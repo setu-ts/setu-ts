@@ -1063,7 +1063,7 @@ graph TB
 | **Dependencies**     | None                                                                                                                                 |
 | **Public API**       | All interfaces (`IPlugin`, `IPluginContext`, `ILogger`, `IConfig`, `IDatabaseService`, etc.); `CAPABILITIES` constant; utility types |
 | **Extension Points** | N/A (types only)                                                                                                                     |
-| **Rules**            | Zero runtime code; zero dependencies; types only                                                                                     |
+| **Rules**            | Zero dependencies; no runtime behavior beyond constants and pure type utilities                                                      |
 
 #### @hono-enterprise/kernel
 

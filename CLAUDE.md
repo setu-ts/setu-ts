@@ -15,8 +15,9 @@ to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compat
 
 ## Current status
 
-- **Milestone 0** (monorepo foundation) — complete (CI verification pending first push to a remote)
-- **Next: Milestone 1** (`packages/common` — types and capability tokens)
+- **Milestone 0** (monorepo foundation) — complete (PR #1 merged, CI green)
+- **Milestone 1** (`packages/common` — types and capability tokens) — implemented, PR pending
+- **Next: Milestone 2** (`packages/kernel` — plugin kernel and service registry)
 
 ## Verification (run before declaring any work done)
 
