@@ -2,29 +2,30 @@
 
 ## Design Philosophy
 
-**NOT a NestJS clone.** This is a Fastify-inspired, Spring Boot-organized, ASP.NET Core-pipelined, Hono-performant framework where **everything is a plugin**.
+**NOT a NestJS clone.** This is a Fastify-inspired, Spring Boot-organized, ASP.NET Core-pipelined,
+Hono-performant framework where **everything is a plugin**.
 
 ### Core Tenets
 
-| Principle | Meaning |
-|-----------|---------|
-| Everything is a plugin | Every capability (DI, logging, validation, database, auth, etc.) is implemented as a plugin |
-| Decorators are optional | Full programmatic API exists; decorators are a thin layer on top |
-| DI is optional | Plugins can use DI, manual wiring, or factory functions |
-| Reflection is optional | Metadata is stored in plain objects; reflection is one way to populate them |
-| Everything has a programmatic API | No capability requires decorators or reflection |
-| Everything is replaceable | Any plugin can be swapped without touching application code |
-| Everything is runtime independent | No Node.js APIs in core; runtime adapters provided by RuntimePlugin |
-| Every capability is a plugin | Framework ships zero hardcoded features |
+| Principle                         | Meaning                                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------------------- |
+| Everything is a plugin            | Every capability (DI, logging, validation, database, auth, etc.) is implemented as a plugin |
+| Decorators are optional           | Full programmatic API exists; decorators are a thin layer on top                            |
+| DI is optional                    | Plugins can use DI, manual wiring, or factory functions                                     |
+| Reflection is optional            | Metadata is stored in plain objects; reflection is one way to populate them                 |
+| Everything has a programmatic API | No capability requires decorators or reflection                                             |
+| Everything is replaceable         | Any plugin can be swapped without touching application code                                 |
+| Everything is runtime independent | No Node.js APIs in core; runtime adapters provided by RuntimePlugin                         |
+| Every capability is a plugin      | Framework ships zero hardcoded features                                                     |
 
 ### Architectural Inspirations
 
-| Source | What We Take |
-|--------|-------------|
-| Hono | Performance, runtime portability, routing engine |
-| Spring Boot | Plugin auto-configuration, starter packages, conditional registration |
-| ASP.NET Core | Middleware pipeline, request/response abstractions |
-| Fastify | Plugin encapsulation, decoration pattern, lifecycle hooks |
+| Source       | What We Take                                                          |
+| ------------ | --------------------------------------------------------------------- |
+| Hono         | Performance, runtime portability, routing engine                      |
+| Spring Boot  | Plugin auto-configuration, starter packages, conditional registration |
+| ASP.NET Core | Middleware pipeline, request/response abstractions                    |
+| Fastify      | Plugin encapsulation, decoration pattern, lifecycle hooks             |
 
 ---
 
@@ -107,7 +108,9 @@ graph TB
 
 ## Plugin Contract
 
-Every plugin implements this contract. `IPlugin` and `IPluginContext` are defined in `@hono-enterprise/common` (following the `IXxx` interface naming rule) — the kernel consumes them, it does not define them.
+Every plugin implements this contract. `IPlugin` and `IPluginContext` are defined in
+`@hono-enterprise/common` (following the `IXxx` interface naming rule) — the kernel consumes them,
+it does not define them.
 
 ```typescript
 interface IPlugin {
@@ -115,9 +118,9 @@ interface IPlugin {
   version: string;
   dependencies?: string[];
   optionalDependencies?: string[];
-  provides?: string[];        // Capability tokens this plugin provides
-  consumes?: string[];        // Capability tokens this plugin needs
-  priority?: number;         // Lower = earlier registration
+  provides?: string[]; // Capability tokens this plugin provides
+  consumes?: string[]; // Capability tokens this plugin needs
+  priority?: number; // Lower = earlier registration
   register(ctx: IPluginContext): void | Promise<void>;
 }
 
@@ -159,7 +162,11 @@ interface IPluginContext {
 }
 ```
 
-> **Runtime bootstrap rule:** `ctx.runtime` is non-optional because a runtime provider is **mandatory**. `createApplication()` fails fast at startup if no registered plugin provides the `runtime` capability, and the kernel always registers the runtime-providing plugin first, regardless of declared priority. Every other plugin can therefore rely on `ctx.runtime` being present.
+> **Runtime bootstrap rule:** `ctx.runtime` is non-optional because a runtime provider is
+> **mandatory**. `createApplication()` fails fast at startup if no registered plugin provides the
+> `runtime` capability, and the kernel always registers the runtime-providing plugin first,
+> regardless of declared priority. Every other plugin can therefore rely on `ctx.runtime` being
+> present.
 
 ### Service Registry
 
@@ -180,9 +187,9 @@ interface ServiceRegistry {
 }
 
 interface RegisterOptions {
-  override?: boolean;       // Replace existing
-  multi?: boolean;          // Allow multiple providers
-  lazy?: boolean;           // Instantiate on first get
+  override?: boolean; // Replace existing
+  multi?: boolean; // Allow multiple providers
+  lazy?: boolean; // Instantiate on first get
 }
 ```
 
@@ -225,7 +232,9 @@ const CAPABILITIES = {
 } as const;
 ```
 
-This constant is the **single source of truth** for capability tokens. Every token used anywhere in the framework, examples, or documentation must appear here — no ad-hoc token strings (see AI_GUIDELINES §11.2, No Magic Strings).
+This constant is the **single source of truth** for capability tokens. Every token used anywhere in
+the framework, examples, or documentation must appear here — no ad-hoc token strings (see
+AI_GUIDELINES §11.2, No Magic Strings).
 
 ---
 
@@ -332,7 +341,11 @@ hono-enterprise/
 └── deno.lock
 ```
 
-> **Toolchain:** The monorepo is built with the **Deno toolchain** (Deno 2 workspaces, `deno test`/`lint`/`fmt`/`check`). Packages are published to **JSR** under the `@hono-enterprise` scope and are consumable from Node/Bun via JSR's npm compatibility layer. There is no build step — JSR publishes TypeScript sources directly. Applications built on the framework can be shipped as standalone binaries with `deno compile`.
+> **Toolchain:** The monorepo is built with the **Deno toolchain** (Deno 2 workspaces,
+> `deno test`/`lint`/`fmt`/`check`). Packages are published to **JSR** under the `@hono-enterprise`
+> scope and are consumable from Node/Bun via JSR's npm compatibility layer. There is no build step —
+> JSR publishes TypeScript sources directly. Applications built on the framework can be shipped as
+> standalone binaries with `deno compile`.
 
 ---
 
@@ -373,7 +386,10 @@ cli ─► common, kernel
 sdk ─► common, kernel
 ```
 
-**Key rule:** No plugin depends on another plugin — not even at build time. All shared interfaces (`ILogger`, `IEventBus`, etc.) live in `@hono-enterprise/common`, so a plugin never needs another plugin's package for type definitions. Plugins communicate exclusively via capability tokens resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
+**Key rule:** No plugin depends on another plugin — not even at build time. All shared interfaces
+(`ILogger`, `IEventBus`, etc.) live in `@hono-enterprise/common`, so a plugin never needs another
+plugin's package for type definitions. Plugins communicate exclusively via capability tokens
+resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 
 ---
 
@@ -398,7 +414,8 @@ sdk ─► common, kernel
 
 2. **Create Directory Structure**
    - Create `apps/`, `packages/`, `examples/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
-   - Create stub `deno.json` for each package with `@hono-enterprise/[name]` JSR naming, version, and exports
+   - Create stub `deno.json` for each package with `@hono-enterprise/[name]` JSR naming, version,
+     and exports
 
 3. **Configure Tooling**
    - Workspace-wide task orchestration via root `deno task`
@@ -408,16 +425,19 @@ sdk ─► common, kernel
 4. **CI/CD Foundation**
    - GitHub Actions workflow
    - `deno fmt --check`, `deno lint`, `deno check`, `deno test --coverage` pipeline
-   - Node and Bun compatibility jobs (consume packages via JSR npm compatibility; run the compat test suite)
+   - Node and Bun compatibility jobs (consume packages via JSR npm compatibility; run the compat
+     test suite)
    - Dependency vulnerability scanning (e.g., OSV-Scanner)
 
 ### Deliverables
-- [ ] Git repository initialized
-- [ ] Working Deno workspace monorepo
-- [ ] Root task pipeline (`check`, `test`, `lint`, `fmt`)
-- [ ] Strict TypeScript via root `deno.json`
-- [ ] All package stubs created with JSR metadata
-- [ ] CI passing on Deno, with Node/Bun compat jobs stubbed
+
+- [x] Git repository initialized
+- [x] Working Deno workspace monorepo
+- [x] Root task pipeline (`check`, `test`, `lint`, `fmt`)
+- [x] Strict TypeScript via root `deno.json`
+- [x] All package stubs created with JSR metadata
+- [ ] CI passing on Deno, with Node/Bun compat jobs stubbed (workflow authored; verifies on first
+      push to a remote)
 
 ---
 
@@ -477,6 +497,7 @@ sdk ─► common, kernel
    - `Option<T>` — Optional type
 
 ### Deliverables
+
 - [ ] All shared interfaces defined
 - [ ] Capability token constants
 - [ ] Zero runtime dependencies
@@ -558,9 +579,9 @@ app.router.get('/users', async (ctx) => {
 });
 
 app.router.post('/users', {
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
   middleware: [validateBody(UserSchema)],
-  schema: { body: UserSchema },  // For OpenAPI
+  schema: { body: UserSchema }, // For OpenAPI
 });
 
 await app.start({ port: 3000 });
@@ -593,6 +614,7 @@ await app.start();
 ```
 
 **Implementation Files:**
+
 - `src/application/application.ts`
 - `src/application/app-builder.ts`
 - `src/registry/plugin-registry.ts`
@@ -612,6 +634,7 @@ await app.start();
 - `src/index.ts`
 
 ### Tests
+
 - Plugin registration and resolution
 - Dependency topological sort
 - Circular dependency detection
@@ -623,6 +646,7 @@ await app.start();
 - Programmatic API (no decorators)
 
 ### Deliverables
+
 - [ ] Plugin kernel
 - [ ] Service registry
 - [ ] Middleware pipeline
@@ -682,12 +706,14 @@ interface IFileSystem {
 ```
 
 **Runtime Adapters:**
+
 - `NodeRuntimeServices` — Node.js implementation
 - `DenoRuntimeServices` — Deno implementation
 - `BunRuntimeServices` — Bun implementation
 - `CloudflareRuntimeServices` — Cloudflare Workers (future)
 
 **Auto-detection:**
+
 ```typescript
 function detectRuntime(): RuntimePlatform {
   // Check for Deno
@@ -695,19 +721,23 @@ function detectRuntime(): RuntimePlatform {
   // Check for Bun
   if (typeof Bun !== 'undefined') return 'bun';
   // Check for Cloudflare Workers
-  if (typeof caches !== 'undefined' && typeof navigator !== 'undefined' && navigator.userAgent?.includes('cloudflare')) return 'cloudflare-workers';
+  if (
+    typeof caches !== 'undefined' && typeof navigator !== 'undefined' &&
+    navigator.userAgent?.includes('cloudflare')
+  ) return 'cloudflare-workers';
   // Default to Node
   return 'node';
 }
 ```
 
-**HTTP Adapter:**
-The RuntimePlugin also provides HTTP server adapters:
+**HTTP Adapter:** The RuntimePlugin also provides HTTP server adapters:
+
 - `NodeHttpAdapter` — Node.js `http` module
 - `DenoHttpAdapter` — Deno `serve` API
 - `BunHttpAdapter` — Bun.serve
 
 **Plugin Registration:**
+
 ```typescript
 const app = createApplication({
   plugins: [RuntimePlugin({ httpAdapter: 'auto' })],
@@ -715,6 +745,7 @@ const app = createApplication({
 ```
 
 **Implementation Files:**
+
 - `src/plugin/runtime-plugin.ts`
 - `src/services/runtime-services.interface.ts`
 - `src/adapters/node/node-runtime.ts`
@@ -729,6 +760,7 @@ const app = createApplication({
 - `src/index.ts`
 
 ### Tests
+
 - Runtime detection
 - UUID generation across runtimes
 - Timer operations
@@ -738,6 +770,7 @@ const app = createApplication({
 - File system operations (Node, Deno, Bun)
 
 ### Deliverables
+
 - [ ] Runtime services interface
 - [ ] Node, Deno, Bun adapters
 - [ ] HTTP server adapters
@@ -753,16 +786,18 @@ const app = createApplication({
 ### Package: `@hono-enterprise/logger-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(LoggerPlugin({
   level: 'info',
-  transport: 'pino',  // or 'console'
+  transport: 'pino', // or 'console'
   redact: ['password', 'token'],
-  pretty: config.get('NODE_ENV') === 'development',  // via ConfigPlugin, never process.env
+  pretty: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
 }));
 ```
 
 **Programmatic API:**
+
 ```typescript
 // In a plugin or route handler
 const logger = ctx.services.get<ILogger>('logger');
@@ -774,18 +809,20 @@ childLogger.debug('Processing request');
 ```
 
 **Implementations:**
+
 - `PinoLogger` — Pino-based (Node.js optimized)
 - `ConsoleLogger` — Runtime-independent console
 - `NoopLogger` — For testing
 
-**Automatic Request Logging:**
-The plugin registers middleware that logs:
+**Automatic Request Logging:** The plugin registers middleware that logs:
+
 - Incoming requests (method, path, requestId)
 - Outgoing responses (status, duration)
 - Slow requests (configurable threshold)
 - Unhandled errors
 
 **Implementation Files:**
+
 - `src/plugin/logger-plugin.ts`
 - `src/loggers/pino-logger.ts`
 - `src/loggers/console-logger.ts`
@@ -795,6 +832,7 @@ The plugin registers middleware that logs:
 - `src/index.ts`
 
 ### Tests
+
 - Log level filtering
 - Structured output
 - Child logger
@@ -804,6 +842,7 @@ The plugin registers middleware that logs:
 - All logger implementations
 
 ### Deliverables
+
 - [ ] LoggerPlugin
 - [ ] Pino, Console, Noop implementations
 - [ ] Request logging middleware
@@ -818,6 +857,7 @@ The plugin registers middleware that logs:
 ### Package: `@hono-enterprise/config-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(ConfigPlugin({
   envFilePath: ['.env.local', '.env'],
@@ -827,6 +867,7 @@ app.register(ConfigPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const config = ctx.services.get<IConfig>('config');
 const port = config.get<number>('PORT', { default: 3000 });
@@ -834,6 +875,7 @@ const dbUrl = config.getOrThrow<string>('DATABASE_URL');
 ```
 
 **Features:**
+
 - Environment variable loading (runtime-specific via RuntimePlugin)
 - `.env` file parsing
 - Zod schema validation at startup
@@ -843,6 +885,7 @@ const dbUrl = config.getOrThrow<string>('DATABASE_URL');
 - Hot reload (optional)
 
 **Environment Validation:**
+
 ```typescript
 const AppConfigSchema = z.object({
   PORT: z.coerce.number().default(3000),
@@ -855,6 +898,7 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 ```
 
 **Implementation Files:**
+
 - `src/plugin/config-plugin.ts`
 - `src/services/config-service.ts`
 - `src/services/env-loader.ts`
@@ -863,6 +907,7 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 - `src/index.ts`
 
 ### Tests
+
 - Env file loading
 - Zod validation
 - Type-safe access
@@ -872,6 +917,7 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 - Runtime-specific loading
 
 ### Deliverables
+
 - [ ] ConfigPlugin
 - [ ] Env file parsing
 - [ ] Zod validation
@@ -886,15 +932,17 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 ### Package: `@hono-enterprise/validation-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(ValidationPlugin({
-  errorFormat: 'rfc7807',  // or 'default', 'nestjs', custom
+  errorFormat: 'rfc7807', // or 'default', 'nestjs', custom
   whitelist: true,
   forbidNonWhitelisted: false,
 }));
 ```
 
 **Programmatic API:**
+
 ```typescript
 const validation = ctx.services.get<IValidationService>('validation');
 
@@ -909,11 +957,12 @@ if (result.success) {
 // Validate as middleware
 app.router.post('/users', {
   middleware: [validation.middleware(UserSchema, 'body')],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
 **Middleware Helper:**
+
 ```typescript
 function validateBody(schema: ZodSchema): MiddlewareFunction;
 function validateQuery(schema: ZodSchema): MiddlewareFunction;
@@ -923,12 +972,14 @@ function validateCookies(schema: ZodSchema): MiddlewareFunction;
 ```
 
 **Error Formats:**
+
 - `default` — Framework standard
 - `rfc7807` — RFC 7807 Problem Details
 - `nestjs` — NestJS-compatible
 - Custom formatter function
 
 **Input Sanitization:**
+
 ```typescript
 interface SanitizationRules {
   htmlEncode?: boolean;
@@ -949,6 +1000,7 @@ const sanitizers = validation.createSanitizer({
 ```
 
 **Implementation Files:**
+
 - `src/plugin/validation-plugin.ts`
 - `src/services/validation-service.ts`
 - `src/middleware/validation-middleware.ts`
@@ -959,6 +1011,7 @@ const sanitizers = validation.createSanitizer({
 - `src/index.ts`
 
 ### Tests
+
 - Body, query, params, headers, cookies validation
 - Sanitization
 - Error formatting (all formats)
@@ -966,6 +1019,7 @@ const sanitizers = validation.createSanitizer({
 - Middleware integration
 
 ### Deliverables
+
 - [ ] ValidationPlugin
 - [ ] Validation middleware
 - [ ] Sanitization
@@ -980,9 +1034,11 @@ const sanitizers = validation.createSanitizer({
 
 ### Package: `@hono-enterprise/exceptions`
 
-This is a **plain package** (not a plugin) containing exception types and an error handling middleware factory.
+This is a **plain package** (not a plugin) containing exception types and an error handling
+middleware factory.
 
 **Exception Types:**
+
 ```typescript
 // Base
 class HttpError extends Error {
@@ -1006,17 +1062,19 @@ function internalServerError(message: string, cause?: Error): HttpError;
 ```
 
 **Error Handling Middleware:**
+
 ```typescript
 import { errorHandler } from '@hono-enterprise/exceptions';
 
 app.middleware.add(errorHandler({
-  format: 'rfc7807',  // or 'default', custom
-  includeStackTrace: config.get('NODE_ENV') === 'development',  // via ConfigPlugin, never process.env
+  format: 'rfc7807', // or 'default', custom
+  includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
   logErrors: true,
 }));
 ```
 
 **Implementation Files:**
+
 - `src/errors/http-error.ts`
 - `src/errors/exceptions.ts` — Factory functions
 - `src/middleware/error-handler.ts`
@@ -1025,6 +1083,7 @@ app.middleware.add(errorHandler({
 - `src/index.ts`
 
 ### Tests
+
 - All exception types
 - Error handler middleware
 - Error formatting
@@ -1032,6 +1091,7 @@ app.middleware.add(errorHandler({
 - Cause chaining
 
 ### Deliverables
+
 - [ ] Exception types (composition-based)
 - [ ] Error handler middleware
 - [ ] RFC 7807 support
@@ -1046,14 +1106,16 @@ app.middleware.add(errorHandler({
 ### Package: `@hono-enterprise/di-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(DiPlugin({
   defaultScope: 'singleton',
-  autoRegister: true,  // Auto-register services from plugins
+  autoRegister: true, // Auto-register services from plugins
 }));
 ```
 
 **Programmatic API:**
+
 ```typescript
 // Access container
 const container = ctx.services.get<IContainer>('di-container');
@@ -1069,6 +1131,7 @@ const userService = container.resolve<UserService>('UserService');
 ```
 
 **Features:**
+
 - Singleton, scoped, transient lifecycles
 - Constructor injection
 - Factory providers
@@ -1079,6 +1142,7 @@ const userService = container.resolve<UserService>('UserService');
 - **Optional** — not required by any other plugin
 
 **Implementation Files:**
+
 - `src/plugin/di-plugin.ts`
 - `src/container/container.ts`
 - `src/container/container-builder.ts`
@@ -1088,12 +1152,14 @@ const userService = container.resolve<UserService>('UserService');
 - `src/index.ts`
 
 ### Tests
+
 - All DI scenarios
 - Lifecycle management
 - Circular detection
 - Hierarchical containers
 
 ### Deliverables
+
 - [ ] DiPlugin (optional)
 - [ ] Full DI container
 - [ ] Full test coverage
@@ -1107,24 +1173,26 @@ const userService = container.resolve<UserService>('UserService');
 ### Package: `@hono-enterprise/decorator-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(DecoratorPlugin({
-  autoDiscover: true,  // Auto-scan for decorated classes
+  autoDiscover: true, // Auto-scan for decorated classes
   controllersPath: './src/controllers',
 }));
 ```
 
 **Decorators Provided:**
+
 ```typescript
 // Controller decorators
 @Controller('/users')
 class UserController {
   @Get('/')
-  async list() { /* ... */ }
+  async list() {/* ... */}
 
   @Post('/')
   @UseGuards(JwtGuard)
-  async create(@Body() body: CreateUserDto) { /* ... */ }
+  async create(@Body() body: CreateUserDto) {/* ... */}
 }
 
 // Injectable (requires DiPlugin)
@@ -1136,12 +1204,14 @@ class UserService {
 ```
 
 **How It Works:**
+
 1. Decorators store metadata in a `MetadataStore` (plain object, not WeakMap)
 2. DecoratorPlugin reads metadata and registers routes/services with kernel
 3. No reflection required — metadata is stored explicitly
 4. Decorators are **syntactic sugar** over the programmatic API
 
 **Metadata Store:**
+
 ```typescript
 interface MetadataStore {
   controllers: Map<string, ControllerMetadata>;
@@ -1173,6 +1243,7 @@ interface RouteMetadata {
 ```
 
 **Decorator Files:**
+
 - `src/decorators/controller.ts` — @Controller, @Get, @Post, etc.
 - `src/decorators/injection.ts` — @Injectable, @Inject
 - `src/decorators/request.ts` — @Body, @Query, @Param, @Header, @Cookie
@@ -1182,12 +1253,14 @@ interface RouteMetadata {
 - `src/decorators/openapi.ts` — @ApiTags, @ApiOperation, @ApiResponse
 
 **Plugin Implementation:**
+
 - `src/plugin/decorator-plugin.ts` — Reads metadata, registers with kernel
 - `src/metadata/metadata-store.ts` — Plain object metadata storage
 - `src/discovery/controller-discovery.ts` — Auto-discovery of decorated classes
 - `src/resolvers/parameter-resolver.ts` — Resolves @Body, @Query, etc.
 
 ### Tests
+
 - Metadata registration
 - Controller discovery
 - Route registration from decorators
@@ -1196,6 +1269,7 @@ interface RouteMetadata {
 - Works with and without DiPlugin
 
 ### Deliverables
+
 - [ ] DecoratorPlugin (optional)
 - [ ] All decorators
 - [ ] Metadata store
@@ -1211,6 +1285,7 @@ interface RouteMetadata {
 ### Package: `@hono-enterprise/database-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(DatabasePlugin({
   type: 'prisma',
@@ -1222,6 +1297,7 @@ app.register(DatabasePlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const db = ctx.services.get<IDatabaseService>('database');
 
@@ -1241,6 +1317,7 @@ await db.transaction(async (uow) => {
 ```
 
 **Repository Interface:**
+
 ```typescript
 interface IRepository<Entity, Id = string> {
   findById(id: Id): Promise<Entity | null>;
@@ -1254,11 +1331,13 @@ interface IRepository<Entity, Id = string> {
 ```
 
 **ORM Adapters:**
+
 - `PrismaAdapter` — Prisma client wrapper
 - `DrizzleAdapter` — Drizzle client wrapper
 - `MemoryAdapter` — In-memory for testing
 
 **Implementation Files:**
+
 - `src/plugin/database-plugin.ts`
 - `src/services/database-service.ts`
 - `src/repositories/base-repository.ts`
@@ -1273,6 +1352,7 @@ interface IRepository<Entity, Id = string> {
 - `src/index.ts`
 
 ### Tests
+
 - Repository CRUD
 - Unit of Work transactions
 - Prisma adapter
@@ -1281,6 +1361,7 @@ interface IRepository<Entity, Id = string> {
 - Query building
 
 ### Deliverables
+
 - [ ] DatabasePlugin
 - [ ] Repository pattern
 - [ ] Unit of Work
@@ -1296,6 +1377,7 @@ interface IRepository<Entity, Id = string> {
 ### Package: `@hono-enterprise/cache-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(CachePlugin({
   store: 'redis',
@@ -1308,6 +1390,7 @@ app.register(CachePlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const cache = ctx.services.get<ICache>('cache');
 await cache.set('user:123', userData, 3600);
@@ -1316,19 +1399,22 @@ await cache.delete('user:123');
 ```
 
 **Cache Middleware:**
+
 ```typescript
 app.router.get('/users/:id', {
   middleware: [cache.middleware({ ttl: 3600, key: (ctx) => `user:${ctx.params.id}` })],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
 **Stores:**
+
 - `MemoryStore` — LRU cache with TTL
 - `RedisStore` — Redis-backed
 - `NoopStore` — For testing
 
 **Implementation Files:**
+
 - `src/plugin/cache-plugin.ts`
 - `src/services/cache-service.ts`
 - `src/stores/memory-store.ts`
@@ -1338,6 +1424,7 @@ app.router.get('/users/:id', {
 - `src/index.ts`
 
 ### Tests
+
 - All store operations
 - TTL management
 - Cache middleware
@@ -1345,6 +1432,7 @@ app.router.get('/users/:id', {
 - LRU eviction (memory)
 
 ### Deliverables
+
 - [ ] CachePlugin
 - [ ] Memory, Redis, Noop stores
 - [ ] Cache middleware
@@ -1359,14 +1447,16 @@ app.router.get('/users/:id', {
 ### Package: `@hono-enterprise/events-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(EventsPlugin({
-  async: true,  // Non-blocking handlers
+  async: true, // Non-blocking handlers
   errorHandler: (err, event) => logger.error('Event handler failed', { err, event }),
 }));
 ```
 
 **Programmatic API:**
+
 ```typescript
 const eventBus = ctx.services.get<IEventBus>('events');
 
@@ -1384,6 +1474,7 @@ await eventBus.publish({
 ```
 
 **Domain Event Base:**
+
 ```typescript
 abstract class DomainEvent<T = unknown> {
   abstract readonly type: string;
@@ -1396,6 +1487,7 @@ abstract class DomainEvent<T = unknown> {
 ```
 
 **Implementation Files:**
+
 - `src/plugin/events-plugin.ts`
 - `src/bus/in-memory-event-bus.ts`
 - `src/events/domain-event.ts`
@@ -1404,6 +1496,7 @@ abstract class DomainEvent<T = unknown> {
 - `src/index.ts`
 
 ### Tests
+
 - Publish/subscribe
 - Multiple handlers
 - Error handling
@@ -1411,6 +1504,7 @@ abstract class DomainEvent<T = unknown> {
 - Batch publishing
 
 ### Deliverables
+
 - [ ] EventsPlugin
 - [ ] In-memory event bus
 - [ ] Domain event base
@@ -1425,6 +1519,7 @@ abstract class DomainEvent<T = unknown> {
 ### Package: `@hono-enterprise/cqrs-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(CqrsPlugin({
   behaviors: [loggingBehavior, validationBehavior, timingBehavior],
@@ -1432,6 +1527,7 @@ app.register(CqrsPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const commandBus = ctx.services.get<ICommandBus>('command-bus');
 const queryBus = ctx.services.get<IQueryBus>('query-bus');
@@ -1453,6 +1549,7 @@ const user = await queryBus.execute<GetUserQuery, User>({
 ```
 
 **Pipeline Behaviors:**
+
 ```typescript
 interface PipelineBehavior<TRequest, TResult> {
   handle(request: TRequest, next: () => Promise<TResult>): Promise<TResult>;
@@ -1462,6 +1559,7 @@ interface PipelineBehavior<TRequest, TResult> {
 Built-in behaviors are optional and composable.
 
 **Implementation Files:**
+
 - `src/plugin/cqrs-plugin.ts`
 - `src/bus/command-bus.ts`
 - `src/bus/query-bus.ts`
@@ -1471,12 +1569,14 @@ Built-in behaviors are optional and composable.
 - `src/index.ts`
 
 ### Tests
+
 - Command/query bus execution
 - Handler registration
 - Pipeline behaviors
 - Error handling
 
 ### Deliverables
+
 - [ ] CqrsPlugin
 - [ ] Command and query buses
 - [ ] Pipeline behaviors
@@ -1491,6 +1591,7 @@ Built-in behaviors are optional and composable.
 ### Package: `@hono-enterprise/messaging-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(MessagingPlugin({
   broker: 'rabbitmq',
@@ -1502,6 +1603,7 @@ app.register(MessagingPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const broker = ctx.services.get<IMessageBroker>('messaging');
 
@@ -1515,6 +1617,7 @@ await broker.subscribe('user.created', async (message, metadata) => {
 ```
 
 **Brokers:**
+
 - `RabbitMqBroker`
 - `NatsBroker`
 - `KafkaBroker`
@@ -1522,6 +1625,7 @@ await broker.subscribe('user.created', async (message, metadata) => {
 - `InMemoryBroker` — For testing
 
 **Events Bridge (Optional):**
+
 ```typescript
 // Bridge domain events to messaging
 app.register(EventsMessagingBridge({
@@ -1531,6 +1635,7 @@ app.register(EventsMessagingBridge({
 ```
 
 **Implementation Files:**
+
 - `src/plugin/messaging-plugin.ts`
 - `src/brokers/rabbitmq-broker.ts`
 - `src/brokers/nats-broker.ts`
@@ -1542,12 +1647,14 @@ app.register(EventsMessagingBridge({
 - `src/index.ts`
 
 ### Tests
+
 - All broker adapters
 - Publish/subscribe
 - Message serialization
 - Events bridge
 
 ### Deliverables
+
 - [ ] MessagingPlugin
 - [ ] RabbitMQ, NATS, Kafka, Redis, Memory brokers
 - [ ] Events bridge
@@ -1562,6 +1669,7 @@ app.register(EventsMessagingBridge({
 ### Package: `@hono-enterprise/queue-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(QueuePlugin({
   adapter: 'redis',
@@ -1573,6 +1681,7 @@ app.register(QueuePlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const queue = ctx.services.get<IQueue>('queue');
 
@@ -1589,11 +1698,13 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 ```
 
 **Adapters:**
+
 - `RedisQueue` — BullMQ-based
 - `RabbitMqQueue` — RabbitMQ-based
 - `MemoryQueue` — For testing
 
 **Implementation Files:**
+
 - `src/plugin/queue-plugin.ts`
 - `src/services/queue-service.ts`
 - `src/adapters/redis-queue.ts`
@@ -1604,6 +1715,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 - `src/index.ts`
 
 ### Tests
+
 - All queue adapters
 - Job add/process
 - Retry strategies
@@ -1611,6 +1723,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 - Concurrency
 
 ### Deliverables
+
 - [ ] QueuePlugin
 - [ ] Redis, RabbitMQ, Memory adapters
 - [ ] Job processor
@@ -1625,6 +1738,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 ### Package: `@hono-enterprise/auth-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(AuthPlugin({
   jwt: {
@@ -1649,6 +1763,7 @@ app.register(AuthPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const auth = ctx.services.get<IAuthService>('authentication');
 const jwt = ctx.services.get<IJwtService>('jwt');
@@ -1670,23 +1785,25 @@ app.router.post('/login', {
 // Guard middleware
 app.router.get('/admin', {
   middleware: [auth.requireRole('admin')],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 
 // Permission check
 app.router.delete('/users/:id', {
   middleware: [auth.requirePermission('users:delete')],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
 **Strategies:**
+
 - `JwtStrategy` — JWT authentication
 - `ApiKeyStrategy` — API key authentication
 - `LocalStrategy` — Username/password
 - `RefreshTokenStrategy` — Refresh tokens
 
 **Guards (as middleware factories):**
+
 - `requireAuth()` — Require authentication
 - `requireRole(role)` — Require specific role
 - `requirePermission(permission)` — Require specific permission
@@ -1695,6 +1812,7 @@ app.router.delete('/users/:id', {
 - `public()` — Bypass auth
 
 **Implementation Files:**
+
 - `src/plugin/auth-plugin.ts`
 - `src/services/auth-service.ts`
 - `src/services/jwt-service.ts`
@@ -1712,6 +1830,7 @@ app.router.delete('/users/:id', {
 - `src/index.ts`
 
 ### Tests
+
 - JWT sign/verify
 - API key validation
 - RBAC role checks
@@ -1720,6 +1839,7 @@ app.router.delete('/users/:id', {
 - Rate limiting
 
 ### Deliverables
+
 - [ ] AuthPlugin
 - [ ] JWT, API Key, Local, Refresh strategies
 - [ ] RBAC with role hierarchy
@@ -1736,6 +1856,7 @@ app.router.delete('/users/:id', {
 ### Package: `@hono-enterprise/http-security-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(HttpSecurityPlugin({
   cors: {
@@ -1759,6 +1880,7 @@ app.register(HttpSecurityPlugin({
 ```
 
 **Implementation Files:**
+
 - `src/plugin/http-security-plugin.ts`
 - `src/middleware/cors-middleware.ts`
 - `src/middleware/security-headers-middleware.ts`
@@ -1768,6 +1890,7 @@ app.register(HttpSecurityPlugin({
 - `src/index.ts`
 
 ### Tests
+
 - CORS handling
 - Security headers
 - CSRF protection
@@ -1775,6 +1898,7 @@ app.register(HttpSecurityPlugin({
 - IP security
 
 ### Deliverables
+
 - [ ] HttpSecurityPlugin
 - [ ] All security middleware
 - [ ] Full test coverage
@@ -1788,6 +1912,7 @@ app.register(HttpSecurityPlugin({
 ### Package: `@hono-enterprise/scheduler-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(SchedulerPlugin({
   timezone: 'UTC',
@@ -1800,6 +1925,7 @@ app.register(SchedulerPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const scheduler = ctx.services.get<IScheduler>('scheduler');
 
@@ -1824,10 +1950,11 @@ scheduler.addCron('sync-data', '*/5 * * * *', async (job) => {
 }, { retry: { limit: 3, delay: 5000, backoff: 'exponential' } });
 ```
 
-**Distributed Locking:**
-For multi-instance deployments, the scheduler uses distributed locks to ensure only one instance executes a job.
+**Distributed Locking:** For multi-instance deployments, the scheduler uses distributed locks to
+ensure only one instance executes a job.
 
 **Implementation Files:**
+
 - `src/plugin/scheduler-plugin.ts`
 - `src/services/scheduler-service.ts`
 - `src/jobs/job-registry.ts`
@@ -1840,6 +1967,7 @@ For multi-instance deployments, the scheduler uses distributed locks to ensure o
 - `src/index.ts`
 
 ### Tests
+
 - Cron scheduling
 - Delayed jobs
 - Recurring jobs
@@ -1848,6 +1976,7 @@ For multi-instance deployments, the scheduler uses distributed locks to ensure o
 - Job pause/resume
 
 ### Deliverables
+
 - [ ] SchedulerPlugin
 - [ ] Cron, delayed, recurring jobs
 - [ ] Distributed locking
@@ -1862,6 +1991,7 @@ For multi-instance deployments, the scheduler uses distributed locks to ensure o
 ### Package: `@hono-enterprise/metrics-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(MetricsPlugin({
   endpoint: '/metrics',
@@ -1874,6 +2004,7 @@ app.register(MetricsPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const metrics = ctx.services.get<IMetricsService>('metrics');
 
@@ -1891,6 +2022,7 @@ gauge.set(42);
 ```
 
 **Built-in Collectors:**
+
 - HTTP request duration histogram
 - HTTP request counter
 - HTTP error counter
@@ -1899,6 +2031,7 @@ gauge.set(42);
 - Active requests gauge
 
 **Implementation Files:**
+
 - `src/plugin/metrics-plugin.ts`
 - `src/services/metrics-service.ts`
 - `src/registry/metrics-registry.ts`
@@ -1913,12 +2046,14 @@ gauge.set(42);
 - `src/index.ts`
 
 ### Tests
+
 - All metric types
 - Registry operations
 - HTTP metrics collection
 - Prometheus rendering
 
 ### Deliverables
+
 - [ ] MetricsPlugin
 - [ ] Counter, Gauge, Histogram, Summary
 - [ ] Built-in collectors
@@ -1934,6 +2069,7 @@ gauge.set(42);
 ### Package: `@hono-enterprise/health-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(HealthPlugin({
   endpoints: {
@@ -1950,6 +2086,7 @@ app.register(HealthPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const health = ctx.services.get<IHealthService>('health');
 
@@ -1961,9 +2098,11 @@ health.registerIndicator('external-api', async () => {
 ```
 
 **Built-in Indicators:**
+
 - Database, Cache, Queue, Disk, Memory, HTTP
 
 **Implementation Files:**
+
 - `src/plugin/health-plugin.ts`
 - `src/services/health-service.ts`
 - `src/indicators/database-indicator.ts`
@@ -1975,11 +2114,13 @@ health.registerIndicator('external-api', async () => {
 - `src/index.ts`
 
 ### Tests
+
 - Health check execution
 - All indicators
 - Endpoint responses
 
 ### Deliverables
+
 - [ ] HealthPlugin
 - [ ] Built-in indicators
 - [ ] Health endpoints
@@ -1994,6 +2135,7 @@ health.registerIndicator('external-api', async () => {
 ### Package: `@hono-enterprise/openapi-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(OpenApiPlugin({
   endpoint: '/docs',
@@ -2005,12 +2147,13 @@ app.register(OpenApiPlugin({
 ```
 
 **Route Schema Definition:**
+
 ```typescript
 // Programmatic
 app.router.post('/users', {
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
   schema: {
-    body: CreateUserSchema,    // Zod schema
+    body: CreateUserSchema, // Zod schema
     response: {
       201: UserSchema,
       400: ErrorSchema,
@@ -2027,14 +2170,14 @@ class UserController {
   @ApiTags('Users')
   @ApiOperation('Create a new user')
   @ApiResponse(201, UserSchema)
-  async create(@Body(CreateUserSchema) body: CreateUserDto) { /* ... */ }
+  async create(@Body(CreateUserSchema) body: CreateUserDto) {/* ... */}
 }
 ```
 
-**Zod to OpenAPI:**
-The plugin automatically converts Zod schemas to OpenAPI schemas.
+**Zod to OpenAPI:** The plugin automatically converts Zod schemas to OpenAPI schemas.
 
 **Implementation Files:**
+
 - `src/plugin/openapi-plugin.ts`
 - `src/generators/openapi-generator.ts`
 - `src/transformers/zod-to-openapi.ts`
@@ -2042,12 +2185,14 @@ The plugin automatically converts Zod schemas to OpenAPI schemas.
 - `src/index.ts`
 
 ### Tests
+
 - OpenAPI generation from routes
 - Zod to OpenAPI conversion
 - Swagger UI serving
 - Schema deduplication
 
 ### Deliverables
+
 - [ ] OpenApiPlugin
 - [ ] Zod to OpenAPI transformer
 - [ ] Swagger UI
@@ -2062,6 +2207,7 @@ The plugin automatically converts Zod schemas to OpenAPI schemas.
 ### Package: `@hono-enterprise/telemetry-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(TelemetryPlugin({
   serviceName: 'my-service',
@@ -2072,6 +2218,7 @@ app.register(TelemetryPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const telemetry = ctx.services.get<ITelemetryService>('telemetry');
 
@@ -2083,6 +2230,7 @@ await telemetry.withSpan('process-order', async (span) => {
 ```
 
 **Implementation Files:**
+
 - `src/plugin/telemetry-plugin.ts`
 - `src/services/telemetry-service.ts`
 - `src/tracing/tracer.ts`
@@ -2093,12 +2241,14 @@ await telemetry.withSpan('process-order', async (span) => {
 - `src/index.ts`
 
 ### Tests
+
 - Span creation
 - Context propagation
 - Instrumentation
 - Exporters
 
 ### Deliverables
+
 - [ ] TelemetryPlugin
 - [ ] Tracing service
 - [ ] Instrumentation
@@ -2113,6 +2263,7 @@ await telemetry.withSpan('process-order', async (span) => {
 ### Package: `@hono-enterprise/secrets-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(SecretsPlugin({
   provider: 'aws-kms',
@@ -2125,6 +2276,7 @@ app.register(SecretsPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const secrets = ctx.services.get<ISecretManager>('secrets');
 const dbPassword = await secrets.get('database/password');
@@ -2132,6 +2284,7 @@ await secrets.rotate('database/password', newPassword);
 ```
 
 **Providers:**
+
 - `AwsKmsProvider`
 - `GcpSecretManagerProvider`
 - `AzureKeyVaultProvider`
@@ -2139,6 +2292,7 @@ await secrets.rotate('database/password', newPassword);
 - `EnvProvider` — From environment variables
 
 **Implementation Files:**
+
 - `src/plugin/secrets-plugin.ts`
 - `src/services/secrets-service.ts`
 - `src/providers/aws-kms.ts`
@@ -2149,12 +2303,14 @@ await secrets.rotate('database/password', newPassword);
 - `src/index.ts`
 
 ### Tests
+
 - All providers (mocked)
 - Secret retrieval
 - Secret rotation
 - Caching
 
 ### Deliverables
+
 - [ ] SecretsPlugin
 - [ ] All providers
 - [ ] Full test coverage
@@ -2168,6 +2324,7 @@ await secrets.rotate('database/password', newPassword);
 ### Package: `@hono-enterprise/audit-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(AuditPlugin({
   storage: 'database',
@@ -2178,6 +2335,7 @@ app.register(AuditPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const audit = ctx.services.get<IAuditLogger>('audit');
 
@@ -2193,11 +2351,13 @@ await audit.log({
 ```
 
 **Storage Adapters:**
+
 - `DatabaseAuditStorage`
 - `FileAuditStorage`
 - `LogAuditStorage`
 
 **Implementation Files:**
+
 - `src/plugin/audit-plugin.ts`
 - `src/services/audit-service.ts`
 - `src/storage/database-audit.ts`
@@ -2206,11 +2366,13 @@ await audit.log({
 - `src/index.ts`
 
 ### Tests
+
 - Audit logging
 - All storage adapters
 - Audit trail retrieval
 
 ### Deliverables
+
 - [ ] AuditPlugin
 - [ ] Storage adapters
 - [ ] Full test coverage
@@ -2224,6 +2386,7 @@ await audit.log({
 ### Package: `@hono-enterprise/resilience-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(ResiliencePlugin({
   defaultCircuitBreaker: {
@@ -2240,6 +2403,7 @@ app.register(ResiliencePlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const resilience = ctx.services.get<IResilienceService>('resilience');
 
@@ -2256,6 +2420,7 @@ const result = await safeCall();
 ```
 
 **Implementation Files:**
+
 - `src/plugin/resilience-plugin.ts`
 - `src/services/resilience-service.ts`
 - `src/patterns/circuit-breaker.ts`
@@ -2265,6 +2430,7 @@ const result = await safeCall();
 - `src/index.ts`
 
 ### Tests
+
 - Circuit breaker states
 - Retry with backoff
 - Timeout
@@ -2272,6 +2438,7 @@ const result = await safeCall();
 - Combined patterns
 
 ### Deliverables
+
 - [ ] ResiliencePlugin
 - [ ] Circuit breaker, retry, timeout, bulkhead
 - [ ] Full test coverage
@@ -2285,6 +2452,7 @@ const result = await safeCall();
 ### Package: `@hono-enterprise/storage-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(StoragePlugin({
   provider: 's3',
@@ -2296,6 +2464,7 @@ app.register(StoragePlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const storage = ctx.services.get<IStorage>('storage');
 
@@ -2306,12 +2475,14 @@ await storage.delete('uploads/photo.jpg');
 ```
 
 **Providers:**
+
 - `S3Provider`
 - `GcsProvider`
 - `LocalStorageProvider`
 - `MemoryProvider`
 
 **File Upload Middleware:**
+
 ```typescript
 app.router.post('/upload', {
   middleware: [storage.upload({ fieldname: 'file', maxSize: 10 * 1024 * 1024 })],
@@ -2324,6 +2495,7 @@ app.router.post('/upload', {
 ```
 
 **Implementation Files:**
+
 - `src/plugin/storage-plugin.ts`
 - `src/services/storage-service.ts`
 - `src/providers/s3-provider.ts`
@@ -2334,12 +2506,14 @@ app.router.post('/upload', {
 - `src/index.ts`
 
 ### Tests
+
 - All providers
 - Upload/download
 - Signed URLs
 - Upload middleware
 
 ### Deliverables
+
 - [ ] StoragePlugin
 - [ ] S3, GCS, Local, Memory providers
 - [ ] Upload middleware
@@ -2354,6 +2528,7 @@ app.router.post('/upload', {
 ### Package: `@hono-enterprise/mail-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(MailPlugin({
   provider: 'smtp',
@@ -2366,6 +2541,7 @@ app.register(MailPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const mailer = ctx.services.get<IMailer>('mail');
 
@@ -2381,6 +2557,7 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 ```
 
 **Providers:**
+
 - `SmtpProvider`
 - `SesProvider`
 - `SendGridProvider`
@@ -2388,6 +2565,7 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 - `LogProvider` — For testing
 
 **Implementation Files:**
+
 - `src/plugin/mail-plugin.ts`
 - `src/services/mail-service.ts`
 - `src/providers/smtp-provider.ts`
@@ -2398,11 +2576,13 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 - `src/index.ts`
 
 ### Tests
+
 - All providers (mocked)
 - Email sending
 - Template rendering
 
 ### Deliverables
+
 - [ ] MailPlugin
 - [ ] SMTP, SES, SendGrid, Log providers
 - [ ] Template engine
@@ -2417,18 +2597,20 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 ### Package: `@hono-enterprise/notification-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(NotificationPlugin({
   channels: {
-    email: { provider: 'mail', options: { /* ... */ } },
-    sms: { provider: 'twilio', options: { /* ... */ } },
-    push: { provider: 'fcm', options: { /* ... */ } },
-    slack: { provider: 'slack', options: { /* ... */ } },
+    email: { provider: 'mail', options: {/* ... */} },
+    sms: { provider: 'twilio', options: {/* ... */} },
+    push: { provider: 'fcm', options: {/* ... */} },
+    slack: { provider: 'slack', options: {/* ... */} },
   },
 }));
 ```
 
 **Programmatic API:**
+
 ```typescript
 const notifier = ctx.services.get<INotifier>('notification');
 
@@ -2445,6 +2627,7 @@ await notifier.sendSms('+1234567890', 'Your code is 123456');
 ```
 
 **Implementation Files:**
+
 - `src/plugin/notification-plugin.ts`
 - `src/services/notification-service.ts`
 - `src/channels/email-channel.ts`
@@ -2457,11 +2640,13 @@ await notifier.sendSms('+1234567890', 'Your code is 123456');
 - `src/index.ts`
 
 ### Tests
+
 - Multi-channel dispatch
 - Individual channels
 - Error handling per channel
 
 ### Deliverables
+
 - [ ] NotificationPlugin
 - [ ] Email, SMS, Push, Slack channels
 - [ ] Full test coverage
@@ -2475,6 +2660,7 @@ await notifier.sendSms('+1234567890', 'Your code is 123456');
 ### Package: `@hono-enterprise/feature-flags-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(FeatureFlagsPlugin({
   provider: 'config',
@@ -2488,6 +2674,7 @@ app.register(FeatureFlagsPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const flags = ctx.services.get<IFeatureFlags>('feature-flags');
 
@@ -2498,17 +2685,19 @@ if (flags.isEnabled('new-dashboard', { userId: '123' })) {
 // Middleware
 app.router.get('/dashboard', {
   middleware: [flags.middleware('new-dashboard', { fallback: '/old-dashboard' })],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
 **Providers:**
+
 - `ConfigProvider` — From config
 - `DatabaseProvider` — From database
 - `LaunchDarklyProvider` — LaunchDarkly
 - `MemoryProvider` — For testing
 
 **Implementation Files:**
+
 - `src/plugin/feature-flags-plugin.ts`
 - `src/services/feature-flags-service.ts`
 - `src/providers/config-provider.ts`
@@ -2518,12 +2707,14 @@ app.router.get('/dashboard', {
 - `src/index.ts`
 
 ### Tests
+
 - Flag evaluation
 - Percentage rollout
 - User targeting
 - Middleware
 
 ### Deliverables
+
 - [ ] FeatureFlagsPlugin
 - [ ] All providers
 - [ ] Middleware
@@ -2538,6 +2729,7 @@ app.router.get('/dashboard', {
 ### Package: `@hono-enterprise/multi-tenancy-plugin`
 
 **Plugin Registration:**
+
 ```typescript
 app.register(MultiTenancyPlugin({
   resolver: 'subdomain',
@@ -2547,6 +2739,7 @@ app.register(MultiTenancyPlugin({
 ```
 
 **Programmatic API:**
+
 ```typescript
 const tenancy = ctx.services.get<IMultiTenancyService>('multi-tenancy');
 
@@ -2555,21 +2748,24 @@ const tenant = ctx.request.tenant;
 
 // Tenant-aware repository
 const userRepo = tenancy.getRepository<User>('User');
-const users = await userRepo.findAll();  // Scoped to current tenant
+const users = await userRepo.findAll(); // Scoped to current tenant
 ```
 
 **Resolvers:**
+
 - `SubdomainResolver`
 - `HeaderResolver`
 - `PathResolver`
 - `JwtResolver`
 
 **Database Strategies:**
+
 - `SchemaPerTenant`
 - `DatabasePerTenant`
 - `ColumnPerTenant`
 
 **Implementation Files:**
+
 - `src/plugin/multi-tenancy-plugin.ts`
 - `src/services/multi-tenancy-service.ts`
 - `src/resolvers/subdomain-resolver.ts`
@@ -2582,12 +2778,14 @@ const users = await userRepo.findAll();  // Scoped to current tenant
 - `src/index.ts`
 
 ### Tests
+
 - All resolvers
 - All database strategies
 - Tenant context
 - Tenant-aware repositories
 
 ### Deliverables
+
 - [ ] MultiTenancyPlugin
 - [ ] Resolvers and strategies
 - [ ] Full test coverage
@@ -2601,6 +2799,7 @@ const users = await userRepo.findAll();  // Scoped to current tenant
 ### Package: `@hono-enterprise/testing`
 
 **Test Application Factory:**
+
 ```typescript
 import { createTestApp } from '@hono-enterprise/testing';
 
@@ -2622,6 +2821,7 @@ expect(response.statusCode).toBe(200);
 ```
 
 **Mock Plugin:**
+
 ```typescript
 const mockDb = createMockPlugin({
   name: 'database',
@@ -2634,6 +2834,7 @@ const testApp = await createTestApp({
 ```
 
 **Utilities:**
+
 - `createTestApp` — Test application factory
 - `createMockPlugin` — Mock a plugin's service
 - `inject` — HTTP request injection without network
@@ -2641,6 +2842,7 @@ const testApp = await createTestApp({
 - `MockServiceRegistry` — Mock service registry
 
 **Implementation Files:**
+
 - `src/test-app.ts`
 - `src/mock-plugin.ts`
 - `src/inject.ts`
@@ -2650,12 +2852,14 @@ const testApp = await createTestApp({
 - `src/index.ts`
 
 ### Tests
+
 - Test app creation
 - Mock plugin
 - Request injection
 - Mock context
 
 ### Deliverables
+
 - [ ] Test app factory
 - [ ] Mock plugin utility
 - [ ] Request injection
@@ -2670,6 +2874,7 @@ const testApp = await createTestApp({
 ### Package: `@hono-enterprise/cli`
 
 **Commands:**
+
 ```
 hono-enterprise new <project-name>
 hono-enterprise generate plugin <name>
@@ -2687,20 +2892,21 @@ hono-enterprise generate job <name>
 hono-enterprise generate migration <name>
 ```
 
-**Scaffolding Is Deno-First:**
-`hono-enterprise new` generates a Deno project (`deno.json` with tasks, JSR imports). A `--runtime node|bun` flag generates an npm-based variant that consumes the packages via JSR's npm compatibility layer.
+**Scaffolding Is Deno-First:** `hono-enterprise new` generates a Deno project (`deno.json` with
+tasks, JSR imports). A `--runtime node|bun` flag generates an npm-based variant that consumes the
+packages via JSR's npm compatibility layer.
 
-**Plugin-Aware Generation:**
-The CLI detects installed plugins and offers relevant generators:
+**Plugin-Aware Generation:** The CLI detects installed plugins and offers relevant generators:
+
 - If `database-plugin` installed → offer repository generator
 - If `auth-plugin` installed → offer guard generator
 - If `cqrs-plugin` installed → offer command/query handler generators
 - If `events-plugin` installed → offer event handler generator
 
-**Custom Schematics:**
-Projects can define custom schematics in `.hono-enterprise/schematics/`.
+**Custom Schematics:** Projects can define custom schematics in `.hono-enterprise/schematics/`.
 
 **Implementation Files:**
+
 - `src/cli.ts`
 - `src/commands/new.ts`
 - `src/commands/generate.ts`
@@ -2719,12 +2925,14 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
 - `src/index.ts`
 
 ### Tests
+
 - All commands
 - Plugin detection
 - File generation
 - Custom schematics
 
 ### Deliverables
+
 - [ ] CLI tool
 - [ ] All generators
 - [ ] Plugin-aware detection
@@ -2739,6 +2947,7 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
 ### Package: `@hono-enterprise/sdk`
 
 **Features:**
+
 - HTTP client
 - Authentication (JWT, API Key)
 - Retry with backoff
@@ -2748,6 +2957,7 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
 - Type-safe API generation from OpenAPI
 
 **Implementation Files:**
+
 - `src/sdk.ts`
 - `src/http/http-client.ts`
 - `src/auth/auth-interceptor.ts`
@@ -2757,6 +2967,7 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
 - `src/index.ts`
 
 ### Tests
+
 - HTTP client
 - Authentication
 - Retry
@@ -2764,6 +2975,7 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
 - Code generation
 
 ### Deliverables
+
 - [ ] SDK
 - [ ] HTTP client with interceptors
 - [ ] Code generation from OpenAPI
@@ -2784,7 +2996,8 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
    import { createRestApp } from '@hono-enterprise/rest-starter';
    const app = await createRestApp({ port: 3000 });
    ```
-   Includes: Runtime, Logger, Config, Validation, Database, Auth, OpenApi, Health, Metrics, HttpSecurity
+   Includes: Runtime, Logger, Config, Validation, Database, Auth, OpenApi, Health, Metrics,
+   HttpSecurity
 
 2. **Microservice Starter**
    ```typescript
@@ -2793,13 +3006,14 @@ Projects can define custom schematics in `.hono-enterprise/schematics/`.
    ```
    Includes: REST Starter + Messaging, Queue, Telemetry, Resilience
 
-3. **Full-Stack Starter**
-   Includes: Microservice Starter + Cache, Events, CQRS, Scheduler, Storage, Mail, Notifications, FeatureFlags, MultiTenancy, Secrets, Audit
+3. **Full-Stack Starter** Includes: Microservice Starter + Cache, Events, CQRS, Scheduler, Storage,
+   Mail, Notifications, FeatureFlags, MultiTenancy, Secrets, Audit
 
-**Implementation:**
-Each starter is a thin package that registers the appropriate plugins with sensible defaults.
+**Implementation:** Each starter is a thin package that registers the appropriate plugins with
+sensible defaults.
 
 ### Deliverables
+
 - [ ] REST starter
 - [ ] Microservice starter
 - [ ] Full-stack starter
@@ -2822,6 +3036,7 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 7. **Compiled Binary** — Shipping an application as a standalone `deno compile` binary
 
 ### Deliverables
+
 - [ ] All example apps
 - [ ] Documentation for each
 - [ ] `deno compile` example produces a working standalone binary
@@ -2833,6 +3048,7 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 **Objective:** Generate comprehensive documentation.
 
 ### Documentation
+
 - Getting started
 - Plugin architecture guide
 - Each plugin documented
@@ -2845,6 +3061,7 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 - API reference generation via `deno doc` (JSR also renders docs on publish)
 
 ### Deliverables
+
 - [ ] All documentation
 - [ ] `deno doc` API reference generation
 - [ ] API reference
@@ -2856,16 +3073,19 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 **Objective:** Containerization and orchestration.
 
 ### Docker
+
 - Dockerfiles for each example (`denoland/deno` base images)
 - `deno compile` multi-stage builds producing minimal distroless/scratch images
 - Docker Compose for local dev
 
 ### Kubernetes
+
 - Deployments, Services, Ingress
 - ConfigMaps, Secrets
 - HPA, PDB
 
 ### Deliverables
+
 - [ ] Docker configurations
 - [ ] Kubernetes manifests
 - [ ] Helm chart (optional)
@@ -2877,6 +3097,7 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 **Objective:** Final integration, testing, and release.
 
 ### Tasks
+
 1. Integration testing across all plugins
 2. Performance benchmarks
 3. Code quality audit
@@ -2885,6 +3106,7 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 6. Release preparation (JSR publish dry-run, npm-compat verification from Node and Bun)
 
 ### Deliverables
+
 - [ ] All tests passing (Deno suite + Node/Bun compat suites)
 - [ ] Benchmarks documented
 - [ ] Security audit complete
@@ -2895,20 +3117,20 @@ Each starter is a thin package that registers the appropriate plugins with sensi
 
 ## Plugin-First vs NestJS Comparison
 
-| Aspect | NestJS | Hono Enterprise (Plugin-First) |
-|--------|--------|-------------------------------|
-| Architecture | Module-based | Plugin-based |
-| DI | Required | Optional (DiPlugin) |
-| Decorators | Required | Optional (DecoratorPlugin) |
-| Reflection | Required | Optional |
-| Programmatic API | Limited | Full API for everything |
-| Replaceability | Difficult | Any plugin swappable |
-| Runtime Support | Node.js only | Node, Deno, Bun, CF Workers |
-| Bundle Size | Large | Pay only for what you use |
-| Learning Curve | Steep | Gradual (start minimal, add plugins) |
-| Extensibility | Modules | Plugins with capability tokens |
-| Middleware | Tied to modules | Independent, pipeline-based |
-| Testing | Mock modules | Mock plugins/services |
+| Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
+| ---------------- | --------------- | ------------------------------------ |
+| Architecture     | Module-based    | Plugin-based                         |
+| DI               | Required        | Optional (DiPlugin)                  |
+| Decorators       | Required        | Optional (DecoratorPlugin)           |
+| Reflection       | Required        | Optional                             |
+| Programmatic API | Limited         | Full API for everything              |
+| Replaceability   | Difficult       | Any plugin swappable                 |
+| Runtime Support  | Node.js only    | Node, Deno, Bun, CF Workers          |
+| Bundle Size      | Large           | Pay only for what you use            |
+| Learning Curve   | Steep           | Gradual (start minimal, add plugins) |
+| Extensibility    | Modules         | Plugins with capability tokens       |
+| Middleware       | Tied to modules | Independent, pipeline-based          |
+| Testing          | Mock modules    | Mock plugins/services                |
 
 ---
 
@@ -3020,44 +3242,44 @@ app.register(MyPlugin({ option1: 'value' }));
 
 ## Progress Tracking
 
-| Milestone | Status | Package |
-|-----------|--------|---------|
-| 0 | ⬜ | Monorepo Foundation |
-| 1 | ⬜ | common |
-| 2 | ⬜ | kernel |
-| 3 | ⬜ | runtime |
-| 4 | ⬜ | logger-plugin |
-| 5 | ⬜ | config-plugin |
-| 6 | ⬜ | validation-plugin |
-| 7 | ⬜ | exceptions |
-| 8 | ⬜ | di-plugin |
-| 9 | ⬜ | decorator-plugin |
-| 10 | ⬜ | database-plugin |
-| 11 | ⬜ | cache-plugin |
-| 12 | ⬜ | events-plugin |
-| 13 | ⬜ | cqrs-plugin |
-| 14 | ⬜ | messaging-plugin |
-| 15 | ⬜ | queue-plugin |
-| 16 | ⬜ | auth-plugin |
-| 17 | ⬜ | http-security-plugin |
-| 18 | ⬜ | scheduler-plugin |
-| 19 | ⬜ | metrics-plugin |
-| 20 | ⬜ | health-plugin |
-| 21 | ⬜ | openapi-plugin |
-| 22 | ⬜ | telemetry-plugin |
-| 23 | ⬜ | secrets-plugin |
-| 24 | ⬜ | audit-plugin |
-| 25 | ⬜ | resilience-plugin |
-| 26 | ⬜ | storage-plugin |
-| 27 | ⬜ | mail-plugin |
-| 28 | ⬜ | notification-plugin |
-| 29 | ⬜ | feature-flags-plugin |
-| 30 | ⬜ | multi-tenancy-plugin |
-| 31 | ⬜ | testing |
-| 32 | ⬜ | cli |
-| 33 | ⬜ | sdk |
-| 34 | ⬜ | starters |
-| 35 | ⬜ | examples |
-| 36 | ⬜ | documentation |
-| 37 | ⬜ | docker/kubernetes |
-| 38 | ⬜ | final release |
+| Milestone | Status | Package              |
+| --------- | ------ | -------------------- |
+| 0         | ✅     | Monorepo Foundation  |
+| 1         | ⬜     | common               |
+| 2         | ⬜     | kernel               |
+| 3         | ⬜     | runtime              |
+| 4         | ⬜     | logger-plugin        |
+| 5         | ⬜     | config-plugin        |
+| 6         | ⬜     | validation-plugin    |
+| 7         | ⬜     | exceptions           |
+| 8         | ⬜     | di-plugin            |
+| 9         | ⬜     | decorator-plugin     |
+| 10        | ⬜     | database-plugin      |
+| 11        | ⬜     | cache-plugin         |
+| 12        | ⬜     | events-plugin        |
+| 13        | ⬜     | cqrs-plugin          |
+| 14        | ⬜     | messaging-plugin     |
+| 15        | ⬜     | queue-plugin         |
+| 16        | ⬜     | auth-plugin          |
+| 17        | ⬜     | http-security-plugin |
+| 18        | ⬜     | scheduler-plugin     |
+| 19        | ⬜     | metrics-plugin       |
+| 20        | ⬜     | health-plugin        |
+| 21        | ⬜     | openapi-plugin       |
+| 22        | ⬜     | telemetry-plugin     |
+| 23        | ⬜     | secrets-plugin       |
+| 24        | ⬜     | audit-plugin         |
+| 25        | ⬜     | resilience-plugin    |
+| 26        | ⬜     | storage-plugin       |
+| 27        | ⬜     | mail-plugin          |
+| 28        | ⬜     | notification-plugin  |
+| 29        | ⬜     | feature-flags-plugin |
+| 30        | ⬜     | multi-tenancy-plugin |
+| 31        | ⬜     | testing              |
+| 32        | ⬜     | cli                  |
+| 33        | ⬜     | sdk                  |
+| 34        | ⬜     | starters             |
+| 35        | ⬜     | examples             |
+| 36        | ⬜     | documentation        |
+| 37        | ⬜     | docker/kubernetes    |
+| 38        | ⬜     | final release        |

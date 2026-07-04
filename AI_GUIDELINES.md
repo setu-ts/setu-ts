@@ -1,8 +1,9 @@
 # Hono Enterprise — AI Engineering Guidelines
 
-> **This document is the permanent engineering handbook for the Hono Enterprise framework.**
-> Every rule in this document is mandatory and applies to all future coding sessions.
-> These rules exist to ensure the framework remains production-quality, maintainable, and trustworthy for thousands of developers.
+> **This document is the permanent engineering handbook for the Hono Enterprise framework.** Every
+> rule in this document is mandatory and applies to all future coding sessions. These rules exist to
+> ensure the framework remains production-quality, maintainable, and trustworthy for thousands of
+> developers.
 
 ---
 
@@ -40,7 +41,8 @@ Every package, plugin, module, and class must adhere to SOLID principles:
 - **Open/Closed** — Extend behavior through composition and plugins, not modification.
 - **Liskov Substitution** — Any implementation of an interface must be substitutable.
 - **Interface Segregation** — No consumer depends on methods it does not use.
-- **Dependency Inversion** — Depend on interfaces from `@hono-enterprise/common`, never on concrete implementations.
+- **Dependency Inversion** — Depend on interfaces from `@hono-enterprise/common`, never on concrete
+  implementations.
 
 ### 1.2 Clean Architecture
 
@@ -75,7 +77,8 @@ The framework follows hexagonal (ports and adapters) architecture:
 
 ### 1.5 Adapters Over Implementations
 
-- Every external dependency (database, cache, message broker, storage, mail) must have an adapter interface.
+- Every external dependency (database, cache, message broker, storage, mail) must have an adapter
+  interface.
 - Concrete implementations are provided by plugins, not hardcoded in core.
 - Applications depend on adapter interfaces, never on concrete adapters.
 
@@ -134,7 +137,8 @@ plugin-package/
 
 - No package may contain more than one major capability.
 - If a package grows beyond a single capability, split it.
-- The `kernel` package contains only: plugin registry, service registry, middleware pipeline, router, and application lifecycle.
+- The `kernel` package contains only: plugin registry, service registry, middleware pipeline,
+  router, and application lifecycle.
 
 ---
 
@@ -180,18 +184,18 @@ interface IPlugin {
 
 Every plugin must expose extension points:
 
-| Extension Point | How |
-|----------------|-----|
+| Extension Point               | How                           |
+| ----------------------------- | ----------------------------- |
 | Custom service implementation | Override the capability token |
-| Custom middleware | `ctx.middleware.add()` |
-| Custom routes | `ctx.router` |
-| Custom health checks | `ctx.health.register()` |
-| Custom metrics | `ctx.metrics.register()` |
-| Custom CLI commands | `ctx.cli.register()` |
-| Custom OpenAPI contributions | `ctx.openapi` |
-| Custom lifecycle hooks | `ctx.lifecycle` |
-| Custom decorators | `ctx.decorators.register()` |
-| Custom environment validation | `ctx.environment.validate()` |
+| Custom middleware             | `ctx.middleware.add()`        |
+| Custom routes                 | `ctx.router`                  |
+| Custom health checks          | `ctx.health.register()`       |
+| Custom metrics                | `ctx.metrics.register()`      |
+| Custom CLI commands           | `ctx.cli.register()`          |
+| Custom OpenAPI contributions  | `ctx.openapi`                 |
+| Custom lifecycle hooks        | `ctx.lifecycle`               |
+| Custom decorators             | `ctx.decorators.register()`   |
+| Custom environment validation | `ctx.environment.validate()`  |
 
 ### 3.6 Plugin Naming
 
@@ -219,15 +223,15 @@ Every plugin must expose extension points:
 
 All runtime-specific operations must be abstracted:
 
-| Operation | Forbidden | Required |
-|-----------|-----------|----------|
-| UUID generation | `crypto.randomUUID()` directly | `runtime.uuid()` |
-| Random bytes | `crypto.randomBytes()` | `runtime.randomBytes()` |
-| Timers | `setTimeout()` directly | `runtime.setTimeout()` |
-| High-resolution time | `process.hrtime()` | `runtime.hrtime()` |
-| Environment variables | `process.env` | `runtime.env` |
-| File system | `fs` module | `runtime.fs` |
-| Platform detection | `process.platform` | `runtime.platform()` |
+| Operation             | Forbidden                      | Required                |
+| --------------------- | ------------------------------ | ----------------------- |
+| UUID generation       | `crypto.randomUUID()` directly | `runtime.uuid()`        |
+| Random bytes          | `crypto.randomBytes()`         | `runtime.randomBytes()` |
+| Timers                | `setTimeout()` directly        | `runtime.setTimeout()`  |
+| High-resolution time  | `process.hrtime()`             | `runtime.hrtime()`      |
+| Environment variables | `process.env`                  | `runtime.env`           |
+| File system           | `fs` module                    | `runtime.fs`            |
+| Platform detection    | `process.platform`             | `runtime.platform()`    |
 
 ### 4.3 HTTP Adapter Abstraction
 
@@ -296,7 +300,14 @@ All runtime-specific operations must be abstracted:
 type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
 // ❌ Bad
-enum LogLevel { Fatal, Error, Warn, Info, Debug, Trace }
+enum LogLevel {
+  Fatal,
+  Error,
+  Warn,
+  Info,
+  Debug,
+  Trace,
+}
 ```
 
 ### 5.6 No `class` for Pure Data
@@ -341,19 +352,21 @@ enum LogLevel { Fatal, Error, Warn, Info, Debug, Trace }
 
 Every package must include:
 
-| Test Type | Purpose | Location |
-|-----------|---------|----------|
-| Unit | Test individual functions and classes in isolation | `test/unit/` |
-| Integration | Test plugin registration and service resolution | `test/integration/` |
-| E2E | Test full application scenarios | `test/e2e/` |
+| Test Type   | Purpose                                            | Location            |
+| ----------- | -------------------------------------------------- | ------------------- |
+| Unit        | Test individual functions and classes in isolation | `test/unit/`        |
+| Integration | Test plugin registration and service resolution    | `test/integration/` |
+| E2E         | Test full application scenarios                    | `test/e2e/`         |
 
 ### 6.4 Test Framework
 
-- Use `deno test` as the test runner, with `@std/testing/bdd` (`describe`/`it`) and `@std/expect` for assertions.
+- Use `deno test` as the test runner, with `@std/testing/bdd` (`describe`/`it`) and `@std/expect`
+  for assertions.
 - Use `@hono-enterprise/testing` for test utilities.
 - Use `app.inject()` for HTTP testing without a server.
 - Use `createMockPlugin()` for mocking plugin services.
-- Node/Bun compatibility is verified by a separate compat suite in CI that consumes the packages through JSR's npm compatibility layer.
+- Node/Bun compatibility is verified by a separate compat suite in CI that consumes the packages
+  through JSR's npm compatibility layer.
 
 ### 6.5 Test Naming
 
@@ -373,7 +386,9 @@ Every package must include:
 - Tests must not connect to real databases, Redis, message brokers, or external APIs.
 - Use in-memory adapters (`MemoryAdapter`, `MemoryStore`, `InMemoryBroker`).
 - Use `createMockPlugin()` for mocking plugin services.
-- Integration tests that require real dependencies must be guarded with `describe.skipIf(!process.env.RUN_INTEGRATION)`. (Test files are the one sanctioned exception to the `runtime.env` rule — they run under the Node-based test runner, not inside the framework.)
+- Integration tests that require real dependencies must be guarded with
+  `describe.skipIf(!process.env.RUN_INTEGRATION)`. (Test files are the one sanctioned exception to
+  the `runtime.env` rule — they run under the Node-based test runner, not inside the framework.)
 
 ### 6.8 Snapshot Testing
 
@@ -405,7 +420,7 @@ Every package must include:
   - `@since` for version tracking
   - `@deprecated` with migration path for deprecated APIs
 
-```typescript
+````typescript
 /**
  * Creates a new application instance with the specified plugins.
  *
@@ -422,7 +437,7 @@ Every package must include:
  * @since 1.0.0
  */
 export function createApplication(options?: ApplicationOptions): Application { ... }
-```
+````
 
 ### 7.3 No Undocumented Public APIs
 
@@ -432,7 +447,8 @@ export function createApplication(options?: ApplicationOptions): Application { .
 
 ### 7.4 Documentation Generation
 
-- API reference is auto-generated from JSDoc using `deno doc` (HTML output); JSR additionally renders per-package docs automatically on publish.
+- API reference is auto-generated from JSDoc using `deno doc` (HTML output); JSR additionally
+  renders per-package docs automatically on publish.
 - Generated docs live in `docs/api/`.
 - Documentation is rebuilt on every release.
 
@@ -449,7 +465,8 @@ export function createApplication(options?: ApplicationOptions): Application { .
 
 ### 8.1 Every Milestone Must Compile
 
-- A milestone is not complete until `deno task check` (type-checking all workspace packages) succeeds with zero errors.
+- A milestone is not complete until `deno task check` (type-checking all workspace packages)
+  succeeds with zero errors.
 - TypeScript errors are blocking.
 - No `// @ts-ignore` or `// @ts-expect-error` without a justifiable reason documented in a comment.
 
@@ -512,7 +529,7 @@ Before marking a milestone as complete, verify:
 2. Provide a replacement API in the same version.
 3. Remove the deprecated API only in the next major version.
 
-```typescript
+````typescript
 /**
  * @deprecated Use `config.getOrThrow()` instead. Will be removed in v2.0.0.
  * @example
@@ -524,7 +541,7 @@ Before marking a milestone as complete, verify:
  * ```
  */
 export function getRequired<T>(key: string): T { ... }
-```
+````
 
 ### 9.3 Semantic Versioning
 
@@ -561,17 +578,17 @@ A public API is any export from a package's `src/index.ts` file.
 
 ### 10.4 Public API Naming Conventions
 
-| Type | Convention | Example |
-|------|-----------|---------|
-| Interface | `IXxx` | `ILogger`, `IConfig` |
-| Service | `XxxService` | `DatabaseService`, `CacheService` |
-| Plugin | `XxxPlugin` | `LoggerPlugin`, `DatabasePlugin` |
-| Middleware | `XxxMiddleware` | `AuthMiddleware`, `CorsMiddleware` |
-| Guard | `requireXxx` | `requireAuth`, `requireRole` |
-| Adapter | `XxxAdapter` | `PrismaAdapter`, `RedisStore` |
-| Options | `XxxOptions` | `LoggerOptions`, `DatabaseOptions` |
-| Factory | `createXxx` | `createApplication`, `createTestApp` |
-| Decorator | `@Xxx` | `@Controller`, `@Get`, `@Body` |
+| Type             | Convention                                   | Example                                |
+| ---------------- | -------------------------------------------- | -------------------------------------- |
+| Interface        | `IXxx`                                       | `ILogger`, `IConfig`                   |
+| Service          | `XxxService`                                 | `DatabaseService`, `CacheService`      |
+| Plugin           | `XxxPlugin`                                  | `LoggerPlugin`, `DatabasePlugin`       |
+| Middleware       | `XxxMiddleware`                              | `AuthMiddleware`, `CorsMiddleware`     |
+| Guard            | `requireXxx`                                 | `requireAuth`, `requireRole`           |
+| Adapter          | `XxxAdapter`                                 | `PrismaAdapter`, `RedisStore`          |
+| Options          | `XxxOptions`                                 | `LoggerOptions`, `DatabaseOptions`     |
+| Factory          | `createXxx`                                  | `createApplication`, `createTestApp`   |
+| Decorator        | `@Xxx`                                       | `@Controller`, `@Get`, `@Body`         |
 | Capability token | `xxx` (lowercase kebab, from `CAPABILITIES`) | `logger`, `database`, `authentication` |
 
 ### 10.5 No Undocumented Exports
@@ -663,10 +680,13 @@ A public API is any export from a package's `src/index.ts` file.
 
 ### 12.2 Optional Heavy Dependencies
 
-- Heavy dependencies (Prisma, Pino, Redis, RabbitMQ clients) must never be hard dependencies of a plugin. (JSR has no peer-dependency concept, so the npm "peer dependency" pattern does not apply.)
+- Heavy dependencies (Prisma, Pino, Redis, RabbitMQ clients) must never be hard dependencies of a
+  plugin. (JSR has no peer-dependency concept, so the npm "peer dependency" pattern does not apply.)
 - Instead, adapters either:
-  - accept a **client instance injected via plugin options** (preferred — e.g., `DatabasePlugin({ type: 'prisma', client: prismaClient })`), or
-  - **lazily load** the driver via dynamic `import()` of an `npm:` specifier, failing with a clear error if it is not installed.
+  - accept a **client instance injected via plugin options** (preferred — e.g.,
+    `DatabasePlugin({ type: 'prisma', client: prismaClient })`), or
+  - **lazily load** the driver via dynamic `import()` of an `npm:` specifier, failing with a clear
+    error if it is not installed.
 - The framework never installs a database driver by default.
 - Users install the driver for the adapter they choose.
 
@@ -683,7 +703,8 @@ A public API is any export from a package's `src/index.ts` file.
 
 ### 12.5 Security Auditing
 
-- Dependency vulnerability scanning (e.g., OSV-Scanner against `deno.lock`) must pass in CI with zero high-severity vulnerabilities.
+- Dependency vulnerability scanning (e.g., OSV-Scanner against `deno.lock`) must pass in CI with
+  zero high-severity vulnerabilities.
 - Dependencies are reviewed quarterly.
 - Unused dependencies are removed.
 
@@ -750,7 +771,8 @@ A public API is any export from a package's `src/index.ts` file.
 - Every package must be tree-shakeable.
 - Use ES module exports only.
 - No side effects at import time.
-- Declare subpath exports in each package's `deno.json` `exports` for granular imports (JSR's npm transform emits the equivalent `package.json` exports map with `sideEffects: false`):
+- Declare subpath exports in each package's `deno.json` `exports` for granular imports (JSR's npm
+  transform emits the equivalent `package.json` exports map with `sideEffects: false`):
 
 ```json
 {
@@ -766,7 +788,9 @@ A public API is any export from a package's `src/index.ts` file.
 ### 14.4 Minimal Bundle Size
 
 - Each package must be as small as possible.
-- Heavy dependencies (database drivers, broker clients, cloud SDKs) are never bundled or eagerly imported — adapters load them via dynamic `import()` of `npm:` specifiers, or accept a client instance injected through plugin options.
+- Heavy dependencies (database drivers, broker clients, cloud SDKs) are never bundled or eagerly
+  imported — adapters load them via dynamic `import()` of `npm:` specifiers, or accept a client
+  instance injected through plugin options.
 - Use feature detection to avoid bundling unused code.
 - Bundle size is monitored in CI.
 
@@ -795,6 +819,7 @@ A public API is any export from a package's `src/index.ts` file.
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `build`, `ci`
 
 Example:
+
 ```
 feat(database-plugin): add transaction support
 
@@ -875,19 +900,19 @@ Any violation of these rules blocks the PR from merging. No exceptions.
 
 ### 17.2 Automated Enforcement
 
-| Rule | Enforcement Tool |
-|------|-----------------|
-| No `any` | `deno lint` rule `no-explicit-any` |
-| No `eval` | `deno lint` rule `no-eval` |
-| No unused variables | `deno lint` rule `no-unused-vars` + `noUnusedLocals` in `compilerOptions` |
-| Strict TypeScript | Root `deno.json` `compilerOptions` with `strict: true` |
-| Test coverage 90%+ | `deno test --coverage` threshold check in CI |
-| No circular dependencies | `deno info --json` graph check (custom script) or `dependency-cruiser` via `npm:` specifier |
-| No security vulnerabilities | OSV-Scanner against `deno.lock` in CI |
-| Code formatting | `deno fmt` |
-| Code style | `deno lint` |
-| Runtime-specific imports outside `runtime` pkg | Custom `deno lint` plugin rule / CI grep gate |
-| JSDoc on exports | `deno doc --lint` |
+| Rule                                           | Enforcement Tool                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| No `any`                                       | `deno lint` rule `no-explicit-any`                                                          |
+| No `eval`                                      | `deno lint` rule `no-eval`                                                                  |
+| No unused variables                            | `deno lint` rule `no-unused-vars` + `noUnusedLocals` in `compilerOptions`                   |
+| Strict TypeScript                              | Root `deno.json` `compilerOptions` with `strict: true`                                      |
+| Test coverage 90%+                             | `deno test --coverage` threshold check in CI                                                |
+| No circular dependencies                       | `deno info --json` graph check (custom script) or `dependency-cruiser` via `npm:` specifier |
+| No security vulnerabilities                    | OSV-Scanner against `deno.lock` in CI                                                       |
+| Code formatting                                | `deno fmt`                                                                                  |
+| Code style                                     | `deno lint`                                                                                 |
+| Runtime-specific imports outside `runtime` pkg | Custom `deno lint` plugin rule / CI grep gate                                               |
+| JSDoc on exports                               | `deno doc --lint`                                                                           |
 
 ### 17.3 Escalation
 

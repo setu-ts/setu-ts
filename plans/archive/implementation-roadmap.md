@@ -2,10 +2,11 @@
 
 ## Project Overview
 
-**Framework Name:** Hono Enterprise  
-**Goal:** Production-quality, reusable enterprise framework combining Hono's performance with NestJS architecture and Spring Boot organization.  
-**Runtime Support:** Node.js, Deno, Bun (Cloudflare Workers extensible)  
-**Monorepo:** pnpm + Turborepo + TypeScript  
+**Framework Name:** Hono Enterprise\
+**Goal:** Production-quality, reusable enterprise framework combining Hono's performance with NestJS
+architecture and Spring Boot organization.\
+**Runtime Support:** Node.js, Deno, Bun (Cloudflare Workers extensible)\
+**Monorepo:** pnpm + Turborepo + TypeScript
 
 ---
 
@@ -123,6 +124,7 @@ plugins ───► core, common
    - Configure linting, type checking, and tests
 
 ### Deliverables
+
 - [ ] Working monorepo with pnpm
 - [ ] Turborepo task orchestration
 - [ ] Strict TypeScript configuration
@@ -139,6 +141,7 @@ plugins ───► core, common
 ### Package: `@hono-enterprise/common`
 
 **Files:**
+
 - `src/types/container.ts` - Container interfaces
 - `src/types/provider.ts` - Provider type definitions
 - `src/types/lifecycle.ts` - Lifecycle hook interfaces
@@ -151,6 +154,7 @@ plugins ───► core, common
 ### Package: `@hono-enterprise/core`
 
 **Core Types:**
+
 ```typescript
 // Provider types
 type ProviderScope = 'singleton' | 'scoped' | 'transient';
@@ -183,6 +187,7 @@ interface ContainerBuilder {
 ```
 
 **Implementation Files:**
+
 - `src/di/container.ts` - Main container implementation
 - `src/di/container-builder.ts` - Fluent builder for containers
 - `src/di/provider-registry.ts` - Provider registration and storage
@@ -192,6 +197,7 @@ interface ContainerBuilder {
 - `src/di/index.ts`
 
 **Features:**
+
 - Singleton, Scoped, Transient lifecycles
 - Constructor injection
 - Factory providers
@@ -203,6 +209,7 @@ interface ContainerBuilder {
 - Provider registration validation
 
 ### Tests
+
 - Container registration and resolution
 - Singleton lifecycle verification
 - Scoped lifecycle verification
@@ -215,6 +222,7 @@ interface ContainerBuilder {
 - Provider validation
 
 ### Deliverables
+
 - [ ] `@hono-enterprise/common` package with core types
 - [ ] `@hono-enterprise/core` DI container
 - [ ] Full test coverage for DI scenarios
@@ -232,10 +240,12 @@ interface ContainerBuilder {
 **Decorator Categories:**
 
 **Module Decorators:**
+
 - `@Module(options)` - Register a module with controllers, providers, imports, exports
 - `@Global()` - Mark module as globally available
 
 **Controller Decorators:**
+
 - `@Controller(path?, version?, prefix?)` - Register a controller with route prefix
 - `@Get(path?)` - GET route handler
 - `@Post(path?)` - POST route handler
@@ -247,11 +257,13 @@ interface ContainerBuilder {
 - `@Options(path?)` - OPTIONS method
 
 **Injection Decorators:**
+
 - `@Injectable()` - Mark class as injectable
 - `@Inject(token)` - Inject dependency via constructor parameter
 - `@Scope(scope)` - Override default provider scope
 
 **Request Data Decorators:**
+
 - `@Body()` - Extract request body
 - `@Query(name?, required?)` - Extract query parameters
 - `@Param(name?, required?)` - Extract route parameters
@@ -261,6 +273,7 @@ interface ContainerBuilder {
 - `@Response()` - Access response object
 
 **Security Decorators:**
+
 - `@CurrentUser()` - Inject authenticated user
 - `@Roles(...roles)` - Require specific roles
 - `@Permissions(...permissions)` - Require specific permissions
@@ -268,6 +281,7 @@ interface ContainerBuilder {
 - `@ApiKey()` - Require API key authentication
 
 **Cross-Cutting Concern Decorators:**
+
 - `@UseGuards(...guards)` - Apply guards
 - `@UseInterceptors(...interceptors)` - Apply interceptors
 - `@UseFilters(...filters)` - Apply exception filters
@@ -277,6 +291,7 @@ interface ContainerBuilder {
 - `@Version(version)` - API version targeting
 
 **Implementation Files:**
+
 - `src/metadata/storage.ts` - Metadata storage (WeakMap-based)
 - `src/metadata/keys.ts` - Symbol keys for metadata
 - `src/decorators/module.ts` - @Module, @Global
@@ -289,6 +304,7 @@ interface ContainerBuilder {
 - `src/decorators/index.ts`
 
 **Metadata Storage Design:**
+
 ```typescript
 interface ControllerMetadata {
   path: string;
@@ -324,6 +340,7 @@ interface ParameterMetadata {
 ```
 
 ### Tests
+
 - Metadata registration for each decorator
 - Multiple decorators on same class/method
 - Parameter decorator index resolution
@@ -331,6 +348,7 @@ interface ParameterMetadata {
 - Inherited decorator behavior
 
 ### Deliverables
+
 - [ ] Complete decorator library
 - [ ] Metadata storage system
 - [ ] Type-safe decorator parameters
@@ -346,6 +364,7 @@ interface ParameterMetadata {
 ### Package: `@hono-enterprise/core` (Extended)
 
 **Module System:**
+
 ```typescript
 interface ModuleDefinition {
   global?: boolean;
@@ -384,6 +403,7 @@ interface DynamicModule {
 ```
 
 **Application Bootstrap:**
+
 ```typescript
 interface Application {
   init(): Promise<void>;
@@ -407,6 +427,7 @@ interface ApplicationOptions {
 ```
 
 **Implementation Files:**
+
 - `src/modules/module-graph.ts` - Module dependency graph
 - `src/modules/module-scanner.ts` - Module discovery and scanning
 - `src/modules/module-loader.ts` - Module loading and initialization
@@ -419,6 +440,7 @@ interface ApplicationOptions {
 - `src/application/index.ts`
 
 **Lifecycle Flow:**
+
 1. Application created with options
 2. Modules scanned and graph built
 3. Circular dependency detection
@@ -432,6 +454,7 @@ interface ApplicationOptions {
 11. On shutdown: `onApplicationShutdown` -> `onModuleDestroy` -> server close
 
 ### Tests
+
 - Module graph construction
 - Circular module dependency detection
 - Module initialization order
@@ -442,6 +465,7 @@ interface ApplicationOptions {
 - Lifecycle hook execution order
 
 ### Deliverables
+
 - [ ] Module system with graph resolution
 - [ ] Application bootstrap with lifecycle hooks
 - [ ] Graceful shutdown implementation
@@ -457,6 +481,7 @@ interface ApplicationOptions {
 ### Package: `@hono-enterprise/middleware`
 
 **Middleware Interface:**
+
 ```typescript
 interface MiddlewareContext {
   request: Request;
@@ -483,6 +508,7 @@ interface MiddlewarePipeline {
 ```
 
 **Built-in Middleware:**
+
 - `LoggingMiddleware` - Request/response logging
 - `RequestIdMiddleware` - Generate unique request ID
 - `CorrelationIdMiddleware` - Propagate correlation ID
@@ -492,6 +518,7 @@ interface MiddlewarePipeline {
 - `CompressionMiddleware` - Response compression
 
 **Pipeline Order:**
+
 ```
 1.  LoggingMiddleware (order: 100)
 2.  RequestIdMiddleware (order: 200)
@@ -508,6 +535,7 @@ interface MiddlewarePipeline {
 ```
 
 **Implementation Files:**
+
 - `src/pipeline/middleware-context.ts`
 - `src/pipeline/middleware-pipeline.ts`
 - `src/pipeline/middleware-executor.ts`
@@ -521,6 +549,7 @@ interface MiddlewarePipeline {
 - `src/middleware/index.ts`
 
 ### Tests
+
 - Middleware execution order
 - Middleware matching rules
 - Context data passing between middleware
@@ -529,6 +558,7 @@ interface MiddlewarePipeline {
 - Built-in middleware functionality
 
 ### Deliverables
+
 - [ ] Middleware pipeline implementation
 - [ ] Built-in middleware set
 - [ ] Context object with state management
@@ -544,6 +574,7 @@ interface MiddlewarePipeline {
 ### Package: `@hono-enterprise/core` (Extended)
 
 **HTTP Adapter Interface:**
+
 ```typescript
 interface HttpAdapter {
   createServer(app: Application): any;
@@ -580,6 +611,7 @@ interface HonoResponse {
 ```
 
 **Router:**
+
 ```typescript
 interface Router {
   registerController(controller: Controller): void;
@@ -596,6 +628,7 @@ interface RouteMatch {
 ```
 
 **Controller Dispatcher:**
+
 ```typescript
 interface ControllerDispatcher {
   dispatch(request: HonoRequest, routeMatch: RouteMatch): Promise<any>;
@@ -605,11 +638,13 @@ interface ControllerDispatcher {
 ```
 
 **Runtime Adapters:**
+
 - `NodeHttpAdapter` - Node.js HTTP server
 - `DenoHttpAdapter` - Deno HTTP server
 - `BunHttpAdapter` - Bun HTTP server
 
 **Implementation Files:**
+
 - `src/router/router.ts`
 - `src/router/route-matcher.ts`
 - `src/router/controller-discovery.ts`
@@ -626,6 +661,7 @@ interface ControllerDispatcher {
 - `src/request/index.ts`
 
 ### Tests
+
 - Controller discovery from modules
 - Route registration and matching
 - Parameter resolution (@Body, @Query, @Param, etc.)
@@ -635,6 +671,7 @@ interface ControllerDispatcher {
 - Response formatting
 
 ### Deliverables
+
 - [ ] Router with route matching
 - [ ] Controller discovery and registration
 - [ ] HTTP adapter interface and runtime adapters
@@ -651,6 +688,7 @@ interface ControllerDispatcher {
 ### Package: `@hono-enterprise/validation`
 
 **Validation System:**
+
 ```typescript
 interface ValidationPipe {
   validate<T>(schema: ZodSchema<T>, data: unknown): Promise<T>;
@@ -673,12 +711,14 @@ interface ValidationOptions {
 ```
 
 **Zod to OpenAPI Transformation:**
+
 ```typescript
 function zodToOpenAPI(schema: ZodSchema): OpenAPISchema;
 function zodToJSONSchema(schema: ZodSchema): JSONSchema;
 ```
 
 **Implementation Files:**
+
 - `src/pipes/validation-pipe.ts`
 - `src/pipes/argument-host.ts`
 - `src/decorators/validate.decorator.ts`
@@ -694,6 +734,7 @@ function zodToJSONSchema(schema: ZodSchema): JSONSchema;
 - `src/index.ts`
 
 **Standardized Validation Error Response:**
+
 ```typescript
 interface ValidationErrorResponse {
   statusCode: number;
@@ -714,6 +755,7 @@ interface ValidationErrorDetail {
 ```
 
 ### Tests
+
 - Body validation with Zod schemas
 - Query parameter validation
 - Path parameter validation
@@ -725,6 +767,7 @@ interface ValidationErrorDetail {
 - Zod to OpenAPI transformation
 
 ### Deliverables
+
 - [ ] Validation pipe implementation
 - [ ] Validation decorators
 - [ ] Standardized error responses
@@ -740,6 +783,7 @@ interface ValidationErrorDetail {
 ### Package: `@hono-enterprise/exceptions`
 
 **Exception Hierarchy:**
+
 ```
 HttpError (base)
 ├── BadRequestException (400)
@@ -760,6 +804,7 @@ HttpError (base)
 ```
 
 **Exception Interface:**
+
 ```typescript
 interface HttpError extends Error {
   statusCode: number;
@@ -785,6 +830,7 @@ interface GlobalExceptionFilter {
 ```
 
 **Standardized Error Response:**
+
 ```typescript
 interface ErrorResponse {
   statusCode: number;
@@ -798,6 +844,7 @@ interface ErrorResponse {
 ```
 
 **Implementation Files:**
+
 - `src/errors/http-error.ts`
 - `src/errors/bad-request.exception.ts`
 - `src/errors/unauthorized.exception.ts`
@@ -817,6 +864,7 @@ interface ErrorResponse {
 - `src/index.ts`
 
 ### Tests
+
 - Exception hierarchy and status codes
 - Exception response formatting
 - Global exception filter
@@ -826,6 +874,7 @@ interface ErrorResponse {
 - Error cause chaining
 
 ### Deliverables
+
 - [ ] Complete exception hierarchy
 - [ ] Global exception filter
 - [ ] Custom filter support
@@ -841,11 +890,12 @@ interface ErrorResponse {
 ### Package: `@hono-enterprise/config`
 
 **Configuration System:**
+
 ```typescript
 interface ConfigModuleOptions {
   isGlobal?: boolean;
   envFilePath?: string;
-    envFilePaths?: string[];
+  envFilePaths?: string[];
   cache?: boolean;
   expandVariables?: boolean;
   validationSchema?: ZodSchema;
@@ -873,11 +923,13 @@ interface ConfigGetOptions {
 ```
 
 **Runtime Adapters:**
+
 - `NodeConfigLoader` - Node.js process.env
 - `DenoConfigLoader` - Deno.env
 - `BunConfigLoader` - Bun.env
 
 **Implementation Files:**
+
 - `src/config-module.ts`
 - `src/config-service.ts`
 - `src/config-validator.ts`
@@ -892,6 +944,7 @@ interface ConfigGetOptions {
 - `src/index.ts`
 
 ### Tests
+
 - Configuration loading from environment
 - Configuration validation with Zod
 - Type-safe configuration access
@@ -902,6 +955,7 @@ interface ConfigGetOptions {
 - Variable expansion
 
 ### Deliverables
+
 - [ ] Configuration module
 - [ ] ConfigService with type inference
 - [ ] Runtime-specific config loaders
@@ -917,6 +971,7 @@ interface ConfigGetOptions {
 ### Package: `@hono-enterprise/logger`
 
 **Logger Interface:**
+
 ```typescript
 type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
@@ -956,6 +1011,7 @@ interface LoggerOptions {
 ```
 
 **Implementation Files:**
+
 - `src/logger.service.ts`
 - `src/pino-logger.service.ts`
 - `src/console-logger.service.ts`
@@ -967,6 +1023,7 @@ interface LoggerOptions {
 - `src/index.ts`
 
 **Automatic Logging:**
+
 - Incoming requests with method, path, status, duration
 - Outgoing responses
 - Exceptions with stack traces
@@ -975,6 +1032,7 @@ interface LoggerOptions {
 - External HTTP calls (when integrated)
 
 ### Tests
+
 - Log level filtering
 - Structured log output
 - Context binding
@@ -984,6 +1042,7 @@ interface LoggerOptions {
 - Redaction of sensitive fields
 
 ### Deliverables
+
 - [ ] Pino-based logger service
 - [ ] Console logger fallback
 - [ ] Logger module for DI integration
@@ -999,6 +1058,7 @@ interface LoggerOptions {
 ### Package: `@hono-enterprise/security`
 
 **JWT Service:**
+
 ```typescript
 interface JwtService {
   sign(payload: any, options?: JwtSignOptions): string;
@@ -1028,6 +1088,7 @@ interface JwtVerifyOptions {
 ```
 
 **RBAC System:**
+
 ```typescript
 interface Role {
   name: string;
@@ -1053,6 +1114,7 @@ interface RolesService {
 ```
 
 **Guard System:**
+
 ```typescript
 interface Guard {
   canActivate(context: ExecutionContext): boolean | Promise<boolean>;
@@ -1074,6 +1136,7 @@ interface CanActivate {
 ```
 
 **Implementation Files:**
+
 - `strategies/jwt.strategy.ts`
 - `strategies/api-key.strategy.ts`
 - `strategies/local.strategy.ts`
@@ -1100,6 +1163,7 @@ interface CanActivate {
 - `index.ts`
 
 ### Tests
+
 - JWT signing and verification
 - Role hierarchy and inheritance
 - Permission checks
@@ -1110,6 +1174,7 @@ interface CanActivate {
 - Token generation
 
 ### Deliverables
+
 - [ ] JWT service
 - [ ] RBAC system with role hierarchy
 - [ ] Guard system with execution context
@@ -1126,6 +1191,7 @@ interface CanActivate {
 ### Package: `@hono-enterprise/auth`
 
 **Auth Module:**
+
 ```typescript
 interface AuthModuleOptions {
   jwt?: JwtAuthOptions;
@@ -1146,12 +1212,14 @@ interface JwtAuthOptions {
 ```
 
 **Middleware:**
+
 - `AuthenticationMiddleware` - Extract and validate credentials
 - `AuthorizationMiddleware` - Check roles and permissions
 - `RateLimitMiddleware` - Rate limiting with Redis/memory store
 - `CookieSecurityMiddleware` - Secure cookie handling
 
 **Implementation Files:**
+
 - `src/auth.module.ts`
 - `src/auth.service.ts`
 - `src/auth-options.factory.ts`
@@ -1176,6 +1244,7 @@ interface JwtAuthOptions {
 - `src/index.ts`
 
 ### Tests
+
 - Authentication middleware
 - Authorization middleware
 - JWT strategy
@@ -1186,6 +1255,7 @@ interface JwtAuthOptions {
 - Public route bypass
 
 ### Deliverables
+
 - [ ] Authentication middleware
 - [ ] Authorization middleware
 - [ ] Auth strategies (JWT, API Key, Local)
@@ -1201,6 +1271,7 @@ interface JwtAuthOptions {
 ### Package: `@hono-enterprise/database`
 
 **Repository Interface:**
+
 ```typescript
 interface IRepository<Entity, Id> {
   findById(id: Id): Promise<Entity | null>;
@@ -1227,6 +1298,7 @@ interface IWriteRepository<Entity, Id> {
 ```
 
 **Unit of Work:**
+
 ```typescript
 interface IUnitOfWork {
   beginTransaction(): Promise<void>;
@@ -1245,6 +1317,7 @@ type IsolationLevel = 'READ UNCOMMITTED' | 'READ COMMITTED' | 'REPEATABLE READ' 
 ```
 
 **Base Repository:**
+
 ```typescript
 abstract class BaseRepository<Entity, Id> implements IRepository<Entity, Id> {
   protected constructor(protected unitOfWork: IUnitOfWork, protected entityClass: Type<Entity>) {}
@@ -1253,6 +1326,7 @@ abstract class BaseRepository<Entity, Id> implements IRepository<Entity, Id> {
 ```
 
 **Implementation Files:**
+
 - `src/interfaces/repository.interface.ts`
 - `src/interfaces/unitOfWork.interface.ts`
 - `src/interfaces/orm-adapter.interface.ts`
@@ -1273,6 +1347,7 @@ abstract class BaseRepository<Entity, Id> implements IRepository<Entity, Id> {
 - `src/index.ts`
 
 ### Tests
+
 - Repository CRUD operations
 - Unit of Work transactions
 - Transaction rollback
@@ -1284,6 +1359,7 @@ abstract class BaseRepository<Entity, Id> implements IRepository<Entity, Id> {
 - Filtering
 
 ### Deliverables
+
 - [ ] Repository interfaces
 - [ ] Base repository implementation
 - [ ] Unit of Work pattern
@@ -1301,6 +1377,7 @@ abstract class BaseRepository<Entity, Id> implements IRepository<Entity, Id> {
 ### Package: `@hono-enterprise/database` (Extended)
 
 **ORM Adapter Interface:**
+
 ```typescript
 interface IOrmAdapter {
   connect(): Promise<void>;
@@ -1320,16 +1397,19 @@ interface ITransaction {
 ```
 
 **Prisma Adapter:**
+
 - `PrismaAdapter` - Wraps PrismaClient
 - `PrismaRepository` - Implements IRepository using Prisma
 - `PrismaUnitOfWork` - Implements IUnitOfWork using Prisma transactions
 
 **Drizzle Adapter:**
+
 - `DrizzleAdapter` - Wraps drizzle() instance
 - `DrizzleRepository` - Implements IRepository using Drizzle
 - `DrizzleUnitOfWork` - Implements IUnitOfWork using Drizzle transactions
 
 **Database Module:**
+
 ```typescript
 interface DatabaseModuleOptions {
   type: 'prisma' | 'drizzle';
@@ -1339,6 +1419,7 @@ interface DatabaseModuleOptions {
 ```
 
 **Implementation Files:**
+
 - `src/adapters/prisma/prisma.adapter.ts`
 - `src/adapters/prisma/prisma.repository.ts`
 - `src/adapters/prisma/prisma-unit-of-work.ts`
@@ -1351,6 +1432,7 @@ interface DatabaseModuleOptions {
 - `src/index.ts`
 
 ### Tests
+
 - Prisma adapter CRUD
 - Prisma transactions
 - Drizzle adapter CRUD
@@ -1360,6 +1442,7 @@ interface DatabaseModuleOptions {
 - Query execution
 
 ### Deliverables
+
 - [ ] Prisma adapter
 - [ ] Drizzle adapter
 - [ ] Database module
@@ -1375,6 +1458,7 @@ interface DatabaseModuleOptions {
 ### Package: `@hono-enterprise/cache`
 
 **Cache Interface:**
+
 ```typescript
 interface ICache {
   get<T>(key: string): Promise<T | null>;
@@ -1400,6 +1484,7 @@ interface CacheOptions {
 ```
 
 **Cache Decorator:**
+
 ```typescript
 @Cache(options?: CacheOptions)
 @CacheKey(keyGenerator: (args: any[]) => string)
@@ -1408,6 +1493,7 @@ interface CacheOptions {
 ```
 
 **Implementation Files:**
+
 - `src/interfaces/cache.interface.ts`
 - `src/cache.module.ts`
 - `src/cache.service.ts`
@@ -1424,6 +1510,7 @@ interface CacheOptions {
 - `src/index.ts`
 
 ### Tests
+
 - Memory store operations
 - Redis store operations
 - Cache service abstraction
@@ -1434,6 +1521,7 @@ interface CacheOptions {
 - Cache invalidation
 
 ### Deliverables
+
 - [ ] Cache interface and service
 - [ ] Memory store
 - [ ] Redis store
@@ -1450,6 +1538,7 @@ interface CacheOptions {
 ### Package: `@hono-enterprise/events`
 
 **Event System:**
+
 ```typescript
 interface IEvent {
   readonly id: string;
@@ -1475,6 +1564,7 @@ interface IEventBus {
 ```
 
 **Domain Event:**
+
 ```typescript
 abstract class DomainEvent extends IEvent {
   constructor(aggregateId: string, data: any) {
@@ -1491,6 +1581,7 @@ abstract class DomainEvent extends IEvent {
 ```
 
 **Implementation Files:**
+
 - `src/interfaces/event.interface.ts`
 - `src/interfaces/event-handler.interface.ts`
 - `src/interfaces/event-bus.interface.ts`
@@ -1507,6 +1598,7 @@ abstract class DomainEvent extends IEvent {
 - `src/index.ts`
 
 ### Tests
+
 - Domain event creation
 - Event bus publish/subscribe
 - Event handler execution
@@ -1516,6 +1608,7 @@ abstract class DomainEvent extends IEvent {
 - Error handling in event handlers
 
 ### Deliverables
+
 - [ ] Event interfaces
 - [ ] Domain event base class
 - [ ] In-memory event bus
@@ -1532,6 +1625,7 @@ abstract class DomainEvent extends IEvent {
 ### Package: `@hono-enterprise/events` (Extended) or New Package `@hono-enterprise/cqrs`
 
 **CQRS Interfaces:**
+
 ```typescript
 interface ICommand {
   readonly id: string;
@@ -1553,7 +1647,9 @@ interface IQueryHandler<TQuery extends IQuery, TResult> {
 
 interface ICommandBus {
   execute<TCommand extends ICommand, TResult = void>(command: TCommand): Promise<TResult>;
-  subscribe<TCommand extends ICommand, TResult = void>(handler: ICommandHandler<TCommand, TResult>): void;
+  subscribe<TCommand extends ICommand, TResult = void>(
+    handler: ICommandHandler<TCommand, TResult>,
+  ): void;
 }
 
 interface IQueryBus {
@@ -1563,6 +1659,7 @@ interface IQueryBus {
 ```
 
 **Pipeline Behaviors:**
+
 ```typescript
 interface PipelineBehavior<TRequest, TResult> {
   handle(request: TRequest, next: () => Promise<TResult>): Promise<TResult>;
@@ -1577,6 +1674,7 @@ class TimingBehavior<TRequest, TResult> implements PipelineBehavior<TRequest, TR
 ```
 
 **Implementation Files:**
+
 - `src/interfaces/command.interface.ts`
 - `src/interfaces/query.interface.ts`
 - `src/interfaces/command-handler.interface.ts`
@@ -1599,6 +1697,7 @@ class TimingBehavior<TRequest, TResult> implements PipelineBehavior<TRequest, TR
 - `src/index.ts`
 
 ### Tests
+
 - Command bus execution
 - Query bus execution
 - Handler registration
@@ -1609,6 +1708,7 @@ class TimingBehavior<TRequest, TResult> implements PipelineBehavior<TRequest, TR
 - Caching behavior
 
 ### Deliverables
+
 - [ ] Command and query interfaces
 - [ ] Command bus and query bus
 - [ ] Handler base classes
@@ -1626,6 +1726,7 @@ class TimingBehavior<TRequest, TResult> implements PipelineBehavior<TRequest, TR
 ### Package: `@hono-enterprise/messaging`
 
 **Messaging Interfaces:**
+
 ```typescript
 interface IMessage {
   readonly id: string;
@@ -1647,7 +1748,11 @@ interface IMessageBroker {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void>;
-  subscribe<T>(topic: string, handler: MessageHandler<T>, options?: SubscribeOptions): Promise<Subscription>;
+  subscribe<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<Subscription>;
   createTopic(name: string, options?: TopicOptions): Promise<void>;
   deleteTopic(name: string): Promise<void>;
 }
@@ -1662,12 +1767,14 @@ interface Subscription {
 ```
 
 **Adapters:**
+
 - `RabbitMqBroker` - RabbitMQ implementation
 - `NatsBroker` - NATS implementation
 - `KafkaBroker` - Kafka implementation
 - `RedisStreamsBroker` - Redis Streams implementation
 
 **Implementation Files:**
+
 - `src/interfaces/message.interface.ts`
 - `src/interfaces/message-broker.interface.ts`
 - `src/interfaces/message-handler.interface.ts`
@@ -1688,6 +1795,7 @@ interface Subscription {
 - `src/index.ts`
 
 ### Tests
+
 - Message broker abstraction
 - RabbitMQ adapter
 - NATS adapter
@@ -1697,6 +1805,7 @@ interface Subscription {
 - Error handling
 
 ### Deliverables
+
 - [ ] Messaging interfaces
 - [ ] RabbitMQ adapter
 - [ ] NATS adapter
@@ -1714,6 +1823,7 @@ interface Subscription {
 ### Package: `@hono-enterprise/scheduler`
 
 **Scheduler Interfaces:**
+
 ```typescript
 interface IScheduler {
   addJob<T>(name: string, handler: JobHandler<T>, options?: JobOptions): Job<T>;
@@ -1755,6 +1865,7 @@ type JobState = 'waiting' | 'active' | 'paused' | 'completed' | 'failed';
 ```
 
 **Implementation Files:**
+
 - `src/interfaces/scheduler.interface.ts`
 - `src/interfaces/job.interface.ts`
 - `src/scheduler/scheduler.module.ts`
@@ -1771,6 +1882,7 @@ type JobState = 'waiting' | 'active' | 'paused' | 'completed' | 'failed';
 - `src/index.ts`
 
 ### Tests
+
 - Cron job scheduling
 - Delayed job execution
 - Recurring job execution
@@ -1780,6 +1892,7 @@ type JobState = 'waiting' | 'active' | 'paused' | 'completed' | 'failed';
 - Scheduler start/stop
 
 ### Deliverables
+
 - [ ] Scheduler service
 - [ ] Job registry and executor
 - [ ] Cron parsing
@@ -1796,6 +1909,7 @@ type JobState = 'waiting' | 'active' | 'paused' | 'completed' | 'failed';
 ### Package: `@hono-enterprise/messaging` (Extended) or New Package
 
 **Queue Interface:**
+
 ```typescript
 interface IQueue {
   add<T>(jobName: string, data: T, options?: JobOptions): Promise<Job<T>>;
@@ -1813,11 +1927,13 @@ interface IQueue {
 ```
 
 **Adapters:**
+
 - `RabbitMqQueue` - RabbitMQ-based queue
 - `RedisQueue` - BullMQ/Redis-based queue
 - `MemoryQueue` - In-memory queue for testing
 
 **Implementation Files:**
+
 - `src/interfaces/queue.interface.ts`
 - `src/interfaces/job.interface.ts`
 - `src/queue/queue.module.ts`
@@ -1832,6 +1948,7 @@ interface IQueue {
 - `src/index.ts`
 
 ### Tests
+
 - Queue add/process
 - Job concurrency
 - Job retry
@@ -1841,6 +1958,7 @@ interface IQueue {
 - Memory queue for testing
 
 ### Deliverables
+
 - [ ] Queue interface and service
 - [ ] RabbitMQ queue adapter
 - [ ] Redis queue adapter
@@ -1858,6 +1976,7 @@ interface IQueue {
 ### Package: `@hono-enterprise/health`
 
 **Health Check Interfaces:**
+
 ```typescript
 interface HealthCheckResult {
   status: 'ok' | 'error' | 'warning';
@@ -1883,6 +2002,7 @@ interface HealthCheckOptions {
 ```
 
 **Built-in Indicators:**
+
 - `DatabaseHealthIndicator` - Check database connectivity
 - `CacheHealthIndicator` - Check cache connectivity
 - `QueueHealthIndicator` - Check queue connectivity
@@ -1891,11 +2011,13 @@ interface HealthCheckOptions {
 - `MemoryHealthIndicator` - Check memory usage
 
 **Endpoints:**
+
 - `/health` - Full health check
 - `/live` - Liveness probe
 - `/ready` - Readiness probe
 
 **Implementation Files:**
+
 - `src/health.module.ts`
 - `src/health.service.ts`
 - `src/health-check-executor.ts`
@@ -1912,6 +2034,7 @@ interface HealthCheckOptions {
 - `src/index.ts`
 
 ### Tests
+
 - Health check execution
 - Database health indicator
 - Cache health indicator
@@ -1921,6 +2044,7 @@ interface HealthCheckOptions {
 - Health controller endpoints
 
 ### Deliverables
+
 - [ ] Health check service
 - [ ] Built-in health indicators
 - [ ] Health controller with endpoints
@@ -1935,6 +2059,7 @@ interface HealthCheckOptions {
 ### Package: `@hono-enterprise/metrics`
 
 **Metrics Interfaces:**
+
 ```typescript
 interface IMetric {
   name: string;
@@ -1972,6 +2097,7 @@ interface MetricsRegistry {
 ```
 
 **Built-in Metrics:**
+
 - HTTP request latency histogram
 - HTTP request counter
 - HTTP error counter
@@ -1982,9 +2108,11 @@ interface MetricsRegistry {
 - Queue processing latency histogram
 
 **Endpoint:**
+
 - `/metrics` - Prometheus metrics endpoint
 
 **Implementation Files:**
+
 - `src/metrics.module.ts`
 - `src/metrics.service.ts`
 - `src/registry/metrics-registry.ts`
@@ -2003,6 +2131,7 @@ interface MetricsRegistry {
 - `src/index.ts`
 
 ### Tests
+
 - Counter operations
 - Gauge operations
 - Histogram operations
@@ -2013,6 +2142,7 @@ interface MetricsRegistry {
 - Prometheus rendering
 
 ### Deliverables
+
 - [ ] Metrics interfaces and types
 - [ ] Counter, Gauge, Histogram, Summary implementations
 - [ ] Metrics registry
@@ -2029,6 +2159,7 @@ interface MetricsRegistry {
 ### Package: `@hono-enterprise/telemetry`
 
 **Telemetry Interfaces:**
+
 ```typescript
 interface Tracer {
   startSpan(name: string, options?: SpanOptions): Span;
@@ -2054,6 +2185,7 @@ interface Propagator {
 ```
 
 **Automatic Instrumentation:**
+
 - HTTP server incoming requests
 - HTTP client outgoing requests
 - Database queries
@@ -2061,6 +2193,7 @@ interface Propagator {
 - External HTTP calls
 
 **Implementation Files:**
+
 - `src/telemetry.module.ts`
 - `src/telemetry.service.ts`
 - `src/tracing/tracer.provider.ts`
@@ -2077,6 +2210,7 @@ interface Propagator {
 - `src/index.ts`
 
 ### Tests
+
 - Tracer creation and span management
 - Span attributes and events
 - Context propagation
@@ -2086,6 +2220,7 @@ interface Propagator {
 - Exporters
 
 ### Deliverables
+
 - [ ] Telemetry module
 - [ ] Tracer provider
 - [ ] Span management
@@ -2103,6 +2238,7 @@ interface Propagator {
 ### Package: `@hono-enterprise/core` (Extended) or New Package `@hono-enterprise/openapi`
 
 **OpenAPI Generation:**
+
 ```typescript
 interface OpenAPIGenerator {
   generate(controllers: Controller[]): OpenAPIDocument;
@@ -2120,6 +2256,7 @@ interface OpenAPIOptions {
 ```
 
 **Decorators for OpenAPI:**
+
 ```typescript
 @ApiTags(...tags: string[])
 @ApiOperation(summary: string, description?: string)
@@ -2130,6 +2267,7 @@ interface OpenAPIOptions {
 ```
 
 **Implementation Files:**
+
 - `src/openapi.module.ts`
 - `src/openapi.service.ts`
 - `src/generators/openapi-generator.ts`
@@ -2151,6 +2289,7 @@ interface OpenAPIOptions {
 - `src/index.ts`
 
 ### Tests
+
 - OpenAPI document generation
 - Schema generation from Zod
 - Path generation from controllers
@@ -2161,6 +2300,7 @@ interface OpenAPIOptions {
 - Docs controller
 
 ### Deliverables
+
 - [ ] OpenAPI generator
 - [ ] Zod to OpenAPI transformer
 - [ ] OpenAPI decorators
@@ -2176,9 +2316,13 @@ interface OpenAPIOptions {
 ### Package: `@hono-enterprise/core` (Extended)
 
 **Interceptor Interfaces:**
+
 ```typescript
 interface NestInterceptor<TRequest = any, TResult = any> {
-  intercept(context: ExecutionContext, callback: CallHandler<TRequest, TResult>): Observable<TResult>;
+  intercept(
+    context: ExecutionContext,
+    callback: CallHandler<TRequest, TResult>,
+  ): Observable<TResult>;
 }
 
 interface CallHandler<TData = any> {
@@ -2196,6 +2340,7 @@ interface ExecutionContext {
 ```
 
 **Built-in Interceptors:**
+
 - `LoggingInterceptor` - Log request/response
 - `TimingInterceptor` - Measure execution time
 - `CacheInterceptor` - Cache responses
@@ -2204,6 +2349,7 @@ interface ExecutionContext {
 - `CompressionInterceptor` - Compress responses
 
 **Implementation Files:**
+
 - `src/interceptors/interceptor.interface.ts`
 - `src/interceptors/interceptors-consumer.ts`
 - `src/interceptors/interceptors-context-creator.ts`
@@ -2216,6 +2362,7 @@ interface ExecutionContext {
 - `src/interceptors/index.ts`
 
 ### Tests
+
 - Interceptor execution order
 - Interceptor chaining
 - Logging interceptor
@@ -2225,6 +2372,7 @@ interface ExecutionContext {
 - Timeout interceptor
 
 ### Deliverables
+
 - [ ] Interceptor interface
 - [ ] Interceptor consumer
 - [ ] Built-in interceptors
@@ -2239,6 +2387,7 @@ interface ExecutionContext {
 ### Package: `@hono-enterprise/core` (Extended)
 
 **Versioning Interfaces:**
+
 ```typescript
 interface VersioningOptions {
   type: VersioningType;
@@ -2256,11 +2405,13 @@ interface Version {
 ```
 
 **Version Strategies:**
+
 - `UriVersioning` - `/v1/users`, `/v2/users`
 - `HeaderVersioning` - `X-API-Version: 1`
 - `MediaTypeVersioning` - `Accept: application/vnd.api.v1+json`
 
 **Implementation Files:**
+
 - `src/versioning/versioning-options.factory.ts`
 - `src/versioning/versioning-strategy.interface.ts`
 - `src/versioning/uri-versioning.strategy.ts`
@@ -2272,6 +2423,7 @@ interface Version {
 - `src/index.ts`
 
 ### Tests
+
 - URI versioning
 - Header versioning
 - Media type versioning
@@ -2280,6 +2432,7 @@ interface Version {
 - Default version fallback
 
 ### Deliverables
+
 - [ ] Versioning interfaces
 - [ ] URI versioning strategy
 - [ ] Header versioning strategy
@@ -2296,6 +2449,7 @@ interface Version {
 ### Package: `@hono-enterprise/core` (Extended) or New Package `@hono-enterprise/multi-tenancy`
 
 **Multi-Tenancy Interfaces:**
+
 ```typescript
 interface Tenant {
   id: string;
@@ -2322,6 +2476,7 @@ type TenantDatabaseStrategyType = 'schema' | 'database' | 'column';
 ```
 
 **Components:**
+
 - `TenantResolver` - Extract tenant from request (subdomain, header, path)
 - `TenantContext` - Thread-local tenant context
 - `TenantDatabaseStrategy` - Schema-per-tenant, database-per-tenant, column-based
@@ -2329,6 +2484,7 @@ type TenantDatabaseStrategyType = 'schema' | 'database' | 'column';
 - `TenantMiddleware` - Inject tenant into request context
 
 **Implementation Files:**
+
 - `src/multi-tenancy.module.ts`
 - `src/tenant/tenant.interface.ts`
 - `src/tenant/tenant-context.ts`
@@ -2347,6 +2503,7 @@ type TenantDatabaseStrategyType = 'schema' | 'database' | 'column';
 - `src/index.ts`
 
 ### Tests
+
 - Tenant resolution from subdomain
 - Tenant resolution from header
 - Tenant resolution from path
@@ -2358,6 +2515,7 @@ type TenantDatabaseStrategyType = 'schema' | 'database' | 'column';
 - Tenant middleware
 
 ### Deliverables
+
 - [ ] Multi-tenancy module
 - [ ] Tenant resolution strategies
 - [ ] Tenant context
@@ -2375,6 +2533,7 @@ type TenantDatabaseStrategyType = 'schema' | 'database' | 'column';
 ### Package: `@hono-enterprise/plugins`
 
 **Plugin Interfaces:**
+
 ```typescript
 interface Plugin {
   name: string;
@@ -2402,7 +2561,7 @@ interface PluginHook {
   priority?: number;
 }
 
-type PluginHookType = 
+type PluginHookType =
   | 'onModuleInit'
   | 'onApplicationBootstrap'
   | 'onHttpAdapter'
@@ -2413,11 +2572,13 @@ type PluginHookType =
 ```
 
 **Plugin Discovery:**
+
 - Auto-discovery from `node_modules/@hono-enterprise/plugin-*`
 - Manual registration via `app.registerPlugin(plugin)`
 - Plugin configuration via module options
 
 **Implementation Files:**
+
 - `src/plugin.interface.ts`
 - `src/plugin-metadata.ts`
 - `src/plugin-loader.ts`
@@ -2433,6 +2594,7 @@ type PluginHookType =
 - `src/index.ts`
 
 ### Tests
+
 - Plugin registration
 - Plugin discovery
 - Plugin loading order
@@ -2441,6 +2603,7 @@ type PluginHookType =
 - Built-in plugins
 
 ### Deliverables
+
 - [ ] Plugin interface and metadata
 - [ ] Plugin loader and registry
 - [ ] Plugin discovery
@@ -2457,6 +2620,7 @@ type PluginHookType =
 ### Package: `@hono-enterprise/testing`
 
 **Testing Utilities:**
+
 ```typescript
 interface TestingModuleBuilder {
   imports(modules: any[]): TestingModuleBuilder;
@@ -2492,17 +2656,20 @@ interface HttpTestTool {
 ```
 
 **Mock Utilities:**
+
 - `MockProvider` - Create mock providers
 - `MockRepository` - Create mock repositories
 - `MockService` - Create mock services
 - `MockFactory` - Factory for creating mocks
 
 **Test Application Factory:**
+
 ```typescript
 function createTestApplication(options?: TestApplicationOptions): Promise<Test>;
 ```
 
 **Implementation Files:**
+
 - `src/testing-module.builder.ts`
 - `src/testing-module.ts`
 - `src/test-application.factory.ts`
@@ -2517,6 +2684,7 @@ function createTestApplication(options?: TestApplicationOptions): Promise<Test>;
 - `src/index.ts`
 
 ### Tests
+
 - Testing module builder
 - Testing module compilation
 - Mock provider creation
@@ -2526,6 +2694,7 @@ function createTestApplication(options?: TestApplicationOptions): Promise<Test>;
 - HTTP test tool
 
 ### Deliverables
+
 - [ ] Testing module builder
 - [ ] Mock utilities
 - [ ] Test application factory
@@ -2541,6 +2710,7 @@ function createTestApplication(options?: TestApplicationOptions): Promise<Test>;
 ### Package: `@hono-enterprise/cli`
 
 **CLI Commands:**
+
 ```
 hono-enterprise new <project-name>                    # Create new project
 hono-enterprise generate <schematic> [options]        # Generate artifact
@@ -2569,6 +2739,7 @@ Schematics:
 ```
 
 **Implementation Files:**
+
 - `src/cli.ts`
 - `src/commands/new.command.ts`
 - `src/commands/generate.command.ts`
@@ -2596,6 +2767,7 @@ Schematics:
 - `src/index.ts`
 
 ### Tests
+
 - CLI command parsing
 - Schematic generation
 - File generation
@@ -2604,6 +2776,7 @@ Schematics:
 - Prompt utilities
 
 ### Deliverables
+
 - [ ] CLI application
 - [ ] Generate commands
 - [ ] All schematics
@@ -2620,6 +2793,7 @@ Schematics:
 ### Package: `@hono-enterprise/sdk`
 
 **SDK Features:**
+
 - HTTP client with automatic serialization
 - API key and JWT authentication
 - Request/response interceptors
@@ -2629,6 +2803,7 @@ Schematics:
 - Type-safe API generation from OpenAPI
 
 **Implementation Files:**
+
 - `src/sdk.module.ts`
 - `src/sdk.service.ts`
 - `src/http/http-client.ts`
@@ -2644,6 +2819,7 @@ Schematics:
 - `src/index.ts`
 
 ### Tests
+
 - HTTP client
 - Authentication interceptor
 - Retry strategy
@@ -2653,6 +2829,7 @@ Schematics:
 - OpenAPI code generation
 
 ### Deliverables
+
 - [ ] SDK module
 - [ ] HTTP client
 - [ ] Authentication interceptor
@@ -2862,43 +3039,43 @@ graph TB
 
 ## Progress Tracking
 
-| Milestone | Status | Notes |
-|-----------|--------|-------|
-| 0 | ⬜ Not Started | Monorepo Foundation |
-| 1 | ⬜ Not Started | Core DI Container |
-| 2 | ⬜ Not Started | Decorators |
-| 3 | ⬜ Not Started | Module System |
-| 4 | ⬜ Not Started | Middleware Pipeline |
-| 5 | ⬜ Not Started | Controllers and Routing |
-| 6 | ⬜ Not Started | Validation |
-| 7 | ⬜ Not Started | Exceptions |
-| 8 | ⬜ Not Started | Configuration |
-| 9 | ⬜ Not Started | Logger |
-| 10 | ⬜ Not Started | Security |
-| 11 | ⬜ Not Started | Auth Middleware |
-| 12 | ⬜ Not Started | Repository Layer |
-| 13 | ⬜ Not Started | Database Adapters |
-| 14 | ⬜ Not Started | Cache |
-| 15 | ⬜ Not Started | Event Bus |
-| 16 | ⬜ Not Started | CQRS |
-| 17 | ⬜ Not Started | Messaging |
-| 18 | ⬜ Not Started | Scheduler |
-| 19 | ⬜ Not Started | Background Queue |
-| 20 | ⬜ Not Started | Health Checks |
-| 21 | ⬜ Not Started | Metrics |
-| 22 | ⬜ Not Started | Telemetry |
-| 23 | ⬜ Not Started | OpenAPI |
-| 24 | ⬜ Not Started | Interceptors |
-| 25 | ⬜ Not Started | API Versioning |
-| 26 | ⬜ Not Started | Multi-tenancy |
-| 27 | ⬜ Not Started | Plugin System |
-| 28 | ⬜ Not Started | Testing Utilities |
-| 29 | ⬜ Not Started | CLI |
-| 30 | ⬜ Not Started | SDK |
-| 31 | ⬜ Not Started | Examples |
-| 32 | ⬜ Not Started | Documentation |
-| 33 | ⬜ Not Started | Docker/K8s |
-| 34 | ⬜ Not Started | Final Release |
+| Milestone | Status         | Notes                   |
+| --------- | -------------- | ----------------------- |
+| 0         | ⬜ Not Started | Monorepo Foundation     |
+| 1         | ⬜ Not Started | Core DI Container       |
+| 2         | ⬜ Not Started | Decorators              |
+| 3         | ⬜ Not Started | Module System           |
+| 4         | ⬜ Not Started | Middleware Pipeline     |
+| 5         | ⬜ Not Started | Controllers and Routing |
+| 6         | ⬜ Not Started | Validation              |
+| 7         | ⬜ Not Started | Exceptions              |
+| 8         | ⬜ Not Started | Configuration           |
+| 9         | ⬜ Not Started | Logger                  |
+| 10        | ⬜ Not Started | Security                |
+| 11        | ⬜ Not Started | Auth Middleware         |
+| 12        | ⬜ Not Started | Repository Layer        |
+| 13        | ⬜ Not Started | Database Adapters       |
+| 14        | ⬜ Not Started | Cache                   |
+| 15        | ⬜ Not Started | Event Bus               |
+| 16        | ⬜ Not Started | CQRS                    |
+| 17        | ⬜ Not Started | Messaging               |
+| 18        | ⬜ Not Started | Scheduler               |
+| 19        | ⬜ Not Started | Background Queue        |
+| 20        | ⬜ Not Started | Health Checks           |
+| 21        | ⬜ Not Started | Metrics                 |
+| 22        | ⬜ Not Started | Telemetry               |
+| 23        | ⬜ Not Started | OpenAPI                 |
+| 24        | ⬜ Not Started | Interceptors            |
+| 25        | ⬜ Not Started | API Versioning          |
+| 26        | ⬜ Not Started | Multi-tenancy           |
+| 27        | ⬜ Not Started | Plugin System           |
+| 28        | ⬜ Not Started | Testing Utilities       |
+| 29        | ⬜ Not Started | CLI                     |
+| 30        | ⬜ Not Started | SDK                     |
+| 31        | ⬜ Not Started | Examples                |
+| 32        | ⬜ Not Started | Documentation           |
+| 33        | ⬜ Not Started | Docker/K8s              |
+| 34        | ⬜ Not Started | Final Release           |
 
 ---
 
@@ -2912,4 +3089,5 @@ The roadmap is complete. The recommended approach is:
 4. **Complete** each milestone sequentially
 5. **Update** progress tracking after each milestone
 
-Each milestone is designed to be independently buildable and testable. The framework grows incrementally, with each milestone adding capabilities while maintaining backward compatibility.
+Each milestone is designed to be independently buildable and testable. The framework grows
+incrementally, with each milestone adding capabilities while maintaining backward compatibility.
