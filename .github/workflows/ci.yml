@@ -56,7 +56,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2
+
+      - uses: denoland/setup-deno@v2
         with:
-          scan-args: --lockfile=deno.lock
+          deno-version: v2.x
+
+      # Native dependency audit (JSR + npm deps in deno.lock).
+      # OSV-Scanner is not used: it has no deno.lock support.
+      - name: Audit
+        run: deno task audit

@@ -703,8 +703,7 @@ A public API is any export from a package's `src/index.ts` file.
 
 ### 12.5 Security Auditing
 
-- Dependency vulnerability scanning (e.g., OSV-Scanner against `deno.lock`) must pass in CI with
-  zero high-severity vulnerabilities.
+- `deno audit --level=high` must pass in CI with zero high-severity vulnerabilities.
 - Dependencies are reviewed quarterly.
 - Unused dependencies are removed.
 
@@ -908,7 +907,7 @@ Any violation of these rules blocks the PR from merging. No exceptions.
 | Strict TypeScript                              | Root `deno.json` `compilerOptions` with `strict: true`                                      |
 | Test coverage 90%+                             | `deno test --coverage` threshold check in CI                                                |
 | No circular dependencies                       | `deno info --json` graph check (custom script) or `dependency-cruiser` via `npm:` specifier |
-| No security vulnerabilities                    | OSV-Scanner against `deno.lock` in CI                                                       |
+| No security vulnerabilities                    | `deno audit --level=high` in CI                                                             |
 | Code formatting                                | `deno fmt`                                                                                  |
 | Code style                                     | `deno lint`                                                                                 |
 | Runtime-specific imports outside `runtime` pkg | Custom `deno lint` plugin rule / CI grep gate                                               |

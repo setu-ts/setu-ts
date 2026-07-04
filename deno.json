@@ -40,7 +40,8 @@
   "tasks": {
     "check": "deno check packages",
     "test": "deno test packages",
-    "test:coverage": "deno test packages --coverage=coverage && deno coverage coverage",
+    "test:coverage": "deno test packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
+    "audit": "deno audit --level=high",
     "lint": "deno lint",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"

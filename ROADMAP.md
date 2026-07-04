@@ -427,7 +427,7 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
    - `deno fmt --check`, `deno lint`, `deno check`, `deno test --coverage` pipeline
    - Node and Bun compatibility jobs (consume packages via JSR npm compatibility; run the compat
      test suite)
-   - Dependency vulnerability scanning (e.g., OSV-Scanner)
+   - Dependency vulnerability scanning via `deno audit`
 
 ### Deliverables
 
