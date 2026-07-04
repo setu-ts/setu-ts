@@ -1,0 +1,18 @@
+# Coverage output
+coverage/
+
+# Generated API docs
+docs/api/
+
+# npm compatibility artifacts (compat test suites)
+node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor/OS noise
+.DS_Store
+.idea/
+*.swp

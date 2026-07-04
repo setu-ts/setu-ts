@@ -1,11 +1,12 @@
 # Hono Enterprise — Architecture Guide
 
-> **This document is the definitive technical architecture guide for framework contributors.**
-> It explains how the framework works internally and why it was designed this way.
+> **This document is the definitive technical architecture guide for framework contributors.** It
+> explains how the framework works internally and why it was designed this way.
 >
 > **Audience:** Framework contributors and maintainers, not application developers.
 >
 > **Companion documents:**
+>
 > - [`PUBLIC_API.md`](PUBLIC_API.md) — How developers use the framework
 > - [`ROADMAP.md`](ROADMAP.md) — Implementation phases
 > - [`AI_GUIDELINES.md`](AI_GUIDELINES.md) — Engineering rules
@@ -39,47 +40,62 @@
 
 ### Why This Framework Exists
 
-Enterprise backend development faces a recurring tension: **frameworks that are powerful tend to be heavy and opinionated, while frameworks that are lightweight tend to lack enterprise features.**
+Enterprise backend development faces a recurring tension: **frameworks that are powerful tend to be
+heavy and opinionated, while frameworks that are lightweight tend to lack enterprise features.**
 
-NestJS provides excellent developer experience with decorators, DI, and modules, but it is tightly coupled to Node.js, requires reflection, and has a steep learning curve. Fastify is fast and plugin-oriented but lacks the enterprise abstractions (repository pattern, CQRS, multi-tenancy, audit logging) that large organizations need. Hono delivers exceptional performance and runtime portability but is intentionally minimal — it provides routing, not architecture.
+NestJS provides excellent developer experience with decorators, DI, and modules, but it is tightly
+coupled to Node.js, requires reflection, and has a steep learning curve. Fastify is fast and
+plugin-oriented but lacks the enterprise abstractions (repository pattern, CQRS, multi-tenancy,
+audit logging) that large organizations need. Hono delivers exceptional performance and runtime
+portability but is intentionally minimal — it provides routing, not architecture.
 
 **Hono Enterprise exists to bridge this gap.** It combines:
 
-| Source | What We Take |
-|--------|-------------|
-| Hono | Performance, runtime portability, routing engine |
-| Spring Boot | Plugin auto-configuration, conditional registration, starter bundles |
-| ASP.NET Core | Middleware pipeline, request/response abstractions |
-| Fastify | Plugin encapsulation, decoration pattern, lifecycle hooks |
+| Source       | What We Take                                                         |
+| ------------ | -------------------------------------------------------------------- |
+| Hono         | Performance, runtime portability, routing engine                     |
+| Spring Boot  | Plugin auto-configuration, conditional registration, starter bundles |
+| ASP.NET Core | Middleware pipeline, request/response abstractions                   |
+| Fastify      | Plugin encapsulation, decoration pattern, lifecycle hooks            |
 
 ### Problems It Solves
 
-1. **Runtime lock-in** — NestJS, Express, and Fastify are Node.js-first. Hono Enterprise runs on Node.js, Deno, and Bun with zero code changes, and is designed for Cloudflare Workers extensibility.
+1. **Runtime lock-in** — NestJS, Express, and Fastify are Node.js-first. Hono Enterprise runs on
+   Node.js, Deno, and Bun with zero code changes, and is designed for Cloudflare Workers
+   extensibility.
 
-2. **Opinionated heaviness** — NestJS requires DI, decorators, and reflection. Hono Enterprise makes all of these optional. Start with just a router and add capabilities as needed.
+2. **Opinionated heaviness** — NestJS requires DI, decorators, and reflection. Hono Enterprise makes
+   all of these optional. Start with just a router and add capabilities as needed.
 
-3. **Monolithic frameworks** — Most frameworks bundle all features. Hono Enterprise is plugin-first: every capability (logging, database, auth, validation) is a plugin that can be added, removed, or replaced.
+3. **Monolithic frameworks** — Most frameworks bundle all features. Hono Enterprise is plugin-first:
+   every capability (logging, database, auth, validation) is a plugin that can be added, removed, or
+   replaced.
 
-4. **Poor replaceability** — In most frameworks, swapping the database layer or logger requires touching application code. Hono Enterprise uses capability tokens, so any plugin can be replaced without modifying business logic.
+4. **Poor replaceability** — In most frameworks, swapping the database layer or logger requires
+   touching application code. Hono Enterprise uses capability tokens, so any plugin can be replaced
+   without modifying business logic.
 
-5. **Enterprise feature gaps** — Lightweight frameworks lack secrets management, audit logging, circuit breakers, feature flags, and multi-tenancy. Hono Enterprise provides these as plugins.
+5. **Enterprise feature gaps** — Lightweight frameworks lack secrets management, audit logging,
+   circuit breakers, feature flags, and multi-tenancy. Hono Enterprise provides these as plugins.
 
 ### Why It Is Not a NestJS Clone
 
-NestJS is built around three mandatory pillars: **modules, dependency injection, and decorators**. Every NestJS application must use all three. This creates a steep learning curve and tight coupling to the framework's opinions.
+NestJS is built around three mandatory pillars: **modules, dependency injection, and decorators**.
+Every NestJS application must use all three. This creates a steep learning curve and tight coupling
+to the framework's opinions.
 
 Hono Enterprise inverts this:
 
-| Aspect | NestJS | Hono Enterprise |
-|--------|--------|----------------|
-| DI | Required | Optional plugin |
-| Decorators | Required | Optional plugin |
-| Reflection | Required | Optional |
-| Modules | Required | Plugins (more granular) |
-| Programmatic API | Limited | Full API for everything |
-| Replaceability | Difficult | Any plugin swappable |
-| Runtime | Node.js only | Node, Deno, Bun, CF Workers |
-| Bundle size | Large | Pay only for what you use |
+| Aspect           | NestJS       | Hono Enterprise             |
+| ---------------- | ------------ | --------------------------- |
+| DI               | Required     | Optional plugin             |
+| Decorators       | Required     | Optional plugin             |
+| Reflection       | Required     | Optional                    |
+| Modules          | Required     | Plugins (more granular)     |
+| Programmatic API | Limited      | Full API for everything     |
+| Replaceability   | Difficult    | Any plugin swappable        |
+| Runtime          | Node.js only | Node, Deno, Bun, CF Workers |
+| Bundle size      | Large        | Pay only for what you use   |
 
 A Hono Enterprise application can be as minimal as:
 
@@ -89,7 +105,8 @@ app.router.get('/', (ctx) => ctx.response.json({ hello: 'world' }));
 await app.start();
 ```
 
-No decorators, no DI, no modules — just a router and a runtime. Capabilities are added incrementally via plugins.
+No decorators, no DI, no modules — just a router and a runtime. Capabilities are added incrementally
+via plugins.
 
 ### Why It Uses Hono
 
@@ -97,20 +114,27 @@ Hono is used as the **routing engine** for several reasons:
 
 1. **Performance** — Hono is one of the fastest TypeScript routers, competitive with Fastify.
 2. **Runtime portability** — Hono already runs on Node.js, Deno, Bun, and Cloudflare Workers.
-3. **Minimal** — Hono does not impose an architecture; it provides routing and lets the framework build on top.
+3. **Minimal** — Hono does not impose an architecture; it provides routing and lets the framework
+   build on top.
 4. **Standards-based** — Hono uses the standard `Request`/`Response` Web APIs.
 
-Hono Enterprise does not expose Hono directly to application developers. Instead, it wraps Hono in a runtime adapter that abstracts the HTTP server, request, and response objects. This allows the framework to swap Hono for another router in the future without breaking applications.
+Hono Enterprise does not expose Hono directly to application developers. Instead, it wraps Hono in a
+runtime adapter that abstracts the HTTP server, request, and response objects. This allows the
+framework to swap Hono for another router in the future without breaking applications.
 
 ### Why It Is Plugin-First
 
 A plugin-first architecture provides three critical benefits:
 
-1. **Pay only for what you use** — If you do not need a database, the database plugin is never loaded. No dead code, no unused dependencies, no startup overhead.
+1. **Pay only for what you use** — If you do not need a database, the database plugin is never
+   loaded. No dead code, no unused dependencies, no startup overhead.
 
-2. **Replace anything** — Every capability is identified by a capability token (a string). If you do not like the default logger, you register a different plugin that provides the same `logger` token. Application code does not change.
+2. **Replace anything** — Every capability is identified by a capability token (a string). If you do
+   not like the default logger, you register a different plugin that provides the same `logger`
+   token. Application code does not change.
 
-3. **Extensible without forking** — Need a feature the framework does not provide? Write a plugin. No need to fork the framework or monkey-patch internals.
+3. **Extensible without forking** — Need a feature the framework does not provide? Write a plugin.
+   No need to fork the framework or monkey-patch internals.
 
 ### Why Runtime Independence Matters
 
@@ -121,7 +145,11 @@ The JavaScript ecosystem is fragmenting across runtimes:
 - **Bun** — Extremely fast, Node-compatible, native TypeScript.
 - **Cloudflare Workers** — Edge computing, V8 isolates, no Node.js APIs.
 
-Applications written today on Node.js may need to run on Bun tomorrow for performance, or on Cloudflare Workers for edge deployment. Hono Enterprise ensures that **business logic never depends on runtime-specific APIs**. All runtime-specific operations (UUID generation, timers, crypto, file system, environment variables) are abstracted behind `IRuntimeServices` and provided by the `RuntimePlugin`.
+Applications written today on Node.js may need to run on Bun tomorrow for performance, or on
+Cloudflare Workers for edge deployment. Hono Enterprise ensures that **business logic never depends
+on runtime-specific APIs**. All runtime-specific operations (UUID generation, timers, crypto, file
+system, environment variables) are abstracted behind `IRuntimeServices` and provided by the
+`RuntimePlugin`.
 
 ---
 
@@ -129,7 +157,8 @@ Applications written today on Node.js may need to run on Bun tomorrow for perfor
 
 ### Plugin-First Architecture
 
-Every capability is a plugin. The kernel ships with zero features beyond plugin orchestration. This means:
+Every capability is a plugin. The kernel ships with zero features beyond plugin orchestration. This
+means:
 
 - The kernel is small and stable.
 - Features are independently versioned.
@@ -156,15 +185,18 @@ All dependencies point toward abstractions:
 
 ### Runtime Abstraction
 
-No package except `@hono-enterprise/runtime` may use runtime-specific APIs. This rule is enforced by:
+No package except `@hono-enterprise/runtime` may use runtime-specific APIs. This rule is enforced
+by:
 
-- Lint rules (custom `deno lint` plugin rule / CI gate) that forbid `node:` and `bun:` imports and `Deno.*` globals outside the runtime package.
+- Lint rules (custom `deno lint` plugin rule / CI gate) that forbid `node:` and `bun:` imports and
+  `Deno.*` globals outside the runtime package.
 - Code review.
 - CI tests that run on all three runtimes.
 
 ### Capability Tokens
 
-Plugins communicate via **capability tokens** — strings that identify a capability, not a concrete type:
+Plugins communicate via **capability tokens** — strings that identify a capability, not a concrete
+type:
 
 ```typescript
 // Plugin A provides the 'database' capability
@@ -174,7 +206,8 @@ ctx.services.register('database', new PrismaDatabaseService());
 const db = ctx.services.get<IDatabaseService>('database');
 ```
 
-This decouples plugins from each other. Plugin B does not know that Plugin A provides the database service — it only knows that *something* provides the `database` capability. This enables:
+This decouples plugins from each other. Plugin B does not know that Plugin A provides the database
+service — it only knows that _something_ provides the `database` capability. This enables:
 
 - **Replaceability** — Swap Prisma for Drizzle by registering a different plugin.
 - **Testing** — Register a mock service with the same token.
@@ -182,19 +215,26 @@ This decouples plugins from each other. Plugin B does not know that Plugin A pro
 
 ### Programmatic APIs
 
-Every feature has a complete programmatic API. No feature requires decorators, DI, or reflection. This ensures:
+Every feature has a complete programmatic API. No feature requires decorators, DI, or reflection.
+This ensures:
 
-- The framework works in environments that do not support decorators (e.g., some bundlers strip them).
+- The framework works in environments that do not support decorators (e.g., some bundlers strip
+  them).
 - Developers who prefer functional style are not forced into OOP.
 - Testing is easier — no need to bootstrap a decorator system.
 
 ### Optional Decorators
 
-Decorators are provided by the `DecoratorPlugin`. When registered, it reads metadata stored by decorators and registers routes, services, and middleware with the kernel. When not registered, decorators are inert — they store metadata that is never read.
+Decorators are provided by the `DecoratorPlugin`. When registered, it reads metadata stored by
+decorators and registers routes, services, and middleware with the kernel. When not registered,
+decorators are inert — they store metadata that is never read.
 
 ### Optional Dependency Injection
 
-DI is provided by the `DiPlugin`. When registered, it provides a container for resolving services by token. When not registered, services are resolved directly from the `ServiceRegistry`. The `ServiceRegistry` is the primary service resolution mechanism; the DI container is a convenience layer on top.
+DI is provided by the `DiPlugin`. When registered, it provides a container for resolving services by
+token. When not registered, services are resolved directly from the `ServiceRegistry`. The
+`ServiceRegistry` is the primary service resolution mechanism; the DI container is a convenience
+layer on top.
 
 ### Tree Shaking
 
@@ -227,7 +267,8 @@ Plugins (Infrastructure) → Application Code → Domain Code
 
 ### Hexagonal Architecture
 
-- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICache`, `IMessageBroker`).
+- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICache`,
+  `IMessageBroker`).
 - **Adapters** — Implementations in plugins (e.g., `PrismaAdapter`, `RedisStore`, `RabbitMqBroker`).
 - **Application Core** — Business logic depends only on ports.
 
@@ -289,16 +330,16 @@ graph TB
 
 ### Component Responsibilities
 
-| Component | Responsibility |
-|-----------|---------------|
-| **Application** | Entry point for developers. Holds plugin list, starts/stops server, provides `inject()` for testing. |
-| **Plugin Kernel** | Orchestrates plugin registration, lifecycle, and shutdown. The only component that knows about all plugins. |
-| **Plugin Registry** | Stores registered plugins, resolves dependencies, detects cycles, orders by priority. |
-| **Service Registry** | Maps capability tokens to service instances. The primary service resolution mechanism. |
-| **Middleware Pipeline** | Executes middleware in order. Created by the kernel, populated by plugins. |
-| **Router** | Registers and matches routes. Populated by plugins and application code. |
-| **Plugins** | Provide capabilities (logging, database, auth, etc.) by registering services, middleware, routes, and hooks. |
-| **Runtime Adapters** | Abstract runtime-specific APIs (HTTP server, UUID, timers, crypto, fs). |
+| Component               | Responsibility                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Application**         | Entry point for developers. Holds plugin list, starts/stops server, provides `inject()` for testing.         |
+| **Plugin Kernel**       | Orchestrates plugin registration, lifecycle, and shutdown. The only component that knows about all plugins.  |
+| **Plugin Registry**     | Stores registered plugins, resolves dependencies, detects cycles, orders by priority.                        |
+| **Service Registry**    | Maps capability tokens to service instances. The primary service resolution mechanism.                       |
+| **Middleware Pipeline** | Executes middleware in order. Created by the kernel, populated by plugins.                                   |
+| **Router**              | Registers and matches routes. Populated by plugins and application code.                                     |
+| **Plugins**             | Provide capabilities (logging, database, auth, etc.) by registering services, middleware, routes, and hooks. |
+| **Runtime Adapters**    | Abstract runtime-specific APIs (HTTP server, UUID, timers, crypto, fs).                                      |
 
 ### Key Insight
 
@@ -362,15 +403,19 @@ sequenceDiagram
 
 1. **Incoming Request** — A client sends an HTTP request to the server.
 
-2. **Runtime Adapter** — The runtime adapter (Node, Deno, or Bun) receives the raw HTTP request and converts it to the framework's `IRequest` abstraction. This normalizes the request across runtimes.
+2. **Runtime Adapter** — The runtime adapter (Node, Deno, or Bun) receives the raw HTTP request and
+   converts it to the framework's `IRequest` abstraction. This normalizes the request across
+   runtimes.
 
-3. **Kernel** — The kernel receives the normalized request and creates a `RequestContext`. The context provides access to:
+3. **Kernel** — The kernel receives the normalized request and creates a `RequestContext`. The
+   context provides access to:
    - The request and response objects.
    - The service registry (for resolving services).
    - A state map (for passing data between middleware).
    - The request ID and correlation ID.
 
-4. **Middleware Pipeline** — The kernel passes the context through the middleware pipeline. Middleware executes in priority order:
+4. **Middleware Pipeline** — The kernel passes the context through the middleware pipeline.
+   Middleware executes in priority order:
    - **Logging** — Logs the incoming request.
    - **Request ID** — Generates or propagates a unique request ID.
    - **CORS** — Handles preflight requests.
@@ -379,27 +424,35 @@ sequenceDiagram
    - **Authorization** — Checks roles and permissions.
    - **Validation** — Validates the request body, query, params, headers against Zod schemas.
 
-5. **Router** — After middleware, the pipeline calls the router to match the request path and method to a registered route. The router extracts path parameters.
+5. **Router** — After middleware, the pipeline calls the router to match the request path and method
+   to a registered route. The router extracts path parameters.
 
 6. **Route Handler** — The matched route's handler is called with the context. The handler:
    - Resolves services from the service registry via `ctx.services.get<T>(token)`.
    - Executes business logic (calling services, repositories, etc.).
    - Returns a response via `ctx.response.json()`, `ctx.response.send()`, etc.
 
-7. **Response Middleware** — After the handler returns, the pipeline executes response-phase middleware:
+7. **Response Middleware** — After the handler returns, the pipeline executes response-phase
+   middleware:
    - **Response Interceptors** — Transform the response (e.g., wrap in a standard envelope).
    - **Metrics** — Record request duration and status code.
-   - **Error Handler** — If any middleware or handler threw an error, the error handler catches it and formats a standardized error response.
+   - **Error Handler** — If any middleware or handler threw an error, the error handler catches it
+     and formats a standardized error response.
 
-8. **Response** — The kernel sends the final response back through the runtime adapter to the client.
+8. **Response** — The kernel sends the final response back through the runtime adapter to the
+   client.
 
 ### Short-Circuiting
 
-Any middleware can short-circuit the pipeline by sending a response without calling `next()`. For example, the auth middleware can return a 401 response if authentication fails, and the pipeline stops — the router and handler are never called.
+Any middleware can short-circuit the pipeline by sending a response without calling `next()`. For
+example, the auth middleware can return a 401 response if authentication fails, and the pipeline
+stops — the router and handler are never called.
 
 ### Error Propagation
 
-If any middleware or handler throws an error, the pipeline catches it and passes it to the error handler middleware. The error handler:
+If any middleware or handler throws an error, the pipeline catches it and passes it to the error
+handler middleware. The error handler:
+
 1. Logs the error (if a logger is available).
 2. Formats the error as a standardized response (RFC 7807 by default).
 3. Sends the error response to the client.
@@ -508,7 +561,8 @@ const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
 2. **Replaceability** — Any plugin can provide the same token.
 3. **Testing** — Tests register a mock with the same token.
 4. **Tree-shaking** — No import dependencies between plugins.
-5. **Multi-provider** — Multiple plugins can provide the same token (e.g., multiple database connections).
+5. **Multi-provider** — Multiple plugins can provide the same token (e.g., multiple database
+   connections).
 
 ### Plugin Ordering
 
@@ -525,7 +579,7 @@ Any plugin can be replaced by registering a new plugin with the same `name` and 
 ```typescript
 // Replace the default database plugin
 app.register({
-  name: 'database',  // Same name
+  name: 'database', // Same name
   version: '1.0.0',
   provides: ['database'],
   register(ctx) {
@@ -564,51 +618,53 @@ Plugins can declare optional dependencies:
 
 Plugins never communicate directly. They communicate through:
 
-| Mechanism | Use Case |
-|-----------|----------|
+| Mechanism        | Use Case                                        |
+| ---------------- | ----------------------------------------------- |
 | Service Registry | Resolve a capability provided by another plugin |
-| Middleware | Observe or modify requests/responses |
-| Event Bus | Publish/subscribe to domain events |
-| Message Broker | Publish/subscribe to integration events |
-| Lifecycle Hooks | React to application lifecycle events |
+| Middleware       | Observe or modify requests/responses            |
+| Event Bus        | Publish/subscribe to domain events              |
+| Message Broker   | Publish/subscribe to integration events         |
+| Lifecycle Hooks  | React to application lifecycle events           |
 
 ### Lifecycle Hooks
 
 Plugins register lifecycle hooks via `ctx.lifecycle`:
 
-| Hook | When | Use Case |
-|------|------|----------|
-| `onRegister` | Plugin registration | Initialize plugin state |
-| `onInit` | All plugins registered | Validate cross-plugin state |
-| `onBootstrap` | Server about to start | Final preparation |
-| `onRequest` | Every request | Per-request setup |
-| `onResponse` | Every response | Per-response cleanup |
-| `onError` | Unhandled error | Error logging, alerting |
-| `onShutdown` | Application shutting down | Close connections, flush buffers |
-| `onClose` | Application closed | Final cleanup |
+| Hook          | When                      | Use Case                         |
+| ------------- | ------------------------- | -------------------------------- |
+| `onRegister`  | Plugin registration       | Initialize plugin state          |
+| `onInit`      | All plugins registered    | Validate cross-plugin state      |
+| `onBootstrap` | Server about to start     | Final preparation                |
+| `onRequest`   | Every request             | Per-request setup                |
+| `onResponse`  | Every response            | Per-response cleanup             |
+| `onError`     | Unhandled error           | Error logging, alerting          |
+| `onShutdown`  | Application shutting down | Close connections, flush buffers |
+| `onClose`     | Application closed        | Final cleanup                    |
 
 ### Extension Points
 
-Every plugin must expose extension points so other plugins and application code can extend its behavior:
+Every plugin must expose extension points so other plugins and application code can extend its
+behavior:
 
-| Extension Point | API | Example |
-|----------------|-----|---------|
-| Custom service | `ctx.services.register(token, service, { override: true })` | Replace the default logger |
-| Custom middleware | `ctx.middleware.add(fn, { priority })` | Add a request timing middleware |
-| Custom route | `ctx.router.get(path, handler)` | Add a health check route |
-| Custom health check | `ctx.health.register(name, indicator)` | Add a custom health indicator |
-| Custom metric | `ctx.metrics.register(name, config)` | Add a custom Prometheus metric |
-| Custom CLI command | `ctx.cli.register(name, handler)` | Add a custom CLI command |
-| Custom OpenAPI | `ctx.openapi.addSchema(name, schema)` | Add a schema to the OpenAPI spec |
-| Custom decorator | `ctx.decorators.register(name, handler)` | Add a custom decorator |
-| Custom lifecycle | `ctx.lifecycle.onX(fn)` | React to lifecycle events |
-| Custom env validation | `ctx.environment.validate(spec)` | Validate environment variables |
+| Extension Point       | API                                                         | Example                          |
+| --------------------- | ----------------------------------------------------------- | -------------------------------- |
+| Custom service        | `ctx.services.register(token, service, { override: true })` | Replace the default logger       |
+| Custom middleware     | `ctx.middleware.add(fn, { priority })`                      | Add a request timing middleware  |
+| Custom route          | `ctx.router.get(path, handler)`                             | Add a health check route         |
+| Custom health check   | `ctx.health.register(name, indicator)`                      | Add a custom health indicator    |
+| Custom metric         | `ctx.metrics.register(name, config)`                        | Add a custom Prometheus metric   |
+| Custom CLI command    | `ctx.cli.register(name, handler)`                           | Add a custom CLI command         |
+| Custom OpenAPI        | `ctx.openapi.addSchema(name, schema)`                       | Add a schema to the OpenAPI spec |
+| Custom decorator      | `ctx.decorators.register(name, handler)`                    | Add a custom decorator           |
+| Custom lifecycle      | `ctx.lifecycle.onX(fn)`                                     | React to lifecycle events        |
+| Custom env validation | `ctx.environment.validate(spec)`                            | Validate environment variables   |
 
 ---
 
 ## 6. Service Registry
 
-The Service Registry is the **primary service resolution mechanism** in the framework. It maps capability tokens to service instances.
+The Service Registry is the **primary service resolution mechanism** in the framework. It maps
+capability tokens to service instances.
 
 ### Registration
 
@@ -618,9 +674,9 @@ ctx.services.register('database', new DatabaseService());
 
 // Register with options
 ctx.services.register('database', new DatabaseService(), {
-  override: false,  // Throw if already registered (default)
-  multi: false,     // Single provider (default)
-  lazy: false,      // Eager instantiation (default)
+  override: false, // Throw if already registered (default)
+  multi: false, // Single provider (default)
+  lazy: false, // Eager instantiation (default)
 });
 
 // Register a factory (lazy)
@@ -685,20 +741,20 @@ ctx.services.registerFactory('database', () => {
 // ...
 
 // First get() triggers factory
-const db = ctx.services.get('database');  // Factory called here
+const db = ctx.services.get('database'); // Factory called here
 
 // Subsequent get() returns cached instance
-const db2 = ctx.services.get('database');  // Same instance
+const db2 = ctx.services.get('database'); // Same instance
 ```
 
 ### Service Scopes
 
 The Service Registry supports two scopes:
 
-| Scope | Behavior |
-|-------|----------|
-| **Application** | Service is created once and shared across all requests. Default. |
-| **Request** | Service is created per request via `ctx.services.register()` in request middleware. |
+| Scope           | Behavior                                                                            |
+| --------------- | ----------------------------------------------------------------------------------- |
+| **Application** | Service is created once and shared across all requests. Default.                    |
+| **Request**     | Service is created per request via `ctx.services.register()` in request middleware. |
 
 Request-scoped services are registered on the request context, not the global registry:
 
@@ -712,11 +768,13 @@ app.middleware.add(async (ctx, next) => {
 
 ### Thread Safety Considerations
 
-The Service Registry is **not thread-safe** by design. JavaScript is single-threaded (event loop), so concurrent access is not an issue. However:
+The Service Registry is **not thread-safe** by design. JavaScript is single-threaded (event loop),
+so concurrent access is not an issue. However:
 
 - **Registration** must happen during the bootstrap phase, not during request processing.
 - **Request-scoped registration** is safe because each request has its own context.
-- **Lazy factories** are safe because JavaScript is single-threaded — the factory is called at most once.
+- **Lazy factories** are safe because JavaScript is single-threaded — the factory is called at most
+  once.
 
 ---
 
@@ -726,16 +784,17 @@ The Service Registry is **not thread-safe** by design. JavaScript is single-thre
 
 Different JavaScript runtimes have different APIs for the same operations:
 
-| Operation | Node.js | Deno | Bun |
-|-----------|---------|------|-----|
-| UUID | `crypto.randomUUID()` | `crypto.randomUUID()` | `crypto.randomUUID()` |
-| Random bytes | `crypto.randomBytes()` | `crypto.getRandomValues()` | `crypto.randomBytes()` |
-| High-res time | `process.hrtime()` | `performance.now()` | `performance.now()` |
-| Environment | `process.env` | `Deno.env` | `Bun.env` |
-| File system | `fs` module | `Deno.readFile()` | `Bun.file()` |
-| HTTP server | `http.createServer()` | `Deno.serve()` | `Bun.serve()` |
+| Operation     | Node.js                | Deno                       | Bun                    |
+| ------------- | ---------------------- | -------------------------- | ---------------------- |
+| UUID          | `crypto.randomUUID()`  | `crypto.randomUUID()`      | `crypto.randomUUID()`  |
+| Random bytes  | `crypto.randomBytes()` | `crypto.getRandomValues()` | `crypto.randomBytes()` |
+| High-res time | `process.hrtime()`     | `performance.now()`        | `performance.now()`    |
+| Environment   | `process.env`          | `Deno.env`                 | `Bun.env`              |
+| File system   | `fs` module            | `Deno.readFile()`          | `Bun.file()`           |
+| HTTP server   | `http.createServer()`  | `Deno.serve()`             | `Bun.serve()`          |
 
-Without abstraction, every plugin would need runtime-specific code paths. The Runtime Layer eliminates this by providing a single interface.
+Without abstraction, every plugin would need runtime-specific code paths. The Runtime Layer
+eliminates this by providing a single interface.
 
 ### IRuntimeServices
 
@@ -798,7 +857,11 @@ graph LR
 
 ### Runtime Is Mandatory
 
-A runtime provider is the one plugin every application must register. `createApplication()` **fails fast at startup** if no registered plugin provides the `runtime` capability, and the kernel always registers the runtime-providing plugin first, regardless of declared priority. This is why `ctx.runtime` on `IPluginContext` is non-optional — every other plugin can rely on it being present during its own `register()` call.
+A runtime provider is the one plugin every application must register. `createApplication()` **fails
+fast at startup** if no registered plugin provides the `runtime` capability, and the kernel always
+registers the runtime-providing plugin first, regardless of declared priority. This is why
+`ctx.runtime` on `IPluginContext` is non-optional — every other plugin can rely on it being present
+during its own `register()` call.
 
 ### Auto-Detection
 
@@ -828,6 +891,7 @@ interface IHttpAdapter {
 ```
 
 Each runtime has its own implementation:
+
 - **NodeHttpAdapter** — Uses Node's `http.createServer()`.
 - **DenoHttpAdapter** — Uses Deno's `Deno.serve()`.
 - **BunHttpAdapter** — Uses Bun's `Bun.serve()`.
@@ -850,7 +914,8 @@ Adding a new runtime requires:
 3. Add the runtime to the detector.
 4. No changes to any other package.
 
-This is the power of the adapter pattern — the framework is open for extension but closed for modification.
+This is the power of the adapter pattern — the framework is open for extension but closed for
+modification.
 
 ---
 
@@ -858,7 +923,13 @@ This is the power of the adapter pattern — the framework is open for extension
 
 ### Toolchain and Distribution
 
-The monorepo is developed with the **Deno toolchain** (Deno 2 workspaces; `deno check`/`test`/`lint`/`fmt`). Packages are published to **JSR** under the `@hono-enterprise` scope with no build step — TypeScript sources are published directly. Node and Bun consumers install through JSR's npm compatibility layer, which transforms packages to standard ESM npm artifacts. Cross-runtime support is therefore a *distribution* property (JSR) plus a *code* property (runtime abstraction, §7) — CI verifies both by running the test suite under Deno and a compat suite under Node and Bun.
+The monorepo is developed with the **Deno toolchain** (Deno 2 workspaces;
+`deno check`/`test`/`lint`/`fmt`). Packages are published to **JSR** under the `@hono-enterprise`
+scope with no build step — TypeScript sources are published directly. Node and Bun consumers install
+through JSR's npm compatibility layer, which transforms packages to standard ESM npm artifacts.
+Cross-runtime support is therefore a _distribution_ property (JSR) plus a _code_ property (runtime
+abstraction, §7) — CI verifies both by running the test suite under Deno and a compat suite under
+Node and Bun.
 
 ### Package Overview
 
@@ -985,366 +1056,366 @@ graph TB
 
 #### @hono-enterprise/common
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Shared types, interfaces, and capability tokens |
-| **Responsibilities** | Define all public interfaces; define capability token constants; provide shared utility types |
-| **Dependencies** | None |
-| **Public API** | All interfaces (`IPlugin`, `IPluginContext`, `ILogger`, `IConfig`, `IDatabaseService`, etc.); `CAPABILITIES` constant; utility types |
-| **Extension Points** | N/A (types only) |
-| **Rules** | Zero runtime code; zero dependencies; types only |
+| Aspect               | Detail                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | Shared types, interfaces, and capability tokens                                                                                      |
+| **Responsibilities** | Define all public interfaces; define capability token constants; provide shared utility types                                        |
+| **Dependencies**     | None                                                                                                                                 |
+| **Public API**       | All interfaces (`IPlugin`, `IPluginContext`, `ILogger`, `IConfig`, `IDatabaseService`, etc.); `CAPABILITIES` constant; utility types |
+| **Extension Points** | N/A (types only)                                                                                                                     |
+| **Rules**            | Zero runtime code; zero dependencies; types only                                                                                     |
 
 #### @hono-enterprise/kernel
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Plugin orchestration and request processing |
-| **Responsibilities** | Plugin registry; service registry; middleware pipeline; router; application lifecycle; request context |
-| **Dependencies** | `common` only |
-| **Public API** | `createApplication()`; `Application`; `ServiceRegistry`; `RouterApi`; `MiddlewareApi` (consumes `IPlugin`/`IPluginContext` from `common`) |
-| **Extension Points** | Custom plugins; custom middleware; custom routes; service override |
-| **Rules** | No runtime-specific APIs; no decorator support; no DI; zero features beyond orchestration |
+| Aspect               | Detail                                                                                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Plugin orchestration and request processing                                                                                               |
+| **Responsibilities** | Plugin registry; service registry; middleware pipeline; router; application lifecycle; request context                                    |
+| **Dependencies**     | `common` only                                                                                                                             |
+| **Public API**       | `createApplication()`; `Application`; `ServiceRegistry`; `RouterApi`; `MiddlewareApi` (consumes `IPlugin`/`IPluginContext` from `common`) |
+| **Extension Points** | Custom plugins; custom middleware; custom routes; service override                                                                        |
+| **Rules**            | No runtime-specific APIs; no decorator support; no DI; zero features beyond orchestration                                                 |
 
 #### @hono-enterprise/runtime
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Runtime abstraction layer |
+| Aspect               | Detail                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Runtime abstraction layer                                                                            |
 | **Responsibilities** | Provide `IRuntimeServices` for Node, Deno, Bun; provide HTTP server adapters; runtime auto-detection |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `RuntimePlugin()`; `IRuntimeServices`; `IHttpAdapter`; `detectRuntime()` |
-| **Extension Points** | Custom runtime adapter (for new runtimes); custom HTTP adapter |
-| **Rules** | The only package allowed to use runtime-specific APIs |
+| **Dependencies**     | `common`, `kernel`                                                                                   |
+| **Public API**       | `RuntimePlugin()`; `IRuntimeServices`; `IHttpAdapter`; `detectRuntime()`                             |
+| **Extension Points** | Custom runtime adapter (for new runtimes); custom HTTP adapter                                       |
+| **Rules**            | The only package allowed to use runtime-specific APIs                                                |
 
 #### @hono-enterprise/di-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Optional dependency injection container |
+| Aspect               | Detail                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Optional dependency injection container                                                                     |
 | **Responsibilities** | Provide DI container with singleton, scoped, transient lifecycles; constructor injection; factory providers |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `DiPlugin()`; `IContainer`; `ContainerBuilder` |
-| **Extension Points** | Custom provider types; custom scopes |
-| **Rules** | Optional; no other plugin depends on it; services resolve from ServiceRegistry, not container |
+| **Dependencies**     | `common`, `kernel`                                                                                          |
+| **Public API**       | `DiPlugin()`; `IContainer`; `ContainerBuilder`                                                              |
+| **Extension Points** | Custom provider types; custom scopes                                                                        |
+| **Rules**            | Optional; no other plugin depends on it; services resolve from ServiceRegistry, not container               |
 
 #### @hono-enterprise/decorator-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Optional decorator and metadata system |
-| **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes/services/middleware with kernel |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `DecoratorPlugin()`; `@Controller`, `@Get`, `@Post`, etc.; `@Injectable`, `@Inject`; `@Body`, `@Query`, `@Param`; `createDecorator()` |
-| **Extension Points** | Custom decorators via `createDecorator()`; custom parameter decorators |
-| **Rules** | Optional; no reflection required; metadata stored in plain objects; decorators are syntactic sugar over programmatic API |
+| Aspect               | Detail                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Optional decorator and metadata system                                                                                                |
+| **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes/services/middleware with kernel                          |
+| **Dependencies**     | `common`, `kernel`                                                                                                                    |
+| **Public API**       | `DecoratorPlugin()`; `@Controller`, `@Get`, `@Post`, etc.; `@Injectable`, `@Inject`; `@Body`, `@Query`, `@Param`; `createDecorator()` |
+| **Extension Points** | Custom decorators via `createDecorator()`; custom parameter decorators                                                                |
+| **Rules**            | Optional; no reflection required; metadata stored in plain objects; decorators are syntactic sugar over programmatic API              |
 
 #### @hono-enterprise/logger-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Structured logging |
+| Aspect               | Detail                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Structured logging                                                                                          |
 | **Responsibilities** | Provide `ILogger` implementations (Pino, Console, Noop); request logging middleware; slow request detection |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `LoggerPlugin()`; `ILogger` |
-| **Extension Points** | Custom logger implementation (override `logger` token); custom log formatters |
-| **Rules** | Pino is optional (injected or lazy-loaded via `npm:` specifier); ConsoleLogger works on all runtimes |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                               |
+| **Public API**       | `LoggerPlugin()`; `ILogger`                                                                                 |
+| **Extension Points** | Custom logger implementation (override `logger` token); custom log formatters                               |
+| **Rules**            | Pino is optional (injected or lazy-loaded via `npm:` specifier); ConsoleLogger works on all runtimes        |
 
 #### @hono-enterprise/config-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Configuration management |
+| Aspect               | Detail                                                                                             |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Configuration management                                                                           |
 | **Responsibilities** | Load environment variables; parse `.env` files; validate config with Zod; provide type-safe access |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `ConfigPlugin()`; `IConfig` |
-| **Extension Points** | Custom config sources (override `config` token); custom env file parsers |
-| **Rules** | Environment access via `runtime.env`, not `process.env` |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                      |
+| **Public API**       | `ConfigPlugin()`; `IConfig`                                                                        |
+| **Extension Points** | Custom config sources (override `config` token); custom env file parsers                           |
+| **Rules**            | Environment access via `runtime.env`, not `process.env`                                            |
 
 #### @hono-enterprise/validation-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Request validation with Zod |
+| Aspect               | Detail                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Request validation with Zod                                                                                          |
 | **Responsibilities** | Validate body, query, params, headers, cookies; sanitize input; format validation errors (RFC 7807, default, custom) |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `ValidationPlugin()`; `IValidationService`; `validateBody()`, `validateQuery()`, `validateParams()` |
-| **Extension Points** | Custom error formatters; custom sanitization rules |
-| **Rules** | Zod is the source of truth for validation; schemas are shared with OpenAPI plugin |
+| **Dependencies**     | `common`, `kernel`                                                                                                   |
+| **Public API**       | `ValidationPlugin()`; `IValidationService`; `validateBody()`, `validateQuery()`, `validateParams()`                  |
+| **Extension Points** | Custom error formatters; custom sanitization rules                                                                   |
+| **Rules**            | Zod is the source of truth for validation; schemas are shared with OpenAPI plugin                                    |
 
 #### @hono-enterprise/exceptions
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Exception types and global error handling |
+| Aspect               | Detail                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Exception types and global error handling                                                                               |
 | **Responsibilities** | `HttpError` type; factory functions (`badRequest()`, `notFound()`, etc.); error handler middleware; RFC 7807 formatting |
-| **Dependencies** | `common` only |
-| **Public API** | `HttpError`; exception factory functions; `errorHandler()` |
-| **Extension Points** | Custom error formatters |
-| **Rules** | Plain package, not a plugin; composition (factories) over inheritance; registered by the application, not the kernel |
+| **Dependencies**     | `common` only                                                                                                           |
+| **Public API**       | `HttpError`; exception factory functions; `errorHandler()`                                                              |
+| **Extension Points** | Custom error formatters                                                                                                 |
+| **Rules**            | Plain package, not a plugin; composition (factories) over inheritance; registered by the application, not the kernel    |
 
 #### @hono-enterprise/database-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Database access with repository pattern |
-| **Responsibilities** | Provide `IDatabaseService`; repository pattern; unit of work (transactions); ORM adapters (Prisma, Drizzle, Memory) |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork` |
-| **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy |
-| **Rules** | Prisma and Drizzle are optional (injected or lazy-loaded via `npm:` specifiers); Memory adapter for testing; no raw SQL in public API |
+| Aspect               | Detail                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Database access with repository pattern                                                                                               |
+| **Responsibilities** | Provide `IDatabaseService`; repository pattern; unit of work (transactions); ORM adapters (Prisma, Drizzle, Memory)                   |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                         |
+| **Public API**       | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork`                                                                  |
+| **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy                                                                    |
+| **Rules**            | Prisma and Drizzle are optional (injected or lazy-loaded via `npm:` specifiers); Memory adapter for testing; no raw SQL in public API |
 
 #### @hono-enterprise/cache-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Caching abstraction |
-| **Responsibilities** | Provide `ICache`; memory and Redis stores; cache middleware; TTL management |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `CachePlugin()`; `ICache`; `cacheMiddleware()` |
-| **Extension Points** | Custom cache store (override `cache` token); custom key generators |
-| **Rules** | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store for testing |
+| Aspect               | Detail                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Caching abstraction                                                                               |
+| **Responsibilities** | Provide `ICache`; memory and Redis stores; cache middleware; TTL management                       |
+| **Dependencies**     | `common`, `kernel`                                                                                |
+| **Public API**       | `CachePlugin()`; `ICache`; `cacheMiddleware()`                                                    |
+| **Extension Points** | Custom cache store (override `cache` token); custom key generators                                |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store for testing |
 
 #### @hono-enterprise/events-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | In-memory event bus for domain events |
+| Aspect               | Detail                                                                      |
+| -------------------- | --------------------------------------------------------------------------- |
+| **Purpose**          | In-memory event bus for domain events                                       |
 | **Responsibilities** | Publish/subscribe domain events; event handler registration; error handling |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `EventsPlugin()`; `IEventBus`; `DomainEvent` |
-| **Extension Points** | Custom event bus (override `events` token); custom event handlers |
-| **Rules** | In-memory only; for distributed events, use messaging plugin |
+| **Dependencies**     | `common`, `kernel`                                                          |
+| **Public API**       | `EventsPlugin()`; `IEventBus`; `DomainEvent`                                |
+| **Extension Points** | Custom event bus (override `events` token); custom event handlers           |
+| **Rules**            | In-memory only; for distributed events, use messaging plugin                |
 
 #### @hono-enterprise/cqrs-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Command Query Responsibility Segregation |
-| **Responsibilities** | Command bus; query bus; pipeline behaviors; handler registration |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `CqrsPlugin()`; `ICommandBus`; `IQueryBus`; `ICommandHandler`; `IQueryHandler` |
-| **Extension Points** | Custom pipeline behaviors; custom bus implementations |
-| **Rules** | Optional; consumes the `events` capability via token for event sourcing (optional) |
+| Aspect               | Detail                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| **Purpose**          | Command Query Responsibility Segregation                                           |
+| **Responsibilities** | Command bus; query bus; pipeline behaviors; handler registration                   |
+| **Dependencies**     | `common`, `kernel`                                                                 |
+| **Public API**       | `CqrsPlugin()`; `ICommandBus`; `IQueryBus`; `ICommandHandler`; `IQueryHandler`     |
+| **Extension Points** | Custom pipeline behaviors; custom bus implementations                              |
+| **Rules**            | Optional; consumes the `events` capability via token for event sourcing (optional) |
 
 #### @hono-enterprise/messaging-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Message broker abstraction |
-| **Responsibilities** | Provide `IMessageBroker`; RabbitMQ, NATS, Kafka, Redis Streams, in-memory adapters; publish/subscribe |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `MessagingPlugin()`; `IMessageBroker` |
-| **Extension Points** | Custom broker adapter; custom serializers |
-| **Rules** | Broker clients are optional (injected or lazy-loaded via `npm:` specifiers); in-memory broker for testing; decoupled from events plugin |
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Message broker abstraction                                                                                                              |
+| **Responsibilities** | Provide `IMessageBroker`; RabbitMQ, NATS, Kafka, Redis Streams, in-memory adapters; publish/subscribe                                   |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `MessagingPlugin()`; `IMessageBroker`                                                                                                   |
+| **Extension Points** | Custom broker adapter; custom serializers                                                                                               |
+| **Rules**            | Broker clients are optional (injected or lazy-loaded via `npm:` specifiers); in-memory broker for testing; decoupled from events plugin |
 
 #### @hono-enterprise/queue-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Background job queue |
-| **Responsibilities** | Add/process jobs; retry strategies; recurring jobs; concurrency control |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `QueuePlugin()`; `IQueue` |
-| **Extension Points** | Custom queue adapter; custom retry strategies |
-| **Rules** | Redis and RabbitMQ clients are optional (injected or lazy-loaded via `npm:` specifiers); Memory queue for testing |
+| Aspect               | Detail                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Background job queue                                                                                              |
+| **Responsibilities** | Add/process jobs; retry strategies; recurring jobs; concurrency control                                           |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                     |
+| **Public API**       | `QueuePlugin()`; `IQueue`                                                                                         |
+| **Extension Points** | Custom queue adapter; custom retry strategies                                                                     |
+| **Rules**            | Redis and RabbitMQ clients are optional (injected or lazy-loaded via `npm:` specifiers); Memory queue for testing |
 
 #### @hono-enterprise/auth-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Authentication and authorization |
-| **Responsibilities** | JWT service; API key auth; RBAC with role hierarchy; permission checks; guards; rate limiting |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `AuthenticationPlugin()`; `IAuthService`; `IJwtService`; `requireAuth()`, `requireRole()`, `requirePermission()` |
-| **Extension Points** | Custom auth strategies; custom guards; custom RBAC models |
-| **Rules** | JWT library is optional (injected or lazy-loaded via `npm:` specifier); password hashing via runtime crypto |
+| Aspect               | Detail                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Authentication and authorization                                                                                 |
+| **Responsibilities** | JWT service; API key auth; RBAC with role hierarchy; permission checks; guards; rate limiting                    |
+| **Dependencies**     | `common`, `kernel`                                                                                               |
+| **Public API**       | `AuthenticationPlugin()`; `IAuthService`; `IJwtService`; `requireAuth()`, `requireRole()`, `requirePermission()` |
+| **Extension Points** | Custom auth strategies; custom guards; custom RBAC models                                                        |
+| **Rules**            | JWT library is optional (injected or lazy-loaded via `npm:` specifier); password hashing via runtime crypto      |
 
 #### @hono-enterprise/http-security-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | HTTP transport security |
-| **Responsibilities** | CORS; security headers; CSRF; request size limiting; IP security |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `HttpSecurityPlugin()` |
-| **Extension Points** | Custom security headers; custom CORS policies |
-| **Rules** | Secure defaults; all security features are opt-out (enabled by default) |
+| Aspect               | Detail                                                                  |
+| -------------------- | ----------------------------------------------------------------------- |
+| **Purpose**          | HTTP transport security                                                 |
+| **Responsibilities** | CORS; security headers; CSRF; request size limiting; IP security        |
+| **Dependencies**     | `common`, `kernel`                                                      |
+| **Public API**       | `HttpSecurityPlugin()`                                                  |
+| **Extension Points** | Custom security headers; custom CORS policies                           |
+| **Rules**            | Secure defaults; all security features are opt-out (enabled by default) |
 
 #### @hono-enterprise/scheduler-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Job scheduling |
-| **Responsibilities** | Cron jobs; delayed jobs; recurring jobs; retry with backoff; distributed locking |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `SchedulerPlugin()`; `IScheduler` |
-| **Extension Points** | Custom distributed lock implementation; custom cron parser |
-| **Rules** | Distributed locking for multi-instance deployments; Redis for lock storage (optional, injected or lazy-loaded) |
+| Aspect               | Detail                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Job scheduling                                                                                                 |
+| **Responsibilities** | Cron jobs; delayed jobs; recurring jobs; retry with backoff; distributed locking                               |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                  |
+| **Public API**       | `SchedulerPlugin()`; `IScheduler`                                                                              |
+| **Extension Points** | Custom distributed lock implementation; custom cron parser                                                     |
+| **Rules**            | Distributed locking for multi-instance deployments; Redis for lock storage (optional, injected or lazy-loaded) |
 
 #### @hono-enterprise/metrics-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Prometheus metrics |
+| Aspect               | Detail                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| **Purpose**          | Prometheus metrics                                                                              |
 | **Responsibilities** | Counter, gauge, histogram, summary; metrics registry; Prometheus rendering; built-in collectors |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `MetricsPlugin()`; `IMetricsService` |
-| **Extension Points** | Custom metric collectors; custom renderers |
-| **Rules** | Prometheus format only; OpenMetrics support in future |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                   |
+| **Public API**       | `MetricsPlugin()`; `IMetricsService`                                                            |
+| **Extension Points** | Custom metric collectors; custom renderers                                                      |
+| **Rules**            | Prometheus format only; OpenMetrics support in future                                           |
 
 #### @hono-enterprise/health-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Health check endpoints |
+| Aspect               | Detail                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| **Purpose**          | Health check endpoints                                                                     |
 | **Responsibilities** | `/health`, `/live`, `/ready` endpoints; health indicator registration; built-in indicators |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `HealthPlugin()`; `IHealthService`; `IHealthIndicator` |
-| **Extension Points** | Custom health indicators |
-| **Rules** | Health indicators depend on capability tokens, not concrete packages |
+| **Dependencies**     | `common`, `kernel`                                                                         |
+| **Public API**       | `HealthPlugin()`; `IHealthService`; `IHealthIndicator`                                     |
+| **Extension Points** | Custom health indicators                                                                   |
+| **Rules**            | Health indicators depend on capability tokens, not concrete packages                       |
 
 #### @hono-enterprise/openapi-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | OpenAPI documentation generation |
+| Aspect               | Detail                                                                          |
+| -------------------- | ------------------------------------------------------------------------------- |
+| **Purpose**          | OpenAPI documentation generation                                                |
 | **Responsibilities** | Generate OpenAPI spec from route schemas; Zod to OpenAPI conversion; Swagger UI |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `OpenApiPlugin()`; `IOpenApiService` |
-| **Extension Points** | Custom schema transformers; custom UI |
-| **Rules** | Zod is the source of truth; no duplicated schemas; spec deduplication |
+| **Dependencies**     | `common`, `kernel`                                                              |
+| **Public API**       | `OpenApiPlugin()`; `IOpenApiService`                                            |
+| **Extension Points** | Custom schema transformers; custom UI                                           |
+| **Rules**            | Zod is the source of truth; no duplicated schemas; spec deduplication           |
 
 #### @hono-enterprise/telemetry-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | OpenTelemetry distributed tracing |
-| **Responsibilities** | Tracer provider; span management; context propagation; instrumentation |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `TelemetryPlugin()`; `ITelemetryService` |
-| **Extension Points** | Custom exporters; custom instrumentations |
-| **Rules** | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier) |
+| Aspect               | Detail                                                                       |
+| -------------------- | ---------------------------------------------------------------------------- |
+| **Purpose**          | OpenTelemetry distributed tracing                                            |
+| **Responsibilities** | Tracer provider; span management; context propagation; instrumentation       |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                |
+| **Public API**       | `TelemetryPlugin()`; `ITelemetryService`                                     |
+| **Extension Points** | Custom exporters; custom instrumentations                                    |
+| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier) |
 
 #### @hono-enterprise/secrets-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Secret management |
-| **Responsibilities** | Retrieve secrets from KMS, Vault, env; secret rotation; caching |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `SecretsPlugin()`; `ISecretManager` |
-| **Extension Points** | Custom secret provider |
-| **Rules** | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); env provider for development |
+| Aspect               | Detail                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Secret management                                                                                     |
+| **Responsibilities** | Retrieve secrets from KMS, Vault, env; secret rotation; caching                                       |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                         |
+| **Public API**       | `SecretsPlugin()`; `ISecretManager`                                                                   |
+| **Extension Points** | Custom secret provider                                                                                |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); env provider for development |
 
 #### @hono-enterprise/audit-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Audit trail logging |
+| Aspect               | Detail                                                                   |
+| -------------------- | ------------------------------------------------------------------------ |
+| **Purpose**          | Audit trail logging                                                      |
 | **Responsibilities** | Log audit events; store in database, file, or log; audit trail retrieval |
-| **Dependencies** | `common`, `kernel` (consumes `logger` capability via token) |
-| **Public API** | `AuditPlugin()`; `IAuditLogger` |
-| **Extension Points** | Custom audit storage |
-| **Rules** | Audit logs are immutable; storage is pluggable |
+| **Dependencies**     | `common`, `kernel` (consumes `logger` capability via token)              |
+| **Public API**       | `AuditPlugin()`; `IAuditLogger`                                          |
+| **Extension Points** | Custom audit storage                                                     |
+| **Rules**            | Audit logs are immutable; storage is pluggable                           |
 
 #### @hono-enterprise/resilience-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Resilience patterns |
-| **Responsibilities** | Circuit breaker; retry with backoff; timeout; bulkhead |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `ResiliencePlugin()`; `IResilienceService` |
+| Aspect               | Detail                                                        |
+| -------------------- | ------------------------------------------------------------- |
+| **Purpose**          | Resilience patterns                                           |
+| **Responsibilities** | Circuit breaker; retry with backoff; timeout; bulkhead        |
+| **Dependencies**     | `common`, `kernel`                                            |
+| **Public API**       | `ResiliencePlugin()`; `IResilienceService`                    |
 | **Extension Points** | Custom resilience patterns; custom circuit breaker strategies |
-| **Rules** | Patterns are composable; no external dependencies |
+| **Rules**            | Patterns are composable; no external dependencies             |
 
 #### @hono-enterprise/storage-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | File storage abstraction |
-| **Responsibilities** | S3, GCS, local, memory providers; upload middleware; signed URLs |
-| **Dependencies** | `common`, `kernel`, `runtime` |
-| **Public API** | `StoragePlugin()`; `IStorage` |
-| **Extension Points** | Custom storage provider |
-| **Rules** | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); local and memory providers for testing |
+| Aspect               | Detail                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | File storage abstraction                                                                                        |
+| **Responsibilities** | S3, GCS, local, memory providers; upload middleware; signed URLs                                                |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                   |
+| **Public API**       | `StoragePlugin()`; `IStorage`                                                                                   |
+| **Extension Points** | Custom storage provider                                                                                         |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); local and memory providers for testing |
 
 #### @hono-enterprise/mail-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Email sending |
-| **Responsibilities** | SMTP, SES, SendGrid providers; template engine |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `MailPlugin()`; `IMailer` |
-| **Extension Points** | Custom mail provider; custom template engine |
-| **Rules** | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
+| Aspect               | Detail                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Email sending                                                                                     |
+| **Responsibilities** | SMTP, SES, SendGrid providers; template engine                                                    |
+| **Dependencies**     | `common`, `kernel`                                                                                |
+| **Public API**       | `MailPlugin()`; `IMailer`                                                                         |
+| **Extension Points** | Custom mail provider; custom template engine                                                      |
+| **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
 
 #### @hono-enterprise/notification-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Multi-channel notifications |
-| **Responsibilities** | Email, SMS, push, Slack channels; multi-channel dispatch |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `NotificationPlugin()`; `INotifier` |
-| **Extension Points** | Custom notification channels |
-| **Rules** | Channel providers are optional (injected or lazy-loaded via `npm:` specifiers) |
+| Aspect               | Detail                                                                         |
+| -------------------- | ------------------------------------------------------------------------------ |
+| **Purpose**          | Multi-channel notifications                                                    |
+| **Responsibilities** | Email, SMS, push, Slack channels; multi-channel dispatch                       |
+| **Dependencies**     | `common`, `kernel`                                                             |
+| **Public API**       | `NotificationPlugin()`; `INotifier`                                            |
+| **Extension Points** | Custom notification channels                                                   |
+| **Rules**            | Channel providers are optional (injected or lazy-loaded via `npm:` specifiers) |
 
 #### @hono-enterprise/feature-flags-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Feature flag management |
+| Aspect               | Detail                                                                  |
+| -------------------- | ----------------------------------------------------------------------- |
+| **Purpose**          | Feature flag management                                                 |
 | **Responsibilities** | Flag evaluation; percentage rollout; user targeting; multiple providers |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `FeatureFlagsPlugin()`; `IFeatureFlags` |
-| **Extension Points** | Custom flag provider |
-| **Rules** | Config provider for simple cases; LaunchDarkly for enterprise |
+| **Dependencies**     | `common`, `kernel`                                                      |
+| **Public API**       | `FeatureFlagsPlugin()`; `IFeatureFlags`                                 |
+| **Extension Points** | Custom flag provider                                                    |
+| **Rules**            | Config provider for simple cases; LaunchDarkly for enterprise           |
 
 #### @hono-enterprise/multi-tenancy-plugin
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Multi-tenancy support |
+| Aspect               | Detail                                                                            |
+| -------------------- | --------------------------------------------------------------------------------- |
+| **Purpose**          | Multi-tenancy support                                                             |
 | **Responsibilities** | Tenant resolution; tenant context; database isolation strategies; cache isolation |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `MultiTenancyPlugin()`; `IMultiTenancyService` |
-| **Extension Points** | Custom tenant resolver; custom database strategy |
-| **Rules** | Tenant resolution via middleware; tenant context via request context |
+| **Dependencies**     | `common`, `kernel`                                                                |
+| **Public API**       | `MultiTenancyPlugin()`; `IMultiTenancyService`                                    |
+| **Extension Points** | Custom tenant resolver; custom database strategy                                  |
+| **Rules**            | Tenant resolution via middleware; tenant context via request context              |
 
 #### @hono-enterprise/testing
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Testing utilities |
+| Aspect               | Detail                                                         |
+| -------------------- | -------------------------------------------------------------- |
+| **Purpose**          | Testing utilities                                              |
 | **Responsibilities** | Test app factory; mock plugin; request injection; mock context |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `createTestApp()`; `createMockPlugin()`; `inject()` |
-| **Extension Points** | N/A (testing utility) |
-| **Rules** | No real external dependencies; in-memory adapters only |
+| **Dependencies**     | `common`, `kernel`                                             |
+| **Public API**       | `createTestApp()`; `createMockPlugin()`; `inject()`            |
+| **Extension Points** | N/A (testing utility)                                          |
+| **Rules**            | No real external dependencies; in-memory adapters only         |
 
 #### @hono-enterprise/cli
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | CLI tool with generators |
-| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `hono-enterprise` CLI command |
-| **Extension Points** | Custom schematics |
-| **Rules** | Plugin-aware: detects installed plugins and offers relevant generators |
+| Aspect               | Detail                                                                 |
+| -------------------- | ---------------------------------------------------------------------- |
+| **Purpose**          | CLI tool with generators                                               |
+| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators          |
+| **Dependencies**     | `common`, `kernel`                                                     |
+| **Public API**       | `hono-enterprise` CLI command                                          |
+| **Extension Points** | Custom schematics                                                      |
+| **Rules**            | Plugin-aware: detects installed plugins and offers relevant generators |
 
 #### @hono-enterprise/sdk
 
-| Aspect | Detail |
-|--------|--------|
-| **Purpose** | Client SDK for external consumers |
+| Aspect               | Detail                                                                  |
+| -------------------- | ----------------------------------------------------------------------- |
+| **Purpose**          | Client SDK for external consumers                                       |
 | **Responsibilities** | HTTP client; auth interceptors; retry; circuit breaker; OpenAPI codegen |
-| **Dependencies** | `common`, `kernel` |
-| **Public API** | `HttpClient`; `createClient()` |
-| **Extension Points** | Custom interceptors |
-| **Rules** | Runtime-independent; works in browsers and servers |
+| **Dependencies**     | `common`, `kernel`                                                      |
+| **Public API**       | `HttpClient`; `createClient()`                                          |
+| **Extension Points** | Custom interceptors                                                     |
+| **Rules**            | Runtime-independent; works in browsers and servers                      |
 
 ---
 
@@ -1405,6 +1476,7 @@ graph LR
 ```
 
 With capability tokens:
+
 - Plugin A registers a service with token `'database'`.
 - Plugin B resolves the service by token `'database'`.
 - Plugin B never imports Plugin A's code.
@@ -1412,12 +1484,14 @@ With capability tokens:
 
 ### Build-Time vs Runtime Dependencies
 
-| Type | Direction | Example |
-|------|-----------|---------|
+| Type           | Direction                                  | Example                                                           |
+| -------------- | ------------------------------------------ | ----------------------------------------------------------------- |
 | **Build-time** | Package imports types from another package | `import type { IDatabaseService } from '@hono-enterprise/common'` |
-| **Runtime** | Plugin resolves service by token | `ctx.services.get('database')` |
+| **Runtime**    | Plugin resolves service by token           | `ctx.services.get('database')`                                    |
 
-Build-time dependencies are for type definitions only. Runtime dependencies are resolved through the service registry. This separation ensures packages can be type-checked independently and bundled without pulling in unnecessary code.
+Build-time dependencies are for type definitions only. Runtime dependencies are resolved through the
+service registry. This separation ensures packages can be type-checked independently and bundled
+without pulling in unnecessary code.
 
 ---
 
@@ -1437,26 +1511,28 @@ graph LR
     M1 --> Resp[Response]
 ```
 
-The middleware pipeline is a chain of functions that execute in order. Each middleware receives the request context and a `next()` function. Calling `next()` passes control to the next middleware. Not calling `next()` short-circuits the pipeline.
+The middleware pipeline is a chain of functions that execute in order. Each middleware receives the
+request context and a `next()` function. Calling `next()` passes control to the next middleware. Not
+calling `next()` short-circuits the pipeline.
 
 ### Ordering
 
 Middleware is ordered by priority (lower numbers execute first):
 
-| Priority | Middleware | Purpose |
-|----------|-----------|---------|
-| 50 | LoggingMiddleware | Log incoming request |
-| 100 | RequestIdMiddleware | Generate request ID |
-| 150 | CorrelationIdMiddleware | Propagate correlation ID |
-| 200 | CorsMiddleware | Handle CORS |
-| 250 | SecurityHeadersMiddleware | Add security headers |
-| 300 | AuthMiddleware | Authenticate request |
-| 350 | AuthorizationMiddleware | Check permissions |
-| 400 | ValidationMiddleware | Validate request |
-| 500 | RouteHandler | Execute route handler |
-| 600 | ResponseInterceptors | Transform response |
-| 700 | MetricsMiddleware | Record metrics |
-| 800 | ErrorHandler | Handle errors |
+| Priority | Middleware                | Purpose                  |
+| -------- | ------------------------- | ------------------------ |
+| 50       | LoggingMiddleware         | Log incoming request     |
+| 100      | RequestIdMiddleware       | Generate request ID      |
+| 150      | CorrelationIdMiddleware   | Propagate correlation ID |
+| 200      | CorsMiddleware            | Handle CORS              |
+| 250      | SecurityHeadersMiddleware | Add security headers     |
+| 300      | AuthMiddleware            | Authenticate request     |
+| 350      | AuthorizationMiddleware   | Check permissions        |
+| 400      | ValidationMiddleware      | Validate request         |
+| 500      | RouteHandler              | Execute route handler    |
+| 600      | ResponseInterceptors      | Transform response       |
+| 700      | MetricsMiddleware         | Record metrics           |
+| 800      | ErrorHandler              | Handle errors            |
 
 ### Registration
 
@@ -1467,7 +1543,7 @@ app.middleware.add(loggingMiddleware(), { priority: 50 });
 // Route-level middleware
 app.router.get('/users', {
   middleware: [authMiddleware(), validationMiddleware()],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
@@ -1565,7 +1641,8 @@ Request-scoped data is stored on the context, not on global state. This ensures:
 
 ### Why DI Is Optional
 
-DI is a pattern for managing service dependencies. In Hono Enterprise, the **Service Registry** is the primary service resolution mechanism. DI is an optional layer that provides:
+DI is a pattern for managing service dependencies. In Hono Enterprise, the **Service Registry** is
+the primary service resolution mechanism. DI is an optional layer that provides:
 
 - Constructor injection.
 - Lifecycle management (singleton, scoped, transient).
@@ -1591,11 +1668,11 @@ graph TB
     end
 ```
 
-| Approach | When to Use |
-|----------|-------------|
-| **Service Registry only** | Simple applications; functional style; no DI needed |
-| **Manual wiring** | When you want explicit control; pass dependencies via constructors |
-| **DI Plugin** | When you want automatic resolution; when you have complex dependency graphs |
+| Approach                  | When to Use                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| **Service Registry only** | Simple applications; functional style; no DI needed                         |
+| **Manual wiring**         | When you want explicit control; pass dependencies via constructors          |
+| **DI Plugin**             | When you want automatic resolution; when you have complex dependency graphs |
 
 ### Service Registry (Default)
 
@@ -1647,14 +1724,14 @@ register(ctx) {
 
 ### When to Use Each
 
-| Scenario | Recommended Approach |
-|----------|---------------------|
-| Simple app with few services | Service Registry |
-| Functional programming style | Service Registry |
-| OOP with explicit dependencies | Manual Wiring |
-| Complex dependency graphs | DI Plugin |
-| NestJS migration | DI Plugin + Decorator Plugin |
-| Testing | Service Registry (mock by overriding token) |
+| Scenario                       | Recommended Approach                        |
+| ------------------------------ | ------------------------------------------- |
+| Simple app with few services   | Service Registry                            |
+| Functional programming style   | Service Registry                            |
+| OOP with explicit dependencies | Manual Wiring                               |
+| Complex dependency graphs      | DI Plugin                                   |
+| NestJS migration               | DI Plugin + Decorator Plugin                |
+| Testing                        | Service Registry (mock by overriding token) |
 
 ---
 
@@ -1662,7 +1739,9 @@ register(ctx) {
 
 ### Why Decorators Are Optional
 
-Decorators are a TypeScript feature that requires compiler support (`experimentalDecorators` or the new TC39 decorators proposal). Some environments and bundlers do not support decorators. Additionally, some developers prefer functional style over OOP decorators.
+Decorators are a TypeScript feature that requires compiler support (`experimentalDecorators` or the
+new TC39 decorators proposal). Some environments and bundlers do not support decorators.
+Additionally, some developers prefer functional style over OOP decorators.
 
 Hono Enterprise makes decorators optional by:
 
@@ -1680,13 +1759,17 @@ graph LR
     K -->|creates| R[Routes, Services, Middleware]
 ```
 
-1. **Decorator execution** — When a class is decorated, the decorator function stores metadata in a plain object (`MetadataStore`).
+1. **Decorator execution** — When a class is decorated, the decorator function stores metadata in a
+   plain object (`MetadataStore`).
 
-2. **Metadata storage** — Metadata is stored in a `Map` keyed by class reference. No reflection is used.
+2. **Metadata storage** — Metadata is stored in a `Map` keyed by class reference. No reflection is
+   used.
 
-3. **DecoratorPlugin registration** — When the `DecoratorPlugin` is registered, it scans the `MetadataStore` for decorated classes.
+3. **DecoratorPlugin registration** — When the `DecoratorPlugin` is registered, it scans the
+   `MetadataStore` for decorated classes.
 
-4. **Kernel registration** — The `DecoratorPlugin` calls the kernel's programmatic API to register routes, services, and middleware from the metadata.
+4. **Kernel registration** — The `DecoratorPlugin` calls the kernel's programmatic API to register
+   routes, services, and middleware from the metadata.
 
 ### Metadata Storage
 
@@ -1699,25 +1782,28 @@ interface MetadataStore {
 }
 ```
 
-**Why not WeakMap?** WeakMaps require the key to be an object reference. In some bundlers and runtimes, class references can be lost during tree-shaking. A plain `Map` with explicit registration is more predictable.
+**Why not WeakMap?** WeakMaps require the key to be an object reference. In some bundlers and
+runtimes, class references can be lost during tree-shaking. A plain `Map` with explicit registration
+is more predictable.
 
 ### Programmatic API Equivalents
 
 Every decorator has a programmatic equivalent:
 
-| Decorator | Programmatic Equivalent |
-|-----------|------------------------|
-| `@Controller('/users')` | `app.router.group('/users', ...)` |
-| `@Get('/')` | `app.router.get('/', handler)` |
-| `@Body()` | `ctx.request.body` |
-| `@Query('name')` | `ctx.query.name` |
-| `@Param('id')` | `ctx.params.id` |
-| `@UseGuards(requireAuth())` | `middleware: [requireAuth()]` |
-| `@Injectable()` | `ctx.services.register(token, new Service())` |
+| Decorator                   | Programmatic Equivalent                       |
+| --------------------------- | --------------------------------------------- |
+| `@Controller('/users')`     | `app.router.group('/users', ...)`             |
+| `@Get('/')`                 | `app.router.get('/', handler)`                |
+| `@Body()`                   | `ctx.request.body`                            |
+| `@Query('name')`            | `ctx.query.name`                              |
+| `@Param('id')`              | `ctx.params.id`                               |
+| `@UseGuards(requireAuth())` | `middleware: [requireAuth()]`                 |
+| `@Injectable()`             | `ctx.services.register(token, new Service())` |
 
 ### Reflection
 
-Reflection is **not required**. The `DecoratorPlugin` reads metadata from the `MetadataStore`, not via `Reflect.getMetadata()`. This ensures:
+Reflection is **not required**. The `DecoratorPlugin` reads metadata from the `MetadataStore`, not
+via `Reflect.getMetadata()`. This ensures:
 
 - No dependency on `reflect-metadata` polyfill.
 - Works in environments that do not support reflection.
@@ -1792,14 +1878,16 @@ The default error format follows [RFC 7807](https://datatracker.ietf.org/doc/htm
 
 ### Global Error Handler
 
-The error handler middleware comes from the `@hono-enterprise/exceptions` package and is registered by the application (or by a starter bundle) — the kernel ships zero features, including error formatting:
+The error handler middleware comes from the `@hono-enterprise/exceptions` package and is registered
+by the application (or by a starter bundle) — the kernel ships zero features, including error
+formatting:
 
 ```typescript
 import { errorHandler } from '@hono-enterprise/exceptions';
 
 app.middleware.add(errorHandler({
   format: 'rfc7807',
-  includeStackTrace: config.get('NODE_ENV') === 'development',  // via ConfigPlugin, never process.env
+  includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
   logErrors: true,
 }));
 ```
@@ -1912,14 +2000,14 @@ The `SecretsPlugin` provides secret management:
 
 ### Plugin Responsibilities
 
-| Plugin | Security Responsibility |
-|--------|------------------------|
+| Plugin                 | Security Responsibility                                 |
+| ---------------------- | ------------------------------------------------------- |
 | `http-security-plugin` | CORS, security headers, CSRF, request size, IP security |
-| `auth-plugin` | Authentication, authorization, RBAC, rate limiting |
-| `secrets-plugin` | Secret management and rotation |
-| `audit-plugin` | Audit trail for security events |
-| `validation-plugin` | Input validation and sanitization |
-| `logger-plugin` | Redaction of sensitive fields in logs |
+| `auth-plugin`          | Authentication, authorization, RBAC, rate limiting      |
+| `secrets-plugin`       | Secret management and rotation                          |
+| `audit-plugin`         | Audit trail for security events                         |
+| `validation-plugin`    | Input validation and sanitization                       |
+| `logger-plugin`        | Redaction of sensitive fields in logs                   |
 
 ### Secure Defaults
 
@@ -1964,7 +2052,8 @@ graph LR
 Plugin loading is optimized:
 
 1. **Topological sort** — O(V + E) where V is plugins and E is dependencies.
-2. **Parallel registration** — Plugins with no dependencies between them can register in parallel (future optimization).
+2. **Parallel registration** — Plugins with no dependencies between them can register in parallel
+   (future optimization).
 3. **No reflection** — Metadata is stored in plain objects, no runtime reflection overhead.
 
 ### Caching
@@ -2175,8 +2264,7 @@ function myMiddleware(options?: MyOptions): MiddlewareFunction {
 ```typescript
 import { createDecorator } from '@hono-enterprise/decorator-plugin';
 
-export const Cacheable = (ttl: number) =>
-  createDecorator('cacheable', { ttl });
+export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
 
 // Usage
 @Controller('/api')
@@ -2195,11 +2283,11 @@ class ApiController {
 import { IOrmAdapter, ITransaction } from '@hono-enterprise/common';
 
 export class MyOrmAdapter implements IOrmAdapter {
-  async connect(): Promise<void> { /* ... */ }
-  async disconnect(): Promise<void> { /* ... */ }
-  isReady(): boolean { /* ... */ }
-  createTransaction(): ITransaction { /* ... */ }
-  async migrate(): Promise<void> { /* ... */ }
+  async connect(): Promise<void> {/* ... */}
+  async disconnect(): Promise<void> {/* ... */}
+  isReady(): boolean {/* ... */}
+  createTransaction(): ITransaction {/* ... */}
+  async migrate(): Promise<void> {/* ... */}
 }
 ```
 
@@ -2209,9 +2297,9 @@ export class MyOrmAdapter implements IOrmAdapter {
 import { ICacheStore } from '@hono-enterprise/common';
 
 export class MyCacheStore implements ICacheStore {
-  async get<T>(key: string): Promise<T | null> { /* ... */ }
-  async set<T>(key: string, value: T, ttl?: number): Promise<void> { /* ... */ }
-  async delete(key: string): Promise<boolean> { /* ... */ }
+  async get<T>(key: string): Promise<T | null> {/* ... */}
+  async set<T>(key: string, value: T, ttl?: number): Promise<void> {/* ... */}
+  async delete(key: string): Promise<boolean> {/* ... */}
   // ... implement all ICacheStore methods
 }
 ```
@@ -2224,10 +2312,10 @@ Transport adapters (message brokers, queue systems) follow the same pattern:
 import { IMessageBroker } from '@hono-enterprise/common';
 
 export class MyMessageBroker implements IMessageBroker {
-  async connect(): Promise<void> { /* ... */ }
-  async disconnect(): Promise<void> { /* ... */ }
-  async publish<T>(topic: string, message: T): Promise<void> { /* ... */ }
-  async subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<Subscription> { /* ... */ }
+  async connect(): Promise<void> {/* ... */}
+  async disconnect(): Promise<void> {/* ... */}
+  async publish<T>(topic: string, message: T): Promise<void> {/* ... */}
+  async subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<Subscription> {/* ... */}
 }
 ```
 
@@ -2278,7 +2366,8 @@ graph TB
 
 The architecture ensures backward compatibility through:
 
-1. **Capability tokens** — Tokens are strings. New tokens can be added without breaking existing ones.
+1. **Capability tokens** — Tokens are strings. New tokens can be added without breaking existing
+   ones.
 2. **Optional plugins** — New plugins do not affect applications that do not use them.
 3. **Interface additions** — New interface methods can be added with default implementations.
 4. **Plugin replacement** — A new plugin can replace an old one by registering the same token.
@@ -2319,18 +2408,18 @@ The public API (defined in `PUBLIC_API.md`) is stable:
 
 The architecture supports future additions without breaking existing applications:
 
-| Future Addition | How It Fits |
-|----------------|-------------|
-| **GraphQL Plugin** | New plugin that registers GraphQL routes and schema |
-| **gRPC Plugin** | New plugin that provides gRPC server and client |
-| **Edge Runtime** | New runtime adapter for Cloudflare Workers |
-| **WebSocket Plugin** | New plugin that provides WebSocket support |
-| **SSE Plugin** | New plugin that provides Server-Sent Events |
-| **New Database Adapter** | New plugin that provides the `database` token with a new ORM |
-| **New Message Broker** | New plugin that provides the `messaging` token with a new broker |
-| **New Auth Strategy** | New plugin that extends the `auth-plugin` with a new strategy |
-| **New Health Indicator** | New plugin that registers a health check |
-| **New Metric Collector** | New plugin that registers a metric collector |
+| Future Addition          | How It Fits                                                      |
+| ------------------------ | ---------------------------------------------------------------- |
+| **GraphQL Plugin**       | New plugin that registers GraphQL routes and schema              |
+| **gRPC Plugin**          | New plugin that provides gRPC server and client                  |
+| **Edge Runtime**         | New runtime adapter for Cloudflare Workers                       |
+| **WebSocket Plugin**     | New plugin that provides WebSocket support                       |
+| **SSE Plugin**           | New plugin that provides Server-Sent Events                      |
+| **New Database Adapter** | New plugin that provides the `database` token with a new ORM     |
+| **New Message Broker**   | New plugin that provides the `messaging` token with a new broker |
+| **New Auth Strategy**    | New plugin that extends the `auth-plugin` with a new strategy    |
+| **New Health Indicator** | New plugin that registers a health check                         |
+| **New Metric Collector** | New plugin that registers a metric collector                     |
 
 ### Migration Paths
 
@@ -2346,7 +2435,9 @@ When breaking changes are necessary:
 
 ## Conclusion
 
-The Hono Enterprise architecture is designed for **longevity, replaceability, and runtime portability**. By making everything a plugin, using capability tokens for communication, and abstracting runtime-specific APIs, the framework can evolve without breaking existing applications.
+The Hono Enterprise architecture is designed for **longevity, replaceability, and runtime
+portability**. By making everything a plugin, using capability tokens for communication, and
+abstracting runtime-specific APIs, the framework can evolve without breaking existing applications.
 
 Contributors should internalize these principles:
 
@@ -2358,6 +2449,6 @@ Contributors should internalize these principles:
 6. **Test everything** — 90%+ coverage; tests on all runtimes.
 7. **Never break backward compatibility** — Deprecate, do not remove.
 
-For implementation phases, refer to [`ROADMAP.md`](ROADMAP.md).
-For developer-facing API, refer to [`PUBLIC_API.md`](PUBLIC_API.md).
-For engineering rules, refer to [`AI_GUIDELINES.md`](AI_GUIDELINES.md).
+For implementation phases, refer to [`ROADMAP.md`](ROADMAP.md). For developer-facing API, refer to
+[`PUBLIC_API.md`](PUBLIC_API.md). For engineering rules, refer to
+[`AI_GUIDELINES.md`](AI_GUIDELINES.md).

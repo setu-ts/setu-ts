@@ -1,7 +1,7 @@
 # Hono Enterprise — Public API Contract
 
-> **This document describes how developers use the framework.**
-> Implementation details are intentionally omitted.
+> **This document describes how developers use the framework.** Implementation details are
+> intentionally omitted.
 
 ---
 
@@ -45,7 +45,8 @@
 
 ## Installation
 
-Packages are published to [JSR](https://jsr.io) under the `@hono-enterprise` scope and are consumable from every runtime:
+Packages are published to [JSR](https://jsr.io) under the `@hono-enterprise` scope and are
+consumable from every runtime:
 
 ```bash
 # Deno
@@ -162,8 +163,8 @@ const app = createApplication({ plugins: [RuntimePlugin()] });
 app.router.get('/users', (ctx) => ctx.response.json([{ id: 1 }]));
 
 const response = await app.inject({ method: 'GET', url: '/users' });
-console.log(response.statusCode);  // 200
-console.log(response.json());      // [{ id: 1 }]
+console.log(response.statusCode); // 200
+console.log(response.json()); // [{ id: 1 }]
 ```
 
 ---
@@ -178,7 +179,7 @@ Provides runtime-agnostic services (UUID, timers, crypto, env, HTTP server).
 import { RuntimePlugin } from '@hono-enterprise/runtime';
 
 app.register(RuntimePlugin({
-  httpAdapter: 'auto',  // 'node' | 'deno' | 'bun' | 'auto'
+  httpAdapter: 'auto', // 'node' | 'deno' | 'bun' | 'auto'
 }));
 ```
 
@@ -236,11 +237,11 @@ import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
 
 app.register(LoggerPlugin({
   level: 'info',
-  transport: 'pino',          // 'pino' | 'console' | 'noop'
+  transport: 'pino', // 'pino' | 'console' | 'noop'
   pretty: false,
   redact: ['password', 'token', 'authorization'],
   requestLogging: true,
-  slowRequestThreshold: 5000,  // ms
+  slowRequestThreshold: 5000, // ms
 }));
 ```
 
@@ -363,7 +364,7 @@ Provides Zod-based validation with standardized errors.
 import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
 
 app.register(ValidationPlugin({
-  errorFormat: 'rfc7807',       // 'default' | 'rfc7807' | 'nestjs' | custom
+  errorFormat: 'rfc7807', // 'default' | 'rfc7807' | 'nestjs' | custom
   whitelist: true,
   forbidNonWhitelisted: false,
   sanitize: true,
@@ -409,7 +410,7 @@ app.router.post('/users', {
 ### Validation Middleware Helpers
 
 ```typescript
-import { validateBody, validateQuery, validateParams } from '@hono-enterprise/validation-plugin';
+import { validateBody, validateParams, validateQuery } from '@hono-enterprise/validation-plugin';
 
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
@@ -424,7 +425,7 @@ app.router.put('/users/:id', {
     validateParams(z.object({ id: z.string().uuid() })),
     validateBody(UpdateUserSchema),
   ],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
@@ -642,7 +643,7 @@ app.register(AuthenticationPlugin({
   rateLimit: {
     windowMs: 60000,
     max: 100,
-    storage: 'memory',  // 'memory' | 'redis'
+    storage: 'memory', // 'memory' | 'redis'
   },
 }));
 ```
@@ -862,10 +863,12 @@ app.router.post('/users', async (ctx) => {
   const eventBus = ctx.services.get<IEventBus>('events');
   const user = await createUser(ctx.request.body);
 
-  await eventBus.publish(new UserCreatedEvent({
-    userId: user.id,
-    email: user.email,
-  }));
+  await eventBus.publish(
+    new UserCreatedEvent({
+      userId: user.id,
+      email: user.email,
+    }),
+  );
 
   return ctx.response.status(201).json(user);
 });
@@ -900,7 +903,10 @@ app.register({
 interface IEventBus {
   publish(event: DomainEvent): Promise<void>;
   publishBatch(events: DomainEvent[]): Promise<void>;
-  subscribe<T extends DomainEvent>(type: string, handler: (event: T) => Promise<void>): Subscription;
+  subscribe<T extends DomainEvent>(
+    type: string,
+    handler: (event: T) => Promise<void>,
+  ): Subscription;
   unsubscribe(subscription: Subscription): void;
   getSubscriptions(type: string): Subscription[];
 }
@@ -1123,7 +1129,7 @@ app.router.post('/users', async (ctx) => {
   // Add a delayed job
   await queue.add('send-reminder', {
     userId: user.id,
-  }, { delay: 86400000 });  // 24 hours
+  }, { delay: 86400000 }); // 24 hours
 
   return ctx.response.status(201).json(user);
 });
@@ -1423,7 +1429,10 @@ import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
 app.register(NotificationPlugin({
   channels: {
     email: { provider: 'mail' },
-    sms: { provider: 'twilio', options: { accountSid: config.get('TWILIO_SID'), authToken: config.get('TWILIO_TOKEN') } },
+    sms: {
+      provider: 'twilio',
+      options: { accountSid: config.get('TWILIO_SID'), authToken: config.get('TWILIO_TOKEN') },
+    },
     push: { provider: 'fcm', options: { serverKey: config.get('FCM_SERVER_KEY') } },
     slack: { provider: 'slack', options: { webhookUrl: config.get('SLACK_WEBHOOK') } },
   },
@@ -1495,7 +1504,7 @@ app.router.get('/dashboard', async (ctx) => {
 // Middleware
 app.router.get('/beta', {
   middleware: [flags.middleware('beta-features', { fallback: '/not-found' })],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
@@ -1743,7 +1752,7 @@ app.router.post('/users', {
     description: 'Creates a new user account',
     security: [{ bearerAuth: [] }],
   },
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
@@ -2031,7 +2040,7 @@ const app = createApplication({
     RuntimePlugin(),
     LoggerPlugin({ level: 'info' }),
     ConfigPlugin({ validationSchema: AppConfigSchema }),
-    DatabasePlugin({ type: 'prisma' }),  // reads DATABASE_URL via the config capability
+    DatabasePlugin({ type: 'prisma' }), // reads DATABASE_URL via the config capability
     EventsPlugin(),
     CqrsPlugin({ behaviors: ['logging', 'validation', 'timing'] }),
     OpenApiPlugin({ title: 'CQRS API', version: '1.0.0' }),
@@ -2258,7 +2267,7 @@ app.middleware.add(requestLogger(), { priority: 50 });
 // Register for specific route
 app.router.get('/users', {
   middleware: [requestLogger()],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 ```
 
@@ -2273,7 +2282,7 @@ function rateLimit(options: { max: number; windowMs: number }): MiddlewareFuncti
     const now = Date.now();
     const windowStart = now - options.windowMs;
 
-    const userRequests = (requests.get(ip) || []).filter(t => t > windowStart);
+    const userRequests = (requests.get(ip) || []).filter((t) => t > windowStart);
     userRequests.push(now);
     requests.set(ip, userRequests);
 
@@ -2328,8 +2337,8 @@ app.middleware.add(new AuthMiddleware(auth));
 ### Using Built-in Decorators
 
 ```typescript
-import { Controller, Get, Post, Body, Params } from '@hono-enterprise/decorator-plugin';
-import { UseGuards, CurrentUser } from '@hono-enterprise/auth-plugin';
+import { Body, Controller, Get, Params, Post } from '@hono-enterprise/decorator-plugin';
+import { CurrentUser, UseGuards } from '@hono-enterprise/auth-plugin';
 
 @Controller('/users')
 class UserController {
@@ -2361,12 +2370,10 @@ class UserController {
 import { createDecorator } from '@hono-enterprise/decorator-plugin';
 
 // Method decorator
-export const Cacheable = (ttl: number) =>
-  createDecorator('cacheable', { ttl });
+export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
 
 // Parameter decorator
-export const CurrentTenant = () =>
-  createParameterDecorator('current-tenant');
+export const CurrentTenant = () => createParameterDecorator('current-tenant');
 
 // Usage
 @Controller('/api')
@@ -2381,7 +2388,9 @@ class ApiController {
 
 ### How Decorators Work
 
-Decorators store metadata in a plain object. The `DecoratorPlugin` reads this metadata and registers routes, services, and middleware with the kernel. No reflection is required — the metadata store is explicit.
+Decorators store metadata in a plain object. The `DecoratorPlugin` reads this metadata and registers
+routes, services, and middleware with the kernel. No reflection is required — the metadata store is
+explicit.
 
 ```typescript
 // This is what the decorator does internally:
@@ -2389,14 +2398,17 @@ Decorators store metadata in a plain object. The `DecoratorPlugin` reads this me
 metadataStore.controllers.set(UserController, {
   path: '/users',
   routes: [
-    { method: 'GET', path: '/', handler: 'list', /* ... */ },
-    { method: 'POST', path: '/', handler: 'create', /* ... */ },
+    { method: 'GET', path: '/', handler: 'list' /* ... */ },
+    { method: 'POST', path: '/', handler: 'create' /* ... */ },
   ],
 });
 
 // DecoratorPlugin reads this and calls:
 app.router.get('/users', userController.list.bind(userController));
-app.router.post('/users', { middleware: [requireAuth()], handler: userController.create.bind(userController) });
+app.router.post('/users', {
+  middleware: [requireAuth()],
+  handler: userController.create.bind(userController),
+});
 ```
 
 ---
@@ -2408,6 +2420,7 @@ The framework provides both APIs for every feature. They are equivalent.
 ### Routing
 
 **Programmatic:**
+
 ```typescript
 app.router.post('/users', {
   middleware: [requireAuth(), validateBody(CreateUserSchema)],
@@ -2421,6 +2434,7 @@ app.router.post('/users', {
 ```
 
 **Decorator:**
+
 ```typescript
 @Controller('/users')
 class UserController {
@@ -2437,6 +2451,7 @@ class UserController {
 ### Service Registration
 
 **Programmatic:**
+
 ```typescript
 app.register({
   name: 'services',
@@ -2449,12 +2464,13 @@ app.register({
 ```
 
 **Decorator (requires DiPlugin):**
+
 ```typescript
 @Injectable()
-class UserService { /* ... */ }
+class UserService {/* ... */}
 
 @Injectable()
-class OrderService { /* ... */ }
+class OrderService {/* ... */}
 
 // DiPlugin auto-discovers @Injectable classes
 ```
@@ -2462,6 +2478,7 @@ class OrderService { /* ... */ }
 ### Event Handling
 
 **Programmatic:**
+
 ```typescript
 app.register({
   name: 'event-handlers',
@@ -2475,10 +2492,11 @@ app.register({
 ```
 
 **Decorator:**
+
 ```typescript
 @EventHandler('UserCreated')
 class UserCreatedHandler {
-  async handle(event: UserCreatedEvent) { /* ... */ }
+  async handle(event: UserCreatedEvent) {/* ... */}
 }
 ```
 
@@ -2492,12 +2510,12 @@ Everything is fully typed. No `any` in public APIs.
 
 ```typescript
 // Config is typed
-const port = config.get<number>('PORT');  // number
-const url = config.getOrThrow<string>('DATABASE_URL');  // string
+const port = config.get<number>('PORT'); // number
+const url = config.getOrThrow<string>('DATABASE_URL'); // string
 
 // Services are typed
 const db = ctx.services.get<IDatabaseService>('database');
-const user = await db.getRepository<User>('User').findById('123');  // User | null
+const user = await db.getRepository<User>('User').findById('123'); // User | null
 
 // Routes are typed
 app.router.get('/users/:id', {
@@ -2506,7 +2524,7 @@ app.router.get('/users/:id', {
     response: { 200: UserSchema },
   },
   handler: async (ctx) => {
-    const id = ctx.params.id;  // string (validated as UUID)
+    const id = ctx.params.id; // string (validated as UUID)
     // ...
   },
 });
@@ -2585,7 +2603,7 @@ expect(response.json().name).toBe('John');
 ### Mocking Plugins
 
 ```typescript
-import { createTestApp, createMockPlugin } from '@hono-enterprise/testing';
+import { createMockPlugin, createTestApp } from '@hono-enterprise/testing';
 
 const mockDb = createMockPlugin({
   name: 'database',
