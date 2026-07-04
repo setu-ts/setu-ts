@@ -99,7 +99,9 @@ The framework follows hexagonal (ports and adapters) architecture:
 - Packages communicate via their public API (`src/index.ts`) only.
 - No package imports from another package's internal modules.
 - Circular dependencies between packages are forbidden.
-- The `@hono-enterprise/common` package contains only types and interfaces — zero runtime code.
+- The `@hono-enterprise/common` package contains only types, interfaces, constants (e.g.,
+  `CAPABILITIES`), and pure zero-dependency type utilities (e.g., `ok()`, `some()`) — no runtime
+  behavior beyond those, and zero dependencies.
 
 ### 2.2 Dependency Direction
 

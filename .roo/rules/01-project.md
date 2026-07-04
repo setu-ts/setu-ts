@@ -1,4 +1,4 @@
-# Hono Enterprise — Session Instructions
+# Hono Enterprise — Project Rules
 
 Plugin-first enterprise backend framework. **Deno-first toolchain** (Deno 2 workspaces), published
 to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compatibility.
@@ -13,12 +13,6 @@ to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compat
 3. Any change to a package's `src/index.ts` exports requires updating **PUBLIC_API.md** in the same
    change, with JSDoc on every export.
 
-## Current status
-
-- **Milestone 0** (monorepo foundation) — complete (PR #1 merged, CI green)
-- **Milestone 1** (`packages/common` — types and capability tokens) — implemented, PR pending
-- **Next: Milestone 2** (`packages/kernel` — plugin kernel and service registry)
-
 ## Verification (run before declaring any work done)
 
 ```bash
@@ -28,13 +22,17 @@ deno task check
 deno task test
 ```
 
-All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
+All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`) and a clean
+`deno task audit`.
 
 ## Key conventions
 
 - Tests: `@std/testing/bdd` + `@std/expect`, in `test/{unit,integration,e2e}/` per package.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
+- `IPlugin`/`IPluginContext` live in `@hono-enterprise/common`, never in the kernel.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).
 - Branches: `feat/[milestone]-[description]`; commits: conventional format (`feat(scope): subject`);
   no direct commits to `main`.
+- Keep this file in sync with `CLAUDE.md` — they carry the same instructions for different
+  assistants. Update the milestone status in `CLAUDE.md` only (single source of truth for status).

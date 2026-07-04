@@ -436,8 +436,7 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 - [x] Root task pipeline (`check`, `test`, `lint`, `fmt`)
 - [x] Strict TypeScript via root `deno.json`
 - [x] All package stubs created with JSR metadata
-- [ ] CI passing on Deno, with Node/Bun compat jobs stubbed (workflow authored; verifies on first
-      push to a remote)
+- [x] CI passing on Deno, with Node/Bun compat jobs stubbed (verified green on PR #1)
 
 ---
 
@@ -498,11 +497,11 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 
 ### Deliverables
 
-- [ ] All shared interfaces defined
-- [ ] Capability token constants
-- [ ] Zero runtime dependencies
-- [ ] JSDoc on all exports
-- [ ] Full type tests
+- [x] All shared interfaces defined
+- [x] Capability token constants
+- [x] Zero runtime dependencies
+- [x] JSDoc on all exports
+- [x] Full type tests
 
 ---
 
@@ -3245,7 +3244,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | Milestone | Status | Package              |
 | --------- | ------ | -------------------- |
 | 0         | ✅     | Monorepo Foundation  |
-| 1         | ⬜     | common               |
+| 1         | ✅     | common               |
 | 2         | ⬜     | kernel               |
 | 3         | ⬜     | runtime              |
 | 4         | ⬜     | logger-plugin        |

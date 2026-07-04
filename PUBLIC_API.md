@@ -40,6 +40,7 @@
 31. [Custom Decorators](#custom-decorators)
 32. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
 33. [Developer Ergonomics](#developer-ergonomics)
+34. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
 
 ---
 
@@ -2685,6 +2686,69 @@ app.register({
   },
 });
 ```
+
+---
+
+## API Reference: @hono-enterprise/common
+
+The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
+the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
+
+### Values (runtime exports)
+
+| Export                        | Kind     | Purpose                                                                                               |
+| ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth                                               |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                 |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                 |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                  |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                      |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                           |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                  |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                      |
+
+### Types
+
+| Group               | Exports                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                  |
+| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                            |
+| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                        |
+| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                              |
+| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore` |
+| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                               |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`                                                                       |
+| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                           |
+| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                           |
+| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                 |
+| Config              | `IConfig`                                                                                                                                                                                                                                |
+| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                              |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`                                                                                                                                                                             |
+| Metrics             | `IMetric`, `MetricConfig`                                                                                                                                                                                                                |
+| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                            |
+| Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                            |
+| Cache               | `ICacheStore`                                                                                                                                                                                                                            |
+| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                         |
+| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`                                                                                                                                            |
+| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                            |
+| Secrets             | `ISecretManager`                                                                                                                                                                                                                         |
+| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                             |
+| Resilience          | `ICircuitBreaker`, `CircuitState`                                                                                                                                                                                                        |
+| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                           |
+| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                 |
+| Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |
+| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                           |
+| Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
+
+Contract notes:
+
+- `IPluginContext.runtime` is **non-optional**: a runtime provider is mandatory and registers first,
+  so every plugin may rely on it (ARCHITECTURE.md §7).
+- Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
+  `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
+- `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
+  terminal methods (`json`, `text`, `send`, `redirect`).
 
 ---
 
