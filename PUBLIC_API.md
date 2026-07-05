@@ -2755,6 +2755,10 @@ Contract notes:
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
   tokens via `services.getAll()`; the corresponding first-party plugins aggregate and expose them.
   `HTTP_ADAPTER` is single-provider — the runtime plugin registers its `IHttpAdapter` there.
+- `METADATA_STORE` (`'metadata-store'`) is the single-provider capability backing
+  `IPluginContext.metadata`; the DecoratorPlugin registers its `IMetadataStore` there. It is
+  distinct from `OPENAPI` so an OpenAPI plugin registering under `OPENAPI` does not populate
+  `ctx.metadata`.
 
 ---
 

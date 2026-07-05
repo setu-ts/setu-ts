@@ -107,6 +107,8 @@ export const CAPABILITIES = {
   CLI_COMMAND: 'cli-command',
   /** Decorator handler contributions (multi-provider). */
   DECORATOR_HANDLER: 'decorator-handler',
+  /** Decorator metadata store (from the DecoratorPlugin, when registered). */
+  METADATA_STORE: 'metadata-store',
 } as const;
 
 /**
