@@ -3,15 +3,26 @@
 Plugin-first enterprise backend framework. **Deno-first toolchain** (Deno 2 workspaces), published
 to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compatibility.
 
-## Before writing any code
+## Starting a new milestone — READ THESE FIRST (mandatory)
 
-1. Read **AI_GUIDELINES.md** — every rule is mandatory (SOLID, no `any`, no runtime-specific APIs
-   outside `packages/runtime`, capability tokens from `CAPABILITIES`, composition over inheritance,
-   `IXxx` interface naming).
-2. Check **ROADMAP.md** for the current milestone scope. Work on **one package per milestone**; do
-   not start the next until the current one is complete (compiles, tested 90%+, documented).
-3. Any change to a package's `src/index.ts` exports requires updating **PUBLIC_API.md** in the same
-   change, with JSDoc on every export.
+Do NOT write, edit, or scaffold any code until you have read, in this order:
+
+1. **AI_GUIDELINES.md** — in full. Every rule is mandatory (SOLID, no `any`, no runtime-specific
+   APIs outside `packages/runtime`, capability tokens from `CAPABILITIES`, composition over
+   inheritance, `IXxx` interface naming). Also read the "Common pitfalls", "Self-review checklist",
+   and "Before reporting a task done" sections lower in THIS file.
+2. **ROADMAP.md** — the section for the milestone you are starting (its scope, file list, and
+   deliverables) AND the "Progress Tracking" table. Work on **one package per milestone**; do not
+   start the next until the current one is complete (compiles, tested 90%+, documented).
+3. **ARCHITECTURE.md** — the sections relevant to the package you are building (e.g. §6 service
+   registry, §10 middleware pipeline). It explains WHY, not just what.
+4. **PUBLIC_API.md** — the sections for `@hono-enterprise/common` and any package you depend on, so
+   you consume existing interfaces instead of inventing new ones.
+5. **The `@hono-enterprise/common` source** for the interfaces you will implement — implement the
+   committed contracts exactly; do not redefine, widen, or re-declare them.
+
+Only after that, begin. And: any change to a package's `src/index.ts` exports requires updating
+**PUBLIC_API.md** in the same change, with JSDoc on every export.
 
 ## Current status
 
