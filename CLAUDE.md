@@ -49,12 +49,13 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
 - **Milestone 0** (monorepo foundation) — complete (PR #1)
 - **Milestone 1** (`packages/common`) — complete (PR #2)
 - **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
-  application lifecycle) — implemented, PR pending
+  application lifecycle) — complete (PR #3)
 - **Milestone 3** (`packages/runtime` — runtime services for Node/Deno/Bun, detection,
-  RuntimePlugin) — implemented, PR pending. HTTP server adapters **deferred** to Milestone 39 (see
+  RuntimePlugin) — complete (PR #4). HTTP server adapters **deferred** to Milestone 39 (see
   ROADMAP.md) — `IResponse` has no read surface; needs a web-standard Request/Response seam designed
   against the kernel.
-- **Next milestone** — Milestone 4 (`packages/logger-plugin` — structured logging)
+- **Milestone 4** (`packages/logger-plugin` — structured logging) — complete (PR #5)
+- **Next milestone** — Milestone 5 (`packages/config-plugin` — configuration)
 
 ## Verification (run before declaring any work done)
 
@@ -162,6 +163,13 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   clock-mixing smell; `globalThis.__` is a fake-lazy-import smell.
 - **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table and
   the grep result. "Done" without that evidence is not done.
+- **Flip the milestone's status IN the milestone PR, before it merges.** A completed milestone is
+  not done until its ROADMAP.md "Progress Tracking" row is `✅` AND the CLAUDE.md "Current status"
+  section reflects it (mark the finished milestone complete with its PR number and point "Next
+  milestone" at the following one). These edits belong on the milestone's own `feat/…` branch and
+  ship in the SAME PR as the code — a merged PR that left the tracking table at `⬜` is a defect. If
+  you catch a merged milestone whose status was never flipped, correct it on a `fix/…` branch (it is
+  a defect in already-merged `main`), never by editing `main` directly.
 
 ## Key conventions
 
