@@ -868,27 +868,34 @@ childLogger.debug('Processing request');
 app.register(ConfigPlugin({
   envFilePath: ['.env.local', '.env'],
   validationSchema: AppConfigSchema,
-  isGlobal: true,
+  expandVariables: true,
 }));
 ```
 
 **Programmatic API:**
 
 ```typescript
-const config = ctx.services.get<IConfig>('config');
+const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
 const port = config.get<number>('PORT', { default: 3000 });
 const dbUrl = config.getOrThrow<string>('DATABASE_URL');
 ```
 
 **Features:**
 
-- Environment variable loading (runtime-specific via RuntimePlugin)
-- `.env` file parsing
-- Zod schema validation at startup
-- Type-safe access
-- Variable expansion
-- Config caching
-- Hot reload (optional)
+- Environment variable loading via `IRuntimeServices.env`
+- `.env` file parsing via `IRuntimeServices.fs`
+- Zod-compatible schema validation at startup (structural schema interface)
+- Type-safe access (`get`, `getOrThrow`, `has`)
+- Variable expansion (`${NAME}`) with cycle detection
+- Immutable application-startup snapshot (caching without mutable cache API)
+- Hot reload deferred (runtime contract has no file-watching abstraction)
+
+> **Deferred — configuration hot reload:** ConfigPlugin currently reads environment variables and
+> `.env` files once during application startup. Changes made while the application is running take
+> effect only after a restart. Cross-runtime hot reload requires a file-watching abstraction (for
+> example, `IFileSystem.watch`) to be designed and added to `IRuntimeServices`; implementing it
+> directly with Node, Deno, or Bun APIs inside ConfigPlugin would violate runtime independence.
+> Revisit this feature when the runtime filesystem contract is extended.
 
 **Environment Validation:**
 
@@ -914,20 +921,22 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 
 ### Tests
 
-- Env file loading
-- Zod validation
-- Type-safe access
-- Default values
-- Variable expansion
-- Missing required vars throw
-- Runtime-specific loading
+- Env file loading (unit, integration, e2e)
+- Zod validation (real Zod schema in e2e)
+- Type-safe access (unit)
+- Default values (unit)
+- Variable expansion with cycles and missing references (unit)
+- Missing required vars throw (unit)
+- Runtime-specific loading (integration)
+- Precedence: runtime.env > earlier files > later files (integration)
+- Edge runtime: missing fs throws (integration, e2e)
 
 ### Deliverables
 
-- [ ] ConfigPlugin
-- [ ] Env file parsing
-- [ ] Zod validation
-- [ ] Full test coverage
+- [x] ConfigPlugin
+- [x] Env file parsing
+- [x] Zod validation
+- [x] Full test coverage (>90% branches, functions, lines for all src files)
 
 ---
 
@@ -3289,7 +3298,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 2         | ✅     | kernel               |
 | 3         | ✅     | runtime              |
 | 4         | ✅     | logger-plugin        |
-| 5         | ⬜     | config-plugin        |
+| 5         | ✅     | config-plugin        |
 | 6         | ⬜     | validation-plugin    |
 | 7         | ⬜     | exceptions           |
 | 8         | ⬜     | di-plugin            |
