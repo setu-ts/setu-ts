@@ -12,12 +12,17 @@ import type {
 } from '@hono-enterprise/common';
 
 import { match as matchPath, parsePattern, staticSegmentCount } from './route-matcher.ts';
+import type { Segment } from './route-matcher.ts';
 
 interface RouteEntry {
   pattern: string;
   method: HttpMethod;
   definition: RouteDefinition;
   index: number;
+  /** Parsed pattern segments — hoisted to registration time (AI_GUIDELINES §14). */
+  segments: readonly Segment[];
+  /** Static-segment count — hoisted to registration time. */
+  statics: number;
 }
 
 /**
@@ -31,11 +36,16 @@ export class Router implements IRouterApi {
 
   #register(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
+    // Hoist per-request work to registration time (AI_GUIDELINES §14):
+    // parse the pattern once and cache its segments + static count.
+    const segments = parsePattern(path);
     this.#routes.push({
       pattern: path,
       method,
       definition,
       index: this.#index++,
+      segments,
+      statics: staticSegmentCount(segments),
     });
   }
 
@@ -96,12 +106,11 @@ export class Router implements IRouterApi {
       if (entry.method !== method) {
         continue;
       }
-      const segments = parsePattern(entry.pattern);
-      const params = matchPath(segments, path);
+      const params = matchPath(entry.segments, path);
       if (params === null) {
         continue;
       }
-      const statics = staticSegmentCount(segments);
+      const statics = entry.statics;
       if (
         best === null ||
         statics > best.statics ||

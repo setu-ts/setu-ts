@@ -153,4 +153,66 @@ describe('Router', () => {
     const result = router.match('GET', '/users/123/profile');
     expect(result?.params).toEqual({ id: '123' });
   });
+
+  it('GroupRouter: every verb routes through the prefix', () => {
+    const router = new Router();
+    router.group('/api', (r) => {
+      r.put('/p', () => ({ __handlerResult: true } as never));
+      r.patch('/pa', () => ({ __handlerResult: true } as never));
+      r.delete('/d', () => ({ __handlerResult: true } as never));
+      r.head('/h', () => ({ __handlerResult: true } as never));
+      r.options('/o', () => ({ __handlerResult: true } as never));
+    });
+    expect(router.match('PUT', '/api/p')).not.toBe(null);
+    expect(router.match('PATCH', '/api/pa')).not.toBe(null);
+    expect(router.match('DELETE', '/api/d')).not.toBe(null);
+    expect(router.match('HEAD', '/api/h')).not.toBe(null);
+    expect(router.match('OPTIONS', '/api/o')).not.toBe(null);
+  });
+
+  it('GroupRouter: nested groups compose prefixes for every verb', () => {
+    const router = new Router();
+    router.group('/api', (r) => {
+      r.group('/v1', (r2) => {
+        r2.get('/g', () => ({ __handlerResult: true } as never));
+        r2.post('/p', () => ({ __handlerResult: true } as never));
+        r2.put('/pu', () => ({ __handlerResult: true } as never));
+        r2.patch('/pa', () => ({ __handlerResult: true } as never));
+        r2.delete('/d', () => ({ __handlerResult: true } as never));
+        r2.head('/h', () => ({ __handlerResult: true } as never));
+        r2.options('/o', () => ({ __handlerResult: true } as never));
+      });
+    });
+    expect(router.match('GET', '/api/v1/g')).not.toBe(null);
+    expect(router.match('POST', '/api/v1/p')).not.toBe(null);
+    expect(router.match('PUT', '/api/v1/pu')).not.toBe(null);
+    expect(router.match('PATCH', '/api/v1/pa')).not.toBe(null);
+    expect(router.match('DELETE', '/api/v1/d')).not.toBe(null);
+    expect(router.match('HEAD', '/api/v1/h')).not.toBe(null);
+    expect(router.match('OPTIONS', '/api/v1/o')).not.toBe(null);
+  });
+
+  it('GroupRouter: group with "/" path resolves to the bare prefix', () => {
+    const router = new Router();
+    router.group('/api', (r) => {
+      r.get('/', () => ({ __handlerResult: true } as never));
+    });
+    expect(router.match('GET', '/api')).not.toBe(null);
+  });
+
+  it('getAll returns every registered route with method and pattern', () => {
+    const router = new Router();
+    router.get('/a', () => ({ __handlerResult: true } as never));
+    router.group('/api', (r) => {
+      r.post('/b', () => ({ __handlerResult: true } as never));
+      r.put('/c', () => ({ __handlerResult: true } as never));
+    });
+    const all = router.getAll();
+    expect(all.length).toBe(3);
+    expect(all.map((e) => `${e.method} ${e.pattern}`).sort()).toEqual([
+      'GET /a',
+      'POST /api/b',
+      'PUT /api/c',
+    ]);
+  });
 });

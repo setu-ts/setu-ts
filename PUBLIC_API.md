@@ -2797,6 +2797,10 @@ Contract notes:
   `services.getAll()`.
 - `ctx.runtime` is a lazy getter that resolves `CAPABILITIES.RUNTIME` on access, so the runtime
   plugin itself does not trip over it during its own registration.
+- Route middleware uses the same `next()`-chaining semantics as the global pipeline: a stage that
+  responds without calling `next()` short-circuits, and the handler does not run. As
+  defense-in-depth, a stage that responds AND calls `next()` still does not let downstream stages
+  overwrite the response (the chain stops once the response is ended).
 
 ---
 

@@ -25,9 +25,10 @@ import type {
   MetricConfig,
   StartOptions,
 } from '@hono-enterprise/common';
-import type { IRequest, IRequestContext } from '@hono-enterprise/common';
+import type { IRequest } from '@hono-enterprise/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
+import { executeChain } from '../pipeline/execute-chain.ts';
 import { resolvePluginOrder } from '../registry/plugin-resolver.ts';
 import { ServiceRegistry } from '../registry/service-registry.ts';
 import { Router } from '../router/router.ts';
@@ -200,14 +201,14 @@ class Application implements IKernelApplication {
       runtime: () => registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
       config: () => registry.get<IConfig>(CAPABILITIES.CONFIG),
       logger: () => registry.get<ILogger>(CAPABILITIES.LOGGER),
-      metadata: () => registry.get<IMetadataStore>(CAPABILITIES.OPENAPI),
+      metadata: () => registry.get<IMetadataStore>(CAPABILITIES.METADATA_STORE),
       container: () => registry.get<IContainer>(CAPABILITIES.DI_CONTAINER),
     };
     const lazyAvailable: Record<string, () => boolean> = {
       runtime: () => registry.has(CAPABILITIES.RUNTIME),
       config: () => registry.has(CAPABILITIES.CONFIG),
       logger: () => registry.has(CAPABILITIES.LOGGER),
-      metadata: () => registry.has(CAPABILITIES.OPENAPI),
+      metadata: () => registry.has(CAPABILITIES.METADATA_STORE),
       container: () => registry.has(CAPABILITIES.DI_CONTAINER),
     };
 
@@ -278,10 +279,20 @@ class Application implements IKernelApplication {
   }
 
   async stop(): Promise<void> {
+    // No-op if the application never started (e.g. a failed start() or a
+    // bare createApplication() used only for inject()). Avoids a confusing
+    // "No service registered for capability 'runtime'" from #drainRequests.
+    if (!this.#started) {
+      return;
+    }
+
     this.#stopping = true;
 
-    // Wait for in-flight requests to drain (max 10s)
-    await this.#drainRequests();
+    // Wait for in-flight requests to drain (max 10s) only when a runtime
+    // is available — it never is when start() never ran.
+    if (this.#registry.has(CAPABILITIES.RUNTIME)) {
+      await this.#drainRequests();
+    }
 
     // Close server if listening
     if (this.#serverHandle !== null) {
@@ -360,7 +371,8 @@ class Application implements IKernelApplication {
 
     this.#inFlight++;
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    const ctx = createRequestContext(request, this.#registry, runtime);
+    const handle = createRequestContext(request, this.#registry, runtime);
+    const ctx = handle.ctx;
 
     try {
       // Run onRequest hooks
@@ -378,16 +390,21 @@ class Application implements IKernelApplication {
           return;
         }
 
-        // Apply route middleware then handler
+        // Install matched params via the internal setter (no readonly cast)
         const { definition, params } = routeResult;
-        // Cast to allow mutating params on the context
-        (ctx as IRequestContext & { params: Record<string, string> }).params = params;
+        handle.setParams(params);
 
-        for (const mw of definition.middleware ?? []) {
-          await mw(ctx, async () => {});
-        }
-
-        await definition.handler(ctx);
+        // Route middleware uses the same next()-chaining semantics as the
+        // global pipeline: a stage that responds without calling next()
+        // short-circuits, and the handler does not run. Defense-in-depth
+        // in executeChain also stops stages after the response is ended.
+        await executeChain(
+          definition.middleware ?? [],
+          ctx,
+          async () => {
+            await definition.handler(ctx);
+          },
+        );
       });
 
       // Run onResponse hooks
@@ -459,8 +476,14 @@ class Application implements IKernelApplication {
   async #drainRequests(): Promise<void> {
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
     const deadline = runtime.now() + 10_000;
+    // Iteration cap: a manual test clock that never advances would otherwise
+    // spin forever (the deadline never arrives). 200 polls × 50ms ≈ 10s of
+    // real polling under a normal clock, and a hard ceiling regardless.
+    let polls = 0;
+    const MAX_POLLS = 200;
 
-    while (this.#inFlight > 0 && runtime.now() < deadline) {
+    while (this.#inFlight > 0 && runtime.now() < deadline && polls < MAX_POLLS) {
+      polls++;
       // Poll via runtime.setTimeout (max 10s)
       await new Promise<void>((resolve) => {
         runtime.setTimeout(() => resolve(), 50);

@@ -11,6 +11,8 @@ import type {
   MiddlewareOptions,
 } from '@hono-enterprise/common';
 
+import { executeChain } from './execute-chain.ts';
+
 interface MiddlewareEntry {
   fn: MiddlewareFunction;
   priority: number;
@@ -64,26 +66,6 @@ export class MiddlewarePipeline implements IMiddlewareApi {
    */
   async execute(ctx: IRequestContext, terminal: () => Promise<void>): Promise<void> {
     const chain = this.#compiled ?? this.compile();
-    let index = 0;
-
-    const run = async (): Promise<void> => {
-      if (index >= chain.length) {
-        await terminal();
-        return;
-      }
-      const fn = chain[index];
-      index++;
-      let nextCalled = false;
-      const next: () => Promise<void> = () => {
-        if (nextCalled) {
-          throw new Error(`next() called multiple times in middleware ${fn.name ?? '<anonymous>'}`);
-        }
-        nextCalled = true;
-        return run();
-      };
-      await fn(ctx, next);
-    };
-
-    await run();
+    await executeChain(chain, ctx, terminal);
   }
 }

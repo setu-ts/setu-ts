@@ -15,7 +15,7 @@ interface ParamSegment {
   name: string;
 }
 
-type Segment = StaticSegment | ParamSegment;
+export type Segment = StaticSegment | ParamSegment;
 
 /**
  * Parses a route pattern like `/users/:id` into segments.

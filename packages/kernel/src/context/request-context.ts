@@ -12,18 +12,37 @@ import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';
 
 /**
+ * Internal result of {@linkcode createRequestContext}: the immutable
+ * {@linkcode IRequestContext} plus a `setParams` mutator the kernel uses
+ * to install matched route parameters after routing. This shape is NOT
+ * exported from the package public API — only the kernel dispatch path
+ * uses `setParams`.
+ */
+export interface RequestContextHandle {
+  /** The per-request context. */
+  readonly ctx: IRequestContext;
+  /** Replaces the params exposed by `ctx.params` (used after route match). */
+  setParams(params: Record<string, string>): void;
+}
+
+/**
  * Creates a per-request {@linkcode IRequestContext}.
+ *
+ * The returned `ctx.params` is a readonly getter over an internal slot;
+ * use {@linkcode RequestContextHandle.setParams} on the returned handle
+ * to update it after routing (the kernel does this in its dispatch
+ * terminal). This avoids mutating a `readonly` field via a cast.
  *
  * @param request - The incoming request
  * @param registry - The application-scoped service registry (a child is created)
  * @param runtime - Runtime services for uuid and hrtime
- * @returns The request context
+ * @returns The request context handle
  */
 export function createRequestContext(
   request: IRequest,
   registry: ServiceRegistry,
   runtime: IRuntimeServices,
-): IRequestContext {
+): RequestContextHandle {
   const child = registry.createChild();
   const response = new ResponseBuilder();
   const url = new URL(request.url);
@@ -33,14 +52,24 @@ export function createRequestContext(
     query[key] = value;
   }
 
-  return {
+  let params: Record<string, string> = {};
+  const ctx: IRequestContext = {
     id: runtime.uuid(),
     request,
     response,
     services: child,
-    params: {},
+    get params(): Record<string, string> {
+      return params;
+    },
     query,
     state: new Map(),
     startTime: runtime.hrtime(),
+  };
+
+  return {
+    ctx,
+    setParams(next: Record<string, string>): void {
+      params = next;
+    },
   };
 }
