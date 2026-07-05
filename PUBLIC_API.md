@@ -42,6 +42,7 @@
 33. [Developer Ergonomics](#developer-ergonomics)
 34. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
 35. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
+36. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
 
 ---
 
@@ -2801,6 +2802,55 @@ Contract notes:
   responds without calling `next()` short-circuits, and the handler does not run. As
   defense-in-depth, a stage that responds AND calls `next()` still does not let downstream stages
   overwrite the response (the chain stops once the response is ended).
+
+---
+
+## API Reference: @hono-enterprise/runtime
+
+RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, and Bun.
+
+> **M3 provides runtime services only; HTTP server adapters are deferred to a dedicated milestone.**
+
+### Values (runtime exports)
+
+| Export                            | Kind     | Purpose                                                                                    |
+| --------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
+| `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
+| `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
+| `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
+| `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
+| `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
+| `createCloudflareRuntimeServices` | function | Stub — throws (Cloudflare Workers not yet implemented)                                     |
+
+### Types
+
+| Export           | Kind | Purpose                                                        |
+| ---------------- | ---- | -------------------------------------------------------------- |
+| `RuntimeOptions` | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`) |
+| `GlobalScope`    | type | Injectable global scope shape for `detectRuntime`              |
+| `DenoHost`       | type | Host interface for the Deno adapter (extension point)          |
+| `DenoFileInfo`   | type | File info returned by `DenoHost.stat()`                        |
+| `DenoDirEntry`   | type | Directory entry returned by `DenoHost.readdir()`               |
+| `NodeHost`       | type | Host interface for the Node adapter (extension point)          |
+| `NodeFsInfo`     | type | File info returned by `NodeHost.stat()`                        |
+| `NodeModules`    | type | Injectable Node built-ins for `buildNodeHost` (testing seam)   |
+| `BunHost`        | type | Host interface for the Bun adapter (extension point)           |
+| `BunFileInfo`    | type | File info returned by `BunHost.stat()`                         |
+
+Contract notes:
+
+- **M3 provides runtime services only; HTTP server adapters are deferred to a dedicated milestone.**
+  The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`, but `IResponse` is
+  write-only (no read/snapshot surface), so an adapter cannot serialize the response without
+  reaching into kernel internals. That seam needs its own design pass against the kernel.
+- The `RuntimePlugin` is **mandatory** in every application. It registers at
+  `PLUGIN_PRIORITY.HIGHEST` so its services are available to all other plugins during registration.
+- Each adapter factory accepts an injectable `*Host` interface (the documented extension point for
+  custom runtimes). The default host binds to the real runtime global via a single sanctioned `as`
+  cast; no other casts are used.
+- `detectRuntime()` accepts an injectable `globals` parameter (default `globalThis`) so all
+  detection branches are testable without real runtimes.
 
 ---
 
