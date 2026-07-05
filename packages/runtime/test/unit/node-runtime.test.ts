@@ -1,8 +1,177 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createNodeRuntimeServices } from '../../src/adapters/node/node-runtime.ts';
-import type { NodeHost } from '../../src/adapters/node/node-runtime.ts';
+import { buildNodeHost, createNodeRuntimeServices } from '../../src/adapters/node/node-runtime.ts';
+import type {
+  NodeFsOperations,
+  NodeHost,
+  NodeModules,
+} from '../../src/adapters/node/node-runtime.ts';
+
+// ---------------------------------------------------------------------------
+// Fake NodeModules — in-memory fs stub with a Stats-like return from stat()
+// ---------------------------------------------------------------------------
+
+function createFakeNodeModules(
+  overrides?: Partial<NodeModules>,
+): NodeModules {
+  const files = new Map<string, Uint8Array>();
+
+  const fakeFs = {
+    readFile: (path: string) => {
+      const data = files.get(path);
+      if (data === undefined) {
+        return Promise.reject(new Error(`ENOENT: ${path}`));
+      }
+      return Promise.resolve(data);
+    },
+    writeFile: (path: string, data: Uint8Array) => {
+      files.set(path, data);
+      return Promise.resolve();
+    },
+    stat: (path: string) => {
+      if (files.has(path)) {
+        return Promise.resolve({
+          isFile: () => true,
+          isDirectory: () => false,
+          size: files.get(path)!.length,
+          mtime: new Date('2025-01-01T00:00:00Z'),
+        } as never);
+      }
+      return Promise.resolve({
+        isFile: () => false,
+        isDirectory: () => true,
+        size: 0,
+        mtime: new Date('2025-01-01T00:00:00Z'),
+      } as never);
+    },
+    readdir: (path: string) => {
+      const entries: string[] = [];
+      for (const key of files.keys()) {
+        if (key.startsWith(path + '/')) {
+          entries.push(key.split('/').pop()!);
+        }
+      }
+      return Promise.resolve(entries);
+    },
+    mkdir: (_path: string) => Promise.resolve(),
+    rm: (path: string) => {
+      files.delete(path);
+      return Promise.resolve();
+    },
+  };
+
+  const fakeProc = {
+    version: 'v20.10.0',
+    env: { NODE_ENV: 'test' } as Record<string, string | undefined>,
+    exit: (code?: number) => {
+      throw new Error(`exit(${code ?? 0})`);
+    },
+  };
+
+  const fakeHostname = () => 'fake-hostname';
+
+  return {
+    fs: fakeFs as NodeFsOperations,
+    proc: fakeProc as NodeModules['proc'],
+    hostname: fakeHostname,
+    ...overrides,
+  };
+}
+
+describe('buildNodeHost', () => {
+  it('sets nodeVersion from proc.version', () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    expect(host.nodeVersion).toBe('v20.10.0');
+  });
+
+  it('sets hostname by calling mods.hostname()', () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    expect(host.hostname).toBe('fake-hostname');
+  });
+
+  it('sets env from proc.env', () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    expect(host.env.NODE_ENV).toBe('test');
+  });
+
+  it('exit() calls proc.exit()', () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    expect(() => host.exit(42)).toThrow('exit(42)');
+  });
+
+  it('exit() with no code calls proc.exit()', () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    expect(() => host.exit()).toThrow('exit(0)');
+  });
+
+  it('readFile delegates to fs.readFile', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    await host.writeFile('/readFile-test.txt', new Uint8Array([10, 20, 30]));
+    const data = await host.readFile('/readFile-test.txt');
+    expect(Array.from(data)).toEqual([10, 20, 30]);
+  });
+
+  it('writeFile delegates to fs.writeFile', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    await host.writeFile('/writeFile-test.txt', new Uint8Array([1, 2, 3]));
+    const read = await host.readFile('/writeFile-test.txt');
+    expect(Array.from(read)).toEqual([1, 2, 3]);
+  });
+
+  it('stat maps to NodeFsInfo with isFile true', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    await host.writeFile('/stat-file.txt', new Uint8Array([100]));
+    const info = await host.stat('/stat-file.txt');
+    expect(info.isFile).toBe(true);
+    expect(info.isDirectory).toBe(false);
+    expect(info.size).toBe(1);
+    expect(info.mtime).toBeInstanceOf(Date);
+  });
+
+  it('stat maps to NodeFsInfo with isDirectory true', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    // A path that has no file entry — the fake returns directory
+    const info = await host.stat('/nonexistent');
+    expect(info.isFile).toBe(false);
+    expect(info.isDirectory).toBe(true);
+  });
+
+  it('readdir delegates to fs.readdir', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    await host.writeFile('/dir/a.txt', new Uint8Array([1]));
+    await host.writeFile('/dir/b.txt', new Uint8Array([2]));
+    const entries = await host.readdir('/dir');
+    expect(entries).toContain('a.txt');
+    expect(entries).toContain('b.txt');
+  });
+
+  it('mkdir delegates to fs.mkdir', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    // Should not throw
+    await host.mkdir('/new-dir', { recursive: true });
+  });
+
+  it('rm delegates to fs.rm', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    await host.writeFile('/rm-test.txt', new Uint8Array([1]));
+    await host.rm('/rm-test.txt');
+    // After rm, readFile should fail (file deleted from fake in-memory map)
+    await expect(host.readFile('/rm-test.txt')).rejects.toThrow('ENOENT');
+  });
+});
 
 function createFakeNodeHost(overrides: Partial<NodeHost> = {}): NodeHost {
   const files = new Map<string, Uint8Array>();

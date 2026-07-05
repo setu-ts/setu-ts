@@ -51,10 +51,10 @@ export interface AdapterFactories {
 }
 
 const defaultAdapters: AdapterFactories = {
-  deno: () => createDenoRuntimeServices(),
-  node: () => createNodeRuntimeServices(),
-  bun: () => createBunRuntimeServices(),
-  'cloudflare-workers': () => createCloudflareRuntimeServices(),
+  deno: createDenoRuntimeServices,
+  node: createNodeRuntimeServices,
+  bun: createBunRuntimeServices,
+  'cloudflare-workers': createCloudflareRuntimeServices,
 };
 
 /**

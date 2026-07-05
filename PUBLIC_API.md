@@ -2817,6 +2817,7 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 | --------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
 | `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
 | `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
+| `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
 | `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
 | `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
@@ -2833,6 +2834,7 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 | `DenoDirEntry`   | type | Directory entry returned by `DenoHost.readdir()`               |
 | `NodeHost`       | type | Host interface for the Node adapter (extension point)          |
 | `NodeFsInfo`     | type | File info returned by `NodeHost.stat()`                        |
+| `NodeModules`    | type | Injectable Node built-ins for `buildNodeHost` (testing seam)   |
 | `BunHost`        | type | Host interface for the Bun adapter (extension point)           |
 | `BunFileInfo`    | type | File info returned by `BunHost.stat()`                         |
 

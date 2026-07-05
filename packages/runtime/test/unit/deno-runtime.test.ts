@@ -204,3 +204,32 @@ describe('createDenoRuntimeServices', () => {
     expect(typeof services.clearInterval).toBe('function');
   });
 });
+
+describe('createDenoRuntimeServices — mtime null branch', () => {
+  it('omits mtime when stat returns mtime: null', async () => {
+    const host: DenoHost = {
+      version: { deno: '2.7.5' },
+      hostname: () => 'host',
+      env: { toObject: () => ({}) },
+      exit: () => {
+        throw new Error('exit');
+      },
+      readFile: () => Promise.resolve(new Uint8Array()),
+      writeFile: () => Promise.resolve(),
+      stat: () =>
+        Promise.resolve({
+          isFile: true,
+          isDirectory: false,
+          size: 0,
+          mtime: null,
+        }),
+      readdir: () => [],
+      mkdir: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+    };
+    const services = createDenoRuntimeServices(host);
+    const info = await services.fs!.stat('/any');
+    expect(info.isFile).toBe(true);
+    expect('mtime' in info).toBe(false);
+  });
+});

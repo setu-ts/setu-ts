@@ -22,8 +22,8 @@ export type { GlobalScope } from './detector/runtime-detector.ts';
 export { createDenoRuntimeServices } from './adapters/deno/deno-runtime.ts';
 export type { DenoDirEntry, DenoFileInfo, DenoHost } from './adapters/deno/deno-runtime.ts';
 
-export { createNodeRuntimeServices } from './adapters/node/node-runtime.ts';
-export type { NodeFsInfo, NodeHost } from './adapters/node/node-runtime.ts';
+export { buildNodeHost, createNodeRuntimeServices } from './adapters/node/node-runtime.ts';
+export type { NodeFsInfo, NodeHost, NodeModules } from './adapters/node/node-runtime.ts';
 
 export { createBunRuntimeServices } from './adapters/bun/bun-runtime.ts';
 export type { BunFileInfo, BunHost } from './adapters/bun/bun-runtime.ts';

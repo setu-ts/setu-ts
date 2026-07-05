@@ -169,4 +169,14 @@ describe('RuntimePlugin', () => {
       'No adapter factory for platform: deno',
     );
   });
+
+  it('registers Node services via default adapters', () => {
+    const plugin = RuntimePlugin({ platform: 'node' });
+    const ctx = createFakeContext();
+    plugin.register(ctx as never);
+
+    expect(ctx.services.has(CAPABILITIES.RUNTIME)).toBe(true);
+    const services = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    expect(services.platform()).toBe('node');
+  });
 });

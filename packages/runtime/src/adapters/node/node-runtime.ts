@@ -3,18 +3,63 @@
  * Node.js built-in modules.
  *
  * Uses static `node:` imports (supported by Deno, Node, and Bun). The default
- * host is built directly from those imports. A {@linkcode NodeHost} interface
- * remains as an injection seam for unit tests.
+ * host is built via {@linkcode buildNodeHost} which routes through an injectable
+ * {@linkcode NodeModules} seam so tests can exercise every wrapper without real
+ * I/O or permissions — and without `new Function`/`eval`/`require`.
  *
  * @module
  */
 
 import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
 import { hostname as osHostname } from 'node:os';
-import type { Stats as NodeStats } from 'node:fs';
 import * as nodeFs from 'node:fs/promises';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+
+// ---------------------------------------------------------------------------
+// Injection seam — Node built-ins that the adapter needs
+// ---------------------------------------------------------------------------
+
+/**
+ * The Node built-ins this adapter needs. Injectable for testing.
+ *
+ * Tests pass a fake implementation (in-memory fs, mock process, fake hostname)
+ * so every wrapper in the adapter executes without real I/O or permissions.
+ */
+/** File-system operations needed by the Node adapter. */
+export interface NodeFsOperations {
+  readFile(path: string): Promise<Uint8Array | Buffer>;
+  writeFile(path: string, data: Uint8Array | Buffer): Promise<void>;
+  stat(path: string): Promise<StatsLike>;
+  readdir(path: string): Promise<string[]>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<string | void>;
+  rm(path: string, options?: { recursive?: boolean }): Promise<void>;
+}
+
+/** Minimal shape of the Stats object returned by fs.stat(). */
+export interface StatsLike {
+  isFile(): boolean;
+  isDirectory(): boolean;
+  size: number;
+  mtime: Date;
+}
+
+export interface NodeModules {
+  /** File-system operations (compatible with `node:fs/promises`). */
+  fs: NodeFsOperations;
+  /** Process object (version, env, exit). */
+  proc: {
+    version: string;
+    env: Record<string, string | undefined>;
+    exit: (code?: number) => never;
+  };
+  /** Hostname function (from `node:os`). */
+  hostname: () => string;
+}
+
+// ---------------------------------------------------------------------------
+// Host interface — what the adapter factory consumes
+// ---------------------------------------------------------------------------
 
 /**
  * Minimal interface covering the Node-specific operations used by this adapter.
@@ -51,6 +96,50 @@ export interface NodeFsInfo {
   mtime: Date;
 }
 
+// ---------------------------------------------------------------------------
+// Factory — builds a NodeHost from injected modules
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a {@linkcode NodeHost} from injected modules (defaults to the real
+ * `node:` built-ins).
+ *
+ * @param mods - Injectable Node modules (defaults to real `node:` built-ins)
+ * @returns A fully-wired NodeHost
+ */
+export function buildNodeHost(
+  mods: NodeModules = { fs: nodeFs, proc: process, hostname: osHostname },
+): NodeHost {
+  return {
+    nodeVersion: mods.proc.version,
+    hostname: mods.hostname(),
+    env: mods.proc.env,
+    exit: (code?: number) => mods.proc.exit(code),
+    readFile: (path: string) => mods.fs.readFile(path) as Promise<Uint8Array>,
+    writeFile: (path: string, data: Uint8Array) => mods.fs.writeFile(path, data) as Promise<void>,
+    stat: (path: string): Promise<NodeFsInfo> =>
+      mods.fs.stat(path).then((st: StatsLike) => ({
+        isFile: st.isFile(),
+        isDirectory: st.isDirectory(),
+        size: st.size,
+        mtime: st.mtime,
+      })),
+    readdir: (path: string): Promise<readonly string[]> =>
+      mods.fs.readdir(path) as Promise<readonly string[]>,
+    mkdir: (path: string, options?: { recursive?: boolean }): Promise<void> =>
+      mods.fs.mkdir(path, options) as Promise<void>,
+    rm: (path: string, options?: { recursive?: boolean }): Promise<void> =>
+      mods.fs.rm(path, options) as Promise<void>,
+  };
+}
+
+/** Default {@linkcode NodeHost} backed by static `node:` imports. */
+const defaultNodeHost: NodeHost = buildNodeHost();
+
+// ---------------------------------------------------------------------------
+// Public adapter factory
+// ---------------------------------------------------------------------------
+
 /**
  * Creates {@linkcode IRuntimeServices} backed by Node.js APIs.
  *
@@ -78,39 +167,3 @@ export function createNodeRuntimeServices(
     fs: fsImpl,
   });
 }
-
-// ---------------------------------------------------------------------------
-// Default Node host — built from static node: imports (Deno/Node/Bun compatible).
-// ---------------------------------------------------------------------------
-
-/** Default {@linkcode NodeHost} backed by static `node:` imports. */
-const defaultNodeHost: NodeHost = {
-  get nodeVersion() {
-    return process.version;
-  },
-  get hostname() {
-    return osHostname();
-  },
-  get env() {
-    return process.env;
-  },
-  exit(code?: number): never {
-    process.exit(code);
-    throw new Error('unreachable');
-  },
-  readFile: (path: string) => nodeFs.readFile(path) as Promise<Uint8Array>,
-  writeFile: (path: string, data: Uint8Array) => nodeFs.writeFile(path, data) as Promise<void>,
-  stat: (path: string): Promise<NodeFsInfo> =>
-    nodeFs.stat(path).then((st: NodeStats) => ({
-      isFile: st.isFile(),
-      isDirectory: st.isDirectory(),
-      size: st.size,
-      mtime: st.mtime,
-    })),
-  readdir: (path: string): Promise<readonly string[]> =>
-    nodeFs.readdir(path) as Promise<readonly string[]>,
-  mkdir: (path: string, options?: { recursive?: boolean }): Promise<void> =>
-    nodeFs.mkdir(path, options) as Promise<void>,
-  rm: (path: string, options?: { recursive?: boolean }): Promise<void> =>
-    nodeFs.rm(path, options) as Promise<void>,
-};
