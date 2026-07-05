@@ -48,6 +48,10 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
   hard-fails below expectations.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
+- `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
+  catches `eval()` but NOT `new Function()` — the gates will not flag it, so this is on you. To load
+  Node builtins in `packages/runtime`, use static `node:` imports (Deno/Node/Bun all support them),
+  never a smuggled `require`.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 
