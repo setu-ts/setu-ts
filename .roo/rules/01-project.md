@@ -66,6 +66,26 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
 - **Hoist per-request work to registration time**: parse route patterns, compile chains, and build
   lookup structures once at startup, never per request (AI_GUIDELINES §14).
 
+## Before reporting a task done (evidence, not vibes)
+
+Passing gates is necessary but NOT sufficient — these misses all passed the gates:
+
+- **A no-op change passes every gate.** A mis-quoted flag (`"--exclude='/test/'"` in an args array),
+  a `@ts-ignore`, a `new Function` shim, a test that asserts nothing — all green, all wrong. Prove
+  the change does what it claims: for a config/flag/exclude change, show the before→after behavior
+  difference; for a bug fix, confirm the test fails WITHOUT the fix and passes with it.
+- **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.**
+  `deno coverage` colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
+  into a false "OK"). Pipe through `sed 's/\x1b\[[0-9;]*m//g'` and confirm every changed `src` file
+  is ≥90% on branch, function, AND line. Deleting or rewriting a test can drop an UNRELATED file
+  below the bar, and the aggregate will hide it — re-check per file after refactors and deletions,
+  not just additions.
+- **Grep for constructs the gates don't catch**:
+  `grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore" packages/<pkg>/src` — must be empty
+  (comments excepted).
+- **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table and
+  the grep result. "Done" without that evidence is not done.
+
 ## Key conventions
 
 - Tests: `@std/testing/bdd` + `@std/expect`, in `test/{unit,integration,e2e}/` per package.
