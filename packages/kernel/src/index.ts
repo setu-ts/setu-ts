@@ -1,10 +1,18 @@
 /**
  * @module
  *
- * Plugin kernel: plugin registry, service registry, middleware pipeline, router, and application lifecycle.
+ * Plugin kernel: plugin registry, service registry, middleware pipeline, router,
+ * and application lifecycle.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * Every export here is public API and documented in PUBLIC_API.md
+ * (AI_GUIDELINES §10).
  */
-export {};
+
+export type {
+  ApplicationOptions,
+  IKernelApplication,
+  InjectRequest,
+  InjectResponse,
+} from './application/application.ts';
+
+export { createApplication } from './application/application.ts';

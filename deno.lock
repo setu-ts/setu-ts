@@ -64,6 +64,13 @@
     "dependencies": [
       "jsr:@std/expect@^1.0.20",
       "jsr:@std/testing@^1.0.19"
-    ]
+    ],
+    "members": {
+      "packages/kernel": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@0.1"
+        ]
+      }
+    }
   }
 }

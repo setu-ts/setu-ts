@@ -41,6 +41,7 @@
 32. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
 33. [Developer Ergonomics](#developer-ergonomics)
 34. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
+35. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
 
 ---
 
@@ -2749,6 +2750,49 @@ Contract notes:
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
   terminal methods (`json`, `text`, `send`, `redirect`).
+- **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
+  (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
+  are multi-provider capabilities. The kernel collects plugin contributions registered under these
+  tokens via `services.getAll()`; the corresponding first-party plugins aggregate and expose them.
+  `HTTP_ADAPTER` is single-provider — the runtime plugin registers its `IHttpAdapter` there.
+
+---
+
+## API Reference: @hono-enterprise/kernel
+
+The plugin kernel: resolves plugin dependencies, builds the middleware pipeline and router,
+validates environment variables, and dispatches requests. Implemented in **Milestone 2**; this
+section is the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
+
+### Values (runtime exports)
+
+| Export              | Kind     | Purpose                                                           |
+| ------------------- | -------- | ----------------------------------------------------------------- |
+| `createApplication` | function | Creates a kernel application with optional pre-registered plugins |
+
+### Types
+
+| Export               | Kind | Purpose                                                                            |
+| -------------------- | ---- | ---------------------------------------------------------------------------------- |
+| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                        |
+| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection           |
+| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)        |
+| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`) |
+
+Contract notes:
+
+- **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
+  `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
+  server.
+- The kernel emits only **bare 404/500 JSON** (`{ error: 'Not Found' }` /
+  `{ error: 'Internal Server Error' }`). Error formatting belongs to the exceptions package, not the
+  kernel.
+- **Contribution-token pattern**: `ctx.health.register()`, `ctx.metrics.register()`,
+  `ctx.openapi.addSchema()`, `ctx.cli.register()`, and `ctx.decorators.register()` funnel
+  contributions into multi-provider services under the Step-1 tokens; consumers retrieve them with
+  `services.getAll()`.
+- `ctx.runtime` is a lazy getter that resolves `CAPABILITIES.RUNTIME` on access, so the runtime
+  plugin itself does not trip over it during its own registration.
 
 ---
 

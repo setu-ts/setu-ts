@@ -13,6 +13,14 @@ to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compat
 3. Any change to a package's `src/index.ts` exports requires updating **PUBLIC_API.md** in the same
    change, with JSDoc on every export.
 
+## Current status
+
+- **Milestone 0** (monorepo foundation) — complete (PR #1)
+- **Milestone 1** (`packages/common`) — complete (PR #2)
+- **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
+  application lifecycle) — implemented, PR pending
+- **Milestone 3** (`packages/runtime` — runtime independence) — next
+
 ## Verification (run before declaring any work done)
 
 ```bash
