@@ -46,6 +46,22 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
 
+## Self-review checklist (bugs that slipped through before — check every time)
+
+- **Per-file coverage, not aggregate**: the 90% bar applies to every file under `src/` — read the
+  per-file table from `deno task test:coverage`. Test fixtures belong under `test/` and are excluded
+  from coverage measurement.
+- **Token ↔ interface binding is fixed**: a service resolved from a `CAPABILITIES` token must be
+  typed as that token's documented interface. Never resolve one token and cast to another interface.
+  If no token fits the need, add one to `CAPABILITIES` (that is a public API change — update
+  PUBLIC_API.md).
+- **Short-circuit tests are mandatory**: any chain/dispatch mechanism (global middleware, route
+  middleware, guards, hooks) needs an explicit test proving that when a stage responds without
+  calling `next()`, downstream stages — including the handler — do NOT run and cannot overwrite the
+  response.
+- **Hoist per-request work to registration time**: parse route patterns, compile chains, and build
+  lookup structures once at startup, never per request (AI_GUIDELINES §14).
+
 ## Key conventions
 
 - Tests: `@std/testing/bdd` + `@std/expect`, in `test/{unit,integration,e2e}/` per package.
