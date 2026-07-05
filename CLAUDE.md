@@ -15,9 +15,11 @@ to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compat
 
 ## Current status
 
-- **Milestone 0** (monorepo foundation) — complete (PR #1 merged, CI green)
-- **Milestone 1** (`packages/common` — types and capability tokens) — implemented, PR pending
-- **Next: Milestone 2** (`packages/kernel` — plugin kernel and service registry)
+- **Milestone 0** (monorepo foundation) — complete (PR #1)
+- **Milestone 1** (`packages/common`) — complete (PR #2)
+- **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
+  application lifecycle) — implemented, PR pending
+- **Milestone 3** (`packages/runtime` — runtime independence) — next
 
 ## Verification (run before declaring any work done)
 
@@ -29,6 +31,35 @@ deno task test
 ```
 
 All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
+
+## Common pitfalls (these fail the gates)
+
+- `exactOptionalPropertyTypes` is on: never assign `undefined` to an optional property — omit it.
+- The `verbatim-module-syntax` lint rule requires `import type { … }` for type-only imports.
+- `no-console` applies everywhere except `packages/cli` and `scripts/` (scripts use
+  `// deno-lint-ignore-file no-console` with a reason).
+- Unused variables fail lint — delete them; do not underscore-prefix.
+- Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
+- `scripts/coverage.ts` tolerates empty coverage only while packages are stubs; with real code it
+  hard-fails below expectations.
+- Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
+  behind `IRuntimeServices` only.
+
+## Self-review checklist (bugs that slipped through before — check every time)
+
+- **Per-file coverage, not aggregate**: the 90% bar applies to every file under `src/` — read the
+  per-file table from `deno task test:coverage`. Test fixtures belong under `test/` and are excluded
+  from coverage measurement.
+- **Token ↔ interface binding is fixed**: a service resolved from a `CAPABILITIES` token must be
+  typed as that token's documented interface. Never resolve one token and cast to another interface.
+  If no token fits the need, add one to `CAPABILITIES` (that is a public API change — update
+  PUBLIC_API.md).
+- **Short-circuit tests are mandatory**: any chain/dispatch mechanism (global middleware, route
+  middleware, guards, hooks) needs an explicit test proving that when a stage responds without
+  calling `next()`, downstream stages — including the handler — do NOT run and cannot overwrite the
+  response.
+- **Hoist per-request work to registration time**: parse route patterns, compile chains, and build
+  lookup structures once at startup, never per request (AI_GUIDELINES §14).
 
 ## Key conventions
 

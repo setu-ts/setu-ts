@@ -646,12 +646,12 @@ await app.start();
 
 ### Deliverables
 
-- [ ] Plugin kernel
-- [ ] Service registry
-- [ ] Middleware pipeline
-- [ ] Router with programmatic API
-- [ ] Application lifecycle
-- [ ] Full test coverage
+- [x] Plugin kernel
+- [x] Service registry
+- [x] Middleware pipeline
+- [x] Router with programmatic API
+- [x] Application lifecycle
+- [x] Full test coverage
 
 ---
 
@@ -3245,7 +3245,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | --------- | ------ | -------------------- |
 | 0         | ✅     | Monorepo Foundation  |
 | 1         | ✅     | common               |
-| 2         | ⬜     | kernel               |
+| 2         | ✅     | kernel               |
 | 3         | ⬜     | runtime              |
 | 4         | ⬜     | logger-plugin        |
 | 5         | ⬜     | config-plugin        |

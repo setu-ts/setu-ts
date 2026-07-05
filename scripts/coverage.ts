@@ -8,7 +8,12 @@
  * hard error, so `deno task test:coverage` stays honest once real code lands.
  */
 const command = new Deno.Command('deno', {
-  args: ['coverage', 'coverage'],
+  // Exclude test code from coverage measurement. The pattern `/test/` (with
+  // slashes) matches `packages/*/test/**` while leaving `packages/testing/src/**`
+  // measured — a bare `test` would also exclude the testing package's source.
+  // Each element is passed to deno verbatim (no shell), so the flag value must
+  // NOT be quoted — quotes would become part of the regex and disable it.
+  args: ['coverage', 'coverage', '--exclude=/test/'],
   stdout: 'inherit',
   stderr: 'piped',
 });

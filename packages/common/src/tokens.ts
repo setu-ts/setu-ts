@@ -95,6 +95,20 @@ export const CAPABILITIES = {
   MULTI_TENANCY: 'multi-tenancy',
   /** Optional dependency injection container. */
   DI_CONTAINER: 'di-container',
+  /** HTTP server adapter — the runtime plugin registers its IHttpAdapter here. */
+  HTTP_ADAPTER: 'http-adapter',
+  /** Health indicator contributions (multi-provider). */
+  HEALTH_INDICATOR: 'health-indicator',
+  /** Metric registration contributions (multi-provider). */
+  METRIC_REGISTRATION: 'metric-registration',
+  /** OpenAPI schema contributions (multi-provider). */
+  OPENAPI_SCHEMA: 'openapi-schema',
+  /** CLI command contributions (multi-provider). */
+  CLI_COMMAND: 'cli-command',
+  /** Decorator handler contributions (multi-provider). */
+  DECORATOR_HANDLER: 'decorator-handler',
+  /** Decorator metadata store (from the DecoratorPlugin, when registered). */
+  METADATA_STORE: 'metadata-store',
 } as const;
 
 /**
