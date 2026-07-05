@@ -15,11 +15,8 @@ to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compat
 
 ## Current status
 
-- **Milestone 0** (monorepo foundation) — complete (PR #1)
-- **Milestone 1** (`packages/common`) — complete (PR #2)
-- **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
-  application lifecycle) — implemented, PR pending
-- **Milestone 3** (`packages/runtime` — runtime independence) — next
+See the "Current status" section of `CLAUDE.md` — it is the single source of truth for milestone
+status. Do not duplicate it here (this file would drift out of date).
 
 ## Verification (run before declaring any work done)
 
