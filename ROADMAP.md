@@ -3288,7 +3288,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 1         | ✅     | common               |
 | 2         | ✅     | kernel               |
 | 3         | ✅     | runtime              |
-| 4         | ⬜     | logger-plugin        |
+| 4         | ✅     | logger-plugin        |
 | 5         | ⬜     | config-plugin        |
 | 6         | ⬜     | validation-plugin    |
 | 7         | ⬜     | exceptions           |
