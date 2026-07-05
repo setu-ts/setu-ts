@@ -19,7 +19,11 @@ to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compat
 - **Milestone 1** (`packages/common`) — complete (PR #2)
 - **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
   application lifecycle) — implemented, PR pending
-- **Milestone 3** (`packages/runtime` — runtime independence) — next
+- **Milestone 3** (`packages/runtime` — runtime services for Node/Deno/Bun, detection,
+  RuntimePlugin) — implemented, PR pending. HTTP server adapters **deferred** to Milestone 39 (see
+  ROADMAP.md) — `IResponse` has no read surface; needs a web-standard Request/Response seam designed
+  against the kernel.
+- **Next milestone** — Milestone 4 (`packages/logger-plugin` — structured logging)
 
 ## Verification (run before declaring any work done)
 

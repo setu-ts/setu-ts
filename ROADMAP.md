@@ -659,6 +659,13 @@ await app.start();
 
 **Objective:** Provide runtime-agnostic services (UUID, timers, crypto, fs, env).
 
+> **Scope change:** HTTP server adapters are **deferred** to a new milestone (see "HTTP Server
+> Adapters" at the end of the milestone list). M3 scope is runtime services + detection + plugin
+> only. The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`, but `IResponse` is
+> write-only (no read/snapshot surface), so an adapter cannot serialize the response without
+> reaching into kernel internals. That seam needs its own design pass against the kernel. The
+> framework already runs via `app.inject()` with no server, so nothing is blocked.
+
 ### Package: `@hono-enterprise/runtime`
 
 **Runtime Services Interface:**
@@ -770,11 +777,11 @@ const app = createApplication({
 
 ### Deliverables
 
-- [ ] Runtime services interface
-- [ ] Node, Deno, Bun adapters
-- [ ] HTTP server adapters
-- [ ] Runtime auto-detection
-- [ ] Full test coverage
+- [x] Runtime services interface
+- [x] Node, Deno, Bun adapters
+- [ ] HTTP server adapters (deferred — see "HTTP Server Adapters" milestone)
+- [x] Runtime auto-detection
+- [x] Full test coverage
 
 ---
 
@@ -3114,6 +3121,40 @@ sensible defaults.
 
 ---
 
+## Milestone 39: HTTP Server Adapters
+
+**Objective:** Provide HTTP server adapters for Node.js, Deno, and Bun, registering them under
+`CAPABILITIES.HTTP_ADAPTER` so the kernel can listen on a real port.
+
+> **Deferred from Milestone 3.** The `IHttpAdapter` contract in `common` hands the adapter a
+> `Promise<IResponse>`, but `IResponse` is write-only (no read/snapshot surface), so an adapter
+> cannot serialize the response without reaching into kernel internals. This milestone designs a
+> web-standard `Request`/`Response` seam against the kernel before implementing the adapters. The
+> framework already runs via `app.inject()` with no server, so nothing is blocked by the deferral.
+
+### Package: `@hono-enterprise/runtime` (continued)
+
+**Tasks:**
+
+1. Design a response-snapshot/read seam on `IResponse` (or a new `IResponseSnapshot` interface) that
+   lets an HTTP adapter serialize the response using web-standard `Response` without reaching into
+   kernel internals.
+2. Implement HTTP server adapters:
+   - `NodeHttpAdapter` — Node.js `http` module
+   - `DenoHttpAdapter` — Deno `serve` API
+   - `BunHttpAdapter` — `Bun.serve`
+3. Register adapters under `CAPABILITIES.HTTP_ADAPTER` via the `RuntimePlugin`.
+4. Wire `app.start({ port })` to create and listen on the adapter.
+
+### Deliverables
+
+- [ ] Response read/snapshot seam designed and implemented
+- [ ] Node, Deno, Bun HTTP server adapters
+- [ ] `app.start({ port })` listens on a real server
+- [ ] Full test coverage (request/response round-trip per adapter)
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -3246,7 +3287,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 0         | ✅     | Monorepo Foundation  |
 | 1         | ✅     | common               |
 | 2         | ✅     | kernel               |
-| 3         | ⬜     | runtime              |
+| 3         | ✅     | runtime              |
 | 4         | ⬜     | logger-plugin        |
 | 5         | ⬜     | config-plugin        |
 | 6         | ⬜     | validation-plugin    |
@@ -3282,3 +3323,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 36        | ⬜     | documentation        |
 | 37        | ⬜     | docker/kubernetes    |
 | 38        | ⬜     | final release        |
+| 39        | ⬜     | http-adapters        |
