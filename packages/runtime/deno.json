@@ -5,5 +5,10 @@
   "imports": {
     "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0",
     "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0"
+  },
+  "test": {
+    "permissions": {
+      "sys": ["hostname"]
+    }
   }
 }
