@@ -346,12 +346,15 @@ The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child l
 
 ## ConfigPlugin()
 
-Provides strongly-typed configuration with environment validation.
+Provides strongly-typed configuration with environment validation and `.env` file loading.
+Configuration is an immutable application-startup snapshot — values are loaded once at startup and
+never mutated. Hot reload is deferred (the runtime contract has no file-watching abstraction).
 
 ### Registration
 
 ```typescript
 import { ConfigPlugin } from '@hono-enterprise/config-plugin';
+import { CAPABILITIES } from '@hono-enterprise/common';
 import { z } from 'zod';
 
 const AppConfigSchema = z.object({
@@ -366,8 +369,6 @@ const AppConfigSchema = z.object({
 app.register(ConfigPlugin({
   envFilePath: ['.env.local', '.env'],
   validationSchema: AppConfigSchema,
-  isGlobal: true,
-  cache: true,
   expandVariables: true,
 }));
 ```
@@ -376,7 +377,7 @@ app.register(ConfigPlugin({
 
 ```typescript
 app.router.get('/config', (ctx) => {
-  const config = ctx.services.get<IConfig>('config');
+  const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
 
   return ctx.response.json({
     port: config.get<number>('PORT'),
@@ -391,17 +392,74 @@ app.router.get('/config', (ctx) => {
 
 ```typescript
 interface IConfig {
-  get<T>(key: string, options?: { default?: T; throwOnMissing?: boolean }): T;
+  get<T>(key: string): T | undefined;
+  get<T>(key: string, options: { readonly default: T }): T;
   getOrThrow<T>(key: string): T;
   has(key: string): boolean;
-  set(key: string, value: unknown): void;
-  getAll(): Record<string, unknown>;
-  parseBoolean(value: string): boolean;
-  parseNumber(value: string): number;
-  parseArray(value: string): string[];
-  parseJSON<T>(value: string): T;
 }
 ```
+
+### ConfigPluginOptions
+
+```typescript
+interface ConfigPluginOptions {
+  readonly envFilePath?: string | readonly string[];
+  readonly validationSchema?: StructuralSchema<unknown>;
+  readonly expandVariables?: boolean;
+}
+```
+
+- **`envFilePath`** — Path or paths to `.env` files. Defaults to no file loading. When supplied, the
+  runtime must provide `fs` (absent on edge platforms).
+- **`validationSchema`** — A Zod-compatible schema for startup validation. The schema's `parse()` is
+  called once after merging and expansion; the parsed output is stored as the configuration
+  snapshot, preserving Zod coercions and defaults.
+- **`expandVariables`** — When `true` (default), expand `${NAME}` references in values using the
+  final merged configuration.
+
+### StructuralSchema\<T\>
+
+```typescript
+interface StructuralSchema<T> {
+  parse(input: unknown): T;
+}
+```
+
+Minimal schema interface compatible with Zod's `parse(unknown)` API. Consumers supply a Zod schema
+without `config-plugin` depending on Zod.
+
+### Configuration Precedence
+
+Values are merged in the following order (highest precedence first):
+
+1. **Environment variables** (`runtime.env`)
+2. **Earlier file paths** (`.env.local` overrides `.env`)
+3. **Later file paths**
+
+`undefined` entries in `runtime.env` are filtered out.
+
+Variable references are expanded only after all sources have been merged, so file values may
+reference `runtime.env`, runtime values may reference files, and references may cross file
+boundaries. Cycles or missing references fail startup unless expansion is disabled.
+
+### Dotenv Parsing
+
+Configured files use strict parsing. Blank lines, comments, optional `export` prefixes, quoted and
+unquoted values, common double-quoted escapes, empty values, and inline comments are supported.
+Malformed entries, invalid keys, and unterminated quotes fail startup with a line number but do not
+include rejected values in the error message.
+
+Schema validation failures use a stable, value-free error message so validator diagnostics cannot
+leak configuration secrets.
+
+### Edge Runtimes
+
+On edge platforms where `runtime.fs` is `undefined`, `envFilePath` must not be set. Attempting to do
+so throws a clear startup error.
+
+### Hot Reload
+
+**Deferred.** Configuration is an immutable application-startup snapshot.
 
 ---
 

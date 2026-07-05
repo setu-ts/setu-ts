@@ -55,7 +55,9 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
   ROADMAP.md) — `IResponse` has no read surface; needs a web-standard Request/Response seam designed
   against the kernel.
 - **Milestone 4** (`packages/logger-plugin` — structured logging) — complete (PR #5)
-- **Next milestone** — Milestone 5 (`packages/config-plugin` — configuration)
+- **Milestone 5** (`packages/config-plugin` — configuration with env loading, variable expansion,
+  and Zod-compatible validation) — complete (PR pending)
+- **Next milestone** — Milestone 6 (`packages/validation-plugin` — Zod-based validation)
 
 ## Verification (run before declaring any work done)
 

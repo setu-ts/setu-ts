@@ -11,7 +11,8 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.19": "1.0.19",
-    "npm:pino@*": "10.3.1"
+    "npm:pino@*": "10.3.1",
+    "npm:zod@^3.24.0": "3.25.76"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -126,6 +127,9 @@
       "dependencies": [
         "real-require@1.0.0"
       ]
+    },
+    "zod@3.25.76": {
+      "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="
     }
   },
   "workspace": {
@@ -134,6 +138,11 @@
       "jsr:@std/testing@^1.0.19"
     ],
     "members": {
+      "packages/config-plugin": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@0.1"
+        ]
+      },
       "packages/kernel": {
         "dependencies": [
           "jsr:@hono-enterprise/common@0.1"
