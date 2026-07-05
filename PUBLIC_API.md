@@ -231,7 +231,9 @@ interface IRuntimeServices {
 
 ## LoggerPlugin()
 
-Provides structured logging via a capability token.
+Provides structured logging via a capability token. The plugin depends on `RuntimePlugin` and
+registers its `ILogger` under `CAPABILITIES.LOGGER` at `PLUGIN_PRIORITY.HIGH` (100) so logging is
+available before most other plugins register.
 
 ### Registration
 
@@ -239,26 +241,37 @@ Provides structured logging via a capability token.
 import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
 
 app.register(LoggerPlugin({
-  level: 'info',
-  transport: 'pino', // 'pino' | 'console' | 'noop'
-  pretty: false,
-  redact: ['password', 'token', 'authorization'],
-  requestLogging: true,
-  slowRequestThreshold: 5000, // ms
+  level: 'info', // minimum level to emit (default 'info')
+  transport: 'console', // 'console' | 'pino' | 'noop' (default 'console')
+  pretty: false, // pretty-print console output
+  redact: ['password', 'token', 'authorization'], // dot-paths to redact
+  requestLogging: true, // register request/response middleware
+  slowRequestThreshold: 5000, // ms — warn when slower (default 5000)
+  excludePaths: ['/health'], // paths excluded from request logging
 }));
 ```
+
+### Transports
+
+| Transport   | Description                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                        |
+| `'pino'`    | Pino-backed, loaded via `await import('npm:pino')` or injected factory. `register()` is async. |
+| `'noop'`    | Discards all output. For tests or disabling logging.                                           |
 
 ### Usage in Routes
 
 ```typescript
+import { CAPABILITIES, ILogger } from '@hono-enterprise/common';
+
 app.router.get('/users/:id', async (ctx) => {
-  const logger = ctx.services.get<ILogger>('logger');
+  const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
 
   logger.info('Fetching user', { userId: ctx.params.id });
 
   const user = await getUser(ctx.params.id);
 
-  logger.debug('User fetched', { userId: user.id, duration: ctx.request.duration });
+  logger.debug('User fetched', { userId: user.id });
 
   return ctx.response.json(user);
 });
@@ -268,13 +281,13 @@ app.router.get('/users/:id', async (ctx) => {
 
 ```typescript
 app.middleware.add(async (ctx, next) => {
-  const logger = ctx.services.get<ILogger>('logger');
+  const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   const requestLogger = logger.child({
-    requestId: ctx.request.id,
-    correlationId: ctx.request.headers.get('x-correlation-id'),
+    requestId: ctx.id,
+    correlationId: ctx.request.headers.get('x-correlation-id') ?? undefined,
   });
 
-  ctx.services.register('logger', requestLogger, { override: true });
+  ctx.services.register(CAPABILITIES.LOGGER, requestLogger, { override: true });
   await next();
 });
 ```
@@ -283,16 +296,51 @@ app.middleware.add(async (ctx, next) => {
 
 ```typescript
 interface ILogger {
-  fatal(msg: string, metadata?: Record<string, unknown>): void;
-  error(msg: string, metadata?: Record<string, unknown>): void;
-  warn(msg: string, metadata?: Record<string, unknown>): void;
-  info(msg: string, metadata?: Record<string, unknown>): void;
-  debug(msg: string, metadata?: Record<string, unknown>): void;
-  trace(msg: string, metadata?: Record<string, unknown>): void;
-  child(bindings: Record<string, unknown>): ILogger;
-  setLevel(level: LogLevel): void;
+  readonly level: LogLevel;
+  fatal(message: string, metadata?: LogMetadata): void;
+  error(message: string, metadata?: LogMetadata): void;
+  warn(message: string, metadata?: LogMetadata): void;
+  info(message: string, metadata?: LogMetadata): void;
+  debug(message: string, metadata?: LogMetadata): void;
+  trace(message: string, metadata?: LogMetadata): void;
+  child(bindings: LogMetadata): ILogger;
 }
+
+type LogMetadata = Readonly<Record<string, unknown>>;
+type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 ```
+
+### Standalone Logger Implementations
+
+The logger implementations can be used directly without the plugin, e.g. in tests or scripts:
+
+```typescript
+import { ConsoleLogger, NoopLogger, PinoLogger } from '@hono-enterprise/logger-plugin';
+
+const consoleLogger = new ConsoleLogger(runtime, { level: 'debug', pretty: true });
+const noopLogger = new NoopLogger();
+// PinoLogger uses async construction (import('npm:pino') is async):
+const pinoLogger = await PinoLogger.create({ level: 'info', redact: ['password'] });
+```
+
+### Request Logging Middleware
+
+```typescript
+import { createRequestLoggerMiddleware } from '@hono-enterprise/logger-plugin';
+
+app.middleware.add(createRequestLoggerMiddleware({
+  slowRequestThreshold: 1000,
+  excludePaths: ['/health'],
+}));
+```
+
+The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child logger bound to
+`requestId`, and logs:
+
+- Incoming request (method, path)
+- Outgoing response (status, duration in ms)
+- Slow request warning when duration exceeds `slowRequestThreshold`
+- Unhandled errors with stack traces
 
 ---
 
