@@ -58,7 +58,9 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
 - **Milestone 5** (`packages/config-plugin` — configuration with env loading, variable expansion,
   and Zod-compatible validation) — complete (PR #7)
 - **Milestone 6** (`packages/validation-plugin` — Zod-based validation) — complete (PR pending)
-- **Next milestone** — Milestone 7 (`packages/exceptions` — exception hierarchy)
+- **Milestone 7** (`packages/exceptions` — exception hierarchy, error handler middleware, RFC 7807
+  support) — complete (PR pending)
+- **Next milestone** — Milestone 8 (`packages/di-plugin` — optional dependency injection)
 
 ## Verification (run before declaring any work done)
 
