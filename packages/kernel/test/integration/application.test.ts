@@ -1078,6 +1078,79 @@ describe('Application review fixes', () => {
     await expect(app.start()).rejects.toThrow("expected number but got 'not-a-number'");
   });
 
+  it('env validation: type number rejects an empty string (blank coerces to 0)', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({ EMPTY_NUM: '' }),
+        {
+          name: 'empty-num-env',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.environment.validate({
+              EMPTY_NUM: { required: true, type: 'number' },
+            });
+          },
+        },
+      ],
+    });
+    await expect(app.start()).rejects.toThrow("expected number but got ''");
+  });
+
+  it('env validation: type number rejects a whitespace-only string', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({ BLANK_NUM: '   ' }),
+        {
+          name: 'blank-num-env',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.environment.validate({
+              BLANK_NUM: { required: true, type: 'number' },
+            });
+          },
+        },
+      ],
+    });
+    await expect(app.start()).rejects.toThrow("expected number but got '   '");
+  });
+
+  it('env validation: type number rejects Infinity', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({ INF_NUM: 'Infinity' }),
+        {
+          name: 'inf-num-env',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.environment.validate({
+              INF_NUM: { required: true, type: 'number' },
+            });
+          },
+        },
+      ],
+    });
+    await expect(app.start()).rejects.toThrow("expected number but got 'Infinity'");
+  });
+
+  it('env validation: type number accepts a valid numeric string', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({ OK_NUM: '8080' }),
+        {
+          name: 'ok-num-env',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.environment.validate({
+              OK_NUM: { required: true, type: 'number' },
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    await app.stop();
+  });
+
   it('env validation: type boolean failure is reported', async () => {
     const app = createApplication({
       plugins: [

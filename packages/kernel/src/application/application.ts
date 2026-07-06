@@ -449,8 +449,12 @@ class Application implements IKernelApplication {
 
         // Type coercion checks
         if (rules.type === 'number') {
+          // `Number('')`, `Number('   ')`, and other blank strings coerce to
+          // 0 (not NaN), so an empty/whitespace value would otherwise pass as
+          // a valid number. Reject blanks explicitly, and use `isFinite` so
+          // `Infinity`/`-Infinity` are rejected too.
           const num = Number(value);
-          if (Number.isNaN(num)) {
+          if (value.trim() === '' || !Number.isFinite(num)) {
             violations.push(
               `Environment variable '${key}' expected number but got '${value}' (declared by ${name}).`,
             );
