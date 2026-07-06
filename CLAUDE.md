@@ -208,3 +208,9 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in
   already-merged `main`. Commits: conventional format (`feat(scope): subject`); no direct commits to
   `main`.
+- **Pushing the branch and opening the PR/MR are manual, human-only steps — do not attempt them.**
+  No remote credentials are available to the assistant, so `git push`, `git remote`, or any `gh`/API
+  call to create the PR will fail and waste time. Once all gates pass and the milestone is committed
+  on its `feat/…` branch, STOP: hand the human the exact `git push -u origin <branch>` and
+  PR-creation command to run, and await the PR number to finish the CLAUDE.md "Current status" entry
+  — record the milestone as "complete (PR pending)" until that number is known.
