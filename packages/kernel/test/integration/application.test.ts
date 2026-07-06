@@ -1500,4 +1500,79 @@ describe('Application review fixes', () => {
 
     await app.stop();
   });
+
+  // ---- Fix: startup state rolled back on failure; stop() idempotency ----
+
+  it('rolls back started state after a failed start so register + retry work', async () => {
+    const app = createApplication({
+      plugins: [{ name: 'no-runtime', version: '1.0.0', register() {} }],
+    });
+    // First start fails (no runtime provider).
+    await expect(app.start()).rejects.toThrow("mandatory 'runtime' capability");
+    // Before the fix, #started stayed true, so this register() threw and the
+    // app was permanently wedged. Now the failed start rolled it back.
+    app.register(runtimePlugin());
+    await app.start();
+    await app.stop();
+  });
+
+  it('start() called twice throws instead of re-running startup', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    await app.start();
+    await expect(app.start()).rejects.toThrow('already been started');
+    await app.stop();
+  });
+
+  it('stop() is idempotent — shutdown and close hooks run exactly once', async () => {
+    let shutdown = 0;
+    let close = 0;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'shutdown-hooks',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onShutdown(() => {
+              shutdown++;
+            });
+            ctx.lifecycle.onClose(() => {
+              close++;
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    await app.stop();
+    await app.stop();
+    await app.stop();
+    expect(shutdown).toBe(1);
+    expect(close).toBe(1);
+  });
+
+  it('concurrent stop() calls share a single shutdown', async () => {
+    let shutdown = 0;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'shutdown-hook',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onShutdown(() => {
+              shutdown++;
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    const first = app.stop();
+    const second = app.stop();
+    // Both callers observe the same cached shutdown promise.
+    expect(first).toBe(second);
+    await Promise.all([first, second]);
+    expect(shutdown).toBe(1);
+  });
 });

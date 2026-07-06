@@ -106,6 +106,8 @@ class Application implements IKernelApplication {
   #serverHandle: unknown = null;
   #inFlight = 0;
   #stopping = false;
+  /** Cached in-flight/completed shutdown, so stop() runs its side effects once. */
+  #stopPromise: Promise<void> | null = null;
 
   get services() {
     return this.#registry;
@@ -128,8 +130,23 @@ class Application implements IKernelApplication {
   }
 
   async start(options?: StartOptions): Promise<void> {
+    if (this.#started) {
+      throw new Error('Application has already been started.');
+    }
+    // Mark as started up-front so plugins cannot register more plugins during
+    // startup, but roll it back if any startup step throws (see the catch
+    // below) so a failed start can be corrected and retried instead of
+    // wedging the application.
     this.#started = true;
+    try {
+      await this.#runStartup(options);
+    } catch (error) {
+      this.#started = false;
+      throw error;
+    }
+  }
 
+  async #runStartup(options?: StartOptions): Promise<void> {
     // 1. Resolve plugin order — throws without runtime provider
     const ordered = resolvePluginOrder(this.#plugins);
 
@@ -284,21 +301,34 @@ class Application implements IKernelApplication {
     }
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     // No-op if the application never started (e.g. a failed start() or a
     // bare createApplication() used only for inject()). Avoids a confusing
     // "No service registered for capability 'runtime'" from #drainRequests.
     if (!this.#started) {
-      return;
+      return Promise.resolve();
     }
+    // Idempotent: a second call — concurrent or later — returns the same
+    // shutdown promise instead of re-running the drain and the shutdown/close
+    // hooks. Without this, repeated stop() calls fire onShutdown/onClose more
+    // than once.
+    if (this.#stopPromise !== null) {
+      return this.#stopPromise;
+    }
+    this.#stopPromise = this.#doStop();
+    return this.#stopPromise;
+  }
 
+  async #doStop(): Promise<void> {
+    // Set synchronously (before the first await) so a request arriving during
+    // the drain window sees the shutting-down state and gets a 503.
     this.#stopping = true;
 
-    // Wait for in-flight requests to drain (max 10s) only when a runtime
-    // is available — it never is when start() never ran.
-    if (this.#registry.has(CAPABILITIES.RUNTIME)) {
-      await this.#drainRequests();
-    }
+    // Wait for in-flight requests to drain (max 10s). A successfully-started
+    // application always has a runtime registered (start() requires a runtime
+    // provider) and stop() short-circuits before this when never started, so
+    // the runtime is always available here.
+    await this.#drainRequests();
 
     // Close server if listening
     if (this.#serverHandle !== null) {
