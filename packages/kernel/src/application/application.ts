@@ -414,13 +414,17 @@ class Application implements IKernelApplication {
 
       return ctx.response as ResponseBuilder;
     } catch (error) {
-      // Run onError hooks (swallow their own errors)
+      // Run onError hooks. A hook that throws must not stop the remaining
+      // hooks from running, but its failure must not vanish either: an
+      // audit logger, telemetry collector, or transaction-rollback hook
+      // that fails silently leaves security infrastructure blind. Surface
+      // the suppressed error through the sanctioned logger channel.
       const err = error instanceof Error ? error : new Error(String(error));
       for (const hook of this.#lifecycle.getErrorHooks()) {
         try {
           await hook(err, ctx);
-        } catch {
-          // Swallow onError hook errors
+        } catch (hookError) {
+          this.#reportSuppressedHookError(hookError);
         }
       }
 
@@ -428,6 +432,32 @@ class Application implements IKernelApplication {
       return ctx.response as ResponseBuilder;
     } finally {
       this.#inFlight--;
+    }
+  }
+
+  /**
+   * Surfaces an exception thrown by an `onError` hook. The failure is
+   * reported through {@linkcode CAPABILITIES.LOGGER} when a logger is
+   * registered — the sanctioned framework logging channel (AI_GUIDELINES
+   * §11.6 forbids `console` here). The whole method is guarded so a missing
+   * or itself-broken logger can never propagate out of request handling: in
+   * that doubly-degraded case there is no safe channel left and the error is
+   * dropped rather than crashing the request.
+   */
+  #reportSuppressedHookError(hookError: unknown): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      const err = hookError instanceof Error ? hookError : new Error(String(hookError));
+      logger.error('onError hook threw and was suppressed', {
+        error: err.message,
+        stack: err.stack,
+      });
+    } catch {
+      // The logger itself failed or none is resolvable — no safe channel
+      // remains without violating the no-console rule; degrade silently.
     }
   }
 
