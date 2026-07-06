@@ -32,8 +32,10 @@ import { executeChain } from '../pipeline/execute-chain.ts';
 import { resolvePluginOrder } from '../registry/plugin-resolver.ts';
 import { ServiceRegistry } from '../registry/service-registry.ts';
 import { Router } from '../router/router.ts';
+import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
+import type { RequestContextHandle } from '../context/request-context.ts';
 import { ResponseBuilder } from '../context/response.ts';
 
 /** Options for {@linkcode createApplication}. */
@@ -369,11 +371,29 @@ class Application implements IKernelApplication {
       return builder;
     }
 
-    this.#inFlight++;
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    const handle = createRequestContext(request, this.#registry, runtime);
+
+    // Build the per-request context and validate the request path BEFORE
+    // entering in-flight accounting. Two client errors are caught here:
+    //   1. A malformed request URL makes `new URL()` throw inside
+    //      createRequestContext.
+    //   2. A malformed percent-escape in the path (e.g. `%zz`) would
+    //      otherwise surface as a 500 from the router's decodeURIComponent.
+    // Both are rejected as a 400. Because #inFlight is incremented only
+    // AFTER this succeeds, a rejected request can never leak the counter and
+    // stall shutdown drain (the throw would otherwise escape the finally).
+    let handle: RequestContextHandle;
+    try {
+      handle = createRequestContext(request, this.#registry, runtime);
+    } catch {
+      return this.#badRequest();
+    }
+    if (!isPathDecodable(handle.ctx.request.path)) {
+      return this.#badRequest();
+    }
     const ctx = handle.ctx;
 
+    this.#inFlight++;
     try {
       // Run onRequest hooks
       for (const hook of this.#lifecycle.getRequestHooks()) {
@@ -433,6 +453,19 @@ class Application implements IKernelApplication {
     } finally {
       this.#inFlight--;
     }
+  }
+
+  /**
+   * Builds a bare `400 Bad Request` response for a client error detected
+   * before request processing begins (a malformed request URL or a
+   * malformed percent-escape in the path). Kept as a helper so both
+   * rejection sites in {@linkcode Application.#handleRequest} produce an
+   * identical body.
+   */
+  #badRequest(): ResponseBuilder {
+    const builder = new ResponseBuilder();
+    builder.status(400).json({ error: 'Bad Request' });
+    return builder;
   }
 
   /**

@@ -2998,9 +2998,11 @@ Contract notes:
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
-- The kernel emits only **bare 404/500 JSON** (`{ error: 'Not Found' }` /
-  `{ error: 'Internal Server Error' }`). Error formatting belongs to the exceptions package, not the
-  kernel.
+- The kernel emits only **bare status JSON** (`{ error: 'Bad Request' }` for a malformed request URL
+  or malformed percent-escape in the path → `400`; `{ error: 'Not Found' }` → `404`;
+  `{ error: 'Internal Server Error' }` → `500`; `{ error: 'Service Unavailable' }` for a request
+  arriving while `stop()` is draining → `503`). Error formatting belongs to the exceptions package,
+  not the kernel.
 - **Contribution-token pattern**: `ctx.health.register()`, `ctx.metrics.register()`,
   `ctx.openapi.addSchema()`, `ctx.cli.register()`, and `ctx.decorators.register()` funnel
   contributions into multi-provider services under the Step-1 tokens; consumers retrieve them with

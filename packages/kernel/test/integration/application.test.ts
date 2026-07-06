@@ -1391,4 +1391,69 @@ describe('Application review fixes', () => {
     await app.stop();
     expect(Date.now() - start).toBeLessThan(1000);
   });
+
+  // ---- Fix: malformed request rejected as 400 without leaking in-flight ----
+
+  it('malformed request URL returns 400 and does not leak the in-flight count', async () => {
+    const fake = createFakeRuntime({ clock: 0 });
+    const app = createApplication({
+      plugins: [
+        {
+          name: 'fake-runtime',
+          version: '1.0.0',
+          provides: [CAPABILITIES.RUNTIME],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+            ctx.services.register(CAPABILITIES.HTTP_ADAPTER, fake.adapter);
+          },
+        },
+      ],
+    });
+    await app.start({ port: 7000 });
+
+    // `new URL('not-a-valid-url')` throws inside createRequestContext. Before
+    // the fix this escaped inject() (a rejected promise) and left #inFlight
+    // incremented; now it is a clean 400 and the counter is never touched.
+    const res = await app.inject({ method: 'GET', url: 'not-a-valid-url' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'Bad Request' });
+
+    // If the in-flight counter had leaked, stop()'s drain loop would block on
+    // the never-advancing fake clock (its setTimeout only fires on tick()).
+    // Completing promptly proves #inFlight returned to 0.
+    const start = Date.now();
+    await app.stop();
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it('malformed percent-encoding in the path returns 400 without running the handler', async () => {
+    let handlerRan = false;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'admin-route',
+          version: '1.0.0',
+          register(ctx) {
+            // A 1-segment route so the pre-fix router would reach
+            // decodeURIComponent('%zz') and surface a 500. The fix rejects
+            // the malformed path as a 400 before routing, so the handler
+            // must never run.
+            ctx.router.get('/admin', (c) => {
+              handlerRan = true;
+              return c.response.status(200).json({ ok: true });
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/%zz' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'Bad Request' });
+    expect(handlerRan).toBe(false);
+
+    await app.stop();
+  });
 });
