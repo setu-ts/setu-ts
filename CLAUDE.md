@@ -126,6 +126,17 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
   middleware, guards, hooks) needs an explicit test proving that when a stage responds without
   calling `next()`, downstream stages — including the handler — do NOT run and cannot overwrite the
   response.
+- **One capability, one implementation — every entry point honors the same config.** When a behavior
+  is reachable two ways (a service method AND a convenience helper or free function), both must
+  funnel through ONE implementation. A helper that hardcodes a default while the service honors
+  configured options is a silent split that passes every gate (a `validateBody(...)` helper that
+  ignored the plugin's configured `errorFormat` shipped green once). Add a test that drives BOTH
+  entry points under a NON-default configuration and asserts identical output.
+- **Output that implements a named spec is asserted field-by-field, forbidden fields included.** For
+  any body claiming to be RFC 7807 Problem Details, a NestJS error, an OpenAPI fragment, etc., a
+  test must assert the exact documented shape from PUBLIC_API.md: required fields PRESENT and fields
+  that must NOT appear ABSENT (Problem Details carries `detail`, never `message`). Stray fields and
+  shape drift type-check and lint clean.
 - **Hoist per-request work to registration time**: parse route patterns, compile chains, and build
   lookup structures once at startup, never per request (AI_GUIDELINES §14).
 - **Test doubles must honor the real contract, or they hide the bug.** A fixture that stands in for
@@ -140,6 +151,11 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
   function that never imports pino, or "@throws if X cannot be loaded from npm" when it throws
   because it never tries, are lies that pass every gate. When you touch a doc claim, confirm the
   code path it describes actually executes.
+- **Every option and parameter must be read on a real code path.** An option you accept, document,
+  and store but never consume is a dead feature — and its JSDoc is then a lie (a `ValidationPlugin`
+  `sanitize` option that was stored on the service but never applied shipped green once). For each
+  option or constructor parameter, grep that its name appears somewhere BEYOND its declaration and
+  assignment; if the only references are "declare" and "store", wire it in or delete it.
 
 ## Before reporting a task done (evidence, not vibes)
 
@@ -163,6 +179,14 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore\|Date.now()\|globalThis.__" packages/<pkg>/src`
   — must be empty (comments excepted). `Date.now()` outside `packages/runtime` is a runtime-API /
   clock-mixing smell; `globalThis.__` is a fake-lazy-import smell.
+- **Run the end-of-task self-audit — each item maps to a class of bug that shipped green before.**
+  Paste the results: (1) execute each new pure transform (sanitizer, encoder, formatter, serializer)
+  on a representative input and show input→output changing as intended, with HTML entities written
+  literally (`&amp;`/`&lt;`), never the raw characters — identity-replacement and entity-collapse
+  bugs type-check and lint clean; (2) for each option or parameter you added, grep that it is READ
+  somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
+  NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
+  points, confirm one test drives BOTH under a non-default configuration.
 - **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table and
   the grep result. "Done" without that evidence is not done.
 - **Flip the milestone's status IN the milestone PR, before it merges.** A completed milestone is
