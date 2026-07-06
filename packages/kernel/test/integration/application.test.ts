@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
 
 import { createApplication } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -1193,6 +1193,109 @@ describe('Application review fixes', () => {
     const app = createApplication({
       plugins: [
         runtimePlugin(),
+        {
+          name: 'bad-hook',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onError(() => {
+              throw new Error('hook blew up');
+            });
+            ctx.router.get('/boom', () => {
+              throw new Error('handler blew up');
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/boom' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: 'Internal Server Error' });
+    await app.stop();
+  });
+
+  it('onError hook failure is reported via the logger and later hooks still run', async () => {
+    const logged: { message: string; metadata?: Record<string, unknown> }[] = [];
+    const stubLogger: ILogger = {
+      level: 'error',
+      fatal() {},
+      error(message, metadata) {
+        logged.push({ message, ...(metadata ? { metadata } : {}) });
+      },
+      warn() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return stubLogger;
+      },
+    };
+    let secondHookRan = false;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'logger-provider',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, stubLogger);
+          },
+        },
+        {
+          name: 'bad-and-good-hooks',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onError(() => {
+              throw new Error('audit hook blew up');
+            });
+            // A later hook must still run even though the earlier one threw.
+            ctx.lifecycle.onError(() => {
+              secondHookRan = true;
+            });
+            ctx.router.get('/boom', () => {
+              throw new Error('handler blew up');
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/boom' });
+    expect(res.statusCode).toBe(500);
+    expect(secondHookRan).toBe(true);
+    expect(logged).toHaveLength(1);
+    expect(logged[0].message).toBe('onError hook threw and was suppressed');
+    expect(logged[0].metadata?.error).toBe('audit hook blew up');
+    await app.stop();
+  });
+
+  it('a throwing logger during hook-error reporting cannot break the request', async () => {
+    const brokenLogger: ILogger = {
+      level: 'error',
+      fatal() {},
+      error() {
+        throw new Error('logger is down too');
+      },
+      warn() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return brokenLogger;
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'broken-logger-provider',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, brokenLogger);
+          },
+        },
         {
           name: 'bad-hook',
           version: '1.0.0',
