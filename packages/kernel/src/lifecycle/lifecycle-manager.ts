@@ -17,6 +17,8 @@ type ErrorHook = (error: Error, ctx: IRequestContext) => void | Promise<void>;
  */
 export class LifecycleManager implements ILifecycleApi {
   readonly #register: VoidHook[] = [];
+  /** Count of onRegister hooks already drained by {@linkcode runRegister}. */
+  #registerCursor = 0;
   readonly #init: VoidHook[] = [];
   readonly #bootstrap: VoidHook[] = [];
   readonly #request: RequestHook[] = [];
@@ -55,6 +57,23 @@ export class LifecycleManager implements ILifecycleApi {
 
   onClose(fn: () => void | Promise<void>): void {
     this.#close.push(fn);
+  }
+
+  /**
+   * Runs onRegister hooks added since the previous call, in registration
+   * order. The kernel invokes this immediately after each plugin's
+   * `register()` returns, so a plugin's onRegister hooks run "during the
+   * owning plugin's registration" (per {@linkcode ILifecycleApi.onRegister})
+   * — after that plugin and before the next one. A cursor tracks how many
+   * hooks have already run so each plugin only fires the hooks it added; a
+   * hook that registers a further onRegister hook drains it in the same pass.
+   */
+  async runRegister(): Promise<void> {
+    while (this.#registerCursor < this.#register.length) {
+      const fn = this.#register[this.#registerCursor];
+      this.#registerCursor++;
+      await fn();
+    }
   }
 
   /** Runs all onInit hooks in registration order. */

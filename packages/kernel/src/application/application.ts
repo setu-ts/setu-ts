@@ -250,9 +250,13 @@ class Application implements IKernelApplication {
       },
     }) as unknown as IPluginContext;
 
-    // 3. Register each plugin in resolved order
+    // 3. Register each plugin in resolved order, then run the onRegister
+    //    hooks it just added — these run "during the owning plugin's
+    //    registration" (after that plugin, before the next), distinct from
+    //    the onInit hooks that run once all plugins have registered.
     for (const plugin of ordered) {
       await plugin.register(ctx);
+      await this.#lifecycle.runRegister();
     }
 
     // 4. Validate collected env specs against runtime.env
