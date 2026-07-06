@@ -3299,7 +3299,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 3         | ✅     | runtime              |
 | 4         | ✅     | logger-plugin        |
 | 5         | ✅     | config-plugin        |
-| 6         | ⬜     | validation-plugin    |
+| 6         | ✅     | validation-plugin    |
 | 7         | ⬜     | exceptions           |
 | 8         | ⬜     | di-plugin            |
 | 9         | ⬜     | decorator-plugin     |

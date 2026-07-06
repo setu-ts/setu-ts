@@ -56,8 +56,9 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
   against the kernel.
 - **Milestone 4** (`packages/logger-plugin` — structured logging) — complete (PR #5)
 - **Milestone 5** (`packages/config-plugin` — configuration with env loading, variable expansion,
-  and Zod-compatible validation) — complete (PR pending)
-- **Next milestone** — Milestone 6 (`packages/validation-plugin` — Zod-based validation)
+  and Zod-compatible validation) — complete (PR #7)
+- **Milestone 6** (`packages/validation-plugin` — Zod-based validation) — complete (PR pending)
+- **Next milestone** — Milestone 7 (`packages/exceptions` — exception hierarchy)
 
 ## Verification (run before declaring any work done)
 

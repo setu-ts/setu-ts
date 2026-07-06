@@ -465,7 +465,8 @@ so throws a clear startup error.
 
 ## ValidationPlugin()
 
-Provides Zod-based validation with standardized errors.
+Provides schema-based request validation with standardized error responses. Schemas are duck-typed
+via a structural `safeParse()` interface — no hard Zod dependency in the plugin itself.
 
 ### Registration
 
@@ -473,17 +474,42 @@ Provides Zod-based validation with standardized errors.
 import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
 
 app.register(ValidationPlugin({
-  errorFormat: 'rfc7807', // 'default' | 'rfc7807' | 'nestjs' | custom
-  whitelist: true,
-  forbidNonWhitelisted: false,
-  sanitize: true,
+  errorFormat: 'rfc7807', // 'default' | 'rfc7807' | 'nestjs' | custom function
 }));
+```
+
+### ValidationPluginOptions
+
+```typescript
+interface ValidationPluginOptions {
+  /** Error response format. Defaults to 'default'. */
+  readonly errorFormat?: ErrorFormat | ValidationErrorFormatter;
+
+  /**
+   * Strip unknown properties not defined in the schema.
+   *
+   * **Limitation:** Cannot be enforced at the middleware layer because schemas
+   * are duck-typed via `safeParse()`. Configure on the schema instead:
+   * `z.object({ ... }).strip()`.
+   */
+  readonly whitelist?: boolean;
+
+  /**
+   * Reject requests with properties not defined in the schema.
+   *
+   * **Limitation:** Cannot be enforced at the middleware layer because schemas
+   * are duck-typed via `safeParse()`. Configure on the schema instead:
+   * `z.object({ ... }).strict()`.
+   */
+  readonly forbidNonWhitelisted?: boolean;
+}
 ```
 
 ### Programmatic Validation
 
 ```typescript
 import { z } from 'zod';
+import { CAPABILITIES, IValidationService } from '@hono-enterprise/common';
 
 const CreateUserSchema = z.object({
   name: z.string().min(2).max(100),
@@ -494,17 +520,17 @@ const CreateUserSchema = z.object({
 
 app.router.post('/users', {
   middleware: [
-    // Validate body against schema
-    (ctx, next) => {
-      const validation = ctx.services.get<IValidationService>('validation');
-      const result = validation.validate(CreateUserSchema, ctx.request.body);
+    async (ctx, next) => {
+      const validation = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
+      const body = await ctx.request.json();
+      const result = validation.validate(CreateUserSchema, body);
 
       if (!result.success) {
         return ctx.response.status(400).json({ errors: result.error });
       }
 
-      ctx.state.set('validatedBody', result.data);
-      return next();
+      ctx.state.set('validatedBody', result.value);
+      await next();
     },
   ],
   handler: async (ctx) => {
@@ -518,14 +544,24 @@ app.router.post('/users', {
 
 ### Validation Middleware Helpers
 
+The helpers resolve `IValidationService` from the request context automatically. Validated values
+are stored in `ctx.state` under `validated:<target>` keys.
+
 ```typescript
-import { validateBody, validateParams, validateQuery } from '@hono-enterprise/validation-plugin';
+import { z } from 'zod';
+import {
+  validateBody,
+  validateCookies,
+  validateHeaders,
+  validateParams,
+  validateQuery,
+} from '@hono-enterprise/validation-plugin';
 
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
   handler: async (ctx) => {
-    const query = ctx.state.get('validatedQuery');
-    // query is typed
+    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validatedQuery');
+    // query is validated
   },
 });
 
@@ -534,40 +570,107 @@ app.router.put('/users/:id', {
     validateParams(z.object({ id: z.string().uuid() })),
     validateBody(UpdateUserSchema),
   ],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    const params = ctx.state.get('validatedParams');
+    const body = ctx.state.get('validatedBody');
+    // both are validated
+  },
+});
+```
+
+### Using the Service's middleware() Method
+
+The `IValidationService.middleware()` method builds middleware with the formatter chosen at plugin
+construction time:
+
+```typescript
+import { CAPABILITIES, IValidationService } from '@hono-enterprise/common';
+
+app.router.post('/users', (ctx, next) => {
+  const validation = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
+  return validation.middleware(CreateUserSchema, 'body')(ctx, next);
 });
 ```
 
 ### Sanitization
 
-```typescript
-const validation = ctx.services.get<IValidationService>('validation');
+Sanitization is a standalone export (not a method on `IValidationService`):
 
-const sanitized = validation.sanitize(userInput, {
+```typescript
+import { SanitizationRules, sanitize } from '@hono-enterprise/validation-plugin';
+
+const rules: SanitizationRules = {
   htmlEncode: true,
   stripTags: true,
   maxLength: 1000,
   trim: true,
-});
+};
+
+const clean = sanitize(userInput, rules);
 ```
 
-### Error Response Format (RFC 7807)
+You can also create a reusable sanitizer function:
+
+```typescript
+import { createSanitizer } from '@hono-enterprise/validation-plugin';
+
+const sanitizer = createSanitizer({ htmlEncode: true, maxLength: 500 });
+const clean1 = sanitizer(inputA);
+const clean2 = sanitizer(inputB);
+```
+
+### Error Response Formats
+
+#### Default format
+
+```json
+{
+  "message": "Validation failed with 2 issue(s).",
+  "errors": [
+    { "field": "email", "message": "Invalid email address", "code": "invalid_string" }
+  ]
+}
+```
+
+#### RFC 7807 Problem Details
 
 ```json
 {
   "type": "https://hono-enterprise.dev/errors/validation",
   "title": "Validation Error",
   "status": 400,
-  "detail": "Request body validation failed",
+  "detail": "The request contains 1 validation error(s).",
   "instance": "/users",
   "errors": [
-    {
-      "field": "email",
-      "message": "Invalid email address",
-      "code": "invalid_string"
-    }
+    { "field": "email", "message": "Invalid email address", "code": "invalid_string" }
   ]
 }
+```
+
+#### NestJS format
+
+```json
+{
+  "statusCode": 400,
+  "message": ["email: Invalid email address"],
+  "error": "Bad Request",
+  "errors": [
+    { "field": "email", "message": "Invalid email address", "code": "invalid_string" }
+  ]
+}
+```
+
+### Custom Error Formatter
+
+```typescript
+import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
+
+app.register(ValidationPlugin({
+  errorFormat: (issues) => ({
+    ok: false,
+    fields: issues.map((i) => ({ name: i.path, reason: i.message })),
+  }),
+}));
 ```
 
 ---
