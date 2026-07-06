@@ -1107,10 +1107,10 @@ app.middleware.add(errorHandler({
 
 ### Deliverables
 
-- [ ] Exception types (composition-based)
-- [ ] Error handler middleware
-- [ ] RFC 7807 support
-- [ ] Full test coverage
+- [x] Exception types (composition-based)
+- [x] Error handler middleware
+- [x] RFC 7807 support
+- [x] Full test coverage
 
 ---
 
@@ -3300,7 +3300,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 4         | ✅     | logger-plugin        |
 | 5         | ✅     | config-plugin        |
 | 6         | ✅     | validation-plugin    |
-| 7         | ⬜     | exceptions           |
+| 7         | ✅     | exceptions           |
 | 8         | ⬜     | di-plugin            |
 | 9         | ⬜     | decorator-plugin     |
 | 10        | ⬜     | database-plugin      |

@@ -3063,6 +3063,69 @@ Contract notes:
 
 ---
 
+## API Reference: @hono-enterprise/exceptions
+
+Exception factory functions, `HttpError`, error formatters, and the global error handler middleware.
+This is a **plain package** (not a plugin) — it depends on `@hono-enterprise/common` only. Register
+the middleware via the application's pipeline.
+
+### Values (exceptions exports)
+
+| Export                | Kind     | Purpose                                                                    |
+| --------------------- | -------- | -------------------------------------------------------------------------- |
+| `HttpError`           | class    | The single HTTP error type (`extends Error`, carries `statusCode`)         |
+| `badRequest`          | function | Factory → `400` `HttpError`                                                |
+| `unauthorized`        | function | Factory → `401` `HttpError`                                                |
+| `forbidden`           | function | Factory → `403` `HttpError`                                                |
+| `notFound`            | function | Factory → `404` `HttpError`                                                |
+| `conflict`            | function | Factory → `409` `HttpError`                                                |
+| `validationError`     | function | Factory → `422` `HttpError` wrapping `ValidationError[]`                   |
+| `tooManyRequests`     | function | Factory → `429` `HttpError`                                                |
+| `internalServerError` | function | Factory → `500` `HttpError` (accepts `cause` for error chaining)           |
+| `notImplemented`      | function | Factory → `501` `HttpError`                                                |
+| `serviceUnavailable`  | function | Factory → `503` `HttpError`                                                |
+| `statusTitle`         | function | Resolves a status code to a human-readable title                           |
+| `STATUS_TITLES`       | const    | Readonly record of well-known status-code → title mappings                 |
+| `errorHandler`        | function | Creates the global error-handler `MiddlewareFunction`                      |
+| `defaultFormatter`    | const    | Framework-standard error body formatter (`{ statusCode, message }`)        |
+| `rfc7807Formatter`    | const    | RFC 7807 Problem Details formatter                                         |
+| `selectFormatter`     | function | Resolves `'default' \| 'rfc7807' \| custom` to a formatter function        |
+| `ERROR_TYPE_BASE`     | const    | Base URI for RFC 7807 `type` fields (`https://hono-enterprise.dev/errors`) |
+
+### Types
+
+| Export                  | Kind | Purpose                                                                      |
+| ----------------------- | ---- | ---------------------------------------------------------------------------- |
+| `ValidationError`       | type | A single validation failure (`{ field, message, code? }`)                    |
+| `HttpErrorInit`         | type | Options object for `HttpError.from()`                                        |
+| `ErrorHandlerOptions`   | type | Options for `errorHandler()` (`{ format?, includeStackTrace?, logErrors? }`) |
+| `ErrorHandlerFormatter` | type | `(error: Error, ctx?) => Record<string, unknown>`                            |
+| `ErrorFormat`           | type | `'default' \| 'rfc7807'`                                                     |
+| `DefaultErrorBody`      | type | Framework-standard error body shape                                          |
+| `ProblemDetails`        | type | RFC 7807 Problem Details body shape                                          |
+
+Contract notes:
+
+- **Composition over inheritance**: there is exactly one `HttpError` class. Every factory function
+  returns an `HttpError` with a pre-set `statusCode` — no `BadRequestError extends HttpError`
+  hierarchy.
+- **`cause` chaining**: `internalServerError(message, cause)` forwards `cause` to the ES2022 `Error`
+  cause chain. The error handler logs it when a logger is registered.
+- **RFC 7807 compliance**: when `format: 'rfc7807'`, the response body carries `type`, `title`,
+  `status`, `detail` (and `instance` from the request path) with
+  `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (RFC 7807
+  uses `detail`).
+- **Logger is optional**: `errorHandler` logs via `ILogger` resolved from
+  `ctx.services.get(CAPABILITIES.LOGGER)` only when a logger is registered; otherwise logging is
+  silently skipped.
+- **`includeStackTrace` is config-supplied**: pass `config.get('NODE_ENV') ===
+  'development'` —
+  never read `process.env` directly.
+- **Short-circuit**: when `next()` throws, `errorHandler` produces a response (`HandlerResult`)
+  without re-invoking `next()`.
+
+---
+
 ## Summary
 
 The Hono Enterprise public API is designed for developer experience:
