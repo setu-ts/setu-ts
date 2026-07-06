@@ -506,21 +506,65 @@ describe('Application integration', () => {
     await app.stop();
   });
 
-  it('should store onRegister hooks without error', async () => {
+  it('runs onRegister hooks per-plugin during registration, before onInit', async () => {
+    const events: string[] = [];
     const app = createApplication({
       plugins: [
         runtimePlugin(),
         {
-          name: 'register-hook',
+          name: 'plugin-a',
           version: '1.0.0',
           register(ctx) {
-            ctx.lifecycle.onRegister(() => {});
+            events.push('register:a');
+            ctx.lifecycle.onRegister(() => {
+              events.push('onRegister:a');
+            });
+            ctx.lifecycle.onInit(() => {
+              events.push('onInit');
+            });
+          },
+        },
+        {
+          name: 'plugin-b',
+          version: '1.0.0',
+          register(ctx) {
+            events.push('register:b');
+            ctx.lifecycle.onRegister(() => {
+              events.push('onRegister:b');
+            });
           },
         },
       ],
     });
     await app.start();
+    // plugin-a's onRegister must run before plugin-b registers (during the
+    // owning plugin's registration), and every onRegister must precede onInit.
+    expect(events).toEqual([
+      'register:a',
+      'onRegister:a',
+      'register:b',
+      'onRegister:b',
+      'onInit',
+    ]);
     await app.stop();
+  });
+
+  it('propagates a throwing onRegister hook out of start()', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'bad-register',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onRegister(() => {
+              throw new Error('register hook blew up');
+            });
+          },
+        },
+      ],
+    });
+    await expect(app.start()).rejects.toThrow('register hook blew up');
   });
 
   it('should listen when adapter and port are provided', async () => {
