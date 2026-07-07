@@ -5,6 +5,7 @@ import type { IPrincipal } from '@hono-enterprise/common';
 import { createFakeRequestContext } from '../fixtures/fake-request-context.ts';
 import {
   clearParameterResolvers,
+  getParameterResolver,
   parseCookies,
   registerParameterResolver,
   resolveParameter,
@@ -103,5 +104,32 @@ describe('parameter resolver', () => {
 
   it('parseCookies returns empty when no Cookie header is present', () => {
     expect(parseCookies(new Headers())).toEqual({});
+  });
+
+  it('parseCookies skips pairs without equals sign', () => {
+    expect(parseCookies(new Headers({ cookie: 'a=1; broken; b=2' }))).toEqual({ a: '1', b: '2' });
+  });
+
+  it('parseCookies skips pairs with empty key', () => {
+    expect(parseCookies(new Headers({ cookie: '=value; a=1' }))).toEqual({ a: '1' });
+  });
+
+  it('@Param without name returns undefined', async () => {
+    const ctx = createFakeRequestContext({ params: { id: '42' } });
+    expect(await resolveParameter(ctx, { index: 0, type: 'param' })).toBeUndefined();
+  });
+
+  it('@Header without name returns undefined', async () => {
+    const ctx = createFakeRequestContext({ headers: { 'x-request-id': 'rid' } });
+    expect(await resolveParameter(ctx, { index: 0, type: 'header' })).toBeUndefined();
+  });
+
+  it('registerParameterResolver and getParameterResolver work together', () => {
+    expect(getParameterResolver('nothing')).toBeUndefined();
+    registerParameterResolver('test-resolver', () => 42);
+    const resolver = getParameterResolver('test-resolver');
+    expect(resolver).toBeDefined();
+    clearParameterResolvers();
+    expect(getParameterResolver('test-resolver')).toBeUndefined();
   });
 });

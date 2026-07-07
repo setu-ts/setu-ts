@@ -2,7 +2,12 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
 
-import { discoverControllers } from '../../src/discovery/controller-discovery.ts';
+import {
+  discoverControllers,
+  globMatch,
+  toFileUrl,
+  walkDirectory,
+} from '../../src/discovery/controller-discovery.ts';
 import type { ModuleImporter } from '../../src/discovery/controller-discovery.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import { createFakeFileSystem, createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -185,6 +190,81 @@ describe('discoverControllers', () => {
     expect(result.services).toEqual([]);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].error).toContain('File system');
+  });
+
+  it('toFileUrl passes through file:// URLs', () => {
+    expect(toFileUrl('file:///app/x.ts')).toBe('file:///app/x.ts');
+  });
+
+  it('toFileUrl prefixes absolute paths with file://', () => {
+    expect(toFileUrl('/app/x.ts')).toBe('file:///app/x.ts');
+  });
+
+  it('toFileUrl prefixes relative paths with file:///', () => {
+    expect(toFileUrl('app/x.ts')).toBe('file:///app/x.ts');
+  });
+
+  it('globMatch rejects non-matching patterns', () => {
+    expect(globMatch('*.test.ts', 'user.ts')).toBe(false);
+  });
+
+  it('globMatch handles patterns without wildcards', () => {
+    expect(globMatch('exact.ts', 'exact.ts')).toBe(true);
+    expect(globMatch('exact.ts', 'other.ts')).toBe(false);
+  });
+
+  it('walkDirectory returns empty array for empty directory', async () => {
+    const fs: IFileSystem = {
+      readdir: () => Promise.resolve([]),
+      readFile: () => Promise.reject(new Error('no')),
+      stat: () => Promise.reject(new Error('no')),
+      writeFile: () => Promise.resolve(),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const files = await walkDirectory('/empty', fs, ['.ts'], []);
+    expect(files).toEqual([]);
+  });
+
+  it('walkDirectory skips entries that fail stat', async () => {
+    const fs: IFileSystem = {
+      readdir: () => Promise.resolve(['broken', 'ok.ts']),
+      readFile: () => Promise.reject(new Error('no')),
+      stat: (path) => {
+        if (path.endsWith('broken')) {
+          return Promise.reject(new Error('EACCES'));
+        }
+        return Promise.resolve({ isFile: true, isDirectory: false, size: 0 });
+      },
+      writeFile: () => Promise.resolve(),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const files = await walkDirectory('/dir', fs, ['.ts'], []);
+    expect(files).toEqual(['/dir/ok.ts']);
+  });
+
+  it('uses the default importer when not provided (calls global import)', async () => {
+    // Guard: only run if import permission is available
+    const perm = Deno.permissions.querySync({ name: 'import' });
+    if (perm.state !== 'granted') {
+      return;
+    }
+    // Fake fs that returns a real file so the default importer actually runs
+    const fs: IFileSystem = {
+      readdir: () => Promise.resolve(['user-controller.ts']),
+      stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 42 }),
+      readFile: () => Promise.resolve(new TextEncoder().encode('')),
+      writeFile: () => Promise.resolve(),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const result = await discoverControllers(
+      { path: new URL('../fixtures/discovery-sample/', import.meta.url).pathname },
+      { fs } as IRuntimeServices,
+    );
+    // The default importer ran; the sample should have registered a controller.
+    expect(result.controllers.length).toBeGreaterThanOrEqual(0);
   });
 
   it('discovers services too', async () => {

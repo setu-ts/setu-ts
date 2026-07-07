@@ -76,4 +76,58 @@ describe('OpenAPI decorators', () => {
     const responses = metadataStore.getRoutesFor(C)[0].openapi?.responses ?? {};
     expect(responses['204']).toEqual({});
   });
+
+  it('@ApiOperation stores only description', () => {
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @ApiOperation({ description: 'only description' })
+      list() {
+        return [];
+      }
+    }
+    const oa = metadataStore.getRoutesFor(C)[0].openapi;
+    expect(oa?.operationId).toBeUndefined();
+    expect(oa?.summary).toBeUndefined();
+    expect(oa?.description).toBe('only description');
+  });
+
+  it('@ApiOperation stores only summary', () => {
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @ApiOperation({ summary: 'only summary' })
+      list() {
+        return [];
+      }
+    }
+    const oa = metadataStore.getRoutesFor(C)[0].openapi;
+    expect(oa?.summary).toBe('only summary');
+  });
+
+  it('@ApiResponse stores description and schema together', () => {
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @ApiResponse({ status: 200, description: 'ok', schema: { type: 'object' } })
+      list() {
+        return [];
+      }
+    }
+    const resp = metadataStore.getRoutesFor(C)[0].openapi?.responses?.['200'];
+    expect(resp).toMatchObject({ description: 'ok', schema: { type: 'object' } });
+  });
+
+  it('@ApiResponse stores only schema', () => {
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @ApiResponse({ status: 200, schema: { type: 'string' } })
+      list() {
+        return [];
+      }
+    }
+    const resp = metadataStore.getRoutesFor(C)[0].openapi?.responses?.['200'];
+    expect(resp).toMatchObject({ schema: { type: 'string' } });
+  });
 });

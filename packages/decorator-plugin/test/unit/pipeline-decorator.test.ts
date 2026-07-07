@@ -126,4 +126,52 @@ describe('Pipeline decorators', () => {
     }
     expect(metadataStore.getController(C)?.filters).toHaveLength(1);
   });
+
+  it('class-level @UseInterceptors is supported', () => {
+    @Controller('/x')
+    @UseInterceptors(interceptorFn)
+    class C {
+      @Get('/')
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getController(C)?.interceptors).toHaveLength(1);
+  });
+
+  it('class-level @UseInterceptors with IMiddleware class', () => {
+    @Controller('/x')
+    @UseInterceptors(InterceptorClass)
+    class C {
+      @Get('/')
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getController(C)?.interceptors).toHaveLength(1);
+  });
+
+  it('method-level @UseInterceptors on Post', () => {
+    @Controller('/x')
+    class C {
+      @Post('/')
+      @UseInterceptors(interceptorFn)
+      create() {
+        return 1;
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].interceptors).toHaveLength(1);
+  });
+
+  it('method-level @UseFilters on Post', () => {
+    @Controller('/x')
+    class C {
+      @Post('/')
+      @UseFilters(filterFn)
+      create() {
+        return 1;
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].filters).toHaveLength(1);
+  });
 });

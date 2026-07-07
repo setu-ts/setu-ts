@@ -85,4 +85,28 @@ describe('Security decorators', () => {
     const p = metadataStore.getRoutesFor(C)[0].params[0];
     expect(p).toMatchObject({ type: 'custom', customType: 'current-user' });
   });
+
+  it('@Permissions at class level stores default permissions', () => {
+    @Controller('/x')
+    @Permissions('read')
+    class C {
+      @Get('/')
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getController(C)?.permissions).toEqual(['read']);
+  });
+
+  it('@Permissions at method level stores permissions on the route', () => {
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @Permissions('admin:delete')
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].permissions).toEqual(['admin:delete']);
+  });
 });
