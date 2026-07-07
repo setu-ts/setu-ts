@@ -3302,7 +3302,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 6         | ✅     | validation-plugin    |
 | 7         | ✅     | exceptions           |
 | 8         | ✅     | di-plugin            |
-| 9         | ⬜     | decorator-plugin     |
+| 9         | ✅     | decorator-plugin     |
 | 10        | ⬜     | database-plugin      |
 | 11        | ⬜     | cache-plugin         |
 | 12        | ⬜     | events-plugin        |

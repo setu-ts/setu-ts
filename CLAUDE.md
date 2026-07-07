@@ -64,8 +64,13 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
   singleton/scoped/transient lifecycles, constructor injection, circular dependency detection,
   hierarchical scopes, and auto-registration fallback to the ServiceRegistry) — complete (PR
   pending)
-- **Next milestone** — Milestone 9 (`packages/decorator-plugin` — optional decorators and
-  reflection)
+- **Milestone 9** (`packages/decorator-plugin` — optional decorators and reflection: `@Controller`,
+  `@Get`/`@Post`/…, `@Body`/`@Query`/`@Param`/…, `@Injectable`/`@Inject`, `@Roles`/`@Permissions`/
+  `@Public`/`@CurrentUser`, `@UseGuards`/`@UseInterceptors`/`@UseFilters`, `@ValidateBody`/
+  `@ValidateQuery`/`@ValidateParams`, `@ApiTags`/`@ApiOperation`/`@ApiResponse`,
+  `createDecorator`/`createParameterDecorator`, `MetadataStore` under `CAPABILITIES.METADATA_STORE`,
+  `discoverControllers` auto-discovery, and a parameter resolver) — complete (PR pending)
+- **Next milestone** — Milestone 10 (`packages/database-plugin`)
 
 ## Verification (run before declaring any work done)
 

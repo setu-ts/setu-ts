@@ -3185,6 +3185,97 @@ Contract notes:
 
 ---
 
+## API Reference: @hono-enterprise/decorator-plugin
+
+Optional decorator and metadata system plugin. Provides NestJS-style decorators as syntactic sugar
+over the kernel's programmatic API. Decorators capture metadata in a plain `MetadataStore` (no
+`reflect-metadata`); the `DecoratorPlugin` reads that store at registration and registers routes,
+services, and middleware with the kernel. The store is published under `CAPABILITIES.METADATA_STORE`
+so `ctx.metadata` resolves to it. Decorators are inert unless the `DecoratorPlugin` is registered —
+they write to the shared singleton regardless, but only the plugin reads it. Implemented in
+**Milestone 9**; this section is the authoritative export list (AI_GUIDELINES §10.5). All exports
+carry full JSDoc.
+
+> Requires `experimentalDecorators` compiler support (enabled in the package `deno.json`). Legacy
+> TypeScript decorator semantics are used; no reflection metadata (`emitDecoratorMetadata`) is
+> required.
+
+### Values (decorator-plugin exports)
+
+| Export                                               | Kind     | Purpose                                                             |
+| ---------------------------------------------------- | -------- | ------------------------------------------------------------------- |
+| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services      |
+| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                |
+| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads |
+| `Controller`                                         | function | Class decorator — base path prefix                                  |
+| `Version`                                            | function | Class decorator — API version prefix                                |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                              |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                        |
+| `Injectable`                                         | function | Class decorator — marks a class for DI registration                 |
+| `Inject`                                             | function | Class decorator — declares constructor injection tokens             |
+| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                 |
+| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                    |
+| `Public`                                             | function | Method decorator — bypasses auth                                    |
+| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                    |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                       |
+| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                      |
+| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                      |
+| `createDecorator`                                    | function | Custom class/method decorator factory                               |
+| `createParameterDecorator`                           | function | Custom parameter decorator factory                                  |
+| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata          |
+| `resolveParameter`                                   | function | Resolves a single parameter value                                   |
+| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                    |
+| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                |
+| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                         |
+| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                   |
+| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                   |
+
+### Types
+
+| Export                    | Kind | Purpose                                                                                            |
+| ------------------------- | ---- | -------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`  | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`) |
+| `InjectableOptions`       | type | Options for `@Injectable()` (`scope?`, `token?`)                                                   |
+| `ApiOperationConfig`      | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                          |
+| `ApiResponseConfig`       | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                  |
+| `HttpMethodDecorator`     | type | `(path?: string) => MethodDecorator`                                                               |
+| `MiddlewareLike`          | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                  |
+| `CustomParameterResolver` | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                  |
+| `ParameterMetadata`       | type | Parameter metadata captured by parameter decorators                                                |
+| `ParameterType`           | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                 |
+| `DiscoveryOptions`        | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                             |
+| `DiscoveryResult`         | type | Result of discovery (`controllers`, `services`, `errors`)                                          |
+| `ModuleImporter`          | type | `(specifier: string) => Promise<unknown>` — injectable module loader                               |
+
+Contract notes:
+
+- **Inert without the plugin**: decorators write to the `metadataStore` singleton at
+  class-definition time regardless of whether the plugin is registered. Only
+  `DecoratorPlugin.register()` reads the store and calls the kernel APIs; without it, no
+  routes/services/middleware are registered.
+- **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
+  `Reflect.getMetadata()`. No `reflect-metadata` dependency.
+- **Decorator composition**: parameter and cross-cutting decorators (`@Body`, `@ValidateBody`,
+  `@Roles`, …) run before the HTTP-verb decorator; the store accumulates per-method and derives one
+  `RouteMetadata` per (method, HTTP verb) at read time, so metadata is correct regardless of
+  application order. Class-level guards/interceptors/middleware run before method-level;
+  method-level `@Roles`/`@Permissions` override class-level; `@Public` sets a bypass flag.
+- **Handler return values**: a controller method either returns a value (serialized as JSON by the
+  plugin's handler wrapper) or returns a `HandlerResult` from `ctx.response.*`.
+- **Discovery**: `discoverControllers` walks via `IRuntimeServices.fs` (absent on edge platforms →
+  empty result with a warning) and loads modules with `await import()` (no `require`/`eval`).
+  Snapshot-diff against the store attributes newly-decorated classes to each file. Discovery
+  failures never crash the application.
+- **Custom decorators**: `createDecorator` records class/method metadata replayed against
+  `DecoratorHandler`s registered via `ctx.decorators.register()` (collected under
+  `CAPABILITIES.DECORATOR_HANDLER`). `createParameterDecorator` records parameter metadata resolved
+  by `resolveParameters` via `registerParameterResolver`; the `current-user` built-in resolves
+  `ctx.request.user`.
+- **No runtime-specific APIs**: the package uses no `Date.now()`, `Deno`, `process`, or `fs` — all
+  file/time operations go through `IRuntimeServices`.
+
+---
+
 ## Summary
 
 The Hono Enterprise public API is designed for developer experience:
