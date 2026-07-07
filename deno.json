@@ -39,8 +39,8 @@
   ],
   "tasks": {
     "check": "deno check packages",
-    "test": "deno test -P packages",
-    "test:coverage": "rm -rf coverage && deno test -P packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
+    "test": "deno test -P --allow-read --allow-import packages",
+    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
     "audit": "deno audit --level=high",
     "lint": "deno lint",
     "fmt": "deno fmt",
