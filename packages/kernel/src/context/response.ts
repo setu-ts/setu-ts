@@ -29,6 +29,11 @@ export class ResponseBuilder implements IResponse {
     return this;
   }
 
+  appendHeader(name: string, value: string): IResponse {
+    this.#headers.append(name, value);
+    return this;
+  }
+
   json<T>(body: T): HandlerResult {
     this.#body = JSON.stringify(body);
     this.#headers.set('content-type', 'application/json; charset=utf-8');

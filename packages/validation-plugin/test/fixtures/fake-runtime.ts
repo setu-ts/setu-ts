@@ -101,6 +101,9 @@ export function createFakeResponse(): FakeResponseResult {
     header(_name: string, _value: string): IResponse {
       return response;
     },
+    appendHeader(_name: string, _value: string): IResponse {
+      return response;
+    },
     json<T>(b: T): HandlerResult {
       body = JSON.stringify(b);
       headers.set('content-type', 'application/json; charset=utf-8');
