@@ -3128,6 +3128,59 @@ Contract notes:
 
 ---
 
+## API Reference: @hono-enterprise/di-plugin
+
+Optional dependency injection container plugin. Registers an `IContainer` under
+`CAPABILITIES.DI_CONTAINER`. The service registry remains the primary resolution mechanism; this
+container is a convenience layer for constructor injection and lifecycle management. No other plugin
+depends on it. Implemented in **Milestone 8**; this section is the authoritative export list
+(AI_GUIDELINES §10.5). All exports carry full JSDoc.
+
+### Values (di-plugin exports)
+
+| Export             | Kind     | Purpose                                                                   |
+| ------------------ | -------- | ------------------------------------------------------------------------- |
+| `DiPlugin`         | function | Plugin factory — registers `IContainer` under `CAPABILITIES.DI_CONTAINER` |
+| `ContainerBuilder` | class    | Fluent builder for configuring and creating a `DiContainer`               |
+| `createContainer`  | function | Convenience factory for a standalone `IContainer`                         |
+| `DiContainer`      | class    | The `IContainer` implementation (for direct construction or testing)      |
+| `CircularDetector` | class    | Circular dependency detector (exported for testing and advanced use)      |
+| `ProviderRegistry` | class    | Token-keyed provider store with hierarchical lookups                      |
+| `ScopeManager`     | class    | Singleton/scoped/transient instance cache manager                         |
+
+### Types
+
+| Export             | Kind | Purpose                                                             |
+| ------------------ | ---- | ------------------------------------------------------------------- |
+| `DiPluginOptions`  | type | Options for `DiPlugin()` (`{ defaultScope?, autoRegister? }`)       |
+| `ContainerConfig`  | type | Configuration for `DiContainer` constructor                         |
+| `ExternalResolver` | type | Subset of `IServiceRegistry` for auto-registration fallback         |
+| `ProviderEntry`    | type | A provider paired with its resolved scope (internal building block) |
+
+Contract notes:
+
+- **Optional**: no plugin depends on the DI container. When `DiPlugin` is not registered,
+  `ctx.container` is `undefined` and services resolve directly from the `ServiceRegistry`.
+- **Three provider forms**: `ClassProvider` (constructor injection via `inject` tokens),
+  `FactoryProvider` (factory function), `ValueProvider` (pre-built value) — all defined in
+  `@hono-enterprise/common`.
+- **Three lifecycle scopes**: `singleton` (one instance, shared across child scopes), `scoped` (one
+  instance per scope), `transient` (new instance every resolve). Default is `singleton`.
+- **Circular dependency detection**: an instance-level resolution stack catches cycles that cross
+  public `resolve()` boundaries (including factory providers calling back into the container).
+  Throws `Error` with a readable `A → B → A` chain.
+- **Hierarchical containers**: `createScope()` returns a child container that shares singletons with
+  the parent but has its own scoped-instance cache.
+- **Auto-registration** (`autoRegister: true`): resolving a token not in the container falls back to
+  the kernel's `ServiceRegistry`. The first successful fallback is cached as a singleton; explicit
+  DI registrations always take precedence. `ClassProvider.inject` dependencies also use this
+  two-tier resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as
+  constructor dependencies without pre-registration.
+- **No runtime-specific APIs**: the container uses no `Date.now()`, `crypto.*`, or `process.*` — it
+  is pure TypeScript and runtime-independent.
+
+---
+
 ## Summary
 
 The Hono Enterprise public API is designed for developer experience:

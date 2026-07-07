@@ -60,7 +60,12 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
 - **Milestone 6** (`packages/validation-plugin` — Zod-based validation) — complete (PR pending)
 - **Milestone 7** (`packages/exceptions` — exception hierarchy, error handler middleware, RFC 7807
   support) — complete (PR pending)
-- **Next milestone** — Milestone 8 (`packages/di-plugin` — optional dependency injection)
+- **Milestone 8** (`packages/di-plugin` — optional dependency injection container with
+  singleton/scoped/transient lifecycles, constructor injection, circular dependency detection,
+  hierarchical scopes, and auto-registration fallback to the ServiceRegistry) — complete (PR
+  pending)
+- **Next milestone** — Milestone 9 (`packages/decorator-plugin` — optional decorators and
+  reflection)
 
 ## Verification (run before declaring any work done)
 
