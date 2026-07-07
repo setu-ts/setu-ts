@@ -2,9 +2,11 @@
  * Circular dependency detector — tracks the active resolution chain and
  * throws when a token appears twice, indicating a dependency cycle.
  *
- * One detector instance is created per top-level {@linkcode resolve} call
- * and threaded through the recursive resolution so cycles like
- * `A → B → A` are caught at the point they recur.
+ * One detector instance lives on each container and is reused across
+ * resolutions. Because {@linkcode enter}/{@linkcode leave} are balanced in a
+ * `try`/`finally`, the stack is empty between top-level resolutions, so cycles
+ * like `A → B → A` are caught at the point they recur without leaking state
+ * into the next resolve.
  *
  * @module
  */
