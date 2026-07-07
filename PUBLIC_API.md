@@ -133,7 +133,6 @@ interface Application {
 interface StartOptions {
   port?: number;
   hostname?: string;
-  signal?: AbortSignal;
 }
 ```
 
@@ -211,10 +210,10 @@ interface IRuntimeServices {
 
   uuid(): string;
   randomBytes(length: number): Uint8Array;
-  getRandomValues(buffer: Uint8Array): Uint8Array;
+  subtle: SubtleCrypto;
 
   now(): number;
-  hrtime(): [number, number];
+  hrtime(): number;
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
   setInterval(fn: () => void, ms: number): TimerHandle;
