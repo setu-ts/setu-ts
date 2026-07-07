@@ -1175,9 +1175,9 @@ const userService = container.resolve<UserService>('UserService');
 
 ### Deliverables
 
-- [ ] DiPlugin (optional)
-- [ ] Full DI container
-- [ ] Full test coverage
+- [x] DiPlugin (optional)
+- [x] Full DI container
+- [x] Full test coverage
 
 ---
 
@@ -3301,7 +3301,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 5         | ✅     | config-plugin        |
 | 6         | ✅     | validation-plugin    |
 | 7         | ✅     | exceptions           |
-| 8         | ⬜     | di-plugin            |
+| 8         | ✅     | di-plugin            |
 | 9         | ⬜     | decorator-plugin     |
 | 10        | ⬜     | database-plugin      |
 | 11        | ⬜     | cache-plugin         |
