@@ -143,6 +143,11 @@
           "jsr:@hono-enterprise/common@0.1"
         ]
       },
+      "packages/decorator-plugin": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@0.1"
+        ]
+      },
       "packages/di-plugin": {
         "dependencies": [
           "jsr:@hono-enterprise/common@0.1"
