@@ -107,6 +107,7 @@ function createFakeResponse(ctx: { response: IResponse }): IResponse {
   return {
     status: () => ctx.response,
     header: () => ctx.response,
+    appendHeader: () => ctx.response,
     json: () => ({ __handlerResult: true }) as HandlerResult,
     text: () => ({ __handlerResult: true }) as HandlerResult,
     send: () => ({ __handlerResult: true }) as HandlerResult,

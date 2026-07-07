@@ -83,4 +83,25 @@ describe('ResponseBuilder', () => {
     res.status(200);
     expect(res.ended).toBe(false);
   });
+
+  it('should preserve multiple appended set-cookie headers', () => {
+    const res = new ResponseBuilder();
+    res.appendHeader('set-cookie', 'a=1').appendHeader('set-cookie', 'b=2');
+    const cookies = res.snapshot().headers.getSetCookie();
+    expect(cookies).toEqual(['a=1', 'b=2']);
+  });
+
+  it('should overwrite repeated header() calls (set semantics, contrast to append)', () => {
+    const res = new ResponseBuilder();
+    res.header('set-cookie', 'a=1').header('set-cookie', 'b=2');
+    const cookies = res.snapshot().headers.getSetCookie();
+    expect(cookies).toEqual(['b=2']);
+  });
+
+  it('should return the builder from appendHeader for chaining', () => {
+    const res = new ResponseBuilder();
+    expect(res.appendHeader('x-test', 'one')).toBe(res);
+    expect(res.appendHeader('x-test', 'one').appendHeader('x-test', 'two')).toBe(res);
+    expect(res.snapshot().headers.get('x-test')).toBe('one, one, two');
+  });
 });

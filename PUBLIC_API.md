@@ -2959,6 +2959,11 @@ Contract notes:
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
   terminal methods (`json`, `text`, `send`, `redirect`).
+- `IResponse` has two header setters with distinct semantics: `header(name, value)` **replaces** any
+  existing value for `name` (`Headers.set`), while `appendHeader(name, value)` **adds** a value
+  without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
+  multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
+  refresh cookies). Both chain (`return this`).
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these

@@ -97,6 +97,18 @@ export interface IResponse {
    */
   header(name: string, value: string): IResponse;
   /**
+   * Appends a response header, preserving any existing values for the same
+   * name rather than replacing them (unlike {@linkcode IResponse.header},
+   * which overwrites). This is the correct way to emit multiple headers of the
+   * same name — most notably several `Set-Cookie` headers (e.g. an access
+   * cookie plus a refresh cookie, or deleting several cookies at once).
+   *
+   * @param name - Header name
+   * @param value - Header value to add
+   * @returns This response, for chaining
+   */
+  appendHeader(name: string, value: string): IResponse;
+  /**
    * Sends a JSON response.
    *
    * @typeParam T - The body type
@@ -168,9 +180,11 @@ export type NextFunction = () => Promise<void>;
  * @example
  * ```typescript
  * const timing: MiddlewareFunction = async (ctx, next) => {
- *   const start = ctx.startTime;
+ *   const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
  *   await next();
- *   ctx.response.header('X-Duration', String(performance.now() - start));
+ *   // ctx.startTime is a monotonic runtime.hrtime() reading; subtract it from
+ *   // another monotonic reading — never from a wall-clock epoch.
+ *   ctx.response.header('X-Duration', String(runtime.hrtime() - ctx.startTime));
  * };
  * ```
  * @since 0.1.0
