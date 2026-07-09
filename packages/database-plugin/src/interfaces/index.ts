@@ -233,13 +233,6 @@ export interface DatabaseAdapterOptions {
   readonly logQueries?: boolean;
 
   /**
-   * Connection pool size (for adapters that support pooling).
-   *
-   * @since 0.1.0
-   */
-  readonly poolSize?: number;
-
-  /**
    * Inject a pre-loaded Prisma client instance, bypassing the lazy
    * `import('npm:prisma')` path. Useful for testing.
    *

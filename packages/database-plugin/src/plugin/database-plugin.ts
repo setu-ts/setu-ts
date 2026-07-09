@@ -9,17 +9,20 @@
  * @module
  */
 import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type {
   DatabaseAdapterOptions,
   DatabaseAdapterType,
   DatabasePluginOptions,
   IDatabaseService,
 } from '../interfaces/index.ts';
-import { DatabaseService } from '../services/database-service.ts';
+import { createMemoryDataSource, DatabaseService } from '../services/database-service.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
+import { createPrismaDataSource } from '../adapters/prisma/prisma-repository.ts';
+import { createDrizzleDataSource } from '../adapters/drizzle/drizzle-repository.ts';
+import type { DataSource } from '../repositories/base-repository.ts';
 
 /** Default adapter when none is specified. */
 const DEFAULT_ADAPTER: DatabaseAdapterType = 'memory';
@@ -31,7 +34,7 @@ const PLUGIN_NAME = 'database-plugin';
  * Creates the DatabasePlugin.
  *
  * The plugin registers an {@linkcode IDatabaseService} under the
- * `CAPABILITIES.DATABASE` token (or `database:<name>` when a custom name
+ * `CAPABILITIES.DATABASE` token (or `database.<name>` when a custom name
  * is provided for multi-database setups).
  *
  * @example
@@ -47,7 +50,6 @@ const PLUGIN_NAME = 'database-plugin';
  *   options: {
  *     url: config.get('DATABASE_URL'),
  *     logQueries: true,
- *     poolSize: 10,
  *   },
  * }));
  *
@@ -67,11 +69,18 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
   const connectionName = options?.name ?? 'default';
   const adapterOptions = buildAdapterOptions(options?.options);
 
-  // Determine the registration token.
-  const token = connectionName === 'default' ? CAPABILITIES.DATABASE : `database:${connectionName}`;
+  // Determine the registration token using dot-notation (colon forbidden by createCapabilityToken).
+  const token = connectionName === 'default'
+    ? CAPABILITIES.DATABASE
+    : createCapabilityToken(`database.${connectionName}`);
+
+  // Plugin name: default stays 'database-plugin'; named gets 'database-plugin.<name>'.
+  const pluginName = connectionName === 'default'
+    ? PLUGIN_NAME
+    : `database-plugin.${connectionName}`;
 
   return {
-    name: PLUGIN_NAME,
+    name: pluginName,
     version: '0.1.0',
     optionalDependencies: ['logger'],
     provides: [token],
@@ -84,13 +93,22 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // Connect the adapter.
       await adapter.connect();
 
-      const service = new DatabaseService(adapter, adapterOptions, logger);
+      // Build the data-source factory for the adapter type.
+      const createDataSource = createDataSourceFactory(adapterType, adapter);
+
+      const service = new DatabaseService(
+        adapter,
+        createDataSource,
+        adapterType,
+        adapterOptions,
+        logger,
+      );
 
       // Register the database service.
       ctx.services.register<IDatabaseService>(token, service);
 
       // Register health indicator.
-      ctx.health.register(`database:${connectionName}`, async () => {
+      ctx.health.register(`${token}`, async () => {
         const healthy = await service.isHealthy();
         return {
           status: healthy ? 'up' : 'down',
@@ -132,6 +150,34 @@ async function createAdapter(
 }
 
 /**
+ * Create the data-source factory function for the given adapter type.
+ *
+ * @param adapterType - Which adapter is in use
+ * @param adapter - The resolved adapter instance (typed for factory dispatch)
+ * @returns Factory that creates a DataSource for a given entity name
+ */
+function createDataSourceFactory(
+  adapterType: DatabaseAdapterType,
+  adapter: import('@hono-enterprise/common').IOrmAdapter,
+): (entity: string) => DataSource {
+  switch (adapterType) {
+    case 'memory': {
+      const memAdapter = adapter as MemoryAdapter;
+      return (entity: string) => createMemoryDataSource(memAdapter, entity);
+    }
+    case 'prisma': {
+      const prismaAdapter = adapter as PrismaAdapter;
+      return (entity: string) => createPrismaDataSource(prismaAdapter, entity);
+    }
+    case 'drizzle':
+    default: {
+      const drizzleAdapter = adapter as DrizzleAdapter;
+      return (entity: string) => createDrizzleDataSource(drizzleAdapter, entity);
+    }
+  }
+}
+
+/**
  * Build a `DatabaseAdapterOptions` object without ever assigning `undefined`
  * to optional properties (required by `exactOptionalPropertyTypes`).
  *
@@ -145,9 +191,6 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   }
   if (opts?.logQueries !== undefined) {
     result.logQueries = opts.logQueries;
-  }
-  if (opts?.poolSize !== undefined) {
-    result.poolSize = opts.poolSize;
   }
   if (opts?.prismaClient !== undefined) {
     result.prismaClient = opts.prismaClient;

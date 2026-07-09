@@ -1377,11 +1377,11 @@ interface IRepository<Entity, Id = string> {
 
 ### Deliverables
 
-- [ ] DatabasePlugin
-- [ ] Repository pattern
-- [ ] Unit of Work
-- [ ] Prisma, Drizzle, Memory adapters
-- [ ] Full test coverage
+- [x] DatabasePlugin
+- [x] Repository pattern
+- [x] Unit of Work
+- [x] Prisma, Drizzle, Memory adapters
+- [x] Full test coverage
 
 ---
 

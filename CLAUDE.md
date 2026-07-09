@@ -40,9 +40,57 @@ Do NOT write, edit, or scaffold any code until you have read, in this order:
    you consume existing interfaces instead of inventing new ones.
 5. **The `@hono-enterprise/common` source** for the interfaces you will implement — implement the
    committed contracts exactly; do not redefine, widen, or re-declare them.
+6. **The milestone's plan under `plans/`** (write one if it does not exist) — and verify it against
+   the "Writing a milestone plan" checklist below BEFORE implementing. A plan that fails a checklist
+   item gets fixed as a plan first; do not "fix it during implementation".
 
 Only after that, begin. And: any change to a package's `src/index.ts` exports requires updating
 **PUBLIC_API.md** in the same change, with JSDoc on every export.
+
+## Writing a milestone plan (`plans/*.md`) — checks the plan must survive
+
+Every item below is a miss from a real milestone plan (M10) caught only in review. A plan is not
+"read these docs and list the files" — it is where these defects are cheapest to catch. Check each:
+
+- **Verify every contract the design builds on by reading its source, not by its name.** The M10
+  plan assumed `IOrmAdapter` (common) carried data access; it is lifecycle-only
+  (`connect`/`disconnect`/`isReady`/`beginTransaction`), which left the plan's core seam —
+  repository ↔ adapter — completely undefined. If a committed port lacks a surface the design needs,
+  the plan must define the internal port explicitly (its methods, its file, and that it is NOT
+  exported from `src/index.ts`); "the adapter handles it" is not a design.
+- **The test-file table must cover every planned `src/` file.** The per-file 90% bar is decided at
+  planning time: a src file with no named test file means the plan fails its own completion criteria
+  (M10 planned four Prisma/Drizzle src files and zero tests for them). External-dep code
+  additionally needs one guarded REAL-import test (logger-plugin pino / M9 discovery precedent),
+  with the branching around the import unit-tested via an injection seam.
+- **Check external-package facts against reality, not memory.** The exact npm specifier of the
+  RUNTIME package (`npm:@prisma/client` — `npm:prisma` is the CLI and the plan had it wrong), and
+  whether the library's API actually fits the contract being implemented (Prisma has only
+  callback-style `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging
+  that is a design decision, not an implementation detail). A plan naming a lazy import must state
+  exactly what it loads, when it can succeed, and the error when it cannot.
+- **Invented tokens and names must pass the committed grammar and the kernel's constraints.** Run
+  every new capability token against `createCapabilityToken` in `packages/common/src/tokens.ts`
+  (lowercase kebab-case, dot namespacing — colons are ILLEGAL), and for any plugin registrable more
+  than once read `packages/kernel/src/registry/plugin-resolver.ts`: duplicate plugin names AND
+  duplicate capability providers throw at startup. The plan must state each instance's derived name,
+  its `provides`, and which instance (if any) claims the bare token.
+- **Committed-doc conflicts are resolved IN the plan, never inherited.** PUBLIC_API.md documented
+  `database:primary` while the token grammar forbids colons — the M10 plan initially copied the
+  illegal form. When two committed documents disagree, the plan picks a side explicitly and lists
+  the doc correction as a named PR deliverable. Same for any deviation from a committed PUBLIC_API
+  shape (widening a generic, dropping an option): deliberate, flagged, and shipped as a
+  PUBLIC_API.md edit in the same PR — never silent.
+- **A test may only assert behavior the design specifies.** M10's integration tests asserted "health
+  indicator registered" and "lifecycle hooks called on close" while no design decision said the
+  plugin calls `ctx.health.register(...)` or `ctx.lifecycle.onShutdown(...)`. Every behavior a
+  planned test asserts needs a design-decision home; otherwise it gets improvised mid-implementation
+  or quietly dropped.
+- **Every option names its consumer; every interface method defines its behavior per
+  implementation.** A planned option no adapter can honestly consume (`poolSize`) is cut at plan
+  time, not stored. An interface method an implementation cannot support (`query()`/`migrate()` on
+  the memory adapter) gets an explicit planned behavior — a documented, tested throw — not silence.
+  These are the plan-time versions of the dead-option and docs-must-match-behavior rules below.
 
 ## Current status
 
@@ -70,7 +118,9 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
   `@ValidateQuery`/`@ValidateParams`, `@ApiTags`/`@ApiOperation`/`@ApiResponse`,
   `createDecorator`/`createParameterDecorator`, `MetadataStore` under `CAPABILITIES.METADATA_STORE`,
   `discoverControllers` auto-discovery, and a parameter resolver) — complete (PR pending)
-- **Next milestone** — Milestone 10 (`packages/database-plugin`)
+- **Milestone 10** (`packages/database-plugin` — DatabasePlugin with repository pattern, Unit of
+  Work, ORM adapters for Prisma/Drizzle/Memory) — complete (PR pending)
+- **Next milestone** — Milestone 11
 
 ## Verification (run before declaring any work done)
 

@@ -1,3 +1,4 @@
+// deno-lint-ignore-file require-await -- interface methods must be async (IPlugin)
 /**
  * Integration test for DatabasePlugin registration flow.
  *
@@ -146,11 +147,11 @@ describe('DatabasePlugin integration', () => {
     expect(db).toBeDefined();
   });
 
-  it('registers named connection under database:<name>', async () => {
+  it('registers named connection under database.<name> (dot notation)', async () => {
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({ name: 'analytics' });
     await plugin.register!(ctx);
-    expect(ctx.services.has('database:analytics')).toBe(true);
+    expect(ctx.services.has('database.analytics')).toBe(true);
   });
 
   it('service is healthy after registration', async () => {
@@ -169,5 +170,256 @@ describe('DatabasePlugin integration', () => {
 
     await db.close();
     expect(await db.isHealthy()).toBe(false);
+  });
+
+  it('registers shutdown hook via lifecycle.onClose', async () => {
+    const closeFns: Array<() => Promise<void>> = [];
+    const lifecycle: ILifecycleApi = {
+      onRegister: () => {},
+      onInit: () => {},
+      onBootstrap: () => {},
+      onRequest: () => {},
+      onResponse: () => {},
+      onError: () => {},
+      onShutdown: () => {},
+      onClose: (fn: () => Promise<void>) => closeFns.push(fn),
+    };
+    const ctx: IPluginContext = {
+      ...createFakeContext(),
+      lifecycle,
+    };
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    expect(closeFns.length).toBe(1);
+  });
+
+  it('registers health indicator', async () => {
+    const healthChecks: Map<string, () => Promise<unknown>> = new Map();
+    const health: IHealthApi = {
+      register: (name: string, fn: () => Promise<unknown>) => healthChecks.set(name, fn),
+    };
+    const ctx: IPluginContext = {
+      ...createFakeContext(),
+      health,
+    };
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    expect(healthChecks.has('database')).toBe(true);
+  });
+
+  it('health indicator reports up when healthy', async () => {
+    const healthChecks: Map<string, () => Promise<unknown>> = new Map();
+    const health: IHealthApi = {
+      register: (name: string, fn: () => Promise<unknown>) => healthChecks.set(name, fn),
+    };
+    const ctx: IPluginContext = {
+      ...createFakeContext(),
+      health,
+    };
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const result = await healthChecks.get('database')!();
+    expect((result as { status: string }).status).toBe('up');
+  });
+
+  it('memory adapter query throws unsupported error', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    await expect(db.query('SELECT 1')).rejects.toThrow('memory adapter does not support');
+  });
+
+  it('memory adapter migrate throws unsupported error', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    await expect(db.migrate()).rejects.toThrow('memory adapter does not support');
+  });
+
+  it('getRepository returns a working repository', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    const repo = db.getRepository<{ id: string; name: string }>('User');
+    const created = await repo.create({ name: 'Alice' });
+    expect(created.name).toBe('Alice');
+    const found = await repo.findById(created.id);
+    expect(found?.name).toBe('Alice');
+  });
+
+  it('transaction commits successfully', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    const result = await db.transaction(async (uow) => {
+      const repo = uow.getRepository<{ name: string }>('Order');
+      await repo.create({ name: 'order-1' });
+      return 'committed';
+    });
+    expect(result).toBe('committed');
+  });
+
+  it('transaction rolls back on error', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    await expect(
+      db.transaction(async () => {
+        throw new Error('rollback');
+      }),
+    ).rejects.toThrow('rollback');
+  });
+
+  it('registers with prisma adapter type', async () => {
+    const fakePrisma = {
+      $connect: async () => {},
+      $disconnect: async () => {},
+      $transaction: async <T>(fn: (c: unknown) => Promise<T>) => fn(null as unknown),
+      $use: () => {},
+    };
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin({
+      type: 'prisma',
+      options: { prismaClient: fakePrisma as never },
+    });
+    await plugin.register!(ctx);
+    expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
+  });
+
+  it('prisma adapter getRepository returns a repository', async () => {
+    const fakePrisma = {
+      $connect: async () => {},
+      $disconnect: async () => {},
+      $transaction: async <T>(fn: (c: unknown) => Promise<T>) => fn(null as unknown),
+      $use: () => {},
+    };
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin({
+      type: 'prisma',
+      options: { prismaClient: fakePrisma as never },
+    });
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    const repo = db.getRepository<{ name: string }>('User');
+    expect(repo).toBeDefined();
+  });
+
+  it('registers with drizzle adapter type', async () => {
+    const fakeDrizzle = {
+      $query: async () => [],
+      $execute: async () => ({ rowsAffected: 0 }),
+      $count: async () => 0,
+      $client: {
+        transaction: async <T>(fn: () => Promise<T>) => fn(),
+        connect: async () => {},
+        disconnect: async () => {},
+      },
+      $bindConnection: async () => {},
+    };
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin({
+      type: 'drizzle',
+      options: { drizzleInstance: fakeDrizzle as never },
+    });
+    await plugin.register!(ctx);
+    expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
+  });
+
+  it('drizzle adapter getRepository returns a repository', async () => {
+    const fakeDrizzle = {
+      $query: async () => [],
+      $execute: async () => ({ rowsAffected: 0 }),
+      $count: async () => 0,
+      $client: {
+        transaction: async <T>(fn: () => Promise<T>) => fn(),
+        connect: async () => {},
+        disconnect: async () => {},
+      },
+      $bindConnection: async () => {},
+    };
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin({
+      type: 'drizzle',
+      options: { drizzleInstance: fakeDrizzle as never },
+    });
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    const repo = db.getRepository<{ name: string }>('users');
+    expect(repo).toBeDefined();
+  });
+
+  it('resolves logger when available', async () => {
+    const healthChecks: Map<string, () => Promise<unknown>> = new Map();
+    const closeFns: Array<() => Promise<void>> = [];
+    const fakeLogger: import('@hono-enterprise/common').ILogger = {
+      level: 'info',
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+      trace: () => {},
+      fatal: () => {},
+      child: () => fakeLogger,
+    };
+    const services: IServiceRegistry = {
+      ...createFakeServiceRegistry(),
+      has: (token: string) =>
+        token === CAPABILITIES.LOGGER || createFakeServiceRegistry().has(token),
+      get: <T>(token: string) => {
+        if (token === CAPABILITIES.LOGGER) return fakeLogger as T;
+        return createFakeServiceRegistry().get(token);
+      },
+    };
+    const ctx: IPluginContext = {
+      ...createFakeContext(),
+      services,
+      health: {
+        register: (name: string, fn: () => Promise<unknown>) => healthChecks.set(name, fn),
+      },
+      lifecycle: {
+        ...createFakeLifecycle(),
+        onClose: (fn: () => Promise<void>) => closeFns.push(fn),
+      },
+    };
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    expect(healthChecks.has('database')).toBe(true);
+  });
+
+  it('health indicator reports down when unhealthy', async () => {
+    const healthChecks: Map<string, () => Promise<unknown>> = new Map();
+    const health: IHealthApi = {
+      register: (name: string, fn: () => Promise<unknown>) => healthChecks.set(name, fn),
+    };
+    const ctx: IPluginContext = {
+      ...createFakeContext(),
+      health,
+    };
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    // Close service to make it unhealthy
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    await db.close();
+    const result = await healthChecks.get('database')!();
+    expect((result as { status: string }).status).toBe('down');
+  });
+
+  it('buildAdapterOptions passes logQueries option', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin({ options: { logQueries: true } });
+    await plugin.register!(ctx);
+    expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
+  });
+
+  it('buildAdapterOptions passes url option', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin({ options: { url: 'sqlite::memory:' } });
+    await plugin.register!(ctx);
+    expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
   });
 });

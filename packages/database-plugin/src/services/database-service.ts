@@ -14,6 +14,7 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
+import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
 /**
  * Memory-backed repository implementation that delegates CRUD to the
@@ -36,7 +37,7 @@ class MemoryRepository<Entity, Id = string> extends BaseRepository<Entity, Id> {
  * @param primaryKey - Primary key field
  * @returns A data source bound to the entity
  */
-function createMemoryDataSource(
+export function createMemoryDataSource(
   adapter: MemoryAdapter,
   entity: string,
   primaryKey: string = 'id',
@@ -75,6 +76,10 @@ export class DatabaseService implements IDatabaseService {
   constructor(
     /** The underlying ORM adapter. */
     private readonly _adapter: IOrmAdapter,
+    /** Factory that creates a DataSource for a named entity. */
+    private readonly _createDataSource: (entity: string) => DataSource,
+    /** The adapter type (used for unsupported-operation checks). */
+    private readonly _adapterType: DatabaseAdapterType,
     /** Adapter-specific options for logging and tuning. */
     private readonly _options?: DatabaseAdapterOptions,
     /** Optional logger for query logging. */
@@ -86,7 +91,7 @@ export class DatabaseService implements IDatabaseService {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
     }
-    const dataSource = this.createDataSource(entity);
+    const dataSource = this._createDataSource(entity);
     return new MemoryRepository<Entity, Id>(dataSource);
   }
 
@@ -99,7 +104,7 @@ export class DatabaseService implements IDatabaseService {
     const txn = await this._adapter.beginTransaction();
     try {
       const uow = new UnitOfWork(txn, (entity: string) => {
-        const dataSource = this.createDataSource(entity);
+        const dataSource = this._createDataSource(entity);
         return new MemoryRepository<unknown>(dataSource);
       });
       const result = await work(uow);
@@ -112,21 +117,24 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** @inheritdoc */
-  async query<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
-    // Raw query support is adapter-specific.
-    // Memory adapter returns empty; Prisma/Drizzle adapters implement this.
+  async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
     if (this._logger && this._options?.logQueries) {
-      this._logger.debug('Raw query executed (MemoryAdapter: no-op)', {
-        sql: _sql,
-        params: _params,
-      });
+      this._logger.debug('Raw query executed', { sql, params });
     }
-    return [];
+    // Memory adapter does not support raw SQL queries — fail loudly.
+    if (this._adapterType === 'memory') {
+      throw new Error('The memory adapter does not support raw SQL queries.');
+    }
+    throw new Error('Raw query is not supported by the current adapter.');
   }
 
   /** @inheritdoc */
   async migrate(): Promise<void> {
-    // Memory adapter has no migrations.
+    // Memory adapter does not support migrations — fail loudly.
+    if (this._adapterType === 'memory') {
+      throw new Error('The memory adapter does not support migrations.');
+    }
+    throw new Error('Migrations are not supported by the current adapter.');
   }
 
   /** @inheritdoc */
@@ -140,23 +148,5 @@ export class DatabaseService implements IDatabaseService {
     if (this._closed) return;
     this._closed = true;
     await this._adapter.disconnect();
-  }
-
-  /**
-   * Creates a data source for the given entity. The exact implementation
-   * depends on the adapter type.
-   *
-   * @param entity - Entity name
-   * @returns Data source for the entity
-   */
-  private createDataSource(entity: string): DataSource {
-    // The MemoryAdapter is the only adapter we have a typed handle for.
-    // For Prisma/Drizzle the pattern is the same but the lazy import
-    // provides a different adapter instance.
-    const memoryAdapter = this._adapter as MemoryAdapter;
-    if (typeof memoryAdapter.getStore === 'function') {
-      return createMemoryDataSource(memoryAdapter as MemoryAdapter, entity);
-    }
-    throw new Error(`Unsupported adapter type for entity '${entity}'`);
   }
 }

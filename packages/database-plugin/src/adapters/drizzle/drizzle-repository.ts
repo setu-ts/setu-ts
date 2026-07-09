@@ -19,7 +19,7 @@ import type { DrizzleAdapter } from './drizzle-adapter.ts';
  */
 export class DrizzleRepository<Entity, Id = string> extends BaseRepository<Entity, Id> {
   constructor(
-    protected readonly _dataSource: DataSource,
+    protected override readonly _dataSource: DataSource,
   ) {
     super(_dataSource);
   }

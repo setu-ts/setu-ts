@@ -688,7 +688,6 @@ app.register(DatabasePlugin({
   options: {
     url: config.get('DATABASE_URL'),
     logQueries: config.get('NODE_ENV') === 'development',
-    poolSize: 10,
   },
 }));
 ```
@@ -804,8 +803,8 @@ app.register(DatabasePlugin({
 
 // Access by name
 app.router.get('/analytics', async (ctx) => {
-  const primaryDb = ctx.services.get<IDatabaseService>('database:primary');
-  const analyticsDb = ctx.services.get<IDatabaseService>('database:analytics');
+  const primaryDb = ctx.services.get<IDatabaseService>('database.primary');
+  const analyticsDb = ctx.services.get<IDatabaseService>('database.analytics');
   // ...
 });
 ```

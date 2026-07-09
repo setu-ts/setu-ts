@@ -120,7 +120,7 @@ export class MemoryAdapter implements IOrmAdapter {
     let results = store.records;
 
     // Filter.
-    if (Object.keys(query.where).length > 0) {
+    if (query.where && Object.keys(query.where).length > 0) {
       results = results.filter((row) => matchesWhere(row, query.where));
     }
 

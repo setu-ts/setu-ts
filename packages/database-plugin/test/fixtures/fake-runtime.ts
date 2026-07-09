@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await no-unused-vars -- test fixtures must be async to satisfy IRuntimeServices
+// deno-lint-ignore-file require-await -- test fixtures use sync methods that interface requires
 /**
  * Fake runtime services for testing.
  *
@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@hono-enterprise/common';
 
 /**
  * Creates a minimal fake runtime that satisfies `IRuntimeServices`.
@@ -18,7 +18,10 @@ export function createFakeRuntime(): IRuntimeServices {
   let counter = 0;
 
   return {
-    async uuid(): Promise<string> {
+    platform: (): RuntimePlatform => 'deno',
+    version: () => '2.0.0-fake',
+    hostname: () => 'test-host',
+    uuid(): string {
       counter++;
       return `test-uuid-${counter}`;
     },
@@ -29,38 +32,38 @@ export function createFakeRuntime(): IRuntimeServices {
       }
       return bytes;
     },
-    setTimeout(callback: () => void, ms: number): number {
-      // Fake timer — just call synchronously for testing.
-      callback();
-      return 0;
-    },
-    clearTimeout(_id: number): void {
-      // No-op for testing.
-    },
-    hrtime(): number {
-      return performance.now();
+    get subtle(): SubtleCrypto {
+      throw new Error('SubtleCrypto not implemented in fake runtime');
     },
     now(): number {
       return Date.now();
     },
+    hrtime(): number {
+      return performance.now();
+    },
+    setTimeout(_callback: () => void, _ms: number): TimerHandle {
+      return 0;
+    },
+    clearTimeout(_id: TimerHandle): void {
+      // No-op for testing.
+    },
+    setInterval(_callback: () => void, _ms: number): TimerHandle {
+      return 0;
+    },
+    clearInterval(_id: TimerHandle): void {
+      // No-op for testing.
+    },
     env: {},
-    platform: () => 'deno',
+    exit(_code?: number): never {
+      throw new Error(`fake runtime exit called with code ${_code ?? 0}`);
+    },
     fs: {
-      exists: async () => false,
+      stat: async () => ({ isFile: true, isDirectory: false, size: 0 }),
       readFile: async () => new TextEncoder().encode(''),
       writeFile: async () => {},
       mkdir: async () => {},
       readdir: async () => [],
-      remove: async () => {},
-    },
-    crypto: {
-      subtle: {
-        generateKey: async () => ({}),
-        exportKey: async () => new Uint8Array(),
-        sign: async () => new Uint8Array(),
-        verify: async () => true,
-        digest: async () => new Uint8Array(),
-      },
+      rm: async () => {},
     },
   };
 }

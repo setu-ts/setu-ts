@@ -19,7 +19,7 @@ import type { PrismaAdapter } from './prisma-adapter.ts';
  */
 export class PrismaRepository<Entity, Id = string> extends BaseRepository<Entity, Id> {
   constructor(
-    protected readonly _dataSource: DataSource,
+    protected override readonly _dataSource: DataSource,
   ) {
     super(_dataSource);
   }

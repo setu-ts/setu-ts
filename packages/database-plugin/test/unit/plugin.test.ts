@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 
 describe('DatabasePlugin', () => {
@@ -25,9 +25,24 @@ describe('DatabasePlugin', () => {
       expect(plugin.provides).toContain(CAPABILITIES.DATABASE);
     });
 
-    it('provides database:<name> when named', () => {
+    it('provides database.<name> when named (dot notation)', () => {
       const plugin = DatabasePlugin({ name: 'primary' });
-      expect(plugin.provides).toContain('database:primary');
+      expect(plugin.provides).toContain('database.primary');
+    });
+
+    it('named connection token passes createCapabilityToken validation', () => {
+      // The derived token must be valid per createCapabilityToken grammar.
+      expect(() => createCapabilityToken('database.primary')).not.toThrow();
+    });
+
+    it('named connection does NOT provide bare database token', () => {
+      const plugin = DatabasePlugin({ name: 'analytics' });
+      expect(plugin.provides).not.toContain(CAPABILITIES.DATABASE);
+    });
+
+    it('named connection has derived plugin name', () => {
+      const plugin = DatabasePlugin({ name: 'analytics' });
+      expect(plugin.name).toBe('database-plugin.analytics');
     });
 
     it('has optionalDependencies logger', () => {
@@ -56,6 +71,16 @@ describe('DatabasePlugin', () => {
     it('accepts drizzle type', () => {
       const plugin = DatabasePlugin({ type: 'drizzle' });
       expect(plugin.name).toBe('database-plugin');
+    });
+  });
+
+  describe('two named instances coexist', () => {
+    it('database.primary and database.analytics have distinct tokens', () => {
+      const primary = DatabasePlugin({ name: 'primary' });
+      const analytics = DatabasePlugin({ name: 'analytics' });
+      expect(primary.provides![0]).toBe('database.primary');
+      expect(analytics.provides![0]).toBe('database.analytics');
+      expect(primary.provides![0]).not.toBe(analytics.provides![0]);
     });
   });
 });
