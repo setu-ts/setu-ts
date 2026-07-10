@@ -22,7 +22,16 @@ milestone is NOT verified. Never report "verified" from the gates' exit codes al
 git branch --show-current      # must be the milestone's feat/… branch, never main
 git log --oneline main..HEAD   # the milestone's commits
 git diff --stat main..HEAD     # the changed files — this is your review scope
+git status --short             # MUST be empty — see the clean-tree rule below
 ```
+
+**Verify the COMMITTED code, never a dirty working tree.** If `git status --short` is not empty,
+someone (a reviewer, a half-finished fix, another agent) has modified the tree, and an uncommitted
+change can MASK the very bug you are hunting — a broken default silently patched in the tree passes
+every probe, then ships broken because the patch was never committed. Before running anything: paste
+`git status --short`; if it is non-empty, `git stash -u`, run the ENTIRE verification against the
+clean commit, then `git stash pop`. State in the report which commit hash you verified
+(`git rev-parse HEAD`). A verification run against a dirty tree is void.
 
 Then read, in order:
 
@@ -128,7 +137,29 @@ const res = await app.inject({ method: 'POST', url: 'http://localhost/probe', bo
 ```
 
 Run with `deno run -A .verify-<milestone>/driver.ts` (it does NOT type-check — cross-check contract
-shapes in `packages/common/src/` by reading them). Paste the output, then delete the dir.
+shapes in `packages/common/src/` by reading them). **Paste BOTH the driver source AND its raw stdout
+verbatim** into the report — not a hand-written "✓ works" summary. A summarized probe result is
+worthless: it cannot be distinguished from a probe that never ran, asserted nothing, or was written
+to pass. The raw `res.json()` / `res.body` output must be visible so the failure modes below are
+impossible to paper over.
+
+**Production defaults, never the test-only seam.** If a component has an injectable seam that tests
+use (a `clock`, a fake client, an in-memory stand-in), your behavioral probe must construct it with
+PRODUCTION DEFAULTS so the real default path executes — the exact path the unit tests bypass. The
+memory cache's default clock (`?? performance.now`) threw `Illegal invocation` on every write in
+production; every unit test injected a fake `clock`, so 100%-covered, all-green code 500'd on the
+first real request. If you only ever drive the seam the tests already drive, you re-run the tests by
+hand and learn nothing. Drive the default; then, separately, the injected variant.
+
+**Assert exact values through `inject()`, and let the probe FAIL loudly.** The probe's assertions
+must compare the response to concrete expected literals and throw on mismatch — a probe that logs
+without asserting is the no-op integration test in disguise. Minimum for any request path:
+`res.statusCode`, the FULL `res.body` (or `res.json()`), and any headers the feature sets. A `500`,
+a `null`/empty body, or a thrown `res.json()` on a DOCUMENTED happy path is a hard FAIL — never a
+nit, no matter how green the gates are. (The cache HIT replayed via `send(bytes)`; the kernel
+surfaces only string bodies through `inject()`, so every cached response came back `body: null` and
+`res.json()` threw — invisible to any probe that checked only the status code or the `X-Cache`
+header.)
 
 Mandatory rules for what to drive:
 
@@ -143,6 +174,13 @@ Mandatory rules for what to drive:
   the adapter is decorative — FAIL, whatever the tests say.
 - **Flip each option and observe the difference** (this is Step 5's option check, executed):
   `logQueries: true` must visibly log during repository operations, not merely be read somewhere.
+- **Middleware / response transforms are verified by reading the transformed response back.** For
+  anything that caches, rewrites, compresses, or otherwise alters a response, send the request, then
+  send it AGAIN and assert the second response's FULL body equals the first's, plus its
+  distinguishing header (`X-Cache: HIT`) AND that the handler ran exactly once (increment a counter
+  in the handler and assert it). Any one of those three checks alone passes for a completely broken
+  cache — the counter can be 1 while the body is empty; the header can be `HIT` while the status is
+  `500`.
 - **Transactions get adversarial probes, not just commit/rollback happy paths**: (1) abort a
   transaction and confirm its writes are gone; (2) write OUTSIDE the transaction while it is open,
   abort, and confirm that unrelated write SURVIVES (M10's global-snapshot rollback destroyed it);
@@ -155,10 +193,31 @@ Mandatory rules for what to drive:
 
 # Step 7 — Report
 
-Structure the report as: **branch/commits → gates table → per-file coverage table (pasted) → grep
-result (pasted) → contract findings (each item: pass, or file:line + why) → behavioral output
-(pasted) → tracking status → verdict.**
+**Write the report to a Markdown file AND print its path.** Put it at
+`.verify/milestone-<N>-verification.md` (the `.verify/` dir is git-ignored and fmt-excluded — this
+is scratch, never `git add` it). Print the path so the human can open it. The chat summary is in
+addition to, not instead of, the file.
 
-Verdict is one of: **verified**, **verified with nits** (doc-only or cosmetic — list them, and
-remember fixes belong on the SAME feat/… branch since the milestone is unmerged), or **not
-verified** (any gate/coverage/contract failure — list exactly what must change).
+Structure the report as: **commit hash verified + clean-tree confirmation → branch/commits → gates
+table → per-file coverage table (pasted) → grep result (pasted) → contract findings (each item:
+pass, or file:line + why) → behavioral section (driver source + RAW stdout, pasted verbatim) →
+tracking status → verdict.**
+
+Verdict is one of:
+
+- **verified** — every gate green AND every behavioral probe asserted exact values against the
+  committed code with pasted raw output.
+- **verified with nits** — reserved for **doc-only or cosmetic** issues (a stale `ICache` name, an
+  unchecked ROADMAP box). Fixes belong on the SAME feat/… branch since the milestone is unmerged. A
+  runtime defect is NEVER a nit.
+- **not verified** — any gate/coverage/contract failure, OR any behavioral probe that produced a
+  `500`, a `null`/empty body, a thrown accessor, or a missing/incorrect value on a documented happy
+  path. List exactly what must change. **If you did not run a behavioral probe with production
+  defaults and paste its raw output, the verdict is `not verified` by default** — absence of
+  evidence is not verification.
+
+Sanity check before you commit to a verdict: re-read your own pasted behavioral output as an
+adversary. Does the raw stdout actually show the expected body value, or only a status code and a
+header? Did the probe use a fake where production uses a default? If the raw output does not prove
+the feature works end-to-end, downgrade to `not verified` — a confident narrative over thin evidence
+is exactly how green-but-broken code ships.
