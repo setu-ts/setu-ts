@@ -953,28 +953,54 @@ app.router.get('/api/data', {
 
 ## CachePlugin()
 
-Provides caching with multiple stores.
+Provides caching with multiple stores (Memory, Redis, Noop) and a transparent response-caching
+middleware.
+
+Registers `ICacheStore` under `CAPABILITIES.CACHE`.
+
+### Exports
+
+| Export                   | File                                 | Description                              |
+| ------------------------ | ------------------------------------ | ---------------------------------------- |
+| `CachePlugin`            | `src/plugin/cache-plugin.ts`         | Plugin factory                           |
+| `CacheService`           | `src/services/cache-service.ts`      | Wrapper applying prefix + defaultTTL     |
+| `MemoryStore`            | `src/stores/memory-store.ts`         | In-memory LRU + TTL store                |
+| `RedisStore`             | `src/stores/redis-store.ts`          | Redis store via ioredis                  |
+| `NoopStore`              | `src/stores/noop-store.ts`           | No-op store (dev/test)                   |
+| `cacheMiddleware`        | `src/middleware/cache-middleware.ts` | Transparent response-caching middleware  |
+| `CacheStoreType`         | `src/interfaces/index.ts`            | `'memory' \| 'redis' \| 'noop'`          |
+| `CacheStoreOptions`      | `src/interfaces/index.ts`            | Store-specific options                   |
+| `CachePluginOptions`     | `src/interfaces/index.ts`            | Plugin factory options                   |
+| `IRedisClient`           | `src/interfaces/index.ts`            | Structural ioredis shape                 |
+| `CacheMiddlewareOptions` | `src/interfaces/index.ts`            | Middleware options                       |
+| `CachedResponsePayload`  | `src/interfaces/index.ts`            | Cached response shape                    |
+| `ICacheStore`            | `src/interfaces/index.ts`            | Re-export from `@hono-enterprise/common` |
 
 ### Registration
 
 ```typescript
 import { CachePlugin } from '@hono-enterprise/cache-plugin';
 
+// Memory store (default)
+app.register(CachePlugin());
+
+// Redis store with URL
 app.register(CachePlugin({
   store: 'redis',
-  options: {
-    url: config.get('REDIS_URL'),
-    prefix: 'myapp:',
-    defaultTTL: 3600,
-  },
+  options: { url: 'redis://localhost:6379', prefix: 'myapp:' },
 }));
+
+// Named multi-cache instance
+app.register(CachePlugin({ name: 'session', options: { maxSize: 500 } }));
 ```
 
 ### Programmatic API
 
 ```typescript
+import type { ICacheStore } from '@hono-enterprise/common';
+
 app.router.get('/users/:id', async (ctx) => {
-  const cache = ctx.services.get<ICache>('cache');
+  const cache = ctx.services.get<ICacheStore>('cache');
   const cacheKey = `user:${ctx.params.id}`;
 
   // Try cache
@@ -995,13 +1021,16 @@ app.router.get('/users/:id', async (ctx) => {
 
 ### Cache Middleware
 
+Transparent response-caching middleware that stores full HTTP responses (status, headers, body) and
+replays them on cache HIT without invoking the handler.
+
 ```typescript
 import { cacheMiddleware } from '@hono-enterprise/cache-plugin';
 
 app.router.get('/users/:id', {
   middleware: [
     cacheMiddleware({
-      ttl: 3600,
+      ttlSeconds: 3600,
       key: (ctx) => `user:${ctx.params.id}`,
       bypass: (ctx) => ctx.request.query.refresh === 'true',
     }),
@@ -1013,22 +1042,15 @@ app.router.get('/users/:id', {
 });
 ```
 
-### Cache Interface
+### ICacheStore Interface
 
 ```typescript
-interface ICache {
+interface ICacheStore {
   get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T, ttl?: number): Promise<void>;
+  set<T>(key: string, value: T, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<boolean>;
   has(key: string): Promise<boolean>;
   clear(): Promise<void>;
-  getMany<T>(keys: string[]): Promise<(T | null)[]>;
-  setMany<T>(entries: Array<[string, T]>, ttl?: number): Promise<void>;
-  deleteMany(keys: string[]): Promise<boolean[]>;
-  incr(key: string): Promise<number>;
-  decr(key: string): Promise<number>;
-  ttl(key: string): Promise<number>;
-  expire(key: string, ttl: number): Promise<void>;
 }
 ```
 

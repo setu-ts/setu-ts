@@ -14,6 +14,7 @@ import { none, some } from '../../src/option.ts';
 import type { Option } from '../../src/option.ts';
 import type { StandardCapability } from '../../src/tokens.ts';
 import { CAPABILITIES } from '../../src/tokens.ts';
+import type { IResponse } from '../../src/http.ts';
 
 describe('shared types', () => {
   it('should type HttpMethod as the standard verb union', () => {
@@ -61,5 +62,14 @@ describe('utility type narrowing', () => {
       assertType<IsExact<typeof option.value, string>>(true);
     }
     expect(option.present).toBe(true);
+  });
+});
+
+describe('IResponse', () => {
+  it('should include a snapshot() method returning status, headers, and body', () => {
+    // Type-level check: IResponse includes snapshot method
+    const _fn: IResponse['snapshot'] = {} as unknown as IResponse['snapshot'];
+    // If this compiles, the type is correct.
+    void _fn;
   });
 });

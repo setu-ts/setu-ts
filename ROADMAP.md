@@ -3304,7 +3304,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 8         | ✅     | di-plugin            |
 | 9         | ✅     | decorator-plugin     |
 | 10        | ✅     | database-plugin      |
-| 11        | ⬜     | cache-plugin         |
+| 11        | ✅     | cache-plugin         |
 | 12        | ⬜     | events-plugin        |
 | 13        | ⬜     | cqrs-plugin          |
 | 14        | ⬜     | messaging-plugin     |

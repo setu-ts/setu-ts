@@ -138,6 +138,19 @@ export interface IResponse {
    * @returns The handler result
    */
   redirect(url: string, status?: number): HandlerResult;
+  /**
+   * Returns an immutable snapshot of the current response state (status,
+   * headers, body). Enables middleware to inspect the response after
+   * `next()` returns — required for transparent response caching.
+   *
+   * @returns The status code, headers, and body bytes or string
+   * @since 0.1.0
+   */
+  snapshot(): {
+    readonly status: number;
+    readonly headers: Headers;
+    readonly body: Uint8Array | string | null;
+  };
 }
 
 /**

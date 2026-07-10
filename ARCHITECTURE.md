@@ -1165,14 +1165,14 @@ graph TB
 
 #### @hono-enterprise/cache-plugin
 
-| Aspect               | Detail                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Caching abstraction                                                                               |
-| **Responsibilities** | Provide `ICache`; memory and Redis stores; cache middleware; TTL management                       |
-| **Dependencies**     | `common`, `kernel`                                                                                |
-| **Public API**       | `CachePlugin()`; `ICache`; `cacheMiddleware()`                                                    |
-| **Extension Points** | Custom cache store (override `cache` token); custom key generators                                |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store for testing |
+| Aspect               | Detail                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Caching abstraction with transparent response-caching middleware                                                              |
+| **Responsibilities** | Provide `ICacheStore`; Memory, Redis, Noop stores; `CacheService`; `cacheMiddleware`; TTL management                          |
+| **Dependencies**     | `common`, `kernel`                                                                                                            |
+| **Public API**       | `CachePlugin()`, `CacheService`, `MemoryStore`, `RedisStore`, `NoopStore`, `cacheMiddleware`, types in `src/interfaces/index` |
+| **Extension Points** | Custom cache store (override `cache` token); custom key generators; named multi-cache instances                               |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store default; `ICacheStore` has 5 methods    |
 
 #### @hono-enterprise/events-plugin
 
