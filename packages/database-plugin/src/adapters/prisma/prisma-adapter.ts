@@ -167,6 +167,10 @@ export class PrismaAdapter implements IDatabaseAdapter {
         timeout: this._options?.transactionTimeout ?? 30_000,
       },
     );
+    // If $transaction rejects before handing back `tx` (e.g. it fails to open
+    // the interactive transaction), unblock the waiter so beginTransaction
+    // rejects instead of hanging on a promise that never settles.
+    outer.catch((err: unknown) => txReady.reject(err));
 
     // Wait for the tx client to be handed to us; if $transaction fails first,
     // beginTransaction rejects with that error.

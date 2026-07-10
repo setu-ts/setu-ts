@@ -10,6 +10,12 @@
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
 import type { IAdapterTransaction, IDatabaseAdapter } from '../adapter.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import {
+  applyOrderBy,
+  applyPagination,
+  matchesWhere,
+  projectFields,
+} from '../../query/query-builder.ts';
 
 // ---------------------------------------------------------------------------
 // Drizzle database type — lazily resolved at connect() time.
@@ -96,6 +102,24 @@ export type DrizzleOperators = {
   desc: (col: unknown) => unknown;
 };
 
+/**
+ * Default operator builders — used with a fake instance during testing and as
+ * a fallback when `drizzle-orm` cannot be imported. Real drizzle-orm operators
+ * override these when the import succeeds.
+ *
+ * Not re-exported from `src/index.ts`; internal to this package.
+ *
+ * @internal
+ */
+export function createDefaultDrizzleOperators(): DrizzleOperators {
+  return {
+    eq: (col, val) => ({ op: 'eq', col, val }),
+    and: (...exprs) => ({ op: 'and', exprs }),
+    asc: (col) => ({ op: 'asc', col }),
+    desc: (col) => ({ op: 'desc', col }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Drizzle adapter
 // ---------------------------------------------------------------------------
@@ -122,7 +146,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   async connect(): Promise<void> {
     this._db = await this.resolveDb();
 
-    // Load drizzle-orm operators once.
+    // Always set defaults so the adapter is usable with a fake instance (and as
+    // a fallback when drizzle-orm cannot be imported). Real drizzle-orm
+    // operators override these when the import succeeds.
+    this._operators = createDefaultDrizzleOperators();
     try {
       const orm = await import('npm:drizzle-orm@0.33.0');
       const ns = orm as Record<string, unknown>;
@@ -133,14 +160,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         desc: ns.desc as (col: unknown) => unknown,
       };
     } catch {
-      // Fall back: create simple operator builders if import fails
-      // (unit tests with fake instance do not need real drizzle-orm).
-      this._operators = {
-        eq: (col, val) => ({ op: 'eq', col, val }),
-        and: (...exprs) => ({ op: 'and', exprs }),
-        asc: (col) => ({ op: 'asc', col }),
-        desc: (col) => ({ op: 'desc', col }),
-      };
+      // Keep the defaults set above (drizzle-orm not installed / unreachable).
     }
 
     // Validate table registry if provided.
@@ -193,6 +213,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       txReady.resolve(tx);
       await hold.promise;
     });
+    // If the transaction rejects before handing back `tx` (e.g. the driver
+    // fails to open it), unblock the waiter so beginTransaction rejects
+    // instead of hanging on a promise that never settles.
+    outer.catch((err: unknown) => txReady.reject(err));
 
     let tx: DrizzleInstance;
     try {
@@ -354,55 +378,19 @@ function createDrizzleDataSourceInner(
     },
 
     async findAll(query) {
-      let rows = await instance.select().from(table);
-      // Apply where filter in-memory (Drizzle operators are query-builder expressions).
-      if (query.where && Object.keys(query.where).length > 0) {
-        for (const [field, expected] of Object.entries(query.where)) {
-          rows = rows.filter((r) => r[field] === expected);
-        }
+      // Drizzle operators are query-builder expressions the fake/driver cannot
+      // evaluate structurally, so filter/sort/paginate/project in-memory using
+      // the SAME shared helpers as the memory adapter and BaseRepository.
+      const rows = await instance.select().from(table);
+      const filtered = Object.keys(query.where).length > 0
+        ? rows.filter((row) => matchesWhere(row, query.where))
+        : rows;
+      const sorted = applyOrderBy(filtered, query.orderBy);
+      const paginated = applyPagination(sorted, query.offset, query.limit);
+      if (query.select.length > 0) {
+        return paginated.map((row) => projectFields(row, query.select) as Record<string, unknown>);
       }
-      // Sort
-      if (query.orderBy && Object.keys(query.orderBy).length > 0) {
-        const sorted = [...rows];
-        sorted.sort((a, b) => {
-          for (const [field, direction] of Object.entries(query.orderBy)) {
-            const av = a[field];
-            const bv = b[field];
-            if (av === bv) continue;
-            if (av === undefined || bv === undefined) {
-              return av === undefined ? 1 : -1;
-            }
-            if (av === null || bv === null) {
-              return av === null ? 1 : -1;
-            }
-            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-            if (direction === 'desc') return -cmp;
-            return cmp;
-          }
-          return 0;
-        });
-        rows = sorted;
-      }
-      // Paginate
-      if (query.offset && query.offset > 0) {
-        rows = rows.slice(query.offset);
-      }
-      if (query.limit && query.limit > 0) {
-        rows = rows.slice(0, query.limit);
-      }
-      // Select fields
-      if (query.select && query.select.length > 0) {
-        rows = rows.map((row) => {
-          const projected: Record<string, unknown> = {};
-          for (const field of query.select) {
-            if (field in row) {
-              projected[field] = row[field];
-            }
-          }
-          return projected;
-        });
-      }
-      return rows;
+      return paginated;
     },
 
     async create(data) {
@@ -442,11 +430,9 @@ function createDrizzleDataSourceInner(
     },
 
     async count(where) {
-      let rows = await instance.select().from(table);
-      if (where && Object.keys(where).length > 0) {
-        for (const [field, expected] of Object.entries(where)) {
-          rows = rows.filter((r) => r[field] === expected);
-        }
+      const rows = await instance.select().from(table);
+      if (Object.keys(where).length > 0) {
+        return rows.filter((row) => matchesWhere(row, where)).length;
       }
       return rows.length;
     },

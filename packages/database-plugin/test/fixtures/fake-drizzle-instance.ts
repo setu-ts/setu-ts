@@ -110,6 +110,10 @@ export function createFakeDrizzleInstance(): {
       if ('id' in obj) {
         return String(obj.id);
       }
+      // Honor the adapter's default `eq(col, val)` shape: { op: 'eq', col, val }.
+      if (obj.op === 'eq' && 'val' in obj) {
+        return String(obj.val);
+      }
       if ('_operator' in obj && 'arguments' in obj) {
         const args = (obj as Record<string, unknown>).arguments as unknown[];
         for (const arg of args) {

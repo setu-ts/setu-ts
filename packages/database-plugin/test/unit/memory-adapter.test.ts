@@ -135,6 +135,20 @@ describe('MemoryAdapter', () => {
       });
       expect(results.length).toBe(2);
     });
+
+    it('applies a where filter', async () => {
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', role: 'admin' });
+      await adapter.insertEntity('User', { id: '2', name: 'Bob', role: 'user' });
+      const results = await adapter.queryEntities('User', {
+        where: { role: 'admin' },
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [],
+      });
+      expect(results.map((r) => r.name)).toEqual(['Alice']);
+    });
   });
 
   describe('countEntities', () => {
@@ -144,6 +158,13 @@ describe('MemoryAdapter', () => {
       await adapter.insertEntity('User', { id: '2', name: 'Bob' });
       const count = await adapter.countEntities('User', {});
       expect(count).toBe(2);
+    });
+
+    it('counts only matching entities when a filter is given', async () => {
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', role: 'admin' });
+      await adapter.insertEntity('User', { id: '2', name: 'Bob', role: 'user' });
+      expect(await adapter.countEntities('User', { role: 'admin' })).toBe(1);
     });
   });
 
@@ -216,6 +237,40 @@ describe('MemoryAdapter', () => {
       // After commit — persisted
       const outside = await adapter.findEntityById('User', '1');
       expect(outside?.name).toBe('Committed');
+    });
+
+    it('overlay findAll and count honor a where filter', async () => {
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', role: 'admin' });
+      await adapter.insertEntity('User', { id: '2', name: 'Bob', role: 'user' });
+      const txn = await adapter.beginTransaction();
+      const ds: DataSource = (txn as IAdapterTransaction).createDataSource('User');
+      const admins = await ds.findAll({
+        where: { role: 'admin' },
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [],
+      });
+      expect(admins.map((r) => r.name)).toEqual(['Alice']);
+      expect(await ds.count({ role: 'admin' })).toBe(1);
+      await txn.rollback();
+    });
+
+    it('overlay update rejects when the row is absent', async () => {
+      await adapter.connect();
+      const txn = await adapter.beginTransaction();
+      const ds: DataSource = (txn as IAdapterTransaction).createDataSource('User');
+      await expect(ds.update('missing', { name: 'X' })).rejects.toThrow('not found');
+      await txn.rollback();
+    });
+
+    it('overlay delete returns false when the row is absent', async () => {
+      await adapter.connect();
+      const txn = await adapter.beginTransaction();
+      const ds: DataSource = (txn as IAdapterTransaction).createDataSource('User');
+      expect(await ds.delete('missing')).toBe(false);
+      await txn.rollback();
     });
   });
 
