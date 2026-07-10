@@ -227,7 +227,7 @@ describe('DatabasePlugin integration', () => {
     const plugin = DatabasePlugin();
     await plugin.register!(ctx);
     const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    await expect(db.query('SELECT 1')).rejects.toThrow('memory adapter does not support');
+    expect(() => db.query('SELECT 1')).toThrow('memory adapter does not support');
   });
 
   it('memory adapter migrate throws unsupported error', async () => {

@@ -206,7 +206,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
   }
 
   /** @inheritdoc */
-  async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
+  rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
     if (!this.isReady()) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
     }
@@ -319,11 +319,9 @@ function createPrismaDataSourceInner(
   }
 
   return {
-    async findById(id) {
-      return delegate.findUnique({ where: { id } });
-    },
+    findById: (id) => delegate.findUnique({ where: { id } }),
 
-    async findAll(query) {
+    findAll: (query) => {
       const args: Parameters<ModelDelegate['findMany']>[0] = {};
       if (query.where && Object.keys(query.where).length > 0) {
         args.where = query.where;
@@ -350,20 +348,16 @@ function createPrismaDataSourceInner(
       return delegate.findMany(args);
     },
 
-    async create(data) {
-      return delegate.create({ data });
-    },
+    create: (data) => delegate.create({ data }),
 
-    async update(id, data) {
-      try {
-        return delegate.update({ where: { id }, data });
-      } catch (err) {
+    update(id, data) {
+      return delegate.update({ where: { id }, data }).catch((err) => {
         const code = (err as { code?: string }).code;
         if (code === 'P2025') {
           throw new Error(`Entity '${entity}' with id '${id}' not found`);
         }
         throw err;
-      }
+      });
     },
 
     async delete(id) {
@@ -379,8 +373,6 @@ function createPrismaDataSourceInner(
       }
     },
 
-    async count(where) {
-      return delegate.count({ where: where ?? undefined });
-    },
+    count: (where) => delegate.count({ where: where ?? undefined }),
   };
 }

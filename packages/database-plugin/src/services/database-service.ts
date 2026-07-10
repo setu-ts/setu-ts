@@ -100,7 +100,7 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** @inheritdoc */
-  async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
+  query<T>(sql: string, params?: unknown[]): Promise<T[]> {
     if (this._adapterType === 'memory') {
       throw new Error('The memory adapter does not support raw SQL queries.');
     }
@@ -108,14 +108,16 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** @inheritdoc */
-  async migrate(): Promise<void> {
-    throw new Error('Programmatic migrations are not supported by the current database adapters.');
+  migrate(): Promise<void> {
+    return Promise.reject(
+      new Error('Programmatic migrations are not supported by the current database adapters.'),
+    );
   }
 
   /** @inheritdoc */
-  async isHealthy(): Promise<boolean> {
-    if (this._closed) return false;
-    return this._adapter.isReady();
+  isHealthy(): Promise<boolean> {
+    if (this._closed) return Promise.resolve(false);
+    return Promise.resolve(this._adapter.isReady());
   }
 
   /** @inheritdoc */
@@ -204,23 +206,11 @@ export function createMemoryDataSource(
 ): DataSource {
   adapter.getStore(entity, primaryKey); // Ensure store is initialized
   return {
-    async findAll(query) {
-      return adapter.queryEntities(entity, query);
-    },
-    async findById(id) {
-      return adapter.findEntityById(entity, id);
-    },
-    async create(data) {
-      return adapter.insertEntity(entity, data);
-    },
-    async update(id, data) {
-      return adapter.updateEntity(entity, id, data);
-    },
-    async delete(id) {
-      return adapter.deleteEntity(entity, id);
-    },
-    async count(where) {
-      return adapter.countEntities(entity, where);
-    },
+    findAll: (query) => adapter.queryEntities(entity, query),
+    findById: (id) => adapter.findEntityById(entity, id),
+    create: (data) => adapter.insertEntity(entity, data),
+    update: (id, data) => adapter.updateEntity(entity, id, data),
+    delete: (id) => adapter.deleteEntity(entity, id),
+    count: (where) => adapter.countEntities(entity, where),
   };
 }

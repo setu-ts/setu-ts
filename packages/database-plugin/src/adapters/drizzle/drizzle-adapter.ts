@@ -89,7 +89,7 @@ class Deferred<T> {
 }
 
 /** Drizzle operator functions loaded once at connect. */
-type DrizzleOperators = {
+export type DrizzleOperators = {
   eq: (col: unknown, val: unknown) => unknown;
   and: (...exprs: unknown[]) => unknown;
   asc: (col: unknown) => unknown;
@@ -124,7 +124,6 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
     // Load drizzle-orm operators once.
     try {
-      // deno-lint-ignore no-unversioned-import -- pinned version used below
       const orm = await import('npm:drizzle-orm@0.33.0');
       const ns = orm as Record<string, unknown>;
       this._operators = {
@@ -163,9 +162,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /** @inheritdoc */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this._connected = false;
     this._db = null;
+    return Promise.resolve();
   }
 
   /** @inheritdoc */

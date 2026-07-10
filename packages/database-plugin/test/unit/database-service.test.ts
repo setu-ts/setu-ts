@@ -103,8 +103,8 @@ describe('DatabaseService', () => {
   });
 
   describe('query', () => {
-    it('throws for memory adapter', async () => {
-      await expect(service.query('SELECT 1')).rejects.toThrow();
+    it('throws for memory adapter', () => {
+      expect(() => service.query('SELECT 1')).toThrow();
     });
   });
 

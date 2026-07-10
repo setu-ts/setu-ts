@@ -136,18 +136,18 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
  * @returns The instantiated adapter
  * @throws {Error} If the adapter type is unsupported
  */
-async function createAdapter(
+function createAdapter(
   adapterType: DatabaseAdapterType,
   adapterOptions: DatabaseAdapterOptions,
 ): Promise<IDatabaseAdapter> {
   switch (adapterType) {
     case 'prisma':
-      return new PrismaAdapter(adapterOptions);
+      return Promise.resolve(new PrismaAdapter(adapterOptions));
     case 'drizzle':
-      return new DrizzleAdapter(adapterOptions);
+      return Promise.resolve(new DrizzleAdapter(adapterOptions));
     case 'memory':
     default:
-      return new MemoryAdapter();
+      return Promise.resolve(new MemoryAdapter());
   }
 }
 

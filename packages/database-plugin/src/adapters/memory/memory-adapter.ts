@@ -70,16 +70,18 @@ export class MemoryAdapter implements IOrmAdapter {
   private _closed = false;
 
   /** @inheritdoc */
-  async connect(): Promise<void> {
+  connect(): Promise<void> {
     this._connected = true;
     this._closed = false;
+    return Promise.resolve();
   }
 
   /** @inheritdoc */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this._connected = false;
     this._closed = true;
     this._stores.clear();
+    return Promise.resolve();
   }
 
   /** @inheritdoc */
@@ -88,7 +90,7 @@ export class MemoryAdapter implements IOrmAdapter {
   }
 
   /** @inheritdoc */
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  beginTransaction(): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('MemoryAdapter is not connected — call connect() first');
     }
@@ -99,28 +101,26 @@ export class MemoryAdapter implements IOrmAdapter {
       tombstones: new Set(),
     };
 
-    const self = this;
     let committed = false;
     let rolledBack = false;
 
-    return {
-      createDataSource(entity: string): DataSource {
-        return self.createOverlayDataSource(entity, overlay);
-      },
+    return Promise.resolve({
+      createDataSource: (entity: string): DataSource =>
+        this.createOverlayDataSource(entity, overlay),
 
-      async commit(): Promise<void> {
+      commit: (): Promise<void> => {
         if (committed || rolledBack) {
           throw new Error('Transaction already finalized');
         }
         committed = true;
         // Flush creates
         for (const entry of overlay.creates) {
-          const store = self.getStore(entry.entity);
+          const store = this.getStore(entry.entity);
           store.records.push({ ...entry.record });
         }
         // Flush update shadows
         for (const shadow of overlay.shadows.values()) {
-          const store = self.getStore(shadow.entity);
+          const store = this.getStore(shadow.entity);
           const idx = store.records.findIndex((r) => r[store.primaryKey] === shadow.id);
           if (idx !== -1) {
             store.records[idx] = { ...shadow.record };
@@ -129,7 +129,7 @@ export class MemoryAdapter implements IOrmAdapter {
         // Flush delete tombstones
         for (const key of overlay.tombstones) {
           const [ent, idStr] = key.split('::');
-          const store = self.getStore(ent);
+          const store = this.getStore(ent);
           const id = Number(idStr) === Number(idStr) && !isNaN(Number(idStr))
             ? Number(idStr)
             : idStr;
@@ -138,14 +138,16 @@ export class MemoryAdapter implements IOrmAdapter {
             store.records.splice(idx, 1);
           }
         }
+        return Promise.resolve();
       },
 
-      async rollback(): Promise<void> {
-        if (committed || rolledBack) return;
+      rollback: (): Promise<void> => {
+        if (committed || rolledBack) return Promise.resolve();
         rolledBack = true;
         // Discard overlay — committed store untouched.
+        return Promise.resolve();
       },
-    };
+    });
   }
 
   /**
@@ -160,15 +162,13 @@ export class MemoryAdapter implements IOrmAdapter {
     entity: string,
     overlay: TxOverlay,
   ): DataSource {
-    const self = this;
-
     /**
      * Resolve the effective records for a transaction read: committed rows
      * with update shadows applied, tombstoned rows removed, buffered creates
      * appended.
      */
     const effectiveRecords = (): Record<string, unknown>[] => {
-      const store = self.getStore(entity);
+      const store = this.getStore(entity);
       const pk = store.primaryKey;
       return store.records
         .map((r) => {
@@ -183,62 +183,62 @@ export class MemoryAdapter implements IOrmAdapter {
     };
 
     return {
-      async findAll(query) {
+      findAll: (query) => {
         let results = effectiveRecords();
         if (query.where && Object.keys(query.where).length > 0) {
           results = results.filter((row) => matchesWhere(row, query.where));
         }
         results = applyOrderBy(results, query.orderBy);
         results = applyPagination(results, query.offset, query.limit);
-        return results.map((r) => ({ ...r }));
+        return Promise.resolve(results.map((r) => ({ ...r })));
       },
 
-      async findById(id) {
+      findById: (id) => {
         const records = effectiveRecords();
-        const store = self.getStore(entity);
+        const store = this.getStore(entity);
         const record = records.find((r) => r[store.primaryKey] === id);
-        if (!record) return null;
-        return { ...record };
+        if (!record) return Promise.resolve(null);
+        return Promise.resolve({ ...record });
       },
 
-      async create(data) {
-        const store = self.getStore(entity);
+      create: (data) => {
+        const store = this.getStore(entity);
         const record: Record<string, unknown> = { ...data };
         if (record[store.primaryKey] === undefined) {
           record[store.primaryKey] = crypto.randomUUID();
         }
         overlay.creates.push({ entity, record });
-        return { ...record };
+        return Promise.resolve({ ...record });
       },
 
-      async update(id, data) {
-        const store = self.getStore(entity);
+      update: (id, data) => {
+        const store = this.getStore(entity);
         // Find in effective records
         const effective = effectiveRecords();
         const target = effective.find((r) => r[store.primaryKey] === id);
         if (!target) {
-          throw new Error(`Entity '${entity}' with id '${id}' not found`);
+          return Promise.reject(new Error(`Entity '${entity}' with id '${id}' not found`));
         }
         const newRecord = { ...target, ...data };
         overlay.shadows.set(overlayKey(entity, id), { entity, id, record: newRecord });
-        return { ...newRecord };
+        return Promise.resolve({ ...newRecord });
       },
 
-      async delete(id) {
-        const store = self.getStore(entity);
+      delete: (id) => {
+        const store = this.getStore(entity);
         const effective = effectiveRecords();
         const target = effective.find((r) => r[store.primaryKey] === id);
-        if (!target) return false;
+        if (!target) return Promise.resolve(false);
         overlay.tombstones.add(overlayKey(entity, id));
-        return true;
+        return Promise.resolve(true);
       },
 
-      async count(where) {
+      count: (where) => {
         let results = effectiveRecords();
         if (Object.keys(where).length > 0) {
           results = results.filter((row) => matchesWhere(row, where));
         }
-        return results.length;
+        return Promise.resolve(results.length);
       },
     };
   }
@@ -266,7 +266,7 @@ export class MemoryAdapter implements IOrmAdapter {
    * @param query - Normalized query options
    * @returns Matching entities
    */
-  async queryEntities(
+  queryEntities(
     entity: string,
     query: NormalizedQuery,
   ): Promise<Record<string, unknown>[]> {
@@ -284,7 +284,7 @@ export class MemoryAdapter implements IOrmAdapter {
     // Paginate.
     results = applyPagination(results, query.offset, query.limit);
 
-    return results.map((r) => ({ ...r }));
+    return Promise.resolve(results.map((r) => ({ ...r })));
   }
 
   /**
@@ -294,14 +294,14 @@ export class MemoryAdapter implements IOrmAdapter {
    * @param id - Primary key value
    * @returns The entity or `null`
    */
-  async findEntityById(
+  findEntityById(
     entity: string,
     id: string | number,
   ): Promise<Record<string, unknown> | null> {
     const store = this.getStore(entity);
     const record = store.records.find((r) => r[store.primaryKey] === id);
-    if (!record) return null;
-    return { ...record };
+    if (!record) return Promise.resolve(null);
+    return Promise.resolve({ ...record });
   }
 
   /**
@@ -311,7 +311,7 @@ export class MemoryAdapter implements IOrmAdapter {
    * @param data - Entity data
    * @returns The inserted entity
    */
-  async insertEntity(
+  insertEntity(
     entity: string,
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>> {
@@ -321,7 +321,7 @@ export class MemoryAdapter implements IOrmAdapter {
       record[store.primaryKey] = crypto.randomUUID();
     }
     store.records.push(record);
-    return { ...record };
+    return Promise.resolve({ ...record });
   }
 
   /**
@@ -333,7 +333,7 @@ export class MemoryAdapter implements IOrmAdapter {
    * @returns The updated entity
    * @throws {Error} If the entity does not exist
    */
-  async updateEntity(
+  updateEntity(
     entity: string,
     id: string | number,
     data: Partial<Record<string, unknown>>,
@@ -341,10 +341,10 @@ export class MemoryAdapter implements IOrmAdapter {
     const store = this.getStore(entity);
     const index = store.records.findIndex((r) => r[store.primaryKey] === id);
     if (index === -1) {
-      throw new Error(`Entity '${entity}' with id '${id}' not found`);
+      return Promise.reject(new Error(`Entity '${entity}' with id '${id}' not found`));
     }
     store.records[index] = { ...store.records[index], ...data };
-    return { ...store.records[index] };
+    return Promise.resolve({ ...store.records[index] });
   }
 
   /**
@@ -354,12 +354,12 @@ export class MemoryAdapter implements IOrmAdapter {
    * @param id - Primary key value
    * @returns `true` when deleted, `false` if not found
    */
-  async deleteEntity(entity: string, id: string | number): Promise<boolean> {
+  deleteEntity(entity: string, id: string | number): Promise<boolean> {
     const store = this.getStore(entity);
     const index = store.records.findIndex((r) => r[store.primaryKey] === id);
-    if (index === -1) return false;
+    if (index === -1) return Promise.resolve(false);
     store.records.splice(index, 1);
-    return true;
+    return Promise.resolve(true);
   }
 
   /**
@@ -369,15 +369,15 @@ export class MemoryAdapter implements IOrmAdapter {
    * @param where - Filter conditions
    * @returns Matching count
    */
-  async countEntities(
+  countEntities(
     entity: string,
     where: Record<string, unknown>,
   ): Promise<number> {
     const store = this.getStore(entity);
     if (Object.keys(where).length === 0) {
-      return store.records.length;
+      return Promise.resolve(store.records.length);
     }
-    return store.records.filter((row) => matchesWhere(row, where)).length;
+    return Promise.resolve(store.records.filter((row) => matchesWhere(row, where)).length);
   }
 
   /** @inheritdoc — raw query not supported on memory adapter. */

@@ -267,9 +267,24 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   ship in the SAME PR as the code — a merged PR that left the tracking table at `⬜` is a defect. If
   you catch a merged milestone whose status was never flipped, correct it on a `fix/…` branch (it is
   a defect in already-merged `main`), never by editing `main` directly.
+- **Clean up plan/scratch files before you commit — a milestone commits exactly ONE plan.** The only
+  `plans/` file a milestone PR may add or keep is its single canonical plan,
+  `plans/milestone-<N>-<desc>.md`. Every transient artifact — continuation prompts, `fix-round-*`
+  notes, `*-verification-issues.md`, hand-off prompts for a human or a local LLM, review dumps — is
+  SCRATCH: write it under the session scratchpad directory, never under `plans/`, and never
+  `git add` it. M10 shipped four `plans/milestone-10-*.md` files into the tree (main plan + three
+  fix/continuation prompts) because scratch was committed — do not repeat this. Before every commit
+  run `git status --short` and `git diff --cached --name-only`; if a transient plan/prompt file is
+  staged, `git rm --cached` (or delete) it. When the milestone is complete, in the SAME PR that
+  flips the status: `git mv plans/milestone-<N>-<desc>.md plans/archive/` and confirm
+  `git ls-files plans/ | grep milestone-<N>` returns ONLY the archived path — any stray
+  `plans/milestone-<N>-*` still tracked at the repo's `plans/` root is a defect the PR must remove.
 
 ## Key conventions
 
+- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), archived to
+  `plans/archive/` on completion in the milestone's own PR. All other prompts/notes are scratchpad
+  only and never committed (see the plan-cleanup rule in "Before reporting a task done").
 - Tests: `@std/testing/bdd` + `@std/expect`, in `test/{unit,integration,e2e}/` per package.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy

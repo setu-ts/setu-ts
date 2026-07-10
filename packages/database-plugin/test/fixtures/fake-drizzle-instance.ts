@@ -76,8 +76,8 @@ export function createFakeDrizzleInstance(): {
   connected: boolean;
   ended: boolean;
 } {
-  let connected = false;
-  let ended = false;
+  const connected = false;
+  const ended = false;
   const recordedCalls: RecordedCall[] = [];
   const stores: Record<string, Store> = {
     user: { records: new Map(), idCounter: 0 },

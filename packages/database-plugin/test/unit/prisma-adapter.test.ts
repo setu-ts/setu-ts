@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- interface methods must be async
 /**
  * Unit tests for PrismaAdapter using a fake Prisma client.
  *
