@@ -128,7 +128,7 @@ export function createDefaultDrizzleOperators(): DrizzleOperators {
  * Drizzle adapter wrapping a Drizzle database instance.
  *
  * The instance is either injected via `options.drizzleInstance` or lazily
- * loaded through `import('npm:drizzle-orm@0.33.0')`.
+ * loaded through `import('npm:drizzle-orm@0.45.2')`.
  *
  * @since 0.1.0
  */
@@ -151,7 +151,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // operators override these when the import succeeds.
     this._operators = createDefaultDrizzleOperators();
     try {
-      const orm = await import('npm:drizzle-orm@0.33.0');
+      const orm = await import('npm:drizzle-orm@0.45.2');
       const ns = orm as Record<string, unknown>;
       this._operators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
@@ -302,7 +302,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // Lazy-load Drizzle — the adapter needs a driver instance, so bare import
     // is mostly a fallback that validates availability.
     try {
-      await import('npm:drizzle-orm@0.33.0');
+      await import('npm:drizzle-orm@0.45.2');
       throw new Error(
         'Drizzle adapter requires options.drizzleInstance to be provided (a configured database instance).',
       );

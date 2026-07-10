@@ -39,7 +39,7 @@ describe('Real ORM imports (guarded)', () => {
     let error: Error | null = null;
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      imported = await import('npm:drizzle-orm@^0.33.0');
+      imported = await import('npm:drizzle-orm@^0.45.2');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
     }
