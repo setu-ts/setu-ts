@@ -283,13 +283,17 @@ interface CacheMiddlewareOptions {
   timing-middleware example, `http.ts:183`).
 - **HIT**: read snapshot payload from cache → replay `ctx.response.status(s)`, copy headers (strip
   hop-by-hop: `connection, keep-alive, proxy-*, te, trailer, transfer-encoding, upgrade`), then set
-  `X-Cache: HIT`, then write the body via **`send()` only** — decode the payload back to
-  `Uint8Array` and call `ctx.response.send(bytes)`. **Do NOT replay via `json()`/`text()`**: both
-  overwrite `content-type` (`application/json` / `text/plain; charset=utf-8`), clobbering the cached
-  `content-type` header just copied and corrupting non-JSON replays. `send()` only defaults
-  `content-type` when it is absent, so a copied `content-type` survives. **Do not call `next()`**
-  (short-circuit — mandatory explicit test). A replay-fidelity test must assert the served
-  `content-type` equals the originally-cached one for a non-JSON body (e.g. `text/html`).
+  `X-Cache: HIT`, then replay the body preserving its type:
+  - **String payload** (no `bodyEncoding` flag): call `ctx.response.text(body)`, THEN re-assert the
+    cached content-type via `ctx.response.header('content-type', <cached ct>)` — `text()` sets
+    `text/plain` but the subsequent `header()` overrides it, and `snapshot()` carries the string
+    body so `inject()` returns it (the kernel only surfaces STRING bodies).
+  - **Binary payload** (`bodyEncoding: 'base64'`): call `ctx.response.send(bytes)`. For binary,
+    `inject().body === null` is an inherent inject limitation until M39 adapters — acceptable.
+  - **Null/empty body**: call `ctx.response.send()` (terminal, so the response is ended). **Do not
+    call `next()`** (short-circuit — mandatory explicit test). A replay-fidelity test must assert
+    the served `content-type` equals the originally-cached one for a non-JSON body (e.g.
+    `text/html`).
 - **MISS**: `await next()`; read `ctx.response.snapshot()`; if `status ∈ cacheableStatuses` and the
   response carries **no `set-cookie`** (security default; do not cache cookie-bearing responses),
   normalize to a serializable payload and `set(key, payload, ttl)`. Set `X-Cache: MISS`.

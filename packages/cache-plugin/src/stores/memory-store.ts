@@ -20,8 +20,8 @@ interface Entry<T = unknown> {
 const DEFAULT_MAX_SIZE = 1000;
 
 /**
- * Monotonic clock function. Defaults to `performance.now()` but accepts an
- * injected clock for deterministic testing.
+ * Monotonic clock function. Defaults to a bound `performance.now()` but
+ * accepts an injected clock for deterministic testing.
  */
 type ClockFn = () => number;
 
@@ -50,14 +50,14 @@ export class MemoryStore implements CacheStore {
    *   unused since each instance owns its own Map).
    * @param options - Configuration
    * @param options.maxSize - Maximum entry count (default 1000)
-   * @param options.clock - Monotonic clock function (default `performance.now`)
+   * @param options.clock - Monotonic clock function (default bound `performance.now`)
    */
   constructor(
     _prefix: string,
     options?: { maxSize?: number | undefined; clock?: ClockFn | undefined },
   ) {
     this.#maxSize = options?.maxSize ?? DEFAULT_MAX_SIZE;
-    this.#clock = options?.clock ?? performance.now;
+    this.#clock = options?.clock ?? (() => performance.now());
   }
 
   connect(): Promise<void> {

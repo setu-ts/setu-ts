@@ -172,4 +172,16 @@ describe('MemoryStore', () => {
       expect(await store.get('b')).toBeNull();
     });
   });
+
+  describe('default clock (production path)', () => {
+    it('set→get round-trip with default clock (no injection)', async () => {
+      // Exercises the production default-clock path — previously threw
+      // "TypeError: Illegal invocation" because performance.now was detached.
+      const store = new MemoryStore('');
+      await store.connect();
+      await store.set('prod-key', { hello: 'world' });
+      const result = await store.get('prod-key');
+      expect(result).toEqual({ hello: 'world' });
+    });
+  });
 });

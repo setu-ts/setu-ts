@@ -95,7 +95,11 @@ describe('cacheMiddleware', () => {
           return ctx.response;
         },
         json: () => hr,
-        text: () => hr,
+        text: (body: string) => {
+          responseBodyVal = body;
+          responseHeaders.set('content-type', 'text/plain; charset=utf-8');
+          return hr;
+        },
         send: (body?: Uint8Array) => {
           responseBodyVal = body ?? null;
           return hr;
@@ -221,6 +225,50 @@ describe('cacheMiddleware', () => {
       const body = responseBody();
       expect(body).toBeInstanceOf(Uint8Array);
       expect(body).toEqual(bytes);
+    });
+
+    it('replays string body as string (so inject() surfaces it)', async () => {
+      const { store } = createFakeStore();
+      await store.set('GET:http://localhost/json2', {
+        status: 200,
+        headers: [['content-type', 'application/json; charset=utf-8']],
+        body: '{"msg":"ok"}',
+      });
+
+      const { ctx, responseBody, responseHeaders } = createContext(store, {
+        method: 'GET',
+        url: 'http://localhost/json2',
+      });
+
+      const mw = cacheMiddleware();
+      await mw(ctx, async () => {});
+
+      const body = responseBody();
+      // Body must be a string (not Uint8Array) so that kernel inject() returns it.
+      expect(typeof body).toBe('string');
+      expect(body).toBe('{"msg":"ok"}');
+      // Content-type should be re-asserted from cache.
+      expect(responseHeaders.get('content-type')).toBe('application/json; charset=utf-8');
+    });
+
+    it('terminates null body with send()', async () => {
+      const { store } = createFakeStore();
+      await store.set('GET:http://localhost/empty', {
+        status: 204,
+        headers: [],
+        body: null,
+      });
+
+      const { ctx, responseBody } = createContext(store, {
+        method: 'GET',
+        url: 'http://localhost/empty',
+      });
+
+      const mw = cacheMiddleware();
+      await mw(ctx, async () => {});
+
+      const body = responseBody();
+      expect(body).toBeNull();
     });
   });
 

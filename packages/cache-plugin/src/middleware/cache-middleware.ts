@@ -79,14 +79,29 @@ export function cacheMiddleware(
       // Mark as cache HIT.
       ctx.response.header('X-Cache', 'HIT');
 
-      // Write body via send() only — do NOT use json()/text() since they
-      // overwrite content-type, corrupting non-JSON replays.
+      // Replay body preserving type so the kernel transport can surface it.
+      // String bodies must use text() — the kernel's inject() only surfaces
+      // STRING bodies (see application.ts:387). After text() sets
+      // text/plain, re-assert the cached content-type header so the correct
+      // type is returned.
       if (decoded.bodyBytes instanceof Uint8Array) {
+        // Binary payload (base64-encoded in cache). send(bytes) is correct.
+        // For binary, inject().body === null is an inherent inject limitation
+        // until M39 HTTP adapters; acceptable.
         ctx.response.send(decoded.bodyBytes);
       } else if (typeof decoded.bodyBytes === 'string') {
-        // String body from cache (non-binary). Encode to bytes for send().
-        const bytes = new TextEncoder().encode(decoded.bodyBytes);
-        ctx.response.send(bytes);
+        // String payload — use text() so snapshot.body is a string.
+        ctx.response.text(decoded.bodyBytes);
+        // text() sets text/plain; re-assert the cached content-type.
+        const cachedCT = decoded.headers.find(
+          ([name]) => name.toLowerCase() === 'content-type',
+        );
+        if (cachedCT !== undefined) {
+          ctx.response.header('content-type', cachedCT[1]);
+        }
+      } else {
+        // Null/empty body — call a terminal method so the response is ended.
+        ctx.response.send();
       }
 
       // Short-circuit — do NOT call next().

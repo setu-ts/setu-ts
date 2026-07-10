@@ -7,7 +7,12 @@
  *
  * @module
  */
-import type { ICacheStore, IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type {
+  ICacheStore,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+} from '@hono-enterprise/common';
 import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { CachePluginOptions, CacheStoreOptions } from '../interfaces/index.ts';
 import type { CacheStore } from '../stores/cache-store.ts';
@@ -74,8 +79,12 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
     async register(ctx: IPluginContext): Promise<void> {
       const prefix = storeOptions.prefix ?? DEFAULT_PREFIX;
 
+      // Derive a runtime clock for the MemoryStore — outside packages/runtime,
+      // get time via IRuntimeServices, never a bare runtime API.
+      const clock = resolveClock(ctx);
+
       // Create the backend store.
-      const backend = createBackend(storeType, prefix, storeOptions);
+      const backend = createBackend(storeType, prefix, storeOptions, { clock });
 
       // Connect the backend.
       await backend.connect();
@@ -129,6 +138,7 @@ function createBackend(
   storeType: string,
   prefix: string,
   options: CacheStoreOptions,
+  extra?: { clock?: (() => number) | undefined },
 ): CacheStore {
   switch (storeType) {
     case 'redis':
@@ -140,8 +150,21 @@ function createBackend(
       return new NoopStore(prefix);
     case 'memory':
     default:
-      return new MemoryStore(prefix, { maxSize: options.maxSize });
+      return new MemoryStore(prefix, { maxSize: options.maxSize, clock: extra?.clock });
   }
+}
+
+/**
+ * Resolve a monotonic clock from the runtime service when available.
+ * Returns `undefined` when the runtime is not yet registered (unit tests
+ * that only provide a fake context).
+ */
+function resolveClock(ctx: IPluginContext): (() => number) | undefined {
+  if (ctx.services.has(CAPABILITIES.RUNTIME)) {
+    const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    return runtime.hrtime.bind(runtime);
+  }
+  return undefined;
 }
 
 /**

@@ -244,6 +244,27 @@ describe('CachePlugin', () => {
     });
   });
 
+  describe('runtime clock injection', () => {
+    it('resolves clock from runtime service when available', async () => {
+      const { ctx, registered } = createFakeContext();
+      // Register a fake runtime so resolveClock can find it.
+      ctx.services.register(CAPABILITIES.RUNTIME, {
+        hrtime: () => 12345,
+      });
+      const plugin = CachePlugin();
+      await plugin.register(ctx);
+      expect(registered.has(CAPABILITIES.CACHE)).toBe(true);
+    });
+
+    it('does not crash when runtime is absent', async () => {
+      // No runtime registered — resolveClock returns undefined; MemoryStore
+      // falls back to its default bound performance.now.
+      const { ctx } = createFakeContext();
+      const plugin = CachePlugin();
+      await expect(plugin.register(ctx)).resolves.toBeUndefined();
+    });
+  });
+
   describe('priority and version', () => {
     it('has correct priority', () => {
       const plugin = CachePlugin();

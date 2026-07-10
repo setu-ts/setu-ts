@@ -267,7 +267,7 @@ Plugins (Infrastructure) → Application Code → Domain Code
 
 ### Hexagonal Architecture
 
-- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICache`,
+- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICacheStore`,
   `IMessageBroker`).
 - **Adapters** — Implementations in plugins (e.g., `PrismaAdapter`, `RedisStore`, `RabbitMqBroker`).
 - **Application Core** — Business logic depends only on ports.
@@ -691,7 +691,7 @@ const db = ctx.services.get<IDatabaseService>('database');
 
 // Check if a capability is available
 if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICache>('cache');
+  const cache = ctx.services.get<ICacheStore>('cache');
 }
 
 // Get all services for a multi-provider token
