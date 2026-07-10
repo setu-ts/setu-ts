@@ -1453,10 +1453,10 @@ app.router.get('/users/:id', {
 
 ### Deliverables
 
-- [ ] CachePlugin
-- [ ] Memory, Redis, Noop stores
-- [ ] Cache middleware
-- [ ] Full test coverage
+- [x] CachePlugin
+- [x] Memory, Redis, Noop stores
+- [x] Cache middleware
+- [x] Full test coverage
 
 ---
 

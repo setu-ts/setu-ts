@@ -2985,6 +2985,12 @@ Contract notes:
   without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
   multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
   refresh cookies). Both chain (`return this`).
+- `IResponse.snapshot()` returns an immutable read of the built response —
+  `{ status: number; headers: Headers; body: Uint8Array | string | null }`. This is the read surface
+  that lets middleware capture a response after the handler runs (the CachePlugin's transparent
+  `cacheMiddleware` uses it) and that unblocks the deferred M39 HTTP server adapters. Added in
+  Milestone 11; `ResponseBuilder` (kernel) already implemented it, so no kernel runtime change was
+  required.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
@@ -3077,9 +3083,10 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 Contract notes:
 
 - **M3 provides runtime services only; HTTP server adapters are deferred to a dedicated milestone.**
-  The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`, but `IResponse` is
-  write-only (no read/snapshot surface), so an adapter cannot serialize the response without
-  reaching into kernel internals. That seam needs its own design pass against the kernel.
+  The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`. As of Milestone 11
+  `IResponse` exposes a read surface — `snapshot()` (see the HTTP abstractions above) — so an
+  adapter can serialize the response (status, headers, body) without reaching into kernel internals.
+  The M39 milestone still owns wiring the concrete Node/Deno/Bun adapters onto a real port.
 - The `RuntimePlugin` is **mandatory** in every application. It registers at
   `PLUGIN_PRIORITY.HIGHEST` so its services are available to all other plugins during registration.
 - Each adapter factory accepts an injectable `*Host` interface (the documented extension point for
