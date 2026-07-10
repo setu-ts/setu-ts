@@ -27,10 +27,18 @@ git diff --stat main..HEAD     # the changed files — this is your review scope
 Then read, in order:
 
 1. `ROADMAP.md` — the milestone's section (objective, feature list, implementation files,
-   deliverables). Every listed file and feature must exist in the diff.
-2. `PUBLIC_API.md` — the section for this package. Every `src/index.ts` export must be documented
+   deliverables). Every listed file and feature must exist in the diff. **Write out the deliverable
+   list now** — Step 6 requires a behavioral observation for each entry; a deliverable you cannot
+   observe running is not delivered, no matter what the checkbox says.
+2. **The milestone's plan under `plans/`** — the design decisions and test-file table are
+   commitments, not suggestions. Diff the plan against the implementation: every design decision
+   must exist in code (grep for its mechanism, read it), every planned test file must exist, and
+   every deviation goes in the report as a finding. M10 shipped "✅" with the plan's data-source
+   implementations, transaction-scoped repositories, and two whole test files silently missing — the
+   plan was right and nothing checked the code against it.
+3. `PUBLIC_API.md` — the section for this package. Every `src/index.ts` export must be documented
    there; every documented export must exist.
-3. `packages/common/src/` — the committed interface(s) this package implements. The implementation
+4. `packages/common/src/` — the committed interface(s) this package implements. The implementation
    must match the contract exactly (same methods, same throws-behavior, same semantics) — not a
    widened or re-declared version.
 
@@ -74,8 +82,12 @@ Check each item and note where it holds or fails:
   (e.g. "@throws if already registered" actually throws).
 - **Token ↔ interface binding** — services registered/resolved via `CAPABILITIES` tokens are typed
   as that token's documented interface; no resolve-one-cast-to-another.
-- **Every option is read** — for each plugin/constructor option: grep that its name appears beyond
-  its declaration and assignment. Declare-and-store-only = dead feature = lying JSDoc.
+- **Every option has an OBSERVABLE effect, not just a read.** The grep ("name appears beyond
+  declaration and assignment") is only the first half — an option can be "read" inside a method that
+  unconditionally throws or a branch that never executes (M10's `logQueries` greps as consumed; it
+  never logged a single repository operation). The check is behavioral: flip the option in Step 6
+  and observe the surface change (a log line appears, an error format switches). No observable
+  difference = dead option = FAIL.
 - **Both entry points, one implementation** — if a behavior is reachable two ways (service method +
   helper), confirm a test drives BOTH under a NON-default configuration.
 - **Spec-shaped output field-by-field** — anything claiming RFC 7807 / NestJS / OpenAPI shape has a
@@ -87,26 +99,59 @@ Check each item and note where it holds or fails:
 - **Docs match behavior** — every JSDoc/PUBLIC_API claim you can point at a code path for, actually
   executes that path ("lazily imported via npm:x" must really `import()`).
 - **Fixtures honor the real contract** — cross-check fixture values against how the real producer
-  sets them (e.g. monotonic `hrtime()` vs epoch `Date.now()`).
+  sets them (e.g. monotonic `hrtime()` vs epoch `Date.now()`). For a fixture standing in for an
+  external dependency, verify every method/shape the fixture implements EXISTS in the dependency's
+  current major version (check its docs or types, not memory): M10's fake Prisma client implemented
+  an invented `$use({name, query})` — real `@prisma/client` v6+ has no `$use` at all, so tests
+  passed while real apps crashed at startup.
 - **Per-request hoisting** — patterns parsed / chains compiled at registration, not per request.
 - **Tracking flipped in this PR** — ROADMAP.md "Progress Tracking" row is ✅ and CLAUDE.md "Current
   status" marks the milestone complete and points "Next milestone" at the following one, on this
   branch.
 
-# Step 6 — Behavioral exercise (run the real code)
+# Step 6 — Behavioral exercise (run the real code at its real surface)
 
-Tests can be wrong together with the code. Write a small scratch script OUTSIDE the repo (e.g.
-`/tmp/…/e2e.ts`) that imports the package's real `src/index.ts` by absolute path, drives its
-headline features on representative inputs, and prints observable results:
+Tests can be wrong together with the code — M10's tests asserted no-op behavior and passed at 90%+
+coverage. Write a scratch driver in a hidden dir INSIDE the repo (workspace imports only resolve
+from inside it; e.g. `.verify-<milestone>/driver.ts`, deleted afterwards) and drive the package
+through its REAL surface — a kernel application, not import-and-call:
 
-```bash
-deno run --allow-read --config /path/to/repo/deno.json /tmp/.../e2e.ts
+```typescript
+import { createApplication } from '@hono-enterprise/kernel';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { XxxPlugin } from '@hono-enterprise/xxx-plugin';
+const app = createApplication({ plugins: [RuntimePlugin(), XxxPlugin(/* opts */)] });
+app.router.post('/probe', async (ctx) => {/* exercise the service via ctx.services */});
+await app.start();
+const res = await app.inject({ method: 'POST', url: 'http://localhost/probe', body: {...} });
+// NOTE: ctx.request has NO .body — use `await ctx.request.json<T>()`.
 ```
 
-Cover at minimum: the happy path of each headline feature, one configured-non-default path, one
-error path (assert the thrown message), and one state-cleanup case (a failure followed by a
-successful call — proves no leaked internal state). Paste the output, then delete the script. Never
-leave scratch files inside the repo.
+Run with `deno run -A .verify-<milestone>/driver.ts` (it does NOT type-check — cross-check contract
+shapes in `packages/common/src/` by reading them). Paste the output, then delete the dir.
+
+Mandatory rules for what to drive:
+
+- **One observation per ROADMAP deliverable** — walk the list from Step 1. Exercising only the
+  default configuration verifies one deliverable, not the milestone (M10's Prisma and Drizzle
+  adapter deliverables were no-op stubs; only the memory adapter was ever driven).
+- **Every write is read back through the same public API.** `create` returning a value proves
+  nothing — a stub echoing its input looks identical to success. Write, then `findAll`/`findById`
+  and confirm the data (with its fields, not just an id) comes back. A variant that cannot be run
+  against its real backend (needs codegen, a live database) is driven with an injected fake client
+  that RECORDS calls: if a full CRUD sequence reaches the client as `["$connect"]` and nothing else,
+  the adapter is decorative — FAIL, whatever the tests say.
+- **Flip each option and observe the difference** (this is Step 5's option check, executed):
+  `logQueries: true` must visibly log during repository operations, not merely be read somewhere.
+- **Transactions get adversarial probes, not just commit/rollback happy paths**: (1) abort a
+  transaction and confirm its writes are gone; (2) write OUTSIDE the transaction while it is open,
+  abort, and confirm that unrelated write SURVIVES (M10's global-snapshot rollback destroyed it);
+  (3) read from outside before commit to check isolation and report dirty reads.
+- **One error path** (assert the thrown message matches the documented one) and **one state-cleanup
+  case** (a failure followed by a successful call — no leaked internal state; also drive one call
+  AFTER `app.stop()` and confirm the closed-state guard).
+- **Multi-instance plugins**: register two instances (named + default), confirm isolation and that
+  illegal names / duplicate registrations throw at the documented point.
 
 # Step 7 — Report
 

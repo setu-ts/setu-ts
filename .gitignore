@@ -1,5 +1,7 @@
-# Coverage output
+# Coverage output (root `deno task test:coverage` writes coverage/; per-package
+# runs with `--coverage=.coverage` write .coverage/ — ignore both at any depth).
 coverage/
+.coverage/
 
 # Generated API docs
 docs/api/

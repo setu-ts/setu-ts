@@ -688,7 +688,6 @@ app.register(DatabasePlugin({
   options: {
     url: config.get('DATABASE_URL'),
     logQueries: config.get('NODE_ENV') === 'development',
-    poolSize: 10,
   },
 }));
 ```
@@ -730,7 +729,7 @@ app.router.get('/users/:id', async (ctx) => {
 
 app.router.post('/users', async (ctx) => {
   const db = ctx.services.get<IDatabaseService>('database');
-  const body = ctx.state.get('validatedBody');
+  const body = await ctx.request.json<{ name: string; email: string }>();
 
   const user = await db.getRepository<User>('User').create({
     name: body.name,
@@ -804,8 +803,8 @@ app.register(DatabasePlugin({
 
 // Access by name
 app.router.get('/analytics', async (ctx) => {
-  const primaryDb = ctx.services.get<IDatabaseService>('database:primary');
-  const analyticsDb = ctx.services.get<IDatabaseService>('database:analytics');
+  const primaryDb = ctx.services.get<IDatabaseService>('database.primary');
+  const analyticsDb = ctx.services.get<IDatabaseService>('database.analytics');
   // ...
 });
 ```
