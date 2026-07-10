@@ -953,28 +953,54 @@ app.router.get('/api/data', {
 
 ## CachePlugin()
 
-Provides caching with multiple stores.
+Provides caching with multiple stores (Memory, Redis, Noop) and a transparent response-caching
+middleware.
+
+Registers `ICacheStore` under `CAPABILITIES.CACHE`.
+
+### Exports
+
+| Export                   | File                                 | Description                              |
+| ------------------------ | ------------------------------------ | ---------------------------------------- |
+| `CachePlugin`            | `src/plugin/cache-plugin.ts`         | Plugin factory                           |
+| `CacheService`           | `src/services/cache-service.ts`      | Wrapper applying prefix + defaultTTL     |
+| `MemoryStore`            | `src/stores/memory-store.ts`         | In-memory LRU + TTL store                |
+| `RedisStore`             | `src/stores/redis-store.ts`          | Redis store via ioredis                  |
+| `NoopStore`              | `src/stores/noop-store.ts`           | No-op store (dev/test)                   |
+| `cacheMiddleware`        | `src/middleware/cache-middleware.ts` | Transparent response-caching middleware  |
+| `CacheStoreType`         | `src/interfaces/index.ts`            | `'memory' \| 'redis' \| 'noop'`          |
+| `CacheStoreOptions`      | `src/interfaces/index.ts`            | Store-specific options                   |
+| `CachePluginOptions`     | `src/interfaces/index.ts`            | Plugin factory options                   |
+| `IRedisClient`           | `src/interfaces/index.ts`            | Structural ioredis shape                 |
+| `CacheMiddlewareOptions` | `src/interfaces/index.ts`            | Middleware options                       |
+| `CachedResponsePayload`  | `src/interfaces/index.ts`            | Cached response shape                    |
+| `ICacheStore`            | `src/interfaces/index.ts`            | Re-export from `@hono-enterprise/common` |
 
 ### Registration
 
 ```typescript
 import { CachePlugin } from '@hono-enterprise/cache-plugin';
 
+// Memory store (default)
+app.register(CachePlugin());
+
+// Redis store with URL
 app.register(CachePlugin({
   store: 'redis',
-  options: {
-    url: config.get('REDIS_URL'),
-    prefix: 'myapp:',
-    defaultTTL: 3600,
-  },
+  options: { url: 'redis://localhost:6379', prefix: 'myapp:' },
 }));
+
+// Named multi-cache instance
+app.register(CachePlugin({ name: 'session', options: { maxSize: 500 } }));
 ```
 
 ### Programmatic API
 
 ```typescript
+import type { ICacheStore } from '@hono-enterprise/common';
+
 app.router.get('/users/:id', async (ctx) => {
-  const cache = ctx.services.get<ICache>('cache');
+  const cache = ctx.services.get<ICacheStore>('cache');
   const cacheKey = `user:${ctx.params.id}`;
 
   // Try cache
@@ -995,13 +1021,16 @@ app.router.get('/users/:id', async (ctx) => {
 
 ### Cache Middleware
 
+Transparent response-caching middleware that stores full HTTP responses (status, headers, body) and
+replays them on cache HIT without invoking the handler.
+
 ```typescript
 import { cacheMiddleware } from '@hono-enterprise/cache-plugin';
 
 app.router.get('/users/:id', {
   middleware: [
     cacheMiddleware({
-      ttl: 3600,
+      ttlSeconds: 3600,
       key: (ctx) => `user:${ctx.params.id}`,
       bypass: (ctx) => ctx.request.query.refresh === 'true',
     }),
@@ -1013,22 +1042,15 @@ app.router.get('/users/:id', {
 });
 ```
 
-### Cache Interface
+### ICacheStore Interface
 
 ```typescript
-interface ICache {
+interface ICacheStore {
   get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T, ttl?: number): Promise<void>;
+  set<T>(key: string, value: T, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<boolean>;
   has(key: string): Promise<boolean>;
   clear(): Promise<void>;
-  getMany<T>(keys: string[]): Promise<(T | null)[]>;
-  setMany<T>(entries: Array<[string, T]>, ttl?: number): Promise<void>;
-  deleteMany(keys: string[]): Promise<boolean[]>;
-  incr(key: string): Promise<number>;
-  decr(key: string): Promise<number>;
-  ttl(key: string): Promise<number>;
-  expire(key: string, ttl: number): Promise<void>;
 }
 ```
 
@@ -2963,6 +2985,12 @@ Contract notes:
   without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
   multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
   refresh cookies). Both chain (`return this`).
+- `IResponse.snapshot()` returns an immutable read of the built response —
+  `{ status: number; headers: Headers; body: Uint8Array | string | null }`. This is the read surface
+  that lets middleware capture a response after the handler runs (the CachePlugin's transparent
+  `cacheMiddleware` uses it) and that unblocks the deferred M39 HTTP server adapters. Added in
+  Milestone 11; `ResponseBuilder` (kernel) already implemented it, so no kernel runtime change was
+  required.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
@@ -3055,9 +3083,10 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 Contract notes:
 
 - **M3 provides runtime services only; HTTP server adapters are deferred to a dedicated milestone.**
-  The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`, but `IResponse` is
-  write-only (no read/snapshot surface), so an adapter cannot serialize the response without
-  reaching into kernel internals. That seam needs its own design pass against the kernel.
+  The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`. As of Milestone 11
+  `IResponse` exposes a read surface — `snapshot()` (see the HTTP abstractions above) — so an
+  adapter can serialize the response (status, headers, body) without reaching into kernel internals.
+  The M39 milestone still owns wiring the concrete Node/Deno/Bun adapters onto a real port.
 - The `RuntimePlugin` is **mandatory** in every application. It registers at
   `PLUGIN_PRIORITY.HIGHEST` so its services are available to all other plugins during registration.
 - Each adapter factory accepts an injectable `*Host` interface (the documented extension point for

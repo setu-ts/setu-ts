@@ -112,6 +112,11 @@ function createFakeResponse(ctx: { response: IResponse }): IResponse {
     text: () => ({ __handlerResult: true }) as HandlerResult,
     send: () => ({ __handlerResult: true }) as HandlerResult,
     redirect: () => ({ __handlerResult: true }) as HandlerResult,
+    snapshot: () => ({
+      status: 200,
+      headers: new Headers(),
+      body: null,
+    }),
   };
 }
 

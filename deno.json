@@ -72,7 +72,7 @@
     "indentWidth": 2,
     "singleQuote": true,
     "semiColons": true,
-    "exclude": ["docs/api"]
+    "exclude": ["docs/api", ".verify", ".verify-milestone"]
   },
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",

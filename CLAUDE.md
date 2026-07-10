@@ -120,7 +120,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `discoverControllers` auto-discovery, and a parameter resolver) — complete (PR pending)
 - **Milestone 10** (`packages/database-plugin` — DatabasePlugin with repository pattern, Unit of
   Work, ORM adapters for Prisma/Drizzle/Memory) — complete (PR pending)
-- **Next milestone** — Milestone 11
+- **Milestone 11** (`packages/cache-plugin` — CachePlugin with Memory, Redis, Noop stores;
+  CacheService; cacheMiddleware for transparent response caching) — complete (PR pending)
+- **Next milestone** — Milestone 12
 
 ## Verification (run before declaring any work done)
 

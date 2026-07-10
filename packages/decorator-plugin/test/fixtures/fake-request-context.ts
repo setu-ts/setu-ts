@@ -43,6 +43,11 @@ function createFakeResponse(): IResponse {
     text: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     send: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     redirect: () => ({ __handlerResult: true }) as unknown as HandlerResult,
+    snapshot: () => ({
+      status: 200,
+      headers: new Headers(),
+      body: null,
+    }),
   };
   return r;
 }

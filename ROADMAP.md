@@ -1407,7 +1407,10 @@ app.register(CachePlugin({
 **Programmatic API:**
 
 ```typescript
-const cache = ctx.services.get<ICache>('cache');
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ICacheStore } from '@hono-enterprise/common';
+
+const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
 await cache.set('user:123', userData, 3600);
 const user = await cache.get<User>('user:123');
 await cache.delete('user:123');
@@ -1416,8 +1419,10 @@ await cache.delete('user:123');
 **Cache Middleware:**
 
 ```typescript
+import { cacheMiddleware } from '@hono-enterprise/cache-plugin';
+
 app.router.get('/users/:id', {
-  middleware: [cache.middleware({ ttl: 3600, key: (ctx) => `user:${ctx.params.id}` })],
+  middleware: [cacheMiddleware({ ttlSeconds: 3600, key: (ctx) => `user:${ctx.params.id}` })],
   handler: async (ctx) => {/* ... */},
 });
 ```
@@ -1448,10 +1453,10 @@ app.router.get('/users/:id', {
 
 ### Deliverables
 
-- [ ] CachePlugin
-- [ ] Memory, Redis, Noop stores
-- [ ] Cache middleware
-- [ ] Full test coverage
+- [x] CachePlugin
+- [x] Memory, Redis, Noop stores
+- [x] Cache middleware
+- [x] Full test coverage
 
 ---
 
@@ -3304,7 +3309,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 8         | ✅     | di-plugin            |
 | 9         | ✅     | decorator-plugin     |
 | 10        | ✅     | database-plugin      |
-| 11        | ⬜     | cache-plugin         |
+| 11        | ✅     | cache-plugin         |
 | 12        | ⬜     | events-plugin        |
 | 13        | ⬜     | cqrs-plugin          |
 | 14        | ⬜     | messaging-plugin     |

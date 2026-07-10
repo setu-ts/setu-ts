@@ -118,6 +118,13 @@ export function createFakeResponse(): FakeResponseResult {
     redirect(_url: string, _status?: number): HandlerResult {
       return HANDLER_RESULT;
     },
+    snapshot(): {
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: Uint8Array | string | null;
+    } {
+      return { status, headers, body };
+    },
   };
 
   return {

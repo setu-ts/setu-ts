@@ -6,6 +6,11 @@ coverage/
 # Generated API docs
 docs/api/
 
+# Verification reports + scratch drivers (verify-milestone skill output — scratch,
+# never committed per CLAUDE.md's plan-cleanup rule; also fmt-excluded in deno.json).
+.verify/
+.verify-*/
+
 # npm compatibility artifacts (compat test suites)
 node_modules/
 

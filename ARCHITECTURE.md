@@ -267,7 +267,7 @@ Plugins (Infrastructure) → Application Code → Domain Code
 
 ### Hexagonal Architecture
 
-- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICache`,
+- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICacheStore`,
   `IMessageBroker`).
 - **Adapters** — Implementations in plugins (e.g., `PrismaAdapter`, `RedisStore`, `RabbitMqBroker`).
 - **Application Core** — Business logic depends only on ports.
@@ -691,7 +691,7 @@ const db = ctx.services.get<IDatabaseService>('database');
 
 // Check if a capability is available
 if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICache>('cache');
+  const cache = ctx.services.get<ICacheStore>('cache');
 }
 
 // Get all services for a multi-provider token
@@ -1165,14 +1165,14 @@ graph TB
 
 #### @hono-enterprise/cache-plugin
 
-| Aspect               | Detail                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Caching abstraction                                                                               |
-| **Responsibilities** | Provide `ICache`; memory and Redis stores; cache middleware; TTL management                       |
-| **Dependencies**     | `common`, `kernel`                                                                                |
-| **Public API**       | `CachePlugin()`; `ICache`; `cacheMiddleware()`                                                    |
-| **Extension Points** | Custom cache store (override `cache` token); custom key generators                                |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store for testing |
+| Aspect               | Detail                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Caching abstraction with transparent response-caching middleware                                                              |
+| **Responsibilities** | Provide `ICacheStore`; Memory, Redis, Noop stores; `CacheService`; `cacheMiddleware`; TTL management                          |
+| **Dependencies**     | `common`, `kernel`                                                                                                            |
+| **Public API**       | `CachePlugin()`, `CacheService`, `MemoryStore`, `RedisStore`, `NoopStore`, `cacheMiddleware`, types in `src/interfaces/index` |
+| **Extension Points** | Custom cache store (override `cache` token); custom key generators; named multi-cache instances                               |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store default; `ICacheStore` has 5 methods    |
 
 #### @hono-enterprise/events-plugin
 
