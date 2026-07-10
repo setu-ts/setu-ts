@@ -181,6 +181,22 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
   seam and unit-test that seam's branches directly, rather than leaving the branch behind a test
   that skips. (An external I/O line that only runs when an optional dep is installed may stay behind
   a guarded/skipped test, but the branching logic around it must not.)
+- **"Hard to cover" is NOT an accepted reason — and a note explaining why a file is under the bar is
+  itself a gate failure.** The 90% branch/function/line bar is absolute; a `src` file below it means
+  the task is UNFINISHED, full stop. Do not ship under the bar with a comment, a commit-message
+  caveat, or a hand-off note rationalizing it ("inherently hard to exercise", "deeply nested
+  comparison branches", "would require exhaustive fakes", "only runs with a real DB"). Every one of
+  those is a real, cheap fix in this codebase, and each has a prescribed technique: **duplicated
+  logic** → route it through the existing shared helper (a hand-rolled filter/sort/paginate copy of
+  `query-builder.ts` is a defect, not a coverage problem — deleting the copy erases the branches);
+  **a fallback/default only taken when an import or env differs** → extract it to an internal seam
+  (`createDefaultXxx()`) and call it from a unit test; **a not-found / error / rollback branch** →
+  drive it with a fake that returns nothing or a fake whose method rejects; **an arg-translation
+  branch** → call the method with that option set and assert the translated call. If you genuinely
+  believe a specific line is uncoverable, the bar to skip it is high: it must be a single external
+  I/O call gated on an optional dep behind a guarded test (per the bullet above), you name the exact
+  file:line, and you state which of the techniques above you tried and why each failed. Anything
+  short of that, the answer is "write the test", never "explain the gap".
 - **Token ↔ interface binding is fixed**: a service resolved from a `CAPABILITIES` token must be
   typed as that token's documented interface. Never resolve one token and cast to another interface.
   If no token fits the need, add one to `CAPABILITIES` (that is a public API change — update
