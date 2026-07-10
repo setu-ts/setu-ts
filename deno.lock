@@ -12,7 +12,6 @@
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.19": "1.0.19",
     "npm:@prisma/client@*": "7.8.0",
-    "npm:@prisma/client@6": "6.19.3",
     "npm:@prisma/client@7.8.0": "7.8.0",
     "npm:drizzle-orm@*": "0.45.2_@prisma+client@7.8.0",
     "npm:drizzle-orm@0.45.2": "0.45.2_@prisma+client@7.8.0",
@@ -74,10 +73,6 @@
     },
     "@prisma/client-runtime-utils@7.8.0": {
       "integrity": "sha512-5NQZztQ0oY/ADFkmd9gPuweH5A1/CCY8YQPorLLO0Mu6a87mY5gsnDkzmFmIHs9NFaLnZojzgddFVN4RpKYrdw=="
-    },
-    "@prisma/client@6.19.3": {
-      "integrity": "sha512-mKq3jQFhjvko5LTJFHGilsuQs+W+T3Gm451NzuTDGQxwCzwXHYnIu2zGkRoW+Exq3Rob7yp2MfzSrdIiZVhrBg==",
-      "scripts": true
     },
     "@prisma/client@7.8.0": {
       "integrity": "sha512-HFp3Dawv/3sU3JtlPha90IB+48lS7zHiH4LKZPjmcE8YH5P9DOXGPvo8dqOtO7MqLDd1p2hOWMcFlRT1DMblHw==",

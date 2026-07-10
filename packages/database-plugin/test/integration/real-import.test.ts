@@ -12,8 +12,8 @@ describe('Real ORM imports (guarded)', () => {
     let imported: unknown = undefined;
     let error: Error | null = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      imported = await import('npm:@prisma/client@^6.0.0');
+      // Match the version the adapter lazily imports (see prisma-adapter.ts).
+      imported = await import('npm:@prisma/client@7.8.0');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
     }
