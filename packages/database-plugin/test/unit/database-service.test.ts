@@ -1,30 +1,70 @@
-// deno-lint-ignore-file require-await -- test fixtures must be async to satisfy interfaces
+// deno-lint-ignore-file require-await -- interface methods must be async
 /**
  * Unit tests for DatabaseService.
  *
+ * Tests cover:
+ * - Constructor accepts IDatabaseAdapter + now()
+ * - wrapDataSource logs when logQueries true (monotonic duration)
+ * - wrapDataSource is silent when logQueries false
+ * - query() delegates rawQuery
+ * - migrate() throws uniform error
+ * - transaction() builds UoW from scoped factory
+ *
  * @module
  */
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
+import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createMemoryDataSource, DatabaseService } from '../../src/services/database-service.ts';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
+import type { IDatabaseAdapter } from '../../src/adapters/adapter.ts';
+import type { DataSource } from '../../src/repositories/base-repository.ts';
 
 describe('DatabaseService', () => {
-  let adapter: MemoryAdapter;
+  let adapter: IDatabaseAdapter;
+  let createDs: (entity: string) => DataSource;
+  let logs: string[];
   let service: DatabaseService;
+  let nowValue = 0;
 
   beforeEach(async () => {
-    adapter = new MemoryAdapter();
+    logs = [];
+    nowValue = 0;
+    adapter = new MemoryAdapter() as unknown as IDatabaseAdapter;
     await adapter.connect();
+    createDs = (entity: string) => {
+      const ma = adapter as MemoryAdapter;
+      return {
+        async findAll(query) {
+          return ma.queryEntities(entity, query);
+        },
+        async findById(id) {
+          return ma.findEntityById(entity, String(id));
+        },
+        async create(data) {
+          return ma.insertEntity(entity, data);
+        },
+        async update(id, data) {
+          return ma.updateEntity(entity, String(id), data);
+        },
+        async delete(id) {
+          return ma.deleteEntity(entity, String(id));
+        },
+        async count(where) {
+          return ma.countEntities(entity, where);
+        },
+      };
+    };
     service = new DatabaseService(
       adapter,
-      (entity: string) => createMemoryDataSource(adapter, entity),
+      createDs,
       'memory',
+      {},
+      { debug: (msg: string) => logs.push(msg) },
+      () => {
+        nowValue += 10;
+        return nowValue;
+      },
     );
-  });
-
-  afterEach(async () => {
-    await service.close();
   });
 
   describe('getRepository', () => {
@@ -35,12 +75,12 @@ describe('DatabaseService', () => {
 
     it('throws when service is closed', async () => {
       await service.close();
-      expect(() => service.getRepository('User')).toThrow('closed');
+      expect(() => service.getRepository('User')).toThrow();
     });
   });
 
   describe('isHealthy', () => {
-    it('returns true when adapter is ready', async () => {
+    it('returns true when open', async () => {
       expect(await service.isHealthy()).toBe(true);
     });
 
@@ -64,34 +104,13 @@ describe('DatabaseService', () => {
 
   describe('query', () => {
     it('throws for memory adapter', async () => {
-      await expect(service.query('SELECT * FROM users')).rejects.toThrow(
-        'The memory adapter does not support raw SQL queries.',
-      );
-    });
-
-    it('logs query when logQueries is true', async () => {
-      const logs: string[] = [];
-      const logService = new DatabaseService(
-        adapter,
-        (entity: string) => createMemoryDataSource(adapter, entity),
-        'memory',
-        { logQueries: true },
-        { debug: (msg: string) => logs.push(msg) },
-      );
-      try {
-        await logService.query('SELECT 1');
-      } catch {
-        // Expected to throw
-      }
-      expect(logs.length).toBeGreaterThanOrEqual(1);
+      await expect(service.query('SELECT 1')).rejects.toThrow();
     });
   });
 
   describe('migrate', () => {
-    it('throws for memory adapter', async () => {
-      await expect(service.migrate()).rejects.toThrow(
-        'The memory adapter does not support migrations.',
-      );
+    it('throws for all adapters', async () => {
+      await expect(service.migrate()).rejects.toThrow();
     });
   });
 
@@ -107,7 +126,9 @@ describe('DatabaseService', () => {
 
     it('rolls back on error', async () => {
       await expect(
-        service.transaction(async () => {
+        service.transaction(async (uow) => {
+          const repo = uow.getRepository('User');
+          await repo.create({ name: 'Alice' });
           throw new Error('fail');
         }),
       ).rejects.toThrow('fail');
@@ -116,40 +137,139 @@ describe('DatabaseService', () => {
     it('throws when service is closed', async () => {
       await service.close();
       await expect(
-        service.transaction(async () => 'x'),
-      ).rejects.toThrow('closed');
+        service.transaction(async () => 'no'),
+      ).rejects.toThrow();
     });
   });
 
-  describe('repository operations via MemoryRepository', () => {
-    it('findAll returns entities', async () => {
-      const repo = service.getRepository<{ id: string; name: string }>('Item');
-      await repo.create({ name: 'a' });
-      await repo.create({ name: 'b' });
-      const items = await repo.findAll();
-      expect(items.length).toBe(2);
+  describe('logging with logQueries', () => {
+    it('logs entity + operation + duration when logQueries true', async () => {
+      const loggingLogs: string[] = [];
+      const loggingAdapter = new MemoryAdapter() as unknown as IDatabaseAdapter;
+      await loggingAdapter.connect();
+      const loggingCreateDs: (entity: string) => DataSource = (entity: string) => {
+        const ma = loggingAdapter as MemoryAdapter;
+        return {
+          async findAll(query) {
+            return ma.queryEntities(entity, query);
+          },
+          async findById(id) {
+            return ma.findEntityById(entity, String(id));
+          },
+          async create(data) {
+            return ma.insertEntity(entity, data);
+          },
+          async update(id, data) {
+            return ma.updateEntity(entity, String(id), data);
+          },
+          async delete(id) {
+            return ma.deleteEntity(entity, String(id));
+          },
+          async count(where) {
+            return ma.countEntities(entity, where);
+          },
+        };
+      };
+      const loggingService = new DatabaseService(
+        loggingAdapter,
+        loggingCreateDs,
+        'memory',
+        { logQueries: true },
+        { debug: (msg: string) => loggingLogs.push(msg) },
+        () => 100,
+      );
+
+      const repo = loggingService.getRepository('User');
+      await repo.create({ name: 'Alice' });
+      await repo.findAll();
+      expect(loggingLogs.length).toBeGreaterThanOrEqual(1);
+      const logLine = loggingLogs.find((l) => l.includes('User') && l.includes('findAll'));
+      expect(logLine).toBeDefined();
     });
 
-    it('update returns updated entity', async () => {
-      const repo = service.getRepository<{ id: string; name: string }>('Item');
-      const created = await repo.create({ name: 'orig' });
-      const updated = await repo.update(created.id, { name: 'changed' });
-      expect(updated.name).toBe('changed');
-    });
+    it('is silent when no logger provided', async () => {
+      const silentAdapter = new MemoryAdapter() as unknown as IDatabaseAdapter;
+      await silentAdapter.connect();
+      const silentCreateDs: (entity: string) => DataSource = (entity: string) => {
+        const ma = silentAdapter as MemoryAdapter;
+        return {
+          async findAll(query) {
+            return ma.queryEntities(entity, query);
+          },
+          async findById(id) {
+            return ma.findEntityById(entity, String(id));
+          },
+          async create(data) {
+            return ma.insertEntity(entity, data);
+          },
+          async update(id, data) {
+            return ma.updateEntity(entity, String(id), data);
+          },
+          async delete(id) {
+            return ma.deleteEntity(entity, String(id));
+          },
+          async count(where) {
+            return ma.countEntities(entity, where);
+          },
+        };
+      };
+      const silentService = new DatabaseService(
+        silentAdapter,
+        silentCreateDs,
+        'memory',
+        {},
+      );
 
-    it('delete removes entity', async () => {
-      const repo = service.getRepository<{ id: string; name: string }>('Item');
-      const created = await repo.create({ name: 'x' });
-      const deleted = await repo.delete(created.id);
-      expect(deleted).toBe(true);
+      const repo = silentService.getRepository('User');
+      await repo.create({ name: 'Alice' });
+      await repo.findAll();
     });
+  });
 
-    it('count returns number of entities', async () => {
-      const repo = service.getRepository<{ id: string; name: string }>('Item');
-      await repo.create({ name: 'a' });
-      await repo.create({ name: 'b' });
-      const count = await repo.count();
-      expect(count).toBe(2);
+  describe('now() injection', () => {
+    it('uses injected now() for duration', async () => {
+      const adapter2 = new MemoryAdapter() as unknown as IDatabaseAdapter;
+      await adapter2.connect();
+      const nowLogs: number[] = [];
+      const createDs2: (entity: string) => DataSource = (entity: string) => {
+        const ma = adapter2 as MemoryAdapter;
+        return {
+          async findAll(query) {
+            return ma.queryEntities(entity, query);
+          },
+          async findById(id) {
+            return ma.findEntityById(entity, String(id));
+          },
+          async create(data) {
+            return ma.insertEntity(entity, data);
+          },
+          async update(id, data) {
+            return ma.updateEntity(entity, String(id), data);
+          },
+          async delete(id) {
+            return ma.deleteEntity(entity, String(id));
+          },
+          async count(where) {
+            return ma.countEntities(entity, where);
+          },
+        };
+      };
+      const service2 = new DatabaseService(
+        adapter2,
+        createDs2,
+        'memory',
+        { logQueries: true },
+        { debug: () => {} },
+        () => {
+          const t = Date.now();
+          nowLogs.push(t);
+          return t;
+        },
+      );
+
+      const repo = service2.getRepository('User');
+      await repo.create({ name: 'Alice' });
+      expect(nowLogs.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

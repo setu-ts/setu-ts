@@ -1,20 +1,22 @@
-// deno-lint-ignore-file require-await no-this-alias -- interface methods must be async; this alias needed for closure scope
 /**
  * In-memory database adapter — zero external dependencies, used for
  * testing and lightweight scenarios.
  *
  * Implements {@linkcode IOrmAdapter} from `@hono-enterprise/common` and
- * provides a simple key-value store per entity type.
+ * provides a simple key-value store per entity type with per-transaction
+ * overlay semantics (buffered creates, update shadows, delete tombstones).
  *
  * @module
  */
-import type { IOrmAdapter, ITransaction } from '@hono-enterprise/common';
+import type { IOrmAdapter } from '@hono-enterprise/common';
+import type { IAdapterTransaction } from '../adapter.ts';
 import {
   applyOrderBy,
   applyPagination,
   matchesWhere,
   type NormalizedQuery,
 } from '../../query/query-builder.ts';
+import type { DataSource } from '../../repositories/base-repository.ts';
 
 /**
  * A single in-memory entity store keyed by entity name.
@@ -26,6 +28,32 @@ interface EntityStore {
   records: Record<string, unknown>[];
   /** Primary key field name (defaults to `'id'`). */
   primaryKey: string;
+}
+
+/**
+ * Per-transaction overlay that buffers writes so the committed store is not
+ * mutated until `commit()` is called.
+ *
+ * - **Creates** are buffered in `creates` array.
+ * - **Update shadows** (`shadows` Map) map primary-key → new row snapshot;
+ *   reads see the shadow instead of the committed row.
+ * - **Delete tombstones** (`tombstones` Set) mark primary-keys as deleted
+ *   within this transaction.
+ *
+ * `commit()` flushes all overlay data to the real stores (last-write-wins on
+ * rows concurrently modified outside the transaction — acceptable for a test
+ * adapter). `rollback()` discards the overlay entirely.
+ *
+ * @internal
+ */
+interface TxOverlay {
+  creates: Array<{ entity: string; record: Record<string, unknown> }>;
+  shadows: Map<string, { entity: string; id: unknown; record: Record<string, unknown> }>;
+  tombstones: Set<string>;
+}
+
+function overlayKey(entity: string, id: unknown): string {
+  return `${entity}::${id}`;
 }
 
 /**
@@ -60,31 +88,157 @@ export class MemoryAdapter implements IOrmAdapter {
   }
 
   /** @inheritdoc */
-  async beginTransaction(): Promise<ITransaction> {
+  async beginTransaction(): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('MemoryAdapter is not connected — call connect() first');
     }
 
-    // Snapshot current stores for rollback.
-    const snapshot = new Map<string, Record<string, unknown>[]>();
-    for (const [name, store] of this._stores.entries()) {
-      snapshot.set(name, store.records.map((r) => ({ ...r })));
-    }
+    const overlay: TxOverlay = {
+      creates: [],
+      shadows: new Map(),
+      tombstones: new Set(),
+    };
 
-    let committed = false;
     const self = this;
+    let committed = false;
+    let rolledBack = false;
 
     return {
-      async commit(): Promise<void> {
-        committed = true;
+      createDataSource(entity: string): DataSource {
+        return self.createOverlayDataSource(entity, overlay);
       },
-      async rollback(): Promise<void> {
-        if (committed) return;
-        // Restore snapshot.
-        self._stores.clear();
-        for (const [name, records] of snapshot.entries()) {
-          self._stores.set(name, { records, primaryKey: 'id' });
+
+      async commit(): Promise<void> {
+        if (committed || rolledBack) {
+          throw new Error('Transaction already finalized');
         }
+        committed = true;
+        // Flush creates
+        for (const entry of overlay.creates) {
+          const store = self.getStore(entry.entity);
+          store.records.push({ ...entry.record });
+        }
+        // Flush update shadows
+        for (const shadow of overlay.shadows.values()) {
+          const store = self.getStore(shadow.entity);
+          const idx = store.records.findIndex((r) => r[store.primaryKey] === shadow.id);
+          if (idx !== -1) {
+            store.records[idx] = { ...shadow.record };
+          }
+        }
+        // Flush delete tombstones
+        for (const key of overlay.tombstones) {
+          const [ent, idStr] = key.split('::');
+          const store = self.getStore(ent);
+          const id = Number(idStr) === Number(idStr) && !isNaN(Number(idStr))
+            ? Number(idStr)
+            : idStr;
+          const idx = store.records.findIndex((r) => r[store.primaryKey] === id);
+          if (idx !== -1) {
+            store.records.splice(idx, 1);
+          }
+        }
+      },
+
+      async rollback(): Promise<void> {
+        if (committed || rolledBack) return;
+        rolledBack = true;
+        // Discard overlay — committed store untouched.
+      },
+    };
+  }
+
+  /**
+   * Build a data source that reads through the overlay (committed rows with
+   * shadows/tombstones/creates applied) and buffers writes into the overlay.
+   *
+   * @param entity - Entity name
+   * @param overlay - The transaction overlay to buffer writes into
+   * @returns DataSource bound to the overlay
+   */
+  private createOverlayDataSource(
+    entity: string,
+    overlay: TxOverlay,
+  ): DataSource {
+    const self = this;
+
+    /**
+     * Resolve the effective records for a transaction read: committed rows
+     * with update shadows applied, tombstoned rows removed, buffered creates
+     * appended.
+     */
+    const effectiveRecords = (): Record<string, unknown>[] => {
+      const store = self.getStore(entity);
+      const pk = store.primaryKey;
+      return store.records
+        .map((r) => {
+          const key = overlayKey(entity, r[pk]);
+          if (overlay.tombstones.has(key)) return null; // deleted
+          const shadow = overlay.shadows.get(key);
+          if (shadow) return shadow.record;
+          return r;
+        })
+        .filter((r): r is Record<string, unknown> => r !== null)
+        .concat(overlay.creates.filter((c) => c.entity === entity).map((c) => c.record));
+    };
+
+    return {
+      async findAll(query) {
+        let results = effectiveRecords();
+        if (query.where && Object.keys(query.where).length > 0) {
+          results = results.filter((row) => matchesWhere(row, query.where));
+        }
+        results = applyOrderBy(results, query.orderBy);
+        results = applyPagination(results, query.offset, query.limit);
+        return results.map((r) => ({ ...r }));
+      },
+
+      async findById(id) {
+        const records = effectiveRecords();
+        const store = self.getStore(entity);
+        const record = records.find((r) => r[store.primaryKey] === id);
+        if (!record) return null;
+        return { ...record };
+      },
+
+      async create(data) {
+        const store = self.getStore(entity);
+        const record: Record<string, unknown> = { ...data };
+        if (record[store.primaryKey] === undefined) {
+          record[store.primaryKey] = crypto.randomUUID();
+        }
+        overlay.creates.push({ entity, record });
+        return { ...record };
+      },
+
+      async update(id, data) {
+        const store = self.getStore(entity);
+        // Find in effective records
+        const effective = effectiveRecords();
+        const target = effective.find((r) => r[store.primaryKey] === id);
+        if (!target) {
+          throw new Error(`Entity '${entity}' with id '${id}' not found`);
+        }
+        const newRecord = { ...target, ...data };
+        overlay.shadows.set(overlayKey(entity, id), { entity, id, record: newRecord });
+        return { ...newRecord };
+      },
+
+      async delete(id) {
+        const store = self.getStore(entity);
+        const effective = effectiveRecords();
+        const target = effective.find((r) => r[store.primaryKey] === id);
+        if (!target) return false;
+        overlay.tombstones.add(overlayKey(entity, id));
+        return true;
+      },
+
+      async count(where) {
+        let results = effectiveRecords();
+        if (Object.keys(where).length > 0) {
+          results = results.filter((row) => matchesWhere(row, where));
+        }
+        return results.length;
       },
     };
   }
@@ -224,5 +378,10 @@ export class MemoryAdapter implements IOrmAdapter {
       return store.records.length;
     }
     return store.records.filter((row) => matchesWhere(row, where)).length;
+  }
+
+  /** @inheritdoc — raw query not supported on memory adapter. */
+  rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
+    return Promise.reject(new Error('The memory adapter does not support raw SQL queries.'));
   }
 }

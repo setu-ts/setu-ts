@@ -2,22 +2,24 @@
 /**
  * Unit tests for PrismaRepository and createPrismaDataSource.
  *
+ * Uses the fake Prisma client with in-memory store so data source methods
+ * exercise real delegate calls (findUnique/findMany/create/update/delete/count).
+ *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
+import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   createPrismaDataSource,
   PrismaRepository,
 } from '../../src/adapters/prisma/prisma-repository.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
+import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 
 describe('PrismaRepository', () => {
   it('instantiates with a data source', () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
+    const fakeClient = createFakePrismaClient();
+    const ds = createPrismaDataSource(fakeClient, 'User');
     const repo = new PrismaRepository(ds);
     expect(repo).toBeDefined();
   });
@@ -49,12 +51,16 @@ describe('PrismaRepository', () => {
   });
 });
 
-describe('createPrismaDataSource', () => {
+describe('createPrismaDataSource — with fake client', () => {
+  let fakeClient: ReturnType<typeof createFakePrismaClient>;
+  let ds: DataSource;
+
+  beforeEach(() => {
+    fakeClient = createFakePrismaClient();
+    ds = createPrismaDataSource(fakeClient, 'User');
+  });
+
   it('returns a data source with all required methods', () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
     expect(typeof ds.findAll).toBe('function');
     expect(typeof ds.findById).toBe('function');
     expect(typeof ds.create).toBe('function');
@@ -63,57 +69,57 @@ describe('createPrismaDataSource', () => {
     expect(typeof ds.count).toBe('function');
   });
 
-  it('findAll returns empty array for stub', async () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
-    const results = await ds.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: [] });
-    expect(results).toEqual([]);
+  it('findById returns entity when found via findUnique', async () => {
+    // Seed a user
+    await ds.create({ name: 'Alice' });
+    const user = await ds.findById('1');
+    expect(user).not.toBeNull();
+    expect(user?.name).toBe('Alice');
   });
 
-  it('findById returns null for stub', async () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
-    const result = await ds.findById('1');
+  it('findById returns null when not found', async () => {
+    const result = await ds.findById('999');
     expect(result).toBeNull();
   });
 
-  it('create returns data for stub', async () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
-    const result = await ds.create({ name: 'Alice' });
-    expect(result.name).toBe('Alice');
+  it('findAll returns seeded entities', async () => {
+    await ds.create({ name: 'Alice' });
+    await ds.create({ name: 'Bob' });
+    const results = await ds.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: [] });
+    expect(results.length).toBe(2);
   });
 
-  it('update returns data for stub', async () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
-    const result = await ds.update('1', { name: 'Bob' });
-    expect(result.name).toBe('Bob');
+  it('create delegates to delegate.create', async () => {
+    const result = await ds.create({ name: 'Charlie' });
+    expect(result.name).toBe('Charlie');
+    expect(result.id).toBeDefined();
   });
 
-  it('delete returns false for stub', async () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
-    const result = await ds.delete('1');
-    expect(result).toBe(false);
+  it('update delegates to delegate.update', async () => {
+    const created = await ds.create({ name: 'Alice' });
+    const updated = await ds.update(created.id as string, { name: 'Alice Updated' });
+    expect(updated.name).toBe('Alice Updated');
   });
 
-  it('count returns 0 for stub', async () => {
-    const ds = createPrismaDataSource(
-      {} as import('../../src/adapters/prisma/prisma-adapter.ts').PrismaAdapter,
-      'User',
-    );
-    const result = await ds.count({});
-    expect(result).toBe(0);
+  it('update throws when entity not found', async () => {
+    await expect(ds.update('999', { name: 'Nobody' })).rejects.toThrow();
+  });
+
+  it('delete returns true when entity exists', async () => {
+    const created = await ds.create({ name: 'Alice' });
+    const deleted = await ds.delete(created.id as string);
+    expect(deleted).toBe(true);
+  });
+
+  it('delete returns false when entity not found (P2025 caught)', async () => {
+    const deleted = await ds.delete('999');
+    expect(deleted).toBe(false);
+  });
+
+  it('count returns number of entities', async () => {
+    await ds.create({ name: 'Alice' });
+    await ds.create({ name: 'Bob' });
+    const count = await ds.count({});
+    expect(count).toBe(2);
   });
 });

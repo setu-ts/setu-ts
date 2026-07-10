@@ -406,6 +406,23 @@ attached retroactively), and satisfies the one-capability-one-implementation rul
 - JSDoc `@throws` on `IDatabaseService.query`/`migrate` documents exactly these behaviors — docs
   must match what the code actually does, and tests assert the throw.
 
+**Deviations from original plan (observed during Fix Round 2):**
+
+1. **Prisma bridge uses two deferreds (txReady + hold) with sentinel-swallow on rollback** — the
+   original plan described a single-deferred bridge; the implementation requires a second deferred
+   (`hold`) to keep the Prisma `$transaction` callback open until explicit commit/rollback. Rollback
+   resolves the `hold` with a sentinel value that the outer `$transaction` swallows, preventing an
+   unhandled rejection.
+
+2. **Memory overlay covers update shadows + delete tombstones (not just creates)** — the original
+   plan only mentioned snapshot/restore. The implementation uses a per-transaction overlay where
+   creates go to a local map, updates write to a shadow map, and deletes are tracked as tombstones.
+   Commit merges all three into the committed store; rollback discards the overlay entirely.
+
+3. **Drizzle operators loaded from `import('npm:drizzle-orm@0.33.0')` at connect time, never from
+   instance** — `eq`/`and`/`asc`/`desc` are resolved once during `connect()` via dynamic import and
+   cached on the adapter instance, so the fake Drizzle instance does not need to provide them.
+
 ### 8. No Plugin-to-Plugin Imports
 
 `database-plugin` depends only on `common` (and consumes runtime services via `ctx.runtime`). Logger

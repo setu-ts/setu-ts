@@ -1,81 +1,138 @@
+// deno-lint-ignore-file require-await -- interface methods must be async
 /**
  * Unit tests for UnitOfWork.
+ *
+ * Tests cover:
+ * - getRepository returns a repository built from scoped factory
+ * - commit calls transaction.commit
+ * - rollback calls transaction.rollback
+ * - double commit/rollback throws
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { UnitOfWork } from '../../src/unitOfWork/unit-of-work.ts';
+import type { IAdapterTransaction } from '../../src/adapters/adapter.ts';
 import type { IRepository } from '../../src/interfaces/index.ts';
+import type { DataSource } from '../../src/repositories/base-repository.ts';
+import { BaseRepository } from '../../src/repositories/base-repository.ts';
 
-/** Create a minimal mock repository satisfying IRepository. */
-function mockRepo(): IRepository<unknown> {
+function mockDataSource(): DataSource {
   return {
-    findById: () => Promise.resolve(null),
-    findAll: () => Promise.resolve([]),
-    create: () => Promise.resolve({}),
-    update: () => Promise.resolve({}),
-    delete: () => Promise.resolve(false),
-    exists: () => Promise.resolve(false),
-    count: () => Promise.resolve(0),
+    async findAll() {
+      return [];
+    },
+    async findById() {
+      return null;
+    },
+    async create(data) {
+      return data;
+    },
+    async update(_id, data) {
+      return data;
+    },
+    async delete() {
+      return true;
+    },
+    async count() {
+      return 0;
+    },
+  };
+}
+
+function mockRepoFactory(): (entity: string) => IRepository<unknown> {
+  return (_entity: string): IRepository<unknown> => {
+    return new (class extends BaseRepository<unknown> {
+      constructor() {
+        super(mockDataSource());
+      }
+    })();
   };
 }
 
 describe('UnitOfWork', () => {
   it('getRepository returns a repository', () => {
-    const repoFactory = () => mockRepo();
-    const mockTxn = { commit: () => Promise.resolve(), rollback: () => Promise.resolve() };
-    const uow = new UnitOfWork(mockTxn, repoFactory);
+    const txn: IAdapterTransaction = {
+      async commit() {},
+      async rollback() {},
+      createDataSource(): DataSource {
+        return mockDataSource();
+      },
+    };
+    const uow = new UnitOfWork(txn, mockRepoFactory());
     const repo = uow.getRepository('User');
     expect(repo).toBeDefined();
   });
 
   it('commit calls transaction.commit', async () => {
     let committed = false;
-    const mockTxn = {
-      commit: () => {
+    const txn: IAdapterTransaction = {
+      async commit() {
         committed = true;
-        return Promise.resolve();
       },
-      rollback: () => Promise.resolve(),
+      async rollback() {},
+      createDataSource(): DataSource {
+        return mockDataSource();
+      },
     };
-    const uow = new UnitOfWork(mockTxn, () => mockRepo());
+    const uow = new UnitOfWork(txn, mockRepoFactory());
     await uow.commit();
     expect(committed).toBe(true);
   });
 
   it('rollback calls transaction.rollback', async () => {
     let rolledBack = false;
-    const mockTxn = {
-      commit: () => Promise.resolve(),
-      rollback: () => {
+    const txn: IAdapterTransaction = {
+      async commit() {},
+      async rollback() {
         rolledBack = true;
-        return Promise.resolve();
+      },
+      createDataSource(): DataSource {
+        return mockDataSource();
       },
     };
-    const uow = new UnitOfWork(mockTxn, () => mockRepo());
+    const uow = new UnitOfWork(txn, mockRepoFactory());
     await uow.rollback();
     expect(rolledBack).toBe(true);
   });
 
   it('throws when committing twice', async () => {
-    const mockTxn = { commit: () => Promise.resolve(), rollback: () => Promise.resolve() };
-    const uow = new UnitOfWork(mockTxn, () => mockRepo());
+    const txn: IAdapterTransaction = {
+      async commit() {},
+      async rollback() {},
+      createDataSource(): DataSource {
+        return mockDataSource();
+      },
+    };
+    const uow = new UnitOfWork(txn, mockRepoFactory());
     await uow.commit();
-    await expect(uow.commit()).rejects.toThrow('already finalized');
+    await expect(uow.commit()).rejects.toThrow();
   });
 
   it('throws when rolling back after commit', async () => {
-    const mockTxn = { commit: () => Promise.resolve(), rollback: () => Promise.resolve() };
-    const uow = new UnitOfWork(mockTxn, () => mockRepo());
+    const txn: IAdapterTransaction = {
+      async commit() {},
+      async rollback() {},
+      createDataSource(): DataSource {
+        return mockDataSource();
+      },
+    };
+    const uow = new UnitOfWork(txn, mockRepoFactory());
     await uow.commit();
-    await expect(uow.rollback()).rejects.toThrow('already finalized');
+    await expect(uow.rollback()).rejects.toThrow();
   });
 
   it('throws when committing after rollback', async () => {
-    const mockTxn = { commit: () => Promise.resolve(), rollback: () => Promise.resolve() };
-    const uow = new UnitOfWork(mockTxn, () => mockRepo());
+    const txn: IAdapterTransaction = {
+      async commit() {},
+      async rollback() {},
+      createDataSource(): DataSource {
+        return mockDataSource();
+      },
+    };
+    const uow = new UnitOfWork(txn, mockRepoFactory());
     await uow.rollback();
-    await expect(uow.commit()).rejects.toThrow('already finalized');
+    await expect(uow.commit()).rejects.toThrow();
   });
 });

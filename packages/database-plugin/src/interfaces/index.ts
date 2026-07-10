@@ -234,11 +234,27 @@ export interface DatabaseAdapterOptions {
 
   /**
    * Inject a pre-loaded Prisma client instance, bypassing the lazy
-   * `import('npm:prisma')` path. Useful for testing.
+   * `import('npm:@prisma/client')` path. Useful for testing.
    *
    * @since 0.1.0
    */
   readonly prismaClient?: unknown;
+
+  /**
+   * Registry mapping entity name → Drizzle table definition. Required when
+   * `type: 'drizzle'`; the adapter validates each table at connect() time.
+   *
+   * @since 0.1.0
+   */
+  readonly drizzleTables?: Record<string, unknown>;
+
+  /**
+   * Timeout (ms) for Prisma interactive transactions. Defaults to 30_000.
+   * Prisma's default is ~5s which is too short for a full Unit of Work.
+   *
+   * @since 0.1.0
+   */
+  readonly transactionTimeout?: number;
 
   /**
    * Inject a pre-loaded Drizzle database instance, bypassing the lazy

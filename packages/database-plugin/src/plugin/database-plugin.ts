@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- interface methods must be async (IPlugin)
 /**
  * DatabasePlugin — registers an {@linkcode IDatabaseService} under
  * `CAPABILITIES.DATABASE`.
@@ -8,7 +7,7 @@
  *
  * @module
  */
-import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
 import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type {
   DatabaseAdapterOptions,
@@ -20,8 +19,7 @@ import { createMemoryDataSource, DatabaseService } from '../services/database-se
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
-import { createPrismaDataSource } from '../adapters/prisma/prisma-repository.ts';
-import { createDrizzleDataSource } from '../adapters/drizzle/drizzle-repository.ts';
+import type { IDatabaseAdapter } from '../adapters/adapter.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
 
 /** Default adapter when none is specified. */
@@ -87,8 +85,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const logger = resolveLogger(ctx);
-      const adapter = await createAdapter(adapterType, adapterOptions, logger);
+      const adapter = await createAdapter(adapterType, adapterOptions);
 
       // Connect the adapter.
       await adapter.connect();
@@ -96,12 +93,19 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // Build the data-source factory for the adapter type.
       const createDataSource = createDataSourceFactory(adapterType, adapter);
 
+      // Optional logger resolution.
+      const logger = resolveLogger(ctx);
+
+      // Monotonic clock from runtime (NEVER Date.now()).
+      const now = (): number => ctx.runtime.hrtime();
+
       const service = new DatabaseService(
         adapter,
         createDataSource,
         adapterType,
         adapterOptions,
         logger,
+        now,
       );
 
       // Register the database service.
@@ -129,18 +133,16 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
  *
  * @param adapterType - Which ORM adapter to instantiate
  * @param adapterOptions - Adapter-specific options
- * @param logger - Optional logger for query logging
  * @returns The instantiated adapter
  * @throws {Error} If the adapter type is unsupported
  */
 async function createAdapter(
   adapterType: DatabaseAdapterType,
   adapterOptions: DatabaseAdapterOptions,
-  logger?: ILogger,
-): Promise<import('@hono-enterprise/common').IOrmAdapter> {
+): Promise<IDatabaseAdapter> {
   switch (adapterType) {
     case 'prisma':
-      return new PrismaAdapter(adapterOptions, logger);
+      return new PrismaAdapter(adapterOptions);
     case 'drizzle':
       return new DrizzleAdapter(adapterOptions);
     case 'memory':
@@ -153,12 +155,12 @@ async function createAdapter(
  * Create the data-source factory function for the given adapter type.
  *
  * @param adapterType - Which adapter is in use
- * @param adapter - The resolved adapter instance (typed for factory dispatch)
+ * @param adapter - The resolved adapter instance
  * @returns Factory that creates a DataSource for a given entity name
  */
 function createDataSourceFactory(
   adapterType: DatabaseAdapterType,
-  adapter: import('@hono-enterprise/common').IOrmAdapter,
+  adapter: IDatabaseAdapter,
 ): (entity: string) => DataSource {
   switch (adapterType) {
     case 'memory': {
@@ -167,12 +169,13 @@ function createDataSourceFactory(
     }
     case 'prisma': {
       const prismaAdapter = adapter as PrismaAdapter;
-      return (entity: string) => createPrismaDataSource(prismaAdapter, entity);
+      // Prisma needs the internal client for data-source creation.
+      return (entity: string) => prismaAdapter.createDataSourceForEntity(entity);
     }
     case 'drizzle':
     default: {
       const drizzleAdapter = adapter as DrizzleAdapter;
-      return (entity: string) => createDrizzleDataSource(drizzleAdapter, entity);
+      return (entity: string) => drizzleAdapter.createDataSourceForEntity(entity);
     }
   }
 }
@@ -198,6 +201,12 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   if (opts?.drizzleInstance !== undefined) {
     result.drizzleInstance = opts.drizzleInstance;
   }
+  if (opts?.drizzleTables !== undefined) {
+    result.drizzleTables = opts.drizzleTables;
+  }
+  if ((opts as Record<string, unknown>)?.transactionTimeout !== undefined) {
+    result.transactionTimeout = (opts as Record<string, unknown>).transactionTimeout;
+  }
   return result as DatabaseAdapterOptions;
 }
 
@@ -207,9 +216,19 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
  * @param ctx - Plugin context
  * @returns The logger if available, otherwise `undefined`
  */
-function resolveLogger(ctx: IPluginContext): ILogger | undefined {
-  if (ctx.services.has(CAPABILITIES.LOGGER)) {
-    return ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+function resolveLogger(
+  ctx: IPluginContext,
+): { debug(msg: string, meta?: Record<string, unknown>): void } | undefined {
+  if (ctx.services.has('logger')) {
+    const logger = ctx.services.get<Record<string, unknown>>('logger');
+    return {
+      debug: (msg: string, meta?: Record<string, unknown>): void => {
+        const dbg = logger?.debug as
+          | ((msg: string, meta?: Record<string, unknown>) => void)
+          | undefined;
+        dbg?.(msg, meta);
+      },
+    };
   }
   return undefined;
 }

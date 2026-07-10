@@ -34,17 +34,6 @@ export type { DataSource } from './repositories/base-repository.ts';
 // Unit of Work
 export { UnitOfWork } from './unitOfWork/unit-of-work.ts';
 
-// Query building
-export {
-  applyOrderBy,
-  applyPagination,
-  matchesWhere,
-  normalizeCountOptions,
-  normalizeQuery,
-  projectFields,
-} from './query/query-builder.ts';
-export type { NormalizedQuery } from './query/query-builder.ts';
-
 // Adapters
 export { MemoryAdapter } from './adapters/memory/memory-adapter.ts';
 export { PrismaAdapter } from './adapters/prisma/prisma-adapter.ts';

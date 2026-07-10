@@ -2,21 +2,34 @@
 /**
  * Unit tests for DrizzleRepository and createDrizzleDataSource.
  *
+ * Uses the fake Drizzle instance with in-memory store so data source methods
+ * exercise real chainable query builder calls.
+ *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
+import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   createDrizzleDataSource,
   DrizzleRepository,
 } from '../../src/adapters/drizzle/drizzle-repository.ts';
+import type { DrizzleInstance } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
+import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
 
 describe('DrizzleRepository', () => {
   it('instantiates with a data source', () => {
+    const fakeDb = createFakeDrizzleInstance();
     const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
+      fakeDb as unknown as DrizzleInstance,
+      'user',
+      { user: {} },
+      {
+        eq: (col, val) => ({ _operator: 'eq', arguments: [col, val], id: val }),
+        and: (...exprs) => ({ _operator: 'and', arguments: exprs }),
+        asc: (col) => ({ _operator: 'asc', arguments: [col] }),
+        desc: (col) => ({ _operator: 'desc', arguments: [col] }),
+      },
     );
     const repo = new DrizzleRepository(ds);
     expect(repo).toBeDefined();
@@ -49,12 +62,26 @@ describe('DrizzleRepository', () => {
   });
 });
 
-describe('createDrizzleDataSource', () => {
-  it('returns a data source with all required methods', () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
+describe('createDrizzleDataSource — with fake instance', () => {
+  let fakeDb: ReturnType<typeof createFakeDrizzleInstance>;
+  let ds: DataSource;
+
+  beforeEach(() => {
+    fakeDb = createFakeDrizzleInstance();
+    ds = createDrizzleDataSource(
+      fakeDb as unknown as DrizzleInstance,
+      'user',
+      { user: {} },
+      {
+        eq: (col, val) => ({ _operator: 'eq', arguments: [col, val], id: val }),
+        and: (...exprs) => ({ _operator: 'and', arguments: exprs }),
+        asc: (col) => ({ _operator: 'asc', arguments: [col] }),
+        desc: (col) => ({ _operator: 'desc', arguments: [col] }),
+      },
     );
+  });
+
+  it('returns a data source with all required methods', () => {
     expect(typeof ds.findAll).toBe('function');
     expect(typeof ds.findById).toBe('function');
     expect(typeof ds.create).toBe('function');
@@ -63,57 +90,46 @@ describe('createDrizzleDataSource', () => {
     expect(typeof ds.count).toBe('function');
   });
 
-  it('findAll returns empty array for stub', async () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
-    );
-    const results = await ds.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: [] });
-    expect(results).toEqual([]);
+  it('findById returns entity when found', async () => {
+    await fakeDb.insert('user').values({ id: '1', name: 'Alice' }).execute();
+    const user = await ds.findById('1');
+    expect(user).not.toBeNull();
+    expect(user?.name).toBe('Alice');
   });
 
-  it('findById returns null for stub', async () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
-    );
-    const result = await ds.findById('1');
+  it('findById returns null when not found', async () => {
+    const result = await ds.findById('999');
     expect(result).toBeNull();
   });
 
-  it('create returns data for stub', async () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
-    );
-    const result = await ds.create({ name: 'Alice' });
-    expect(result.name).toBe('Alice');
+  it('findAll returns seeded entities', async () => {
+    await fakeDb.insert('user').values({ id: '1', name: 'Alice' }).execute();
+    await fakeDb.insert('user').values({ id: '2', name: 'Bob' }).execute();
+    const results = await ds.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: [] });
+    expect(results.length).toBe(2);
   });
 
-  it('update returns data for stub', async () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
-    );
-    const result = await ds.update('1', { name: 'Bob' });
-    expect(result.name).toBe('Bob');
+  it('create delegates to insert', async () => {
+    const result = await ds.create({ name: 'Charlie' });
+    expect(result.name).toBe('Charlie');
   });
 
-  it('delete returns false for stub', async () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
-    );
-    const result = await ds.delete('1');
-    expect(result).toBe(false);
+  it('update delegates to update chain', async () => {
+    await fakeDb.insert('user').values({ id: '1', name: 'Alice' }).execute();
+    const updated = await ds.update('1', { name: 'Alice Updated' });
+    expect(updated).toBeDefined();
   });
 
-  it('count returns 0 for stub', async () => {
-    const ds = createDrizzleDataSource(
-      {} as import('../../src/adapters/drizzle/drizzle-adapter.ts').DrizzleAdapter,
-      'users',
-    );
-    const result = await ds.count({});
-    expect(result).toBe(0);
+  it('delete removes entity', async () => {
+    await fakeDb.insert('user').values({ id: '1', name: 'Alice' }).execute();
+    const deleted = await ds.delete('1');
+    expect(deleted).toBe(true);
+  });
+
+  it('count returns number of entities', async () => {
+    await fakeDb.insert('user').values({ id: '1', name: 'Alice' }).execute();
+    await fakeDb.insert('user').values({ id: '2', name: 'Bob' }).execute();
+    const count = await ds.count({});
+    expect(count).toBe(2);
   });
 });

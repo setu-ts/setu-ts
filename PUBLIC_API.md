@@ -729,7 +729,7 @@ app.router.get('/users/:id', async (ctx) => {
 
 app.router.post('/users', async (ctx) => {
   const db = ctx.services.get<IDatabaseService>('database');
-  const body = ctx.state.get('validatedBody');
+  const body = await ctx.request.json<{ name: string; email: string }>();
 
   const user = await db.getRepository<User>('User').create({
     name: body.name,

@@ -230,6 +230,14 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   config/flag/exclude change, show the before→after behavior difference; for a bug fix, confirm the
   test fails WITHOUT the fix and passes with it; for an integration with an external dep or another
   package, exercise the REAL path once, not just the fake.
+- **A no-op IMPLEMENTATION also passes every gate — when its tests assert the no-op.** M10 shipped
+  Prisma/Drizzle adapters whose `create()` echoed input without persisting and `findAll()` returned
+  `[]`, at 90%+ coverage, with ROADMAP deliverables checked ✅ — because the tests asserted the stub
+  behavior and nothing ever read a write back. Before checking a deliverable: demonstrate it through
+  the public surface (a running kernel app), and for every write, READ IT BACK through the same API
+  and show the data returns. An implementation variant that cannot run against its real backend is
+  driven with an injected fake that records calls — if the calls never arrive, the deliverable is
+  not delivered. Checking a ROADMAP box is a behavioral claim, not a files-exist claim.
 - **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.**
   `deno coverage` colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
   into a false "OK"). Pipe through `sed 's/\x1b\[[0-9;]*m//g'` and confirm every changed `src` file

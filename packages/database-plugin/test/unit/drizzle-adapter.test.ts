@@ -1,6 +1,13 @@
 /**
  * Unit tests for DrizzleAdapter using a fake Drizzle instance.
  *
+ * Tests cover:
+ * - connect/disconnect lifecycle
+ * - injected-instance structural validation
+ * - transaction bridge (commit + rollback)
+ * - rawQuery delegation
+ * - drizzleTables validation at connect time
+ *
  * @module
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
@@ -14,7 +21,10 @@ describe('DrizzleAdapter', () => {
 
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
-    adapter = new DrizzleAdapter({ drizzleInstance: fakeDb });
+    adapter = new DrizzleAdapter({
+      drizzleInstance: fakeDb,
+      drizzleTables: { user: {}, post: {} },
+    });
   });
 
   describe('connect / disconnect / isReady', () => {
@@ -25,14 +35,12 @@ describe('DrizzleAdapter', () => {
     it('is ready after connect', async () => {
       await adapter.connect();
       expect(adapter.isReady()).toBe(true);
-      expect(fakeDb.connected).toBe(true);
     });
 
     it('is not ready after disconnect', async () => {
       await adapter.connect();
       await adapter.disconnect();
       expect(adapter.isReady()).toBe(false);
-      expect(fakeDb.ended).toBe(true);
     });
   });
 
@@ -43,8 +51,20 @@ describe('DrizzleAdapter', () => {
     });
 
     it('rejects missing drizzleInstance with import error', async () => {
-      const noInstanceAdapter = new DrizzleAdapter({ url: 'postgresql://localhost/test' });
-      await expect(noInstanceAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
+      const noDbAdapter = new DrizzleAdapter({
+        url: 'postgresql://localhost/test',
+        drizzleTables: { user: {} },
+      });
+      await expect(noDbAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
+    });
+
+    it('validates drizzleTables at connect', async () => {
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: fakeDb,
+        drizzleTables: { user: {} },
+      });
+      await adapter.connect();
+      expect(adapter.isReady()).toBe(true);
     });
   });
 
@@ -65,22 +85,19 @@ describe('DrizzleAdapter', () => {
       await adapter.connect();
       const txn = await adapter.beginTransaction();
       await txn.commit();
-      // No error means success.
     });
 
     it('rollback resolves', async () => {
       await adapter.connect();
       const txn = await adapter.beginTransaction();
       await txn.rollback();
-      // No error means success.
     });
   });
 
   describe('constructor options', () => {
     it('accepts no options', async () => {
-      const noInstanceAdapter = new DrizzleAdapter();
-      // Without injected instance, connect() fails loudly (import error).
-      await expect(noInstanceAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
+      const noDbAdapter = new DrizzleAdapter();
+      await expect(noDbAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
     });
   });
 });

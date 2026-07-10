@@ -235,7 +235,7 @@ describe('DatabasePlugin integration', () => {
     const plugin = DatabasePlugin();
     await plugin.register!(ctx);
     const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    await expect(db.migrate()).rejects.toThrow('memory adapter does not support');
+    await expect(db.migrate()).rejects.toThrow('Programmatic migrations are not supported');
   });
 
   it('getRepository returns a working repository', async () => {
@@ -280,7 +280,7 @@ describe('DatabasePlugin integration', () => {
       $connect: async () => {},
       $disconnect: async () => {},
       $transaction: async <T>(fn: (c: unknown) => Promise<T>) => fn(null as unknown),
-      $use: () => {},
+      $queryRawUnsafe: async () => [],
     };
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
@@ -296,7 +296,15 @@ describe('DatabasePlugin integration', () => {
       $connect: async () => {},
       $disconnect: async () => {},
       $transaction: async <T>(fn: (c: unknown) => Promise<T>) => fn(null as unknown),
-      $use: () => {},
+      $queryRawUnsafe: async () => [],
+      user: {
+        findUnique: async () => null,
+        findMany: async () => [],
+        create: async (args: { data: Record<string, unknown> }) => args.data,
+        update: async () => ({}),
+        delete: async () => ({}),
+        count: async () => 0,
+      },
     };
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
@@ -311,15 +319,12 @@ describe('DatabasePlugin integration', () => {
 
   it('registers with drizzle adapter type', async () => {
     const fakeDrizzle = {
-      $query: async () => [],
-      $execute: async () => ({ rowsAffected: 0 }),
-      $count: async () => 0,
-      $client: {
-        transaction: async <T>(fn: () => Promise<T>) => fn(),
-        connect: async () => {},
-        disconnect: async () => {},
-      },
-      $bindConnection: async () => {},
+      select: () => ({ from: async () => [] }),
+      insert: () => ({ values: () => ({ execute: async () => [] }) }),
+      update: () => ({ set: () => ({ where: async () => [] }) }),
+      delete: () => ({ where: async () => {} }),
+      execute: async () => ({ rows: [] }),
+      transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(fakeDrizzle),
     };
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
@@ -332,20 +337,20 @@ describe('DatabasePlugin integration', () => {
 
   it('drizzle adapter getRepository returns a repository', async () => {
     const fakeDrizzle = {
-      $query: async () => [],
-      $execute: async () => ({ rowsAffected: 0 }),
-      $count: async () => 0,
-      $client: {
-        transaction: async <T>(fn: () => Promise<T>) => fn(),
-        connect: async () => {},
-        disconnect: async () => {},
-      },
-      $bindConnection: async () => {},
+      select: () => ({ from: async () => [] }),
+      insert: () => ({ values: () => ({ execute: async () => [] }) }),
+      update: () => ({ set: () => ({ where: async () => [] }) }),
+      delete: () => ({ where: async () => {} }),
+      execute: async () => ({ rows: [] }),
+      transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(fakeDrizzle),
     };
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
-      options: { drizzleInstance: fakeDrizzle as never },
+      options: {
+        drizzleInstance: fakeDrizzle as never,
+        drizzleTables: { users: {} },
+      },
     });
     await plugin.register!(ctx);
     const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
