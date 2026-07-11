@@ -140,7 +140,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   IntegrationEvent, defineDomainEvent, IEventHandler, subscribeHandler; in-memory event bus with
   publish/publishBatch/subscribe; `publishBatch` addition to `IEventBus` in `common`) — complete (PR
   pending)
-- **Next milestone** — Milestone 13
+- **Milestone 13** (`packages/cqrs-plugin` — CqrsPlugin, CommandBus/QueryBus, ICqrsFacade under
+  `CAPABILITIES.CQRS`, internal RequestBus + composePipeline behavior pipeline,
+  HandlerNotFoundError; CQRS contracts in `common/services/cqrs.ts`:
+  CqrsRequest/CqrsCommand/CqrsQuery, ICommandHandler/IQueryHandler/IPipelineBehavior,
+  ICommandBus/IQueryBus/ICqrsFacade) — complete (PR pending)
+- **Next milestone** — Milestone 14
 
 ## Verification (run before declaring any work done)
 

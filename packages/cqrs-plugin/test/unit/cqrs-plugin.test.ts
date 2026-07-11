@@ -6,8 +6,8 @@ import { expect } from '@std/expect';
 import { CqrsPlugin } from '../../src/plugin/cqrs-plugin.ts';
 import {
   CAPABILITIES,
-  type CqrsPipelineBehavior,
   type CqrsRequest,
+  type IPipelineBehavior,
   PLUGIN_PRIORITY,
 } from '@hono-enterprise/common';
 import type { ICommandBus, ICqrsFacade, IPluginContext, IQueryBus } from '@hono-enterprise/common';
@@ -121,7 +121,7 @@ describe('CqrsPlugin', () => {
     });
 
     it('should register services with custom options', async () => {
-      const mockBehavior: CqrsPipelineBehavior = {
+      const mockBehavior: IPipelineBehavior = {
         handle: (_req: CqrsRequest, next: () => Promise<unknown>) => {
           return next();
         },
@@ -186,13 +186,13 @@ describe('CqrsPlugin', () => {
     });
 
     it('should register multiple behaviors', async () => {
-      const behavior1: CqrsPipelineBehavior = {
+      const behavior1: IPipelineBehavior = {
         handle: (_req: CqrsRequest, next: () => Promise<unknown>) => next(),
       };
-      const behavior2: CqrsPipelineBehavior = {
+      const behavior2: IPipelineBehavior = {
         handle: (_req: CqrsRequest, next: () => Promise<unknown>) => next(),
       };
-      const behavior3: CqrsPipelineBehavior = {
+      const behavior3: IPipelineBehavior = {
         handle: (_req: CqrsRequest, next: () => Promise<unknown>) => next(),
       };
 

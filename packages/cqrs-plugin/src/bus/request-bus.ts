@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { CqrsPipelineBehavior, CqrsRequest } from '@hono-enterprise/common';
+import type { CqrsRequest, IPipelineBehavior } from '@hono-enterprise/common';
 import { composePipeline } from '../behaviors/pipeline-behavior.ts';
 import { HandlerNotFoundError } from '../errors/handler-not-found.ts';
 
@@ -29,7 +29,7 @@ export class RequestBus {
    *
    * @param behaviors - Behaviors to apply to every execution (default: `[]`)
    */
-  constructor(private readonly behaviors: readonly CqrsPipelineBehavior[] = []) {}
+  constructor(private readonly behaviors: readonly IPipelineBehavior[] = []) {}
 
   /**
    * Registers a handler for a request type.

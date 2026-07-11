@@ -131,12 +131,12 @@ export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type { ITenant, ITenantResolver } from './services/tenancy.ts';
 export type {
   CqrsCommand,
-  CqrsCommandHandler,
-  CqrsPipelineBehavior,
   CqrsQuery,
-  CqrsQueryHandler,
   CqrsRequest,
   ICommandBus,
+  ICommandHandler,
   ICqrsFacade,
+  IPipelineBehavior,
   IQueryBus,
+  IQueryHandler,
 } from './services/cqrs.ts';

@@ -46,7 +46,7 @@ export interface CqrsQuery<TData = unknown> extends CqrsRequest<TData> {}
  * @typeParam TResult - The result type
  * @since 0.1.0
  */
-export interface CqrsCommandHandler<TCommand extends CqrsCommand = CqrsCommand, TResult = unknown> {
+export interface ICommandHandler<TCommand extends CqrsCommand = CqrsCommand, TResult = unknown> {
   /**
    * Executes the command.
    *
@@ -63,7 +63,7 @@ export interface CqrsCommandHandler<TCommand extends CqrsCommand = CqrsCommand, 
  * @typeParam TResult - The result type
  * @since 0.1.0
  */
-export interface CqrsQueryHandler<TQuery extends CqrsQuery = CqrsQuery, TResult = unknown> {
+export interface IQueryHandler<TQuery extends CqrsQuery = CqrsQuery, TResult = unknown> {
   /**
    * Executes the query.
    *
@@ -83,7 +83,7 @@ export interface CqrsQueryHandler<TQuery extends CqrsQuery = CqrsQuery, TResult 
  * @typeParam TResult - The result type
  * @since 0.1.0
  */
-export interface CqrsPipelineBehavior<
+export interface IPipelineBehavior<
   TRequest extends CqrsRequest = CqrsRequest,
   TResult = unknown,
 > {
@@ -113,7 +113,7 @@ export interface ICommandBus {
    */
   register<TCommand extends CqrsCommand, TResult>(
     type: string,
-    handler: CqrsCommandHandler<TCommand, TResult>,
+    handler: ICommandHandler<TCommand, TResult>,
   ): void;
 
   /**
@@ -144,7 +144,7 @@ export interface IQueryBus {
    */
   register<TQuery extends CqrsQuery, TResult>(
     type: string,
-    handler: CqrsQueryHandler<TQuery, TResult>,
+    handler: IQueryHandler<TQuery, TResult>,
   ): void;
 
   /**

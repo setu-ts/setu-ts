@@ -17,14 +17,14 @@ import { CAPABILITIES } from '../../src/tokens.ts';
 import type { IResponse } from '../../src/http.ts';
 import type {
   CqrsCommand,
-  CqrsCommandHandler,
-  CqrsPipelineBehavior,
   CqrsQuery,
-  CqrsQueryHandler,
   CqrsRequest,
   ICommandBus,
+  ICommandHandler,
   ICqrsFacade,
+  IPipelineBehavior,
   IQueryBus,
+  IQueryHandler,
 } from '../../src/services/cqrs.ts';
 
 describe('shared types', () => {
@@ -126,18 +126,18 @@ describe('CQRS contracts', () => {
     void facade;
   });
 
-  it('should have CqrsPipelineBehavior with handle', () => {
-    const _fn: CqrsPipelineBehavior['handle'] = {} as unknown as CqrsPipelineBehavior['handle'];
+  it('should have IPipelineBehavior with handle', () => {
+    const _fn: IPipelineBehavior['handle'] = {} as unknown as IPipelineBehavior['handle'];
     void _fn;
   });
 
-  it('should have CqrsCommandHandler with handle', () => {
-    const _fn: CqrsCommandHandler['handle'] = {} as unknown as CqrsCommandHandler['handle'];
+  it('should have ICommandHandler with handle', () => {
+    const _fn: ICommandHandler['handle'] = {} as unknown as ICommandHandler['handle'];
     void _fn;
   });
 
-  it('should have CqrsQueryHandler with handle', () => {
-    const _fn: CqrsQueryHandler['handle'] = {} as unknown as CqrsQueryHandler['handle'];
+  it('should have IQueryHandler with handle', () => {
+    const _fn: IQueryHandler['handle'] = {} as unknown as IQueryHandler['handle'];
     void _fn;
   });
 });

@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CommandBus } from '../../src/bus/command-bus.ts';
-import type { CqrsCommand, CqrsCommandHandler } from '@hono-enterprise/common';
+import type { CqrsCommand, ICommandHandler } from '@hono-enterprise/common';
 import { HandlerNotFoundError } from '../../src/errors/handler-not-found.ts';
 
 // Test command
@@ -14,7 +14,7 @@ class TestCommand implements CqrsCommand {
 }
 
 // Test handler
-class TestHandler implements CqrsCommandHandler<TestCommand, string> {
+class TestHandler implements ICommandHandler<TestCommand, string> {
   handle(command: TestCommand): string {
     return `handled: ${command.data.value}`;
   }
@@ -35,7 +35,7 @@ describe('CommandBus', () => {
 
   it('should support async handlers', async () => {
     const bus = new CommandBus();
-    const asyncHandler: CqrsCommandHandler<TestCommand, string> = {
+    const asyncHandler: ICommandHandler<TestCommand, string> = {
       handle: async (cmd) => {
         await Promise.resolve();
         return `async: ${cmd.data.value}`;
@@ -78,7 +78,7 @@ describe('CommandBus', () => {
     };
 
     const bus = new CommandBus([behavior]);
-    const handler: CqrsCommandHandler<TestCommand, string> = {
+    const handler: ICommandHandler<TestCommand, string> = {
       handle: (cmd) => {
         calls.push('handler');
         return cmd.data.value;
@@ -105,7 +105,7 @@ describe('CommandBus', () => {
     };
 
     const bus = new CommandBus([shortCircuitBehavior]);
-    const handler: CqrsCommandHandler<TestCommand, string> = {
+    const handler: ICommandHandler<TestCommand, string> = {
       handle: (_cmd) => {
         calls.push('handler');
         return 'should-not-reach';
@@ -123,10 +123,10 @@ describe('CommandBus', () => {
 
   it('should replace handler on re-registration', async () => {
     const bus = new CommandBus();
-    const handler1: CqrsCommandHandler<TestCommand, string> = {
+    const handler1: ICommandHandler<TestCommand, string> = {
       handle: () => 'first',
     };
-    const handler2: CqrsCommandHandler<TestCommand, string> = {
+    const handler2: ICommandHandler<TestCommand, string> = {
       handle: () => 'second',
     };
 
@@ -161,7 +161,7 @@ describe('CommandBus', () => {
 
   it('should support plain object commands', async () => {
     const bus = new CommandBus();
-    const handler: CqrsCommandHandler<CqrsCommand, string> = {
+    const handler: ICommandHandler<CqrsCommand, string> = {
       handle: (cmd) => `handled: ${cmd.type}`,
     };
 

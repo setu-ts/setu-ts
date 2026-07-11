@@ -4,10 +4,10 @@
  * @module
  */
 import type {
-  CqrsPipelineBehavior,
   CqrsQuery,
-  CqrsQueryHandler,
+  IPipelineBehavior,
   IQueryBus,
+  IQueryHandler,
 } from '@hono-enterprise/common';
 import { RequestBus } from './request-bus.ts';
 
@@ -24,7 +24,7 @@ export class QueryBus implements IQueryBus {
    *
    * @param behaviors - Behaviors to apply to every query execution (default: `[]`)
    */
-  constructor(behaviors: readonly CqrsPipelineBehavior[] = []) {
+  constructor(behaviors: readonly IPipelineBehavior[] = []) {
     this.bus = new RequestBus(behaviors);
   }
 
@@ -36,7 +36,7 @@ export class QueryBus implements IQueryBus {
    */
   register<TQuery extends CqrsQuery, TResult>(
     type: string,
-    handler: CqrsQueryHandler<TQuery, TResult>,
+    handler: IQueryHandler<TQuery, TResult>,
   ): void {
     this.bus.registerHandler(type, (req) => Promise.resolve(handler.handle(req as TQuery)));
   }

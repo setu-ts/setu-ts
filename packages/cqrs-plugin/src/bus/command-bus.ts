@@ -5,9 +5,9 @@
  */
 import type {
   CqrsCommand,
-  CqrsCommandHandler,
-  CqrsPipelineBehavior,
   ICommandBus,
+  ICommandHandler,
+  IPipelineBehavior,
 } from '@hono-enterprise/common';
 import { RequestBus } from './request-bus.ts';
 
@@ -24,7 +24,7 @@ export class CommandBus implements ICommandBus {
    *
    * @param behaviors - Behaviors to apply to every command execution (default: `[]`)
    */
-  constructor(behaviors: readonly CqrsPipelineBehavior[] = []) {
+  constructor(behaviors: readonly IPipelineBehavior[] = []) {
     this.bus = new RequestBus(behaviors);
   }
 
@@ -36,7 +36,7 @@ export class CommandBus implements ICommandBus {
    */
   register<TCommand extends CqrsCommand, TResult>(
     type: string,
-    handler: CqrsCommandHandler<TCommand, TResult>,
+    handler: ICommandHandler<TCommand, TResult>,
   ): void {
     this.bus.registerHandler(type, (req) => Promise.resolve(handler.handle(req as TCommand)));
   }

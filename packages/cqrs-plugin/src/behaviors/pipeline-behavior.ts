@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { CqrsPipelineBehavior, CqrsRequest } from '@hono-enterprise/common';
+import type { CqrsRequest, IPipelineBehavior } from '@hono-enterprise/common';
 
 /**
  * Composes a pipeline of behaviors wrapping a terminal handler.
@@ -22,7 +22,7 @@ import type { CqrsPipelineBehavior, CqrsRequest } from '@hono-enterprise/common'
  */
 export function composePipeline(
   request: CqrsRequest,
-  behaviors: readonly CqrsPipelineBehavior[],
+  behaviors: readonly IPipelineBehavior[],
   terminal: () => Promise<unknown>,
 ): Promise<unknown> {
   let next = terminal;

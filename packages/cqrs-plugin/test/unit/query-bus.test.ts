@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { QueryBus } from '../../src/bus/query-bus.ts';
-import type { CqrsQuery, CqrsQueryHandler } from '@hono-enterprise/common';
+import type { CqrsQuery, IQueryHandler } from '@hono-enterprise/common';
 import { HandlerNotFoundError } from '../../src/errors/handler-not-found.ts';
 
 // Test query
@@ -14,7 +14,7 @@ class TestQuery implements CqrsQuery {
 }
 
 // Test handler
-class TestHandler implements CqrsQueryHandler<TestQuery, { id: string; name: string }> {
+class TestHandler implements IQueryHandler<TestQuery, { id: string; name: string }> {
   handle(query: TestQuery): { id: string; name: string } {
     return { id: query.data.id, name: `User ${query.data.id}` };
   }
@@ -35,7 +35,7 @@ describe('QueryBus', () => {
 
   it('should support async handlers', async () => {
     const bus = new QueryBus();
-    const asyncHandler: CqrsQueryHandler<TestQuery, string> = {
+    const asyncHandler: IQueryHandler<TestQuery, string> = {
       handle: async (qry) => {
         await Promise.resolve();
         return `async: ${qry.data.id}`;
@@ -78,7 +78,7 @@ describe('QueryBus', () => {
     };
 
     const bus = new QueryBus([behavior]);
-    const handler: CqrsQueryHandler<TestQuery, string> = {
+    const handler: IQueryHandler<TestQuery, string> = {
       handle: (qry) => {
         calls.push('handler');
         return qry.data.id;
@@ -105,7 +105,7 @@ describe('QueryBus', () => {
     };
 
     const bus = new QueryBus([shortCircuitBehavior]);
-    const handler: CqrsQueryHandler<TestQuery, string> = {
+    const handler: IQueryHandler<TestQuery, string> = {
       handle: (_qry) => {
         calls.push('handler');
         return 'should-not-reach';
@@ -123,10 +123,10 @@ describe('QueryBus', () => {
 
   it('should replace handler on re-registration', async () => {
     const bus = new QueryBus();
-    const handler1: CqrsQueryHandler<TestQuery, string> = {
+    const handler1: IQueryHandler<TestQuery, string> = {
       handle: () => 'first',
     };
-    const handler2: CqrsQueryHandler<TestQuery, string> = {
+    const handler2: IQueryHandler<TestQuery, string> = {
       handle: () => 'second',
     };
 
@@ -161,7 +161,7 @@ describe('QueryBus', () => {
 
   it('should support plain object queries', async () => {
     const bus = new QueryBus();
-    const handler: CqrsQueryHandler<CqrsQuery, string> = {
+    const handler: IQueryHandler<CqrsQuery, string> = {
       handle: (qry) => `handled: ${qry.type}`,
     };
 
@@ -174,10 +174,10 @@ describe('QueryBus', () => {
   });
 
   it('should keep command and query registries separate', () => {
-    // This is a compile-time check: QueryBus only accepts CqrsQueryHandler
+    // This is a compile-time check: QueryBus only accepts IQueryHandler
     const bus = new QueryBus();
-    // The following would not compile if we tried to register a CqrsCommandHandler:
-    // bus.register('TestQuery', new CommandHandlerThatImplementsCqrsCommandHandler);
+    // The following would not compile if we tried to register an ICommandHandler:
+    // bus.register('TestQuery', commandHandlerImplementingICommandHandler);
     // But we verify at runtime that the bus is for queries only by checking type.
     expect(bus).toBeInstanceOf(QueryBus);
   });

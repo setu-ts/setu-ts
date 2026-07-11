@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { composePipeline } from '../../src/behaviors/pipeline-behavior.ts';
-import type { CqrsPipelineBehavior } from '@hono-enterprise/common';
+import type { IPipelineBehavior } from '@hono-enterprise/common';
 
 describe('composePipeline', () => {
   it('should call the terminal handler when no behaviors are provided', async () => {
@@ -24,7 +24,7 @@ describe('composePipeline', () => {
   it('should wrap the terminal with a single behavior', async () => {
     const calls: string[] = [];
 
-    const behavior: CqrsPipelineBehavior = {
+    const behavior: IPipelineBehavior = {
       handle: (_req, next) => {
         calls.push('before');
         return next().then((r) => {
@@ -49,7 +49,7 @@ describe('composePipeline', () => {
   it('should run multiple behaviors in declared order', async () => {
     const calls: string[] = [];
 
-    const behavior1: CqrsPipelineBehavior = {
+    const behavior1: IPipelineBehavior = {
       handle: (_req, next) => {
         calls.push('b1-before');
         return next().then((r) => {
@@ -59,7 +59,7 @@ describe('composePipeline', () => {
       },
     };
 
-    const behavior2: CqrsPipelineBehavior = {
+    const behavior2: IPipelineBehavior = {
       handle: (_req, next) => {
         calls.push('b2-before');
         return next().then((r) => {
@@ -89,14 +89,14 @@ describe('composePipeline', () => {
   it('should short-circuit when a behavior does not call next()', async () => {
     const calls: string[] = [];
 
-    const shortCircuitBehavior: CqrsPipelineBehavior = {
+    const shortCircuitBehavior: IPipelineBehavior = {
       handle: (_req, _next) => {
         calls.push('short-circuit');
         return 'early';
       },
     };
 
-    const behaviorAfter: CqrsPipelineBehavior = {
+    const behaviorAfter: IPipelineBehavior = {
       handle: (_req, next) => {
         calls.push('after');
         return next();
@@ -116,7 +116,7 @@ describe('composePipeline', () => {
   });
 
   it('should normalize sync returns to promises', async () => {
-    const behavior: CqrsPipelineBehavior = {
+    const behavior: IPipelineBehavior = {
       handle: (_req, next) => {
         return next();
       },

@@ -19,12 +19,12 @@ export type { CqrsPluginOptions } from './interfaces/index.ts';
 // Re-export common types for convenience
 export type {
   CqrsCommand,
-  CqrsCommandHandler,
-  CqrsPipelineBehavior,
   CqrsQuery,
-  CqrsQueryHandler,
   CqrsRequest,
   ICommandBus,
+  ICommandHandler,
   ICqrsFacade,
+  IPipelineBehavior,
   IQueryBus,
+  IQueryHandler,
 } from '@hono-enterprise/common';

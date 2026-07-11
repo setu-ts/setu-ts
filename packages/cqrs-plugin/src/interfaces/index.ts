@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { CqrsPipelineBehavior } from '@hono-enterprise/common';
+import type { IPipelineBehavior } from '@hono-enterprise/common';
 
 /**
  * Options for {@linkcode CqrsPlugin}.
@@ -20,5 +20,5 @@ export interface CqrsPluginOptions {
    *
    * Default: `[]` (no behaviors).
    */
-  behaviors?: readonly CqrsPipelineBehavior[];
+  behaviors?: readonly IPipelineBehavior[];
 }
