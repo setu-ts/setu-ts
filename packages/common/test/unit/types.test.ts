@@ -15,6 +15,17 @@ import type { Option } from '../../src/option.ts';
 import type { StandardCapability } from '../../src/tokens.ts';
 import { CAPABILITIES } from '../../src/tokens.ts';
 import type { IResponse } from '../../src/http.ts';
+import type {
+  CqrsCommand,
+  CqrsCommandHandler,
+  CqrsPipelineBehavior,
+  CqrsQuery,
+  CqrsQueryHandler,
+  CqrsRequest,
+  ICommandBus,
+  ICqrsFacade,
+  IQueryBus,
+} from '../../src/services/cqrs.ts';
 
 describe('shared types', () => {
   it('should type HttpMethod as the standard verb union', () => {
@@ -70,6 +81,63 @@ describe('IResponse', () => {
     // Type-level check: IResponse includes snapshot method
     const _fn: IResponse['snapshot'] = {} as unknown as IResponse['snapshot'];
     // If this compiles, the type is correct.
+    void _fn;
+  });
+});
+
+describe('CQRS contracts', () => {
+  it('should have CqrsRequest with readonly type and data', () => {
+    const req: CqrsRequest<{ userId: string }> = { type: 'Test', data: { userId: '123' } };
+    assertType<IsExact<typeof req.type, string>>(true);
+    void req;
+  });
+
+  it('should have CqrsCommand extending CqrsRequest', () => {
+    const cmd: CqrsCommand<{ name: string }> = { type: 'CreateUser', data: { name: 'John' } };
+    assertType<IsExact<typeof cmd.type, string>>(true);
+    void cmd;
+  });
+
+  it('should have CqrsQuery extending CqrsRequest', () => {
+    const qry: CqrsQuery<{ id: string }> = { type: 'GetUser', data: { id: '123' } };
+    assertType<IsExact<typeof qry.type, string>>(true);
+    void qry;
+  });
+
+  it('should have ICommandBus with register and execute', () => {
+    const _fn: ICommandBus['register'] = {} as unknown as ICommandBus['register'];
+    const _exec: ICommandBus['execute'] = {} as unknown as ICommandBus['execute'];
+    void _fn;
+    void _exec;
+  });
+
+  it('should have IQueryBus with register and execute', () => {
+    const _fn: IQueryBus['register'] = {} as unknown as IQueryBus['register'];
+    const _exec: IQueryBus['execute'] = {} as unknown as IQueryBus['execute'];
+    void _fn;
+    void _exec;
+  });
+
+  it('should have ICqrsFacade with commandBus and queryBus', () => {
+    const facade: ICqrsFacade = {
+      commandBus: {} as ICommandBus,
+      queryBus: {} as IQueryBus,
+    };
+    void facade;
+  });
+
+  it('should have CqrsPipelineBehavior with handle', () => {
+    const _fn: CqrsPipelineBehavior['handle'] = {} as unknown as CqrsPipelineBehavior['handle'];
+    void _fn;
+  });
+
+  it('should have CqrsCommandHandler with handle', () => {
+    const _fn: CqrsCommandHandler['handle'] = {} as unknown as CqrsCommandHandler['handle'];
+    void _fn;
+  });
+
+  it('should have CqrsQueryHandler with handle', () => {
+    const _fn: CqrsQueryHandler['handle'] = {} as unknown as CqrsQueryHandler['handle'];
     void _fn;
   });
 });

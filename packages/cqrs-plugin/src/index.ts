@@ -3,8 +3,28 @@
  *
  * CQRS plugin: command bus, query bus, and pipeline behaviors.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * @example
+ * ```typescript
+ * import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
+ *
+ * app.register(CqrsPlugin({ behaviors: [timingBehavior] }));
+ * ```
  */
-export {};
+export { CqrsPlugin } from './plugin/cqrs-plugin.ts';
+export { CommandBus } from './bus/command-bus.ts';
+export { QueryBus } from './bus/query-bus.ts';
+export { HandlerNotFoundError } from './errors/handler-not-found.ts';
+export type { CqrsPluginOptions } from './interfaces/index.ts';
+
+// Re-export common types for convenience
+export type {
+  CqrsCommand,
+  CqrsCommandHandler,
+  CqrsPipelineBehavior,
+  CqrsQuery,
+  CqrsQueryHandler,
+  CqrsRequest,
+  ICommandBus,
+  ICqrsFacade,
+  IQueryBus,
+} from '@hono-enterprise/common';

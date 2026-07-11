@@ -129,3 +129,14 @@ export type { IMailer, MailMessage } from './services/mail.ts';
 export type { INotifier, NotificationMessage } from './services/notification.ts';
 export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type { ITenant, ITenantResolver } from './services/tenancy.ts';
+export type {
+  CqrsCommand,
+  CqrsCommandHandler,
+  CqrsPipelineBehavior,
+  CqrsQuery,
+  CqrsQueryHandler,
+  CqrsRequest,
+  ICommandBus,
+  ICqrsFacade,
+  IQueryBus,
+} from './services/cqrs.ts';
