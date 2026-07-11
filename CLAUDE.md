@@ -49,15 +49,29 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
 
 ## Writing a milestone plan (`plans/*.md`) — checks the plan must survive
 
+**Start from the template and lint it.** Copy `plans/TEMPLATE.md` to
+`plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run `deno task check:plan`. It
+mechanically enforces the structure — required sections present (including the "Contracts verified
+from SOURCE" and "Exported surface — every symbol names its consumer" tables), no unfilled
+placeholders, no undecided-alternative markers left in a design decision, and only the one canonical
+plan file at `plans/` root. A plan that does not lint clean is not ready to implement. The linter
+checks _structure_; the prose checks below are the judgment it cannot make for you — do both.
+
 Every item below is a miss from a real milestone plan (M10) caught only in review. A plan is not
 "read these docs and list the files" — it is where these defects are cheapest to catch. Check each:
 
-- **Verify every contract the design builds on by reading its source, not by its name.** The M10
-  plan assumed `IOrmAdapter` (common) carried data access; it is lifecycle-only
-  (`connect`/`disconnect`/`isReady`/`beginTransaction`), which left the plan's core seam —
-  repository ↔ adapter — completely undefined. If a committed port lacks a surface the design needs,
-  the plan must define the internal port explicitly (its methods, its file, and that it is NOT
-  exported from `src/index.ts`); "the adapter handles it" is not a design.
+- **The principle: any claim about code you do not own in this change must be checked against that
+  code before the plan relies on it — read the source, never the name and never your memory.** This
+  is one rule, not a list of special cases: it covers a committed contract's surface, a capability
+  token's shape, a runtime service's signature, AND any assertion that another milestone/package
+  "already ships X" or that your design "builds on Y". A motivational aside is a reference too, and
+  a wrong one is a lie that ships green (the M12 plan claimed M9 shipped an `@EventHandler`
+  decorator; `packages/decorator-plugin/src` has none — one `grep` would have caught it). Worked
+  example (contract surface): the M10 plan assumed `IOrmAdapter` (common) carried data access; it is
+  lifecycle-only (`connect`/`disconnect`/`isReady`/`beginTransaction`), which left the plan's core
+  seam — repository ↔ adapter — completely undefined. If a committed port lacks a surface the design
+  needs, the plan must define the internal port explicitly (its methods, its file, and that it is
+  NOT exported from `src/index.ts`); "the adapter handles it" is not a design.
 - **The test-file table must cover every planned `src/` file.** The per-file 90% bar is decided at
   planning time: a src file with no named test file means the plan fails its own completion criteria
   (M10 planned four Prisma/Drizzle src files and zero tests for them). External-dep code
@@ -122,7 +136,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Work, ORM adapters for Prisma/Drizzle/Memory) — complete (PR pending)
 - **Milestone 11** (`packages/cache-plugin` — CachePlugin with Memory, Redis, Noop stores;
   CacheService; cacheMiddleware for transparent response caching) — complete (PR pending)
-- **Next milestone** — Milestone 12
+- **Milestone 12** (`packages/events-plugin` — EventsPlugin, InMemoryEventBus, DomainEvent,
+  IntegrationEvent, defineDomainEvent, IEventHandler, subscribeHandler; in-memory event bus with
+  publish/publishBatch/subscribe; `publishBatch` addition to `IEventBus` in `common`) — complete (PR
+  pending)
+- **Next milestone** — Milestone 13
 
 ## Verification (run before declaring any work done)
 
@@ -232,11 +250,16 @@ All four must pass. A milestone also requires 90%+ coverage (`deno task test:cov
   function that never imports pino, or "@throws if X cannot be loaded from npm" when it throws
   because it never tries, are lies that pass every gate. When you touch a doc claim, confirm the
   code path it describes actually executes.
-- **Every option and parameter must be read on a real code path.** An option you accept, document,
-  and store but never consume is a dead feature — and its JSDoc is then a lie (a `ValidationPlugin`
-  `sanitize` option that was stored on the service but never applied shipped green once). For each
-  option or constructor parameter, grep that its name appears somewhere BEYOND its declaration and
-  assignment; if the only references are "declare" and "store", wire it in or delete it.
+- **The principle: every symbol you declare must be read on a real code path — the same rule for an
+  option, a constructor parameter, a class field, an exported function, an exported type, or a
+  capability token.** If a name's only references are its declaration and its assignment, it is dead
+  surface: wire it into a real path or delete it, and know that its JSDoc is a lie until you do. Do
+  not read this as "options and parameters only" — a marker field no code branches on (the M12
+  plan's `isIntegrationEvent` boolean, read by nothing in the milestone), an exported helper only
+  its own test calls, or a type parameter no caller benefits from are all the identical defect.
+  Worked example (option): a `ValidationPlugin` `sanitize` option was stored on the service but
+  never applied, and shipped green once. For each symbol, `grep` that its name appears somewhere
+  BEYOND its declaration and assignment; if not, wire it in or cut it.
 
 ## Before reporting a task done (evidence, not vibes)
 

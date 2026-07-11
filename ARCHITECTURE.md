@@ -1176,14 +1176,14 @@ graph TB
 
 #### @hono-enterprise/events-plugin
 
-| Aspect               | Detail                                                                      |
-| -------------------- | --------------------------------------------------------------------------- |
-| **Purpose**          | In-memory event bus for domain events                                       |
-| **Responsibilities** | Publish/subscribe domain events; event handler registration; error handling |
-| **Dependencies**     | `common`, `kernel`                                                          |
-| **Public API**       | `EventsPlugin()`; `IEventBus`; `DomainEvent`                                |
-| **Extension Points** | Custom event bus (override `events` token); custom event handlers           |
-| **Rules**            | In-memory only; for distributed events, use messaging plugin                |
+| Aspect               | Detail                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | In-memory event bus for domain events                                                                                      |
+| **Responsibilities** | Publish/subscribe domain events; event handler registration; error handling                                                |
+| **Dependencies**     | `common`, `kernel`                                                                                                         |
+| **Public API**       | `EventsPlugin()`; `IEventBus`; `DomainEvent`; `IntegrationEvent`; `defineDomainEvent`; `IEventHandler`; `subscribeHandler` |
+| **Extension Points** | Custom event bus (override `events` token); custom event handlers                                                          |
+| **Rules**            | In-memory only; for distributed events, use messaging plugin                                                               |
 
 #### @hono-enterprise/cqrs-plugin
 

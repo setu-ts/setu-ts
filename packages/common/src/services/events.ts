@@ -66,6 +66,12 @@ export interface IEventBus {
    */
   publish<T>(event: IDomainEvent<T>): Promise<void>;
   /**
+   * Publishes multiple events, each to its own subscribers.
+   *
+   * @param events - The events to publish, in array order
+   */
+  publishBatch(events: IDomainEvent[]): Promise<void>;
+  /**
    * Subscribes to an event type.
    *
    * @typeParam T - The event payload type
