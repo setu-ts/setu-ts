@@ -3,7 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { defineDomainEvent } from '../../src/events/domain-event.ts';
+import { defineDomainEvent, DomainEvent } from '../../src/events/domain-event.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('IntegrationEvent', () => {
@@ -16,6 +16,10 @@ describe('IntegrationEvent', () => {
     }
     const event = new UserCreatedIntegration({ userId: '123' });
     expect(event).toBeInstanceOf(BoundIntegrationEvent);
+    // An integration event is also a domain event (plan §5.3 — M14 discriminates
+    // cross-service events via `instanceof IntegrationEvent`, and both are DomainEvents).
+    // `toBeInstanceOf` rejects abstract classes; the `instanceof` operator accepts them.
+    expect(event instanceof DomainEvent).toBe(true);
   });
 
   it('should have DomainEvent properties', () => {

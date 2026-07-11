@@ -65,15 +65,6 @@ export class InMemoryEventBus implements IEventBus {
    * @param events - The events to publish, in array order
    */
   async publishBatch(events: IDomainEvent[]): Promise<void> {
-    if (this.async) {
-      // Fire-and-forget all events
-      for (const event of events) {
-        await this.publish(event);
-      }
-      return;
-    }
-
-    // Synchronous: await each event in order
     for (const event of events) {
       await this.publish(event);
     }

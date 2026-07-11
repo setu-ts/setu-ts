@@ -63,8 +63,9 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       const errorHandler = opts.errorHandler ?? defaultErrorHandler;
 
       // Build dispatch options.
+      // Note: opts.async is always defined because DEFAULT_OPTIONS provides the default.
       const dispatchOptions: EventDispatchOptions = {
-        async: opts.async ?? false,
+        async: opts.async as boolean,
         errorHandler,
       };
 

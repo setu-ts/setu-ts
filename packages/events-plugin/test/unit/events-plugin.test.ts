@@ -265,6 +265,51 @@ describe('EventsPlugin', () => {
     expect((errorReceived as Error).message).toBe('handler error');
   });
 
+  it('should wire async:false option explicitly', async () => {
+    const plugin = EventsPlugin({ async: false });
+    await plugin.register(ctx);
+
+    const bus = ctx.services.get(CAPABILITIES.EVENTS) as {
+      subscribe: (e: string, h: () => Promise<void>) => void;
+      publish: (e: unknown) => Promise<void>;
+    };
+    const { defineDomainEvent } = await import('../../src/events/domain-event.ts');
+    const runtime = {
+      platform: () => 'deno' as const,
+      version: () => 'test',
+      now: () => Date.now(),
+      hrtime: () => 0,
+      setTimeout: (fn: () => void) => ({ id: setTimeout(fn, 0) }) as TimerHandle,
+      clearTimeout: (h: TimerHandle) => clearTimeout((h as { id: number }).id),
+      setInterval: (fn: () => void) => ({ id: setInterval(fn, 1000) }) as TimerHandle,
+      clearInterval: (h: TimerHandle) => clearInterval((h as { id: number }).id),
+      uuid: () => 'sync-uuid',
+      randomBytes: (n: number) => new Uint8Array(n),
+      subtle: {} as SubtleCrypto,
+      env: {},
+      exit: () => {
+        throw new Error('exit');
+      },
+      hostname: () => 'localhost',
+    };
+    const { DomainEvent } = defineDomainEvent(runtime);
+
+    class TestEvent extends DomainEvent<{ value: string }> {
+      readonly type = 'TestEvent';
+    }
+
+    let completed = false;
+    bus.subscribe('TestEvent', async () => {
+      await new Promise((r) => setTimeout(r, 50));
+      completed = true;
+    });
+
+    const event = new TestEvent({ value: 'test' });
+    await bus.publish(event);
+
+    expect(completed).toBe(true); // synchronous, should complete
+  });
+
   it('should resolve optional logger when present', async () => {
     let loggerResolved = false;
     const fakeLogger: ILogger = {
@@ -321,5 +366,110 @@ describe('EventsPlugin', () => {
     await bus.publish(event);
 
     expect(loggerResolved).toBe(true);
+  });
+
+  it('should use default errorHandler without crashing when logger is absent', async () => {
+    // Ensure logger is NOT in the services registry.
+    registeredServices.delete('logger');
+
+    const plugin = EventsPlugin();
+    await plugin.register(ctx);
+
+    const bus = ctx.services.get(CAPABILITIES.EVENTS) as {
+      subscribe: (e: string, h: () => void) => void;
+      publish: (e: unknown) => Promise<void>;
+    };
+    const { defineDomainEvent } = await import('../../src/events/domain-event.ts');
+    const runtime = {
+      platform: () => 'deno' as const,
+      version: () => 'test',
+      now: () => Date.now(),
+      hrtime: () => 0,
+      setTimeout: (fn: () => void) => ({ id: setTimeout(fn, 0) }) as TimerHandle,
+      clearTimeout: (h: TimerHandle) => clearTimeout((h as { id: number }).id),
+      setInterval: (fn: () => void) => ({ id: setInterval(fn, 1000) }) as TimerHandle,
+      clearInterval: (h: TimerHandle) => clearInterval((h as { id: number }).id),
+      uuid: () => 'no-logger-uuid',
+      randomBytes: (n: number) => new Uint8Array(n),
+      subtle: {} as SubtleCrypto,
+      env: {},
+      exit: () => {
+        throw new Error('exit');
+      },
+      hostname: () => 'localhost',
+    };
+    const { DomainEvent } = defineDomainEvent(runtime);
+
+    class TestEvent extends DomainEvent<{ value: string }> {
+      readonly type = 'TestEvent';
+    }
+
+    // This should NOT throw even though handler fails and there's no logger.
+    bus.subscribe('TestEvent', () => {
+      throw new Error('handler fails');
+    });
+
+    const event = new TestEvent({ value: 'test' });
+    await expect(bus.publish(event)).resolves.toBeUndefined();
+  });
+
+  it('should use default errorHandler with logger when no custom errorHandler provided', async () => {
+    // Add logger to services.
+    let errorLogged = false;
+    const fakeLogger: ILogger = {
+      level: 'debug',
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {
+        errorLogged = true;
+      },
+      fatal: () => {},
+      trace: () => {},
+      child: () => fakeLogger,
+    };
+    registeredServices.set('logger', fakeLogger);
+
+    const plugin = EventsPlugin(); // No custom errorHandler
+    await plugin.register(ctx);
+
+    const bus = ctx.services.get(CAPABILITIES.EVENTS) as {
+      subscribe: (e: string, h: () => void) => void;
+      publish: (e: unknown) => Promise<void>;
+    };
+    const { defineDomainEvent } = await import('../../src/events/domain-event.ts');
+    const runtime = {
+      platform: () => 'deno' as const,
+      version: () => 'test',
+      now: () => Date.now(),
+      hrtime: () => 0,
+      setTimeout: (fn: () => void) => ({ id: setTimeout(fn, 0) }) as TimerHandle,
+      clearTimeout: (h: TimerHandle) => clearTimeout((h as { id: number }).id),
+      setInterval: (fn: () => void) => ({ id: setInterval(fn, 1000) }) as TimerHandle,
+      clearInterval: (h: TimerHandle) => clearInterval((h as { id: number }).id),
+      uuid: () => 'default-logger-uuid',
+      randomBytes: (n: number) => new Uint8Array(n),
+      subtle: {} as SubtleCrypto,
+      env: {},
+      exit: () => {
+        throw new Error('exit');
+      },
+      hostname: () => 'localhost',
+    };
+    const { DomainEvent } = defineDomainEvent(runtime);
+
+    class TestEvent extends DomainEvent<{ value: string }> {
+      readonly type = 'TestEvent';
+    }
+
+    bus.subscribe('TestEvent', () => {
+      throw new Error('handler fails');
+    });
+
+    const event = new TestEvent({ value: 'test' });
+    await bus.publish(event);
+
+    // Default errorHandler should have logged via the logger.
+    expect(errorLogged).toBe(true);
   });
 });

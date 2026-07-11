@@ -1525,10 +1525,10 @@ abstract class DomainEvent<T = unknown> {
 
 ### Deliverables
 
-- [ ] EventsPlugin
-- [ ] In-memory event bus
-- [ ] Domain event base
-- [ ] Full test coverage
+- [x] EventsPlugin
+- [x] In-memory event bus
+- [x] Domain event base
+- [x] Full test coverage
 
 ---
 
@@ -3310,7 +3310,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 9         | ✅     | decorator-plugin     |
 | 10        | ✅     | database-plugin      |
 | 11        | ✅     | cache-plugin         |
-| 12        | ⬜     | events-plugin        |
+| 12        | ✅     | events-plugin        |
 | 13        | ⬜     | cqrs-plugin          |
 | 14        | ⬜     | messaging-plugin     |
 | 15        | ⬜     | queue-plugin         |

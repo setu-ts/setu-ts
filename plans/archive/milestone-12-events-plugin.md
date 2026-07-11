@@ -346,6 +346,27 @@ Mirrors `packages/cache-plugin/src/plugin/cache-plugin.ts` (verified against sou
 (Any option accepted-but-unconsumed is a defect — grep each name beyond declare/assign, per
 CLAUDE.md. There are exactly two options and both are consumed.)
 
+### 5.8 Exported surface — every symbol names its consumer
+
+Every symbol the barrel exports, with the real code path that reads it (CLAUDE.md dead-surface rule:
+a symbol whose only reader is its own test is dead). Re-exported common types are owned by `common`;
+`PUBLIC_API.md` marks them as re-exports, not new declarations.
+
+| Exported symbol                                            | Kind                | Consumer / real code path that READS it                                                                                          |
+| ---------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `EventsPlugin`                                             | plugin factory      | `app.register(EventsPlugin(...))` — §7 integration test registers it and drives publish/subscribe via a route.                   |
+| `InMemoryEventBus`                                         | class               | Registered under `CAPABILITIES.EVENTS`; also constructed directly in unit tests. `whenIdle()`/`clear()` are concrete-only.       |
+| `DomainEvent`                                              | abstract class      | Consumers extend the raw form; base of `IntegrationEvent`; target of `instanceof` checks (works across both entry points).       |
+| `IntegrationEvent`                                         | abstract class      | Consumers extend; published in §7 tests; M14 messaging bridge discriminates via `event instanceof IntegrationEvent`.             |
+| `defineDomainEvent`                                        | factory fn          | Called once per app from `ctx.runtime`; the documented ergonomic construction path (`new X(data)`), tested against the raw path. |
+| `IEventHandler`                                            | interface           | Implemented by class-based handlers; read by `subscribeHandler`; unit-tested via a concrete handler class.                       |
+| `subscribeHandler`                                         | fn                  | Subscribes a class-based handler to the bus; §7 `event-handler.test.ts` drives it end-to-end (invoke + unsubscribe).             |
+| `EventsPluginOptions`, `EventDispatchOptions`              | option types        | `EventsPlugin()` parameter / the bound shape passed into the bus constructor (§5.4, §5.7).                                       |
+| `IEventBus`, `IDomainEvent`, `EventHandler`, `Unsubscribe` | re-exports (common) | Convenience only — owned by `common`; consumers resolve `IEventBus` from `CAPABILITIES.EVENTS`.                                  |
+
+No symbol is exported without a consumer beyond its own test; `whenIdle`/`clear` are deliberately
+NOT exported on `IEventBus` (concrete-class internals, §5.4/§5.6).
+
 ---
 
 ## 6. Implementation files
@@ -420,6 +441,7 @@ pure in-memory and fully exercised by fakes.
 
 ```bash
 git branch --show-current   # MUST be feat/m12-events-plugin, never main
+deno task check:plan        # this plan lints clean (required sections, no unresolved seams)
 deno task fmt:check
 deno task lint
 deno task check

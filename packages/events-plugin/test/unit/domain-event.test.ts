@@ -129,6 +129,42 @@ describe('defineDomainEvent', () => {
     expect(event).toBeInstanceOf(BoundIntegrationEvent);
   });
 
+  it('should omit aggregateId when not supplied (bound IntegrationEvent)', () => {
+    const { IntegrationEvent: BoundIntegrationEvent } = defineDomainEvent(runtime);
+    class TestIntegrationEvent extends BoundIntegrationEvent<{ value: string }> {
+      readonly type = 'TestIntegrationEvent';
+    }
+    const event = new TestIntegrationEvent({ value: 'test' });
+    expect('aggregateId' in event).toBe(false);
+  });
+
+  it('should set aggregateId when supplied (bound IntegrationEvent)', () => {
+    const { IntegrationEvent: BoundIntegrationEvent } = defineDomainEvent(runtime);
+    class TestIntegrationEvent extends BoundIntegrationEvent<{ value: string }> {
+      readonly type = 'TestIntegrationEvent';
+    }
+    const event = new TestIntegrationEvent({ value: 'test' }, { aggregateId: 'agg-integration' });
+    expect((event as unknown as { aggregateId: string }).aggregateId).toBe('agg-integration');
+  });
+
+  it('should omit version when not supplied (bound IntegrationEvent)', () => {
+    const { IntegrationEvent: BoundIntegrationEvent } = defineDomainEvent(runtime);
+    class TestIntegrationEvent extends BoundIntegrationEvent<{ value: string }> {
+      readonly type = 'TestIntegrationEvent';
+    }
+    const event = new TestIntegrationEvent({ value: 'test' });
+    expect('version' in event).toBe(false);
+  });
+
+  it('should set version when supplied (bound IntegrationEvent)', () => {
+    const { IntegrationEvent: BoundIntegrationEvent } = defineDomainEvent(runtime);
+    class TestIntegrationEvent extends BoundIntegrationEvent<{ value: string }> {
+      readonly type = 'TestIntegrationEvent';
+    }
+    const event = new TestIntegrationEvent({ value: 'test' }, { version: 7 });
+    expect((event as unknown as { version: number }).version).toBe(7);
+  });
+
   it('should produce identical field shapes for raw and bound construction', () => {
     const { DomainEvent: BoundDomainEvent } = defineDomainEvent(runtime);
     class RawEvent extends DomainEvent<{ value: string }> {
