@@ -1166,9 +1166,29 @@ Provides command/query separation with buses.
 
 ```typescript
 import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
+import type { CqrsPipelineBehavior, CqrsRequest } from '@hono-enterprise/common';
+
+// Example behavior implementations
+const loggingBehavior: CqrsPipelineBehavior = {
+  handle: async (request: CqrsRequest, next: () => Promise<unknown>) => {
+    console.log(`Executing ${request.type}`);
+    const result = await next();
+    console.log(`Completed ${request.type}`);
+    return result;
+  },
+};
+
+const timingBehavior: CqrsPipelineBehavior = {
+  handle: async (request: CqrsRequest, next: () => Promise<unknown>) => {
+    const start = Date.now();
+    const result = await next();
+    console.log(`${request.type} took ${Date.now() - start}ms`);
+    return result;
+  },
+};
 
 app.register(CqrsPlugin({
-  behaviors: ['logging', 'validation', 'timing'],
+  behaviors: [loggingBehavior, timingBehavior],
 }));
 ```
 
