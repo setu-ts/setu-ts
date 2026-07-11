@@ -1187,14 +1187,14 @@ graph TB
 
 #### @hono-enterprise/cqrs-plugin
 
-| Aspect               | Detail                                                                             |
-| -------------------- | ---------------------------------------------------------------------------------- |
-| **Purpose**          | Command Query Responsibility Segregation                                           |
-| **Responsibilities** | Command bus; query bus; pipeline behaviors; handler registration                   |
-| **Dependencies**     | `common`, `kernel`                                                                 |
-| **Public API**       | `CqrsPlugin()`; `ICommandBus`; `IQueryBus`; `ICommandHandler`; `IQueryHandler`     |
-| **Extension Points** | Custom pipeline behaviors; custom bus implementations                              |
-| **Rules**            | Optional; consumes the `events` capability via token for event sourcing (optional) |
+| Aspect               | Detail                                                                                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | Command Query Responsibility Segregation                                                                                                                                                                                                                                 |
+| **Responsibilities** | Command bus; query bus; pipeline behaviors; handler registration                                                                                                                                                                                                         |
+| **Dependencies**     | `common`, `kernel`                                                                                                                                                                                                                                                       |
+| **Public API**       | `CqrsPlugin()`; `ICommandBus`; `IQueryBus`; `ICqrsFacade`; `ICommandHandler`; `IQueryHandler`; `IPipelineBehavior`; `CqrsRequest`; `CqrsCommand`; `CqrsQuery`; `CommandBus`; `QueryBus`; `HandlerNotFoundError` (contracts owned by `common`, re-exported by the plugin) |
+| **Extension Points** | Custom pipeline behaviors; custom bus implementations                                                                                                                                                                                                                    |
+| **Rules**            | Optional; consumes the `events` capability via token for event sourcing (optional)                                                                                                                                                                                       |
 
 #### @hono-enterprise/messaging-plugin
 

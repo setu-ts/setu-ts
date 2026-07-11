@@ -1166,38 +1166,54 @@ Provides command/query separation with buses.
 
 ```typescript
 import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
+import type { CqrsRequest, IPipelineBehavior } from '@hono-enterprise/common';
+
+// Example behavior implementations
+const loggingBehavior: IPipelineBehavior = {
+  handle: async (request: CqrsRequest, next: () => Promise<unknown>) => {
+    console.log(`Executing ${request.type}`);
+    const result = await next();
+    console.log(`Completed ${request.type}`);
+    return result;
+  },
+};
+
+const timingBehavior: IPipelineBehavior = {
+  handle: async (request: CqrsRequest, next: () => Promise<unknown>) => {
+    const start = Date.now();
+    const result = await next();
+    console.log(`${request.type} took ${Date.now() - start}ms`);
+    return result;
+  },
+};
 
 app.register(CqrsPlugin({
-  behaviors: ['logging', 'validation', 'timing'],
+  behaviors: [loggingBehavior, timingBehavior],
 }));
 ```
 
 ### Defining Commands and Queries
 
 ```typescript
-import { ICommand, IQuery } from '@hono-enterprise/cqrs-plugin';
+import type { CqrsCommand, CqrsQuery } from '@hono-enterprise/cqrs-plugin';
 
-class CreateUserCommand implements ICommand {
-  constructor(
-    public readonly data: { name: string; email: string },
-    public readonly id: string = crypto.randomUUID(),
-    public readonly createdAt: Date = new Date(),
-  ) {}
+// A request is routed by its string `type`; `data` carries the payload.
+// Both a class instance (below) and a plain `{ type, data }` object satisfy the contract.
+class CreateUserCommand implements CqrsCommand<{ name: string; email: string }> {
+  readonly type = 'CreateUserCommand';
+  constructor(public readonly data: { name: string; email: string }) {}
 }
 
-class GetUserQuery implements IQuery {
-  constructor(
-    public readonly data: { id: string },
-    public readonly id: string = crypto.randomUUID(),
-    public readonly createdAt: Date = new Date(),
-  ) {}
+class GetUserQuery implements CqrsQuery<{ id: string }> {
+  readonly type = 'GetUserQuery';
+  constructor(public readonly data: { id: string }) {}
 }
 ```
 
 ### Implementing Handlers
 
 ```typescript
-import { ICommandHandler, IQueryHandler } from '@hono-enterprise/cqrs-plugin';
+import type { ICommandHandler, IQueryHandler } from '@hono-enterprise/cqrs-plugin';
 
 class CreateUserHandler implements ICommandHandler<CreateUserCommand, string> {
   constructor(private db: IDatabaseService) {}
@@ -1242,13 +1258,13 @@ app.register({
 ```typescript
 app.router.post('/users', async (ctx) => {
   const commandBus = ctx.services.get<ICommandBus>('command-bus');
-  const userId = await commandBus.execute(new CreateUserCommand(ctx.request.body));
+  const userId = await commandBus.execute<string>(new CreateUserCommand(ctx.request.body));
   return ctx.response.status(201).json({ id: userId });
 });
 
 app.router.get('/users/:id', async (ctx) => {
   const queryBus = ctx.services.get<IQueryBus>('query-bus');
-  const user = await queryBus.execute(new GetUserQuery({ id: ctx.params.id }));
+  const user = await queryBus.execute<User>(new GetUserQuery({ id: ctx.params.id }));
   return ctx.response.json(user);
 });
 ```
@@ -2286,7 +2302,7 @@ const app = createApplication({
     ConfigPlugin({ validationSchema: AppConfigSchema }),
     DatabasePlugin({ type: 'prisma' }), // reads DATABASE_URL via the config capability
     EventsPlugin(),
-    CqrsPlugin({ behaviors: ['logging', 'validation', 'timing'] }),
+    CqrsPlugin(), // add cross-cutting behaviors via `behaviors: [myBehavior]` (typed IPipelineBehavior[])
     OpenApiPlugin({ title: 'CQRS API', version: '1.0.0' }),
   ],
 });

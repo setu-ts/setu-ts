@@ -1541,9 +1541,15 @@ abstract class DomainEvent<T = unknown> {
 **Plugin Registration:**
 
 ```typescript
-app.register(CqrsPlugin({
-  behaviors: [loggingBehavior, validationBehavior, timingBehavior],
-}));
+// `behaviors` is a consumer-supplied IPipelineBehavior[] (no built-ins ship in M13).
+const timingBehavior: IPipelineBehavior = {
+  handle: async (request, next) => {
+    const result = await next();
+    return result;
+  },
+};
+
+app.register(CqrsPlugin({ behaviors: [timingBehavior] }));
 ```
 
 **Programmatic API:**
@@ -1556,13 +1562,14 @@ const queryBus = ctx.services.get<IQueryBus>('query-bus');
 commandBus.register<CreateUserCommand, string>('CreateUserCommand', new CreateUserHandler());
 queryBus.register<GetUserQuery, User>('GetUserQuery', new GetUserHandler());
 
-// Execute
-const userId = await commandBus.execute<CreateUserCommand, string>({
+// Execute — routed by `request.type`; the single type param is the result type.
+// A plain `{ type, data }` object or a class instance both satisfy the request contract.
+const userId = await commandBus.execute<string>({
   type: 'CreateUserCommand',
   data: { name: 'John', email: 'john@example.com' },
 });
 
-const user = await queryBus.execute<GetUserQuery, User>({
+const user = await queryBus.execute<User>({
   type: 'GetUserQuery',
   data: { id: userId },
 });
@@ -1571,12 +1578,12 @@ const user = await queryBus.execute<GetUserQuery, User>({
 **Pipeline Behaviors:**
 
 ```typescript
-interface PipelineBehavior<TRequest, TResult> {
-  handle(request: TRequest, next: () => Promise<TResult>): Promise<TResult>;
+interface IPipelineBehavior<TRequest extends CqrsRequest = CqrsRequest, TResult = unknown> {
+  handle(request: TRequest, next: () => Promise<TResult>): TResult | Promise<TResult>;
 }
 ```
 
-Built-in behaviors are optional and composable.
+Behaviors are consumer-supplied and composable; no built-in behaviors ship in M13.
 
 **Implementation Files:**
 
@@ -1597,10 +1604,16 @@ Built-in behaviors are optional and composable.
 
 ### Deliverables
 
-- [ ] CqrsPlugin
-- [ ] Command and query buses
-- [ ] Pipeline behaviors
-- [ ] Full test coverage
+- [x] CqrsPlugin
+- [x] Command and query buses
+- [x] Pipeline behaviors
+- [x] Full test coverage
+
+> Note: the ROADMAP file list included `src/handlers/command-handler.ts` and
+> `src/handlers/query-handler.ts`; these were intentionally omitted (the handler interfaces
+> `ICommandHandler`/`IQueryHandler` are contracts owned by `@hono-enterprise/common`, so plugin
+> handler files would be empty re-export shells). See `plans/archive/milestone-13-cqrs-plugin.md`
+> §C4.
 
 ---
 
@@ -3311,7 +3324,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 10        | ✅     | database-plugin      |
 | 11        | ✅     | cache-plugin         |
 | 12        | ✅     | events-plugin        |
-| 13        | ⬜     | cqrs-plugin          |
+| 13        | ✅     | cqrs-plugin          |
 | 14        | ⬜     | messaging-plugin     |
 | 15        | ⬜     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
