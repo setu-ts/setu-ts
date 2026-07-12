@@ -7,6 +7,8 @@ import type {
   IPluginContext,
   IRuntimeServices,
 } from '@hono-enterprise/common';
+import type { IRedisStreamsClient } from '../../src/interfaces/index.ts';
+import { FakeRedisStreamsClient } from '../../test/fixtures/fake-ioredis-client.ts';
 
 /**
  * Creates a fake context for testing MessagingPlugin.
@@ -152,11 +154,25 @@ Deno.test('MessagingPlugin - memory broker registers successfully', async () => 
 });
 
 Deno.test(
-  'MessagingPlugin - redis-streams broker registers successfully',
-  { ignore: true },
+  'MessagingPlugin - redis-streams broker registers successfully with fake client',
   async () => {
-    // Skip this test as it requires ioredis npm package which needs env access
-    // The redis-streams broker is tested in redis-streams-broker.test.ts with fake client
+    const fakeClient = new FakeRedisStreamsClient();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'redis-streams',
+      client: fakeClient as unknown as IRedisStreamsClient,
+      url: 'redis://localhost:6379',
+    });
+
+    await plugin.register(ctx);
+
+    // Should register the broker
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect(typeof (broker as { connect: () => Promise<void> }).connect).toBe('function');
+    expect(typeof (broker as { disconnect: () => Promise<void> }).disconnect).toBe('function');
   },
 );
 
@@ -281,9 +297,28 @@ Deno.test('MessagingPlugin - custom serializer is used', async () => {
   expect(broker).toBeDefined();
 });
 
-Deno.test('MessagingPlugin - redis-streams with all options', { ignore: true }, async () => {
-  // Skip this test as it requires ioredis npm package which needs env access
-});
+Deno.test(
+  'MessagingPlugin - redis-streams with all options including defaultQueue and pollIntervalMs',
+  async () => {
+    const fakeClient = new FakeRedisStreamsClient();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'redis-streams',
+      client: fakeClient as unknown as IRedisStreamsClient,
+      url: 'redis://localhost:6379',
+      defaultQueue: 'test-queue',
+      pollIntervalMs: 1000,
+      blockSizeMs: 500,
+    });
+
+    await plugin.register(ctx);
+
+    // Should register the broker
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  },
+);
 
 Deno.test('MessagingPlugin - named instance provides correct token', async () => {
   const { ctx } = createFakeContext();
