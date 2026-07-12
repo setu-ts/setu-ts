@@ -336,7 +336,12 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
 - Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), archived to
   `plans/archive/` on completion in the milestone's own PR. All other prompts/notes are scratchpad
   only and never committed (see the plan-cleanup rule in "Before reporting a task done").
-- Tests: `@std/testing/bdd` + `@std/expect`, in `test/{unit,integration,e2e}/` per package.
+- Tests: `@std/testing/bdd` (`describe`/`it`) + `@std/expect` (`expect`), in
+  `test/{unit,integration,e2e}/` per package. **Write every test with `describe`/`it` from
+  `@std/testing/bdd` from the very first line — NEVER start with `Deno.test(...)` and convert it
+  later.** `Deno.test` is banned in this repo; a test file's first test-framework import must be
+  `import { describe, it } from '@std/testing/bdd';` and assertions use `expect` from `@std/expect`.
+  Do not scaffold in one style and rewrite to another — that wastes the whole edit.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).
