@@ -1198,14 +1198,14 @@ graph TB
 
 #### @hono-enterprise/messaging-plugin
 
-| Aspect               | Detail                                                                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Message broker abstraction                                                                                                              |
-| **Responsibilities** | Provide `IMessageBroker`; RabbitMQ, NATS, Kafka, Redis Streams, in-memory adapters; publish/subscribe                                   |
-| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
-| **Public API**       | `MessagingPlugin()`; `IMessageBroker`                                                                                                   |
-| **Extension Points** | Custom broker adapter; custom serializers                                                                                               |
-| **Rules**            | Broker clients are optional (injected or lazy-loaded via `npm:` specifiers); in-memory broker for testing; decoupled from events plugin |
+| Aspect               | Detail                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Message broker abstraction for cross-service integration events                                                                                                           |
+| **Responsibilities** | Provide `IMessageBroker`; in-memory and Redis Streams adapters; serializer interface (`ISerializer`); `EventsMessagingBridge` for events-to-messaging bridge              |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                             |
+| **Public API**       | `MessagingPlugin()`; `EventsMessagingBridge()`; `InMemoryBroker`; `RedisStreamsBroker`; `JsonSerializer`; `IMessageBroker` (re-exported from `common`)                    |
+| **Extension Points** | Custom broker adapter; custom serializers; custom Redis client injection                                                                                                  |
+| **Rules**            | ioredis is optional (injected or lazy-loaded via `npm:` specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option |
 
 #### @hono-enterprise/queue-plugin
 

@@ -137,11 +137,17 @@ const res = await app.inject({ method: 'POST', url: 'http://localhost/probe', bo
 ```
 
 Run with `deno run -A .verify-<milestone>/driver.ts` (it does NOT type-check — cross-check contract
-shapes in `packages/common/src/` by reading them). **Paste BOTH the driver source AND its raw stdout
-verbatim** into the report — not a hand-written "✓ works" summary. A summarized probe result is
-worthless: it cannot be distinguished from a probe that never ran, asserted nothing, or was written
-to pass. The raw `res.json()` / `res.body` output must be visible so the failure modes below are
-impossible to paper over.
+shapes in `packages/common/src/` by reading them). **The driver is a plain top-level-`await` script,
+NOT a test file** — bare `import`s, then `await app.start()` / `app.inject()` at the top level. Do
+NOT wrap it in `Deno.test(...)`, and do NOT reach for `describe`/`it` from `@std/testing/bdd`: this
+is a runtime probe, not the test suite, so it uses NEITHER harness. (Repo test files use
+`@std/testing/bdd` — `describe`/`it` + `expect`, never `Deno.test`; a verify driver uses neither.
+Scaffolding in a test framework and then rewriting to a plain script just burns the edit — write it
+as a plain script from the first line.) Signal failure by letting an assertion `throw`. **Paste BOTH
+the driver source AND its raw stdout verbatim** into the report — not a hand-written "✓ works"
+summary. A summarized probe result is worthless: it cannot be distinguished from a probe that never
+ran, asserted nothing, or was written to pass. The raw `res.json()` / `res.body` output must be
+visible so the failure modes below are impossible to paper over.
 
 **Production defaults, never the test-only seam.** If a component has an injectable seam that tests
 use (a `clock`, a fake client, an in-memory stand-in), your behavioral probe must construct it with

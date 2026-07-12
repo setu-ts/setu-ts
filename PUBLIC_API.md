@@ -1273,38 +1273,59 @@ app.router.get('/users/:id', async (ctx) => {
 
 ## Messaging
 
-Provides message broker abstraction.
+Provides message broker abstraction for cross-service integration events.
 
 ### Registration
 
 ```typescript
 import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
 
+// In-memory broker (for development/testing)
 app.register(MessagingPlugin({
-  broker: 'rabbitmq',
+  broker: 'memory',
+}));
+
+// Redis Streams broker
+app.register(MessagingPlugin({
+  broker: 'redis-streams',
   options: {
-    url: config.get('RABBITMQ_URL'),
-    exchange: 'myapp.events',
-    exchangeType: 'topic',
-    durable: true,
+    url: config.get('REDIS_URL'),
+    defaultQueue: 'myapp-events',
   },
 }));
+```
+
+### Plugin Options
+
+```typescript
+interface MessagingPluginOptions {
+  /** Broker type - 'memory' | 'redis-streams' */
+  broker: 'memory' | 'redis-streams';
+  /** Optional instance name for multi-instance support */
+  name?: string;
+  /** Plugin version (default: '0.1.0') */
+  version?: string;
+  /** Redis Streams options (required when broker='redis-streams') */
+  options?: {
+    url: string;
+    defaultQueue: string;
+  };
+}
 ```
 
 ### Publishing Messages
 
 ```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+
 app.router.post('/orders', async (ctx) => {
-  const broker = ctx.services.get<IMessageBroker>('messaging');
+  const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
   const order = await createOrder(ctx.request.body);
 
   await broker.publish('order.created', {
     orderId: order.id,
     total: order.total,
     customerId: order.customerId,
-  }, {
-    correlationId: ctx.request.id,
-    persistent: true,
   });
 
   return ctx.response.status(201).json(order);
@@ -1317,40 +1338,81 @@ app.router.post('/orders', async (ctx) => {
 app.register({
   name: 'order-processor',
   version: '1.0.0',
-  dependencies: ['messaging'],
+  dependencies: [CAPABILITIES.MESSAGING],
   register(ctx) {
-    const broker = ctx.services.get<IMessageBroker>('messaging');
+    const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
     broker.subscribe('order.created', async (message, metadata) => {
       console.log('Processing order', message.orderId);
       await processOrder(message);
     }, {
       queue: 'order-processor',
-      durable: true,
-      prefetch: 10,
     });
   },
 });
 ```
 
-### Multiple Brokers
+### Multiple Broker Instances
 
 ```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+
 app.register(MessagingPlugin({
-  broker: 'rabbitmq',
+  broker: 'redis-streams',
   name: 'events',
-  options: { url: config.get('EVENTS_RABBITMQ_URL') },
+  options: { url: config.get('EVENTS_REDIS_URL'), defaultQueue: 'events' },
 }));
 
 app.register(MessagingPlugin({
-  broker: 'kafka',
+  broker: 'redis-streams',
   name: 'audit',
-  options: { brokers: config.get('KAFKA_BROKERS').split(',') },
+  options: { url: config.get('AUDIT_REDIS_URL'), defaultQueue: 'audit' },
 }));
 
-// Access by name
-const eventsBroker = ctx.services.get<IMessageBroker>('messaging:events');
-const auditBroker = ctx.services.get<IMessageBroker>('messaging:audit');
+// Access by namespaced token
+const eventsBroker = ctx.services.get<IMessageBroker>('messaging.events');
+const auditBroker = ctx.services.get<IMessageBroker>('messaging.audit');
+```
+
+### Events Messaging Bridge
+
+The `EventsMessagingBridge` forwards domain events from `EventsPlugin` to a messaging broker:
+
+```typescript
+import { EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
+
+app.register(EventsMessagingBridge({
+  eventTypes: ['user.created', 'user.updated'],
+  brokerToken: CAPABILITIES.MESSAGING,
+  errorHandler: (error, eventType) => {
+    console.error(`Failed to forward ${eventType}:`, error);
+  },
+}));
+```
+
+### Exports
+
+```typescript
+// Plugin factories
+export { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
+export { EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
+
+// Broker implementations
+export { InMemoryBroker } from '@hono-enterprise/messaging-plugin';
+export { RedisStreamsBroker } from '@hono-enterprise/messaging-plugin';
+
+// Serializer
+export { JsonSerializer } from '@hono-enterprise/messaging-plugin';
+export type { ISerializer } from '@hono-enterprise/messaging-plugin';
+
+// Re-exported types from @hono-enterprise/common
+export type {
+  IMessageBroker,
+  ISubscription,
+  MessageHandler,
+  MessageMetadata,
+  SubscribeOptions,
+} from '@hono-enterprise/messaging-plugin';
 ```
 
 ---
