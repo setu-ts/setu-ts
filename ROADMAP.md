@@ -1720,7 +1720,7 @@ app.register(EventsMessagingBridge({
 
 ---
 
-## Milestone 14b: Messaging Plugin — RabbitMQ, NATS, Kafka Brokers ⬜ NOT STARTED
+## Milestone 14b: Messaging Plugin — RabbitMQ, NATS, Kafka Brokers ✅ COMPLETE
 
 **Objective:** Complete the messaging capability by adding the three remaining production brokers to
 the existing `@hono-enterprise/messaging-plugin` package.
@@ -3412,7 +3412,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 12        | ✅     | events-plugin        |
 | 13        | ✅     | cqrs-plugin          |
 | 14        | ✅     | messaging-plugin     |
-| 14b       | ⬜     | messaging-plugin     |
+| 14b       | ✅     | messaging-plugin     |
 | 15        | ⬜     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |

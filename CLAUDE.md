@@ -150,7 +150,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `common/services/messaging.ts`: IMessageBroker, ISubscription, MessageHandler, MessageMetadata,
   SubscribeOptions; in-memory + Redis Streams brokers implemented; RabbitMQ/NATS/Kafka deferred to
   M14b) — complete (PR pending)
-- **Next milestone** — Milestone 14b (RabbitMQ, NATS, Kafka brokers)
+- **Next milestone** — Milestone 15 (queue-plugin)
 
 ## Verification (run before declaring any work done)
 

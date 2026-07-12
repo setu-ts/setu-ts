@@ -24,6 +24,15 @@ describe('barrel exports', () => {
     expect(messaging.RedisStreamsBroker).toBeDefined();
     expect(typeof messaging.RedisStreamsBroker).toBe('function');
 
+    expect(messaging.RabbitMqBroker).toBeDefined();
+    expect(typeof messaging.RabbitMqBroker).toBe('function');
+
+    expect(messaging.NatsBroker).toBeDefined();
+    expect(typeof messaging.NatsBroker).toBe('function');
+
+    expect(messaging.KafkaBroker).toBeDefined();
+    expect(typeof messaging.KafkaBroker).toBe('function');
+
     // Serializer
     expect(messaging.JsonSerializer).toBeDefined();
     expect(typeof messaging.JsonSerializer).toBe('function');

@@ -1277,7 +1277,7 @@ Provides message broker abstraction for cross-service integration events.
 
 ### Registration
 
-```typescript
+````typescript
 import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
 
 // In-memory broker (for development/testing)
@@ -1288,30 +1288,40 @@ app.register(MessagingPlugin({
 // Redis Streams broker
 app.register(MessagingPlugin({
   broker: 'redis-streams',
-  options: {
-    url: config.get('REDIS_URL'),
-    defaultQueue: 'myapp-events',
-  },
+  url: config.get('REDIS_URL'),
+  defaultQueue: 'myapp-events',
 }));
-```
 
 ### Plugin Options
 
 ```typescript
 interface MessagingPluginOptions {
-  /** Broker type - 'memory' | 'redis-streams' */
-  broker: 'memory' | 'redis-streams';
-  /** Optional instance name for multi-instance support */
+  /** Broker type. @defaultValue 'memory' */
+  broker?: 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka';
+  /** Instance name for multi-instance support (registers under messaging.<name>). */
   name?: string;
-  /** Plugin version (default: '0.1.0') */
-  version?: string;
-  /** Redis Streams options (required when broker='redis-streams') */
-  options?: {
-    url: string;
-    defaultQueue: string;
-  };
+  /** Serializer for message payloads. @defaultValue new JsonSerializer() */
+  serializer?: ISerializer;
+  /** Connection URL (redis-streams / rabbitmq / nats). */
+  url?: string;
+  /** Injected client — bypasses the lazy npm import. Type depends on broker. */
+  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory;
+  /** Default consumer group / queue name. @defaultValue 'messaging-consumers' */
+  defaultQueue?: string;
+  /** Redis Streams poll interval in ms. @defaultValue 100 */
+  pollIntervalMs?: number;
+  /** Redis Streams XREADGROUP block timeout in ms. @defaultValue 100 */
+  blockSizeMs?: number;
+  /** RabbitMQ exchange name. @defaultValue 'messaging' */
+  exchangeName?: string;
+  /** NATS JetStream stream name. @defaultValue 'MESSAGING' */
+  streamName?: string;
+  /** Kafka bootstrap brokers. @defaultValue ['localhost:9092'] */
+  brokers?: readonly string[];
+  /** Kafka client ID. @defaultValue 'messaging-client' */
+  clientId?: string;
 }
-```
+````
 
 ### Publishing Messages
 
@@ -1360,13 +1370,15 @@ import { CAPABILITIES } from '@hono-enterprise/common';
 app.register(MessagingPlugin({
   broker: 'redis-streams',
   name: 'events',
-  options: { url: config.get('EVENTS_REDIS_URL'), defaultQueue: 'events' },
+  url: config.get('EVENTS_REDIS_URL'),
+  defaultQueue: 'events',
 }));
 
 app.register(MessagingPlugin({
   broker: 'redis-streams',
   name: 'audit',
-  options: { url: config.get('AUDIT_REDIS_URL'), defaultQueue: 'audit' },
+  url: config.get('AUDIT_REDIS_URL'),
+  defaultQueue: 'audit',
 }));
 
 // Access by namespaced token
@@ -1383,7 +1395,8 @@ import { EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
 
 app.register(EventsMessagingBridge({
   eventTypes: ['user.created', 'user.updated'],
-  brokerToken: CAPABILITIES.MESSAGING,
+  token: CAPABILITIES.MESSAGING,
+  topicMapping: (eventType) => eventType.toLowerCase(),
   errorHandler: (error, eventType) => {
     console.error(`Failed to forward ${eventType}:`, error);
   },
@@ -1400,10 +1413,24 @@ export { EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
 // Broker implementations
 export { InMemoryBroker } from '@hono-enterprise/messaging-plugin';
 export { RedisStreamsBroker } from '@hono-enterprise/messaging-plugin';
+export { RabbitMqBroker } from '@hono-enterprise/messaging-plugin';
+export { NatsBroker } from '@hono-enterprise/messaging-plugin';
+export { KafkaBroker } from '@hono-enterprise/messaging-plugin';
 
 // Serializer
 export { JsonSerializer } from '@hono-enterprise/messaging-plugin';
 export type { ISerializer } from '@hono-enterprise/messaging-plugin';
+
+// Option types
+export type {
+  EventsMessagingBridgeOptions,
+  KafkaOptions,
+  MessagingBrokerType,
+  MessagingPluginOptions,
+  NatsOptions,
+  RabbitMqOptions,
+  RedisStreamsOptions,
+} from '@hono-enterprise/messaging-plugin';
 
 // Re-exported types from @hono-enterprise/common
 export type {
@@ -1414,6 +1441,9 @@ export type {
   SubscribeOptions,
 } from '@hono-enterprise/messaging-plugin';
 ```
+
+> **Kafka Commit Model:** Kafka uses the producer/consumer commit model — handler success
+> auto-commits; a thrown handler prevents commit.
 
 ---
 

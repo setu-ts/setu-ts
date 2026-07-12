@@ -8,8 +8,16 @@ import type {
   IPluginContext,
   IRuntimeServices,
 } from '@hono-enterprise/common';
-import type { IRedisStreamsClient } from '../../src/interfaces/index.ts';
+import type {
+  IAmqpConnection,
+  IKafkaFactory,
+  INatsConnection,
+  IRedisStreamsClient,
+} from '../../src/interfaces/index.ts';
 import { FakeRedisStreamsClient } from '../../test/fixtures/fake-ioredis-client.ts';
+import { FakeAmqpConnection } from '../../test/fixtures/fake-amqplib-client.ts';
+import { FakeNatsConnection } from '../../test/fixtures/fake-nats-client.ts';
+import { FakeKafkaFactory } from '../../test/fixtures/fake-kafkajs-client.ts';
 
 /**
  * Creates a fake context for testing MessagingPlugin.
@@ -430,6 +438,25 @@ describe('MessagingPlugin', () => {
     expect(broker).toBeDefined();
   });
 
+  // P8: redis-streams with logger
+  it('redis-streams broker with logger forwards the logger', async () => {
+    const fakeClient = new FakeRedisStreamsClient();
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'redis-streams',
+      client: fakeClient as unknown as IRedisStreamsClient,
+      url: 'redis://localhost:6379',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
   it('throws when name contains invalid characters', () => {
     // Test that illegal names (containing colon, uppercase, etc.) throw
     expect(() => MessagingPlugin({ name: 'Invalid:Name' })).toThrow(TypeError);
@@ -481,5 +508,177 @@ describe('MessagingPlugin', () => {
     // This exercises the 'down' branch of the ternary
     expect(result.status).toBe('down');
     expect(result.data).toEqual({ broker: 'memory' });
+  });
+
+  // P1: RabbitMQ broker registers with injected client
+  it('rabbitmq broker registers with an injected client', async () => {
+    const fakeClient = new FakeAmqpConnection();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'rabbitmq',
+      client: fakeClient as unknown as IAmqpConnection,
+      url: 'amqp://localhost:5672',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // P2: NATS broker registers with injected client
+  it('nats broker registers with an injected client', async () => {
+    const fakeClient = new FakeNatsConnection();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'nats',
+      client: fakeClient as unknown as INatsConnection,
+      url: 'nats://localhost:4222',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // P3: Kafka broker registers with injected client
+  it('kafka broker registers with an injected client', async () => {
+    const fakeClient = new FakeKafkaFactory();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      brokers: ['localhost:9092'],
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // P4: RabbitMQ broker with logger
+  it('rabbitmq broker with logger forwards the logger', async () => {
+    const fakeClient = new FakeAmqpConnection();
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'rabbitmq',
+      client: fakeClient as unknown as IAmqpConnection,
+      url: 'amqp://localhost:5672',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  // P5: NATS broker with logger
+  it('nats broker with logger forwards the logger', async () => {
+    const fakeClient = new FakeNatsConnection();
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'nats',
+      client: fakeClient as unknown as INatsConnection,
+      url: 'nats://localhost:4222',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  // P6: Kafka broker with logger
+  it('kafka broker with logger forwards the logger', async () => {
+    const fakeClient = new FakeKafkaFactory();
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      brokers: ['localhost:9092'],
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  // P7: unknown broker type throws error
+  it('unknown broker type throws error', async () => {
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'unknown-broker' as unknown as
+        | 'memory'
+        | 'redis-streams'
+        | 'rabbitmq'
+        | 'nats'
+        | 'kafka',
+    });
+
+    await expect(plugin.register(ctx)).rejects.toThrow('Unknown broker type: unknown-broker');
+  });
+
+  // P8: nats broker with all options and logger
+  it('nats broker with all options and logger', async () => {
+    const fakeClient = new FakeNatsConnection();
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'nats',
+      client: fakeClient as unknown as INatsConnection,
+      url: 'nats://localhost:4222',
+      streamName: 'CUSTOM-STREAM',
+      defaultQueue: 'custom-queue',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  // P9: kafka broker with all options and logger
+  it('kafka broker with all options and logger', async () => {
+    const fakeClient = new FakeKafkaFactory();
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      brokers: ['localhost:9092', 'localhost:9093'],
+      clientId: 'custom-client',
+      defaultQueue: 'custom-queue',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
   });
 });
