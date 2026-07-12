@@ -13,6 +13,8 @@ export interface FakeKafkaOptions {
     timestamp: string;
     headers: Record<string, string>;
   }>;
+  /** Whether stop() should reject. */
+  rejectStop?: boolean;
 }
 
 /**
@@ -81,12 +83,14 @@ export class FakeKafkaConsumer {
   } | null;
   #running: boolean;
   #calls: Array<{ method: string; args: unknown[] }>;
+  #rejectStop: boolean;
 
-  constructor(_groupId: string) {
+  constructor(_groupId: string, rejectStop: boolean = false) {
     this.#subscribedTopics = [];
     this.#runOptions = null;
     this.#running = false;
     this.#calls = [];
+    this.#rejectStop = rejectStop;
   }
 
   #record(method: string, args: unknown[]): void {
@@ -125,6 +129,9 @@ export class FakeKafkaConsumer {
   stop(): Promise<void> {
     this.#record('stop', []);
     this.#running = false;
+    if (this.#rejectStop) {
+      return Promise.reject(new Error('Stop rejected'));
+    }
     return Promise.resolve();
   }
 
@@ -225,7 +232,7 @@ export class FakeKafkaFactory {
     this.#record('consumer', [options]);
     // Return existing consumer for this groupId, or create a new one
     if (!this.#consumers.has(options.groupId)) {
-      const consumer = new FakeKafkaConsumer(options.groupId);
+      const consumer = new FakeKafkaConsumer(options.groupId, this.#options.rejectStop);
       this.#consumers.set(options.groupId, consumer);
     }
     return this.#consumers.get(options.groupId)!;

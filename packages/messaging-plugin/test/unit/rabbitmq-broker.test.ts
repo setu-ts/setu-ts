@@ -229,4 +229,183 @@ describe('RabbitMqBroker', () => {
 
     await expect(broker.connect()).rejects.toThrow();
   });
+
+  // R1: seeded delivery + ack
+  it('subscribe delivers a seeded message, invokes handler, and acks', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          content: JSON.stringify({ x: 1 }),
+          properties: { messageId: 'm1' },
+        },
+      ],
+    });
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    let handlerCalled = false;
+    let receivedData: unknown;
+    let receivedMetadata: unknown;
+
+    await broker.connect();
+    await broker.subscribe('test.topic', (data, metadata) => {
+      handlerCalled = true;
+      receivedData = data;
+      receivedMetadata = metadata;
+    });
+
+    // Give time for message delivery
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(handlerCalled).toBe(true);
+    expect(receivedData).toEqual({ x: 1 });
+    const meta = receivedMetadata as { topic: string; messageId: string };
+    expect(meta.topic).toBe('test.topic');
+    expect(meta.messageId).toBe('m1');
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+    const ackCall = calls.find((c) => c.method === 'ack');
+    expect(ackCall).toBeDefined();
+
+    await broker.disconnect();
+  });
+
+  // R2: nack+logger on handler throw
+  it('subscribe nacks and logs when the handler throws', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          content: JSON.stringify({ x: 1 }),
+          properties: { messageId: 'm2' },
+        },
+      ],
+    });
+    const logger = { error: (_msg: string) => {} };
+    const broker = new RabbitMqBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger,
+    });
+
+    await broker.connect();
+    await broker.subscribe('test.topic', () => {
+      throw new Error('handler failed');
+    });
+
+    // Give time for message delivery and nack
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+    const nackCall = calls.find((c) => c.method === 'nack');
+    expect(nackCall).toBeDefined();
+
+    await broker.disconnect();
+  });
+
+  // R3: unsubscribe of exclusive queue deletes the queue
+  it('unsubscribe of an exclusive queue deletes the queue', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+    const sub = await broker.subscribe('test.topic', () => {});
+
+    await sub.unsubscribe();
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+    const deleteQueueCall = calls.find((c) => c.method === 'deleteQueue');
+    expect(deleteQueueCall).toBeDefined();
+
+    await broker.disconnect();
+  });
+
+  // R4: unsubscribe of named queue cancels without deleting
+  it('unsubscribe of a named queue cancels without deleting', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+    const sub = await broker.subscribe('test.topic', () => {}, { queue: 'my-queue' });
+
+    await sub.unsubscribe();
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+    const cancelCall = calls.find((c) => c.method === 'cancel');
+    const deleteQueueCall = calls.find((c) => c.method === 'deleteQueue');
+    expect(cancelCall).toBeDefined();
+    expect(deleteQueueCall).toBeUndefined();
+
+    await broker.disconnect();
+  });
+
+  // R5: publish messageId from object
+  it('publish copies messageId from an object payload', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+    await broker.publish('test.topic', { messageId: 'custom-id', data: 1 });
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+    const publishCall = calls.find((c) => c.method === 'publish');
+
+    expect(publishCall).toBeDefined();
+    const properties = publishCall?.args[3] as { messageId?: string };
+    expect(properties.messageId).toBe('custom-id');
+
+    await broker.disconnect();
+  });
+
+  // R6: publish generates messageId for non-object
+  it('publish with a non-object payload generates a messageId', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+    await broker.publish('test.topic', 'string-payload');
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+    const publishCall = calls.find((c) => c.method === 'publish');
+
+    expect(publishCall).toBeDefined();
+    const properties = publishCall?.args[3] as { messageId?: string };
+    // Fake runtime generates "fake-uuid-0", "fake-uuid-1", etc.
+    expect(properties.messageId).toMatch(/^fake-uuid-\d+$/);
+
+    await broker.disconnect();
+  });
+
+  // R7: null message handling
+  it('subscribe ignores a null message (consumer-cancel notification)', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection({ deliverNull: true });
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+    await broker.subscribe('test.topic', () => {});
+
+    // Should not throw
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await broker.disconnect();
+  });
 });

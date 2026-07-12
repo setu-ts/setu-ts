@@ -13,6 +13,8 @@ export interface FakeNatsOptions {
     seq: number;
     timestamp: string;
   }>;
+  /** Whether streams.info should throw a generic error (not 'stream not found'). */
+  rejectStreamInfo?: boolean;
 }
 
 /**
@@ -71,19 +73,17 @@ export class FakeNatsMessage {
  */
 export class FakeNatsConsumer {
   #messages: FakeNatsMessage[];
-  #callback: (msg: FakeNatsMessage) => void;
   #stopped = false;
 
-  constructor(messages: FakeNatsMessage[], callback: (msg: FakeNatsMessage) => void) {
+  constructor(messages: FakeNatsMessage[]) {
     this.#messages = messages;
-    this.#callback = callback;
   }
 
-  consume(_options: { callback: (msg: FakeNatsMessage) => void }): unknown {
-    // Deliver messages
+  consume(options: { callback: (msg: FakeNatsMessage) => void }): unknown {
+    // Deliver messages using the callback from options
     for (const msg of this.#messages) {
       if (!this.#stopped) {
-        this.#callback(msg);
+        options.callback(msg);
       }
     }
     return {
@@ -105,11 +105,13 @@ export class FakeNatsJetStreamManager {
   #streams: Set<string>;
   #consumers: Map<string, Set<string>>; // stream -> consumer names
   #calls: Array<{ method: string; args: unknown[] }>;
+  #rejectStreamInfo: boolean;
 
-  constructor() {
+  constructor(rejectStreamInfo: boolean = false) {
     this.#streams = new Set();
     this.#consumers = new Map();
     this.#calls = [];
+    this.#rejectStreamInfo = rejectStreamInfo;
   }
 
   #record(method: string, args: unknown[]): void {
@@ -124,6 +126,11 @@ export class FakeNatsJetStreamManager {
   streams = {
     info: (name: string): Promise<{ name: string }> => {
       this.#record('streams.info', [name]);
+      if (this.#rejectStreamInfo) {
+        const err = new Error(`generic error: ${name}`) as Error & { code?: string };
+        err.code = 'generic_error';
+        return Promise.reject(err);
+      }
       if (this.#streams.has(name)) {
         return Promise.resolve({ name });
       }
@@ -151,7 +158,7 @@ export class FakeNatsJetStreamManager {
     },
     get: (stream: string, consumer: string): Promise<FakeNatsConsumer> => {
       this.#record('consumers.get', [stream, consumer]);
-      return Promise.resolve(new FakeNatsConsumer([], () => {}));
+      return Promise.resolve(new FakeNatsConsumer([]));
     },
   };
 }
@@ -165,7 +172,7 @@ const sharedConsumers = {
   },
   get: (stream: string, consumer: string): Promise<FakeNatsConsumer> => {
     sharedConsumers.calls.push({ method: 'consumers.get', args: [stream, consumer] });
-    return Promise.resolve(new FakeNatsConsumer([], () => {}));
+    return Promise.resolve(new FakeNatsConsumer([]));
   },
 };
 
@@ -224,7 +231,7 @@ export class FakeNatsJetStream {
       for (const [_subject, msgs] of this.#seededMessages.entries()) {
         messages.push(...msgs);
       }
-      return Promise.resolve(new FakeNatsConsumer(messages, () => {}));
+      return Promise.resolve(new FakeNatsConsumer(messages));
     },
   };
 }
@@ -247,7 +254,7 @@ export class FakeNatsConnection {
       return Promise.reject(new Error('Connection closed'));
     }
     if (!this.#jsm) {
-      this.#jsm = new FakeNatsJetStreamManager();
+      this.#jsm = new FakeNatsJetStreamManager(this.#options.rejectStreamInfo);
     }
     return Promise.resolve(this.#jsm);
   }

@@ -122,40 +122,37 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
     this.#connection = await resolveClient(this.#url, this.#injectedClient);
 
-    if (!this.#injectedClient) {
-      const nats = await loadNats();
-      const realConn = this.#connection as unknown as Awaited<ReturnType<typeof nats.connect>>;
-      // Ensure stream exists
-      const jsm = await realConn.jetstreamManager();
-      try {
-        await jsm.streams.info(this.#streamName);
-      } catch (err) {
-        const e = err as Error;
-        if (e.message.includes('stream not found')) {
-          await jsm.streams.add({
-            name: this.#streamName,
-            subjects: ['>'],
-          });
-        } else {
-          throw e;
-        }
+    // Ensure stream exists (unconditional for both injected and real connections)
+    const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
+    const jsm = await realConn.jetstreamManager();
+    try {
+      const jsmTyped = jsm as unknown as {
+        streams: {
+          info(name: string): Promise<unknown>;
+          add(config: { name: string; subjects: string[] }): Promise<unknown>;
+        };
+      };
+      await jsmTyped.streams.info(this.#streamName);
+    } catch (err) {
+      const e = err as Error;
+      if (e.message.includes('stream not found')) {
+        const jsmTyped = jsm as unknown as {
+          streams: {
+            add(config: { name: string; subjects: string[] }): Promise<unknown>;
+          };
+        };
+        await jsmTyped.streams.add({
+          name: this.#streamName,
+          subjects: ['>'],
+        });
+      } else {
+        throw e;
       }
-    } else {
-      // For injected client, ensure stream exists
-      const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
-      await realConn.jetstreamManager();
-      // Stream ensure logic would go here if jsm exposes streams.add
-      // For now, we assume stream exists or is created externally
-      // Get JetStream instance for injected client
-      const realConn2 = this.#connection as unknown as { jetstream(): unknown };
-      this.#js = realConn2.jetstream();
     }
 
-    // Get JetStream instance
-    if (!this.#injectedClient) {
-      const realConn = this.#connection as unknown as { jetstream(): unknown };
-      this.#js = realConn.jetstream();
-    }
+    // Get JetStream instance unconditionally
+    const realConn2 = this.#connection as unknown as { jetstream(): unknown };
+    this.#js = realConn2.jetstream();
     this.#ready = true;
   }
 
@@ -209,9 +206,6 @@ export class NatsBroker implements MessageBrokerAdapter {
     if (!this.#connection) {
       return Promise.reject(new Error('NatsBroker is not connected'));
     }
-    if (!this.#js) {
-      return Promise.reject(new Error('JetStream is not initialized'));
-    }
     const serialized = this.#serializer.serialize(message);
     const encoder = new TextEncoder();
     const data = encoder.encode(serialized);
@@ -243,11 +237,7 @@ export class NatsBroker implements MessageBrokerAdapter {
     const subscriptionId = this.#runtime.uuid();
     const consumerName = options?.queue ?? `messaging-${this.#runtime.uuid()}`;
 
-    // Get JetStream instance
-    if (!this.#js) {
-      throw new Error('JetStream is not initialized');
-    }
-    const realJs = this.#js;
+    const realJs = this.#js!;
 
     const realJsTyped = realJs as unknown as {
       consumers: {

@@ -14,6 +14,8 @@ export interface FakeAmqpOptions {
     content: string;
     properties: Record<string, unknown>;
   }>;
+  /** Whether to deliver a null message (consumer-cancel notification). */
+  deliverNull?: boolean;
 }
 
 /**
@@ -81,6 +83,11 @@ export class FakeAmqpChannel {
     this.#record('consume', [queue, typeof callback, _options]);
     const consumerTag = `consumer-${this.#consumerTagCounter++}`;
     this.#consumers.push({ queue, callback, consumerTag });
+
+    // Deliver null message for consumer-cancel notification
+    if (this.#options.deliverNull) {
+      callback(null);
+    }
 
     // Deliver seeded messages
     if (this.#options.seededMessages) {

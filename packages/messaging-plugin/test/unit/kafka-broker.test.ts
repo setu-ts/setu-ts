@@ -221,4 +221,119 @@ describe('KafkaBroker', () => {
 
     await expect(broker.connect()).rejects.toThrow();
   });
+
+  // K1: seeded-message delivery
+  it('subscribe delivers a seeded message to the handler with decoded metadata', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          value: JSON.stringify({ x: 1 }),
+          partition: 0,
+          offset: '5',
+          timestamp: String(Date.now()),
+          headers: { h: 'v' },
+        },
+      ],
+    });
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    let handlerCalled = false;
+    let receivedData: unknown;
+    let receivedMetadata: unknown;
+
+    await broker.connect();
+    await broker.subscribe('test.topic', (data, metadata) => {
+      handlerCalled = true;
+      receivedData = data;
+      receivedMetadata = metadata;
+    });
+
+    // Deliver seeded messages
+    await fakeFactory.deliverAll();
+
+    expect(handlerCalled).toBe(true);
+    expect(receivedData).toEqual({ x: 1 });
+    const meta = receivedMetadata as {
+      topic: string;
+      messageId: string;
+      timestamp: Date;
+      headers: Record<string, string>;
+    };
+    expect(meta.topic).toBe('test.topic');
+    expect(meta.messageId).toBe('0:5');
+    expect(meta.timestamp instanceof Date).toBe(true);
+    expect(meta.headers).toEqual({ h: 'v' });
+
+    await broker.disconnect();
+  });
+
+  // K2: unsubscribe closure
+  it('unsubscribe stops the consumer and removes the active subscription', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+    const sub = await broker.subscribe('test.topic', () => {});
+
+    await sub.unsubscribe();
+
+    // Verify stop was called on consumer
+    const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers' });
+    const calls = consumer.calls;
+    const stopCall = calls.find((c) => c.method === 'stop');
+    expect(stopCall).toBeDefined();
+
+    await broker.disconnect();
+  });
+
+  // K3: publish with non-object payload
+  it('publish with a non-object payload sends headers undefined', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+    await broker.publish('test.topic', 42);
+
+    const producer = fakeFactory.producer();
+    const calls = producer.calls;
+    const sendCall = calls.find((c) => c.method === 'send');
+
+    expect(sendCall).toBeDefined();
+    const messages = (sendCall?.args[0] as { messages: unknown[] }).messages;
+    expect(messages[0]).toEqual({ value: '42', headers: undefined });
+
+    await broker.disconnect();
+  });
+
+  // K4: disconnect swallows consumer that rejects on stop
+  it('disconnect swallows a consumer that rejects on stop', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory({ rejectStop: true });
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+    await broker.subscribe('test.topic', () => {});
+
+    // Should not throw
+    await expect(broker.disconnect()).resolves.not.toThrow();
+  });
+
+  // K5: validateClient throws when injected client is invalid
+  it('connect throws when injected client is invalid', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new KafkaBroker(runtime, serializer, {
+      client: { producer: () => {} } as unknown as FakeKafkaFactory, // missing consumer
+    });
+
+    await expect(broker.connect()).rejects.toThrow('does not match the required structural shape');
+  });
 });

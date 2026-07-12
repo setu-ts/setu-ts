@@ -128,13 +128,9 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       return;
     }
     this.#connection = await resolveClient(this.#url, this.#injectedClient);
-    // For injected clients, we assume channel is obtained on first publish/subscribe
-    // For real connections, we create the channel here
-    if (!this.#injectedClient) {
-      const amqplib = await loadAmqplib();
-      const realConn = this.#connection as unknown as Awaited<ReturnType<typeof amqplib.connect>>;
-      this.#channel = await realConn.createChannel();
-    }
+    // Create channel unconditionally from the resolved connection
+    const realConn = this.#connection as unknown as { createChannel(): Promise<unknown> };
+    this.#channel = await realConn.createChannel();
     this.#ready = true;
   }
 
@@ -187,18 +183,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async publish<T>(topic: string, message: T): Promise<void> {
-    if (!this.#connection) {
-      throw new Error('RabbitMqBroker is not connected');
-    }
-    // Create channel from injected client if not already created
-    if (!this.#channel && this.#injectedClient) {
-      const realConn = this.#injectedClient as unknown as {
-        createChannel(): Promise<unknown>;
-      };
-      this.#channel = await realConn.createChannel();
-    }
     if (!this.#channel) {
-      throw new Error('Channel is not available');
+      throw new Error('RabbitMqBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
     const realChannel = this.#channel as unknown as {
@@ -244,18 +230,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    if (!this.#connection) {
-      throw new Error('RabbitMqBroker is not connected');
-    }
-    // Create channel from injected client if not already created
-    if (!this.#channel && this.#injectedClient) {
-      const realConn = this.#injectedClient as unknown as {
-        createChannel(): Promise<unknown>;
-      };
-      this.#channel = await realConn.createChannel();
-    }
     if (!this.#channel) {
-      throw new Error('Channel is not available');
+      throw new Error('RabbitMqBroker is not connected');
     }
 
     const realChannel = this.#channel as unknown as {

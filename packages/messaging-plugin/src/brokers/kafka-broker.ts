@@ -126,17 +126,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
     }
     this.#factory = await resolveClient(this.#brokers, this.#clientId, this.#injectedClient);
 
-    if (!this.#injectedClient) {
-      const kafkajs = await loadKafkajs();
-      const realKafka = this.#factory as unknown as InstanceType<typeof kafkajs.Kafka>;
-      this.#producer = realKafka.producer();
-      await (this.#producer as unknown as { connect(): Promise<void> }).connect();
-    } else {
-      // For injected client, create producer
-      const realFactory = this.#factory as unknown as { producer(): unknown };
-      this.#producer = realFactory.producer();
-      await (this.#producer as unknown as { connect(): Promise<void> }).connect();
-    }
+    // Build producer unconditionally from the resolved factory
+    const realFactory = this.#factory as unknown as { producer(): unknown };
+    this.#producer = realFactory.producer();
+    await (this.#producer as unknown as { connect(): Promise<void> }).connect();
 
     this.#ready = true;
   }
@@ -234,18 +227,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
     const subscriptionId = this.#runtime.uuid();
     const groupId = options?.queue ?? this.#defaultQueue;
 
-    // Create consumer
-    let realConsumer: unknown;
-    if (!this.#injectedClient) {
-      const kafkajs = await loadKafkajs();
-      const realFactory = this.#factory as unknown as InstanceType<typeof kafkajs.Kafka>;
-      realConsumer = realFactory.consumer({ groupId });
-    } else {
-      const realFactory = this.#factory as unknown as {
-        consumer(options: { groupId: string }): unknown;
-      };
-      realConsumer = realFactory.consumer({ groupId });
-    }
+    // Create consumer unconditionally from the resolved factory
+    const realFactory = this.#factory as unknown as {
+      consumer(options: { groupId: string }): unknown;
+    };
+    const realConsumer = realFactory.consumer({ groupId });
 
     const consumerTyped = realConsumer as unknown as {
       connect(): Promise<void>;
