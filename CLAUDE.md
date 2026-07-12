@@ -145,7 +145,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   HandlerNotFoundError; CQRS contracts in `common/services/cqrs.ts`:
   CqrsRequest/CqrsCommand/CqrsQuery, ICommandHandler/IQueryHandler/IPipelineBehavior,
   ICommandBus/IQueryBus/ICqrsFacade) — complete (PR pending)
-- **Next milestone** — Milestone 14
+- **Milestone 14** (`packages/messaging-plugin` — MessagingPlugin, InMemoryBroker,
+  RedisStreamsBroker, JsonSerializer/ISerializer, EventsMessagingBridge; broker contracts in
+  `common/services/messaging.ts`: IMessageBroker, ISubscription, MessageHandler, MessageMetadata,
+  SubscribeOptions; in-memory + Redis Streams brokers implemented; RabbitMQ/NATS/Kafka deferred to
+  M14b) — complete (PR pending)
+- **Next milestone** — Milestone 14b (RabbitMQ, NATS, Kafka brokers)
 
 ## Verification (run before declaring any work done)
 
