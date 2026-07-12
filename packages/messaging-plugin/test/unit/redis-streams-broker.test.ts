@@ -594,28 +594,20 @@ describe('RedisStreamsBroker', () => {
     await broker.disconnect();
   });
 
-  it('resolveClient calls loadIoredis when no client injected', async () => {
-    // This test exercises the loadIoredis() fallback path by creating a broker
-    // without injecting a client. Guard: skip if ioredis is not available.
-
-    // First verify ioredis is available by attempting the import
-    try {
-      await import('npm:ioredis@5.x');
-    } catch {
-      // ioredis not available, skip this test
-      return;
-    }
-
+  it('connect without an injected client exercises the loadIoredis() lazy-import path', async () => {
+    // Covers the real loadIoredis() -> await import('npm:ioredis@5.x') path (and the
+    // lazy-import branch of connect()) by constructing a broker with NO injected client.
+    // connect() rejects either way: if ioredis is present it fails to connect to the
+    // non-existent instance below; if ioredis is absent the dynamic import rejects. In
+    // both cases loadIoredis() is entered, so this remains coverage of the real import
+    // path rather than the injected-client seam (which resolveClient covers separately).
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
 
-    // Create broker WITHOUT injecting a client - this forces loadIoredis() to be called
     const broker = new RedisStreamsBroker(runtime, serializer, {
       url: 'redis://localhost:9999', // Non-existent Redis instance
     });
 
-    // The connect will fail because Redis is not available, but loadIoredis() will have been called
-    // Assert that the rejection is a connection-style error (not a module-resolution error)
     await expect(broker.connect()).rejects.toThrow();
   });
 });
