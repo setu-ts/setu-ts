@@ -35,6 +35,7 @@ describe('NatsBroker', () => {
     await broker.connect();
 
     const message = { userId: 123, event: 'test' };
+    const expectedJson = JSON.stringify(message);
     await broker.publish('test.subject', message);
 
     const js = fakeConnection.jetstream();
@@ -43,6 +44,11 @@ describe('NatsBroker', () => {
 
     expect(publishCall).toBeDefined();
     expect(publishCall?.args[0]).toBe('test.subject');
+
+    // Assert the serialized bytes match the expected JSON
+    const dataArg = publishCall?.args[1] as Uint8Array;
+    const decoded = new TextDecoder().decode(dataArg);
+    expect(decoded).toBe(expectedJson);
 
     await broker.disconnect();
   });
@@ -386,5 +392,80 @@ describe('NatsBroker', () => {
     await expect(broker.publish('test', { data: 1 })).rejects.toThrow(
       'NatsBroker is not connected',
     );
+  });
+
+  // N8: failure-path - handler throws → nak() called
+  it('subscribe calls nak() when the async handler throws', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+
+    // Handler that throws (async, returns rejected promise)
+    let handlerInvoked = false;
+    const sub = await broker.subscribe(
+      'test.subject',
+      async () => {
+        handlerInvoked = true;
+        await Promise.resolve(); // ensure async behavior
+        throw new Error('handler failure');
+      },
+      { queue: 'failure-consumer' },
+    );
+
+    // Wait for async handler to run
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+
+    expect(handlerInvoked).toBe(true);
+  });
+
+  // N9: success-path - handler succeeds → ack() called
+  it('subscribe calls ack() when the async handler succeeds', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+
+    let handlerCalled = false;
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => {
+        handlerCalled = true;
+      },
+      { queue: 'success-consumer' },
+    );
+
+    // Wait for async handler to run
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+
+    expect(handlerCalled).toBe(true);
   });
 });

@@ -24,13 +24,15 @@ export class FakeNatsMessage {
   #data: Uint8Array;
   #seq: number;
   #timestamp: string;
+  #subject: string;
   #acked = false;
   #naked = false;
 
-  constructor(data: string, seq: number, timestamp: string) {
+  constructor(data: string, seq: number, timestamp: string, subject: string) {
     this.#data = new TextEncoder().encode(data);
     this.#seq = seq;
     this.#timestamp = timestamp;
+    this.#subject = subject;
   }
 
   get data(): Uint8Array {
@@ -39,6 +41,10 @@ export class FakeNatsMessage {
 
   get seq(): number {
     return this.#seq;
+  }
+
+  get subject(): string {
+    return this.#subject;
   }
 
   get info(): { timestamp: string } {
@@ -73,17 +79,22 @@ export class FakeNatsMessage {
  */
 export class FakeNatsConsumer {
   #messages: FakeNatsMessage[];
+  #filterSubject: string | undefined;
   #stopped = false;
 
-  constructor(messages: FakeNatsMessage[]) {
+  constructor(messages: FakeNatsMessage[], filterSubject?: string) {
     this.#messages = messages;
+    this.#filterSubject = filterSubject;
   }
 
   consume(options: { callback: (msg: FakeNatsMessage) => void }): unknown {
-    // Deliver messages using the callback from options
+    // Deliver messages using the callback from options, filtered by subject if filterSubject is set
     for (const msg of this.#messages) {
       if (!this.#stopped) {
-        options.callback(msg);
+        // If filterSubject is set, only deliver messages matching the filter
+        if (this.#filterSubject === undefined || msg.subject === this.#filterSubject) {
+          options.callback(msg);
+        }
       }
     }
     return {
@@ -158,7 +169,14 @@ export class FakeNatsJetStreamManager {
     },
     get: (stream: string, consumer: string): Promise<FakeNatsConsumer> => {
       this.#record('consumers.get', [stream, consumer]);
-      return Promise.resolve(new FakeNatsConsumer([]));
+      // Look up the consumer's filter_subject from the recorded add calls
+      const addCall = this.calls
+        .filter((c) => c.method === 'consumers.add')
+        .find((c) => (c.args[1] as { name: string })?.name === consumer);
+      const filterSubject = addCall
+        ? (addCall.args[1] as { filter_subject?: string }).filter_subject
+        : undefined;
+      return Promise.resolve(new FakeNatsConsumer([], filterSubject));
     },
   };
 }
@@ -193,7 +211,7 @@ export class FakeNatsJetStream {
         this.#seededMessages.set(msg.subject, []);
       }
       this.#seededMessages.get(msg.subject)!.push(
-        new FakeNatsMessage(msg.data, msg.seq, msg.timestamp),
+        new FakeNatsMessage(msg.data, msg.seq, msg.timestamp, msg.subject),
       );
     }
   }
@@ -226,12 +244,21 @@ export class FakeNatsJetStream {
       this.#record('consumers.get', [stream, consumer]);
       // Also record to shared for JetStreamManager compatibility
       sharedConsumers.calls.push({ method: 'consumers.get', args: [stream, consumer] });
-      // Return consumer with seeded messages
+      // Look up the consumer's filter_subject from the recorded add calls
+      const addCall = [...this.calls, ...sharedConsumers.calls]
+        .filter((c) => c.method === 'consumers.add')
+        .find((c) => (c.args[1] as { name: string })?.name === consumer);
+      const filterSubject = addCall
+        ? (addCall.args[1] as { filter_subject?: string }).filter_subject
+        : undefined;
+      // Return consumer with seeded messages, filtered by subject if filterSubject is set
       const messages: FakeNatsMessage[] = [];
-      for (const [_subject, msgs] of this.#seededMessages.entries()) {
-        messages.push(...msgs);
+      for (const [subject, msgs] of this.#seededMessages.entries()) {
+        if (filterSubject === undefined || subject === filterSubject) {
+          messages.push(...msgs);
+        }
       }
-      return Promise.resolve(new FakeNatsConsumer(messages));
+      return Promise.resolve(new FakeNatsConsumer(messages, filterSubject));
     },
   };
 }

@@ -408,4 +408,86 @@ describe('RabbitMqBroker', () => {
 
     await broker.disconnect();
   });
+
+  // R8: failure-path - handler throws → nack(msg, false, false) called
+  it('subscribe calls nack(msg, false, false) when the handler throws', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          content: JSON.stringify({ x: 1 }),
+          properties: { messageId: 'msg-1' },
+        },
+      ],
+    });
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+
+    // Handler that throws
+    await broker.subscribe(
+      'test.topic',
+      () => {
+        throw new Error('handler failure');
+      },
+      { queue: 'failure-queue' },
+    );
+
+    // Wait for async handler to run
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+
+    // Verify nack was called with correct parameters
+    const nackCall = calls.find((c) => c.method === 'nack');
+    expect(nackCall).toBeDefined();
+    expect(nackCall?.args[1]).toBe(false); // allUpTo
+    expect(nackCall?.args[2]).toBe(false); // requeue
+
+    await broker.disconnect();
+  });
+
+  // R9: success-path - handler succeeds → ack() called
+  it('subscribe calls ack() when the handler succeeds', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeAmqpConnection({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          content: JSON.stringify({ x: 1 }),
+          properties: { messageId: 'msg-1' },
+        },
+      ],
+    });
+    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+
+    let handlerCalled = false;
+    await broker.subscribe(
+      'test.topic',
+      () => {
+        handlerCalled = true;
+      },
+      { queue: 'success-queue' },
+    );
+
+    // Wait for async handler to run
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(handlerCalled).toBe(true);
+
+    const channel = await fakeConnection.createChannel();
+    const calls = channel.calls;
+
+    // Verify ack was called
+    const ackCall = calls.find((c) => c.method === 'ack');
+    expect(ackCall).toBeDefined();
+
+    await broker.disconnect();
+  });
 });

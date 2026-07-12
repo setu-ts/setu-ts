@@ -84,13 +84,33 @@ export class FakeKafkaConsumer {
   #running: boolean;
   #calls: Array<{ method: string; args: unknown[] }>;
   #rejectStop: boolean;
+  #seededMessages: Array<{
+    topic: string;
+    value: string;
+    partition: number;
+    offset: string;
+    timestamp: string;
+    headers: Record<string, string>;
+  }>;
 
-  constructor(_groupId: string, rejectStop: boolean = false) {
+  constructor(
+    _groupId: string,
+    rejectStop: boolean = false,
+    seededMessages?: Array<{
+      topic: string;
+      value: string;
+      partition: number;
+      offset: string;
+      timestamp: string;
+      headers: Record<string, string>;
+    }>,
+  ) {
     this.#subscribedTopics = [];
     this.#runOptions = null;
     this.#running = false;
     this.#calls = [];
     this.#rejectStop = rejectStop;
+    this.#seededMessages = seededMessages ?? [];
   }
 
   #record(method: string, args: unknown[]): void {
@@ -123,6 +143,22 @@ export class FakeKafkaConsumer {
     this.#record('run', [options]);
     this.#runOptions = options;
     this.#running = true;
+    // Auto-deliver seeded messages to the handler
+    for (const msg of this.#seededMessages) {
+      if (this.#subscribedTopics.includes(msg.topic)) {
+        options.eachMessage({
+          topic: msg.topic,
+          partition: msg.partition,
+          message: new FakeKafkaMessage(
+            msg.value,
+            msg.partition,
+            msg.offset,
+            msg.timestamp,
+            msg.headers,
+          ),
+        });
+      }
+    }
     return Promise.resolve();
   }
 
@@ -232,7 +268,11 @@ export class FakeKafkaFactory {
     this.#record('consumer', [options]);
     // Return existing consumer for this groupId, or create a new one
     if (!this.#consumers.has(options.groupId)) {
-      const consumer = new FakeKafkaConsumer(options.groupId, this.#options.rejectStop);
+      const consumer = new FakeKafkaConsumer(
+        options.groupId,
+        this.#options.rejectStop,
+        this.#options.seededMessages,
+      );
       this.#consumers.set(options.groupId, consumer);
     }
     return this.#consumers.get(options.groupId)!;
