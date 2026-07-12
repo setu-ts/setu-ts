@@ -1,3 +1,4 @@
+import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -8,212 +9,214 @@ import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
  *
  * Tests fanout delivery, queue round-robin, lifecycle, and error handling.
  */
-Deno.test('InMemoryBroker - fanout delivery (no-queue subscribers all receive)', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+describe('InMemoryBroker', () => {
+  it('fanout delivery (no-queue subscribers all receive)', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  await broker.connect();
+    await broker.connect();
 
-  const received: string[] = [];
+    const received: string[] = [];
 
-  // Subscribe without queue (fanout)
-  await broker.subscribe('test.topic', (msg) => {
-    received.push(`handler1: ${msg}`);
+    // Subscribe without queue (fanout)
+    await broker.subscribe('test.topic', (msg) => {
+      received.push(`handler1: ${msg}`);
+    });
+
+    await broker.subscribe('test.topic', (msg) => {
+      received.push(`handler2: ${msg}`);
+    });
+
+    await broker.publish('test.topic', 'hello');
+
+    expect(received.length).toBe(2);
+    expect(received).toContain('handler1: hello');
+    expect(received).toContain('handler2: hello');
+
+    await broker.disconnect();
   });
 
-  await broker.subscribe('test.topic', (msg) => {
-    received.push(`handler2: ${msg}`);
+  it('queue round-robin delivery', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
+
+    await broker.connect();
+
+    const received: string[] = [];
+
+    // Subscribe with same queue (load-balanced)
+    await broker.subscribe('test.topic', (_msg) => {
+      received.push('handler1');
+    }, { queue: 'my-queue' });
+
+    await broker.subscribe('test.topic', (_msg) => {
+      received.push('handler2');
+    }, { queue: 'my-queue' });
+
+    // First publish - should go to handler1 (cursor at 0)
+    await broker.publish('test.topic', 'msg1');
+
+    // Second publish - should go to handler2 (cursor at 1)
+    await broker.publish('test.topic', 'msg2');
+
+    // Third publish - should go to handler1 (cursor wraps to 0)
+    await broker.publish('test.topic', 'msg3');
+
+    expect(received).toEqual(['handler1', 'handler2', 'handler1']);
+
+    await broker.disconnect();
   });
 
-  await broker.publish('test.topic', 'hello');
+  it('messageId and timestamp populated', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  expect(received.length).toBe(2);
-  expect(received).toContain('handler1: hello');
-  expect(received).toContain('handler2: hello');
+    await broker.connect();
 
-  await broker.disconnect();
-});
+    let capturedMetadata: unknown = null;
 
-Deno.test('InMemoryBroker - queue round-robin delivery', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+    await broker.subscribe('test.topic', (_msg, metadata) => {
+      capturedMetadata = metadata;
+    });
 
-  await broker.connect();
+    await broker.publish('test.topic', 'test');
 
-  const received: string[] = [];
+    expect(capturedMetadata).toBeDefined();
+    expect((capturedMetadata as Record<string, unknown>).topic).toBe('test.topic');
+    expect((capturedMetadata as Record<string, unknown>).messageId).toBeDefined();
+    expect((capturedMetadata as Record<string, unknown>).timestamp).toBeInstanceOf(Date);
 
-  // Subscribe with same queue (load-balanced)
-  await broker.subscribe('test.topic', (_msg) => {
-    received.push('handler1');
-  }, { queue: 'my-queue' });
-
-  await broker.subscribe('test.topic', (_msg) => {
-    received.push('handler2');
-  }, { queue: 'my-queue' });
-
-  // First publish - should go to handler1 (cursor at 0)
-  await broker.publish('test.topic', 'msg1');
-
-  // Second publish - should go to handler2 (cursor at 1)
-  await broker.publish('test.topic', 'msg2');
-
-  // Third publish - should go to handler1 (cursor wraps to 0)
-  await broker.publish('test.topic', 'msg3');
-
-  expect(received).toEqual(['handler1', 'handler2', 'handler1']);
-
-  await broker.disconnect();
-});
-
-Deno.test('InMemoryBroker - messageId and timestamp populated', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
-
-  await broker.connect();
-
-  let capturedMetadata: unknown = null;
-
-  await broker.subscribe('test.topic', (_msg, metadata) => {
-    capturedMetadata = metadata;
+    await broker.disconnect();
   });
 
-  await broker.publish('test.topic', 'test');
+  it('sequential handler ordering', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  expect(capturedMetadata).toBeDefined();
-  expect((capturedMetadata as Record<string, unknown>).topic).toBe('test.topic');
-  expect((capturedMetadata as Record<string, unknown>).messageId).toBeDefined();
-  expect((capturedMetadata as Record<string, unknown>).timestamp).toBeInstanceOf(Date);
+    await broker.connect();
 
-  await broker.disconnect();
-});
+    const order: string[] = [];
 
-Deno.test('InMemoryBroker - sequential handler ordering', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+    await broker.subscribe('test.topic', async () => {
+      order.push('first');
+      // Simulate async work
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
-  await broker.connect();
+    await broker.subscribe('test.topic', async () => {
+      order.push('second');
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
-  const order: string[] = [];
+    await broker.publish('test.topic', 'test');
 
-  await broker.subscribe('test.topic', async () => {
-    order.push('first');
-    // Simulate async work
-    await new Promise((r) => setTimeout(r, 10));
+    // Handlers should be called in subscription order
+    expect(order).toEqual(['first', 'second']);
+
+    await broker.disconnect();
   });
 
-  await broker.subscribe('test.topic', async () => {
-    order.push('second');
-    await new Promise((r) => setTimeout(r, 10));
+  it('handler rejection propagates to publish', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
+
+    await broker.connect();
+
+    await broker.subscribe('test.topic', () => {
+      throw new Error('handler failed');
+    });
+
+    await expect(broker.publish('test.topic', 'test')).rejects.toThrow('handler failed');
+
+    await broker.disconnect();
   });
 
-  await broker.publish('test.topic', 'test');
+  it('unsubscribe removes subscription', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  // Handlers should be called in subscription order
-  expect(order).toEqual(['first', 'second']);
+    await broker.connect();
 
-  await broker.disconnect();
-});
+    let called = false;
 
-Deno.test('InMemoryBroker - handler rejection propagates to publish', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+    const subscription = await broker.subscribe('test.topic', () => {
+      called = true;
+    });
 
-  await broker.connect();
+    await subscription.unsubscribe();
 
-  await broker.subscribe('test.topic', () => {
-    throw new Error('handler failed');
+    await broker.publish('test.topic', 'test');
+
+    expect(called).toBe(false);
+
+    await broker.disconnect();
   });
 
-  await expect(broker.publish('test.topic', 'test')).rejects.toThrow('handler failed');
+  it('idempotent connect', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  await broker.disconnect();
-});
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
 
-Deno.test('InMemoryBroker - unsubscribe removes subscription', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+    // Second connect should be a no-op
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
 
-  await broker.connect();
-
-  let called = false;
-
-  const subscription = await broker.subscribe('test.topic', () => {
-    called = true;
+    await broker.disconnect();
   });
 
-  await subscription.unsubscribe();
+  it('disconnect clears subscriptions', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  await broker.publish('test.topic', 'test');
+    await broker.connect();
 
-  expect(called).toBe(false);
+    let called = false;
 
-  await broker.disconnect();
-});
+    await broker.subscribe('test.topic', () => {
+      called = true;
+    });
 
-Deno.test('InMemoryBroker - idempotent connect', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+    await broker.disconnect();
+    expect(broker.isReady()).toBe(false);
 
-  await broker.connect();
-  expect(broker.isReady()).toBe(true);
+    await broker.connect();
 
-  // Second connect should be a no-op
-  await broker.connect();
-  expect(broker.isReady()).toBe(true);
+    await broker.publish('test.topic', 'test');
 
-  await broker.disconnect();
-});
+    // Old subscription should be cleared
+    expect(called).toBe(false);
 
-Deno.test('InMemoryBroker - disconnect clears subscriptions', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
-
-  await broker.connect();
-
-  let called = false;
-
-  await broker.subscribe('test.topic', () => {
-    called = true;
+    await broker.disconnect();
   });
 
-  await broker.disconnect();
-  expect(broker.isReady()).toBe(false);
+  it('READ-BACK: publish and receive same payload', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const broker = new InMemoryBroker(runtime, serializer);
 
-  await broker.connect();
+    await broker.connect();
 
-  await broker.publish('test.topic', 'test');
+    const original = { userId: 123, name: 'test', data: [1, 2, 3] };
+    let received: unknown = null;
 
-  // Old subscription should be cleared
-  expect(called).toBe(false);
+    await broker.subscribe('test.topic', (msg) => {
+      received = msg;
+    });
 
-  await broker.disconnect();
-});
+    await broker.publish('test.topic', original);
 
-Deno.test('InMemoryBroker - READ-BACK: publish and receive same payload', async () => {
-  const runtime = createFakeRuntime();
-  const serializer = new JsonSerializer();
-  const broker = new InMemoryBroker(runtime, serializer);
+    expect(received).toEqual(original);
 
-  await broker.connect();
-
-  const original = { userId: 123, name: 'test', data: [1, 2, 3] };
-  let received: unknown = null;
-
-  await broker.subscribe('test.topic', (msg) => {
-    received = msg;
+    await broker.disconnect();
   });
-
-  await broker.publish('test.topic', original);
-
-  expect(received).toEqual(original);
-
-  await broker.disconnect();
 });

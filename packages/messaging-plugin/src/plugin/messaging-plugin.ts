@@ -1,20 +1,21 @@
 import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { IMessageBroker } from '@hono-enterprise/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
-import type { IRedisStreamsClient, MessagingPluginOptions } from '../interfaces/index.ts';
+import type { MessagingPluginOptions, RedisStreamsOptions } from '../interfaces/index.ts';
 
 /**
  * Creates a capability token for a named messaging instance.
  *
  * @param name - The instance name
  * @returns The dot-namespaced capability token
+ * @throws {TypeError} If the name contains invalid characters
  */
 function createNamedToken(name: string): string {
-  return `messaging.${name}`;
+  return createCapabilityToken(`messaging.${name}`);
 }
 
 /**
@@ -90,14 +91,7 @@ export function MessagingPlugin(
         broker = new InMemoryBroker(ctx.runtime, serializer);
       } else if (brokerType === 'redis-streams') {
         // Build options object only with defined values to satisfy exactOptionalPropertyTypes
-        const redisOptions: {
-          url?: string;
-          client?: IRedisStreamsClient;
-          defaultQueue?: string;
-          pollIntervalMs?: number;
-          blockSizeMs?: number;
-          logger?: { error: (msg: string) => void };
-        } = {};
+        const redisOptions: RedisStreamsOptions = {};
         if (options.url !== undefined) redisOptions.url = options.url;
         if (options.client !== undefined) redisOptions.client = options.client;
         if (options.defaultQueue !== undefined) redisOptions.defaultQueue = options.defaultQueue;

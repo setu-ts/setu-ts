@@ -1,3 +1,4 @@
+import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { EventsMessagingBridge } from '../../src/bridge/events-messaging-bridge.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
@@ -176,393 +177,395 @@ function createFakeContext(): {
 /**
  * EventsMessagingBridge unit tests.
  */
-Deno.test('EventsMessagingBridge - provides empty array', () => {
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
+describe('EventsMessagingBridge', () => {
+  it('provides empty array', () => {
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
 
-  expect(plugin.provides).toEqual([]);
-});
-
-Deno.test('EventsMessagingBridge - optionalDependencies includes events, messaging, logger', () => {
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
-
-  expect(plugin.optionalDependencies).toContain('events');
-  expect(plugin.optionalDependencies).toContain('messaging');
-  expect(plugin.optionalDependencies).toContain('logger');
-});
-
-Deno.test('EventsMessagingBridge - name and version', () => {
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
-
-  expect(plugin.name).toBe('events-messaging-bridge');
-  expect(plugin.version).toBe('0.1.0');
-});
-
-Deno.test('EventsMessagingBridge - register throws when event bus is not registered', () => {
-  const { ctx } = createFakeContext();
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
-
-  expect(() => plugin.register(ctx)).toThrow(
-    'EventsMessagingBridge requires the events capability to be registered.',
-  );
-});
-
-Deno.test('EventsMessagingBridge - register throws when messaging broker is not registered', () => {
-  const { ctx } = createFakeContext();
-  ctx.services.register(CAPABILITIES.EVENTS, new FakeEventBus());
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
-
-  expect(() => plugin.register(ctx)).toThrow(
-    'EventsMessagingBridge requires the messaging capability (messaging) to be registered.',
-  );
-});
-
-Deno.test('EventsMessagingBridge - successfully subscribes to configured event types', () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  const plugin = EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] });
-  plugin.register(ctx);
-
-  expect(eventBus.getSubscriberCount('user.created')).toBe(1);
-  expect(eventBus.getSubscriberCount('user.updated')).toBe(1);
-});
-
-Deno.test('EventsMessagingBridge - publishes events to broker with default topic mapping', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
-  plugin.register(ctx);
-
-  // Trigger the event
-  const event = { type: 'user.created', data: { userId: 123 } };
-  await eventBus.publish('user.created', event);
-
-  expect(broker.publishCalls.length).toBe(1);
-  expect(broker.publishCalls[0].topic).toBe('user.created');
-  expect(broker.publishCalls[0].message).toEqual(event.data);
-});
-
-Deno.test('EventsMessagingBridge - applies custom topic mapping function', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  const topicMapping = (eventType: string) => `events.${eventType}.v1`;
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['user.created'],
-    topicMapping,
-  });
-  plugin.register(ctx);
-
-  const event = { type: 'user.created', data: { userId: 456 } };
-  await eventBus.publish('user.created', event);
-
-  expect(broker.publishCalls.length).toBe(1);
-  expect(broker.publishCalls[0].topic).toBe('events.user.created.v1');
-  expect(broker.publishCalls[0].message).toEqual(event.data);
-});
-
-Deno.test('EventsMessagingBridge - uses custom error handler on publish failure', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const errorHandlerCalls: Array<{ error: unknown; eventType: string }> = [];
-
-  const customErrorHandler = (error: unknown, eventType: string) => {
-    errorHandlerCalls.push({ error, eventType });
-  };
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  // Make broker throw on publish
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw new Error('Publish failed');
-  };
-
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['user.created'],
-    errorHandler: customErrorHandler,
-  });
-  plugin.register(ctx);
-
-  const event = { type: 'user.created', data: { userId: 789 } };
-  await eventBus.publish('user.created', event);
-
-  expect(errorHandlerCalls.length).toBe(1);
-  expect(errorHandlerCalls[0].eventType).toBe('user.created');
-  expect((errorHandlerCalls[0].error as Error).message).toBe('Publish failed');
-});
-
-Deno.test('EventsMessagingBridge - default error handler logs via logger', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const logger = new FakeLogger();
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-  ctx.services.register('logger', logger);
-
-  // Make broker throw on publish
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw new Error('Default handler test');
-  };
-
-  const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
-  plugin.register(ctx);
-
-  const event = { type: 'user.created', data: { userId: 111 } };
-  await eventBus.publish('user.created', event);
-
-  expect(logger.errorCalls.length).toBe(1);
-  expect(logger.errorCalls[0]).toContain('EventsMessagingBridge failed to publish event');
-  expect(logger.errorCalls[0]).toContain('Default handler test');
-});
-
-Deno.test('EventsMessagingBridge - default error handler swallows error when no logger', () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  // Make broker throw on publish - should not throw from bridge
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw new Error('Should be swallowed');
-  };
-
-  const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
-
-  // Should not throw
-  expect(() => plugin.register(ctx)).not.toThrow();
-});
-
-Deno.test('EventsMessagingBridge - uses custom token for broker resolution', () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const customToken = 'messaging.custom';
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(customToken, broker);
-
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['user.created'],
-    token: customToken,
+    expect(plugin.provides).toEqual([]);
   });
 
-  expect(() => plugin.register(ctx)).not.toThrow();
-});
+  it('optionalDependencies includes events, messaging, logger', () => {
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
 
-Deno.test('EventsMessagingBridge - throws when custom token broker is not registered', () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['user.created'],
-    token: 'messaging.nonexistent',
+    expect(plugin.optionalDependencies).toContain('events');
+    expect(plugin.optionalDependencies).toContain('messaging');
+    expect(plugin.optionalDependencies).toContain('logger');
   });
 
-  expect(() => plugin.register(ctx)).toThrow(
-    'EventsMessagingBridge requires the messaging capability (messaging.nonexistent) to be registered.',
-  );
-});
+  it('name and version', () => {
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
 
-Deno.test('EventsMessagingBridge - error handler receives Error object when error is Error instance', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const errorHandlerCalls: Array<{ errorMessage: string }> = [];
-
-  const customErrorHandler = (error: unknown, _eventType: string) => {
-    if (error instanceof Error) {
-      errorHandlerCalls.push({ errorMessage: error.message });
-    }
-  };
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw new Error('Error instance test');
-  };
-
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['user.created'],
-    errorHandler: customErrorHandler,
+    expect(plugin.name).toBe('events-messaging-bridge');
+    expect(plugin.version).toBe('0.1.0');
   });
-  plugin.register(ctx);
 
-  await eventBus.publish('user.created', { type: 'user.created', data: {} });
+  it('register throws when event bus is not registered', () => {
+    const { ctx } = createFakeContext();
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
 
-  expect(errorHandlerCalls.length).toBe(1);
-  expect(errorHandlerCalls[0].errorMessage).toBe('Error instance test');
-});
-
-Deno.test('EventsMessagingBridge - error handler handles non-Error errors', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const errorHandlerCalls: Array<{ errorString: string }> = [];
-
-  const customErrorHandler = (error: unknown, _eventType: string) => {
-    errorHandlerCalls.push({ errorString: String(error) });
-  };
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw 'String error';
-  };
-
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['user.created'],
-    errorHandler: customErrorHandler,
+    expect(() => plugin.register(ctx)).toThrow(
+      'EventsMessagingBridge requires the events capability to be registered.',
+    );
   });
-  plugin.register(ctx);
 
-  await eventBus.publish('user.created', { type: 'user.created', data: {} });
+  it('register throws when messaging broker is not registered', () => {
+    const { ctx } = createFakeContext();
+    ctx.services.register(CAPABILITIES.EVENTS, new FakeEventBus());
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
 
-  expect(errorHandlerCalls.length).toBe(1);
-  expect(errorHandlerCalls[0].errorString).toBe('String error');
-});
-
-Deno.test('EventsMessagingBridge - lifecycle onClose is registered and called', () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
-  plugin.register(ctx);
-
-  // The plugin should have registered an onClose handler
-  // We can verify by checking that the lifecycle has the handler registered
-  // (The FakeContext's lifecycle should have captured it)
-  expect(eventBus.getSubscriberCount('user.created')).toBe(1);
-});
-
-Deno.test('EventsMessagingBridge - empty event types array works', () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  const plugin = EventsMessagingBridge({ eventTypes: [] });
-
-  // Should not throw
-  expect(() => plugin.register(ctx)).not.toThrow();
-});
-
-Deno.test('EventsMessagingBridge - topic mapping receives correct event type', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const receivedTopics: string[] = [];
-
-  const topicMapping = (eventType: string) => {
-    receivedTopics.push(eventType);
-    return `topic.${eventType}`;
-  };
-
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-
-  const plugin = EventsMessagingBridge({
-    eventTypes: ['domain.event'],
-    topicMapping,
+    expect(() => plugin.register(ctx)).toThrow(
+      'EventsMessagingBridge requires the messaging capability (messaging) to be registered.',
+    );
   });
-  plugin.register(ctx);
 
-  await eventBus.publish('domain.event', { type: 'domain.event', data: {} });
+  it('successfully subscribes to configured event types', () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
-  expect(receivedTopics).toContain('domain.event');
-  expect(broker.publishCalls[0].topic).toBe('topic.domain.event');
-});
+    const plugin = EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] });
+    plugin.register(ctx);
 
-Deno.test('EventsMessagingBridge - default error handler uses error.message for Error instances', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const logger = new FakeLogger();
+    expect(eventBus.getSubscriberCount('user.created')).toBe(1);
+    expect(eventBus.getSubscriberCount('user.updated')).toBe(1);
+  });
 
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-  ctx.services.register('logger', logger);
+  it('publishes events to broker with default topic mapping', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
-  // Make broker throw an Error
-  const testError = new Error('test-error-message');
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw testError;
-  };
+    const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
+    plugin.register(ctx);
 
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
-  plugin.register(ctx);
+    // Trigger the event
+    const event = { type: 'user.created', data: { userId: 123 } };
+    await eventBus.publish('user.created', event);
 
-  await eventBus.publish('test.event', { type: 'test.event', data: {} });
+    expect(broker.publishCalls.length).toBe(1);
+    expect(broker.publishCalls[0].topic).toBe('user.created');
+    expect(broker.publishCalls[0].message).toEqual(event.data);
+  });
 
-  // Verify the error message was extracted correctly
-  expect(logger.errorCalls.length).toBe(1);
-  expect(logger.errorCalls[0]).toContain('test-error-message');
-});
+  it('applies custom topic mapping function', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
-Deno.test('EventsMessagingBridge - default error handler converts non-Error to string', async () => {
-  const { ctx } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
-  const logger = new FakeLogger();
+    const topicMapping = (eventType: string) => `events.${eventType}.v1`;
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['user.created'],
+      topicMapping,
+    });
+    plugin.register(ctx);
 
-  ctx.services.register(CAPABILITIES.EVENTS, eventBus);
-  ctx.services.register(CAPABILITIES.MESSAGING, broker);
-  ctx.services.register('logger', logger);
+    const event = { type: 'user.created', data: { userId: 456 } };
+    await eventBus.publish('user.created', event);
 
-  // Make broker throw a string (non-Error)
-  (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
-    throw 'string-error';
-  };
+    expect(broker.publishCalls.length).toBe(1);
+    expect(broker.publishCalls[0].topic).toBe('events.user.created.v1');
+    expect(broker.publishCalls[0].message).toEqual(event.data);
+  });
 
-  const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
-  plugin.register(ctx);
+  it('uses custom error handler on publish failure', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const errorHandlerCalls: Array<{ error: unknown; eventType: string }> = [];
 
-  await eventBus.publish('test.event', { type: 'test.event', data: {} });
+    const customErrorHandler = (error: unknown, eventType: string) => {
+      errorHandlerCalls.push({ error, eventType });
+    };
 
-  // Verify the string was converted
-  expect(logger.errorCalls.length).toBe(1);
-  expect(logger.errorCalls[0]).toContain('string-error');
-});
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
-Deno.test('EventsMessagingBridge - lifecycle cleanup calls unsubscribe functions', async () => {
-  const { ctx, closeHandlers, registered } = createFakeContext();
-  const eventBus = new FakeEventBus();
-  const broker = new FakeMessageBroker();
+    // Make broker throw on publish
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw new Error('Publish failed');
+    };
 
-  registered.set(CAPABILITIES.EVENTS, eventBus);
-  registered.set(CAPABILITIES.MESSAGING, broker);
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['user.created'],
+      errorHandler: customErrorHandler,
+    });
+    plugin.register(ctx);
 
-  const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
-  plugin.register(ctx);
+    const event = { type: 'user.created', data: { userId: 789 } };
+    await eventBus.publish('user.created', event);
 
-  // Verify close handler was registered
-  expect(closeHandlers.length).toBe(1);
+    expect(errorHandlerCalls.length).toBe(1);
+    expect(errorHandlerCalls[0].eventType).toBe('user.created');
+    expect((errorHandlerCalls[0].error as Error).message).toBe('Publish failed');
+  });
 
-  // Trigger lifecycle cleanup
-  await closeHandlers[0]();
+  it('default error handler logs via logger', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const logger = new FakeLogger();
 
-  // Verify subscription was cleaned up
-  expect(eventBus.getSubscriberCount('user.created')).toBe(0);
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+    ctx.services.register('logger', logger);
+
+    // Make broker throw on publish
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw new Error('Default handler test');
+    };
+
+    const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
+    plugin.register(ctx);
+
+    const event = { type: 'user.created', data: { userId: 111 } };
+    await eventBus.publish('user.created', event);
+
+    expect(logger.errorCalls.length).toBe(1);
+    expect(logger.errorCalls[0]).toContain('EventsMessagingBridge failed to publish event');
+    expect(logger.errorCalls[0]).toContain('Default handler test');
+  });
+
+  it('default error handler swallows error when no logger', () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+
+    // Make broker throw on publish - should not throw from bridge
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw new Error('Should be swallowed');
+    };
+
+    const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
+
+    // Should not throw
+    expect(() => plugin.register(ctx)).not.toThrow();
+  });
+
+  it('uses custom token for broker resolution', () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const customToken = 'messaging.custom';
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(customToken, broker);
+
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['user.created'],
+      token: customToken,
+    });
+
+    expect(() => plugin.register(ctx)).not.toThrow();
+  });
+
+  it('throws when custom token broker is not registered', () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['user.created'],
+      token: 'messaging.nonexistent',
+    });
+
+    expect(() => plugin.register(ctx)).toThrow(
+      'EventsMessagingBridge requires the messaging capability (messaging.nonexistent) to be registered.',
+    );
+  });
+
+  it('error handler receives Error object when error is Error instance', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const errorHandlerCalls: Array<{ errorMessage: string }> = [];
+
+    const customErrorHandler = (error: unknown, _eventType: string) => {
+      if (error instanceof Error) {
+        errorHandlerCalls.push({ errorMessage: error.message });
+      }
+    };
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw new Error('Error instance test');
+    };
+
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['user.created'],
+      errorHandler: customErrorHandler,
+    });
+    plugin.register(ctx);
+
+    await eventBus.publish('user.created', { type: 'user.created', data: {} });
+
+    expect(errorHandlerCalls.length).toBe(1);
+    expect(errorHandlerCalls[0].errorMessage).toBe('Error instance test');
+  });
+
+  it('error handler handles non-Error errors', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const errorHandlerCalls: Array<{ errorString: string }> = [];
+
+    const customErrorHandler = (error: unknown, _eventType: string) => {
+      errorHandlerCalls.push({ errorString: String(error) });
+    };
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw 'String error';
+    };
+
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['user.created'],
+      errorHandler: customErrorHandler,
+    });
+    plugin.register(ctx);
+
+    await eventBus.publish('user.created', { type: 'user.created', data: {} });
+
+    expect(errorHandlerCalls.length).toBe(1);
+    expect(errorHandlerCalls[0].errorString).toBe('String error');
+  });
+
+  it('lifecycle onClose is registered and called', () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+
+    const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
+    plugin.register(ctx);
+
+    // The plugin should have registered an onClose handler
+    // We can verify by checking that the lifecycle has the handler registered
+    // (The FakeContext's lifecycle should have captured it)
+    expect(eventBus.getSubscriberCount('user.created')).toBe(1);
+  });
+
+  it('empty event types array works', () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+
+    const plugin = EventsMessagingBridge({ eventTypes: [] });
+
+    // Should not throw
+    expect(() => plugin.register(ctx)).not.toThrow();
+  });
+
+  it('topic mapping receives correct event type', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const receivedTopics: string[] = [];
+
+    const topicMapping = (eventType: string) => {
+      receivedTopics.push(eventType);
+      return `topic.${eventType}`;
+    };
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+
+    const plugin = EventsMessagingBridge({
+      eventTypes: ['domain.event'],
+      topicMapping,
+    });
+    plugin.register(ctx);
+
+    await eventBus.publish('domain.event', { type: 'domain.event', data: {} });
+
+    expect(receivedTopics).toContain('domain.event');
+    expect(broker.publishCalls[0].topic).toBe('topic.domain.event');
+  });
+
+  it('default error handler uses error.message for Error instances', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const logger = new FakeLogger();
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+    ctx.services.register('logger', logger);
+
+    // Make broker throw an Error
+    const testError = new Error('test-error-message');
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw testError;
+    };
+
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
+    plugin.register(ctx);
+
+    await eventBus.publish('test.event', { type: 'test.event', data: {} });
+
+    // Verify the error message was extracted correctly
+    expect(logger.errorCalls.length).toBe(1);
+    expect(logger.errorCalls[0]).toContain('test-error-message');
+  });
+
+  it('default error handler converts non-Error to string', async () => {
+    const { ctx } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+    const logger = new FakeLogger();
+
+    ctx.services.register(CAPABILITIES.EVENTS, eventBus);
+    ctx.services.register(CAPABILITIES.MESSAGING, broker);
+    ctx.services.register('logger', logger);
+
+    // Make broker throw a string (non-Error)
+    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+      throw 'string-error';
+    };
+
+    const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
+    plugin.register(ctx);
+
+    await eventBus.publish('test.event', { type: 'test.event', data: {} });
+
+    // Verify the string was converted
+    expect(logger.errorCalls.length).toBe(1);
+    expect(logger.errorCalls[0]).toContain('string-error');
+  });
+
+  it('lifecycle cleanup calls unsubscribe functions', async () => {
+    const { ctx, closeHandlers, registered } = createFakeContext();
+    const eventBus = new FakeEventBus();
+    const broker = new FakeMessageBroker();
+
+    registered.set(CAPABILITIES.EVENTS, eventBus);
+    registered.set(CAPABILITIES.MESSAGING, broker);
+
+    const plugin = EventsMessagingBridge({ eventTypes: ['user.created'] });
+    plugin.register(ctx);
+
+    // Verify close handler was registered
+    expect(closeHandlers.length).toBe(1);
+
+    // Trigger lifecycle cleanup
+    await closeHandlers[0]();
+
+    // Verify subscription was cleaned up
+    expect(eventBus.getSubscriberCount('user.created')).toBe(0);
+  });
 });

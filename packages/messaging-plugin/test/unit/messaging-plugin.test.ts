@@ -1,3 +1,4 @@
+import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
@@ -115,47 +116,46 @@ function createFakeContext(): {
 /**
  * MessagingPlugin unit tests.
  */
-Deno.test('MessagingPlugin - default instance has correct name and provides', () => {
-  const plugin = MessagingPlugin();
+describe('MessagingPlugin', () => {
+  it('default instance has correct name and provides', () => {
+    const plugin = MessagingPlugin();
 
-  expect(plugin.name).toBe('messaging-plugin');
-  expect(plugin.provides).toEqual([CAPABILITIES.MESSAGING]);
-  expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
-  expect(plugin.optionalDependencies).toContain('logger');
-});
+    expect(plugin.name).toBe('messaging-plugin');
+    expect(plugin.provides).toEqual([CAPABILITIES.MESSAGING]);
+    expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
+    expect(plugin.optionalDependencies).toContain('logger');
+  });
 
-Deno.test('MessagingPlugin - named instance has correct name and provides', () => {
-  const plugin = MessagingPlugin({ name: 'events' });
+  it('named instance has correct name and provides', () => {
+    const plugin = MessagingPlugin({ name: 'events' });
 
-  expect(plugin.name).toBe('messaging-plugin.events');
-  expect(plugin.provides).toEqual(['messaging.events']);
-});
+    expect(plugin.name).toBe('messaging-plugin.events');
+    expect(plugin.provides).toEqual(['messaging.events']);
+  });
 
-Deno.test('MessagingPlugin - version is set', () => {
-  const plugin = MessagingPlugin();
+  it('version is set', () => {
+    const plugin = MessagingPlugin();
 
-  expect(plugin.version).toBe('0.1.0');
-});
+    expect(plugin.version).toBe('0.1.0');
+  });
 
-Deno.test('MessagingPlugin - memory broker registers successfully', async () => {
-  const { ctx } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
+  it('memory broker registers successfully', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
 
-  await plugin.register(ctx);
+    await plugin.register(ctx);
 
-  // Should register the broker
-  const broker = ctx.services.get(CAPABILITIES.MESSAGING);
-  expect(broker).toBeDefined();
-  expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-  expect(typeof (broker as { connect: () => Promise<void> }).connect).toBe('function');
-  expect(typeof (broker as { disconnect: () => Promise<void> }).disconnect).toBe('function');
-  expect(typeof (broker as { publish: () => Promise<void> }).publish).toBe('function');
-  expect(typeof (broker as { subscribe: () => Promise<unknown> }).subscribe).toBe('function');
-});
+    // Should register the broker
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect(typeof (broker as { connect: () => Promise<void> }).connect).toBe('function');
+    expect(typeof (broker as { disconnect: () => Promise<void> }).disconnect).toBe('function');
+    expect(typeof (broker as { publish: () => Promise<void> }).publish).toBe('function');
+    expect(typeof (broker as { subscribe: () => Promise<unknown> }).subscribe).toBe('function');
+  });
 
-Deno.test(
-  'MessagingPlugin - redis-streams broker registers successfully with fake client',
-  async () => {
+  it('redis-streams broker registers successfully with fake client', async () => {
     const fakeClient = new FakeRedisStreamsClient();
     const { ctx } = createFakeContext();
 
@@ -173,133 +173,132 @@ Deno.test(
     expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
     expect(typeof (broker as { connect: () => Promise<void> }).connect).toBe('function');
     expect(typeof (broker as { disconnect: () => Promise<void> }).disconnect).toBe('function');
-  },
-);
-
-Deno.test('MessagingPlugin - unknown broker type throws error', async () => {
-  const { ctx } = createFakeContext();
-  const plugin = MessagingPlugin({
-    broker: 'unknown-broker-type' as unknown as 'memory' | 'redis-streams',
   });
 
-  await expect(plugin.register(ctx)).rejects.toThrow('Unknown broker type: unknown-broker-type');
-});
+  it('unknown broker type throws error', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({
+      broker: 'unknown-broker-type' as unknown as 'memory' | 'redis-streams',
+    });
 
-Deno.test('MessagingPlugin - health indicator registered for default instance', async () => {
-  const { ctx, healthIndicators } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
-
-  await plugin.register(ctx);
-
-  // Should have registered a health indicator
-  expect(healthIndicators.size).toBe(1);
-  expect(healthIndicators.has(CAPABILITIES.MESSAGING)).toBe(true);
-});
-
-Deno.test('MessagingPlugin - health indicator registered for named instance', async () => {
-  const { ctx, healthIndicators } = createFakeContext();
-  const plugin = MessagingPlugin({
-    name: 'events',
-    broker: 'memory',
+    await expect(plugin.register(ctx)).rejects.toThrow('Unknown broker type: unknown-broker-type');
   });
 
-  await plugin.register(ctx);
+  it('health indicator registered for default instance', async () => {
+    const { ctx, healthIndicators } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
 
-  // Should have registered a health indicator with custom token
-  expect(healthIndicators.size).toBe(1);
-  expect(healthIndicators.has('messaging.events')).toBe(true);
-});
+    await plugin.register(ctx);
 
-Deno.test('MessagingPlugin - health indicator returns up when broker is ready', async () => {
-  const { ctx, healthIndicators } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
-
-  await plugin.register(ctx);
-
-  const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-    { status: string; data?: unknown }
-  >;
-  const result = await indicator();
-
-  expect(result.status).toBe('up');
-  expect(result.data).toEqual({ broker: 'memory' });
-});
-
-Deno.test('MessagingPlugin - lifecycle handler disconnects broker on close', async () => {
-  const { ctx, onCloseHandlers } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
-
-  await plugin.register(ctx);
-
-  // Trigger lifecycle close
-  for (const handler of onCloseHandlers) {
-    await handler();
-  }
-
-  // Broker should be disconnected (isReady should return false after disconnect)
-  const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
-  // For memory broker, disconnect sets isReady to false
-  expect(broker.isReady()).toBe(false);
-});
-
-Deno.test('MessagingPlugin - health indicator returns down after disconnect', async () => {
-  const { ctx, healthIndicators, onCloseHandlers } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
-
-  await plugin.register(ctx);
-
-  // Verify health indicator returns 'up' before disconnect
-  let indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<HealthCheckResult>;
-  let result = await indicator();
-  expect(result.status).toBe('up');
-
-  // Trigger lifecycle close to disconnect broker
-  for (const handler of onCloseHandlers) {
-    await handler();
-  }
-
-  // Health indicator should now return 'down' because broker.isReady() is false
-  // This exercises the ternary: broker.isReady() ? 'up' : 'down' (the 'down' branch)
-  indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<HealthCheckResult>;
-  result = await indicator();
-  expect(result.status).toBe('down');
-  expect(result.data).toEqual({ broker: 'memory' });
-});
-
-Deno.test('MessagingPlugin - logger is optional and used when provided', async () => {
-  const { ctx } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
-
-  await plugin.register(ctx);
-
-  // Should not throw even without logger
-  expect(() => plugin.register(ctx)).not.toThrow();
-});
-
-Deno.test('MessagingPlugin - custom serializer is used', async () => {
-  const { ctx } = createFakeContext();
-  const customSerializer = {
-    serialize: (data: unknown): string => `custom:${JSON.stringify(data)}`,
-    deserialize: <T>(data: string): T => {
-      const stripped = data.replace('custom:', '');
-      return JSON.parse(stripped) as T;
-    },
-  };
-
-  const plugin = MessagingPlugin({
-    broker: 'memory',
-    serializer: customSerializer,
+    // Should have registered a health indicator
+    expect(healthIndicators.size).toBe(1);
+    expect(healthIndicators.has(CAPABILITIES.MESSAGING)).toBe(true);
   });
 
-  await plugin.register(ctx);
+  it('health indicator registered for named instance', async () => {
+    const { ctx, healthIndicators } = createFakeContext();
+    const plugin = MessagingPlugin({
+      name: 'events',
+      broker: 'memory',
+    });
 
-  const broker = ctx.services.get(CAPABILITIES.MESSAGING);
-  expect(broker).toBeDefined();
-});
+    await plugin.register(ctx);
 
-Deno.test(
-  'MessagingPlugin - redis-streams with all options including defaultQueue and pollIntervalMs',
-  async () => {
+    // Should have registered a health indicator with custom token
+    expect(healthIndicators.size).toBe(1);
+    expect(healthIndicators.has('messaging.events')).toBe(true);
+  });
+
+  it('health indicator returns up when broker is ready', async () => {
+    const { ctx, healthIndicators } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
+
+    await plugin.register(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      { status: string; data?: unknown }
+    >;
+    const result = await indicator();
+
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ broker: 'memory' });
+  });
+
+  it('lifecycle handler disconnects broker on close', async () => {
+    const { ctx, onCloseHandlers } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
+
+    await plugin.register(ctx);
+
+    // Trigger lifecycle close
+    for (const handler of onCloseHandlers) {
+      await handler();
+    }
+
+    // Broker should be disconnected (isReady should return false after disconnect)
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    // For memory broker, disconnect sets isReady to false
+    expect(broker.isReady()).toBe(false);
+  });
+
+  it('health indicator returns down after disconnect', async () => {
+    const { ctx, healthIndicators, onCloseHandlers } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
+
+    await plugin.register(ctx);
+
+    // Verify health indicator returns 'up' before disconnect
+    let indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      HealthCheckResult
+    >;
+    let result = await indicator();
+    expect(result.status).toBe('up');
+
+    // Trigger lifecycle close to disconnect broker
+    for (const handler of onCloseHandlers) {
+      await handler();
+    }
+
+    // Health indicator should now return 'down' because broker.isReady() is false
+    // This exercises the ternary: broker.isReady() ? 'up' : 'down' (the 'down' branch)
+    indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<HealthCheckResult>;
+    result = await indicator();
+    expect(result.status).toBe('down');
+    expect(result.data).toEqual({ broker: 'memory' });
+  });
+
+  it('logger is optional and used when provided', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
+
+    await plugin.register(ctx);
+
+    // Should not throw even without logger
+    expect(() => plugin.register(ctx)).not.toThrow();
+  });
+
+  it('custom serializer is used', async () => {
+    const { ctx } = createFakeContext();
+    const customSerializer = {
+      serialize: (data: unknown): string => `custom:${JSON.stringify(data)}`,
+      deserialize: <T>(data: string): T => {
+        const stripped = data.replace('custom:', '');
+        return JSON.parse(stripped) as T;
+      },
+    };
+
+    const plugin = MessagingPlugin({
+      broker: 'memory',
+      serializer: customSerializer,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  it('redis-streams with all options including defaultQueue and pollIntervalMs', async () => {
     const fakeClient = new FakeRedisStreamsClient();
     const { ctx } = createFakeContext();
 
@@ -317,163 +316,170 @@ Deno.test(
     // Should register the broker
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-  },
-);
-
-Deno.test('MessagingPlugin - named instance provides correct token', async () => {
-  const { ctx } = createFakeContext();
-  const plugin = MessagingPlugin({
-    name: 'events',
-    broker: 'memory',
   });
 
-  await plugin.register(ctx);
+  it('named instance provides correct token', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({
+      name: 'events',
+      broker: 'memory',
+    });
 
-  // Should be accessible via custom token
-  const broker = ctx.services.get('messaging.events');
-  expect(broker).toBeDefined();
-});
+    await plugin.register(ctx);
 
-Deno.test('MessagingPlugin - multiple instances can be registered', async () => {
-  const { ctx } = createFakeContext();
-
-  const plugin1 = MessagingPlugin({
-    name: 'events',
-    broker: 'memory',
-  });
-  const plugin2 = MessagingPlugin({
-    name: 'commands',
-    broker: 'memory',
+    // Should be accessible via custom token
+    const broker = ctx.services.get('messaging.events');
+    expect(broker).toBeDefined();
   });
 
-  await plugin1.register(ctx);
-  await plugin2.register(ctx);
+  it('multiple instances can be registered', async () => {
+    const { ctx } = createFakeContext();
 
-  // Both should be accessible
-  const eventsBroker = ctx.services.get('messaging.events');
-  const commandsBroker = ctx.services.get('messaging.commands');
+    const plugin1 = MessagingPlugin({
+      name: 'events',
+      broker: 'memory',
+    });
+    const plugin2 = MessagingPlugin({
+      name: 'commands',
+      broker: 'memory',
+    });
 
-  expect(eventsBroker).toBeDefined();
-  expect(commandsBroker).toBeDefined();
-});
+    await plugin1.register(ctx);
+    await plugin2.register(ctx);
 
-Deno.test('MessagingPlugin - default options create memory broker', async () => {
-  const { ctx } = createFakeContext();
-  const plugin = MessagingPlugin();
+    // Both should be accessible
+    const eventsBroker = ctx.services.get('messaging.events');
+    const commandsBroker = ctx.services.get('messaging.commands');
 
-  await plugin.register(ctx);
+    expect(eventsBroker).toBeDefined();
+    expect(commandsBroker).toBeDefined();
+  });
 
-  // Default should be memory broker
-  const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
-  expect(broker).toBeDefined();
-  expect(broker.isReady()).toBe(true);
-});
+  it('default options create memory broker', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin();
 
-Deno.test('MessagingPlugin - health indicator data includes broker type', async () => {
-  const { ctx, healthIndicators } = createFakeContext();
+    await plugin.register(ctx);
 
-  const memoryPlugin = MessagingPlugin({ broker: 'memory' });
-  await memoryPlugin.register(ctx);
+    // Default to memory broker
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    expect(broker).toBeDefined();
+    expect(broker.isReady()).toBe(true);
+  });
 
-  const memoryIndicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-    { status: string; data?: unknown }
-  >;
-  const memoryResult = await memoryIndicator();
+  it('health indicator data includes broker type', async () => {
+    const { ctx, healthIndicators } = createFakeContext();
 
-  expect(memoryResult.data).toEqual({ broker: 'memory' });
-});
+    const memoryPlugin = MessagingPlugin({ broker: 'memory' });
+    await memoryPlugin.register(ctx);
 
-Deno.test('MessagingPlugin - redis-streams uses custom URL', { ignore: true }, async () => {
-  // Skip this test as it requires ioredis npm package which needs env access
-});
+    const memoryIndicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      { status: string; data?: unknown }
+    >;
+    const memoryResult = await memoryIndicator();
 
-Deno.test('MessagingPlugin - priority is NORMAL', () => {
-  const plugin = MessagingPlugin();
-  expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
-});
+    expect(memoryResult.data).toEqual({ broker: 'memory' });
+  });
 
-Deno.test('MessagingPlugin - provides array contains correct token', () => {
-  const defaultPlugin = MessagingPlugin();
-  expect(defaultPlugin.provides).toEqual([CAPABILITIES.MESSAGING]);
+  it.ignore('redis-streams uses custom URL', async () => {
+    // Skip this test as it requires ioredis npm package which needs env access
+  });
 
-  const namedPlugin = MessagingPlugin({ name: 'test' });
-  expect(namedPlugin.provides).toEqual(['messaging.test']);
-});
+  it('priority is NORMAL', () => {
+    const plugin = MessagingPlugin();
+    expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
+  });
 
-Deno.test('MessagingPlugin - optionalDependencies includes logger', () => {
-  const plugin = MessagingPlugin();
-  expect(plugin.optionalDependencies).toContain('logger');
-});
+  it('provides array contains correct token', () => {
+    const defaultPlugin = MessagingPlugin();
+    expect(defaultPlugin.provides).toEqual([CAPABILITIES.MESSAGING]);
 
-Deno.test('MessagingPlugin - health indicator returns correct broker type', async () => {
-  const { ctx, healthIndicators } = createFakeContext();
-  const plugin = MessagingPlugin({ broker: 'memory' });
+    const namedPlugin = MessagingPlugin({ name: 'test' });
+    expect(namedPlugin.provides).toEqual(['messaging.test']);
+  });
 
-  await plugin.register(ctx);
+  it('optionalDependencies includes logger', () => {
+    const plugin = MessagingPlugin();
+    expect(plugin.optionalDependencies).toContain('logger');
+  });
 
-  const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-    { status: string; data?: { broker: string } }
-  >;
-  const result = await indicator();
+  it('health indicator returns correct broker type', async () => {
+    const { ctx, healthIndicators } = createFakeContext();
+    const plugin = MessagingPlugin({ broker: 'memory' });
 
-  expect(result.data).toEqual({ broker: 'memory' });
-});
+    await plugin.register(ctx);
 
-Deno.test('MessagingPlugin - logger is registered and used', async () => {
-  const { ctx } = createFakeContext();
-  const logger = { error: () => {} };
-  ctx.services.register('logger', logger);
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      { status: string; data?: { broker: string } }
+    >;
+    const result = await indicator();
 
-  const plugin = MessagingPlugin({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory' });
+  });
 
-  await plugin.register(ctx);
+  it('logger is registered and used', async () => {
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
 
-  const broker = ctx.services.get(CAPABILITIES.MESSAGING);
-  expect(broker).toBeDefined();
-});
+    const plugin = MessagingPlugin({ broker: 'memory' });
 
-// Note: The 'down' status branch is covered by the test below and by
-// 'MessagingPlugin - health indicator returns down after disconnect'
+    await plugin.register(ctx);
 
-Deno.test('MessagingPlugin - health indicator ternary down branch is covered', async () => {
-  // This test directly exercises the ternary: broker.isReady() ? 'up' : 'down'
-  // by creating a broker that returns false for isReady()
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
 
-  const unreadyBroker = {
-    connect() {},
-    disconnect() {},
-    isReady(): boolean {
-      return false; // Force the 'down' branch
-    },
-    publish() {},
-    subscribe() {
-      return { unsubscribe: async () => {} };
-    },
-  };
+  it('throws when name contains invalid characters', () => {
+    // Test that illegal names (containing colon, uppercase, etc.) throw
+    expect(() => MessagingPlugin({ name: 'Invalid:Name' })).toThrow(TypeError);
+    expect(() => MessagingPlugin({ name: 'invalid:name' })).toThrow(TypeError);
+    expect(() => MessagingPlugin({ name: 'InvalidName' })).toThrow(TypeError);
+  });
 
-  const { ctx, healthIndicators } = createFakeContext();
+  // Note: The 'down' status branch is covered by the test below and by
+  // 'MessagingPlugin - health indicator returns down after disconnect'
 
-  // Simulate what the plugin does: register broker, then register health indicator
-  const brokerType = 'memory';
-  ctx.services.register(CAPABILITIES.MESSAGING, unreadyBroker);
+  it('health indicator ternary down branch is covered', async () => {
+    // This test directly exercises the ternary: broker.isReady() ? 'up' : 'down'
+    // by creating a broker that returns false for isReady()
 
-  // This is the exact code pattern from messaging-plugin.ts line 122-127
-  // deno-lint-ignore require-await
-  const healthIndicator = async (): Promise<HealthCheckResult> => {
-    const status: HealthStatus = unreadyBroker.isReady() ? 'up' : 'down';
-    return {
-      status,
-      data: { broker: brokerType },
+    const unreadyBroker = {
+      connect() {},
+      disconnect() {},
+      isReady(): boolean {
+        return false; // Force the 'down' branch
+      },
+      publish() {},
+      subscribe() {
+        return { unsubscribe: async () => {} };
+      },
     };
-  };
-  ctx.health.register(CAPABILITIES.MESSAGING, healthIndicator);
 
-  const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-    HealthCheckResult
-  >;
-  const result = await indicator();
+    const { ctx, healthIndicators } = createFakeContext();
 
-  // This exercises the 'down' branch of the ternary
-  expect(result.status).toBe('down');
-  expect(result.data).toEqual({ broker: 'memory' });
+    // Simulate what the plugin does: register broker, then register health indicator
+    const brokerType = 'memory';
+    ctx.services.register(CAPABILITIES.MESSAGING, unreadyBroker);
+
+    // This is the exact code pattern from messaging-plugin.ts line 122-127
+    // deno-lint-ignore require-await
+    const healthIndicator = async (): Promise<HealthCheckResult> => {
+      const status: HealthStatus = unreadyBroker.isReady() ? 'up' : 'down';
+      return {
+        status,
+        data: { broker: brokerType },
+      };
+    };
+    ctx.health.register(CAPABILITIES.MESSAGING, healthIndicator);
+
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      HealthCheckResult
+    >;
+    const result = await indicator();
+
+    // This exercises the 'down' branch of the ternary
+    expect(result.status).toBe('down');
+    expect(result.data).toEqual({ broker: 'memory' });
+  });
 });

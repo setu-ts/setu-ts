@@ -7,7 +7,7 @@ import type {
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import type { IRedisStreamsClient } from '../interfaces/index.ts';
+import type { IRedisStreamsClient, RedisStreamsOptions } from '../interfaces/index.ts';
 
 /**
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
@@ -106,14 +106,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   constructor(
     runtime: IRuntimeServices,
     serializer: ISerializer,
-    options?: {
-      url?: string;
-      client?: IRedisStreamsClient;
-      defaultQueue?: string;
-      pollIntervalMs?: number;
-      blockSizeMs?: number;
-      logger?: { error: (msg: string) => void };
-    },
+    options?: RedisStreamsOptions,
   ) {
     this.#runtime = runtime;
     this.#serializer = serializer;

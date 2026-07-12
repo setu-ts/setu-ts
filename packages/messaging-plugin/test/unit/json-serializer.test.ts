@@ -1,3 +1,4 @@
+import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 
@@ -6,87 +7,89 @@ import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
  *
  * Tests serialization/deserialization round-trips for various data types.
  */
-Deno.test('JsonSerializer - serialize/deserialize round-trip for objects', () => {
-  const serializer = new JsonSerializer();
-  const obj = { name: 'test', value: 123, nested: { foo: 'bar' } };
+describe('JsonSerializer', () => {
+  it('serialize/deserialize round-trip for objects', () => {
+    const serializer = new JsonSerializer();
+    const obj = { name: 'test', value: 123, nested: { foo: 'bar' } };
 
-  const serialized = serializer.serialize(obj);
-  const deserialized = serializer.deserialize<typeof obj>(serialized);
+    const serialized = serializer.serialize(obj);
+    const deserialized = serializer.deserialize<typeof obj>(serialized);
 
-  expect(deserialized).toEqual(obj);
-});
+    expect(deserialized).toEqual(obj);
+  });
 
-Deno.test('JsonSerializer - serialize/deserialize round-trip for arrays', () => {
-  const serializer = new JsonSerializer();
-  const arr = [1, 2, 3, 'four', { five: 5 }];
+  it('serialize/deserialize round-trip for arrays', () => {
+    const serializer = new JsonSerializer();
+    const arr = [1, 2, 3, 'four', { five: 5 }];
 
-  const serialized = serializer.serialize(arr);
-  const deserialized = serializer.deserialize<typeof arr>(serialized);
+    const serialized = serializer.serialize(arr);
+    const deserialized = serializer.deserialize<typeof arr>(serialized);
 
-  expect(deserialized).toEqual(arr);
-});
+    expect(deserialized).toEqual(arr);
+  });
 
-Deno.test('JsonSerializer - serialize/deserialize round-trip for nested values', () => {
-  const serializer = new JsonSerializer();
-  const nested = {
-    level1: {
-      level2: {
-        level3: {
-          data: 'deep',
+  it('serialize/deserialize round-trip for nested values', () => {
+    const serializer = new JsonSerializer();
+    const nested = {
+      level1: {
+        level2: {
+          level3: {
+            data: 'deep',
+          },
         },
       },
-    },
-  };
+    };
 
-  const serialized = serializer.serialize(nested);
-  const deserialized = serializer.deserialize<typeof nested>(serialized);
+    const serialized = serializer.serialize(nested);
+    const deserialized = serializer.deserialize<typeof nested>(serialized);
 
-  expect(deserialized).toEqual(nested);
-});
+    expect(deserialized).toEqual(nested);
+  });
 
-Deno.test('JsonSerializer - serialize/deserialize round-trip for primitives', () => {
-  const serializer = new JsonSerializer();
+  it('serialize/deserialize round-trip for primitives', () => {
+    const serializer = new JsonSerializer();
 
-  // String
-  const str = 'hello world';
-  expect(serializer.deserialize<string>(serializer.serialize(str))).toEqual(str);
+    // String
+    const str = 'hello world';
+    expect(serializer.deserialize<string>(serializer.serialize(str))).toEqual(str);
 
-  // Number
-  const num = 42.5;
-  expect(serializer.deserialize<number>(serializer.serialize(num))).toEqual(num);
+    // Number
+    const num = 42.5;
+    expect(serializer.deserialize<number>(serializer.serialize(num))).toEqual(num);
 
-  // Boolean
-  const bool = true;
-  expect(serializer.deserialize<boolean>(serializer.serialize(bool))).toEqual(bool);
+    // Boolean
+    const bool = true;
+    expect(serializer.deserialize<boolean>(serializer.serialize(bool))).toEqual(bool);
 
-  // Null
-  const nul = null;
-  expect(serializer.deserialize<null>(serializer.serialize(nul))).toEqual(nul);
-});
+    // Null
+    const nul = null;
+    expect(serializer.deserialize<null>(serializer.serialize(nul))).toEqual(nul);
+  });
 
-Deno.test('JsonSerializer - serialize/deserialize handles JSON-special characters', () => {
-  const serializer = new JsonSerializer();
-  const str = 'hello "world" with \'quotes\' and \\backslash\\';
+  it('serialize/deserialize handles JSON-special characters', () => {
+    const serializer = new JsonSerializer();
+    const str = 'hello "world" with \'quotes\' and \\backslash\\';
 
-  const serialized = serializer.serialize(str);
-  const deserialized = serializer.deserialize<string>(serialized);
+    const serialized = serializer.serialize(str);
+    const deserialized = serializer.deserialize<string>(serialized);
 
-  expect(deserialized).toEqual(str);
-});
+    expect(deserialized).toEqual(str);
+  });
 
-Deno.test('JsonSerializer - deserialize handles non-object input', () => {
-  const serializer = new JsonSerializer();
+  it('deserialize handles non-object input', () => {
+    const serializer = new JsonSerializer();
 
-  // Array input
-  const arr = [1, 2, 3];
-  const serialized = serializer.serialize(arr);
-  const deserialized = serializer.deserialize<number[]>(serialized);
-  expect(Array.isArray(deserialized)).toBe(true);
-  expect(deserialized).toEqual(arr);
-});
+    // Array input
+    const arr = [1, 2, 3];
+    const serialized = serializer.serialize(arr);
+    const deserialized = serializer.deserialize<number[]>(serialized);
+    expect(Array.isArray(deserialized)).toBe(true);
+    expect(deserialized).toEqual(arr);
+  });
 
-Deno.test('JsonSerializer - serialize handles null', () => {
-  const serializer = new JsonSerializer();
+  it('serialize handles null', () => {
+    const serializer = new JsonSerializer();
 
-  expect(serializer.serialize(null)).toBe('null');
+    expect(serializer.serialize(null)).toBe('null');
+  });
 });

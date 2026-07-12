@@ -3356,7 +3356,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 11        | ✅     | cache-plugin         |
 | 12        | ✅     | events-plugin        |
 | 13        | ✅     | cqrs-plugin          |
-| 14        | ⬜     | messaging-plugin     |
+| 14        | ✅     | messaging-plugin     |
 | 15        | ⬜     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |

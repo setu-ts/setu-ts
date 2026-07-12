@@ -4,6 +4,8 @@
  * @module
  */
 
+import type { ISerializer } from '../serializers/serializer.ts';
+
 /**
  * Structural type for Redis Streams client.
  *
@@ -69,8 +71,7 @@ export interface MessagingPluginOptions {
    *
    * @defaultValue `new JsonSerializer()`
    */
-  // deno-lint-ignore no-explicit-any
-  serializer?: any;
+  serializer?: ISerializer;
 
   /**
    * Redis connection URL (used when broker is `'redis-streams'`).
@@ -122,6 +123,8 @@ export interface RedisStreamsOptions {
   pollIntervalMs?: number;
   /** Block timeout in milliseconds. */
   blockSizeMs?: number;
+  /** Optional logger for error reporting. */
+  logger?: { error: (msg: string) => void };
 }
 
 /**
