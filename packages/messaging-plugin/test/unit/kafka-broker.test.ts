@@ -378,7 +378,7 @@ describe('KafkaBroker', () => {
   });
 
   // K7: failure-path - handler throws
-  it('subscribe handles a throwing handler without crashing', async () => {
+  it('does NOT commit the offset when the handler throws', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeFactory = new FakeKafkaFactory({
@@ -387,8 +387,8 @@ describe('KafkaBroker', () => {
           topic: 'test.topic',
           value: JSON.stringify({ x: 1 }),
           partition: 0,
-          offset: '1',
-          timestamp: new Date().toISOString(),
+          offset: '7',
+          timestamp: '1700000000000',
           headers: {},
         },
       ],
@@ -397,26 +397,55 @@ describe('KafkaBroker', () => {
 
     await broker.connect();
 
-    let handlerWasInvoked = false;
-    // Wrap handler to catch and track errors without crashing the test
-    const handler = () => {
-      handlerWasInvoked = true;
-      // In production, KafkaJS auto-commit swallows errors; no explicit ack/nack
-      // For testing, we wrap to prevent uncaught exception
-      try {
-        throw new Error('handler failure');
-      } catch {
-        // Swallow to simulate KafkaJS behavior
-      }
-    };
-    await broker.subscribe('test.topic', handler);
+    let handlerInvoked = false;
+    await broker.subscribe('test.topic', () => {
+      handlerInvoked = true;
+      throw new Error('handler failure');
+    }, { queue: 'g-fail' });
 
-    // Wait for handler to run
+    await fakeFactory.deliverAll();
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    await broker.disconnect();
+    const consumer = fakeFactory.consumer({ groupId: 'g-fail' });
+    expect(handlerInvoked).toBe(true);
+    // eachMessage rejected → kafkajs does NOT commit the offset (message redelivers).
+    expect(consumer.committedOffsets).toEqual([]);
 
-    // The broker should not crash; the error is swallowed by KafkaJS auto-commit behavior
-    expect(handlerWasInvoked).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('commits the offset when the handler succeeds', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          value: JSON.stringify({ x: 1 }),
+          partition: 0,
+          offset: '9',
+          timestamp: '1700000000000',
+          headers: {},
+        },
+      ],
+    });
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+
+    let handlerInvoked = false;
+    await broker.subscribe('test.topic', () => {
+      handlerInvoked = true;
+    }, { queue: 'g-ok' });
+
+    await fakeFactory.deliverAll();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const consumer = fakeFactory.consumer({ groupId: 'g-ok' });
+    expect(handlerInvoked).toBe(true);
+    // eachMessage resolved → kafkajs auto-commits the offset.
+    expect(consumer.committedOffsets).toContain('9');
+
+    await broker.disconnect();
   });
 });

@@ -427,10 +427,14 @@ describe('NatsBroker', () => {
     // Wait for async handler to run
     await new Promise((resolve) => setTimeout(resolve, 10));
 
+    // The delivered message must be nak()'d (not ack()'d) because the handler threw.
+    const deliveredMsg = fakeConnection.jetstream().deliveredMessages[0];
+    expect(handlerInvoked).toBe(true);
+    expect(deliveredMsg.isNaked()).toBe(true);
+    expect(deliveredMsg.isAcked()).toBe(false);
+
     await sub.unsubscribe();
     await broker.disconnect();
-
-    expect(handlerInvoked).toBe(true);
   });
 
   // N9: success-path - handler succeeds → ack() called
@@ -463,9 +467,13 @@ describe('NatsBroker', () => {
     // Wait for async handler to run
     await new Promise((resolve) => setTimeout(resolve, 10));
 
+    // The delivered message must be ack()'d (not nak()'d) because the handler succeeded.
+    const deliveredMsg = fakeConnection.jetstream().deliveredMessages[0];
+    expect(handlerCalled).toBe(true);
+    expect(deliveredMsg.isAcked()).toBe(true);
+    expect(deliveredMsg.isNaked()).toBe(false);
+
     await sub.unsubscribe();
     await broker.disconnect();
-
-    expect(handlerCalled).toBe(true);
   });
 });

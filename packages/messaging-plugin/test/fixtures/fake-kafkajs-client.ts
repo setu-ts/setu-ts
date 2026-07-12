@@ -83,6 +83,7 @@ export class FakeKafkaConsumer {
   } | null;
   #running: boolean;
   #calls: Array<{ method: string; args: unknown[] }>;
+  #committedOffsets: string[];
   #rejectStop: boolean;
   #seededMessages: Array<{
     topic: string;
@@ -109,6 +110,7 @@ export class FakeKafkaConsumer {
     this.#runOptions = null;
     this.#running = false;
     this.#calls = [];
+    this.#committedOffsets = [];
     this.#rejectStop = rejectStop;
     this.#seededMessages = seededMessages ?? [];
   }
@@ -120,6 +122,32 @@ export class FakeKafkaConsumer {
   /** All recorded method calls. */
   get calls(): Array<{ method: string; args: unknown[] }> {
     return [...this.#calls];
+  }
+
+  /**
+   * Offsets kafkajs would have auto-committed — i.e. those whose `eachMessage`
+   * resolved. A message whose handler throws leaves `eachMessage` rejected and
+   * its offset absent here (no commit → redelivery).
+   */
+  get committedOffsets(): string[] {
+    return [...this.#committedOffsets];
+  }
+
+  /**
+   * Runs one message through `eachMessage`, modelling kafkajs auto-commit:
+   * commit the offset only when `eachMessage` resolves; on rejection, do not
+   * commit (and swallow so there is no unhandled rejection).
+   */
+  async #deliverAndTrack(topic: string, message: FakeKafkaMessage): Promise<void> {
+    if (!this.#runOptions) {
+      return;
+    }
+    try {
+      await this.#runOptions.eachMessage({ topic, partition: message.partition, message });
+      this.#committedOffsets.push(message.offset);
+    } catch {
+      // eachMessage rejected → kafkajs does NOT commit the offset (redelivery).
+    }
   }
 
   connect(): Promise<void> {
@@ -143,20 +171,13 @@ export class FakeKafkaConsumer {
     this.#record('run', [options]);
     this.#runOptions = options;
     this.#running = true;
-    // Auto-deliver seeded messages to the handler
+    // Auto-deliver seeded messages to the handler, tracking commit-on-resolve.
     for (const msg of this.#seededMessages) {
       if (this.#subscribedTopics.includes(msg.topic)) {
-        options.eachMessage({
-          topic: msg.topic,
-          partition: msg.partition,
-          message: new FakeKafkaMessage(
-            msg.value,
-            msg.partition,
-            msg.offset,
-            msg.timestamp,
-            msg.headers,
-          ),
-        });
+        void this.#deliverAndTrack(
+          msg.topic,
+          new FakeKafkaMessage(msg.value, msg.partition, msg.offset, msg.timestamp, msg.headers),
+        );
       }
     }
     return Promise.resolve();
@@ -177,14 +198,10 @@ export class FakeKafkaConsumer {
     return Promise.resolve();
   }
 
-  /** Deliver a seeded message to the eachMessage handler. */
+  /** Deliver a seeded message to the eachMessage handler (tracks commit-on-resolve). */
   async deliver(topic: string, message: FakeKafkaMessage): Promise<void> {
     if (this.#running && this.#runOptions) {
-      await this.#runOptions.eachMessage({
-        topic,
-        partition: message.partition,
-        message,
-      });
+      await this.#deliverAndTrack(topic, message);
     }
   }
 }

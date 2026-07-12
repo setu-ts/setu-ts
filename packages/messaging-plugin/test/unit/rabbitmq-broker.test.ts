@@ -304,6 +304,12 @@ describe('RabbitMqBroker', () => {
     const calls = channel.calls;
     const nackCall = calls.find((c) => c.method === 'nack');
     expect(nackCall).toBeDefined();
+    // nack(msg, allUpTo=false, requeue=false) — no requeue, so no poison-message hot-loop.
+    expect(nackCall?.args[1]).toBe(false);
+    expect(nackCall?.args[2]).toBe(false);
+    // The message must NOT be ack'd when the handler throws.
+    const ackCall = calls.find((c) => c.method === 'ack');
+    expect(ackCall).toBeUndefined();
 
     await broker.disconnect();
   });

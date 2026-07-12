@@ -225,6 +225,14 @@ export class FakeNatsJetStream {
     return [...this.#calls];
   }
 
+  /**
+   * All seeded message instances (the same objects delivered to consumers), so
+   * tests can assert their ack/nak state after delivery.
+   */
+  get deliveredMessages(): FakeNatsMessage[] {
+    return [...this.#seededMessages.values()].flat();
+  }
+
   publish(subject: string, data: Uint8Array): void {
     this.#record('publish', [subject, data]);
   }
