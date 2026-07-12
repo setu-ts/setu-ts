@@ -3,9 +3,22 @@ import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-ente
 import type { IMessageBroker } from '@hono-enterprise/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
+import { RabbitMqBroker } from '../brokers/rabbitmq-broker.ts';
+import { NatsBroker } from '../brokers/nats-broker.ts';
+import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
-import type { MessagingPluginOptions, RedisStreamsOptions } from '../interfaces/index.ts';
+import type {
+  IAmqpConnection,
+  IKafkaFactory,
+  INatsConnection,
+  IRedisStreamsClient,
+  KafkaOptions,
+  MessagingPluginOptions,
+  NatsOptions,
+  RabbitMqOptions,
+  RedisStreamsOptions,
+} from '../interfaces/index.ts';
 
 /**
  * Creates a capability token for a named messaging instance.
@@ -93,7 +106,9 @@ export function MessagingPlugin(
         // Build options object only with defined values to satisfy exactOptionalPropertyTypes
         const redisOptions: RedisStreamsOptions = {};
         if (options.url !== undefined) redisOptions.url = options.url;
-        if (options.client !== undefined) redisOptions.client = options.client;
+        if (options.client !== undefined) {
+          redisOptions.client = options.client as IRedisStreamsClient;
+        }
         if (options.defaultQueue !== undefined) redisOptions.defaultQueue = options.defaultQueue;
         if (options.pollIntervalMs !== undefined) {
           redisOptions.pollIntervalMs = options.pollIntervalMs;
@@ -101,6 +116,30 @@ export function MessagingPlugin(
         if (options.blockSizeMs !== undefined) redisOptions.blockSizeMs = options.blockSizeMs;
         if (logger !== undefined) redisOptions.logger = logger;
         broker = new RedisStreamsBroker(ctx.runtime, serializer, redisOptions);
+      } else if (brokerType === 'rabbitmq') {
+        const rabbitOptions: RabbitMqOptions = {};
+        if (options.url !== undefined) rabbitOptions.url = options.url;
+        if (options.client !== undefined) rabbitOptions.client = options.client as IAmqpConnection;
+        if (options.exchangeName !== undefined) rabbitOptions.exchangeName = options.exchangeName;
+        if (options.defaultQueue !== undefined) rabbitOptions.defaultQueue = options.defaultQueue;
+        if (logger !== undefined) rabbitOptions.logger = logger;
+        broker = new RabbitMqBroker(ctx.runtime, serializer, rabbitOptions);
+      } else if (brokerType === 'nats') {
+        const natsOptions: NatsOptions = {};
+        if (options.url !== undefined) natsOptions.url = options.url;
+        if (options.client !== undefined) natsOptions.client = options.client as INatsConnection;
+        if (options.streamName !== undefined) natsOptions.streamName = options.streamName;
+        if (options.defaultQueue !== undefined) natsOptions.defaultQueue = options.defaultQueue;
+        if (logger !== undefined) natsOptions.logger = logger;
+        broker = new NatsBroker(ctx.runtime, serializer, natsOptions);
+      } else if (brokerType === 'kafka') {
+        const kafkaOptions: KafkaOptions = {};
+        if (options.brokers !== undefined) kafkaOptions.brokers = options.brokers;
+        if (options.client !== undefined) kafkaOptions.client = options.client as IKafkaFactory;
+        if (options.clientId !== undefined) kafkaOptions.clientId = options.clientId;
+        if (options.defaultQueue !== undefined) kafkaOptions.defaultQueue = options.defaultQueue;
+        if (logger !== undefined) kafkaOptions.logger = logger;
+        broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
       } else {
         throw new Error(`Unknown broker type: ${brokerType}`);
       }

@@ -37,11 +37,55 @@ export interface IRedisStreamsClient {
 }
 
 /**
+ * Structural type for AMQP 0-9-1 connection (RabbitMQ).
+ *
+ * This type defines the minimal RabbitMQ client interface needed for topic exchange operations.
+ *
+ * @since 0.1.0
+ */
+export interface IAmqpConnection {
+  /** Create a channel. */
+  createChannel(): Promise<unknown>;
+  /** Close the connection. */
+  close(): Promise<void>;
+}
+
+/**
+ * Structural type for NATS connection.
+ *
+ * This type defines the minimal NATS client interface needed for JetStream operations.
+ *
+ * @since 0.1.0
+ */
+export interface INatsConnection {
+  /** Get JetStream instance. */
+  jetstream(): unknown;
+  /** Get JetStream manager (async). */
+  jetstreamManager(): Promise<unknown>;
+  /** Close the connection. */
+  close(): void;
+}
+
+/**
+ * Structural type for Kafka client factory.
+ *
+ * This type defines the minimal Kafka client interface needed for producer/consumer operations.
+ *
+ * @since 0.1.0
+ */
+export interface IKafkaFactory {
+  /** Create a producer. */
+  producer(): unknown;
+  /** Create a consumer. */
+  consumer(options: { groupId: string }): unknown;
+}
+
+/**
  * Broker type identifier.
  *
  * @since 0.1.0
  */
-export type MessagingBrokerType = 'memory' | 'redis-streams';
+export type MessagingBrokerType = 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka';
 
 /**
  * Options for the MessagingPlugin factory.
@@ -81,9 +125,11 @@ export interface MessagingPluginOptions {
   url?: string;
 
   /**
-   * Injected Redis client (bypasses lazy ioredis import).
+   * Injected client (bypasses lazy npm import).
+   *
+   * Supports Redis, RabbitMQ, NATS, or Kafka clients depending on the broker type.
    */
-  client?: IRedisStreamsClient;
+  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory;
 
   /**
    * Default consumer group name for Redis Streams subscriptions.
@@ -105,6 +151,34 @@ export interface MessagingPluginOptions {
    * @defaultValue `100`
    */
   blockSizeMs?: number;
+
+  /**
+   * RabbitMQ exchange name (used when broker is `'rabbitmq'`).
+   *
+   * @defaultValue `'messaging'`
+   */
+  exchangeName?: string;
+
+  /**
+   * NATS JetStream stream name (used when broker is `'nats'`).
+   *
+   * @defaultValue `'MESSAGING'`
+   */
+  streamName?: string;
+
+  /**
+   * Kafka bootstrap brokers (used when broker is `'kafka'`).
+   *
+   * @defaultValue `['localhost:9092']`
+   */
+  brokers?: readonly string[];
+
+  /**
+   * Kafka client ID (used when broker is `'kafka'`).
+   *
+   * @defaultValue `'messaging-client'`
+   */
+  clientId?: string;
 }
 
 /**
@@ -123,6 +197,60 @@ export interface RedisStreamsOptions {
   pollIntervalMs?: number;
   /** Block timeout in milliseconds. */
   blockSizeMs?: number;
+  /** Optional logger for error reporting. */
+  logger?: { error: (msg: string) => void };
+}
+
+/**
+ * RabbitMQ-specific options (internal use).
+ *
+ * @since 0.1.0
+ */
+export interface RabbitMqOptions {
+  /** RabbitMQ connection URL. */
+  url?: string;
+  /** Injected AMQP connection. */
+  client?: IAmqpConnection;
+  /** Exchange name (default: 'messaging'). */
+  exchangeName?: string;
+  /** Default consumer group/queue name. */
+  defaultQueue?: string;
+  /** Optional logger for error reporting. */
+  logger?: { error: (msg: string) => void };
+}
+
+/**
+ * NATS-specific options (internal use).
+ *
+ * @since 0.1.0
+ */
+export interface NatsOptions {
+  /** NATS connection URL(s). */
+  url?: string;
+  /** Injected NATS connection. */
+  client?: INatsConnection;
+  /** JetStream stream name (default: 'MESSAGING'). */
+  streamName?: string;
+  /** Default consumer group name. */
+  defaultQueue?: string;
+  /** Optional logger for error reporting. */
+  logger?: { error: (msg: string) => void };
+}
+
+/**
+ * Kafka-specific options (internal use).
+ *
+ * @since 0.1.0
+ */
+export interface KafkaOptions {
+  /** Kafka bootstrap brokers. */
+  brokers?: readonly string[];
+  /** Injected Kafka factory. */
+  client?: IKafkaFactory;
+  /** Kafka client ID (default: 'messaging-client'). */
+  clientId?: string;
+  /** Default consumer group name. */
+  defaultQueue?: string;
   /** Optional logger for error reporting. */
   logger?: { error: (msg: string) => void };
 }
