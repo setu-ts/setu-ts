@@ -309,7 +309,7 @@ hono-enterprise/
 │   ├── cache-plugin/             # CachePlugin (Memory, Redis)
 │   ├── events-plugin/            # EventsPlugin (in-memory event bus)
 │   ├── cqrs-plugin/              # CqrsPlugin (commands, queries, buses)
-│   ├── messaging-plugin/         # MessagingPlugin (RabbitMQ, NATS, Kafka)
+│   ├── messaging-plugin/         # MessagingPlugin (Memory, Redis Streams; RabbitMQ/NATS/Kafka in M14b)
 │   ├── queue-plugin/             # QueuePlugin (Redis, RabbitMQ, Memory)
 │   ├── auth-plugin/              # AuthenticationPlugin (JWT, API Key, RBAC)
 │   ├── http-security-plugin/     # HttpSecurityPlugin (CORS, headers, CSRF, rate limit)
@@ -1718,11 +1718,66 @@ app.register(EventsMessagingBridge({
 - [x] Comprehensive test suite (36 tests, 90%+ coverage)
 - [x] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
 
-### Milestone 14b (Future)
+---
 
-- RabbitMQ broker implementation
-- NATS broker implementation
-- Kafka broker implementation
+## Milestone 14b: Messaging Plugin — RabbitMQ, NATS, Kafka Brokers ⬜ NOT STARTED
+
+**Objective:** Complete the messaging capability by adding the three remaining production brokers to
+the existing `@hono-enterprise/messaging-plugin` package.
+
+> **Why this is a separate milestone.** Milestone 14 was deliberately phased ("Redis-first",
+> user-approved) so that every broker it shipped could be exercised against a real transport —
+> `InMemoryBroker` end-to-end and `RedisStreamsBroker` via a recording fake plus a guarded real
+> `import('npm:ioredis')`. RabbitMQ, NATS, and Kafka were split out to **avoid the Milestone 10
+> failure mode** (shipping adapters as non-functional stubs that pass coverage but never touch their
+> backend). Each broker below lands only with the full inject-or-lazy client seam and a guarded
+> real-import test — no stubs.
+
+### Package: `@hono-enterprise/messaging-plugin` (extends the M14 package)
+
+These brokers implement the same committed `IMessageBroker` contract
+(`packages/common/src/services/messaging.ts`) and the internal `MessageBrokerAdapter` seam
+(`isReady()`) that `InMemoryBroker`/`RedisStreamsBroker` already implement. They are selected via
+the existing `MessagingPlugin({ broker: … })` option — no new capability token, no `common` change.
+
+```typescript
+app.register(MessagingPlugin({ broker: 'rabbitmq', url: config.get('RABBITMQ_URL') }));
+app.register(MessagingPlugin({ broker: 'nats', url: config.get('NATS_URL') }));
+app.register(MessagingPlugin({ broker: 'kafka', brokers: config.get('KAFKA_BROKERS') }));
+```
+
+**Brokers to implement:**
+
+- ⬜ `RabbitMqBroker` — AMQP 0-9-1 via `npm:amqplib` (exchanges/queues, ack on success)
+- ⬜ `NatsBroker` — NATS / JetStream via `npm:nats` (subjects, durable consumers)
+- ⬜ `KafkaBroker` — Kafka via `npm:kafkajs` (topics, consumer groups, manual commit)
+
+**Implementation files (added to the M14 package):**
+
+- ⬜ `src/brokers/rabbitmq-broker.ts`
+- ⬜ `src/brokers/nats-broker.ts`
+- ⬜ `src/brokers/kafka-broker.ts`
+- ⬜ extend `MessagingBrokerType` in `src/interfaces/index.ts` with `'rabbitmq' | 'nats' | 'kafka'`
+- ⬜ extend the backend selection in `src/plugin/messaging-plugin.ts`
+- ⬜ barrel exports in `src/index.ts` for the three broker classes
+
+**Test files:**
+
+- ⬜ `test/unit/rabbitmq-broker.test.ts` (+ `test/fixtures/fake-amqplib-client.ts`)
+- ⬜ `test/unit/nats-broker.test.ts` (+ `test/fixtures/fake-nats-client.ts`)
+- ⬜ `test/unit/kafka-broker.test.ts` (+ `test/fixtures/fake-kafkajs-client.ts`)
+
+### Deliverables
+
+- [ ] `RabbitMqBroker` with the inject-or-lazy `amqplib` client seam + guarded real-import test
+- [ ] `NatsBroker` with the inject-or-lazy `nats` client seam + guarded real-import test
+- [ ] `KafkaBroker` with the inject-or-lazy `kafkajs` client seam + guarded real-import test
+- [ ] Each broker driven through a recording fake that asserts real transport calls (publish +
+      subscribe read-back), plus ack-on-success / no-ack-on-failure semantics where the transport
+      supports it
+- [ ] `MessagingBrokerType` + plugin backend selection extended; barrel updated
+- [ ] 90%+ per-file coverage on every new `src/` file
+- [ ] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md) in the same PR
 
 ---
 
@@ -3357,6 +3412,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 12        | ✅     | events-plugin        |
 | 13        | ✅     | cqrs-plugin          |
 | 14        | ✅     | messaging-plugin     |
+| 14b       | ⬜     | messaging-plugin     |
 | 15        | ⬜     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
