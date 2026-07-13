@@ -1,10 +1,26 @@
 /**
+ * Queue plugin for Hono Enterprise.
+ *
+ * Provides background job queue capability with Memory and Redis adapters.
+ *
  * @module
- *
- * Background job queue plugin (Redis, RabbitMQ, Memory adapters).
- *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
  */
-export {};
+
+// Re-export the IQueue contract from common
+export type {
+  AddJobOptions,
+  IJob,
+  IQueue,
+  JobProcessor,
+  ProcessOptions,
+  RecurringOptions,
+} from '@hono-enterprise/common';
+
+// Export plugin factory and types
+export { QueuePlugin } from './plugin/queue-plugin.ts';
+export type { QueuePluginOptions } from './interfaces/index.ts';
+export type { QueueAdapterType, RedisQueueOptions } from './interfaces/index.ts';
+
+// Export adapter classes
+export { MemoryQueue } from './adapters/memory-queue.ts';
+export { RedisQueue } from './adapters/redis-queue.ts';

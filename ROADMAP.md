@@ -1792,10 +1792,9 @@ app.register(MessagingPlugin({ broker: 'kafka', brokers: config.get('KAFKA_BROKE
 ```typescript
 app.register(QueuePlugin({
   adapter: 'redis',
-  options: {
-    url: config.get('REDIS_URL'),
-    concurrency: 5,
-  },
+  url: config.get('REDIS_URL'),
+  pollIntervalMs: 1000,
+  defaultMaxAttempts: 3,
 }));
 ```
 
@@ -1818,8 +1817,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 
 **Adapters:**
 
-- `RedisQueue` — BullMQ-based
-- `RabbitMqQueue` — RabbitMQ-based
+- `RedisQueue` — ioredis-based delayed queue (Redis sorted set)
 - `MemoryQueue` — For testing
 
 **Implementation Files:**
@@ -1827,10 +1825,10 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 - `src/plugin/queue-plugin.ts`
 - `src/services/queue-service.ts`
 - `src/adapters/redis-queue.ts`
-- `src/adapters/rabbitmq-queue.ts`
 - `src/adapters/memory-queue.ts`
 - `src/processors/job-processor.ts`
 - `src/retry/retry-strategy.ts`
+- `src/scheduler/cron-calculator.ts`
 - `src/index.ts`
 
 ### Tests
@@ -1843,10 +1841,40 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 
 ### Deliverables
 
-- [ ] QueuePlugin
-- [ ] Redis, RabbitMQ, Memory adapters
-- [ ] Job processor
-- [ ] Full test coverage
+- [x] QueuePlugin
+- [x] MemoryQueue adapter
+- [x] RedisQueue adapter (ioredis-based)
+- [x] QueueService with retry/backoff
+- [x] Cron-based recurring job scheduler
+- [x] Job processor with concurrency control
+- [ ] RabbitMQ adapter — deferred to M15b
+
+---
+
+## Milestone 15b: Queue Plugin — RabbitMQ Adapter
+
+**Objective:** Add RabbitMQ push-based queue adapter with dead-letter-exchange and per-attempt TTL
+machinery.
+
+### Package: `@hono-enterprise/queue-plugin`
+
+The `RabbitMqQueue` adapter implements the same
+[`QueueAdapter`](packages/queue-plugin/src/adapters/queue-adapter.ts) transport seam as
+`MemoryQueue` and `RedisQueue`, but maps the polling-based primitives onto RabbitMQ's push model
+(`consume`). This requires:
+
+- A **dead-letter-exchange (DLX)** configuration for failed jobs
+- **Per-attempt TTL queues** that automatically route to the DLX after the attempt timeout
+- A **requeue queue** that receives dead-lettered messages and re-publishes them with a fresh TTL
+- **Acknowledgment semantics** where successful processing acks the message, while failures trigger
+  the TTL→DLX→requeue cycle
+
+This mirrors the M14 → M14b split for messaging brokers, where RabbitMQ/NATS/Kafka were deferred
+after shipping in-memory + Redis Streams.
+
+**NOT in M15b:** Priority queues, multiple retry strategies, `removeOnComplete` / `removeOnFail`
+options — these are out of scope of the committed
+[`IQueue`](packages/common/src/services/queue.ts:79) contract.
 
 ---
 
@@ -3413,7 +3441,8 @@ app.register(MyPlugin({ option1: 'value' }));
 | 13        | ✅     | cqrs-plugin          |
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
-| 15        | ⬜     | queue-plugin         |
+| 15        | ✅     | queue-plugin         |
+| 15b       | ⬜     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |
