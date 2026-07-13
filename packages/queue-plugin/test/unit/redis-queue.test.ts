@@ -190,10 +190,7 @@ describe('RedisQueue', () => {
     beforeEach(async () => {
       testFakeClient = new FakeRedisClient();
       // Override hget to return null (no payload)
-      testFakeClient.hget = async () => {
-        await Promise.resolve();
-        return null;
-      };
+      testFakeClient.hget = () => Promise.resolve(null);
       testQueue = new RedisQueue({ client: testFakeClient });
       await testQueue.connect();
 
@@ -277,10 +274,7 @@ describe('RedisQueue', () => {
 
     it('fetchRecurringDue handles missing payload gracefully', async () => {
       // Override hget to return null
-      testFakeClient3.hget = async () => {
-        await Promise.resolve();
-        return null;
-      };
+      testFakeClient3.hget = () => Promise.resolve(null);
       // Add to due set manually
       await testFakeClient3.zadd('queue:recurring:due', Date.now(), 'orphan');
 

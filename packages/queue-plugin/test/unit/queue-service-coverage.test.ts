@@ -12,21 +12,21 @@ import type { StoredRecurring } from '../../src/interfaces/index.ts';
 class ThrowingAdapter implements QueueAdapter {
   #connected = false;
 
-  async connect(): Promise<void> {
-    await Promise.resolve();
+  connect(): Promise<void> {
     this.#connected = true;
+    return Promise.resolve();
   }
 
-  async disconnect(): Promise<void> {
-    await Promise.resolve();
+  disconnect(): Promise<void> {
     this.#connected = false;
+    return Promise.resolve();
   }
 
   isReady(): boolean {
     return this.#connected;
   }
 
-  async enqueue<T>(
+  enqueue<T>(
     _job: {
       id: string;
       name: string;
@@ -37,9 +37,10 @@ class ThrowingAdapter implements QueueAdapter {
     },
   ): Promise<void> {
     // Success
+    return Promise.resolve();
   }
 
-  async reserve<T>(
+  reserve<T>(
     _name: string,
     _limit: number,
     _nowMs: number,
@@ -53,45 +54,46 @@ class ThrowingAdapter implements QueueAdapter {
       availableAtMs: number;
     }[]
   > {
-    await Promise.resolve();
-    return [];
+    return Promise.resolve([]);
   }
 
-  async ack(_name: string, _id: string): Promise<void> {
+  ack(_name: string, _id: string): Promise<void> {
     // Success
+    return Promise.resolve();
   }
 
-  async requeue(
+  requeue(
     _name: string,
     _id: string,
     _availableAtMs: number,
     _attempts: number,
   ): Promise<void> {
     // Success
+    return Promise.resolve();
   }
 
-  async deadLetter(_name: string, _id: string, _nowMs: number): Promise<void> {
+  deadLetter(_name: string, _id: string, _nowMs: number): Promise<void> {
     // Success
+    return Promise.resolve();
   }
 
-  async storeRecurring(_rec: StoredRecurring): Promise<void> {
+  storeRecurring(_rec: StoredRecurring): Promise<void> {
     // Success
+    return Promise.resolve();
   }
 
-  async fetchRecurringDue(_nowMs: number): Promise<readonly StoredRecurring[]> {
-    await Promise.resolve();
+  fetchRecurringDue(_nowMs: number): Promise<readonly StoredRecurring[]> {
     // Return a recurring job that will trigger advanceRecurring
-    return [{
+    return Promise.resolve([{
       id: 'test-id',
       name: 'test',
       data: {},
       cron: 'invalid-cron-expression-for-test',
       nextRunAtMs: Date.now(),
-    }];
+    }]);
   }
 
-  async advanceRecurring(_id: string, _nextRunAtMs: number): Promise<void> {
-    await Promise.resolve();
+  advanceRecurring(_id: string, _nextRunAtMs: number): Promise<void> {
     throw new Error('Adapter error for testing');
   }
 }
@@ -407,8 +409,7 @@ describe('QueueService - coverage', () => {
 
     it('dispatchJob catch handler decrements inFlight on error', async () => {
       // Register a processor that throws
-      service.process('error-decorator-test', async () => {
-        await Promise.resolve();
+      service.process('error-decorator-test', () => {
         throw new Error('Processor error');
       });
 

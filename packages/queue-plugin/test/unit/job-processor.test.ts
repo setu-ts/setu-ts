@@ -80,22 +80,22 @@ describe('runJob', () => {
       ackCalled: false,
       requeueCalls: [],
       deadLetterCalled: false,
-      ack: async (_name: string, _id: string) => {
-        await Promise.resolve();
+      ack: (_name: string, _id: string) => {
         adapter.ackCalled = true;
+        return Promise.resolve();
       },
-      requeue: async (
+      requeue: (
         name: string,
         id: string,
         availableAtMs: number,
         attempts: number,
       ) => {
-        await Promise.resolve();
         adapter.requeueCalls.push({ name, id, availableAtMs, attempts });
+        return Promise.resolve();
       },
-      deadLetter: async (_name: string, _id: string, _nowMs: number) => {
-        await Promise.resolve();
+      deadLetter: (_name: string, _id: string, _nowMs: number) => {
         adapter.deadLetterCalled = true;
+        return Promise.resolve();
       },
     };
   });
