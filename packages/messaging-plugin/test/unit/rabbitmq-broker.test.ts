@@ -1,5 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { Buffer } from 'node:buffer';
 import { RabbitMqBroker, validateClient } from '../../src/brokers/rabbitmq-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -42,6 +43,15 @@ describe('RabbitMqBroker', () => {
 
     expect(publishCall).toBeDefined();
     expect(publishCall?.args[0] as string).toBe('messaging'); // default exchange name
+
+    // Content MUST be a Node Buffer (amqplib rejects string/Uint8Array), and it
+    // must round-trip back to the original serialized payload.
+    const content = publishCall?.args[2];
+    expect(Buffer.isBuffer(content)).toBe(true);
+    const decoded = serializer.deserialize<typeof message>(
+      (content as Buffer).toString('utf8'),
+    );
+    expect(decoded).toEqual(message);
 
     await broker.disconnect();
   });

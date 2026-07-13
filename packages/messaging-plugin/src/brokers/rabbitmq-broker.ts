@@ -8,6 +8,11 @@ import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
+// amqplib's frame codec requires a Node Buffer for message content (it throws
+// `TypeError('content is not a buffer')` for a string or a Uint8Array). This is
+// the sanctioned cross-runtime static `node:` import (Deno/Node/Bun all support
+// it); there is no web-standard value amqplib's wire protocol accepts.
+import { Buffer } from 'node:buffer';
 
 /**
  * Lazily load amqplib at runtime.
@@ -211,7 +216,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       }
     }
 
-    const content = new TextEncoder().encode(serialized);
+    const content = Buffer.from(serialized, 'utf8');
     realChannel.publish(this.#exchangeName, topic, content, properties);
   }
 
