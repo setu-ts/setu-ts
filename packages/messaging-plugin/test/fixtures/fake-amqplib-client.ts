@@ -1,7 +1,13 @@
+import { Buffer } from 'node:buffer';
+
 /**
  * Fake AMQP 0-9-1 client for testing RabbitMqBroker.
  *
- * Records all method calls and simulates RabbitMQ behavior.
+ * Records all method calls and simulates RabbitMQ behavior. Mirrors the real
+ * amqplib contract where it matters: `publish` rejects content that is not a
+ * Node `Buffer` (amqplib's frame codec throws `TypeError('content is not a
+ * buffer')`), so a regression to a string/Uint8Array payload fails the suite
+ * instead of passing silently.
  */
 export interface FakeAmqpOptions {
   /** Whether to reject on createChannel. */
@@ -65,9 +71,14 @@ export class FakeAmqpChannel {
   publish(
     exchange: string,
     routingKey: string,
-    content: Uint8Array,
+    content: unknown,
     properties?: unknown,
   ): Promise<boolean> {
+    // Faithful to amqplib: the frame codec requires a Node Buffer and throws
+    // for a string or a Uint8Array (Buffer.isBuffer(new Uint8Array()) === false).
+    if (!Buffer.isBuffer(content)) {
+      throw new TypeError('content is not a buffer');
+    }
     this.#record('publish', [exchange, routingKey, content, properties]);
     if (this.#options.rejectPublish) {
       throw new Error('Publish failed');
@@ -155,7 +166,8 @@ export class FakeAmqpConnection {
  */
 function createFakeMessage(content: string, properties: Record<string, unknown>): unknown {
   return {
-    content: new TextEncoder().encode(content),
+    // Real amqplib delivers message content as a Node Buffer.
+    content: Buffer.from(content, 'utf8'),
     fields: { routingKey: 'test-topic' },
     properties,
   };
