@@ -1662,9 +1662,9 @@ await broker.subscribe('user.created', async (message, metadata) => {
 
 - ✅ `InMemoryBroker` — Fanout + round-robin queue delivery (default for testing)
 - ✅ `RedisStreamsBroker` — Redis Streams via ioredis (XADD, XGROUP, XREADGROUP)
-- ⏳ `RabbitMqBroker` — Deferred to M14b
-- ⏳ `NatsBroker` — Deferred to M14b
-- ⏳ `KafkaBroker` — Deferred to M14b
+- ✅ `RabbitMqBroker` — Shipped in M14b (AMQP 0-9-1 via `npm:amqplib`)
+- ✅ `NatsBroker` — Shipped in M14b (via `npm:nats`)
+- ✅ `KafkaBroker` — Shipped in M14b (via `npm:kafkajs`)
 
 **Serializer Interface:**
 
