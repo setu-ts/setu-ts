@@ -15,7 +15,7 @@ interface FakeTimerHandle {
   id: number;
   callback: () => void | Promise<void>;
   intervalMs: number;
-  fired: number;
+  lastFiredAtMs: number | null; // Track when timer last fired
 }
 
 // Global set to track pending promises for testing
@@ -67,14 +67,14 @@ export class FakeRuntimeServices implements IRuntimeServices {
       id,
       callback: fn,
       intervalMs: ms,
-      fired: 0,
+      lastFiredAtMs: null, // Fire once when time reaches now + ms
     };
     this.#timers.set(id, handle);
     return id;
   }
 
-  clearTimeout(_handle: number): void {
-    // No-op in fake
+  clearTimeout(handle: number): void {
+    this.#timers.delete(handle);
   }
 
   get env(): Readonly<Record<string, string | undefined>> {
@@ -93,35 +93,60 @@ export class FakeRuntimeServices implements IRuntimeServices {
   }
 
   /**
-   * Advance the fake clock.
+   * Advance the fake clock by ms milliseconds.
+   * Fires any timers (setTimeout/setInterval) that should fire during this advance.
    */
   async advanceMs(ms: number): Promise<void> {
-    this.#now += ms;
+    const targetTime = this.#now + ms;
 
-    // Fire any timers that should have fired
-    const toFire: FakeTimerHandle[] = [];
-    for (const timer of this.#timers.values()) {
-      // Check if timer should fire based on elapsed time
-      if (timer.fired * timer.intervalMs < this.#now) {
-        toFire.push(timer);
+    // Fire timers at each interval until we reach target time
+    while (this.#now < targetTime) {
+      // Advance by a small increment
+      const step = Math.min(100, targetTime - this.#now);
+      this.#now += step;
+
+      // Find timers that should fire at this point
+      const toFire: FakeTimerHandle[] = [];
+      for (const timer of this.#timers.values()) {
+        // For setInterval: fire if enough time has passed since last fire
+        // For setTimeout: fire once when due
+        if (timer.lastFiredAtMs === null) {
+          // First fire - fire immediately if we've reached the scheduled time
+          if (this.#now >= timer.intervalMs) {
+            toFire.push(timer);
+          }
+        } else {
+          // Subsequent fires for setInterval
+          if (this.#now >= timer.lastFiredAtMs + timer.intervalMs) {
+            toFire.push(timer);
+          }
+        }
       }
-    }
 
-    // Fire timers and await async callbacks
-    const promises: Promise<void>[] = [];
-    for (const timer of toFire) {
-      timer.fired++;
-      const result = timer.callback();
-      if (result instanceof Promise) {
-        promises.push(result);
+      if (toFire.length === 0) continue;
+
+      // Fire timers and await async callbacks
+      const promises: Promise<void>[] = [];
+      for (const timer of toFire) {
+        timer.lastFiredAtMs = this.#now;
+        const result = timer.callback();
+        if (result instanceof Promise) {
+          promises.push(result);
+        }
       }
+
+      // Wait for all async callbacks to complete
+      await Promise.all(promises);
+
+      // Wait for any nested promises (e.g., job processing)
+      await this.#awaitPendingPromises();
     }
+  }
 
-    // Wait for all async callbacks to complete
-    await Promise.all(promises);
-
-    // Wait for any nested promises (e.g., job processing)
-    // Keep waiting until no new promises are created
+  /**
+   * Wait for all pending promises to settle.
+   */
+  async #awaitPendingPromises(): Promise<void> {
     let iterations = 0;
     const maxIterations = 10;
     while (pendingPromises.size > 0 && iterations < maxIterations) {
@@ -146,7 +171,7 @@ export class FakeRuntimeServices implements IRuntimeServices {
       id,
       callback: fn,
       intervalMs: ms,
-      fired: 0,
+      lastFiredAtMs: null, // Will fire when advanceMs is called
     };
     this.#timers.set(id, handle);
     return id;

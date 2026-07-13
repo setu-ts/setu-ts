@@ -47,10 +47,9 @@ export async function runJob<T>(
     attempts: storedJob.attempts,
   };
 
+  // Execute the processor - if it fails, requeue or dead-letter
   try {
     await processor(job);
-    // Success: acknowledge
-    await adapter.ack(storedJob.name, storedJob.id);
   } catch {
     // Failure: requeue or dead-letter
     if (storedJob.attempts < storedJob.maxAttempts) {
@@ -58,9 +57,14 @@ export async function runJob<T>(
       const backoffMs = computeBackoffMs(nextAttempts);
       const availableAtMs = runtime.now() + backoffMs;
       await adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts);
+      return;
     } else {
       // At max attempts: dead-letter
       await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now());
+      return;
     }
   }
+
+  // Success: acknowledge (outside the try/catch so ack errors don't trigger requeue)
+  await adapter.ack(storedJob.name, storedJob.id);
 }

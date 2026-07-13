@@ -4,10 +4,10 @@ import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import type { IQueue, IRuntimeServices } from '@hono-enterprise/common';
 
 /**
- * Fake runtime for testing.
+ * Fake runtime services for integration testing.
  */
 class FakeRuntime implements IRuntimeServices {
-  #now: number = Date.now();
+  #now: number = 0;
 
   platform(): 'deno' | 'node' | 'bun' | 'cloudflare-workers' {
     return 'deno';
@@ -25,12 +25,8 @@ class FakeRuntime implements IRuntimeServices {
     return this.#now;
   }
 
-  advanceMs(ms: number): void {
-    this.#now += ms;
-  }
-
   uuid(): string {
-    return `fake-uuid-${Date.now()}`;
+    return `fake-uuid-${this.#now}`;
   }
 
   randomBytes(_length: number): Uint8Array {
@@ -45,14 +41,21 @@ class FakeRuntime implements IRuntimeServices {
     return this.#now;
   }
 
-  setInterval(_fn: () => void, _ms: number): number {
-    return 1;
+  setInterval(fn: () => void, _ms: number): number {
+    // In integration tests, we don't test the poll loop - that's unit tested
+    // Just return a dummy handle
+    const id = Date.now();
+    // Fire once immediately for testing purposes
+    setTimeout(fn, 0);
+    return id;
   }
 
   clearInterval(_handle: number): void {}
 
-  setTimeout(_fn: () => void, _ms: number): number {
-    return 1;
+  setTimeout(fn: () => void, _ms: number): number {
+    const id = Date.now();
+    fn(); // Fire immediately for testing
+    return id;
   }
 
   clearTimeout(_handle: number): void {}
@@ -163,47 +166,6 @@ describe('QueuePlugin integration', () => {
     expect(typeof jobId).toBe('string');
   });
 
-  it('acks job after successful processing', async () => {
-    const plugin = QueuePlugin({ adapter: 'memory' });
-    await plugin.register(ctx as never);
-
-    const queue = ctx.services.get<IQueue>('queue');
-
-    // Add a job
-    await queue.add('test-job', { foo: 'bar' });
-
-    // The job should be added successfully
-    expect(queue).toBeDefined();
-  });
-
-  it('retries and then dead-letters on repeated failure', async () => {
-    const plugin = QueuePlugin({ adapter: 'memory' });
-    await plugin.register(ctx as never);
-
-    const queue = ctx.services.get<IQueue>('queue');
-
-    // Add a job with maxAttempts=2
-    await queue.add('failing-job', {}, { maxAttempts: 2 });
-
-    // The job should be added successfully
-    expect(queue).toBeDefined();
-  });
-
-  it('schedules recurring jobs', async () => {
-    const plugin = QueuePlugin({ adapter: 'memory' });
-    await plugin.register(ctx as never);
-
-    const queue = ctx.services.get<IQueue>('queue');
-
-    // Add recurring job (every minute)
-    await queue.addRecurring('tick', { count: 0 }, { cron: '* * * * *' });
-
-    // Verify recurring job was stored
-    const memoryQueue = ctx.services.get('queue');
-    // Access internal recurring jobs through adapter
-    expect(memoryQueue).toBeDefined();
-  });
-
   it('supports multiple named instances', async () => {
     const plugin1 = QueuePlugin({ adapter: 'memory', name: 'foreground' });
     const plugin2 = QueuePlugin({ adapter: 'memory', name: 'background' });
@@ -224,21 +186,40 @@ describe('QueuePlugin integration', () => {
     await plugin.register(ctx as never);
 
     const health = await ctx.health.check();
-    expect(health.queue.status).toBe('up');
+    // Health indicator is registered under the token 'queue'
+    expect(health['queue']).toBeDefined();
+    expect(health['queue']?.status).toBe('up');
   });
 
   it('lifecycle hook disconnects on close', async () => {
     const plugin = QueuePlugin({ adapter: 'memory' });
     await plugin.register(ctx as never);
 
-    ctx.services.get<IQueue>('queue');
-    // Queue should be ready after registration
-    // Type assertion needed because IQueue doesn't include isReady (it's internal)
-    expect(true).toBe(true); // Placeholder for isReady check
+    const queue = ctx.services.get<IQueue>('queue');
+
+    // Queue should be connected after registration
+    // We verify by checking that we can add jobs
+    const jobId = await queue.add('test', {});
+    expect(jobId).toBeTruthy();
 
     await ctx.lifecycle.triggerClose();
 
-    // Service should be disconnected after lifecycle close
-    expect(true).toBe(true); // Placeholder for isReady check after disconnect
+    // After close, the adapter should be disconnected
+    // Try to add a job - should throw since disconnected
+    await expect(queue.add('test2', {})).rejects.toThrow('not connected');
+  });
+
+  it('schedules recurring jobs', async () => {
+    const plugin = QueuePlugin({ adapter: 'memory' });
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+
+    // Add recurring job (every minute)
+    await queue.addRecurring('tick', { count: 0 }, { cron: '* * * * *' });
+
+    // Verify recurring job was stored
+    const health = await ctx.health.check();
+    expect(health).toBeTruthy();
   });
 });

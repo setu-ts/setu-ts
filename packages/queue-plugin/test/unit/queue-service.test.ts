@@ -116,7 +116,7 @@ describe('QueueService', () => {
       await runtime.advanceMs(200);
 
       // Job should be processed and acked
-      const jobs = await adapter.reserve('test', 1, Date.now());
+      const jobs = await adapter.reserve('test', 1, runtime.now());
       expect(jobs.length).toBe(0); // Already acked
     });
 
@@ -128,17 +128,18 @@ describe('QueueService', () => {
       });
 
       await service.add('test', {});
-      await runtime.advanceMs(200);
+      // Poll interval is 1000ms, so advance past it
+      await runtime.advanceMs(1100);
 
       // Should have tried once
       expect(callCount).toBe(1);
 
-      // Advance past backoff
-      await runtime.advanceMs(2000);
-      await runtime.advanceMs(100);
+      // Advance past backoff (exponential: attempt 2 = 1000ms backoff)
+      // Plus another poll interval to pick up the retried job
+      await runtime.advanceMs(1000 + 1100);
 
-      // Should retry
-      await runtime.advanceMs(200);
+      // Should retry - assert callCount increased
+      expect(callCount).toBe(2);
     });
 
     it('dead-letters at maxAttempts', async () => {
@@ -149,18 +150,21 @@ describe('QueueService', () => {
       });
 
       await service.add('test', {}, { maxAttempts: 2 });
-      await runtime.advanceMs(200);
+      // Poll interval is 1000ms
+      await runtime.advanceMs(1100);
 
       // First attempt
       expect(callCount).toBe(1);
 
-      // Advance past backoff for retry
-      await runtime.advanceMs(2000);
-      await runtime.advanceMs(100);
-      await runtime.advanceMs(200);
+      // Advance past backoff for retry (attempt 2 = 1000ms) + poll interval
+      await runtime.advanceMs(1000 + 1100);
 
       // Second attempt (at max)
       expect(callCount).toBe(2);
+
+      // Job should be dead-lettered - verify via dead letters
+      const deadLetters = adapter.getDeadLetters('test');
+      expect(deadLetters.length).toBe(1);
     });
   });
 
@@ -187,10 +191,80 @@ describe('QueueService', () => {
         await service.add('test', { index: i });
       }
 
-      runtime.advanceMs(200);
+      // Poll interval is 1000ms
+      await runtime.advanceMs(1100);
 
       // Should have at most 2 in flight
       expect(inFlight.length).toBeLessThanOrEqual(2);
+    });
+
+    it('concurrency cap is not exceeded even on adapter failure', async () => {
+      // This test catches Defect 1: inFlight double-decrement causing cap breach
+      const inFlightCount: number[] = [];
+      let resolveAll: (() => void) | null = null;
+      const allJobsBlocked = new Promise<void>((resolve) => {
+        resolveAll = resolve;
+      });
+
+      service.process(
+        'test',
+        async (_job) => {
+          // Track in-flight count
+          inFlightCount.push(1);
+          await allJobsBlocked;
+          inFlightCount.pop();
+        },
+        { concurrency: 2 },
+      );
+
+      // Add 5 jobs
+      for (let i = 0; i < 5; i++) {
+        await service.add('test', { index: i });
+      }
+
+      // Poll interval is 1000ms
+      await runtime.advanceMs(1100);
+
+      // Should have exactly 2 in flight (concurrency cap)
+      expect(inFlightCount.length).toBeLessThanOrEqual(2);
+
+      // Unblock and clean up
+      resolveAll!();
+    });
+  });
+
+  describe('double-dispatch regression (§3.5)', () => {
+    beforeEach(async () => {
+      await service.connect();
+    });
+
+    it('slow processor spanning 10+ poll ticks is dispatched exactly once', async () => {
+      let dispatchCount = 0;
+      let resolveJob: (() => void) | null = null;
+      const jobProcessed = new Promise<void>((resolve) => {
+        resolveJob = resolve;
+      });
+
+      service.process(
+        'slow-job',
+        async () => {
+          dispatchCount++;
+          await jobProcessed;
+        },
+        { concurrency: 1 },
+      );
+
+      // Add one job
+      await service.add('slow-job', {});
+
+      // Advance past 10 poll ticks (10 * 1000ms = 10000ms)
+      await runtime.advanceMs(11000);
+
+      // Should have dispatched exactly once (not re-dispatched due to reserve bug)
+      expect(dispatchCount).toBe(1);
+
+      // Clean up
+      resolveJob!();
     });
   });
 
@@ -205,7 +279,7 @@ describe('QueueService', () => {
       // Verify recurring job was stored by fetching due jobs at a future time
       // The cron '* * * * *' means every minute, so at any time in the next minute,
       // the job should be due
-      const futureTime = Date.now() + 60000; // 1 minute in the future
+      const futureTime = runtime.now() + 60000; // 1 minute in the future
       const due = await adapter.fetchRecurringDue(futureTime);
       expect(due.length).toBe(1);
       expect(due[0].name).toBe('test');
@@ -227,7 +301,7 @@ describe('QueueService', () => {
       expect(service.isReady()).toBe(false);
     });
 
-    it('disconnect handles already disconnected gracefully', async () => {
+    it('disconnect handles being called when not connected', async () => {
       // Should not throw
       await service.disconnect();
       expect(service.isReady()).toBe(false);

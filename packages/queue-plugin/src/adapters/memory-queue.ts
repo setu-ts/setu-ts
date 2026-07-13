@@ -213,6 +213,17 @@ export class MemoryQueue implements QueueAdapter {
     }
   }
 
+  /**
+   * Get dead-lettered jobs for a given queue name (for testing/observability).
+   */
+  getDeadLetters<T>(name: string): readonly StoredJob<T>[] {
+    if (!this.#connected) {
+      throw new Error('MemoryQueue is not connected');
+    }
+    const dead = this.#getOrCreateDead(name);
+    return [...dead] as readonly StoredJob<T>[];
+  }
+
   #getOrCreateReady(name: string): StoredJob[] {
     if (!this.#ready.has(name)) {
       this.#ready.set(name, []);

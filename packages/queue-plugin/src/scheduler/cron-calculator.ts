@@ -130,9 +130,10 @@ function isValidCron(cron: string): boolean {
  *
  * @example
  * ```typescript
- * cronNextMs('* * * * *', Date.now()); // Next minute
- * cronNextMs('0 9 * * 1-5', Date.now()); // 9 AM on weekdays
- * cronNextMs('5 * * * *', Date.now()); // Every hour at :05
+ * const now = runtime.now(); // Use runtime clock, not Date.now()
+ * cronNextMs('* * * * *', now); // Next minute
+ * cronNextMs('0 9 * * 1-5', now); // 9 AM on weekdays
+ * cronNextMs('5 * * * *', now); // Every hour at :05
  * ```
  * @since 0.1.0
  */

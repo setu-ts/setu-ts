@@ -7,6 +7,7 @@
  */
 
 import type { HealthIndicatorFn, IPlugin, IQueue } from '@hono-enterprise/common';
+import { createCapabilityToken } from '@hono-enterprise/common';
 import type { QueueAdapterType, QueuePluginOptions } from '../interfaces/index.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
 import { RedisQueue } from '../adapters/redis-queue.ts';
@@ -36,9 +37,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   const defaultMaxAttempts = options?.defaultMaxAttempts ?? 3;
   const pollIntervalMs = options?.pollIntervalMs ?? 1000;
 
-  // Derive plugin name and token
+  // Derive plugin name and token using capability token grammar
   const pluginName = name ? `queue-plugin.${name}` : 'queue-plugin';
-  const token = name ? `queue.${name}` : 'queue';
+  const token = name ? createCapabilityToken(`queue.${name}`) : 'queue';
 
   return {
     name: pluginName,
@@ -79,9 +80,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // Register the service
       ctx.services.register<IQueue>(token, service);
 
-      // Register health indicator
+      // Register health indicator using the same token
       const healthIndicator: HealthIndicatorFn = service.createHealthIndicator();
-      ctx.health.register('queue', healthIndicator);
+      ctx.health.register(token, healthIndicator);
 
       // Register lifecycle hook for cleanup
       ctx.lifecycle.onClose(async () => {

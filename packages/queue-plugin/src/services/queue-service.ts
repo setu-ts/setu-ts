@@ -160,13 +160,21 @@ export class QueueService implements IQueue {
 
   #startWorkerLoop(): void {
     this.#workerHandle = this.#runtime.setInterval(() => {
-      this.#poll();
+      this.#poll().catch((_error) => {
+        // Log transient errors but don't crash the loop
+        // Errors are silently swallowed to prevent unhandled rejections
+        // In production, consider injecting a logger for error reporting
+      });
     }, this.#pollIntervalMs) as unknown as number;
   }
 
   #startRecurringLoop(): void {
     this.#recurringHandle = this.#runtime.setInterval(() => {
-      this.#processRecurring();
+      this.#processRecurring().catch((_error) => {
+        // Log transient errors but don't crash the loop
+        // Errors are silently swallowed to prevent unhandled rejections
+        // In production, consider injecting a logger for error reporting
+      });
     }, this.#pollIntervalMs) as unknown as number;
   }
 
@@ -227,10 +235,8 @@ export class QueueService implements IQueue {
     };
 
     // Fire and forget - errors are handled by runJob
-    processor().catch(() => {
-      // Errors are already handled in runJob (requeue/deadLetter)
-      reg.inFlight--;
-    });
+    // DO NOT add .catch() here - inFlight is already decremented in finally
+    processor();
   }
 
   async #processRecurring(): Promise<void> {
