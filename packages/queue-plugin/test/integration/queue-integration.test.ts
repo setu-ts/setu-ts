@@ -220,6 +220,93 @@ describe('QueuePlugin integration', () => {
     expect(health['queue.background']?.data).toEqual({ adapter: 'MemoryQueue' });
   });
 
+  it('rabbitmq adapter: adds and processes a job through the fake AMQP client', async () => {
+    // Use a fake AMQP client to simulate RabbitMQ without a real broker
+    const fakeAmqpClient = {
+      createChannel: () =>
+        Promise.resolve({
+          assertQueue: (queue: string, _options?: unknown) => {
+            return Promise.resolve({ queue });
+          },
+          publish: (
+            _exchange: string,
+            routingKey: string,
+            content: Uint8Array,
+            options?: unknown,
+          ) => {
+            // For testing, route delay queue messages to ready queue immediately
+            if (routingKey.endsWith('.delay')) {
+              const readyQueue = routingKey.replace('.delay', '.ready');
+              if (!fakeAmqpClient._buffers) {
+                fakeAmqpClient._buffers = new Map();
+              }
+              if (!fakeAmqpClient._buffers.has(readyQueue)) {
+                fakeAmqpClient._buffers.set(readyQueue, []);
+              }
+              fakeAmqpClient._buffers.get(readyQueue)!.push({
+                content,
+                options,
+              });
+            } else {
+              if (!fakeAmqpClient._buffers) {
+                fakeAmqpClient._buffers = new Map();
+              }
+              if (!fakeAmqpClient._buffers.has(routingKey)) {
+                fakeAmqpClient._buffers.set(routingKey, []);
+              }
+              fakeAmqpClient._buffers.get(routingKey)!.push({
+                content,
+                options,
+              });
+            }
+            return true;
+          },
+          get: (queue: string, _options?: unknown) => {
+            if (!fakeAmqpClient._buffers) {
+              fakeAmqpClient._buffers = new Map();
+            }
+            const buffer = fakeAmqpClient._buffers.get(queue);
+            if (!buffer || buffer.length === 0) {
+              return Promise.resolve(false); // BasicGetEmpty sentinel
+            }
+            const msg = buffer.shift()!;
+            return Promise.resolve({
+              content: msg.content,
+              fields: { deliveryTag: Math.floor(Math.random() * 1000) },
+              properties: msg.options,
+            });
+          },
+          ack: (_msg: unknown) => {},
+          close: () => Promise.resolve(),
+        }),
+      close: () => Promise.resolve(),
+      _buffers: new Map<string, Array<{ content: Uint8Array; options: unknown }>>(),
+    };
+
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      client: fakeAmqpClient as never,
+      prefix: 'test.integration',
+      pollIntervalMs: POLL_MS,
+    });
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+
+    const delivered: IJob<{ message: string }>[] = [];
+    queue.process<{ message: string }>('test-job', (job) => {
+      delivered.push(job);
+    });
+
+    const jobId = await queue.add('test-job', { message: 'hello rabbitmq' });
+    await runtime.advanceMs(POLL_MS * 2);
+
+    expect(delivered.length).toBe(1);
+    expect(delivered[0]?.id).toBe(jobId);
+    expect(delivered[0]?.data.message).toBe('hello rabbitmq');
+    expect(delivered[0]?.attempts).toBe(1);
+  });
+
   it('lifecycle hook disconnects the queue on close', async () => {
     const plugin = QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS });
     await plugin.register(ctx as never);

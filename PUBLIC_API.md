@@ -1454,11 +1454,14 @@ Provides background job queue with Memory and Redis adapters.
 ### Exports
 
 - **`QueuePlugin`** — Plugin factory for registering the queue service
-- **`QueueAdapterType`** — `'memory' | 'redis'`
-- **`QueuePluginOptions`** — Plugin configuration options
+- **`QueueAdapterType`** — `'memory' | 'redis' | 'rabbitmq'`
+- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`)
 - **`MemoryQueue`** — In-memory queue adapter for development/testing
 - **`RedisQueue`** — Redis-backed queue adapter for production
 - **`RedisQueueOptions`** — Redis adapter configuration
+- **`RabbitMqQueue`** — RabbitMQ queue adapter via amqplib (polling via basicGet, TTL+DLX for
+  delays)
+- **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`)
 - **`IQueue`** — Queue service interface (re-exported from `@hono-enterprise/common`)
 - **`IJob<T>`** — Job interface (re-exported)
 - **`JobProcessor<T>`** — Job processor type (re-exported)
@@ -1491,6 +1494,15 @@ app.register(QueuePlugin({
   adapter: 'memory',
   name: 'background',
   pollIntervalMs: 2000,
+}));
+
+// RabbitMQ adapter (production, requires amqplib)
+app.register(QueuePlugin({
+  adapter: 'rabbitmq',
+  url: config.get('RABBITMQ_URL'),
+  prefix: 'myapp.queue',
+  pollIntervalMs: 1000,
+  defaultMaxAttempts: 3,
 }));
 ```
 
@@ -1567,8 +1579,8 @@ await queue.addRecurring('daily-report', { type: 'summary' }, { cron: '0 9 * * *
 ### Dead-Lettered Jobs
 
 A job that fails on its final attempt is dead-lettered and never delivered again. `MemoryQueue`
-exposes its dead set for assertions in tests; the Redis transport keeps its dead set in Redis, so
-inspect it there.
+exposes its dead set for assertions in tests; the Redis transport keeps its dead set in Redis, and
+the RabbitMQ transport keeps its dead set in a per-name dead queue (`he.queue.<name>.dead`).
 
 ```typescript
 import { MemoryQueue } from '@hono-enterprise/queue-plugin';

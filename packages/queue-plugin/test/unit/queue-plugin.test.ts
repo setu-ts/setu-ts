@@ -200,6 +200,33 @@ describe('QueuePlugin', () => {
     expect(queue).toBeDefined();
   });
 
+  it('builds RabbitMqQueue when adapter is rabbitmq', async () => {
+    // Use a fake AMQP client to avoid needing a real RabbitMQ connection
+    const fakeClient = {
+      createChannel: () =>
+        Promise.resolve({
+          assertQueue: () => Promise.resolve({ queue: 'test' }),
+          publish: () => true,
+          get: () => Promise.resolve(false),
+          ack: () => {},
+          close: () => Promise.resolve(),
+        }),
+      close: () => Promise.resolve(),
+    };
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      url: 'amqp://localhost:5672',
+      client: fakeClient as never,
+      prefix: 'test.prefix',
+    });
+
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+    expect(queue).toBeDefined();
+  });
+
   it('throws on unknown adapter', async () => {
     const ctx = new FakeContext();
     const plugin = QueuePlugin({ adapter: 'unknown' as never });
