@@ -150,6 +150,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `common/services/messaging.ts`: IMessageBroker, ISubscription, MessageHandler, MessageMetadata,
   SubscribeOptions; in-memory + Redis Streams brokers implemented; RabbitMQ/NATS/Kafka deferred to
   M14b) — complete (PR pending)
+- **Milestone 14b** (`packages/messaging-plugin` — RabbitMqBroker, NatsBroker, and KafkaBroker added
+  to the existing MessagingPlugin via the internal MessageBrokerAdapter seam; no `common` change, no
+  new capability token; each broker follows the inject-or-lazy `npm:` client pattern with a guarded
+  real-import test) — complete (PR pending)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
