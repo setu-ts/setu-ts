@@ -3442,6 +3442,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
+| 15b       | ⬜     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |
