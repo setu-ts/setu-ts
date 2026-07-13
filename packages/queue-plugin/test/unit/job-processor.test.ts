@@ -68,7 +68,7 @@ describe('runJob', () => {
   let adapter: {
     ack: (name: string, id: string) => Promise<void>;
     requeue: (name: string, id: string, availableAtMs: number, attempts: number) => Promise<void>;
-    deadLetter: (name: string, id: string) => Promise<void>;
+    deadLetter: (name: string, id: string, nowMs: number) => Promise<void>;
     ackCalled: boolean;
     requeueCalls: Array<{ name: string; id: string; availableAtMs: number; attempts: number }>;
     deadLetterCalled: boolean;
@@ -81,6 +81,7 @@ describe('runJob', () => {
       requeueCalls: [],
       deadLetterCalled: false,
       ack: async (_name: string, _id: string) => {
+        await Promise.resolve();
         adapter.ackCalled = true;
       },
       requeue: async (
@@ -89,9 +90,11 @@ describe('runJob', () => {
         availableAtMs: number,
         attempts: number,
       ) => {
+        await Promise.resolve();
         adapter.requeueCalls.push({ name, id, availableAtMs, attempts });
       },
-      deadLetter: async (_name: string, _id: string) => {
+      deadLetter: async (_name: string, _id: string, _nowMs: number) => {
+        await Promise.resolve();
         adapter.deadLetterCalled = true;
       },
     };

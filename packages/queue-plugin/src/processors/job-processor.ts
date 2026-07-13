@@ -18,7 +18,7 @@ import type { IRuntimeServices } from '@hono-enterprise/common';
 interface JobRunnerAdapter {
   ack(name: string, id: string): Promise<void>;
   requeue(name: string, id: string, availableAtMs: number, attempts: number): Promise<void>;
-  deadLetter(name: string, id: string): Promise<void>;
+  deadLetter(name: string, id: string, nowMs: number): Promise<void>;
 }
 
 /**
@@ -60,7 +60,7 @@ export async function runJob<T>(
       await adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts);
     } else {
       // At max attempts: dead-letter
-      await adapter.deadLetter(storedJob.name, storedJob.id);
+      await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now());
     }
   }
 }

@@ -227,7 +227,7 @@ export class RedisQueue implements QueueAdapter {
     await this.#client.zadd(readyKey, availableAtMs, id);
   }
 
-  async deadLetter(name: string, id: string): Promise<void> {
+  async deadLetter(name: string, id: string, nowMs: number): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
     }
@@ -238,8 +238,8 @@ export class RedisQueue implements QueueAdapter {
     // Remove from processing
     await this.#client.zrem(processingKey, id);
 
-    // Add to dead set (keep payload in jobs hash for debugging)
-    await this.#client.zadd(deadKey, Date.now(), id);
+    // Add to dead set with score = nowMs (keep payload in jobs hash for debugging)
+    await this.#client.zadd(deadKey, nowMs, id);
   }
 
   async storeRecurring(rec: StoredRecurring): Promise<void> {

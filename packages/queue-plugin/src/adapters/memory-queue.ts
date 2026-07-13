@@ -84,7 +84,7 @@ export class MemoryQueue implements QueueAdapter {
 
   // deno-lint-ignore require-await
   async reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]> {
-    if (!this.#ready) {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 
@@ -112,7 +112,7 @@ export class MemoryQueue implements QueueAdapter {
 
   // deno-lint-ignore require-await
   async ack(name: string, id: string): Promise<void> {
-    if (!this.#ready) {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 
@@ -127,7 +127,7 @@ export class MemoryQueue implements QueueAdapter {
     availableAtMs: number,
     attempts: number,
   ): Promise<void> {
-    if (!this.#ready) {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 
@@ -152,8 +152,8 @@ export class MemoryQueue implements QueueAdapter {
   }
 
   // deno-lint-ignore require-await
-  async deadLetter(name: string, id: string): Promise<void> {
-    if (!this.#ready) {
+  async deadLetter(name: string, id: string, _nowMs: number): Promise<void> {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 
@@ -172,7 +172,7 @@ export class MemoryQueue implements QueueAdapter {
 
   // deno-lint-ignore require-await
   async storeRecurring(rec: StoredRecurring): Promise<void> {
-    if (!this.#ready) {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 
@@ -183,7 +183,7 @@ export class MemoryQueue implements QueueAdapter {
 
   // deno-lint-ignore require-await
   async fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
-    if (!this.#ready) {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 
@@ -192,7 +192,7 @@ export class MemoryQueue implements QueueAdapter {
 
   // deno-lint-ignore require-await
   async advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
-    if (!this.#ready) {
+    if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
 

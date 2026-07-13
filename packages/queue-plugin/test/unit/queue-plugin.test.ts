@@ -175,8 +175,29 @@ describe('QueuePlugin', () => {
   });
 
   it('builds RedisQueue when adapter is redis', async () => {
-    // Skip this test as it requires real Redis connection
-    // The RedisQueue is tested in redis-queue.test.ts with a fake client
+    // Use a fake Redis client to avoid needing a real Redis connection
+    const fakeClient = {
+      zadd: () => 0,
+      zrangebyscore: () => [],
+      zrem: () => 0,
+      hset: () => 0,
+      hget: () => null,
+      hdel: () => 0,
+      del: () => 0,
+      quit: () => Promise.resolve(),
+      connect: () => Promise.resolve(),
+    };
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({
+      adapter: 'redis',
+      url: 'redis://localhost:6379',
+      client: fakeClient as never,
+    });
+
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+    expect(queue).toBeDefined();
   });
 
   it('throws on unknown adapter', async () => {

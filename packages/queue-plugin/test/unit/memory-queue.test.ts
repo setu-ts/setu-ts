@@ -127,6 +127,13 @@ describe('MemoryQueue', () => {
       await queue.connect();
     });
 
+    it('throws when acking while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.ack('test', '1'),
+      ).rejects.toThrow('MemoryQueue is not connected');
+    });
+
     it('ack removes job from processing', async () => {
       const job = {
         id: '1',
@@ -152,6 +159,12 @@ describe('MemoryQueue', () => {
   describe('requeue', () => {
     beforeEach(async () => {
       await queue.connect();
+    });
+
+    it('requeue returns early when job not found in processing', async () => {
+      // Try to requeue a job that was never reserved
+      await queue.requeue('test', 'nonexistent', Date.now() + 5000, 1);
+      // Should not throw
     });
 
     it('requeue moves job back to ready with new availableAtMs', async () => {
@@ -186,6 +199,12 @@ describe('MemoryQueue', () => {
       await queue.connect();
     });
 
+    it('deadLetter returns early when job not found in processing', async () => {
+      // Try to deadLetter a job that was never reserved
+      await queue.deadLetter('test', 'nonexistent', Date.now());
+      // Should not throw
+    });
+
     it('deadLetter moves job from processing to dead', async () => {
       const job = {
         id: '1',
@@ -199,7 +218,7 @@ describe('MemoryQueue', () => {
       await queue.enqueue(job);
       await queue.reserve('test', 1, Date.now());
 
-      await queue.deadLetter('test', '1');
+      await queue.deadLetter('test', '1', Date.now());
 
       // Should not be reservable
       const reserved = await queue.reserve('test', 1, Date.now());
@@ -245,6 +264,53 @@ describe('MemoryQueue', () => {
 
       const dueLater = await queue.fetchRecurringDue(Date.now() + 60000);
       expect(dueLater.length).toBe(1);
+    });
+
+    it('advanceRecurring returns early when recurring job not found', async () => {
+      // Try to advance a recurring job that doesn't exist
+      await queue.advanceRecurring('nonexistent', Date.now() + 60000);
+      // Should not throw
+    });
+
+    it('fetchRecurringDue returns empty array when no jobs due', async () => {
+      const rec = {
+        id: 'r2',
+        name: 'test2',
+        data: {},
+        cron: '* * * * *',
+        nextRunAtMs: Date.now() + 600000, // 10 minutes in future
+      };
+
+      await queue.storeRecurring(rec);
+      const due = await queue.fetchRecurringDue(Date.now());
+      expect(due.length).toBe(0);
+    });
+
+    it('throws when storeRecurring while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.storeRecurring({
+          id: 'r1',
+          name: 'test',
+          data: {},
+          cron: '* * * * *',
+          nextRunAtMs: Date.now(),
+        }),
+      ).rejects.toThrow('MemoryQueue is not connected');
+    });
+
+    it('throws when fetchRecurringDue while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.fetchRecurringDue(Date.now()),
+      ).rejects.toThrow('MemoryQueue is not connected');
+    });
+
+    it('throws when advanceRecurring while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.advanceRecurring('r1', Date.now()),
+      ).rejects.toThrow('MemoryQueue is not connected');
     });
   });
 });

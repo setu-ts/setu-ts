@@ -33,6 +33,19 @@ describe('QueueService', () => {
       await service.disconnect();
       expect(service.isReady()).toBe(false);
     });
+
+    it('connect() returns early when already connected', async () => {
+      await service.connect();
+      // Second connect should be a no-op
+      await service.connect();
+      expect(service.isReady()).toBe(true);
+    });
+
+    it('disconnect() handles being called when not connected', async () => {
+      // Should not throw
+      await service.disconnect();
+      expect(service.isReady()).toBe(false);
+    });
   });
 
   describe('add', () => {
@@ -211,6 +224,12 @@ describe('QueueService', () => {
       await service.disconnect();
 
       // isReady should be false after disconnect
+      expect(service.isReady()).toBe(false);
+    });
+
+    it('disconnect handles already disconnected gracefully', async () => {
+      // Should not throw
+      await service.disconnect();
       expect(service.isReady()).toBe(false);
     });
   });

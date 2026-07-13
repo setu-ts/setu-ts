@@ -150,7 +150,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `common/services/messaging.ts`: IMessageBroker, ISubscription, MessageHandler, MessageMetadata,
   SubscribeOptions; in-memory + Redis Streams brokers implemented; RabbitMQ/NATS/Kafka deferred to
   M14b) — complete (PR pending)
-- **Next milestone** — Milestone 15 (queue-plugin)
+- **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
+  QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
+  processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
+  IQueue, IJob, JobProcessor, AddJobOptions, ProcessOptions, RecurringOptions; memory + redis
+  adapters implemented) — complete
+- **Next milestone** — Milestone 16 (auth-plugin)
 
 ## Verification (run before declaring any work done)
 

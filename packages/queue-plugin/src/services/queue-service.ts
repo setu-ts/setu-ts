@@ -187,6 +187,8 @@ export class QueueService implements IQueue {
       // Compute how many jobs we can reserve
       const limit = reg.concurrency - reg.inFlight;
 
+      // Defensive: skip if limit is non-positive (unreachable due to earlier concurrency check above)
+      // Kept for safety against race conditions or future code changes
       if (limit <= 0) {
         continue;
       }

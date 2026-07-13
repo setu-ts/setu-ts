@@ -1449,18 +1449,44 @@ export type {
 
 ## Queue
 
-Provides background job queue.
+Provides background job queue with Memory and Redis adapters.
+
+### Exports
+
+- **`QueuePlugin`** — Plugin factory for registering the queue service
+- **`QueueAdapterType`** — `'memory' | 'redis'`
+- **`QueuePluginOptions`** — Plugin configuration options
+- **`MemoryQueue`** — In-memory queue adapter for development/testing
+- **`RedisQueue`** — Redis-backed queue adapter for production
+- **`RedisQueueOptions`** — Redis adapter configuration
+- **`IQueue`** — Queue service interface (re-exported from `@hono-enterprise/common`)
+- **`IJob<T>`** — Job interface (re-exported)
+- **`JobProcessor<T>`** — Job processor type (re-exported)
+- **`AddJobOptions`** — Options for `queue.add()` (re-exported)
+- **`ProcessOptions`** — Options for `queue.process()` (re-exported)
+- **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
 
 ### Registration
 
 ```typescript
 import { QueuePlugin } from '@hono-enterprise/queue-plugin';
 
+// Memory adapter (development/testing)
+app.register(QueuePlugin({
+  adapter: 'memory',
+  options: {
+    pollIntervalMs: 1000,
+    defaultMaxAttempts: 3,
+  },
+}));
+
+// Redis adapter (production)
 app.register(QueuePlugin({
   adapter: 'redis',
   options: {
     url: config.get('REDIS_URL'),
-    concurrency: 5,
+    pollIntervalMs: 1000,
+    defaultMaxAttempts: 3,
   },
 }));
 ```
@@ -1468,6 +1494,8 @@ app.register(QueuePlugin({
 ### Adding Jobs
 
 ```typescript
+import type { AddJobOptions, IQueue } from '@hono-enterprise/queue-plugin';
+
 app.router.post('/users', async (ctx) => {
   const queue = ctx.services.get<IQueue>('queue');
   const user = await createUser(ctx.request.body);
@@ -1478,10 +1506,14 @@ app.router.post('/users', async (ctx) => {
     email: user.email,
   });
 
-  // Add a delayed job
+  // Add a delayed job (delayMs in milliseconds)
   await queue.add('send-reminder', {
     userId: user.id,
-  }, { delay: 86400000 }); // 24 hours
+  }, { delayMs: 86400000 }); // 24 hours
+
+  // Add with custom max attempts
+  const options: AddJobOptions = { maxAttempts: 5 };
+  await queue.add('process-payment', paymentData, options);
 
   return ctx.response.status(201).json(user);
 });
@@ -1490,16 +1522,17 @@ app.router.post('/users', async (ctx) => {
 ### Processing Jobs
 
 ```typescript
+import type { IJob, IQueue } from '@hono-enterprise/queue-plugin';
+
 app.register({
   name: 'job-processors',
   version: '1.0.0',
   dependencies: ['queue', 'mail'],
   register(ctx) {
     const queue = ctx.services.get<IQueue>('queue');
-    const mailer = ctx.services.get<IMailer>('mail');
 
-    queue.process('send-welcome-email', async (job) => {
-      await mailer.send({
+    queue.process('send-welcome-email', async (job: IJob<{ userId: string; email: string }>) => {
+      await sendEmail({
         to: job.data.email,
         subject: 'Welcome!',
         body: 'Thank you for joining.',
@@ -1516,28 +1549,51 @@ app.register({
 ### Recurring Jobs
 
 ```typescript
+import type { IQueue, RecurringOptions } from '@hono-enterprise/queue-plugin';
+
 const queue = ctx.services.get<IQueue>('queue');
 
-// Every hour
-await queue.addRecurring('cleanup-old-sessions', {}, { cron: '0 * * * *' });
+// Every hour using cron expression
+const hourlyOptions: RecurringOptions = { cron: '0 * * * *' };
+await queue.addRecurring('cleanup-old-sessions', {}, hourlyOptions);
 
-// Every 5 minutes
-await queue.addRecurring('sync-data', {}, { every: 300000 });
+// Every day at 9 AM
+await queue.addRecurring('daily-report', { type: 'summary' }, { cron: '0 9 * * *' });
 ```
 
-### Job Options
+### Type Reference
 
 ```typescript
-await queue.add('process-payment', paymentData, {
-  priority: 1,
-  attempts: 3,
-  backoff: {
-    type: 'exponential',
-    delay: 5000,
-  },
-  removeOnComplete: 100,
-  removeOnFail: 50,
-});
+// AddJobOptions
+interface AddJobOptions {
+  readonly delayMs?: number; // Delay before job becomes available (ms)
+  readonly maxAttempts?: number; // Maximum retry attempts (default: 3)
+}
+
+// ProcessOptions
+interface ProcessOptions {
+  readonly concurrency?: number; // Jobs processed concurrently (default: 1)
+}
+
+// RecurringOptions
+interface RecurringOptions {
+  readonly cron: string; // Cron expression (e.g., '0 * * * *')
+}
+
+// IJob<T>
+interface IJob<T = unknown> {
+  readonly id: string;
+  readonly name: string;
+  readonly data: T;
+  readonly attempts: number;
+}
+
+// IQueue interface
+interface IQueue {
+  add<T>(name: string, data: T, options?: AddJobOptions): Promise<string>;
+  process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void;
+  addRecurring<T>(name: string, data: T, options: RecurringOptions): Promise<void>;
+}
 ```
 
 ---

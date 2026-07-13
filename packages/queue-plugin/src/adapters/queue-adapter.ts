@@ -92,10 +92,11 @@ export interface QueueAdapter {
    *
    * @param name - Job name
    * @param id - Job ID
+   * @param nowMs - Current timestamp in ms (for dead-letter timestamp)
    * @returns Resolves when dead-lettered
    * @since 0.1.0
    */
-  deadLetter(name: string, id: string): Promise<void>;
+  deadLetter(name: string, id: string, nowMs: number): Promise<void>;
 
   /**
    * Stores a recurring job.
