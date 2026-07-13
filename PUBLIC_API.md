@@ -1564,6 +1564,23 @@ await queue.addRecurring('cleanup-old-sessions', {}, hourlyOptions);
 await queue.addRecurring('daily-report', { type: 'summary' }, { cron: '0 9 * * *' });
 ```
 
+### Dead-Lettered Jobs
+
+A job that fails on its final attempt is dead-lettered and never delivered again. `MemoryQueue`
+exposes its dead set for assertions in tests; the Redis transport keeps its dead set in Redis, so
+inspect it there.
+
+```typescript
+import { MemoryQueue } from '@hono-enterprise/queue-plugin';
+
+const adapter = new MemoryQueue();
+// ... jobs fail through all their attempts ...
+
+// getDeadLetters<T>(name: string): readonly StoredJob<T>[]
+const dead = adapter.getDeadLetters('send-email');
+console.log(dead.length, dead[0]?.attempts); // 1 3
+```
+
 ### Type Reference
 
 ```typescript

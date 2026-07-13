@@ -212,7 +212,7 @@ export class QueueService implements IQueue {
           };
 
           // Dispatch job
-          this.#dispatchJob(name, jobWithAttempts, reg as ProcessorRegistration<unknown>);
+          this.#dispatchJob(jobWithAttempts, reg as ProcessorRegistration<unknown>);
         }
       } finally {
         reg.reserveInProgress = false;
@@ -221,7 +221,6 @@ export class QueueService implements IQueue {
   }
 
   #dispatchJob<T>(
-    _name: string,
     storedJob: StoredJob<T>,
     reg: ProcessorRegistration<T>,
   ): void {
@@ -229,14 +228,16 @@ export class QueueService implements IQueue {
       try {
         await runJob<T>(this.#runtime, this.#adapter, storedJob, reg.processor);
       } finally {
-        // Decrement in-flight when job settles
+        // Decrement in-flight when the job settles
         reg.inFlight--;
       }
     };
 
-    // Fire and forget - errors are handled by runJob
-    // DO NOT add .catch() here - inFlight is already decremented in finally
-    processor();
+    // Fire and forget. runJob handles a failing processor, but a failing adapter
+    // call (ack / requeue / deadLetter) still rejects, and this promise is not
+    // awaited: without a catch that rejection escapes and terminates the process.
+    // The catch must NOT decrement inFlight — the finally above already did.
+    processor().catch(() => {});
   }
 
   async #processRecurring(): Promise<void> {

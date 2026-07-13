@@ -26,8 +26,6 @@ export class MemoryQueue implements QueueAdapter {
   #processing: Map<string, Map<string, StoredJob>>;
   // Per-name: dead-lettered jobs
   #dead: Map<string, StoredJob[]>;
-  // Per-name: jobs hash (id -> StoredJob)
-  #jobs: Map<string, Map<string, StoredJob>>;
   // Recurring jobs
   #recurringDue: StoredRecurring[];
   #recurringJobs: Map<string, StoredRecurring>;
@@ -36,7 +34,6 @@ export class MemoryQueue implements QueueAdapter {
     this.#ready = new Map();
     this.#processing = new Map();
     this.#dead = new Map();
-    this.#jobs = new Map();
     this.#recurringDue = [];
     this.#recurringJobs = new Map();
   }
@@ -46,7 +43,6 @@ export class MemoryQueue implements QueueAdapter {
     this.#ready = new Map();
     this.#processing = new Map();
     this.#dead = new Map();
-    this.#jobs = new Map();
     this.#recurringDue = [];
     this.#recurringJobs = new Map();
     this.#connected = true;
@@ -57,7 +53,6 @@ export class MemoryQueue implements QueueAdapter {
     this.#ready = new Map();
     this.#processing = new Map();
     this.#dead = new Map();
-    this.#jobs = new Map();
     this.#recurringDue = [];
     this.#recurringJobs = new Map();
     this.#connected = false;
@@ -72,9 +67,6 @@ export class MemoryQueue implements QueueAdapter {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
-
-    const jobs = this.#getOrCreateJobsMap(job.name);
-    jobs.set(job.id, { ...job });
 
     const ready = this.#getOrCreateReady(job.name);
     ready.push({ ...job });
@@ -142,9 +134,6 @@ export class MemoryQueue implements QueueAdapter {
 
     // Update job
     const updated = { ...job, availableAtMs, attempts } as StoredJob<T>;
-
-    const jobs = this.#getOrCreateJobsMap(name);
-    jobs.set(id, updated);
 
     const ready = this.#getOrCreateReady(name);
     ready.push(updated);
@@ -214,7 +203,18 @@ export class MemoryQueue implements QueueAdapter {
   }
 
   /**
-   * Get dead-lettered jobs for a given queue name (for testing/observability).
+   * Returns the jobs dead-lettered under a queue name, in the order they were
+   * dead-lettered. A job lands here once it fails on its final attempt; the
+   * queue never delivers it again.
+   *
+   * This is `MemoryQueue`-only observability: the Redis transport keeps its
+   * dead set in Redis, so inspect it there.
+   *
+   * @typeParam T - The job payload type
+   * @param name - Job name
+   * @returns The dead-lettered jobs for that name
+   * @throws {Error} If the adapter is not connected
+   * @since 0.1.0
    */
   getDeadLetters<T>(name: string): readonly StoredJob<T>[] {
     if (!this.#connected) {
@@ -247,12 +247,5 @@ export class MemoryQueue implements QueueAdapter {
       this.#dead.set(name, []);
     }
     return this.#dead.get(name)!;
-  }
-
-  #getOrCreateJobsMap(name: string): Map<string, StoredJob> {
-    if (!this.#jobs.has(name)) {
-      this.#jobs.set(name, new Map());
-    }
-    return this.#jobs.get(name)!;
   }
 }

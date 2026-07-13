@@ -313,4 +313,43 @@ describe('MemoryQueue', () => {
       ).rejects.toThrow('MemoryQueue is not connected');
     });
   });
+
+  describe('storage primitives reject while not connected', () => {
+    it('throws when reserving while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.reserve('test', 1, 0),
+      ).rejects.toThrow('MemoryQueue is not connected');
+    });
+
+    it('throws when requeueing while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.requeue('test', 'job-1', 0, 2),
+      ).rejects.toThrow('MemoryQueue is not connected');
+    });
+
+    it('throws when dead-lettering while not connected', async () => {
+      const notConnectedQueue = new MemoryQueue();
+      await expect(
+        notConnectedQueue.deadLetter('test', 'job-1', 0),
+      ).rejects.toThrow('MemoryQueue is not connected');
+    });
+
+    it('throws when reading dead letters while not connected', () => {
+      const notConnectedQueue = new MemoryQueue();
+      expect(() => notConnectedQueue.getDeadLetters('test')).toThrow(
+        'MemoryQueue is not connected',
+      );
+    });
+
+    it('throws again after disconnect', async () => {
+      const queue = new MemoryQueue();
+      await queue.connect();
+      await queue.disconnect();
+      await expect(queue.reserve('test', 1, 0)).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
+    });
+  });
 });

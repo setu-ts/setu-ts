@@ -15,11 +15,14 @@ interface FakeTimerHandle {
   id: number;
   callback: () => void | Promise<void>;
   intervalMs: number;
-  lastFiredAtMs: number | null; // Track when timer last fired
+  /** Fake-clock time at which this timer next fires. */
+  nextFireAtMs: number;
+  /** `true` for setInterval (reschedules), `false` for setTimeout (one-shot). */
+  repeating: boolean;
 }
 
-// Global set to track pending promises for testing
-const pendingPromises = new Set<Promise<unknown>>();
+/** How far the clock moves between timer sweeps inside {@linkcode FakeRuntimeServices.advanceMs}. */
+const STEP_MS = 100;
 
 /**
  * Fake runtime services implementation.
@@ -67,7 +70,8 @@ export class FakeRuntimeServices implements IRuntimeServices {
       id,
       callback: fn,
       intervalMs: ms,
-      lastFiredAtMs: null, // Fire once when time reaches now + ms
+      nextFireAtMs: this.#now + ms,
+      repeating: false,
     };
     this.#timers.set(id, handle);
     return id;
@@ -93,67 +97,48 @@ export class FakeRuntimeServices implements IRuntimeServices {
   }
 
   /**
-   * Advance the fake clock by ms milliseconds.
-   * Fires any timers (setTimeout/setInterval) that should fire during this advance.
+   * Advances the fake clock, firing every timer whose due time is crossed.
+   *
+   * The clock moves in {@linkcode STEP_MS} steps so an interval fires once per
+   * elapsed period rather than once per call, which is what lets a test observe
+   * a job that stays in flight across several poll ticks.
    */
   async advanceMs(ms: number): Promise<void> {
     const targetTime = this.#now + ms;
 
-    // Fire timers at each interval until we reach target time
     while (this.#now < targetTime) {
-      // Advance by a small increment
-      const step = Math.min(100, targetTime - this.#now);
-      this.#now += step;
+      this.#now += Math.min(STEP_MS, targetTime - this.#now);
 
-      // Find timers that should fire at this point
-      const toFire: FakeTimerHandle[] = [];
-      for (const timer of this.#timers.values()) {
-        // For setInterval: fire if enough time has passed since last fire
-        // For setTimeout: fire once when due
-        if (timer.lastFiredAtMs === null) {
-          // First fire - fire immediately if we've reached the scheduled time
-          if (this.#now >= timer.intervalMs) {
-            toFire.push(timer);
-          }
-        } else {
-          // Subsequent fires for setInterval
-          if (this.#now >= timer.lastFiredAtMs + timer.intervalMs) {
-            toFire.push(timer);
-          }
-        }
-      }
+      const toFire = [...this.#timers.values()].filter((t) => this.#now >= t.nextFireAtMs);
 
-      if (toFire.length === 0) continue;
-
-      // Fire timers and await async callbacks
-      const promises: Promise<void>[] = [];
+      const settled: Promise<void>[] = [];
       for (const timer of toFire) {
-        timer.lastFiredAtMs = this.#now;
+        if (timer.repeating) {
+          timer.nextFireAtMs += timer.intervalMs;
+        } else {
+          this.#timers.delete(timer.id);
+        }
         const result = timer.callback();
         if (result instanceof Promise) {
-          promises.push(result);
+          settled.push(result);
         }
       }
 
-      // Wait for all async callbacks to complete
-      await Promise.all(promises);
+      await Promise.all(settled);
 
-      // Wait for any nested promises (e.g., job processing)
-      await this.#awaitPendingPromises();
+      // The service dispatches jobs as fire-and-forget promises the timer
+      // callback does not return, so drain the microtask queue to let them run.
+      await this.#drainMicrotasks();
     }
   }
 
   /**
-   * Wait for all pending promises to settle.
+   * Yields repeatedly so already-scheduled microtask chains (a dispatched job
+   * running its processor, then acking) can settle before the clock moves on.
    */
-  async #awaitPendingPromises(): Promise<void> {
-    let iterations = 0;
-    const maxIterations = 10;
-    while (pendingPromises.size > 0 && iterations < maxIterations) {
-      const currentPromises = Array.from(pendingPromises);
-      pendingPromises.clear();
-      await Promise.all(currentPromises);
-      iterations++;
+  async #drainMicrotasks(): Promise<void> {
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
     }
   }
 
@@ -171,7 +156,8 @@ export class FakeRuntimeServices implements IRuntimeServices {
       id,
       callback: fn,
       intervalMs: ms,
-      lastFiredAtMs: null, // Will fire when advanceMs is called
+      nextFireAtMs: this.#now + ms,
+      repeating: true,
     };
     this.#timers.set(id, handle);
     return id;
@@ -193,13 +179,5 @@ export class FakeRuntimeServices implements IRuntimeServices {
    */
   clearAllTimers(): void {
     this.#timers.clear();
-  }
-
-  /**
-   * Track a promise for later awaiting (used by job processing).
-   */
-  trackPromise<T>(promise: Promise<T>): Promise<T> {
-    pendingPromises.add(promise);
-    return promise.finally(() => pendingPromises.delete(promise));
   }
 }

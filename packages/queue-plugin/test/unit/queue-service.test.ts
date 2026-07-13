@@ -4,6 +4,19 @@ import { QueueService } from '../../src/services/queue-service.ts';
 import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
+/**
+ * A MemoryQueue whose ack() always rejects, standing in for a transport that
+ * loses its backend between reserving a job and acknowledging it.
+ */
+class FailingAckQueue extends MemoryQueue {
+  failedAcks = 0;
+
+  override ack(_name: string, _id: string): Promise<void> {
+    this.failedAcks++;
+    return Promise.reject(new Error('backend unavailable during ack'));
+  }
+}
+
 describe('QueueService', () => {
   let runtime: FakeRuntimeServices;
   let adapter: MemoryQueue;
@@ -198,38 +211,56 @@ describe('QueueService', () => {
       expect(inFlight.length).toBeLessThanOrEqual(2);
     });
 
-    it('concurrency cap is not exceeded even on adapter failure', async () => {
-      // This test catches Defect 1: inFlight double-decrement causing cap breach
-      const inFlightCount: number[] = [];
-      let resolveAll: (() => void) | null = null;
-      const allJobsBlocked = new Promise<void>((resolve) => {
-        resolveAll = resolve;
+    it('concurrency cap is not exceeded when the adapter ack() fails', async () => {
+      // A failing ack rejects runJob after the in-flight slot was already
+      // released. If that rejection releases the slot a SECOND time, inFlight
+      // goes negative, `limit = concurrency - inFlight` grows past the cap, and
+      // the next poll dispatches more jobs than `concurrency` allows.
+      const failingAck = new FailingAckQueue();
+      const failService = new QueueService(failingAck, runtime, {
+        defaultMaxAttempts: 3,
+        pollIntervalMs: 100,
       });
+      await failService.connect();
 
-      service.process(
+      let concurrent = 0;
+      let peakConcurrent = 0;
+      // Phase 1 lets jobs run to completion (so their ack fails); phase 2 holds
+      // them in flight so overlapping dispatches are observable.
+      let gate: Promise<void> = Promise.resolve();
+
+      failService.process(
         'test',
-        async (_job) => {
-          // Track in-flight count
-          inFlightCount.push(1);
-          await allJobsBlocked;
-          inFlightCount.pop();
+        async () => {
+          concurrent++;
+          peakConcurrent = Math.max(peakConcurrent, concurrent);
+          await gate;
+          concurrent--;
         },
         { concurrency: 2 },
       );
 
-      // Add 5 jobs
-      for (let i = 0; i < 5; i++) {
-        await service.add('test', { index: i });
-      }
+      // Phase 1: two jobs complete; both acks reject.
+      await failService.add('test', { phase: 1 });
+      await failService.add('test', { phase: 1 });
+      await runtime.advanceMs(1100);
+      expect(failingAck.failedAcks).toBe(2);
 
-      // Poll interval is 1000ms
+      // Phase 2: block the processor, then offer four more jobs. Only two may
+      // ever be in flight at once.
+      let openGate: () => void = () => {};
+      gate = new Promise<void>((resolve) => {
+        openGate = resolve;
+      });
+      for (let i = 0; i < 4; i++) {
+        await failService.add('test', { phase: 2 });
+      }
       await runtime.advanceMs(1100);
 
-      // Should have exactly 2 in flight (concurrency cap)
-      expect(inFlightCount.length).toBeLessThanOrEqual(2);
+      expect(peakConcurrent).toBeLessThanOrEqual(2);
 
-      // Unblock and clean up
-      resolveAll!();
+      openGate();
+      await failService.disconnect();
     });
   });
 
