@@ -1474,20 +1474,23 @@ import { QueuePlugin } from '@hono-enterprise/queue-plugin';
 // Memory adapter (development/testing)
 app.register(QueuePlugin({
   adapter: 'memory',
-  options: {
-    pollIntervalMs: 1000,
-    defaultMaxAttempts: 3,
-  },
+  pollIntervalMs: 1000,
+  defaultMaxAttempts: 3,
 }));
 
 // Redis adapter (production)
 app.register(QueuePlugin({
   adapter: 'redis',
-  options: {
-    url: config.get('REDIS_URL'),
-    pollIntervalMs: 1000,
-    defaultMaxAttempts: 3,
-  },
+  url: config.get('REDIS_URL'),
+  pollIntervalMs: 1000,
+  defaultMaxAttempts: 3,
+}));
+
+// Named instance for multi-queue support
+app.register(QueuePlugin({
+  adapter: 'memory',
+  name: 'background',
+  pollIntervalMs: 2000,
 }));
 ```
 

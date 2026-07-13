@@ -154,7 +154,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
   IQueue, IJob, JobProcessor, AddJobOptions, ProcessOptions, RecurringOptions; memory + redis
-  adapters implemented) — complete
+  adapters implemented) — complete (PR pending)
 - **Next milestone** — Milestone 16 (auth-plugin)
 
 ## Verification (run before declaring any work done)
