@@ -3272,6 +3272,12 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 | `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
 | `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
 | `createCloudflareRuntimeServices` | function | Stub — throws (Cloudflare Workers not yet implemented)                                     |
+| `DenoHttpAdapter`                 | class    | Deno HTTP server adapter implementing `IHttpAdapter`                                       |
+| `NodeHttpAdapter`                 | class    | Node.js HTTP server adapter implementing `IHttpAdapter`                                    |
+| `BunHttpAdapter`                  | class    | Bun HTTP server adapter implementing `IHttpAdapter`                                        |
+| `isDenoHttpServerHandle`          | function | Type guard for `DenoHttpServerHandle`                                                      |
+| `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                      |
+| `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                       |
 
 ### Types
 
@@ -3287,14 +3293,21 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 | `NodeModules`    | type | Injectable Node built-ins for `buildNodeHost` (testing seam)   |
 | `BunHost`        | type | Host interface for the Bun adapter (extension point)           |
 | `BunFileInfo`    | type | File info returned by `BunHost.stat()`                         |
+| `DenoHttpServerHandle` | type | Internal server handle for DenoHttpAdapter                     |
+| `NodeHttpServerHandle` | type | Internal server handle for NodeHttpAdapter                     |
+| `BunHttpServerHandle`  | type | Internal server handle for BunHttpAdapter                      |
+| `BunServeHost`   | type | Injectable host interface for BunHttpAdapter (extension point) |
+| `BunServer`      | type | Bun server handle returned by `Bun.serve`                      |
+| `HttpAdapterFactories` | type | Platform→adapter factory map for RuntimePlugin                 |
 
 Contract notes:
 
-- **M3 provides runtime services only; HTTP server adapters are deferred to a dedicated milestone.**
-  The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`. As of Milestone 11
-  `IResponse` exposes a read surface — `snapshot()` (see the HTTP abstractions above) — so an
-  adapter can serialize the response (status, headers, body) without reaching into kernel internals.
-  The M39 milestone still owns wiring the concrete Node/Deno/Bun adapters onto a real port.
+- **M39 implemented HTTP server adapters for Node, Deno, and Bun.** The `IHttpAdapter` contract
+  hands the adapter a `Promise<IResponse>`. `IResponse` exposes a read surface — `snapshot()` (see
+  the HTTP abstractions above) — so adapters serialize the response (status, headers, body) without
+  reaching into kernel internals. M39 wired the concrete adapters (`NodeHttpAdapter`,
+  `DenoHttpAdapter`, `BunHttpAdapter`) and registered them under `CAPABILITIES.HTTP_ADAPTER` via
+  `RuntimePlugin`.
 - The `RuntimePlugin` is **mandatory** in every application. It registers at
   `PLUGIN_PRIORITY.HIGHEST` so its services are available to all other plugins during registration.
 - Each adapter factory accepts an injectable `*Host` interface (the documented extension point for

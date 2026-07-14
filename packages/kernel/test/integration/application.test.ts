@@ -589,11 +589,11 @@ describe('Application integration', () => {
     expect(fake.adapter.listening).toBe(false);
   });
 
-  it('should not listen when port is provided but no adapter', async () => {
+  it('should throw when a port is provided but no adapter is registered', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
-    await app.start({ port: 3000 });
-    // No adapter registered — should skip listening without error
-    await app.stop();
+    await expect(app.start({ port: 3000 })).rejects.toThrow(
+      "Cannot start HTTP server on port 3000: no 'http-adapter' capability is registered",
+    );
   });
 
   it('should support hostname option when listening', async () => {

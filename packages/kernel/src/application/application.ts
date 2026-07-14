@@ -292,7 +292,13 @@ class Application implements IKernelApplication {
     await this.#lifecycle.runBootstrap();
 
     // 8. Listen only if adapter + port are available
-    if (options?.port !== undefined && this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
+    if (options?.port !== undefined) {
+      if (!this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
+        throw new Error(
+          `Cannot start HTTP server on port ${options.port}: no 'http-adapter' capability is registered. ` +
+            `Register the RuntimePlugin or a custom IHttpAdapter.`,
+        );
+      }
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       this.#serverHandle = adapter.createServer((request: IRequest) =>
         this.#handleRequest(request)

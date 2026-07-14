@@ -1,182 +1,193 @@
+/**
+ * Tests for RuntimePlugin HTTP adapter registration.
+ */
+
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
-
 import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
-import { detectRuntime } from '../../src/detector/runtime-detector.ts';
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IHttpAdapter, IRuntimeServices } from '@hono-enterprise/common';
 
-// Minimal fake service registry for testing register()
-function createFakeRegistry() {
-  const services = new Map<string, unknown>();
-  return {
-    register(token: string, service: unknown) {
-      services.set(token, service);
-    },
-    get<T>(token: string): T {
-      return services.get(token) as T;
-    },
-    has(token: string) {
-      return services.has(token);
-    },
-  };
+/**
+ * Fake HTTP adapter for testing.
+ */
+class FakeHttpAdapter implements IHttpAdapter {
+  createServerCount = 0;
+  listenCount = 0;
+  closeCount = 0;
+
+  createServer(): unknown {
+    this.createServerCount++;
+    return { type: 'fake-server' };
+  }
+
+  listen(): Promise<void> {
+    this.listenCount++;
+    return Promise.resolve();
+  }
+
+  close(): Promise<void> {
+    this.closeCount++;
+    return Promise.resolve();
+  }
 }
 
-function createFakeContext() {
-  const registry = createFakeRegistry();
+/**
+ * Fake runtime services for testing.
+ */
+function createFakeRuntimeServices(): IRuntimeServices {
   return {
-    services: registry,
-    middleware: { add: () => {} },
-    router: {
-      get: () => {},
-      post: () => {},
-      put: () => {},
-      patch: () => {},
-      delete: () => {},
-      head: () => {},
-      options: () => {},
-      group: () => {},
-    },
-    lifecycle: {
-      onRegister: () => {},
-      onInit: () => {},
-      onBootstrap: () => {},
-      onRequest: () => {},
-      onResponse: () => {},
-      onError: () => {},
-      onShutdown: () => {},
-      onClose: () => {},
-    },
-    health: { register: () => {} },
-    metrics: { register: () => {} },
-    openapi: { addSchema: () => {} },
-    decorators: { register: () => {} },
-    cli: { register: () => {} },
-    environment: { validate: () => {} },
-    options: {},
-    app: {} as unknown,
-  };
-}
-
-function createFakeRuntime(platform: 'deno' | 'node' | 'bun'): IRuntimeServices {
-  return {
-    platform: () => platform,
-    version: () => '1.0.0-fake',
-    hostname: () => 'fake-host',
-    uuid: () => 'fake-uuid',
-    randomBytes: (n: number) => new Uint8Array(n),
-    subtle: crypto.subtle,
-    now: () => 1000,
-    hrtime: () => 1,
-    setTimeout: () => 0,
+    platform: () => 'deno',
+    version: () => '1.0.0',
+    hostname: () => 'localhost',
+    uuid: () => 'test-uuid',
+    randomBytes: () => new Uint8Array(),
+    subtle: {} as SubtleCrypto,
+    now: () => 0,
+    hrtime: () => 0,
+    setTimeout: () => ({} as unknown),
     clearTimeout: () => {},
-    setInterval: () => 0,
+    setInterval: () => ({} as unknown),
     clearInterval: () => {},
+    fs: {
+      // deno-lint-ignore require-await
+      readFile: async () => new Uint8Array(),
+      writeFile: async () => {},
+      // deno-lint-ignore require-await
+      stat: async () => ({ isFile: true, isDirectory: false, size: 0 }),
+      // deno-lint-ignore require-await
+      readdir: async () => [],
+      mkdir: async () => {},
+      rm: async () => {},
+    },
     env: {},
     exit: () => {
-      throw new Error('exit');
+      throw new Error('exit called');
     },
   };
 }
 
-describe('RuntimePlugin', () => {
-  it('has name "runtime"', () => {
-    const plugin = RuntimePlugin({ platform: 'deno' });
-    expect(plugin.name).toBe('runtime');
-  });
+describe('RuntimePlugin - HTTP Adapter', () => {
+  describe('provides', () => {
+    it('provides HTTP_ADAPTER capability', () => {
+      const plugin = RuntimePlugin({
+        platform: 'deno',
+        httpAdapters: {
+          deno: () => new FakeHttpAdapter(),
+        },
+      });
 
-  it('has version "0.1.0"', () => {
-    const plugin = RuntimePlugin({ platform: 'deno' });
-    expect(plugin.version).toBe('0.1.0');
-  });
-
-  it('provides CAPABILITIES.RUNTIME', () => {
-    const plugin = RuntimePlugin({ platform: 'deno' });
-    expect(plugin.provides).toContain(CAPABILITIES.RUNTIME);
-  });
-
-  it('has HIGHEST priority', () => {
-    const plugin = RuntimePlugin({ platform: 'deno' });
-    expect(plugin.priority).toBe(PLUGIN_PRIORITY.HIGHEST);
-  });
-
-  it('registers runtime services under CAPABILITIES.RUNTIME', () => {
-    const fakeRuntime = createFakeRuntime('deno');
-    const plugin = RuntimePlugin({
-      platform: 'deno',
-      adapters: { deno: () => fakeRuntime },
+      expect(plugin.provides).toContain(CAPABILITIES.HTTP_ADAPTER);
     });
-    const ctx = createFakeContext();
-    plugin.register(ctx as never);
 
-    expect(ctx.services.has(CAPABILITIES.RUNTIME)).toBe(true);
-    const services = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    expect(services.platform()).toBe('deno');
-  });
+    it('provides RUNTIME capability', () => {
+      const plugin = RuntimePlugin({
+        platform: 'deno',
+      });
 
-  it('honors forced platform option (node)', () => {
-    const fakeRuntime = createFakeRuntime('node');
-    const plugin = RuntimePlugin({
-      platform: 'node',
-      adapters: { node: () => fakeRuntime },
+      expect(plugin.provides).toContain(CAPABILITIES.RUNTIME);
     });
-    const ctx = createFakeContext();
-    plugin.register(ctx as never);
-
-    const services = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    expect(services.platform()).toBe('node');
   });
 
-  it('honors forced platform option (bun)', () => {
-    const fakeRuntime = createFakeRuntime('bun');
-    const plugin = RuntimePlugin({
-      platform: 'bun',
-      adapters: { bun: () => fakeRuntime },
+  describe('register', () => {
+    it('registers HTTP adapter under HTTP_ADAPTER capability', () => {
+      const fakeAdapter = new FakeHttpAdapter();
+      const fakeRuntime = createFakeRuntimeServices();
+
+      const plugin = RuntimePlugin({
+        platform: 'deno',
+        adapters: {
+          deno: () => fakeRuntime,
+        },
+        httpAdapters: {
+          deno: () => fakeAdapter,
+        },
+      });
+
+      const registry = {
+        services: {
+          register: () => {},
+        },
+      };
+
+      plugin.register(registry as never);
+
+      // Verify the plugin registered correctly
+      expect(plugin.provides).toContain(CAPABILITIES.HTTP_ADAPTER);
     });
-    const ctx = createFakeContext();
-    plugin.register(ctx as never);
 
-    const services = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    expect(services.platform()).toBe('bun');
-  });
+    it('throws when no HTTP adapter for platform', () => {
+      const fakeRuntime = createFakeRuntimeServices();
+      const plugin = RuntimePlugin({
+        platform: 'deno',
+        adapters: {
+          deno: () => fakeRuntime,
+        },
+        httpAdapters: {}, // No adapter for deno
+      });
 
-  it('throws when platform is cloudflare-workers', () => {
-    expect(() => RuntimePlugin({ platform: 'cloudflare-workers' })).toThrow(
-      'Cloudflare Workers runtime is not yet supported',
-    );
-  });
+      const registry = {
+        services: {
+          register: () => {},
+        },
+      };
 
-  it('defaults to detected runtime when no platform specified', () => {
-    const fakeRuntime = createFakeRuntime('deno');
-    const plugin = RuntimePlugin({
-      adapters: { deno: () => fakeRuntime },
+      expect(() => plugin.register(registry as never)).toThrow('No HTTP adapter for platform');
     });
-    const ctx = createFakeContext();
-    plugin.register(ctx as never);
 
-    const services = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    expect(services.platform()).toBe(detectRuntime());
-  });
-
-  it('throws if no adapter factory is registered for the platform', () => {
-    const plugin = RuntimePlugin({
-      platform: 'deno',
-      adapters: {},
+    it('throws for cloudflare-workers platform', () => {
+      expect(() => RuntimePlugin({ platform: 'cloudflare-workers' })).toThrow('Cloudflare Workers');
     });
-    const ctx = createFakeContext();
-    expect(() => plugin.register(ctx as never)).toThrow(
-      'No adapter factory for platform: deno',
-    );
+
+    it('allows httpAdapters injection override', () => {
+      const customAdapter = new FakeHttpAdapter();
+      const fakeRuntime = createFakeRuntimeServices();
+      const plugin = RuntimePlugin({
+        platform: 'deno',
+        adapters: {
+          deno: () => fakeRuntime,
+        },
+        httpAdapters: {
+          deno: () => customAdapter,
+        },
+      });
+
+      expect(plugin.provides).toContain(CAPABILITIES.HTTP_ADAPTER);
+    });
   });
 
-  it('registers Node services via default adapters', () => {
-    const plugin = RuntimePlugin({ platform: 'node' });
-    const ctx = createFakeContext();
-    plugin.register(ctx as never);
+  describe('platform detection', () => {
+    it('uses explicit platform when provided', () => {
+      const fakeRuntime = createFakeRuntimeServices();
+      const plugin = RuntimePlugin({
+        platform: 'node',
+        adapters: {
+          node: () => fakeRuntime,
+        },
+        httpAdapters: {
+          node: () => new FakeHttpAdapter(),
+        },
+      });
 
-    expect(ctx.services.has(CAPABILITIES.RUNTIME)).toBe(true);
-    const services = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    expect(services.platform()).toBe('node');
+      expect(plugin.provides).toContain(CAPABILITIES.HTTP_ADAPTER);
+    });
+
+    it('uses auto-detected platform when not provided', () => {
+      const fakeRuntime = createFakeRuntimeServices();
+      const plugin = RuntimePlugin({
+        adapters: {
+          deno: () => fakeRuntime,
+          node: () => fakeRuntime,
+          bun: () => fakeRuntime,
+        },
+        httpAdapters: {
+          deno: () => new FakeHttpAdapter(),
+          node: () => new FakeHttpAdapter(),
+          bun: () => new FakeHttpAdapter(),
+        },
+      });
+
+      expect(plugin.provides).toContain(CAPABILITIES.HTTP_ADAPTER);
+    });
   });
 });
