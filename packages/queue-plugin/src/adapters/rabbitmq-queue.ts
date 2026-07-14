@@ -276,6 +276,7 @@ export class RabbitMqQueue implements QueueAdapter {
     return result as readonly StoredJob<T>[];
   }
 
+  // deno-lint-ignore require-await
   async ack(name: string, id: string): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -352,6 +353,7 @@ export class RabbitMqQueue implements QueueAdapter {
     processing.delete(id);
   }
 
+  // deno-lint-ignore require-await
   async storeRecurring(rec: StoredRecurring): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -360,6 +362,7 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#recurringJobs.set(rec.id, { ...rec });
   }
 
+  // deno-lint-ignore require-await
   async fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -374,6 +377,7 @@ export class RabbitMqQueue implements QueueAdapter {
     return due as readonly StoredRecurring[];
   }
 
+  // deno-lint-ignore require-await
   async advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');

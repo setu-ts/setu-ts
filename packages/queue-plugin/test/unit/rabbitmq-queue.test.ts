@@ -120,12 +120,12 @@ describe('RabbitMqQueue', () => {
 
       await queue.enqueue(job);
 
-      // For testing, delay queue messages are routed to ready queue immediately
-      const readyBuffer = channel.getReadyBuffer('test.queue.test.ready');
-      expect(readyBuffer.length).toBe(1);
+      // Delay queue messages now go to delayBuffers (not auto-routed to ready)
+      const delayBuffer = channel.getDelayBuffer('test.queue.test.delay');
+      expect(delayBuffer.length).toBe(1);
 
       // Verify expiration was set
-      expect((readyBuffer[0].options as { expiration?: number })?.expiration).toBe(5000);
+      expect((delayBuffer[0].options as { expiration?: number })?.expiration).toBe(5000);
     });
 
     it('reserve polls via get() and returns jobs', async () => {
@@ -188,11 +188,11 @@ describe('RabbitMqQueue', () => {
       expect(true).toBe(true);
     });
 
-    it('requeue publishes to delay queue with fresh TTL', async () => {
+    it('requeue publishes to delay queue with fresh TTL via channel.calls', async () => {
       const job = {
         id: '6',
         name: 'test',
-        data: {},
+        data: { foo: 'bar' },
         attempts: 0,
         maxAttempts: 3,
         availableAtMs: runtime.now(),
@@ -204,12 +204,36 @@ describe('RabbitMqQueue', () => {
       const newAvailableAtMs = runtime.now() + 10000;
       await queue.requeue('test', '6', newAvailableAtMs, 1);
 
-      const readyBuffer = channel.getReadyBuffer('test.queue.test.ready');
-      expect(readyBuffer.length).toBe(1);
+      // Find the publish call to the delay queue
+      const publishCalls = channel.calls.filter(
+        (c) => c.method === 'publish' && c.args[1] === 'test.queue.test.delay',
+      );
+      expect(publishCalls.length).toBe(1);
 
-      // Verify attempts was updated
-      const decoded = JSON.parse(readyBuffer[0].content.toString('utf8'));
+      const publishCall = publishCalls[0];
+      const routingKey = publishCall.args[1];
+      const content = publishCall.args[2] as Buffer;
+      const options = publishCall.args[3];
+
+      // Assert delay routing key
+      expect(routingKey).toBe('test.queue.test.delay');
+
+      // Assert content is a Buffer
+      expect(Buffer.isBuffer(content)).toBe(true);
+
+      // Assert expiration equals the expected TTL
+      const expectedExpiration = newAvailableAtMs - runtime.now();
+      expect((options as { expiration?: number })?.expiration).toBe(expectedExpiration);
+
+      // Assert payload has updated attempts and availableAtMs
+      const decoded = JSON.parse(content.toString('utf8'));
       expect(decoded.attempts).toBe(1);
+      expect(decoded.availableAtMs).toBe(newAvailableAtMs);
+      expect(decoded.data.foo).toBe('bar');
+
+      // Assert the original message was acked
+      const ackCalls = channel.calls.filter((c) => c.method === 'ack');
+      expect(ackCalls.length).toBe(1);
     });
 
     it('deadLetter publishes to dead queue', async () => {
@@ -229,6 +253,68 @@ describe('RabbitMqQueue', () => {
 
       const deadBuffer = channel.getReadyBuffer('test.queue.test.dead');
       expect(deadBuffer.length).toBe(1);
+    });
+
+    it('DLX wiring: delay queue has camelCase deadLetterExchange/deadLetterRoutingKey', async () => {
+      // Connect the adapter and enqueue a job to trigger queue assertion
+      const fakeClient2 = createFakeAmqpConnection();
+      const queue2 = new RabbitMqQueue(runtime, { client: fakeClient2, prefix: 'test.queue' });
+      await queue2.connect();
+
+      // Enqueue a delayed job to trigger queue assertion
+      await queue2.enqueue({
+        id: 'dlx-test',
+        name: 'test',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: runtime.now() + 5000,
+      });
+
+      // Get the channel
+      const channel2 = await fakeClient2.createChannel();
+
+      // Find all assertQueue calls
+      const assertQueueCalls = channel2.calls.filter((c) => c.method === 'assertQueue');
+
+      // Find the delay queue assert
+      const delayQueueCall = assertQueueCalls.find(
+        (c) => c.args[0] === 'test.queue.test.delay',
+      );
+      expect(delayQueueCall).toBeDefined();
+
+      const delayOptions = delayQueueCall!.args[1] as {
+        durable: boolean;
+        deadLetterExchange?: string;
+        deadLetterRoutingKey?: string;
+      };
+
+      // Assert the camelCase keys (amqplib reads these, NOT raw x-... keys)
+      expect(delayOptions.durable).toBe(true);
+      expect(delayOptions.deadLetterExchange).toBe('');
+      expect(delayOptions.deadLetterRoutingKey).toBe('test.queue.test.ready');
+
+      // Find the ready queue assert
+      const readyQueueCall = assertQueueCalls.find(
+        (c) => c.args[0] === 'test.queue.test.ready',
+      );
+      expect(readyQueueCall).toBeDefined();
+      const readyOptions = readyQueueCall!.args[1] as { durable: boolean };
+      expect(readyOptions.durable).toBe(true);
+      // Ready queue should NOT have DLX keys
+      expect((readyOptions as Record<string, unknown>).deadLetterExchange).toBeUndefined();
+      expect((readyOptions as Record<string, unknown>).deadLetterRoutingKey).toBeUndefined();
+
+      // Find the dead queue assert
+      const deadQueueCall = assertQueueCalls.find(
+        (c) => c.args[0] === 'test.queue.test.dead',
+      );
+      expect(deadQueueCall).toBeDefined();
+      const deadOptions = deadQueueCall!.args[1] as { durable: boolean };
+      expect(deadOptions.durable).toBe(true);
+      // Dead queue should NOT have DLX keys
+      expect((deadOptions as Record<string, unknown>).deadLetterExchange).toBeUndefined();
+      expect((deadOptions as Record<string, unknown>).deadLetterRoutingKey).toBeUndefined();
     });
   });
 
@@ -447,6 +533,24 @@ describe('RabbitMqQueue', () => {
       const queue = new RabbitMqQueue(runtime);
 
       await expect(queue.advanceRecurring('r1', runtime.now())).rejects.toThrow(
+        'RabbitMqQueue is not connected',
+      );
+    });
+
+    it('requeue throws when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      await expect(queue.requeue('test', '1', runtime.now(), 1)).rejects.toThrow(
+        'RabbitMqQueue is not connected',
+      );
+    });
+
+    it('deadLetter throws when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      await expect(queue.deadLetter('test', '1', runtime.now())).rejects.toThrow(
         'RabbitMqQueue is not connected',
       );
     });

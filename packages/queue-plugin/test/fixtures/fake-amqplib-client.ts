@@ -29,14 +29,17 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
   #calls: Array<{ method: string; args: unknown[] }>;
   // Per-queue: buffers for ready queues
   #readyBuffers: Map<string, Array<{ content: Buffer; options: unknown }>>;
-  // Per-queue: buffers for delay queues (routes to ready on publish for testing)
+  // Per-queue: buffers for delay queues
   #delayBuffers: Map<string, Array<{ content: Buffer; options: unknown }>>;
+  // Deterministic deliveryTag counter starting at 1
+  #nextDeliveryTag: number;
 
   constructor(options: FakeAmqpQueueOptions = {}) {
     this.#options = options;
     this.#calls = [];
     this.#readyBuffers = new Map();
     this.#delayBuffers = new Map();
+    this.#nextDeliveryTag = 1;
   }
 
   #record(method: string, args: unknown[]): void {
@@ -56,6 +59,32 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
   /** Get all buffered messages for a delay queue. */
   getDelayBuffer(queue: string): Array<{ content: Buffer; options: unknown }> {
     return this.#delayBuffers.get(queue) ?? [];
+  }
+
+  /**
+   * Move messages from delay queue to ready queue, simulating TTL expiry.
+   * Tests call this deliberately to trigger delayed message delivery.
+   */
+  expireDelayed(queue: string): void {
+    const delayQueue = queue.endsWith('.ready')
+      ? queue.replace('.ready', '.delay')
+      : queue + '.delay';
+    const delayBuffer = this.#delayBuffers.get(delayQueue);
+    if (!delayBuffer || delayBuffer.length === 0) {
+      return;
+    }
+    // Initialize ready buffer if not exists
+    if (!this.#readyBuffers.has(queue)) {
+      this.#readyBuffers.set(queue, []);
+    }
+    // Move all messages from delay to ready
+    for (const msg of delayBuffer) {
+      this.#readyBuffers.get(queue)!.push({
+        content: Buffer.from(msg.content),
+        options: msg.options,
+      });
+    }
+    delayBuffer.length = 0;
   }
 
   assertQueue(queue: string, options?: unknown): Promise<{ queue: string }> {
@@ -87,16 +116,13 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
       throw new TypeError('content is not a buffer');
     }
 
-    // Route based on queue name pattern
-    // Delay queues end with '.delay', route to matching ready queue
+    // Route based on queue name - delay queues go to #delayBuffers, ready/dead go to #readyBuffers
     if (routingKey.endsWith('.delay')) {
-      const readyQueue = routingKey.replace('.delay', '.ready');
-      if (!this.#readyBuffers.has(readyQueue)) {
-        this.#readyBuffers.set(readyQueue, []);
+      // Delay queue: store in #delayBuffers (NOT routed to ready automatically)
+      if (!this.#delayBuffers.has(routingKey)) {
+        this.#delayBuffers.set(routingKey, []);
       }
-      // For testing: immediately route delay queue messages to ready queue
-      // (simulates TTL expiry without waiting)
-      this.#readyBuffers.get(readyQueue)!.push({
+      this.#delayBuffers.get(routingKey)!.push({
         content: Buffer.from(content),
         options,
       });
@@ -127,7 +153,8 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
     const message: IAmqpQueueMessage = {
       content: msg.content,
       fields: {
-        deliveryTag: Math.floor(Math.random() * 1000),
+        // Deterministic deliveryTag counter starting at 1
+        deliveryTag: this.#nextDeliveryTag++,
       },
       properties: msg.options,
     };
