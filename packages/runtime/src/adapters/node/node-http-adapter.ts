@@ -19,7 +19,6 @@ import { mapNodeRequest, writeSnapshotToNodeResponse } from './node-http-mapping
 export class NodeHttpServerHandle {
   readonly #handler: (request: IRequest) => Promise<IResponse>;
   #server: Server | null = null;
-  #bodyCache: Map<IncomingMessage, Uint8Array> = new Map();
 
   constructor(handler: (request: IRequest) => Promise<IResponse>) {
     this.#handler = handler;
@@ -55,9 +54,6 @@ export class NodeHttpServerHandle {
         bodyBytes.set(chunk, offset);
         offset += chunk.length;
       }
-
-      // Cache the body for the request
-      this.#bodyCache.set(req, bodyBytes);
 
       const frameworkRequest = mapNodeRequest(req, bodyBytes);
       const frameworkResponse = await this.#handler(frameworkRequest);
