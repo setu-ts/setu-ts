@@ -110,7 +110,11 @@ describe('DenoHttpAdapter - Real Round-Trip', () => {
       }
     });
 
-    it('serves a real request through the full pipeline', async () => {
+    // NOTE: this drives the adapter directly with a stub handler — it does NOT
+    // exercise the kernel's middleware/router/handler pipeline. The full-pipeline
+    // round-trip through app.start({ port }) lives in
+    // test/integration/runtime-plugin.test.ts.
+    it('maps a real request to IRequest and serves the handler response', async () => {
       let capturedMethod: string | null = null;
       let capturedPath: string | null = null;
 
