@@ -4,6 +4,8 @@
  * @module
  */
 
+import type { Buffer } from 'node:buffer';
+
 /**
  * Structural client type for Redis operations used by RedisQueue.
  *

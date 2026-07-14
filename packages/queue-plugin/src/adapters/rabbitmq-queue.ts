@@ -196,14 +196,15 @@ export class RabbitMqQueue implements QueueAdapter {
     }
     this.#connection = await resolveClient(this.#url, this.#injectedClient);
     // Create channel unconditionally from the resolved connection
-    const realConn = this.#connection as unknown as { createChannel(): Promise<IAmqpQueueChannel> };
-    this.#channel = await realConn.createChannel();
+    this.#channel = await this.#connection.createChannel();
     this.#ready = true;
   }
 
   async disconnect(): Promise<void> {
     // Clear processing state
     this.#processing.clear();
+    // Clear asserted queues so they are re-asserted on next connect
+    this.#asserted.clear();
     // Close channel
     if (this.#channel) {
       await this.#channel.close();
@@ -275,22 +276,20 @@ export class RabbitMqQueue implements QueueAdapter {
     return result as readonly StoredJob<T>[];
   }
 
-  ack(name: string, id: string): Promise<void> {
+  async ack(name: string, id: string): Promise<void> {
     if (!this.#channel) {
-      return Promise.resolve();
+      throw new Error('RabbitMqQueue is not connected');
     }
 
     const processing = this.#getOrCreateProcessing(name);
     const entry = processing.get(id);
     if (!entry) {
-      return Promise.resolve();
+      return;
     }
 
     // Ack the message
-    const msg = entry.message as { fields: { deliveryTag: number } };
-    this.#channel.ack(msg);
+    this.#channel.ack(entry.message);
     processing.delete(id);
-    return Promise.resolve();
   }
 
   async requeue<T>(
@@ -300,7 +299,7 @@ export class RabbitMqQueue implements QueueAdapter {
     attempts: number,
   ): Promise<void> {
     if (!this.#channel) {
-      return;
+      throw new Error('RabbitMqQueue is not connected');
     }
 
     await this.#assertQueues(name);
@@ -322,16 +321,15 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#channel.publish('', delayQ, content, { expiration });
 
     // Ack the original message
-    const msg = entry.message as { fields: { deliveryTag: number } };
-    this.#channel.ack(msg);
+    this.#channel.ack(entry.message);
 
     // Remove from processing
     processing.delete(id);
   }
 
-  async deadLetter(name: string, id: string, _nowMs: number): Promise<void> {
+  async deadLetter(name: string, id: string, nowMs: number): Promise<void> {
     if (!this.#channel) {
-      return;
+      throw new Error('RabbitMqQueue is not connected');
     }
 
     await this.#assertQueues(name);
@@ -345,38 +343,47 @@ export class RabbitMqQueue implements QueueAdapter {
     // Publish to dead queue
     const content = Buffer.from(JSON.stringify(entry.job), 'utf8');
     const deadQ = this.#deadQueue(name);
-    this.#channel.publish('', deadQ, content, { timestamp: _nowMs });
+    this.#channel.publish('', deadQ, content, { timestamp: nowMs });
 
     // Ack the original message
-    const msg = entry.message as { fields: { deliveryTag: number } };
-    this.#channel.ack(msg);
+    this.#channel.ack(entry.message);
 
     // Remove from processing
     processing.delete(id);
   }
 
-  storeRecurring(rec: StoredRecurring): Promise<void> {
+  async storeRecurring(rec: StoredRecurring): Promise<void> {
+    if (!this.#channel) {
+      throw new Error('RabbitMqQueue is not connected');
+    }
+
     this.#recurringJobs.set(rec.id, { ...rec });
-    return Promise.resolve();
   }
 
-  fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
+  async fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
+    if (!this.#channel) {
+      throw new Error('RabbitMqQueue is not connected');
+    }
+
     const due: StoredRecurring[] = [];
     for (const rec of this.#recurringJobs.values()) {
       if (rec.nextRunAtMs <= nowMs) {
         due.push({ ...rec });
       }
     }
-    return Promise.resolve(due as readonly StoredRecurring[]);
+    return due as readonly StoredRecurring[];
   }
 
-  advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
+  async advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
+    if (!this.#channel) {
+      throw new Error('RabbitMqQueue is not connected');
+    }
+
     const rec = this.#recurringJobs.get(id);
     if (!rec) {
-      return Promise.resolve();
+      return;
     }
     this.#recurringJobs.set(id, { ...rec, nextRunAtMs });
-    return Promise.resolve();
   }
 
   /**

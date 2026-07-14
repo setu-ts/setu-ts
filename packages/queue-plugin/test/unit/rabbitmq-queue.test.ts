@@ -44,7 +44,7 @@ describe('RabbitMqQueue', () => {
 
     it('isReady() is true after connect with fake client', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
       expect(queue.isReady()).toBe(true);
@@ -52,7 +52,7 @@ describe('RabbitMqQueue', () => {
 
     it('isReady() is false after disconnect', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
       await queue.disconnect();
@@ -61,7 +61,7 @@ describe('RabbitMqQueue', () => {
 
     it('connect() is idempotent', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
       await queue.connect(); // Second call should not error
@@ -77,7 +77,7 @@ describe('RabbitMqQueue', () => {
 
     beforeEach(async () => {
       runtime = new FakeRuntimeServices();
-      fakeClient = createFakeAmqpConnection() as never;
+      fakeClient = createFakeAmqpConnection();
       queue = new RabbitMqQueue(runtime, { client: fakeClient, prefix: 'test.queue' });
       await queue.connect();
 
@@ -239,7 +239,7 @@ describe('RabbitMqQueue', () => {
 
     beforeEach(async () => {
       runtime = new FakeRuntimeServices();
-      fakeClient = createFakeAmqpConnection() as never;
+      fakeClient = createFakeAmqpConnection();
       queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
     });
@@ -304,7 +304,7 @@ describe('RabbitMqQueue', () => {
   describe('prefix option', () => {
     it('uses custom prefix for queue names', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, {
         client: fakeClient,
         prefix: 'custom.prefix',
@@ -367,17 +367,9 @@ describe('RabbitMqQueue', () => {
   });
 
   describe('error paths and edge cases', () => {
-    it('requeue returns early when not connected', async () => {
-      const runtime = new FakeRuntimeServices();
-      const queue = new RabbitMqQueue(runtime);
-
-      // Should not throw, just resolve
-      await expect(queue.requeue('test', 'nonexistent', runtime.now(), 1)).resolves.toBeUndefined();
-    });
-
     it('requeue returns early when job not in processing', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
 
@@ -385,17 +377,9 @@ describe('RabbitMqQueue', () => {
       await expect(queue.requeue('test', 'nonexistent', runtime.now(), 1)).resolves.toBeUndefined();
     });
 
-    it('deadLetter returns early when not connected', async () => {
-      const runtime = new FakeRuntimeServices();
-      const queue = new RabbitMqQueue(runtime);
-
-      // Should not throw, just resolve
-      await expect(queue.deadLetter('test', 'nonexistent', runtime.now())).resolves.toBeUndefined();
-    });
-
     it('deadLetter returns early when job not in processing', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
 
@@ -405,7 +389,7 @@ describe('RabbitMqQueue', () => {
 
     it('advanceRecurring returns early when recurring job not found', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
 
@@ -415,7 +399,7 @@ describe('RabbitMqQueue', () => {
 
     it('disconnect with injected client clears channel and connection state', async () => {
       const runtime = new FakeRuntimeServices();
-      const fakeClient = createFakeAmqpConnection() as never;
+      const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
 
@@ -423,6 +407,48 @@ describe('RabbitMqQueue', () => {
 
       // After disconnect, isReady should be false
       expect(queue.isReady()).toBe(false);
+    });
+  });
+
+  describe('throws when not connected (additional methods)', () => {
+    it('ack throws when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      await expect(queue.ack('test', '1')).rejects.toThrow('RabbitMqQueue is not connected');
+    });
+
+    it('storeRecurring throws when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      await expect(
+        queue.storeRecurring({
+          id: 'r1',
+          name: 'test',
+          data: {},
+          cron: '* * * * *',
+          nextRunAtMs: runtime.now(),
+        }),
+      ).rejects.toThrow('RabbitMqQueue is not connected');
+    });
+
+    it('fetchRecurringDue throws when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      await expect(queue.fetchRecurringDue(runtime.now())).rejects.toThrow(
+        'RabbitMqQueue is not connected',
+      );
+    });
+
+    it('advanceRecurring throws when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      await expect(queue.advanceRecurring('r1', runtime.now())).rejects.toThrow(
+        'RabbitMqQueue is not connected',
+      );
     });
   });
 });
