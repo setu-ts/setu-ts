@@ -1,7 +1,7 @@
 # Roo-specific rule — start every milestone in Architect mode, plan-only
 
 This rule is specific to Roo Code and its mode system (Architect / Code / Orchestrator / …). It does
-not override `/CLAUDE.md` — it says _how_ Roo must approach the plan-first workflow that CLAUDE.md
+not override `CLAUDE.md` — it says _how_ Roo must approach the plan-first workflow that CLAUDE.md
 already mandates.
 
 ## The rule
@@ -12,9 +12,9 @@ milestone from Code mode.
 
 In Architect mode, for a milestone start, do exactly this and nothing more:
 
-1. Complete Step 0 from `/CLAUDE.md` — be on the milestone's `feat/[milestone]-[description]` branch
+1. Complete Step 0 from `CLAUDE.md` — be on the milestone's `feat/[milestone]-[description]` branch
    (`git branch --show-current`), never `main`.
-2. Read the mandatory docs in the order `/CLAUDE.md` lists (AI_GUIDELINES.md, the ROADMAP milestone
+2. Read the mandatory docs in the order `CLAUDE.md` lists (AI_GUIDELINES.md, the ROADMAP milestone
    section, ARCHITECTURE.md, PUBLIC_API.md, the `@hono-enterprise/common` source you implement, and
    the source of any package you extend).
 3. Copy `plans/TEMPLATE.md` to `plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run
@@ -39,4 +39,4 @@ In Architect mode, for a milestone start, do exactly this and nothing more:
 - Do NOT push and do NOT open a PR (those are human-only steps).
 
 Only after the plan is approved do you switch to Code mode and implement — still on the same
-`feat/…` branch, still following `/CLAUDE.md`.
+`feat/…` branch, still following `CLAUDE.md`.

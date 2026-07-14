@@ -1,11 +1,11 @@
 # Hono Enterprise — Project Rules (pointer)
 
-The canonical, always-current project rules for ALL assistants live in **`/CLAUDE.md`** at the repo
+The canonical, always-current project rules for ALL assistants live in **`CLAUDE.md`** at the repo
 root. This file is intentionally a thin pointer so the rules exist in exactly one place and cannot
 drift out of sync.
 
 **Before doing anything in this repo — and especially before starting a milestone — open and read
-`/CLAUDE.md` in full, then follow it.** It covers:
+`CLAUDE.md` in full, then follow it.** It covers:
 
 - **Step 0 for every milestone: be on the milestone's feature branch.** `main` is protected — one
   `feat/[milestone]-[description]` branch per milestone holds ALL its work AND its fixes until it
@@ -20,5 +20,16 @@ drift out of sync.
   vibes)" sections;
 - the current milestone status.
 
-Do NOT add or duplicate project rules in this file — put them in `/CLAUDE.md` only. That is why
-there is nothing else to update here.
+Do NOT add or duplicate project rules in this file — put them in `CLAUDE.md` only. That is why there
+is nothing else to update here.
+
+## Paths are workspace-relative — never absolute
+
+Every path in these rules, in `CLAUDE.md`, and in any subtask instruction is relative to the
+workspace root: `CLAUDE.md`, `AI_GUIDELINES.md`, `ROADMAP.md`, `ARCHITECTURE.md`, `PUBLIC_API.md`,
+`plans/…`, `packages/…`, `.roo/…`. Write and read them with **no leading slash**, and cite them the
+same way in every subtask you spawn.
+
+A leading slash resolves to the root of the machine's filesystem, not the repo root, so a read of an
+absolute project-doc path fails. If a doc read comes back "not found", that is almost always the
+cause — retry the same path with the leading slash removed.

@@ -26,7 +26,7 @@ implement. Its entire job is to break a request into subtasks and hand each to t
   and then stops (see `.roo/rules/02-milestone-architect-mode.md`). Do not have Code mode start a
   milestone.
 - **Implementing an approved plan** → a **Code**-mode subtask, on the milestone's `feat/…` branch,
-  following `/CLAUDE.md`.
+  following `CLAUDE.md`.
 - **Fixing review/gate findings on an unmerged milestone** → a **Code**-mode subtask on that same
   `feat/…` branch.
 - **Verifying / auditing a milestone** → a subtask that runs the `verify-milestone` skill
@@ -51,6 +51,6 @@ responsibility you own by delegating and verifying it:
 
 ## Always
 
-- Respect `/CLAUDE.md` and the other `.roo/rules/*` in every subtask you spawn (restate the relevant
+- Respect `CLAUDE.md` and the other `.roo/rules/*` in every subtask you spawn (restate the relevant
   constraints in the subtask instruction — the subtask starts fresh).
 - Do not push or open PRs from any subtask; those are human-only steps.
