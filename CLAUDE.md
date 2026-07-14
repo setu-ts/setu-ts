@@ -163,7 +163,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   QueuePlugin via the internal `QueueAdapter` seam; `basicGet` polling for `reserve`, per-message
   TTL with a dead-letter-exchange for delayed enqueue/requeue, per-name ready/delay/dead queues,
   in-process recurring; inject-or-lazy `npm:amqplib` client with a guarded real-import test; no
-  `common` change, no new capability token) — complete (PR pending)
+  `common` change, no new capability token) — complete (PR #32)
 - **Next milestone** — Milestone 16 (auth-plugin)
 
 ## Verification (run before declaring any work done)
