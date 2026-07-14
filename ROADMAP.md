@@ -659,12 +659,12 @@ await app.start();
 
 **Objective:** Provide runtime-agnostic services (UUID, timers, crypto, fs, env).
 
-> **Scope change:** HTTP server adapters are **deferred** to a new milestone (see "HTTP Server
-> Adapters" at the end of the milestone list). M3 scope is runtime services + detection + plugin
-> only. The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`, but `IResponse` is
-> write-only (no read/snapshot surface), so an adapter cannot serialize the response without
-> reaching into kernel internals. That seam needs its own design pass against the kernel. The
-> framework already runs via `app.inject()` with no server, so nothing is blocked.
+> **Scope change (historical):** HTTP server adapters were deferred from M3 to Milestone 39 (see
+> "HTTP Server Adapters"). M3 shipped runtime services + detection + plugin only. The deferral was
+> originally because `IResponse` had no read surface; that was resolved in M11 by the
+> `IResponse.snapshot()` read seam, which M39's adapters now use to serialize responses without
+> reaching into kernel internals. The framework already ran via `app.inject()` with no server, so
+> nothing was blocked.
 
 ### Package: `@hono-enterprise/runtime`
 
@@ -3271,32 +3271,31 @@ sensible defaults.
 **Objective:** Provide HTTP server adapters for Node.js, Deno, and Bun, registering them under
 `CAPABILITIES.HTTP_ADAPTER` so the kernel can listen on a real port.
 
-> **Deferred from Milestone 3.** The `IHttpAdapter` contract in `common` hands the adapter a
-> `Promise<IResponse>`, but `IResponse` is write-only (no read/snapshot surface), so an adapter
-> cannot serialize the response without reaching into kernel internals. This milestone designs a
-> web-standard `Request`/`Response` seam against the kernel before implementing the adapters. The
-> framework already runs via `app.inject()` with no server, so nothing is blocked by the deferral.
+> **Completed in Milestone 39.** The `IResponse.snapshot()` read seam designed in M11 enables
+> adapters to serialize responses without reaching into kernel internals. This milestone implements
+> the three HTTP adapters (Node, Deno, Bun), registers them under `CAPABILITIES.HTTP_ADAPTER` via
+> `RuntimePlugin`, and wires `app.start({ port })` to bind a real socket. Cloudflare Workers is
+> explicitly excluded (no `listen(port)` model).
 
 ### Package: `@hono-enterprise/runtime` (continued)
 
 **Tasks:**
 
-1. Design a response-snapshot/read seam on `IResponse` (or a new `IResponseSnapshot` interface) that
-   lets an HTTP adapter serialize the response using web-standard `Response` without reaching into
-   kernel internals.
-2. Implement HTTP server adapters:
+1. Implement HTTP server adapters:
    - `NodeHttpAdapter` — Node.js `http` module
    - `DenoHttpAdapter` — Deno `serve` API
    - `BunHttpAdapter` — `Bun.serve`
-3. Register adapters under `CAPABILITIES.HTTP_ADAPTER` via the `RuntimePlugin`.
-4. Wire `app.start({ port })` to create and listen on the adapter.
+2. Register adapters under `CAPABILITIES.HTTP_ADAPTER` via the `RuntimePlugin`.
+3. Wire `app.start({ port })` to create and listen on the adapter.
+4. Add `net: true` permission to runtime test permissions for real socket tests.
 
 ### Deliverables
 
-- [ ] Response read/snapshot seam designed and implemented
-- [ ] Node, Deno, Bun HTTP server adapters
-- [ ] `app.start({ port })` listens on a real server
-- [ ] Full test coverage (request/response round-trip per adapter)
+- [x] Response read/snapshot seam (`IResponse.snapshot()`) designed and implemented (M11)
+- [x] Node, Deno, Bun HTTP server adapters
+- [x] `app.start({ port })` listens on a real server
+- [x] Full test coverage (request/response round-trip per adapter)
+- [x] `net: true` permission added to runtime test permissions
 
 ---
 
@@ -3470,4 +3469,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 36        | ⬜     | documentation        |
 | 37        | ⬜     | docker/kubernetes    |
 | 38        | ⬜     | final release        |
-| 39        | ⬜     | http-adapters        |
+| 39        | ✅     | http-adapters        |

@@ -8,7 +8,9 @@
   },
   "test": {
     "permissions": {
-      "sys": ["hostname"]
+      "sys": ["hostname"],
+      "net": true,
+      "env": true
     }
   }
 }
