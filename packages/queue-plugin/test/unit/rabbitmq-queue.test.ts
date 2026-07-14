@@ -365,4 +365,64 @@ describe('RabbitMqQueue', () => {
       await expect(queue.reserve('test', 1, runtime.now())).rejects.toThrow('not connected');
     });
   });
+
+  describe('error paths and edge cases', () => {
+    it('requeue returns early when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      // Should not throw, just resolve
+      await expect(queue.requeue('test', 'nonexistent', runtime.now(), 1)).resolves.toBeUndefined();
+    });
+
+    it('requeue returns early when job not in processing', async () => {
+      const runtime = new FakeRuntimeServices();
+      const fakeClient = createFakeAmqpConnection() as never;
+      const queue = new RabbitMqQueue(runtime, { client: fakeClient });
+      await queue.connect();
+
+      // Try to requeue a job that was never reserved
+      await expect(queue.requeue('test', 'nonexistent', runtime.now(), 1)).resolves.toBeUndefined();
+    });
+
+    it('deadLetter returns early when not connected', async () => {
+      const runtime = new FakeRuntimeServices();
+      const queue = new RabbitMqQueue(runtime);
+
+      // Should not throw, just resolve
+      await expect(queue.deadLetter('test', 'nonexistent', runtime.now())).resolves.toBeUndefined();
+    });
+
+    it('deadLetter returns early when job not in processing', async () => {
+      const runtime = new FakeRuntimeServices();
+      const fakeClient = createFakeAmqpConnection() as never;
+      const queue = new RabbitMqQueue(runtime, { client: fakeClient });
+      await queue.connect();
+
+      // Try to deadLetter a job that was never reserved
+      await expect(queue.deadLetter('test', 'nonexistent', runtime.now())).resolves.toBeUndefined();
+    });
+
+    it('advanceRecurring returns early when recurring job not found', async () => {
+      const runtime = new FakeRuntimeServices();
+      const fakeClient = createFakeAmqpConnection() as never;
+      const queue = new RabbitMqQueue(runtime, { client: fakeClient });
+      await queue.connect();
+
+      // Try to advance a recurring job that doesn't exist
+      await expect(queue.advanceRecurring('nonexistent', runtime.now())).resolves.toBeUndefined();
+    });
+
+    it('disconnect with injected client clears channel and connection state', async () => {
+      const runtime = new FakeRuntimeServices();
+      const fakeClient = createFakeAmqpConnection() as never;
+      const queue = new RabbitMqQueue(runtime, { client: fakeClient });
+      await queue.connect();
+
+      await queue.disconnect();
+
+      // After disconnect, isReady should be false
+      expect(queue.isReady()).toBe(false);
+    });
+  });
 });
