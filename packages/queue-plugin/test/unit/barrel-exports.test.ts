@@ -28,7 +28,17 @@ describe('barrel exports', () => {
     expect(typeof exports.RedisQueue).toBe('function');
   });
 
+  it('exports RabbitMqQueue', () => {
+    expect(exports.RabbitMqQueue).toBeDefined();
+    expect(typeof exports.RabbitMqQueue).toBe('function');
+  });
+
   it('exports RedisQueueOptions type (compile-time only)', () => {
+    // Type-only export, verified at compile time
+    expect(true).toBe(true);
+  });
+
+  it('exports RabbitMqQueueOptions type (compile-time only)', () => {
     // Type-only export, verified at compile time
     expect(true).toBe(true);
   });

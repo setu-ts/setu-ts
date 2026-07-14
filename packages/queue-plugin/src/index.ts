@@ -19,8 +19,13 @@ export type {
 // Export plugin factory and types
 export { QueuePlugin } from './plugin/queue-plugin.ts';
 export type { QueuePluginOptions } from './interfaces/index.ts';
-export type { QueueAdapterType, RedisQueueOptions } from './interfaces/index.ts';
+export type {
+  QueueAdapterType,
+  RabbitMqQueueOptions,
+  RedisQueueOptions,
+} from './interfaces/index.ts';
 
 // Export adapter classes
 export { MemoryQueue } from './adapters/memory-queue.ts';
 export { RedisQueue } from './adapters/redis-queue.ts';
+export { RabbitMqQueue } from './adapters/rabbitmq-queue.ts';

@@ -10,7 +10,11 @@ import type { HealthIndicatorFn, IPlugin, IQueue } from '@hono-enterprise/common
 import { createCapabilityToken } from '@hono-enterprise/common';
 import type { QueueAdapterType, QueuePluginOptions } from '../interfaces/index.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
-import { RedisQueue } from '../adapters/redis-queue.ts';
+import { RedisQueue, validateClient as isRedisQueueClient } from '../adapters/redis-queue.ts';
+import {
+  RabbitMqQueue,
+  validateClient as isAmqpQueueConnection,
+} from '../adapters/rabbitmq-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
 
 /**
@@ -55,12 +59,23 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
         case 'memory':
           adapter = new MemoryQueue();
           break;
-        case 'redis':
+        case 'redis': {
+          const client = options?.client;
           adapter = new RedisQueue({
             url: options?.url ?? 'redis://localhost:6379',
-            ...(options?.client !== undefined && { client: options.client }),
+            ...(client !== undefined && isRedisQueueClient(client) ? { client } : {}),
           });
           break;
+        }
+        case 'rabbitmq': {
+          const client = options?.client;
+          adapter = new RabbitMqQueue(ctx.runtime, {
+            url: options?.url ?? 'amqp://localhost:5672',
+            ...(client !== undefined && isAmqpQueueConnection(client) ? { client } : {}),
+            ...(options?.prefix !== undefined ? { prefix: options.prefix } : {}),
+          });
+          break;
+        }
         default:
           throw new Error(`Unknown queue adapter: ${adapterType}`);
       }

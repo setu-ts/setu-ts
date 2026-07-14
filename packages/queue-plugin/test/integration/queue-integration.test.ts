@@ -2,6 +2,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
+import { createFakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
 import type { IJob, IQueue } from '@hono-enterprise/common';
 
 /**
@@ -220,8 +221,152 @@ describe('QueuePlugin integration', () => {
     expect(health['queue.background']?.data).toEqual({ adapter: 'MemoryQueue' });
   });
 
+  it('rabbitmq adapter: adds and processes a job through the recording fixture', async () => {
+    const fakeConn = createFakeAmqpConnection();
+
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      client: fakeConn,
+      prefix: 'test.integration',
+      pollIntervalMs: POLL_MS,
+    });
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+
+    const delivered: IJob<{ message: string }>[] = [];
+    queue.process<{ message: string }>('test-job', (job) => {
+      delivered.push(job);
+    });
+
+    const jobId = await queue.add('test-job', { message: 'hello rabbitmq' });
+    await runtime.advanceMs(POLL_MS * 2);
+
+    expect(delivered.length).toBe(1);
+    expect(delivered[0]?.id).toBe(jobId);
+    expect(delivered[0]?.data.message).toBe('hello rabbitmq');
+    expect(delivered[0]?.attempts).toBe(1);
+  });
+
+  it('rabbitmq adapter: retry path - job fails, requeues, and is re-delivered at attempts+1', async () => {
+    const fakeConn = createFakeAmqpConnection();
+
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      client: fakeConn,
+      prefix: 'test.retry',
+      pollIntervalMs: POLL_MS,
+      defaultMaxAttempts: 3,
+    });
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+
+    const attempts: number[] = [];
+    queue.process('retry-job', (job) => {
+      attempts.push(job.attempts);
+      if (job.attempts < 3) {
+        // Fail on first two attempts
+        throw new Error('fail again');
+      }
+      // Succeed on third attempt
+    });
+
+    await queue.add('retry-job', { shouldFail: true }, { maxAttempts: 3 });
+
+    // First delivery fails at attempt 1
+    await runtime.advanceMs(POLL_MS * 2);
+    expect(attempts).toEqual([1]);
+
+    // Trigger the TTL expiry to simulate delay queue expiry
+    // The job should have been requeued to the delay queue with backoff
+    const channel = await fakeConn.createChannel();
+    channel.expireDelayed('test.retry.retry-job.ready');
+
+    // Advance for second delivery (attempt 2)
+    await runtime.advanceMs(POLL_MS * 2);
+    expect(attempts).toEqual([1, 2]);
+
+    // Trigger TTL expiry again for third attempt
+    channel.expireDelayed('test.retry.retry-job.ready');
+
+    // Advance for third delivery (attempt 3 - success)
+    await runtime.advanceMs(POLL_MS * 2);
+    expect(attempts).toEqual([1, 2, 3]);
+  });
+
+  it('rabbitmq adapter: dead-letter path - job at maxAttempts lands in dead queue', async () => {
+    const fakeConn = createFakeAmqpConnection();
+
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      client: fakeConn,
+      prefix: 'test.dlq',
+      pollIntervalMs: POLL_MS,
+      defaultMaxAttempts: 2,
+    });
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+
+    const attempts: number[] = [];
+    queue.process('dlq-job', (job) => {
+      attempts.push(job.attempts);
+      throw new Error('always fails');
+    });
+
+    await queue.add('dlq-job', {}, { maxAttempts: 2 });
+
+    // First delivery fails at attempt 1
+    await runtime.advanceMs(POLL_MS * 2);
+    expect(attempts).toEqual([1]);
+
+    // Trigger TTL expiry for second attempt
+    const channel = await fakeConn.createChannel();
+    channel.expireDelayed('test.dlq.dlq-job.ready');
+    await runtime.advanceMs(POLL_MS * 2);
+    expect(attempts).toEqual([1, 2]);
+
+    // At this point the job should be dead-lettered
+    // Check that it's in the dead queue buffer
+    const deadQueueName = 'test.dlq.dlq-job.dead';
+    const deadMessages = channel.getReadyBuffer(deadQueueName);
+    expect(deadMessages.length).toBe(1);
+
+    // The dead-lettered job should never be re-delivered
+    // Advance time and confirm no further deliveries
+    await runtime.advanceMs(POLL_MS * 5);
+    expect(attempts).toEqual([1, 2]);
+  });
+
   it('lifecycle hook disconnects the queue on close', async () => {
     const plugin = QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS });
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+
+    const jobId = await queue.add('test', {});
+    expect(jobId).toBeTruthy();
+
+    await ctx.lifecycle.triggerClose();
+
+    // The adapter is disconnected, so further enqueues fail.
+    await expect(queue.add('test2', {})).rejects.toThrow('not connected');
+
+    // The health indicator reports the queue as down once closed.
+    const health = await ctx.health.check();
+    expect(health['queue']?.status).toBe('down');
+  });
+
+  it('rabbitmq adapter: lifecycle hook disconnects the queue on close', async () => {
+    const fakeConn = createFakeAmqpConnection();
+
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      client: fakeConn,
+      prefix: 'test.lifecycle',
+      pollIntervalMs: POLL_MS,
+    });
     await plugin.register(ctx as never);
 
     const queue = ctx.services.get<IQueue>('queue');

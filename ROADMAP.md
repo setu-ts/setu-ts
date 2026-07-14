@@ -1847,34 +1847,38 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 - [x] QueueService with retry/backoff
 - [x] Cron-based recurring job scheduler
 - [x] Job processor with concurrency control
-- [ ] RabbitMQ adapter — deferred to M15b
+- [x] RabbitMQ adapter — implemented in M15b
 
 ---
 
-## Milestone 15b: Queue Plugin — RabbitMQ Adapter
+## Milestone 15b: Queue Plugin — RabbitMQ Adapter (COMPLETED)
 
-**Objective:** Add RabbitMQ push-based queue adapter with dead-letter-exchange and per-attempt TTL
-machinery.
+**Objective:** Add RabbitMQ queue adapter with polling via `basicGet` and per-message TTL + DLX for
+delayed re-delivery.
 
 ### Package: `@hono-enterprise/queue-plugin`
 
 The `RabbitMqQueue` adapter implements the same
 [`QueueAdapter`](packages/queue-plugin/src/adapters/queue-adapter.ts) transport seam as
-`MemoryQueue` and `RedisQueue`, but maps the polling-based primitives onto RabbitMQ's push model
-(`consume`). This requires:
+`MemoryQueue` and `RedisQueue`. It uses polling via `basicGet` (NOT push `consume`) and leverages
+RabbitMQ's per-message TTL + dead-letter-exchange for delayed enqueue/requeue:
 
-- A **dead-letter-exchange (DLX)** configuration for failed jobs
-- **Per-attempt TTL queues** that automatically route to the DLX after the attempt timeout
-- A **requeue queue** that receives dead-lettered messages and re-publishes them with a fresh TTL
-- **Acknowledgment semantics** where successful processing acks the message, while failures trigger
-  the TTL→DLX→requeue cycle
+- **Per-name queues:** `he.queue.<name>.ready`, `he.queue.<name>.delay`, `he.queue.<name>.dead`
+- **Polling:** `reserve()` polls the ready queue via `basicGet`, stopping at the empty sentinel
+  (`false`)
+- **Delay via TTL+DLX:** Delayed jobs publish to the delay queue with `expiration`; the queue's DLX
+  routes expired messages to the ready queue
+- **Requeue:** Re-publishes to the delay queue with a fresh TTL (backoff), then acks the original
+- **Dead-letter:** Publishes to the dead queue (final resting place)
+- **Inject-or-lazy:** AMQP client via `amqplib@0.10.x`, same pattern as `RedisQueue`
 
 This mirrors the M14 → M14b split for messaging brokers, where RabbitMQ/NATS/Kafka were deferred
 after shipping in-memory + Redis Streams.
 
 **NOT in M15b:** Priority queues, multiple retry strategies, `removeOnComplete` / `removeOnFail`
 options — these are out of scope of the committed
-[`IQueue`](packages/common/src/services/queue.ts:79) contract.
+[`IQueue`](packages/common/src/services/queue.ts:79) contract. Durable recurring for RabbitMQ is
+also out of scope (recurring metadata is in-process, matching `MemoryQueue`).
 
 ---
 
@@ -3442,7 +3446,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
-| 15b       | ⬜     | queue-plugin         |
+| 15b       | ✅     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |

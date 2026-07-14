@@ -47,6 +47,7 @@ export interface QueueAdapter {
    *
    * @param job - The job to enqueue
    * @returns Resolves when enqueued
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   enqueue<T>(job: StoredJob<T>): Promise<void>;
@@ -61,6 +62,7 @@ export interface QueueAdapter {
    * @param limit - Maximum jobs to reserve
    * @param nowMs - Current timestamp in ms
    * @returns The reserved jobs
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]>;
@@ -71,6 +73,7 @@ export interface QueueAdapter {
    * @param name - Job name
    * @param id - Job ID
    * @returns Resolves when acknowledged
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   ack(name: string, id: string): Promise<void>;
@@ -83,6 +86,7 @@ export interface QueueAdapter {
    * @param availableAtMs - When the job becomes available again
    * @param attempts - Updated attempt count
    * @returns Resolves when requeued
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   requeue(name: string, id: string, availableAtMs: number, attempts: number): Promise<void>;
@@ -94,6 +98,7 @@ export interface QueueAdapter {
    * @param id - Job ID
    * @param nowMs - Current timestamp in ms (for dead-letter timestamp)
    * @returns Resolves when dead-lettered
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   deadLetter(name: string, id: string, nowMs: number): Promise<void>;
@@ -103,6 +108,7 @@ export interface QueueAdapter {
    *
    * @param rec - The recurring job to store
    * @returns Resolves when stored
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   storeRecurring(rec: StoredRecurring): Promise<void>;
@@ -112,6 +118,7 @@ export interface QueueAdapter {
    *
    * @param nowMs - Current timestamp in ms
    * @returns The due recurring jobs
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]>;
@@ -122,6 +129,7 @@ export interface QueueAdapter {
    * @param id - Recurring job ID
    * @param nextRunAtMs - Next run timestamp
    * @returns Resolves when advanced
+   * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
   advanceRecurring(id: string, nextRunAtMs: number): Promise<void>;

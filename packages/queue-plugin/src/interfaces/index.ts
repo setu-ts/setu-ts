@@ -4,6 +4,8 @@
  * @module
  */
 
+import type { Buffer } from 'node:buffer';
+
 /**
  * Structural client type for Redis operations used by RedisQueue.
  *
@@ -35,6 +37,55 @@ export interface IRedisQueueClient {
   connect?(): Promise<void>;
   /** Close the connection. */
   quit(): Promise<void>;
+}
+
+/**
+ * Structural client type for AMQP connection used by RabbitMqQueue.
+ *
+ * Mirrors the IRedisQueueClient pattern. Intentionally not barrel-exported.
+ */
+export interface IAmqpQueueConnection {
+  /** Create a channel. */
+  createChannel(): Promise<IAmqpQueueChannel>;
+  /** Close the connection. */
+  close(): Promise<void>;
+}
+
+/**
+ * Structural client type for AMQP channel used by RabbitMqQueue.
+ *
+ * Intentionally not barrel-exported.
+ */
+export interface IAmqpQueueChannel {
+  /** Assert a queue. */
+  assertQueue(queue: string, options?: unknown): Promise<{ queue: string }>;
+  /** Publish a message. */
+  publish(
+    exchange: string,
+    routingKey: string,
+    content: Buffer,
+    options?: unknown,
+  ): boolean;
+  /** Get a message (polling). */
+  get(queue: string, options?: unknown): Promise<IAmqpQueueMessage | false>;
+  /** Acknowledge a message. */
+  ack(message: unknown): void;
+  /** Close the channel. */
+  close(): Promise<void>;
+}
+
+/**
+ * Structural type for an AMQP message returned by get().
+ *
+ * Intentionally not barrel-exported.
+ */
+export interface IAmqpQueueMessage {
+  /** The message content (Buffer). */
+  content: Buffer;
+  /** Message fields. */
+  fields: unknown;
+  /** Message properties. */
+  properties: unknown;
 }
 
 /**
@@ -78,7 +129,7 @@ export interface StoredRecurring {
 /**
  * Queue adapter type for plugin configuration.
  */
-export type QueueAdapterType = 'memory' | 'redis';
+export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq';
 
 /**
  * Options for configuring the queue plugin.
@@ -88,14 +139,16 @@ export interface QueuePluginOptions {
   adapter?: QueueAdapterType;
   /** Instance name for multi-instance support. */
   name?: string;
-  /** Redis connection URL (used when adapter is 'redis'). */
+  /** Connection URL (used when adapter is 'redis' or 'rabbitmq'). */
   url?: string;
-  /** Injected Redis client (bypasses lazy import). */
-  client?: IRedisQueueClient;
+  /** Injected client (bypasses lazy import). */
+  client?: IRedisQueueClient | IAmqpQueueConnection;
   /** Default max attempts for jobs (default 3). */
   defaultMaxAttempts?: number;
   /** Poll interval for worker loop (default 1000ms). */
   pollIntervalMs?: number;
+  /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
+  prefix?: string;
 }
 
 /**
@@ -106,4 +159,16 @@ export interface RedisQueueOptions {
   url?: string;
   /** Injected Redis client (bypasses lazy import). */
   client?: IRedisQueueClient;
+}
+
+/**
+ * Options for configuring RabbitMqQueue.
+ */
+export interface RabbitMqQueueOptions {
+  /** RabbitMQ connection URL (default 'amqp://localhost:5672'). */
+  url?: string;
+  /** Injected AMQP connection (bypasses lazy import). */
+  client?: IAmqpQueueConnection;
+  /** Queue name prefix (default 'he.queue'). */
+  prefix?: string;
 }

@@ -1209,22 +1209,22 @@ graph TB
 
 #### @hono-enterprise/queue-plugin
 
-| Aspect               | Detail                                                                                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Background job queue                                                                                                                     |
-| **Responsibilities** | Add/process jobs; retry strategies; recurring jobs; concurrency control                                                                  |
-| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                            |
-| **Public API**       | `QueuePlugin()`; `IQueue` (re-exported from `common`)                                                                                    |
-| **Extension Points** | Custom queue adapter via internal `QueueAdapter` seam; custom retry strategies                                                           |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory queue for testing; **RabbitMQ adapter deferred to M15b** |
+| Aspect               | Detail                                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Background job queue                                                                                                                                                               |
+| **Responsibilities** | Add/process jobs; retry strategies; recurring jobs; concurrency control                                                                                                            |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                      |
+| **Public API**       | `QueuePlugin()`; `IQueue` (re-exported from `common`)                                                                                                                              |
+| **Extension Points** | Custom queue adapter via internal `QueueAdapter` seam; custom retry strategies                                                                                                     |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory queue for testing; RabbitMQ adapter implemented in M15b (polling via basicGet, TTL+DLX for delays) |
 
 **Architecture Notes:** The `QueuePlugin` factory registers a `QueueService` implementing the
 `IQueue` contract under the `queue` capability token (or `queue.<name>` for named instances). The
 service owns the backend-agnostic machinery (worker poll loop, retry with exponential backoff,
 cron-driven recurring scheduling) and delegates storage to an internal `QueueAdapter` transport
 seam. `MemoryQueue` and `RedisQueue` (ioredis-based delayed queue using Redis sorted sets) implement
-this seam in M15; `RabbitMqQueue` (push-based with dead-letter-exchange and per-attempt TTL) is
-deferred to M15b, mirroring the M14 → M14b messaging split.
+this seam in M15. `RabbitMqQueue` (implemented in M15b) uses polling via `basicGet` over a ready
+queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/auth-plugin
 

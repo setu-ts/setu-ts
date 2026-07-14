@@ -200,6 +200,73 @@ describe('QueuePlugin', () => {
     expect(queue).toBeDefined();
   });
 
+  it('builds RabbitMqQueue when adapter is rabbitmq', async () => {
+    // Use a fake AMQP client to avoid needing a real RabbitMQ connection
+    const fakeClient = {
+      createChannel: () =>
+        Promise.resolve({
+          assertQueue: () => Promise.resolve({ queue: 'test' }),
+          publish: () => true,
+          get: () => Promise.resolve(false),
+          ack: () => {},
+          close: () => Promise.resolve(),
+        }),
+      close: () => Promise.resolve(),
+    };
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      url: 'amqp://localhost:5672',
+      client: fakeClient as never,
+      prefix: 'test.prefix',
+    });
+
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+    expect(queue).toBeDefined();
+  });
+
+  it('drops wrong-shaped redis client and falls through to lazy-load', async () => {
+    // Wrong-shaped client: defined but missing required methods
+    const wrongShapedRedisClient = {
+      zadd: () => 0,
+      // Missing: zrangebyscore, zrem, hset, hget, hdel, del, quit
+    };
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({
+      adapter: 'redis',
+      url: 'redis://localhost:6379',
+      client: wrongShapedRedisClient as never,
+    });
+
+    // The plugin should not throw; it falls through to lazy-load ioredis
+    // Since we don't have a real Redis, the lazy-load will fail at connect time
+    // We're testing that the wrong-shaped client is DROPPED (guard fails)
+    // and the code proceeds to the lazy-load path
+    await expect(plugin.register(ctx as never)).rejects.toThrow();
+  });
+
+  it('drops wrong-shaped rabbitmq client and falls through to lazy-load', async () => {
+    // Wrong-shaped client: defined but missing required methods
+    const wrongShapedAmqpClient = {
+      createChannel: () => Promise.resolve({}),
+      // Missing: close
+    };
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      url: 'amqp://localhost:5672',
+      client: wrongShapedAmqpClient as never,
+    });
+
+    // The plugin should not throw; it falls through to lazy-load amqplib
+    // Since we don't have a real RabbitMQ, the lazy-load will fail at connect time
+    // We're testing that the wrong-shaped client is DROPPED (guard fails)
+    // and the code proceeds to the lazy-load path
+    await expect(plugin.register(ctx as never)).rejects.toThrow();
+  });
+
   it('throws on unknown adapter', async () => {
     const ctx = new FakeContext();
     const plugin = QueuePlugin({ adapter: 'unknown' as never });
