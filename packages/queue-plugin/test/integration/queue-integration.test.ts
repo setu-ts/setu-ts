@@ -265,7 +265,7 @@ describe('QueuePlugin integration', () => {
     const attempts: number[] = [];
     queue.process('retry-job', (job) => {
       attempts.push(job.attempts);
-      if (job.attempts < 2) {
+      if (job.attempts < 3) {
         // Fail on first two attempts
         throw new Error('fail again');
       }

@@ -64,6 +64,8 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
   /**
    * Move messages from delay queue to ready queue, simulating TTL expiry.
    * Tests call this deliberately to trigger delayed message delivery.
+   * Only moves messages that were in the delay buffer at call time,
+   * preserving any new messages added by subsequent requeue calls.
    */
   expireDelayed(queue: string): void {
     const delayQueue = queue.endsWith('.ready')
@@ -78,13 +80,15 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
       this.#readyBuffers.set(queue, []);
     }
     // Move all messages from delay to ready
-    for (const msg of delayBuffer) {
+    const messagesToMove = [...delayBuffer]; // Snapshot current messages
+    for (const msg of messagesToMove) {
       this.#readyBuffers.get(queue)!.push({
         content: Buffer.from(msg.content),
         options: msg.options,
       });
     }
-    delayBuffer.length = 0;
+    // Clear only the messages that were moved, preserving new arrivals
+    delayBuffer.splice(0, messagesToMove.length);
   }
 
   assertQueue(queue: string, options?: unknown): Promise<{ queue: string }> {
