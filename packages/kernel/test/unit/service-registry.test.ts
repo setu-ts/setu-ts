@@ -96,4 +96,119 @@ describe('ServiceRegistry', () => {
       expect((e as Error).message).toContain('CAPABILITIES');
     }
   });
+
+  describe('getAll - edge cases', () => {
+    it('returns empty array for unregistered token', () => {
+      const registry = new ServiceRegistry();
+      const all = registry.getAll('nonexistent');
+
+      expect(all).toEqual([]);
+    });
+
+    it('includes single registration in getAll', () => {
+      const registry = new ServiceRegistry();
+      registry.register('single', { id: 1 });
+      registry.register('multi', { id: 2 }, { multi: true });
+
+      const all = registry.getAll('multi');
+
+      expect(all.length).toBe(1);
+      expect(all[0]).toEqual({ id: 2 });
+    });
+  });
+
+  describe('has - inheritance', () => {
+    it('returns true for parent registration', () => {
+      const parent = new ServiceRegistry();
+      parent.register('shared', {});
+
+      const child = parent.createChild();
+
+      expect(child.has('shared')).toBe(true);
+    });
+
+    it('returns false for non-existent parent registration', () => {
+      const parent = new ServiceRegistry();
+      const child = parent.createChild();
+
+      expect(child.has('nonexistent')).toBe(false);
+    });
+  });
+
+  describe('unregister - edge cases', () => {
+    it('removes multi-registered token', () => {
+      const registry = new ServiceRegistry();
+      registry.register('multi', { id: 1 }, { multi: true });
+      registry.register('multi', { id: 2 }, { multi: true });
+
+      const removed = registry.unregister('multi');
+
+      expect(removed).toBe(true);
+      expect(registry.getAll('multi').length).toBe(0);
+    });
+
+    it('returns false for unregistering non-existent token', () => {
+      const registry = new ServiceRegistry();
+
+      const removed = registry.unregister('nonexistent');
+
+      expect(removed).toBe(false);
+    });
+  });
+
+  describe('factory lazy initialization', () => {
+    it('caches factory result for subsequent gets', () => {
+      const registry = new ServiceRegistry();
+      let callCount = 0;
+
+      registry.registerFactory('cached', () => {
+        callCount++;
+        return { value: callCount };
+      });
+
+      const first = registry.get('cached');
+      const second = registry.get('cached');
+
+      expect(callCount).toBe(1);
+      expect(first).toBe(second);
+    });
+
+    it('caches factory result for getAll', () => {
+      const registry = new ServiceRegistry();
+      let callCount = 0;
+
+      registry.registerFactory('cached', () => {
+        callCount++;
+        return { value: callCount };
+      });
+
+      const all = registry.getAll('cached');
+
+      expect(callCount).toBe(1);
+      expect(all.length).toBe(1);
+    });
+  });
+
+  describe('child scope isolation', () => {
+    it('child gets parent registration via fallback', () => {
+      const parent = new ServiceRegistry();
+      parent.register('shared', { from: 'parent' });
+
+      const child = parent.createChild();
+
+      expect(child.get('shared')).toEqual({ from: 'parent' });
+      expect(child.has('shared')).toBe(true);
+    });
+
+    it('child can shadow parent registration', () => {
+      const parent = new ServiceRegistry();
+      parent.register('shared', { from: 'parent' });
+
+      const child = parent.createChild();
+      child.register('shared', { from: 'child' });
+
+      expect(child.get('shared')).toEqual({ from: 'child' });
+      expect(parent.get('shared')).toEqual({ from: 'parent' });
+    });
+  });
 });

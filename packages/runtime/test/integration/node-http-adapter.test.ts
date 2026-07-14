@@ -165,7 +165,6 @@ describe('NodeHttpAdapter - Real Round-Trip', () => {
         .catch(() => 0);
       expect(afterClose).toBe(0); // Connection failed
     });
-
   });
 
   describe('createNodeRequestListener', () => {

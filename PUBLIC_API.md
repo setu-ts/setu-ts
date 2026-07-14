@@ -3281,23 +3281,23 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 
 ### Types
 
-| Export           | Kind | Purpose                                                        |
-| ---------------- | ---- | -------------------------------------------------------------- |
-| `RuntimeOptions` | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`) |
-| `GlobalScope`    | type | Injectable global scope shape for `detectRuntime`              |
-| `DenoHost`       | type | Host interface for the Deno adapter (extension point)          |
-| `DenoFileInfo`   | type | File info returned by `DenoHost.stat()`                        |
-| `DenoDirEntry`   | type | Directory entry returned by `DenoHost.readdir()`               |
-| `NodeHost`       | type | Host interface for the Node adapter (extension point)          |
-| `NodeFsInfo`     | type | File info returned by `NodeHost.stat()`                        |
-| `NodeModules`    | type | Injectable Node built-ins for `buildNodeHost` (testing seam)   |
-| `BunHost`        | type | Host interface for the Bun adapter (extension point)           |
-| `BunFileInfo`    | type | File info returned by `BunHost.stat()`                         |
+| Export                 | Kind | Purpose                                                        |
+| ---------------------- | ---- | -------------------------------------------------------------- |
+| `RuntimeOptions`       | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`) |
+| `GlobalScope`          | type | Injectable global scope shape for `detectRuntime`              |
+| `DenoHost`             | type | Host interface for the Deno adapter (extension point)          |
+| `DenoFileInfo`         | type | File info returned by `DenoHost.stat()`                        |
+| `DenoDirEntry`         | type | Directory entry returned by `DenoHost.readdir()`               |
+| `NodeHost`             | type | Host interface for the Node adapter (extension point)          |
+| `NodeFsInfo`           | type | File info returned by `NodeHost.stat()`                        |
+| `NodeModules`          | type | Injectable Node built-ins for `buildNodeHost` (testing seam)   |
+| `BunHost`              | type | Host interface for the Bun adapter (extension point)           |
+| `BunFileInfo`          | type | File info returned by `BunHost.stat()`                         |
 | `DenoHttpServerHandle` | type | Internal server handle for DenoHttpAdapter                     |
 | `NodeHttpServerHandle` | type | Internal server handle for NodeHttpAdapter                     |
 | `BunHttpServerHandle`  | type | Internal server handle for BunHttpAdapter                      |
-| `BunServeHost`   | type | Injectable host interface for BunHttpAdapter (extension point) |
-| `BunServer`      | type | Bun server handle returned by `Bun.serve`                      |
+| `BunServeHost`         | type | Injectable host interface for BunHttpAdapter (extension point) |
+| `BunServer`            | type | Bun server handle returned by `Bun.serve`                      |
 | `HttpAdapterFactories` | type | Platform→adapter factory map for RuntimePlugin                 |
 
 Contract notes:

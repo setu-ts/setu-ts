@@ -4,7 +4,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { mapNodeRequest, writeSnapshotToNodeResponse } from '../../src/adapters/node/node-http-mapping.ts';
+import {
+  mapNodeRequest,
+  writeSnapshotToNodeResponse,
+} from '../../src/adapters/node/node-http-mapping.ts';
 
 describe('Node HTTP mapping - mapNodeRequest', () => {
   it('maps GET request correctly', () => {
@@ -55,6 +58,7 @@ describe('Node HTTP mapping - mapNodeRequest', () => {
 
     expect(request.ip).toBe('192.168.1.1');
   });
+
   it('maps request without IP when socket is missing', () => {
     // @ts-ignore - test fake
     const message = {
@@ -124,6 +128,72 @@ describe('Node HTTP mapping - mapNodeRequest', () => {
 
     expect(request.url).toBe('/');
     expect(request.path).toBe('/');
+  });
+
+  describe('mapNodeRequest - body methods', () => {
+    it('json() parses JSON body from cached bytes', async () => {
+      const bodyBytes = new TextEncoder().encode(JSON.stringify({ key: 'value' }));
+      // @ts-ignore - test fake
+      const message = {
+        method: 'POST',
+        url: '/api',
+        headers: { 'content-type': 'application/json' },
+        socket: { remoteAddress: '192.168.1.1' },
+      };
+
+      const request = mapNodeRequest(message as never, bodyBytes);
+      const result = await request.json();
+
+      expect(result).toEqual({ key: 'value' });
+    });
+
+    it('json() reads body from cached bytes', async () => {
+      const bodyBytes = new TextEncoder().encode(JSON.stringify({ from: 'cached' }));
+      // @ts-ignore - test fake
+      const message = {
+        method: 'POST',
+        url: '/api',
+        headers: { 'content-type': 'application/json' },
+        socket: { remoteAddress: '192.168.1.1' },
+      };
+
+      const request = mapNodeRequest(message as never, bodyBytes);
+      const result = await request.json();
+
+      expect(result).toEqual({ from: 'cached' });
+    });
+
+    it('text() returns text from cached bytes', async () => {
+      const bodyBytes = new TextEncoder().encode('Hello, World!');
+      // @ts-ignore - test fake
+      const message = {
+        method: 'GET',
+        url: '/',
+        headers: {},
+        socket: { remoteAddress: '192.168.1.1' },
+      };
+
+      const request = mapNodeRequest(message as never, bodyBytes);
+      const result = await request.text();
+
+      expect(result).toBe('Hello, World!');
+    });
+
+    it('bytes() returns cached bytes', async () => {
+      const bodyBytes = new Uint8Array([1, 2, 3, 4, 5]);
+      // @ts-ignore - test fake
+      const message = {
+        method: 'POST',
+        url: '/api',
+        headers: {},
+        socket: { remoteAddress: '192.168.1.1' },
+      };
+
+      const request = mapNodeRequest(message as never, bodyBytes);
+      const result = await request.bytes();
+
+      expect(result).toEqual(bodyBytes);
+    });
   });
 });
 
@@ -244,5 +314,69 @@ describe('Node HTTP mapping - writeSnapshotToNodeResponse', () => {
     writeSnapshotToNodeResponse(snapshot, response as never);
 
     expect(endCalled).toBe(true);
+  });
+
+  describe('writeSnapshotToNodeResponse - body types', () => {
+    it('writes undefined body correctly', () => {
+      const snapshot = {
+        status: 204,
+        headers: new Headers(),
+        body: null, // Use null instead of undefined to match type
+      };
+      // @ts-ignore - test fake
+      let endCalled = false;
+      const response: {
+        statusCode: number;
+        headers: Record<string, string>;
+        setHeader: () => void;
+        end: (chunk?: string | Uint8Array) => void;
+      } = {
+        statusCode: 200,
+        headers: {},
+        setHeader: function () {},
+        end: function (_chunk?: string | Uint8Array) {
+          endCalled = true;
+        },
+      };
+
+      writeSnapshotToNodeResponse(snapshot, response as never);
+
+      expect(endCalled).toBe(true);
+    });
+
+    it('sets headers correctly with multiple entries', () => {
+      const headers = new Headers();
+      headers.append('Content-Type', 'text/html');
+      headers.append('X-Custom-Header', 'value1');
+      headers.append('X-Custom-Header', 'value2');
+
+      const snapshot = {
+        status: 200,
+        headers,
+        body: 'test',
+      };
+
+      const responseHeaders: Record<string, string> = {};
+      // @ts-ignore - test fake
+      const response: {
+        statusCode: number;
+        headers: Record<string, string>;
+        setHeader: (key: string, value: string) => void;
+        end: (chunk?: string | Uint8Array) => void;
+      } = {
+        statusCode: 200,
+        headers: responseHeaders,
+        setHeader: function (key: string, value: string) {
+          responseHeaders[key.toLowerCase()] = value;
+        },
+        end: function (_chunk?: string | Uint8Array) {},
+      };
+
+      writeSnapshotToNodeResponse(snapshot, response as never);
+
+      expect(responseHeaders['content-type']).toBe('text/html');
+      // Note: setHeader may only set the last value for duplicate headers
+      expect(responseHeaders['x-custom-header']).toBeDefined();
+    });
   });
 });

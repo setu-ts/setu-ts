@@ -8,28 +8,6 @@
  */
 
 import type { HttpMethod, IRequest } from '@hono-enterprise/common';
-import { Readable } from 'node:stream';
-
-/**
- * Reads the body from an IncomingMessage as bytes.
- *
- * @param message - The incoming message
- * @returns The body bytes
- */
-async function readBodyAsBytes(message: NodeIncomingMessage): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of Readable.toWeb(message) as ReadableStream<Uint8Array>) {
-    chunks.push(chunk);
-  }
-  const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
-}
 
 // Type alias for IncomingMessage to avoid import collision
 type NodeIncomingMessage = import('node:http').IncomingMessage;
@@ -67,8 +45,6 @@ export function mapNodeRequest(
   // Client IP address
   const ip = message.socket?.remoteAddress;
 
-  let cachedBody: Uint8Array | null = bodyBytes;
-
   const result: IRequest = {
     method,
     url,
@@ -76,20 +52,14 @@ export function mapNodeRequest(
     headers,
     ...(ip !== undefined ? { ip } : {}),
     json: async () => {
-      const bytes = cachedBody ?? (await readBodyAsBytes(message));
-      cachedBody = null;
-      const text = new TextDecoder().decode(bytes);
-      return JSON.parse(text);
+      const text = new TextDecoder().decode(bodyBytes);
+      return await Promise.resolve(JSON.parse(text));
     },
     text: async () => {
-      const bytes = cachedBody ?? (await readBodyAsBytes(message));
-      cachedBody = null;
-      return new TextDecoder().decode(bytes);
+      return await Promise.resolve(new TextDecoder().decode(bodyBytes));
     },
     bytes: async () => {
-      const bytes = cachedBody ?? (await readBodyAsBytes(message));
-      cachedBody = null;
-      return bytes;
+      return await Promise.resolve(bodyBytes);
     },
   };
 

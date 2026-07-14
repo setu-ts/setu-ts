@@ -151,5 +151,113 @@ describe('Deno HTTP mapping', () => {
       // At least one cookie should be present
       expect(cookies).toBeTruthy();
     });
+
+    it('maps snapshot with empty string body', () => {
+      const snapshot = {
+        status: 200,
+        headers: new Headers(),
+        body: '',
+      };
+
+      const response = mapSnapshotToDenoResponse(snapshot);
+
+      expect(response.status).toBe(200);
+    });
+
+    it('maps snapshot with empty Uint8Array body', async () => {
+      const snapshot = {
+        status: 200,
+        headers: new Headers(),
+        body: new Uint8Array([]),
+      };
+
+      const response = mapSnapshotToDenoResponse(snapshot);
+
+      expect(response.status).toBe(200);
+      const result = await response.arrayBuffer();
+      expect(result.byteLength).toBe(0);
+    });
+
+    it('maps snapshot with various status codes', () => {
+      // Status codes 204 (No Content) and 304 (Not Modified) cannot have a body
+      const statusCodesWithBody = [200, 201, 301, 302, 400, 404, 500];
+
+      for (const status of statusCodesWithBody) {
+        const snapshot = {
+          status,
+          headers: new Headers(),
+          body: 'test' as string | Uint8Array | null,
+        };
+
+        const response = mapSnapshotToDenoResponse(snapshot);
+
+        expect(response.status).toBe(status);
+      }
+
+      // Test 204 No Content separately (no body)
+      const noContentSnapshot = {
+        status: 204,
+        headers: new Headers(),
+        body: null,
+      };
+      const noContentResponse = mapSnapshotToDenoResponse(noContentSnapshot);
+      expect(noContentResponse.status).toBe(204);
+    });
+  });
+
+  describe('mapDenoRequest - edge cases', () => {
+    it('handles request without query string', () => {
+      const nativeRequest = new Request('http://example.com/path', {
+        method: 'GET',
+      });
+
+      const request = mapDenoRequest(nativeRequest);
+
+      expect(request.path).toBe('/path');
+      expect(request.url).toBe('http://example.com/path');
+    });
+
+    it('handles request with complex query string', () => {
+      const nativeRequest = new Request('http://example.com/path?a=1&b=2&c=3', {
+        method: 'GET',
+      });
+
+      const request = mapDenoRequest(nativeRequest);
+
+      expect(request.path).toBe('/path');
+      expect(request.url).toBe('http://example.com/path?a=1&b=2&c=3');
+    });
+
+    it('handles request with special characters in URL', () => {
+      const nativeRequest = new Request('http://example.com/path%20with%20spaces', {
+        method: 'GET',
+      });
+
+      const request = mapDenoRequest(nativeRequest);
+
+      expect(request.path).toBe('/path%20with%20spaces');
+    });
+
+    it('handles all HTTP methods', () => {
+      const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+
+      for (const method of methods) {
+        const nativeRequest = new Request('http://example.com', { method });
+        const request = mapDenoRequest(nativeRequest);
+
+        expect(request.method).toBe(method.toUpperCase());
+      }
+    });
+
+    it('handles empty headers', () => {
+      const nativeRequest = new Request('http://example.com', {
+        method: 'GET',
+        headers: {},
+      });
+
+      const request = mapDenoRequest(nativeRequest);
+
+      expect(request.headers.get('content-type')).toBeNull();
+    });
   });
 });
