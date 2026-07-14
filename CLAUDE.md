@@ -159,10 +159,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
   IQueue, IJob, JobProcessor, AddJobOptions, ProcessOptions, RecurringOptions; memory + redis
   adapters implemented) — complete (PR pending)
-- **Milestone 15b** (`packages/queue-plugin` — RabbitMQ queue adapter (`RabbitMqQueue`) added to the
-  existing QueuePlugin; implements the committed `IQueue` contract with connection pooling,
-  automatic reconnection, and graceful shutdown; no `common` change, no new capability token) —
-  complete (PR pending)
+- **Milestone 15b** (`packages/queue-plugin` — `RabbitMqQueue` adapter added to the existing
+  QueuePlugin via the internal `QueueAdapter` seam; `basicGet` polling for `reserve`, per-message
+  TTL with a dead-letter-exchange for delayed enqueue/requeue, per-name ready/delay/dead queues,
+  in-process recurring; inject-or-lazy `npm:amqplib` client with a guarded real-import test; no
+  `common` change, no new capability token) — complete (PR pending)
 - **Next milestone** — Milestone 16 (auth-plugin)
 
 ## Verification (run before declaring any work done)
