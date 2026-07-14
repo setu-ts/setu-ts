@@ -659,12 +659,12 @@ await app.start();
 
 **Objective:** Provide runtime-agnostic services (UUID, timers, crypto, fs, env).
 
-> **Scope change:** HTTP server adapters are **deferred** to a new milestone (see "HTTP Server
-> Adapters" at the end of the milestone list). M3 scope is runtime services + detection + plugin
-> only. The `IHttpAdapter` contract hands the adapter a `Promise<IResponse>`, but `IResponse` is
-> write-only (no read/snapshot surface), so an adapter cannot serialize the response without
-> reaching into kernel internals. That seam needs its own design pass against the kernel. The
-> framework already runs via `app.inject()` with no server, so nothing is blocked.
+> **Scope change (historical):** HTTP server adapters were deferred from M3 to Milestone 39 (see
+> "HTTP Server Adapters"). M3 shipped runtime services + detection + plugin only. The deferral was
+> originally because `IResponse` had no read surface; that was resolved in M11 by the
+> `IResponse.snapshot()` read seam, which M39's adapters now use to serialize responses without
+> reaching into kernel internals. The framework already ran via `app.inject()` with no server, so
+> nothing was blocked.
 
 ### Package: `@hono-enterprise/runtime`
 
@@ -3469,4 +3469,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 36        | ⬜     | documentation        |
 | 37        | ⬜     | docker/kubernetes    |
 | 38        | ⬜     | final release        |
-| 39        | ⬜     | http-adapters        |
+| 39        | ✅     | http-adapters        |

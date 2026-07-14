@@ -113,9 +113,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
   application lifecycle) — complete (PR #3)
 - **Milestone 3** (`packages/runtime` — runtime services for Node/Deno/Bun, detection,
-  RuntimePlugin) — complete (PR #4). HTTP server adapters **deferred** to Milestone 39 (see
-  ROADMAP.md) — `IResponse` has no read surface; needs a web-standard Request/Response seam designed
-  against the kernel.
+  RuntimePlugin) — complete (PR #4). HTTP server adapters were deferred to Milestone 39 and are now
+  implemented there via the `IResponse.snapshot()` read seam (added in M11).
 - **Milestone 4** (`packages/logger-plugin` — structured logging) — complete (PR #5)
 - **Milestone 5** (`packages/config-plugin` — configuration with env loading, variable expansion,
   and Zod-compatible validation) — complete (PR #7)
@@ -164,6 +163,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   TTL with a dead-letter-exchange for delayed enqueue/requeue, per-name ready/delay/dead queues,
   in-process recurring; inject-or-lazy `npm:amqplib` client with a guarded real-import test; no
   `common` change, no new capability token) — complete (PR #32)
+- **Milestone 39** (`packages/runtime` — HTTP server adapters taken out of order, before M16:
+  `DenoHttpAdapter`/`NodeHttpAdapter`/`BunHttpAdapter` implementing `IHttpAdapter`, registered under
+  `CAPABILITIES.HTTP_ADAPTER` via the `RuntimePlugin` `httpAdapters` map; `app.start({ port })`
+  binds a real socket and throws when no adapter is registered; Bun is unit-tested via an injectable
+  `BunServeHost` seam; `IResponse.snapshot()` (M11) is the response read seam — no `common` change)
+  — complete (PR pending)
 - **Next milestone** — Milestone 16 (auth-plugin)
 
 ## Verification (run before declaring any work done)
