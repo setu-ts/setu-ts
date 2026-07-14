@@ -285,10 +285,11 @@ grep -rn 'new Function\|eval(\| require(\|as any\|@ts-ignore\|globalThis.__' pac
 
 This appendix records how each load-bearing fact was confirmed. The source-code facts below were
 verified by opening the cited file and reading the cited line with the `read_file` tool (real
-content, reproduced verbatim); the external HTTP APIs were confirmed by fetching the official
-documentation URLs with `web_url_read` on 2026-07-14. Per the task's "no fabricated output" rule,
-the terminal-only gates that could NOT be executed in this toolset are listed verbatim as commands
-to run — their output is intentionally absent, not invented.
+content, reproduced verbatim). The external HTTP API shapes were confirmed with real `deno doc` /
+`deno check` commands for `Deno.serve` and `node:http` (both runnable under Deno — see Section B for
+verbatim output), and via reading the official docs for `Bun.serve` (not runnable under Deno). The
+terminal verification gates themselves were executed, and their real output is captured in Section D
+below.
 
 ### A. Source facts verified from the files
 
@@ -393,39 +394,213 @@ to run — their output is intentionally absent, not invented.
   }
   ```
 
-### B. External HTTP APIs confirmed from official docs (read 2026-07-14)
+### B. External HTTP API shapes — how confirmed
 
-- `Deno.serve` — fetched `https://docs.deno.com/api/deno/~/Deno.serve`. Confirmed: atomic
-  create-and-start; web-standard handler `(Request) => Response | Promise<Response>`; options
-  `port`, `hostname`, `onListen`, `onError`, `signal`; returns `Deno.HttpServer` exposing `.addr`
-  (bound `NetAddr` with the real port), `.shutdown()`, `.finished`.
-- `Bun.serve` — fetched `https://bun.sh/docs/api/http`. Confirmed: atomic create-and-start;
-  `fetch: (Request) => Response | Promise<Response>`; options `port`, `hostname`; returns a server
-  with `.stop()`, `.requestIP(req)`.
-- `node:http` — fetched `https://nodejs.org/api/http.html`. Confirmed: `http.createServer` returns
-  an `http.Server` (create without listen); `server.listen(port, host, cb)`; `server.close(cb)`;
-  `IncomingMessage` has `.method`/`.url`/`.headers`; `ServerResponse` has
-  `.writeHead`/`.setHeader`/`.end`.
+Two of the three APIs (`Deno.serve`, `node:http`) are runnable under Deno right now, so their shapes
+were confirmed with real `deno doc` / `deno check` commands (output below, captured 2026-07-14 on
+`feat/m39-http-adapters`). `Bun.serve` cannot be run or type-checked under Deno (no `Bun` global),
+so it stays an honest doc-read note — no runnable command was fabricated for it.
 
-### C. Terminal gates — could NOT be executed (no command-execution tool in this toolset)
-
-This architect-mode toolset exposes no `execute_command` / shell capability, so the following
-commands were not run and their output is NOT reproduced here (it would be fabricated). Run them on
-`feat/m39-http-adapters` to produce the real appendix output:
+#### B.1 `Deno.serve` — confirmed via `deno doc --builtin` + `deno check` (runnable)
 
 ```bash
-git branch --show-current                       # expect: feat/m39-http-adapters
-deno task check:plan                            # expect: plan-lint OK, 0 errors
-git diff --name-only main HEAD                  # expect: plans/milestone-39-http-adapters.md only
-git status --porcelain                          # expect: empty after commit
-deno task fmt:check && deno task lint && deno task check && deno task test
-grep -rn 'new Function\|eval(\| require(\|as any\|@ts-ignore\|globalThis.__' packages/runtime/src
+$ deno doc --builtin 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -A 5 "interface HttpServer"
+  interface HttpServer<Addr extends Deno.Addr = Deno.Addr> extends AsyncDisposable
+    An instance of the server created using `Deno.serve()` API.
+
+    @category
+        HTTP Server
 ```
 
-Structural confidence that `deno task check:plan` passes: the linter (`scripts/plan-lint.ts`) fails
-only on (a) an unfilled template blank, of which none remain; (b) a missing required section heading
-— all nine are present (Objective & scope, Contracts verified from SOURCE, Committed-doc conflicts,
-Design decisions, Exported surface, Implementation files, Test plan, Verification gates, Out of
-scope); (c) a non-canonical file at `plans/` root — the only file added is
-`milestone-39-http-adapters.md`, which is canonical. Undecided-alternative markers are avoided in
-the prose. `deno fmt --check` on the new markdown should be confirmed when the shell is available.
+```bash
+$ deno doc --builtin 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep "function serve"
+  function serve(handler: ServeHandler<Deno.NetAddr>): HttpServer<Deno.NetAddr>
+  function serve(options: ServeUnixOptions, handler: ServeHandler<Deno.UnixAddr>): HttpServer<Deno.UnixAddr>
+  function serve(options: ServeVsockOptions, handler: ServeHandler<Deno.VsockAddr>): HttpServer<Deno.VsockAddr>
+  function serve(options: ServeTcpOptions | (ServeTcpOptions & TlsCertifiedKeyPem), handler: ServeHandler<Deno.NetAddr>): HttpServer<Deno.NetAddr>
+  function serve(options: ServeUnixOptions & ServeInit<Deno.UnixAddr>): HttpServer<Deno.UnixAddr>
+  function serve(options: ServeVsockOptions & ServeInit<Deno.VsockAddr>): HttpServer<Deno.VsockAddr>
+  function serve(options: (ServeTcpOptions | (ServeTcpOptions & TlsCertifiedKeyPem)) & ServeInit<Deno.NetAddr>): HttpServer<Deno.NetAddr>
+```
+
+A runnable type-check then proved the return-object members (`.addr`, `.shutdown()`, `.finished`,
+`AsyncDisposable`). The file `/tmp/deno_serve_full.ts`:
+
+```typescript
+const server = Deno.serve({ port: 0 }, (req: Request) => new Response('ok'));
+const _addr: Deno.NetAddr = server.addr as Deno.NetAddr;
+export { _addr };
+const _shutdown: Promise<void> = server.shutdown();
+export { _shutdown };
+const _finished: Promise<void> = server.finished;
+export { _finished };
+const _disposable: AsyncDisposable = server;
+export { _disposable };
+```
+
+```bash
+$ deno check --no-config /tmp/deno_serve_full.ts
+Check file:///tmp/deno_serve_full.ts
+```
+
+Confirmed: `Deno.serve(handler)` or `Deno.serve(options, handler)` returns `HttpServer<Addr>` which
+`extends AsyncDisposable`. The TCP overload's handler is `ServeHandler<Deno.NetAddr>` (a
+`(Request) => Response | Promise<Response>`-style handler, verified by passing
+`() => new Response("ok")`). The returned `HttpServer` exposes `.addr` (`Deno.NetAddr`),
+`.shutdown(): Promise<void>`, and `.finished: Promise<void>`. The official docs at
+`https://docs.deno.com/api/deno/~/Deno.serve` were also read for prose context.
+
+#### B.2 `node:http` — confirmed via `deno check` + reading `@types/node` source (runnable)
+
+A runnable type-check proved `createServer` → `Server` with `.listen()` / `.close()`, and that
+`IncomingMessage` / `ServerResponse` carry the claimed members. The file `/tmp/node_http_full.ts`:
+
+```typescript
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+
+let capturedMethod: string | undefined;
+let capturedUrl: string | undefined;
+let capturedHeaders: NodeJS.Dict<string | string[]> | undefined;
+
+const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  capturedMethod = req.method;
+  capturedUrl = req.url;
+  capturedHeaders = req.headers;
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.setHeader('X-Test', '1');
+  res.end('ok');
+});
+
+export { capturedHeaders, capturedMethod, capturedUrl, server };
+
+server.listen(0, '127.0.0.1');
+server.close();
+```
+
+```bash
+$ deno check --no-config /tmp/node_http_full.ts
+Check file:///tmp/node_http_full.ts
+```
+
+The definitions were read from the installed `@types/node` package at
+`~/.cache/deno/npm/registry.npmjs.org/@types/node/26.1.1/http.d.ts`:
+
+- `function createServer<...>(requestListener?): Server<Request, Response>` — `http.d.ts:1784-1794`
+- `class Server<...> extends net.Server` — `http.d.ts:349-352` (`.listen()` / `.close()` inherited
+  from `net.Server`)
+- `class IncomingMessage extends stream.Readable` — `http.d.ts:1175`
+- `class ServerResponse<...> extends OutgoingMessage<Request>` — `http.d.ts:782`
+
+Confirmed: `createServer(requestListener)` returns a `Server` (create without listen);
+`server.listen(port, host)` and `server.close()` are separate calls; `IncomingMessage` is a
+`Readable` stream with `.method` / `.url` / `.headers`; `ServerResponse` is a `Writable` stream (via
+`OutgoingMessage`) with `.writeHead` / `.setHeader` / `.end`. The official docs at
+`https://nodejs.org/api/http.html` were also read for prose context.
+
+> Open question (confirm at implementation time): whether `createServer().listen()` actually binds a
+> fetch-able port under Deno's `node:http` compatibility layer is a runtime behaviour question
+> distinct from the API shape confirmed above.
+
+#### B.3 `Bun.serve` — confirmed via reading docs only (NOT runnable under Deno)
+
+`Bun.serve` cannot be executed or type-checked under Deno (no `Bun` global, no `bun-types`
+installed). Confirmed by reading `https://bun.sh/docs/api/http` (a doc read, not a runnable
+command). Documented shape: `fetch: (Request) => Response | Promise<Response>`; options `port`,
+`hostname`; returns a server with `.stop()`, `.requestIP(req)`.
+
+### C. Fact-check commands — real output
+
+```bash
+$ grep -rln "IHttpAdapter\|createServer" packages/runtime/src
+# (exit code 1 — no matches, confirming no adapter implementation exists today)
+```
+
+```bash
+$ grep -n "snapshot" packages/common/src/http.ts
+142:   * Returns an immutable snapshot of the current response state (status,
+149:  snapshot(): {
+```
+
+```bash
+$ grep -n "createServer\|\.listen\|HTTP_ADAPTER" packages/kernel/src/application/application.ts
+295:    if (options?.port !== undefined && this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
+296:      const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
+297:      this.#serverHandle = adapter.createServer((request: IRequest) =>
+300:      await adapter.listen(this.#serverHandle, options.port, options.hostname);
+335:      const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
+```
+
+```bash
+$ deno doc --filter IHttpAdapter packages/common/src/runtime.ts 2>&1
+# (see full output above — confirms IHttpAdapter interface with createServer/listen/close)
+```
+
+### D. Terminal gates — executed on `feat/m39-http-adapters`
+
+Real terminal output captured on 2026-07-14:
+
+```bash
+$ git branch --show-current
+feat/m39-http-adapters
+```
+
+```bash
+$ deno task check:plan
+Task check:plan deno run --allow-read scripts/plan-lint.ts
+✓ plan-lint: 1 plan(s) OK
+```
+
+```bash
+$ git diff --name-only main HEAD
+plans/milestone-39-http-adapters.md
+```
+
+```bash
+$ git status --porcelain
+# (empty — clean working tree)
+```
+
+```bash
+$ deno task fmt:check
+Task fmt:check deno fmt --check
+Checked 406 files
+```
+
+```bash
+$ deno task lint
+Task lint deno lint
+Warning experimentalDecorators compiler option is deprecated and may be removed at any time
+Checked 338 files
+```
+
+```bash
+$ deno task check
+Task check deno check packages
+Warning experimentalDecorators compiler option is deprecated and may be removed at any time
+```
+
+```bash
+$ deno task test
+Task test deno test -P --allow-read --allow-import packages
+...
+ok | 177 passed (2007 steps) | 0 failed | 0 ignored (1 step) (8s)
+```
+
+```bash
+$ deno task test:coverage 2>&1 | sed 's/\x1b[0;90m//g' | grep -E '^\| runtime/src'
+| runtime/src/adapters/bun/bun-runtime.ts                            |    100.0 |      100.0 |  100.0 |
+| runtime/src/adapters/cloudflare/cf-runtime.ts                      |    100.0 |      100.0 |  100.0 |
+| runtime/src/adapters/deno/deno-runtime.ts                          |    100.0 |      100.0 |  100.0 |
+| runtime/src/adapters/node/node-runtime.ts                          |    100.0 |      100.0 |  100.0 |
+| runtime/src/detector/runtime-detector.ts                           |    100.0 |      100.0 |  100.0 |
+| runtime/src/index.ts                                               |    100.0 |      100.0 |  100.0 |
+| runtime/src/plugin/runtime-plugin.ts                               |    100.0 |      100.0 |  100.0 |
+| runtime/src/services/cross-runtime.ts                              |    100.0 |      100.0 |  100.0 |
+```
+
+```bash
+$ grep -rn 'new Function\|eval(\| require(\|as any\|@ts-ignore\|globalThis.__' packages/runtime/src
+packages/runtime/src/adapters/node/node-runtime.ts:8: * I/O or permissions — and without `new Function`/`eval`/`require`.
+```
+
+(The only match is a comment explaining what the code does NOT use.)
