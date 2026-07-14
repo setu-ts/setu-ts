@@ -7,7 +7,7 @@ description: Verify a completed milestone's changes end-to-end — gates, ANSI-s
 
 Independently verify that a milestone's changes actually do what they claim. Passing gates is
 necessary but NOT sufficient — this skill exists because green gates have shipped real bugs. The
-canonical policy lives in `/CLAUDE.md` ("Verification", "Common pitfalls", "Self-review checklist",
+canonical policy lives in `CLAUDE.md` ("Verification", "Common pitfalls", "Self-review checklist",
 "Before reporting a task done") — read those sections first and treat them as the source of truth;
 this file is the step-by-step procedure.
 

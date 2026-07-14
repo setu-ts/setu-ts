@@ -1,6 +1,6 @@
 # Code mode — your work is not finished until it is committed
 
-This rule is specific to Roo Code's **Code** mode. Follow `/CLAUDE.md` for the branch and commit
+This rule is specific to Roo Code's **Code** mode. Follow `CLAUDE.md` for the branch and commit
 conventions (one `feat/…` branch per milestone; conventional commit messages; never work on or
 commit to `main`; push and PRs are human-only). This file adds the mode-specific gate a delegated
 subtask must not skip: leaving the tree dirty for someone else to commit is the single most common
