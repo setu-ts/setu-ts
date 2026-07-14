@@ -32,6 +32,23 @@ implement. Its entire job is to break a request into subtasks and hand each to t
 - **Verifying / auditing a milestone** → a subtask that runs the `verify-milestone` skill
   (`.roo/skills/verify-milestone/SKILL.md`).
 
+## Persisting each subtask's work (you coordinate the commit; you never run it)
+
+Delegating the work is only half the job — the result has to land on the branch. Nobody but a
+subtask can commit (you are forbidden from running `git`, above), so the commit is a coordination
+responsibility you own by delegating and verifying it:
+
+- **Every Code subtask commits its OWN changes before it finishes** (see
+  `.roo/rules-code/01-commit-before-done.md`). Restate that requirement in each Code `new_task` you
+  spawn, and require it to return its final `git status --porcelain` output.
+- **On return, check that output.** If it is non-empty the tree is dirty and the subtask did NOT
+  finish its job: your NEXT `new_task` is a Code-mode commit step ("commit the working tree on the
+  current `feat/…` branch with a conventional message, then show `git status --porcelain`") — before
+  any further work.
+- **Never launch the next unit of work over a dirty tree.** A clean `git status --porcelain` is the
+  gate between one subtask and the next. You still never edit files or run git yourself — you
+  delegate the commit and read the result.
+
 ## Always
 
 - Respect `/CLAUDE.md` and the other `.roo/rules/*` in every subtask you spawn (restate the relevant
