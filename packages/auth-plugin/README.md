@@ -185,6 +185,74 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 Supplying neither `jwt.secret` (HS256) nor `jwt.privateKey` + `jwt.publicKey` (RS256) throws at
 registration.
 
+## Refresh Tokens (M16b)
+
+`RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
+`AuthPlugin` option and registers nothing. It mints access + refresh pairs, **rotates** on every
+`refresh` (the presented token's `jti` is revoked; replaying it returns `null`), and **revokes** on
+logout. A refresh token is a signed JWT with `type: 'refresh'` and a random `jti`, tracked in a
+pluggable async `RefreshTokenStore` (`MemoryRefreshTokenStore` ships; single-process, lazy expiry).
+`refresh()`/`revoke()` never throw on a bad token — invalid, expired, or tampered input yields
+`null`/`false`.
+
+```typescript
+import { MemoryRefreshTokenStore, RefreshTokenService } from '@hono-enterprise/auth-plugin';
+
+const refresh = new RefreshTokenService({
+  jwt, // IJwtService resolved from the 'jwt' token
+  store: new MemoryRefreshTokenStore(runtime),
+  runtime, // IRuntimeServices resolved from the 'runtime' token
+  accessToken: { expiresIn: '15m' },
+  refreshTokenExpiresIn: '30d',
+});
+
+const pair = await refresh.issue(principal); // { accessToken, refreshToken }
+const next = await refresh.refresh(pair.refreshToken); // new pair; old token now rejected
+await refresh.revoke(next!.refreshToken); // logout
+```
+
+| Option                  | Type                | Default     | Description                                    |
+| ----------------------- | ------------------- | ----------- | ---------------------------------------------- |
+| `jwt`                   | `IJwtService`       | -           | Signs/verifies both tokens.                    |
+| `store`                 | `RefreshTokenStore` | -           | Rotation/revocation backend.                   |
+| `runtime`               | `IRuntimeServices`  | -           | `randomBytes` (jti) + `now()` (expiry).        |
+| `accessToken.expiresIn` | `string`            | jwt default | Access-token lifetime.                         |
+| `accessToken.audience`  | `string`            | -           | `aud` on both tokens; enforced on verify.      |
+| `accessToken.issuer`    | `string`            | -           | `iss` on both tokens; enforced on verify.      |
+| `refreshTokenExpiresIn` | `string`            | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record). |
+
+## Rate Limiting (M16b)
+
+`rateLimitMiddleware(options)` is a standalone fixed-window limiter, independent of `AuthPlugin` and
+registered under no capability token. Over-limit requests are short-circuited with **429**
+(`Retry-After` always set; `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` set unless
+`standardHeaders: false` — `Reset` and `Retry-After` are both delta-seconds). The default store is
+in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
+ioredis-compatible `client`, or `npm:ioredis@5.x` is lazily imported on first use).
+
+```typescript
+import { rateLimitMiddleware, RedisRateLimitStore } from '@hono-enterprise/auth-plugin';
+
+app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 })); // per IP
+
+// Redis-backed, keyed by authenticated user
+rateLimitMiddleware({
+  windowMs: 60_000,
+  max: 5,
+  keyGenerator: (ctx) => ctx.request.user?.id ?? ctx.request.ip ?? 'anonymous',
+  store: new RedisRateLimitStore({ url: 'redis://localhost:6379', runtime }),
+});
+```
+
+| Option            | Type              | Default                 | Description                      |
+| ----------------- | ----------------- | ----------------------- | -------------------------------- |
+| `windowMs`        | `number`          | -                       | Window length in ms.             |
+| `max`             | `number`          | -                       | Max requests per window per key. |
+| `store`           | `RateLimitStore`  | `MemoryRateLimitStore`  | Counter backend.                 |
+| `keyGenerator`    | `(ctx) => string` | `ip ?? 'anonymous'`     | Caller identity for the counter. |
+| `message`         | `string`          | `'Rate limit exceeded'` | 429 body message.                |
+| `standardHeaders` | `boolean`         | `true`                  | Emit `RateLimit-*` headers.      |
+
 ## License
 
 MIT

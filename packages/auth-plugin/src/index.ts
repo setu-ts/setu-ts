@@ -38,6 +38,8 @@ export { PasswordHasher } from './services/password-hasher.ts';
 
 // Middleware
 export { authMiddleware } from './middleware/auth-middleware.ts';
+export { rateLimitMiddleware } from './middleware/rate-limit-middleware.ts';
+export type { RateLimitOptions } from './middleware/rate-limit-middleware.ts';
 
 // Guards
 export { requireAuth } from './guards/index.ts';
@@ -46,6 +48,19 @@ export { requirePermission } from './guards/index.ts';
 export { requireAnyRole } from './guards/index.ts';
 export { requireAllPermissions } from './guards/index.ts';
 export { publicRoute } from './guards/index.ts';
+
+// Refresh token service
+export { RefreshTokenService } from './services/refresh-token-service.ts';
+export type { RefreshTokenOptions, TokenPair } from './services/refresh-token-service.ts';
+
+// Refresh token store
+export type { RefreshTokenRecord, RefreshTokenStore } from './stores/refresh-token-store.ts';
+export { MemoryRefreshTokenStore } from './stores/refresh-token-store.ts';
+
+// Rate limit store
+export type { RateLimitResult, RateLimitStore } from './stores/rate-limit-store.ts';
+export { MemoryRateLimitStore } from './stores/rate-limit-store.ts';
+export { RedisRateLimitStore } from './stores/redis-rate-limit-store.ts';
 
 // Re-export common contracts
 export type {

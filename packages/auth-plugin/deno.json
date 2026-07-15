@@ -1,5 +1,13 @@
 {
   "name": "@hono-enterprise/auth-plugin",
   "version": "0.1.0",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "sys": ["hostname"]
+    }
+  }
 }

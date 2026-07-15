@@ -24,6 +24,16 @@ describe('barrel exports', () => {
     expect(typeof auth.authMiddleware).toBe('function');
   });
 
+  it('exports rateLimitMiddleware', () => {
+    expect(auth.rateLimitMiddleware).toBeDefined();
+    expect(typeof auth.rateLimitMiddleware).toBe('function');
+  });
+
+  it('exports RefreshTokenService', () => {
+    expect(auth.RefreshTokenService).toBeDefined();
+    expect(typeof auth.RefreshTokenService).toBe('function');
+  });
+
   it('exports guard factories', () => {
     expect(auth.requireAuth).toBeDefined();
     expect(typeof auth.requireAuth).toBe('function');
@@ -44,6 +54,12 @@ describe('barrel exports', () => {
     expect(typeof auth.publicRoute).toBe('function');
   });
 
+  it('exports stores', () => {
+    expect(auth.MemoryRefreshTokenStore).toBeDefined();
+    expect(auth.MemoryRateLimitStore).toBeDefined();
+    expect(auth.RedisRateLimitStore).toBeDefined();
+  });
+
   it('type exports', () => {
     // Type exports are verified by deno check - this test just confirms
     // the module can be imported without errors
@@ -52,7 +68,7 @@ describe('barrel exports', () => {
 
   it('does not export internal implementations', () => {
     // JwtService, AuthService, RbacService, JwtStrategy, ApiKeyStrategy,
-    // LocalStrategy, and parseDuration should NOT be exported from the barrel
+    // LocalStrategy, parseDuration, loadIoredis, validateClient should NOT be exported
     const internals = [
       'JwtService',
       'AuthService',
@@ -61,6 +77,8 @@ describe('barrel exports', () => {
       'ApiKeyStrategy',
       'LocalStrategy',
       'parseDuration',
+      'loadIoredis',
+      'validateClient',
     ];
     for (const name of internals) {
       expect(auth[name as keyof typeof auth]).toBeUndefined();
