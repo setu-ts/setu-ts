@@ -102,7 +102,16 @@ export type {
 } from './services/validation.ts';
 export type { HealthCheckResult, HealthIndicatorFn, IHealthIndicator } from './services/health.ts';
 export type { IMetric, MetricConfig } from './services/metrics.ts';
-export type { IJwtService, IPrincipal, JwtSignOptions } from './services/auth.ts';
+export type {
+  IAuthorizationService,
+  IAuthService,
+  IAuthStrategy,
+  IJwtService,
+  IPrincipal,
+  JwtSignOptions,
+  RbacConfig,
+  RoleDefinition,
+} from './services/auth.ts';
 export type { IOrmAdapter, ITransaction } from './services/database.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';
