@@ -1882,7 +1882,7 @@ also out of scope (recurring metadata is in-process, matching `MemoryQueue`).
 
 ---
 
-## Milestone 16: Auth Plugin — Authentication and Authorization
+## Milestone 16: Auth Plugin — Authentication and Authorization ✅ COMPLETE
 
 **Objective:** Provide authentication (JWT, API key, local credentials), authorization (RBAC with
 role hierarchy), and short-circuiting route guards. All cryptography (HS256/RS256 JWT, PBKDF2-SHA256
@@ -1890,8 +1890,8 @@ password hashing) runs through Web Crypto (`runtime.subtle` / `runtime.randomByt
 ships with **zero npm dependencies**.
 
 > **Phasing:** the **refresh-token strategy** and **rate limiting** are deferred to **M16b** (see
-> the M16b sub-section below), mirroring the M14 → M14b and M15 → M15b splits. Status:
-> implemented-but-not-merged (deliverable checkboxes are not flipped until the PR merges).
+> the M16b sub-section below), mirroring the M14 → M14b and M15 → M15b splits. Status: complete (PR
+> pending).
 
 ### Package: `@hono-enterprise/auth-plugin`
 
@@ -1979,12 +1979,12 @@ All guards short-circuit (no `next()`) on 401/403; `authMiddleware` always calls
 
 ### Deliverables
 
-- [ ] AuthPlugin
-- [ ] JWT, API Key, Local strategies (Refresh deferred to M16b)
-- [ ] RBAC with role hierarchy
-- [ ] Guard middleware factories (`publicRoute`, not `public`)
-- [ ] Password hashing (PBKDF2 via Web Crypto)
-- [ ] Full test coverage (per-file 90% bar)
+- [x] AuthPlugin
+- [x] JWT, API Key, Local strategies (Refresh deferred to M16b)
+- [x] RBAC with role hierarchy (incl. the `'*'` wildcard permission)
+- [x] Guard middleware factories (`publicRoute`, not `public`)
+- [x] Password hashing (PBKDF2 via Web Crypto)
+- [x] Full test coverage (per-file 90% bar)
 - [ ] Rate limiting — **M16b** (deferred)
 
 ## Milestone 16b: Auth Plugin — Refresh Tokens & Rate Limiting (deferred)
@@ -3446,7 +3446,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 14b       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
-| 16        | ⬜     | auth-plugin          |
+| 16        | ✅     | auth-plugin          |
 | 16b       | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |

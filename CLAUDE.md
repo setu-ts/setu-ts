@@ -169,7 +169,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   binds a real socket and throws when no adapter is registered; Bun is unit-tested via an injectable
   `BunServeHost` seam; `IResponse.snapshot()` (M11) is the response read seam — no `common` change)
   — complete (PR pending)
-- **Next milestone** — Milestone 16 (auth-plugin)
+- **Milestone 16** (`packages/auth-plugin` — AuthPlugin registering `IJwtService` under `jwt`,
+  `IAuthService` under `authentication`, and `IAuthorizationService` under `authorization`; JWT
+  HS256/RS256 via Web Crypto (`runtime.subtle`, zero npm deps), passive JwtStrategy/ApiKeyStrategy
+  chain + LocalStrategy for `verifyCredentials` login flows, RBAC with transitive role hierarchy and
+  the `'*'` wildcard permission, short-circuiting guard factories (`requireAuth`, `requireRole`,
+  `requirePermission`, `requireAnyRole`, `requireAllPermissions`, `publicRoute`), `authMiddleware`
+  populating `ctx.request.user` (made writable in `common`), and an exported PBKDF2-SHA256
+  `PasswordHasher`; refresh tokens + rate limiting deferred to M16b) — complete (PR pending)
+- **Next milestone** — Milestone 16b (auth-plugin — refresh-token strategy & rate limiting)
 
 ## Verification (run before declaring any work done)
 
