@@ -20,7 +20,7 @@
  *   },
  * }));
  * app.middleware.add(authMiddleware());
- * app.router.get('/protected', requireAuth(), handler);
+ * app.router.get('/protected', { middleware: [requireAuth()], handler });
  * ```
  */
 

@@ -18,7 +18,7 @@ import { CAPABILITIES } from '@hono-enterprise/common';
  *
  * @example
  * ```typescript
- * app.router.get('/protected', requireAuth(), handler);
+ * app.router.get('/protected', { middleware: [requireAuth()], handler });
  * ```
  */
 export function requireAuth(): MiddlewareFunction {
@@ -43,7 +43,7 @@ export function requireAuth(): MiddlewareFunction {
  *
  * @example
  * ```typescript
- * app.router.delete('/users/:id', requireRole('admin'), handler);
+ * app.router.delete('/users/:id', { middleware: [requireRole('admin')], handler });
  * ```
  */
 export function requireRole(role: string): MiddlewareFunction {
@@ -78,7 +78,7 @@ export function requireRole(role: string): MiddlewareFunction {
  *
  * @example
  * ```typescript
- * app.router.post('/users', requirePermission('users:create'), handler);
+ * app.router.post('/users', { middleware: [requirePermission('users:create')], handler });
  * ```
  */
 export function requirePermission(permission: string): MiddlewareFunction {
@@ -113,7 +113,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
  *
  * @example
  * ```typescript
- * app.router.get('/admin', requireAnyRole(['admin', 'manager']), handler);
+ * app.router.get('/admin', { middleware: [requireAnyRole(['admin', 'manager'])], handler });
  * ```
  */
 export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
@@ -148,7 +148,10 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
  *
  * @example
  * ```typescript
- * app.router.post('/bulk', requireAllPermissions(['users:create', 'users:send-welcome']), handler);
+ * app.router.post('/bulk', {
+ *   middleware: [requireAllPermissions(['users:create', 'users:send-welcome'])],
+ *   handler,
+ * });
  * ```
  */
 export function requireAllPermissions(permissions: readonly string[]): MiddlewareFunction {
@@ -186,7 +189,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
  *
  * @example
  * ```typescript
- * app.router.get('/public', publicRoute(), handler);
+ * app.router.get('/public', { middleware: [publicRoute()], handler });
  * ```
  */
 export function publicRoute(): MiddlewareFunction {
