@@ -7,6 +7,7 @@
  * @module
  */
 
+import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
 
 /**
@@ -80,13 +81,13 @@ export class RedisRateLimitStore implements RateLimitStore {
   #client: IRateLimitRedisClient | null = null;
   #url: string;
   #injectedClient: IRateLimitRedisClient | undefined;
-  #runtime: { now(): number };
+  #runtime: IRuntimeServices;
 
   constructor(
     options: {
       url?: string | undefined;
       client?: IRateLimitRedisClient | undefined;
-      runtime: { now(): number };
+      runtime: IRuntimeServices;
     },
   ) {
     this.#url = options.url ?? 'redis://localhost:6379';

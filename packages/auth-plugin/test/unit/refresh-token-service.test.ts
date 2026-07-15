@@ -1,345 +1,294 @@
 /**
  * Unit tests for RefreshTokenService.
  *
- * Covers: issue, refresh (rotation), replay rejection, revocation.
+ * Covers: issue, refresh (rotation), replay rejection, revocation, option
+ * handling (accessToken vs refreshTokenExpiresIn lifetimes), and the
+ * invalid/expired/tampered-token null paths.
  */
 
-import { assert, assertEquals, assertExists } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { RefreshTokenService } from '../../src/services/refresh-token-service.ts';
-import type { TokenPair } from '../../src/services/refresh-token-service.ts';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
 import { JwtService } from '../../src/services/jwt-service.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
-Deno.test('RefreshTokenService — issue returns a valid token pair', async () => {
+function makeService(options?: {
+  accessToken?: { expiresIn?: string; audience?: string; issuer?: string };
+  refreshTokenExpiresIn?: string;
+}): {
+  runtime: ReturnType<typeof createFakeRuntime>;
+  jwt: JwtService;
+  store: MemoryRefreshTokenStore;
+  service: RefreshTokenService;
+} {
   const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, {
-    algorithm: 'HS256',
-    secret: 'test-secret',
-  });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
-
-  const principal = {
-    id: 'user-123',
-    roles: ['user'],
-    permissions: ['users:read'],
-  };
-
-  const pair = await service.issue(principal);
-
-  // Verify access token
-  const accessPayload = await jwt.verify<{
-    sub: string;
-    roles: string[];
-    permissions: string[];
-  }>(pair.accessToken);
-  assertEquals(accessPayload.sub, 'user-123');
-  assertEquals(accessPayload.roles, ['user']);
-  assertEquals(accessPayload.permissions, ['users:read']);
-
-  // Verify refresh token has type:'refresh' and jti
-  const refreshPayload = await jwt.verify<{
-    sub: string;
-    type: 'refresh';
-    jti: string;
-  }>(pair.refreshToken);
-  assertEquals(refreshPayload.type, 'refresh');
-  assertEquals(refreshPayload.sub, 'user-123');
-  assertEquals(typeof refreshPayload.jti, 'string');
-
-  // Verify store has the record
-  const record = await store.get(refreshPayload.jti);
-  assertEquals(record?.principalId, 'user-123');
-  assertEquals(record?.revoked, false);
-});
-
-Deno.test('RefreshTokenService — refresh rotates and issues a new pair', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test' });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
-
-  const principal = { id: 'user-123', roles: ['user'] };
-  const pair1 = await service.issue(principal);
-
-  // First refresh — should succeed and rotate
-  const pair2 = await service.refresh(pair1.refreshToken);
-  assertExists(pair2);
-  assertEquals(pair2.accessToken, pair1.accessToken); // Same access claims
-  assert(pair2.refreshToken !== pair1.refreshToken); // NEW refresh token with new jti
-
-  // Verify the new token has a different jti
-  const oldJti = (await jwt.verify<{ jti: string }>(pair1.refreshToken)).jti;
-  const newJti = (await jwt.verify<{ jti: string }>(pair2.refreshToken)).jti;
-  assert(oldJti !== newJti);
-});
-
-Deno.test('RefreshTokenService — replay rejection', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test' });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
-
-  const principal = { id: 'user-123', roles: ['user'] };
-  const pair = await service.issue(principal);
-
-  // First refresh succeeds and rotates
-  await service.refresh(pair.refreshToken);
-
-  // Second refresh with the SAME original token — jti is revoked, should return null
-  const pair3 = await service.refresh(pair.refreshToken);
-  assertEquals(pair3, null);
-});
-
-Deno.test('RefreshTokenService — revoke works', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test' });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
-
-  const principal = { id: 'user-123' };
-  const pair = await service.issue(principal);
-
-  const revoked = await service.revoke(pair.refreshToken);
-  assertEquals(revoked, true);
-
-  // Refresh after revoke returns null
-  const pair2 = await service.refresh(pair.refreshToken);
-  assertEquals(pair2, null);
-});
-
-Deno.test('RefreshTokenService — expired token returns null', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test' });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
-
-  const principal = { id: 'user-123' };
-  const pair = await service.issue(principal);
-  const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
-
-  // Advance time past expiry
-  runtime.setNow(runtime.now() + 8 * 24 * 60 * 60 * 1000); // 8 days later
-
-  // Store.get will lazy-expire and return null
-  const record = await store.get(refreshPayload.jti);
-  assertEquals(record, null);
-
-  // Refresh throws on expired token
-  let refreshed: TokenPair | null = null;
-  try {
-    refreshed = await service.refresh(pair.refreshToken);
-  } catch {
-    refreshed = null;
-  }
-  assertEquals(refreshed, null);
-});
-
-Deno.test('RefreshTokenService — tampered token returns null', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test' });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
-
-  const principal = { id: 'user-123' };
-  const pair = await service.issue(principal);
-
-  // Tamper with the payload (not the signature)
-  const parts = pair.refreshToken.split('.');
-  const tamperedPayload = globalThis.btoa(
-    JSON.stringify({ sub: 'user-123', type: 'refresh', jti: 'hacked' }),
-  );
-  const tampered = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
-
-  let refreshed: TokenPair | null = null;
-  try {
-    refreshed = await service.refresh(tampered);
-  } catch {
-    refreshed = null;
-  }
-  assertEquals(refreshed, null); // Signature mismatch
-});
-
-// --- Option-coverage tests for accessToken and refreshTokenExpiresIn ---
-
-Deno.test('RefreshTokenService — accessToken option flows through to token claims', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, {
-    algorithm: 'HS256',
-    secret: 'test-secret',
-  });
+  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
   const store = new MemoryRefreshTokenStore(runtime);
   const service = new RefreshTokenService({
     jwt,
     store,
     runtime,
-    accessToken: { expiresIn: '15m', audience: 'my-app', issuer: 'auth-svc' },
+    ...(options?.accessToken !== undefined ? { accessToken: options.accessToken } : {}),
+    ...(options?.refreshTokenExpiresIn !== undefined
+      ? { refreshTokenExpiresIn: options.refreshTokenExpiresIn }
+      : {}),
+  });
+  return { runtime, jwt, store, service };
+}
+
+describe('RefreshTokenService', () => {
+  describe('issue', () => {
+    it('returns a valid token pair with round-tripping access claims', async () => {
+      const { jwt, store, service } = makeService();
+      const principal = {
+        id: 'user-123',
+        roles: ['user'],
+        permissions: ['users:read'],
+      };
+
+      const pair = await service.issue(principal);
+
+      const accessPayload = await jwt.verify<{
+        sub: string;
+        roles: string[];
+        permissions: string[];
+      }>(pair.accessToken);
+      expect(accessPayload.sub).toBe('user-123');
+      expect(accessPayload.roles).toEqual(['user']);
+      expect(accessPayload.permissions).toEqual(['users:read']);
+
+      const refreshPayload = await jwt.verify<{
+        sub: string;
+        type: string;
+        jti: string;
+      }>(pair.refreshToken);
+      expect(refreshPayload.type).toBe('refresh');
+      expect(refreshPayload.sub).toBe('user-123');
+      expect(typeof refreshPayload.jti).toBe('string');
+
+      const record = await store.get(refreshPayload.jti);
+      expect(record?.principalId).toBe('user-123');
+      expect(record?.revoked).toBe(false);
+    });
+
+    it('signs the refresh token with refreshTokenExpiresIn, NOT the access lifetime', async () => {
+      const { jwt, service } = makeService({
+        accessToken: { expiresIn: '30m' },
+        refreshTokenExpiresIn: '1h',
+      });
+
+      const pair = await service.issue({ id: 'user-123' });
+
+      const accessPayload = await jwt.verify<{ iat: number; exp: number }>(pair.accessToken);
+      expect(accessPayload.exp - accessPayload.iat).toBe(1800); // 30m
+
+      const refreshPayload = await jwt.verify<{ iat: number; exp: number }>(pair.refreshToken);
+      expect(refreshPayload.exp - refreshPayload.iat).toBe(3600); // 1h — the REFRESH lifetime
+    });
+
+    it('defaults the refresh token JWT lifetime to 7d', async () => {
+      const { jwt, service } = makeService();
+
+      const pair = await service.issue({ id: 'user-123' });
+
+      const refreshPayload = await jwt.verify<{ iat: number; exp: number }>(pair.refreshToken);
+      expect(refreshPayload.exp - refreshPayload.iat).toBe(7 * 24 * 60 * 60);
+    });
+
+    it('carries configured audience/issuer on both tokens so verify enforces them', async () => {
+      const { jwt, service } = makeService({
+        accessToken: { expiresIn: '15m', audience: 'my-app', issuer: 'auth-svc' },
+      });
+
+      const pair = await service.issue({ id: 'user-123', roles: ['user'] });
+
+      const accessPayload = await jwt.verify<{ aud: string; iss: string }>(pair.accessToken);
+      expect(accessPayload.aud).toBe('my-app');
+      expect(accessPayload.iss).toBe('auth-svc');
+
+      const refreshPayload = await jwt.verify<{ type: string; aud: string; iss: string }>(
+        pair.refreshToken,
+      );
+      expect(refreshPayload.type).toBe('refresh');
+      expect(refreshPayload.aud).toBe('my-app');
+      expect(refreshPayload.iss).toBe('auth-svc');
+    });
+
+    it('refreshTokenExpiresIn controls the store record expiry', async () => {
+      const { runtime, jwt, store, service } = makeService({ refreshTokenExpiresIn: '1h' });
+
+      const pair = await service.issue({ id: 'user-123' });
+      const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
+
+      expect((await store.get(refreshPayload.jti))?.principalId).toBe('user-123');
+
+      // Advance past 1h — record is lazily evicted
+      runtime.setNow(runtime.now() + 3600001);
+      expect(await store.get(refreshPayload.jti)).toBeNull();
+    });
+
+    it('defaults the store record expiry to 7d', async () => {
+      const { runtime, jwt, store, service } = makeService();
+
+      const pair = await service.issue({ id: 'user-123' });
+      const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
+
+      expect((await store.get(refreshPayload.jti))?.principalId).toBe('user-123');
+
+      runtime.setNow(runtime.now() + 7 * 24 * 60 * 60 * 1000 + 1);
+      expect(await store.get(refreshPayload.jti)).toBeNull();
+    });
   });
 
-  const principal = { id: 'user-123', roles: ['user'] };
-  const pair = await service.issue(principal);
+  describe('refresh (rotation)', () => {
+    it('returns a NEW pair and rotates the jti', async () => {
+      const { jwt, service } = makeService();
+      const pair1 = await service.issue({ id: 'user-123', roles: ['user'] });
 
-  // Access token carries audience and issuer
-  const accessPayload = await jwt.verify<{
-    sub: string;
-    aud: string;
-    iss: string;
-  }>(pair.accessToken);
-  assertEquals(accessPayload.aud, 'my-app');
-  assertEquals(accessPayload.iss, 'auth-svc');
+      const pair2 = await service.refresh(pair1.refreshToken);
 
-  // Refresh token also carries audience and issuer from accessToken option
-  const refreshPayload = await jwt.verify<{
-    type: 'refresh';
-    aud: string;
-    iss: string;
-  }>(pair.refreshToken);
-  assertEquals(refreshPayload.type, 'refresh');
-  assertEquals(refreshPayload.aud, 'my-app');
-  assertEquals(refreshPayload.iss, 'auth-svc');
-});
+      expect(pair2).not.toBeNull();
+      expect(pair2?.refreshToken).not.toBe(pair1.refreshToken);
 
-Deno.test(
-  'RefreshTokenService — refreshTokenExpiresIn controls store record expiry',
-  async () => {
-    const runtime = createFakeRuntime();
-    const jwt = new JwtService(runtime, {
-      algorithm: 'HS256',
-      secret: 'test-secret',
-    });
-    const store = new MemoryRefreshTokenStore(runtime);
-    const service = new RefreshTokenService({
-      jwt,
-      store,
-      runtime,
-      refreshTokenExpiresIn: '1h', // 3600000 ms
+      const oldJti = (await jwt.verify<{ jti: string }>(pair1.refreshToken)).jti;
+      const newJti = (await jwt.verify<{ jti: string }>(pair2!.refreshToken)).jti;
+      expect(oldJti).not.toBe(newJti);
+
+      // The re-minted access token carries the snapshot principal's claims
+      const accessPayload = await jwt.verify<{ sub: string; roles: string[] }>(
+        pair2!.accessToken,
+      );
+      expect(accessPayload.sub).toBe('user-123');
+      expect(accessPayload.roles).toEqual(['user']);
     });
 
-    const principal = { id: 'user-123' };
-    const pair = await service.issue(principal);
-    const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
+    it('rejects replay: refreshing the same token twice returns null the second time', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
 
-    // Record exists before expiry
-    const record = await store.get(refreshPayload.jti);
-    assertEquals(record?.principalId, 'user-123');
+      const first = await service.refresh(pair.refreshToken);
+      expect(first).not.toBeNull();
 
-    // Advance 1h + 1ms past the expiry — record should be evicted
-    runtime.setNow(runtime.now() + 3600001);
-    const afterExpiry = await store.get(refreshPayload.jti);
-    assertEquals(afterExpiry, null);
-  },
-);
-
-Deno.test(
-  'RefreshTokenService — refreshTokenExpiresIn default is 7d',
-  async () => {
-    const runtime = createFakeRuntime();
-    const jwt = new JwtService(runtime, {
-      algorithm: 'HS256',
-      secret: 'test-secret',
-    });
-    const store = new MemoryRefreshTokenStore(runtime);
-    const service = new RefreshTokenService({
-      jwt,
-      store,
-      runtime,
-      // No refreshTokenExpiresIn — defaults to '7d'
+      const second = await service.refresh(pair.refreshToken);
+      expect(second).toBeNull();
     });
 
-    const principal = { id: 'user-123' };
-    const pair = await service.issue(principal);
-    const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
+    it('returns null for an expired refresh token (verify rejects, no throw)', async () => {
+      const { runtime, service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
 
-    // Record still exists before 7d
-    const beforeExpiry = await store.get(refreshPayload.jti);
-    assertEquals(beforeExpiry?.principalId, 'user-123');
+      // Advance past the 7d default expiry
+      runtime.setNow(runtime.now() + 8 * 24 * 60 * 60 * 1000);
 
-    // Advance 7d + 1ms — record should be evicted
-    runtime.setNow(runtime.now() + 7 * 24 * 60 * 60 * 1000 + 1);
-    const afterExpiry = await store.get(refreshPayload.jti);
-    assertEquals(afterExpiry, null);
-  },
-);
-
-Deno.test(
-  'RefreshTokenService — revoke with malformed token falls back to decode',
-  async () => {
-    const runtime = createFakeRuntime();
-    const jwt = new JwtService(runtime, {
-      algorithm: 'HS256',
-      secret: 'test-secret',
+      expect(await service.refresh(pair.refreshToken)).toBeNull();
     });
-    const store = new MemoryRefreshTokenStore(runtime);
-    const service = new RefreshTokenService({ jwt, store, runtime });
 
-    const principal = { id: 'user-123' };
-    const pair = await service.issue(principal);
+    it('returns null for a tampered refresh token (signature mismatch, no throw)', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
 
-    // Tamper the token so verify fails but decode still extracts jti
-    const parts = pair.refreshToken.split('.');
-    const tamperedPayload = globalThis.btoa(
-      JSON.stringify({
-        sub: 'user-123',
-        type: 'refresh',
-        jti: (await jwt.verify<{ jti: string }>(pair.refreshToken)).jti,
-      }),
-    );
-    const tampered = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
+      const parts = pair.refreshToken.split('.');
+      const tamperedPayload = globalThis.btoa(
+        JSON.stringify({ sub: 'user-123', type: 'refresh', jti: 'hacked' }),
+      );
+      const tampered = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
 
-    // Revoke with tampered token — verify fails, decode fallback extracts jti, store revokes
-    const revoked = await service.revoke(tampered);
-    assertEquals(revoked, true);
+      expect(await service.refresh(tampered)).toBeNull();
+    });
 
-    // Original token is now revoked in store
-    const refreshed = await service.refresh(pair.refreshToken);
-    assertEquals(refreshed, null);
-  },
-);
+    it('returns null for a garbage token string', async () => {
+      const { service } = makeService();
+      expect(await service.refresh('not.a.token')).toBeNull();
+    });
 
-Deno.test('RefreshTokenService — revoke with completely unparseable token returns false', async () => {
-  const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, {
-    algorithm: 'HS256',
-    secret: 'test-secret',
+    it('returns null for a valid JWT that is not a refresh token (no type claim)', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      // The ACCESS token verifies fine but has no type:'refresh'
+      expect(await service.refresh(pair.accessToken)).toBeNull();
+    });
+
+    it('returns null for a refresh-typed JWT without a jti claim', async () => {
+      const { jwt, service } = makeService();
+      const forged = await jwt.sign({ sub: 'user-123', type: 'refresh' }, { expiresIn: '1h' });
+
+      expect(await service.refresh(forged)).toBeNull();
+    });
+
+    it('returns null after revoke (revoked record rejected)', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      expect(await service.revoke(pair.refreshToken)).toBe(true);
+      expect(await service.refresh(pair.refreshToken)).toBeNull();
+    });
+
+    it('sequential double refresh of one token: first wins, second yields null', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      const [first, second] = [
+        await service.refresh(pair.refreshToken),
+        await service.refresh(pair.refreshToken),
+      ];
+      expect(first).not.toBeNull();
+      expect(second).toBeNull();
+    });
   });
-  const store = new MemoryRefreshTokenStore(runtime);
-  const service = new RefreshTokenService({ jwt, store, runtime });
 
-  // Totally invalid token — decode returns null
-  const revoked = await service.revoke('not.a.token');
-  assertEquals(revoked, false);
+  describe('revoke', () => {
+    it('returns true when a live record is revoked', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      expect(await service.revoke(pair.refreshToken)).toBe(true);
+    });
+
+    it('returns false when the record is already revoked', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      expect(await service.revoke(pair.refreshToken)).toBe(true);
+      expect(await service.revoke(pair.refreshToken)).toBe(false);
+    });
+
+    it('returns false for a token that does not verify (tampered)', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      const parts = pair.refreshToken.split('.');
+      const tamperedPayload = globalThis.btoa(
+        JSON.stringify({ sub: 'user-123', type: 'refresh', jti: 'hacked' }),
+      );
+      const tampered = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
+
+      expect(await service.revoke(tampered)).toBe(false);
+    });
+
+    it('returns false for a completely unparseable token', async () => {
+      const { service } = makeService();
+      expect(await service.revoke('not.a.token')).toBe(false);
+    });
+
+    it('returns false for a valid JWT without a jti claim', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      // The access token verifies but carries no jti
+      expect(await service.revoke(pair.accessToken)).toBe(false);
+    });
+
+    it('returns false for a validly-signed refresh token whose jti is unknown to the store', async () => {
+      const { jwt, service } = makeService();
+
+      const forged = await jwt.sign(
+        { sub: 'user-123', type: 'refresh', jti: 'never-issued' },
+        { expiresIn: '1h' },
+      );
+
+      expect(await service.revoke(forged)).toBe(false);
+    });
+  });
 });
-
-Deno.test(
-  'RefreshTokenService — accessToken.expiresIn only (no audience/issuer)',
-  async () => {
-    const runtime = createFakeRuntime();
-    const jwt = new JwtService(runtime, {
-      algorithm: 'HS256',
-      secret: 'test-secret',
-    });
-    const store = new MemoryRefreshTokenStore(runtime);
-    const service = new RefreshTokenService({
-      jwt,
-      store,
-      runtime,
-      accessToken: { expiresIn: '30m' },
-    });
-
-    const principal = { id: 'user-123' };
-    const pair = await service.issue(principal);
-
-    const accessPayload = await jwt.verify<{ iat: number; exp: number }>(
-      pair.accessToken,
-    );
-    assertEquals(accessPayload.exp - accessPayload.iat, 1800); // 30m = 1800s
-
-    // Refresh token also uses accessToken.expiresIn
-    const refreshPayload = await jwt.verify<{
-      iat: number;
-      exp: number;
-    }>(pair.refreshToken);
-    assertEquals(refreshPayload.exp - refreshPayload.iat, 1800);
-  },
-);

@@ -2,70 +2,78 @@
  * Unit tests for MemoryRefreshTokenStore.
  */
 
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
+import type { RefreshTokenRecord } from '../../src/stores/refresh-token-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
-Deno.test('MemoryRefreshTokenStore — save then get returns the record', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRefreshTokenStore(runtime);
-
-  const record = {
-    jti: 'token-123',
+function makeRecord(
+  runtime: ReturnType<typeof createFakeRuntime>,
+  jti = 'token-123',
+): RefreshTokenRecord {
+  return {
+    jti,
     principalId: 'user-1',
     principal: { id: 'user-1', roles: ['user'] },
     expiresAt: runtime.now() + 7 * 24 * 60 * 60 * 1000,
     revoked: false,
   };
+}
 
-  await store.save(record);
-  const found = await store.get('token-123');
-  assertEquals(found, record);
-});
+describe('MemoryRefreshTokenStore', () => {
+  it('save then get returns the record', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    const record = makeRecord(runtime);
 
-Deno.test('MemoryRefreshTokenStore — get after revoke returns null', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRefreshTokenStore(runtime);
+    await store.save(record);
+    const found = await store.get('token-123');
 
-  const record = {
-    jti: 'token-123',
-    principalId: 'user-1',
-    principal: { id: 'user-1' },
-    expiresAt: runtime.now() + 7 * 24 * 60 * 60 * 1000,
-    revoked: false,
-  };
+    expect(found).toEqual(record);
+  });
 
-  await store.save(record);
-  await store.revoke('token-123');
-  const found = await store.get('token-123');
-  assertEquals(found, null);
-});
+  it('get after revoke returns the record flagged revoked (caller distinguishes replay)', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
 
-Deno.test('MemoryRefreshTokenStore — expired record is evicted on get', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRefreshTokenStore(runtime);
+    await store.save(makeRecord(runtime));
+    await store.revoke('token-123');
+    const found = await store.get('token-123');
 
-  const record = {
-    jti: 'token-123',
-    principalId: 'user-1',
-    principal: { id: 'user-1' },
-    expiresAt: runtime.now() + 7 * 24 * 60 * 60 * 1000,
-    revoked: false,
-  };
+    expect(found).not.toBeNull();
+    expect(found?.revoked).toBe(true);
+  });
 
-  await store.save(record);
+  it('revoke of a missing jti is a no-op', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
 
-  // Advance time past expiry
-  runtime.setNow(record.expiresAt + 1);
+    await store.revoke('nonexistent');
+    expect(await store.get('nonexistent')).toBeNull();
+  });
 
-  const found = await store.get('token-123');
-  assertEquals(found, null);
-});
+  it('expired record is evicted on get and returns null', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    const record = makeRecord(runtime);
 
-Deno.test('MemoryRefreshTokenStore — missing jti returns null', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRefreshTokenStore(runtime);
+    await store.save(record);
 
-  const found = await store.get('nonexistent');
-  assertEquals(found, null);
+    // Advance time to exactly the expiry instant (now >= expiresAt evicts)
+    runtime.setNow(record.expiresAt);
+
+    const found = await store.get('token-123');
+    expect(found).toBeNull();
+
+    // A second get also returns null (the entry was deleted, not just hidden)
+    expect(await store.get('token-123')).toBeNull();
+  });
+
+  it('missing jti returns null', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+
+    expect(await store.get('nonexistent')).toBeNull();
+  });
 });

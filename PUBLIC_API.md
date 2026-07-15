@@ -824,35 +824,51 @@ Registers three services under existing capability tokens:
 - `IAuthService` under `CAPABILITIES.AUTH` (`'authentication'`) — passive strategy chain + login.
 - `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks.
 
-> **Phasing (M16b):** the **refresh-token strategy** and **rate limiting** are deferred to M16b.
-> `IJwtService` exposes only `sign`/`verify`/`decode` — a refresh token is simply
-> `sign({ expiresIn: '7d' })`.
+> **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
+> standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
+> refresh token arrives in the request body, not as a passive header credential) and
+> `rateLimitMiddleware` (a decoupled middleware factory with no capability token). Neither is an
+> `AuthPlugin` option: the plugin's option shape, `provides`, and registration are unchanged from
+> M16. `IJwtService` still exposes only `sign`/`verify`/`decode` — a refresh token is a signed JWT
+> carrying `type: 'refresh'` and a `jti`.
 
 ### Exports
 
-| Export                  | File                                | Description                                                           |
-| ----------------------- | ----------------------------------- | --------------------------------------------------------------------- |
-| `AuthPlugin`            | `src/plugin/auth-plugin.ts`         | Plugin factory                                                        |
-| `AuthPluginOptions`     | `src/interfaces/index.ts`           | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)          |
-| `JwtOptions`            | `src/interfaces/index.ts`           | JWT config (key material, algorithm, expected aud/iss, header/scheme) |
-| `ApiKeyOptions`         | `src/interfaces/index.ts`           | API-key strategy config (header + `validate` callback)                |
-| `LocalOptions`          | `src/interfaces/index.ts`           | Local credential config (`verify` callback)                           |
-| `PasswordHasher`        | `src/services/password-hasher.ts`   | PBKDF2-SHA256 hash/verify utility                                     |
-| `authMiddleware`        | `src/middleware/auth-middleware.ts` | Global middleware: authenticates and populates `ctx.request.user`     |
-| `requireAuth`           | `src/guards/index.ts`               | Guard: require an authenticated principal (401)                       |
-| `requireRole`           | `src/guards/index.ts`               | Guard: require a role (401/403)                                       |
-| `requirePermission`     | `src/guards/index.ts`               | Guard: require a permission (401/403)                                 |
-| `requireAnyRole`        | `src/guards/index.ts`               | Guard: require any of the given roles                                 |
-| `requireAllPermissions` | `src/guards/index.ts`               | Guard: require all of the given permissions                           |
-| `publicRoute`           | `src/guards/index.ts`               | Guard: explicitly allow unauthenticated access                        |
-| `IAuthService`          | re-export                           | From `@hono-enterprise/common`                                        |
-| `IJwtService`           | re-export                           | From `@hono-enterprise/common`                                        |
-| `IAuthorizationService` | re-export                           | From `@hono-enterprise/common`                                        |
-| `IAuthStrategy`         | re-export                           | From `@hono-enterprise/common`                                        |
-| `IPrincipal`            | re-export                           | From `@hono-enterprise/common`                                        |
-| `JwtSignOptions`        | re-export                           | From `@hono-enterprise/common`                                        |
-| `RbacConfig`            | re-export                           | From `@hono-enterprise/common`                                        |
-| `RoleDefinition`        | re-export                           | From `@hono-enterprise/common`                                        |
+| Export                    | File                                      | Description                                                           |
+| ------------------------- | ----------------------------------------- | --------------------------------------------------------------------- |
+| `AuthPlugin`              | `src/plugin/auth-plugin.ts`               | Plugin factory                                                        |
+| `AuthPluginOptions`       | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)          |
+| `JwtOptions`              | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme) |
+| `ApiKeyOptions`           | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                |
+| `LocalOptions`            | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                           |
+| `PasswordHasher`          | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                     |
+| `authMiddleware`          | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`     |
+| `requireAuth`             | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                       |
+| `requireRole`             | `src/guards/index.ts`                     | Guard: require a role (401/403)                                       |
+| `requirePermission`       | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                 |
+| `requireAnyRole`          | `src/guards/index.ts`                     | Guard: require any of the given roles                                 |
+| `requireAllPermissions`   | `src/guards/index.ts`                     | Guard: require all of the given permissions                           |
+| `publicRoute`             | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                        |
+| `RefreshTokenService`     | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`             |
+| `RefreshTokenOptions`     | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                             |
+| `TokenPair`               | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`         |
+| `RefreshTokenStore`       | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records             |
+| `RefreshTokenRecord`      | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                    |
+| `MemoryRefreshTokenStore` | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                              |
+| `rateLimitMiddleware`     | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)      |
+| `RateLimitOptions`        | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                              |
+| `RateLimitStore`          | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                       |
+| `RateLimitResult`         | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                        |
+| `MemoryRateLimitStore`    | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                  |
+| `RedisRateLimitStore`     | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                 |
+| `IAuthService`            | re-export                                 | From `@hono-enterprise/common`                                        |
+| `IJwtService`             | re-export                                 | From `@hono-enterprise/common`                                        |
+| `IAuthorizationService`   | re-export                                 | From `@hono-enterprise/common`                                        |
+| `IAuthStrategy`           | re-export                                 | From `@hono-enterprise/common`                                        |
+| `IPrincipal`              | re-export                                 | From `@hono-enterprise/common`                                        |
+| `JwtSignOptions`          | re-export                                 | From `@hono-enterprise/common`                                        |
+| `RbacConfig`              | re-export                                 | From `@hono-enterprise/common`                                        |
+| `RoleDefinition`          | re-export                                 | From `@hono-enterprise/common`                                        |
 
 ### Registration
 
@@ -889,7 +905,8 @@ app.middleware.add(authMiddleware());
 ### Login (Issue Token)
 
 `IAuthService.verifyCredentials({ identifier, secret })` resolves to an `IPrincipal | null`; mint a
-JWT with the separate `IJwtService` resolved from `'jwt'`. There is no refresh-token API in M16.
+JWT with the separate `IJwtService` resolved from `'jwt'` (or issue an access + refresh pair with
+`RefreshTokenService` — see Refresh Tokens below).
 
 ```typescript
 import type { IAuthService, IJwtService } from '@hono-enterprise/common';
@@ -909,6 +926,92 @@ app.router.post('/auth/login', async (ctx) => {
     { expiresIn: '1h', audience: 'my-app-users', issuer: 'my-app' },
   );
   return ctx.response.json({ accessToken });
+});
+```
+
+### Refresh Tokens (M16b)
+
+`RefreshTokenService` is an **app-instantiated** class (like `PasswordHasher`) — it is NOT an
+`AuthPlugin` option and registers no service. A refresh token is a signed JWT carrying
+`type: 'refresh'` and a random `jti`; a pluggable server-side store tracks each `jti` so the service
+can **rotate** (each `refresh` revokes the presented token and mints a fresh pair — replay of a
+rotated token returns `null`) and **revoke** (logout). `refresh()`/`revoke()` never throw on a bad
+token: an invalid, expired, or tampered token yields `null`/`false`. The access token uses the
+`accessToken` options; the refresh token uses `refreshTokenExpiresIn` (default `'7d'`). Both carry
+the configured `audience`/`issuer` so `verify` enforces them. `MemoryRefreshTokenStore` is the
+default backend (single-process; lazy expiry on `get`); a Redis-backed `RefreshTokenStore` is
+deferred — the async interface makes it a later drop-in.
+
+```typescript
+import { MemoryRefreshTokenStore, RefreshTokenService } from '@hono-enterprise/auth-plugin';
+import type { IJwtService, IRuntimeServices } from '@hono-enterprise/common';
+
+const jwt = app.services.get<IJwtService>('jwt');
+const runtime = app.services.get<IRuntimeServices>('runtime');
+const refresh = new RefreshTokenService({
+  jwt,
+  store: new MemoryRefreshTokenStore(runtime),
+  runtime,
+  accessToken: { expiresIn: '15m', audience: 'my-app-users', issuer: 'my-app' },
+  refreshTokenExpiresIn: '30d',
+});
+
+// Login: issue the pair after verifying credentials
+app.router.post('/auth/login', async (ctx) => {
+  const principal = await auth.verifyCredentials({ identifier, secret });
+  if (!principal) return ctx.response.status(401).json({ error: 'Invalid credentials' });
+  return ctx.response.json(await refresh.issue(principal)); // { accessToken, refreshToken }
+});
+
+// Refresh: rotate the pair (the presented refresh token is revoked)
+app.router.post('/auth/refresh', async (ctx) => {
+  const { refreshToken } = await ctx.request.json<{ refreshToken: string }>();
+  const pair = await refresh.refresh(refreshToken);
+  if (!pair) return ctx.response.status(401).json({ error: 'Invalid refresh token' });
+  return ctx.response.json(pair);
+});
+
+// Logout: revoke the refresh token
+app.router.post('/auth/logout', async (ctx) => {
+  const { refreshToken } = await ctx.request.json<{ refreshToken: string }>();
+  await refresh.revoke(refreshToken);
+  return ctx.response.json({ ok: true });
+});
+```
+
+### Rate Limiting (M16b)
+
+`rateLimitMiddleware(options)` is a **standalone** fixed-window limiter — added via
+`app.middleware.add(...)` like `authMiddleware`, independent of `AuthPlugin` (it never reads the
+principal unless your `keyGenerator` does) and registered under **no capability token**. Requests
+are counted per key (default `ctx.request.ip ?? 'anonymous'`) in a `windowMs` window; when the count
+exceeds `max` the middleware **short-circuits with 429** (downstream stages, including the handler,
+do not run) and a JSON body `{ error: 'Too Many Requests', message }`. Headers: always `Retry-After`
+on 429; with `standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLimit-Remaining`, and
+`RateLimit-Reset` — `RateLimit-Reset` and `Retry-After` are both **delta-seconds** until the window
+resets (IETF draft semantics), never epoch timestamps. The default store is an in-memory
+fixed-window counter (single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for
+multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise
+`npm:ioredis@5.x` is lazily imported on first use).
+
+```typescript
+import { rateLimitMiddleware, RedisRateLimitStore } from '@hono-enterprise/auth-plugin';
+
+// Global: 100 requests per minute per client IP (in-memory store)
+app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 }));
+
+// Per-route, keyed by authenticated user, Redis-backed
+app.router.post('/expensive', {
+  middleware: [
+    rateLimitMiddleware({
+      windowMs: 60_000,
+      max: 5,
+      keyGenerator: (ctx) => ctx.request.user?.id ?? ctx.request.ip ?? 'anonymous',
+      store: new RedisRateLimitStore({ url: 'redis://localhost:6379', runtime }),
+      message: 'Too many expensive calls — try again shortly',
+    }),
+  ],
+  handler: async (ctx) => {/* ... */},
 });
 ```
 

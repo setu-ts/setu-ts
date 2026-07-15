@@ -312,7 +312,7 @@ hono-enterprise/
 │   ├── messaging-plugin/         # MessagingPlugin (Memory, Redis Streams; RabbitMQ/NATS/Kafka in M14b)
 │   ├── queue-plugin/             # QueuePlugin (Redis, RabbitMQ, Memory)
 │   ├── auth-plugin/              # AuthPlugin (JWT, API Key, RBAC; refresh + rate limiting in M16b)
-│   ├── http-security-plugin/     # HttpSecurityPlugin (CORS, headers, CSRF, rate limit)
+│   ├── http-security-plugin/     # HttpSecurityPlugin (CORS, headers, CSRF)
 │   ├── scheduler-plugin/         # SchedulerPlugin (cron, delayed, recurring)
 │   ├── metrics-plugin/           # MetricsPlugin (Prometheus)
 │   ├── health-plugin/            # HealthPlugin
@@ -1889,9 +1889,9 @@ role hierarchy), and short-circuiting route guards. All cryptography (HS256/RS25
 password hashing) runs through Web Crypto (`runtime.subtle` / `runtime.randomBytes`), so the package
 ships with **zero npm dependencies**.
 
-> **Phasing:** the **refresh-token strategy** and **rate limiting** are deferred to **M16b** (see
-> the M16b sub-section below), mirroring the M14 → M14b and M15 → M15b splits. Status: complete (PR
-> pending).
+> **Phasing:** **refresh tokens** and **rate limiting** were deferred to **M16b** (see the M16b
+> sub-section below), mirroring the M14 → M14b and M15 → M15b splits, and have since shipped there.
+> Status: complete (PR #35).
 
 ### Package: `@hono-enterprise/auth-plugin`
 
@@ -1939,7 +1939,8 @@ app.router.get('/admin', {
 - `JwtStrategy` — passive bearer-token authentication (in the `authenticate` chain)
 - `ApiKeyStrategy` — passive API-key authentication (header + app-supplied `validate`)
 - `LocalStrategy` — explicit credentials verification via `verifyCredentials` (login route)
-- `RefreshTokenStrategy` — **M16b** (deferred)
+- `RefreshTokenService` — **M16b** (shipped as an app-instantiated service, not a strategy: a
+  refresh token arrives in the request body, not as a passive header credential)
 
 **Guards (middleware factories):**
 
@@ -1980,23 +1981,29 @@ All guards short-circuit (no `next()`) on 401/403; `authMiddleware` always calls
 ### Deliverables
 
 - [x] AuthPlugin
-- [x] JWT, API Key, Local strategies (Refresh deferred to M16b)
+- [x] JWT, API Key, Local strategies (Refresh shipped in M16b as `RefreshTokenService`)
 - [x] RBAC with role hierarchy (incl. the `'*'` wildcard permission)
 - [x] Guard middleware factories (`publicRoute`, not `public`)
 - [x] Password hashing (PBKDF2 via Web Crypto)
 - [x] Full test coverage (per-file 90% bar)
-- [ ] Rate limiting — **M16b** (deferred)
+- [x] Rate limiting — **M16b** (shipped)
 
-## Milestone 16b: Auth Plugin — Refresh Tokens & Rate Limiting (deferred)
+## Milestone 16b: Auth Plugin — Refresh Tokens & Rate Limiting ✅ COMPLETE
 
 Follow-up to M16, mirroring the M14 → M14b / M15 → M15b splits. No `@hono-enterprise/common`
-contract change is required — refresh access tokens are minted with the existing
+contract change was required — refresh tokens are minted with the existing
 `IJwtService.sign({ expiresIn })`.
 
-- `RefreshTokenStrategy` — a thin layer over `sign({ expiresIn })` plus a pluggable server-side
-  token store and a refresh-endpoint helper.
-- Rate limiting (`src/middleware/rate-limit-middleware.ts` + memory/redis storage) — a
-  transport-level concern, treated as a separate capability rather than identity.
+- [x] `RefreshTokenService` — a thin layer over `sign({ expiresIn })` plus a pluggable server-side
+      token store (`RefreshTokenStore` + `MemoryRefreshTokenStore`); `issue` / `refresh` (rotation)
+      / `revoke`. The service IS the refresh-endpoint helper — an app's refresh route is a one-line
+      call over `refresh(token)`. (Shipped as a service, not the once-planned
+      `RefreshTokenStrategy`: the committed `IAuthStrategy` is a passive header extractor, and a
+      refresh token arrives in the request body at a dedicated endpoint.)
+- [x] Rate limiting (`src/middleware/rate-limit-middleware.ts` + memory/redis storage) — a
+      transport-level concern, decoupled from identity: a standalone middleware factory
+      (`rateLimitMiddleware`) with `MemoryRateLimitStore` / `RedisRateLimitStore` (inject-or-lazy
+      `npm:ioredis@5.x`), registered under no capability token.
 
 ---
 
@@ -3447,7 +3454,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
 | 16        | ✅     | auth-plugin          |
-| 16b       | ⬜     | auth-plugin          |
+| 16b       | ✅     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |
 | 19        | ⬜     | metrics-plugin       |

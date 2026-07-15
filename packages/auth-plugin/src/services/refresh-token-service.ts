@@ -55,6 +55,7 @@ export class RefreshTokenService {
     readonly audience?: string;
     readonly issuer?: string;
   } | undefined;
+  private readonly refreshTokenExpiresIn: string;
   private readonly refreshTokenExpiresInMs: number;
 
   constructor(options: RefreshTokenOptions) {
@@ -64,9 +65,8 @@ export class RefreshTokenService {
     if (options.accessToken !== undefined) {
       this.accessTokenOptions = options.accessToken;
     }
-    this.refreshTokenExpiresInMs = parseDuration(
-      options.refreshTokenExpiresIn ?? '7d',
-    );
+    this.refreshTokenExpiresIn = options.refreshTokenExpiresIn ?? '7d';
+    this.refreshTokenExpiresInMs = parseDuration(this.refreshTokenExpiresIn);
   }
 
   /**
@@ -88,13 +88,14 @@ export class RefreshTokenService {
       this.accessTokenOptions,
     );
 
-    // Mint refresh token (type:'refresh' + jti)
+    // Mint refresh token (type:'refresh' + jti) with the REFRESH lifetime,
+    // carrying the configured audience/issuer so jwt.verify enforces them.
     const refreshOptions: {
       expiresIn: string;
       audience?: string;
       issuer?: string;
     } = {
-      expiresIn: this.accessTokenOptions?.expiresIn ?? '7d',
+      expiresIn: this.refreshTokenExpiresIn,
     };
     if (this.accessTokenOptions?.audience !== undefined) {
       refreshOptions.audience = this.accessTokenOptions.audience;
@@ -121,31 +122,34 @@ export class RefreshTokenService {
 
   /**
    * Refresh a token pair: verify the refresh token, revoke its jti, and issue
-   * a new pair (rotation). Returns null if the token is invalid, expired, or
-   * already revoked.
+   * a new pair (rotation). Returns null if the token is invalid, expired,
+   * tampered with, not a refresh token, or already revoked (replay).
    */
   async refresh(refreshToken: string): Promise<TokenPair | null> {
-    // Verify the refresh token JWT
-    const payload = await this.jwt.verify<{
-      sub: string;
-      type: 'refresh';
-      jti: string;
-    }>(refreshToken);
-
-    if (payload.type !== 'refresh') {
+    // Verify the refresh token JWT; verify() throws on an invalid, expired,
+    // or tampered token — all of those mean "no new pair", never an error.
+    let payload: { sub: string; type?: string; jti?: string };
+    try {
+      payload = await this.jwt.verify<{ sub: string; type?: string; jti?: string }>(
+        refreshToken,
+      );
+    } catch {
       return null;
     }
 
-    const jti = payload.jti;
-    const record = await this.store.get(jti);
+    if (payload.type !== 'refresh' || payload.jti === undefined) {
+      return null;
+    }
+
+    const record = await this.store.get(payload.jti);
 
     if (record === null || record.revoked) {
-      // Token not found, already revoked, or replayed
+      // Token not found, expired, or replayed after rotation
       return null;
     }
 
     // Rotate: revoke the presented jti
-    await this.store.revoke(jti);
+    await this.store.revoke(payload.jti);
 
     // Issue a fresh pair from the stored principal snapshot
     return this.issue(record.principal);
@@ -153,33 +157,27 @@ export class RefreshTokenService {
 
   /**
    * Revoke a refresh token (logout). Returns true if a live record was found
-   * and revoked.
+   * and revoked; false when the token does not verify or no live record
+   * exists (missing, expired, or already revoked).
    */
   async revoke(refreshToken: string): Promise<boolean> {
-    let jti: string | undefined;
-
+    let payload: { jti?: string };
     try {
-      const payload = await this.jwt.verify<{ jti: string }>(refreshToken);
-      jti = payload.jti;
+      payload = await this.jwt.verify<{ jti?: string }>(refreshToken);
     } catch {
-      // Token malformed or expired — still try to revoke by decoding
-      const decoded = this.jwt.decode<{ jti: string }>(refreshToken);
-      if (decoded === null) {
-        return false;
-      }
-      jti = decoded.jti;
-    }
-
-    if (jti === undefined) {
       return false;
     }
 
-    const record = await this.store.get(jti);
-    if (record === null) {
+    if (payload.jti === undefined) {
       return false;
     }
 
-    await this.store.revoke(jti);
+    const record = await this.store.get(payload.jti);
+    if (record === null || record.revoked) {
+      return false;
+    }
+
+    await this.store.revoke(payload.jti);
     return true;
   }
 }

@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IPrincipal } from '@hono-enterprise/common';
+import type { IPrincipal, IRuntimeServices } from '@hono-enterprise/common';
 
 /**
  * A refresh token record stored on the server.
@@ -26,15 +26,21 @@ export interface RefreshTokenRecord {
  * Store interface for refresh tokens.
  *
  * Implementations must track each jti so the service can rotate (revoke the
- * presented token, issue a new pair) and revoke (logout).
+ * presented token, issue a new pair) and revoke (logout). All methods are
+ * async so remote backends (e.g. a future Redis store) can implement the
+ * interface without a breaking change.
  */
 export interface RefreshTokenStore {
   /** Store or update a refresh token record. */
-  save(record: RefreshTokenRecord): void;
-  /** Retrieve a record by jti; returns null if missing or expired. */
-  get(jti: string): RefreshTokenRecord | null;
+  save(record: RefreshTokenRecord): Promise<void>;
+  /**
+   * Retrieve a record by jti; returns null if missing or expired. A revoked
+   * record is still returned so the caller can distinguish replay of a
+   * rotated token from an unknown token.
+   */
+  get(jti: string): Promise<RefreshTokenRecord | null>;
   /** Revoke a token by jti. */
-  revoke(jti: string): void;
+  revoke(jti: string): Promise<void>;
 }
 
 /**
@@ -46,36 +52,35 @@ export interface RefreshTokenStore {
  */
 export class MemoryRefreshTokenStore implements RefreshTokenStore {
   #map: Map<string, RefreshTokenRecord> = new Map();
-  #runtime: { now(): number };
+  #runtime: IRuntimeServices;
 
-  constructor(runtime: { now(): number }) {
+  constructor(runtime: IRuntimeServices) {
     this.#runtime = runtime;
   }
 
-  save(record: RefreshTokenRecord): void {
+  save(record: RefreshTokenRecord): Promise<void> {
     this.#map.set(record.jti, record);
+    return Promise.resolve();
   }
 
-  get(jti: string): RefreshTokenRecord | null {
+  get(jti: string): Promise<RefreshTokenRecord | null> {
     const record = this.#map.get(jti);
     if (record === undefined) {
-      return null;
+      return Promise.resolve(null);
     }
     // Lazy expiry check
     if (this.#runtime.now() >= record.expiresAt) {
       this.#map.delete(jti);
-      return null;
+      return Promise.resolve(null);
     }
-    if (record.revoked) {
-      return null;
-    }
-    return record;
+    return Promise.resolve(record);
   }
 
-  revoke(jti: string): void {
+  revoke(jti: string): Promise<void> {
     const record = this.#map.get(jti);
     if (record !== undefined) {
       record.revoked = true;
     }
+    return Promise.resolve();
   }
 }

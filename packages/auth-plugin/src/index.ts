@@ -24,9 +24,6 @@
  * ```
  */
 
-// Re-export common types used by middleware
-export type { IRequestContext } from '@hono-enterprise/common';
-
 // Plugin factory
 export { AuthPlugin } from './plugin/auth-plugin.ts';
 export type { AuthPluginOptions } from './interfaces/index.ts';

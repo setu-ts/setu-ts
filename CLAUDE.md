@@ -177,7 +177,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `requirePermission`, `requireAnyRole`, `requireAllPermissions`, `publicRoute`), `authMiddleware`
   populating `ctx.request.user` (made writable in `common`), and an exported PBKDF2-SHA256
   `PasswordHasher`; refresh tokens + rate limiting deferred to M16b) — complete (PR #35)
-- **Next milestone** — Milestone 16b (auth-plugin — refresh-token strategy & rate limiting)
+- **Milestone 16b** (`packages/auth-plugin` — refresh tokens & rate limiting as pure additions, no
+  `common` change, no new capability token, `AuthPlugin` options untouched: `RefreshTokenService`
+  (app-instantiated; `issue`/`refresh` with jti rotation + replay rejection/`revoke`, refresh JWTs
+  carry `type: 'refresh'` + `jti`) over a pluggable async `RefreshTokenStore` with
+  `MemoryRefreshTokenStore`; standalone `rateLimitMiddleware` fixed-window limiter (429
+  short-circuit, `Retry-After` + `RateLimit-*` delta-seconds headers) over `RateLimitStore` with
+  `MemoryRateLimitStore` + `RedisRateLimitStore` (inject-or-lazy `npm:ioredis@5.x`, guarded
+  real-import test)) — complete (PR pending)
+- **Next milestone** — Milestone 17 (`packages/http-security-plugin` — CORS, security headers, CSRF,
+  request-size, ip-security)
 
 ## Verification (run before declaring any work done)
 

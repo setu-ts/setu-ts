@@ -2,64 +2,74 @@
  * Unit tests for MemoryRateLimitStore.
  */
 
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { MemoryRateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
-Deno.test('MemoryRateLimitStore — increment returns count and resetTime', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRateLimitStore(runtime);
+describe('MemoryRateLimitStore', () => {
+  it('increment returns count and resetTime = windowStart + windowMs', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRateLimitStore(runtime);
 
-  const result = await store.increment('key-1', 60000);
+    const result = await store.increment('key-1', 60000);
 
-  assertEquals(result.count, 1);
-  assertEquals(result.resetTime, runtime.now() + 60000);
-});
+    expect(result.count).toBe(1);
+    expect(result.resetTime).toBe(runtime.now() + 60000);
+  });
 
-Deno.test('MemoryRateLimitStore — subsequent increments increase count', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRateLimitStore(runtime);
+  it('subsequent increments increase count within the same window', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRateLimitStore(runtime);
 
-  const r1 = await store.increment('key-1', 60000);
-  assertEquals(r1.count, 1);
+    const r1 = await store.increment('key-1', 60000);
+    expect(r1.count).toBe(1);
 
-  const r2 = await store.increment('key-1', 60000);
-  assertEquals(r2.count, 2);
-  assertEquals(r2.resetTime, r1.resetTime); // Same window
-});
+    const r2 = await store.increment('key-1', 60000);
+    expect(r2.count).toBe(2);
+    expect(r2.resetTime).toBe(r1.resetTime); // Same window
 
-Deno.test('MemoryRateLimitStore — window resets when time advances past windowMs', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRateLimitStore(runtime);
+    const r3 = await store.increment('key-1', 60000);
+    expect(r3.count).toBe(3);
+  });
 
-  const r1 = await store.increment('key-1', 60000);
-  assertEquals(r1.count, 1);
+  it('window resets to count 1 with a fresh resetTime when time advances past windowMs', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRateLimitStore(runtime);
 
-  // Advance past window
-  runtime.setNow(r1.resetTime + 1);
+    const r1 = await store.increment('key-1', 60000);
+    expect(r1.count).toBe(1);
 
-  const r2 = await store.increment('key-1', 60000);
-  assertEquals(r2.count, 1); // New window
-});
+    // Advance exactly to the window boundary (windowStart + windowMs <= now resets)
+    runtime.setNow(r1.resetTime);
 
-Deno.test('MemoryRateLimitStore — reset clears the counter', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRateLimitStore(runtime);
+    const r2 = await store.increment('key-1', 60000);
+    expect(r2.count).toBe(1); // New window
+    expect(r2.resetTime).toBe(runtime.now() + 60000);
+    expect(r2.resetTime).not.toBe(r1.resetTime);
+  });
 
-  await store.increment('key-1', 60000);
-  await store.reset('key-1');
+  it('reset clears the counter', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRateLimitStore(runtime);
 
-  const r = await store.increment('key-1', 60000);
-  assertEquals(r.count, 1);
-});
+    await store.increment('key-1', 60000);
+    await store.increment('key-1', 60000);
+    await store.reset('key-1');
 
-Deno.test('MemoryRateLimitStore — different keys are independent', async () => {
-  const runtime = createFakeRuntime();
-  const store = new MemoryRateLimitStore(runtime);
+    const r = await store.increment('key-1', 60000);
+    expect(r.count).toBe(1);
+  });
 
-  const r1 = await store.increment('key-a', 60000);
-  const r2 = await store.increment('key-b', 60000);
+  it('different keys are independent', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRateLimitStore(runtime);
 
-  assertEquals(r1.count, 1);
-  assertEquals(r2.count, 1);
+    await store.increment('key-a', 60000);
+    const rA = await store.increment('key-a', 60000);
+    const rB = await store.increment('key-b', 60000);
+
+    expect(rA.count).toBe(2);
+    expect(rB.count).toBe(1);
+  });
 });
