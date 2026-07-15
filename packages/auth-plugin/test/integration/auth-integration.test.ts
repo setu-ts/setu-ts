@@ -225,8 +225,9 @@ describe('Auth Plugin Integration', () => {
 
     // Then require auth
     let nextCalled = false;
-    await requireAuth()(ctx, async () => {
+    await requireAuth()(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     expect(nextCalled).toBe(true);
@@ -243,8 +244,9 @@ describe('Auth Plugin Integration', () => {
     };
 
     let nextCalled = false;
-    await requireAuth()(ctx, async () => {
+    await requireAuth()(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     expect(statusSet).toBe(401);
@@ -261,8 +263,9 @@ describe('Auth Plugin Integration', () => {
 
     // Require role
     let nextCalled = false;
-    await requireRole('user')(ctx, async () => {
+    await requireRole('user')(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     // admin inherits user, so this should pass
@@ -285,8 +288,9 @@ describe('Auth Plugin Integration', () => {
     };
 
     let nextCalled = false;
-    await requireRole('admin')(ctx, async () => {
+    await requireRole('admin')(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     expect(statusSet).toBe(403);
@@ -316,8 +320,9 @@ describe('Auth Plugin Integration', () => {
     await authMiddleware()(ctx, async () => {
       // Step 2: Authorize
       let handlerCalled = false;
-      await requireRole('admin')(ctx, async () => {
+      await requireRole('admin')(ctx, () => {
         handlerCalled = true;
+        return Promise.resolve();
       });
 
       expect(handlerCalled).toBe(true);

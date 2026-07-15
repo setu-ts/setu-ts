@@ -1228,14 +1228,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/auth-plugin
 
-| Aspect               | Detail                                                                                                           |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Authentication and authorization                                                                                 |
-| **Responsibilities** | JWT service; API key auth; RBAC with role hierarchy; permission checks; guards; rate limiting                    |
-| **Dependencies**     | `common`, `kernel`                                                                                               |
-| **Public API**       | `AuthenticationPlugin()`; `IAuthService`; `IJwtService`; `requireAuth()`, `requireRole()`, `requirePermission()` |
-| **Extension Points** | Custom auth strategies; custom guards; custom RBAC models                                                        |
-| **Rules**            | JWT library is optional (injected or lazy-loaded via `npm:` specifier); password hashing via runtime crypto      |
+| Aspect               | Detail                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | Authentication and authorization (JWT, API key, local credentials; RBAC; route guards)                                                                                                                                                                                                                                                     |
+| **Responsibilities** | JWT service (HS256/RS256); API-key + local credential strategies; RBAC with role hierarchy; permission checks; short-circuiting guards; PBKDF2 password hashing                                                                                                                                                                            |
+| **Dependencies**     | `common`, `kernel`                                                                                                                                                                                                                                                                                                                         |
+| **Public API**       | `AuthPlugin()`; `IAuthService`; `IJwtService`; `IAuthorizationService`; `authMiddleware()`; `PasswordHasher`; guards `requireAuth()`, `requireRole()`, `requirePermission()`, `requireAnyRole()`, `requireAllPermissions()`, `publicRoute()`                                                                                               |
+| **Extension Points** | Custom `IAuthStrategy` strategies; RBAC role/permission models; app-supplied `apiKey.validate` / `local.verify`                                                                                                                                                                                                                            |
+| **Rules**            | Zero npm deps — JWT (HS256/RS256) and PBKDF2-SHA256 via Web Crypto (`runtime.subtle`/`runtime.randomBytes`); no JWT library. Three service tokens `jwt`/`authentication`/`authorization`; `ctx.request.user` is the writable principal field; guards short-circuit (no `next()`) on 401/403. Refresh-token strategy + rate limiting → M16b |
 
 #### @hono-enterprise/http-security-plugin
 
@@ -1967,19 +1967,24 @@ Authentication is handled by the `AuthPlugin`, which provides:
 - **JWT** — Sign and verify tokens.
 - **API Key** — Validate API keys via custom function.
 - **Local** — Username/password authentication.
-- **Refresh Token** — Issue new access tokens.
+- **Refresh Token** — Issue new access tokens (**M16b**, deferred).
 
 Authentication middleware extracts credentials and populates `ctx.request.user`.
 
 ### Authorization
 
-Authorization is handled via guards (middleware factories):
+Authorization is handled via free `MiddlewareFunction` factories (imported from the plugin, not
+methods on `IAuthService`). The role/permission guards resolve `IAuthorizationService` from the
+`'authorization'` token and short-circuit — they return a 401/403 response and do **not** call
+`next()`; `authMiddleware` always calls `next()` so an unauthenticated request still reaches the
+guard.
 
-- `requireAuth()` — Require any authenticated user.
-- `requireRole(role)` — Require a specific role.
-- `requirePermission(permission)` — Require a specific permission.
+- `requireAuth()` — Require any authenticated user (401).
+- `requireRole(role)` — Require a specific role, honoring the configured hierarchy (401/403).
+- `requirePermission(permission)` — Require a specific permission (401/403).
 - `requireAnyRole(roles)` — Require any of the specified roles.
 - `requireAllPermissions(permissions)` — Require all specified permissions.
+- `publicRoute()` — Explicitly allow unauthenticated access (named `publicRoute`, not `public`).
 
 ### RBAC
 
@@ -2010,7 +2015,7 @@ The `SecretsPlugin` provides secret management:
 | Plugin                 | Security Responsibility                                 |
 | ---------------------- | ------------------------------------------------------- |
 | `http-security-plugin` | CORS, security headers, CSRF, request size, IP security |
-| `auth-plugin`          | Authentication, authorization, RBAC, rate limiting      |
+| `auth-plugin`          | Authentication, authorization, RBAC, route guards       |
 | `secrets-plugin`       | Secret management and rotation                          |
 | `audit-plugin`         | Audit trail for security events                         |
 | `validation-plugin`    | Input validation and sanitization                       |

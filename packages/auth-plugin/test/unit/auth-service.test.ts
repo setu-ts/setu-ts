@@ -26,11 +26,11 @@ describe('AuthService', () => {
       const principal2: IPrincipal = { id: 'p2' };
 
       const strategies: IAuthStrategy[] = [
-        { name: 's1', authenticate: async () => null },
-        { name: 's2', authenticate: async () => principal1 },
-        { name: 's3', authenticate: async () => principal2 },
+        { name: 's1', authenticate: () => Promise.resolve(null) },
+        { name: 's2', authenticate: () => Promise.resolve(principal1) },
+        { name: 's3', authenticate: () => Promise.resolve(principal2) },
       ];
-      const local = new LocalStrategy(async () => null);
+      const local = new LocalStrategy(() => Promise.resolve(null));
       const service = new AuthService(strategies, local);
 
       const result = await service.authenticate(createRequest());
@@ -39,10 +39,10 @@ describe('AuthService', () => {
 
     it('returns null when all strategies return null', async () => {
       const strategies: IAuthStrategy[] = [
-        { name: 's1', authenticate: async () => null },
-        { name: 's2', authenticate: async () => null },
+        { name: 's1', authenticate: () => Promise.resolve(null) },
+        { name: 's2', authenticate: () => Promise.resolve(null) },
       ];
-      const local = new LocalStrategy(async () => null);
+      const local = new LocalStrategy(() => Promise.resolve(null));
       const service = new AuthService(strategies, local);
 
       const result = await service.authenticate(createRequest());
@@ -50,7 +50,7 @@ describe('AuthService', () => {
     });
 
     it('returns null when the strategy list is empty', async () => {
-      const local = new LocalStrategy(async () => null);
+      const local = new LocalStrategy(() => Promise.resolve(null));
       const service = new AuthService([], local);
 
       const result = await service.authenticate(createRequest());
@@ -60,16 +60,16 @@ describe('AuthService', () => {
     it('runs strategies in order and stops at the first match', async () => {
       let secondCalled = false;
       const strategies: IAuthStrategy[] = [
-        { name: 's1', authenticate: async () => ({ id: 'first' }) },
+        { name: 's1', authenticate: () => Promise.resolve({ id: 'first' }) },
         {
           name: 's2',
-          authenticate: async () => {
+          authenticate: () => {
             secondCalled = true;
-            return { id: 'second' };
+            return Promise.resolve({ id: 'second' });
           },
         },
       ];
-      const local = new LocalStrategy(async () => null);
+      const local = new LocalStrategy(() => Promise.resolve(null));
       const service = new AuthService(strategies, local);
 
       const result = await service.authenticate(createRequest());
@@ -81,11 +81,11 @@ describe('AuthService', () => {
   describe('verifyCredentials', () => {
     it('delegates to the LocalStrategy', async () => {
       const expected: IPrincipal = { id: 'login-user', roles: ['user'] };
-      const local = new LocalStrategy(async (identifier, secret) => {
+      const local = new LocalStrategy((identifier, secret) => {
         if (identifier === 'login-user' && secret === 'pass') {
-          return expected;
+          return Promise.resolve(expected);
         }
-        return null;
+        return Promise.resolve(null);
       });
       const service = new AuthService([], local);
 
@@ -94,7 +94,7 @@ describe('AuthService', () => {
     });
 
     it('returns null when LocalStrategy returns null', async () => {
-      const local = new LocalStrategy(async () => null);
+      const local = new LocalStrategy(() => Promise.resolve(null));
       const service = new AuthService([], local);
 
       const result = await service.verifyCredentials({ identifier: 'x', secret: 'y' });

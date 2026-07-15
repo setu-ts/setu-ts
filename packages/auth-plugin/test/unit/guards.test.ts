@@ -151,8 +151,9 @@ function createContext(opts: {
 function createNext(): { next: () => Promise<void>; calls: number } {
   const tracker: { next: () => Promise<void>; calls: number } = {
     calls: 0,
-    next: async () => {
+    next: () => {
       tracker.calls++;
+      return Promise.resolve();
     },
   };
   return tracker;

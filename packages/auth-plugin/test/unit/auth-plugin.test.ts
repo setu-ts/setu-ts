@@ -6,7 +6,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IPluginContext, IPrincipal } from '@hono-enterprise/common';
+import type { IAuthService, IPluginContext, IPrincipal } from '@hono-enterprise/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /**
@@ -210,7 +210,7 @@ describe('AuthPlugin', () => {
     const plugin = AuthPlugin({
       jwt: { secret: 'test-secret' },
       apiKey: {
-        validate: async () => null as IPrincipal | null,
+        validate: () => Promise.resolve(null as IPrincipal | null),
       },
       rbac: { roles: {} },
     });
@@ -223,13 +223,26 @@ describe('AuthPlugin', () => {
     const plugin = AuthPlugin({
       jwt: { secret: 'test-secret' },
       local: {
-        verify: async () => null as IPrincipal | null,
+        verify: () => Promise.resolve(null as IPrincipal | null),
       },
       rbac: { roles: {} },
     });
     const { ctx } = createFakeContext();
     await plugin.register!(ctx);
     // Should not throw
+  });
+
+  it('uses the default (always-null) local strategy when local is not configured', async () => {
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      rbac: { roles: {} },
+    });
+    const { ctx, registered } = createFakeContext();
+    await plugin.register!(ctx);
+    const authService = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    // Exercises the default local fallback (`() => Promise.resolve(null)`).
+    const result = await authService.verifyCredentials({ identifier: 'x', secret: 'y' });
+    expect(result).toBeNull();
   });
 
   it('registers with jwt.audience option set', async () => {
@@ -257,7 +270,7 @@ describe('AuthPlugin', () => {
       jwt: { secret: 'test-secret' },
       apiKey: {
         header: 'x-api-key',
-        validate: async () => null as IPrincipal | null,
+        validate: () => Promise.resolve(null as IPrincipal | null),
       },
       rbac: { roles: {} },
     });

@@ -11,7 +11,6 @@ import type { AuthPluginOptions } from '../interfaces/index.ts';
 import { JwtService } from '../services/jwt-service.ts';
 import { AuthService, LocalStrategy } from '../services/auth-service.ts';
 import { RbacService } from '../services/rbac-service.ts';
-import { PasswordHasher } from '../services/password-hasher.ts';
 import { JwtStrategy } from '../strategies/jwt-strategy.ts';
 import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
 
@@ -56,7 +55,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     provides: [CAPABILITIES.JWT, CAPABILITIES.AUTH, CAPABILITIES.AUTHORIZATION],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    async register(ctx: IPluginContext): Promise<void> {
+    register(ctx: IPluginContext): void {
       // Resolve runtime
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
 
@@ -109,20 +108,17 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         strategies.push(new ApiKeyStrategy(apiKeyOpts));
       }
 
-      // Local strategy (optional, defaults to always-null)
+      // Local strategy (optional, defaults to always-null). When no `local`
+      // callback is configured, verifyCredentials resolves to null.
       const localStrategy = options.local
         ? new LocalStrategy(options.local.verify)
-        : new LocalStrategy(async () => null);
+        : new LocalStrategy(() => Promise.resolve(null));
 
       // Create auth service
       const authService = new AuthService(strategies, localStrategy);
 
       // Create RBAC service
       const rbacService = new RbacService(options.rbac);
-
-      // Create password hasher (instantiated for app use via import)
-      const _passwordHasher = new PasswordHasher(runtime);
-      void _passwordHasher;
 
       // Register services
       ctx.services.register(CAPABILITIES.JWT, jwtService);

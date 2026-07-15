@@ -10,11 +10,11 @@ import type { IPrincipal } from '@hono-enterprise/common';
 describe('LocalStrategy', () => {
   it('delegates to the verify callback and returns the principal', async () => {
     const expected: IPrincipal = { id: 'user1', roles: ['user'] };
-    const strategy = new LocalStrategy(async (identifier, secret) => {
+    const strategy = new LocalStrategy((identifier, secret) => {
       if (identifier === 'user1' && secret === 'password') {
-        return expected;
+        return Promise.resolve(expected);
       }
-      return null;
+      return Promise.resolve(null);
     });
 
     const result = await strategy.verify('user1', 'password');
@@ -23,7 +23,7 @@ describe('LocalStrategy', () => {
   });
 
   it('returns null when credentials are invalid', async () => {
-    const strategy = new LocalStrategy(async () => null);
+    const strategy = new LocalStrategy(() => Promise.resolve(null));
     const result = await strategy.verify('user1', 'wrong');
     expect(result).toBeNull();
   });
@@ -31,10 +31,10 @@ describe('LocalStrategy', () => {
   it('passes identifier and secret to the callback', async () => {
     let capturedId: string | undefined;
     let capturedSecret: string | undefined;
-    const strategy = new LocalStrategy(async (identifier, secret) => {
+    const strategy = new LocalStrategy((identifier, secret) => {
       capturedId = identifier;
       capturedSecret = secret;
-      return { id: identifier };
+      return Promise.resolve({ id: identifier });
     });
 
     await strategy.verify('myuser', 'mypassword');
@@ -49,7 +49,7 @@ describe('LocalStrategy', () => {
       permissions: ['*'],
       claims: { email: 'admin@example.com' },
     };
-    const strategy = new LocalStrategy(async () => principal);
+    const strategy = new LocalStrategy(() => Promise.resolve(principal));
     const result = await strategy.verify('admin', 'pass');
     expect(result).toEqual(principal);
   });

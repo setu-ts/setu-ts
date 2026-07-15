@@ -70,14 +70,15 @@ describe('authMiddleware', () => {
     const principal: IPrincipal = { id: 'user1', roles: ['user'] };
     const middleware = authMiddleware();
     const authService: IAuthService = {
-      authenticate: async () => principal,
-      verifyCredentials: async () => null,
+      authenticate: () => Promise.resolve(principal),
+      verifyCredentials: () => Promise.resolve(null),
     };
     const { ctx, request } = createContext(authService);
 
     let nextCalled = false;
-    await middleware(ctx, async () => {
+    await middleware(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     expect(request.user).toEqual(principal);
@@ -87,14 +88,15 @@ describe('authMiddleware', () => {
   it('does not set user when authenticate returns null', async () => {
     const middleware = authMiddleware();
     const authService: IAuthService = {
-      authenticate: async () => null,
-      verifyCredentials: async () => null,
+      authenticate: () => Promise.resolve(null),
+      verifyCredentials: () => Promise.resolve(null),
     };
     const { ctx, request } = createContext(authService);
 
     let nextCalled = false;
-    await middleware(ctx, async () => {
+    await middleware(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     expect(request.user).toBeUndefined();
@@ -104,14 +106,15 @@ describe('authMiddleware', () => {
   it('always calls next (no short-circuit) even when no principal', async () => {
     const middleware = authMiddleware();
     const authService: IAuthService = {
-      authenticate: async () => null,
-      verifyCredentials: async () => null,
+      authenticate: () => Promise.resolve(null),
+      verifyCredentials: () => Promise.resolve(null),
     };
     const { ctx } = createContext(authService);
 
     let nextCalled = false;
-    await middleware(ctx, async () => {
+    await middleware(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
     expect(nextCalled).toBe(true);
   });
@@ -120,14 +123,15 @@ describe('authMiddleware', () => {
     const middleware = authMiddleware();
     const principal: IPrincipal = { id: 'user1' };
     const authService: IAuthService = {
-      authenticate: async () => principal,
-      verifyCredentials: async () => null,
+      authenticate: () => Promise.resolve(principal),
+      verifyCredentials: () => Promise.resolve(null),
     };
     const { ctx } = createContext(authService);
 
     let nextCalled = false;
-    await middleware(ctx, async () => {
+    await middleware(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
     expect(nextCalled).toBe(true);
   });
@@ -135,16 +139,15 @@ describe('authMiddleware', () => {
   it('continues (calls next) when authenticate throws', async () => {
     const middleware = authMiddleware();
     const authService: IAuthService = {
-      authenticate: async () => {
-        throw new Error('auth service down');
-      },
-      verifyCredentials: async () => null,
+      authenticate: () => Promise.reject(new Error('auth service down')),
+      verifyCredentials: () => Promise.resolve(null),
     };
     const { ctx, request } = createContext(authService);
 
     let nextCalled = false;
-    await middleware(ctx, async () => {
+    await middleware(ctx, () => {
       nextCalled = true;
+      return Promise.resolve();
     });
 
     expect(request.user).toBeUndefined();

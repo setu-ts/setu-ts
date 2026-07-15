@@ -15,7 +15,7 @@
 6. [ConfigPlugin()](#configplugin)
 7. [ValidationPlugin()](#validationplugin)
 8. [DatabasePlugin()](#databaseplugin)
-9. [AuthenticationPlugin()](#authenticationplugin)
+9. [AuthPlugin()](#authplugin)
 10. [CachePlugin()](#cacheplugin)
 11. [EventsPlugin()](#eventsplugin)
 12. [CQRS](#cqrs)
@@ -811,142 +811,187 @@ app.router.get('/analytics', async (ctx) => {
 
 ---
 
-## AuthenticationPlugin()
+## AuthPlugin()
 
-Provides JWT, API key, RBAC, and guards.
+Provides JWT and API-key authentication, local credential verification, RBAC authorization with role
+hierarchy, and short-circuiting route guards. All cryptography (HS256/RS256 JWT, PBKDF2-SHA256
+password hashing) runs through Web Crypto via `IRuntimeServices`, so the package has **zero npm
+dependencies**.
+
+Registers three services under existing capability tokens:
+
+- `IJwtService` under `CAPABILITIES.JWT` (`'jwt'`) — sign/verify/decode JWTs.
+- `IAuthService` under `CAPABILITIES.AUTH` (`'authentication'`) — passive strategy chain + login.
+- `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks.
+
+> **Phasing (M16b):** the **refresh-token strategy** and **rate limiting** are deferred to M16b.
+> `IJwtService` exposes only `sign`/`verify`/`decode` — a refresh token is simply
+> `sign({ expiresIn: '7d' })`.
+
+### Exports
+
+| Export                  | File                                | Description                                                           |
+| ----------------------- | ----------------------------------- | --------------------------------------------------------------------- |
+| `AuthPlugin`            | `src/plugin/auth-plugin.ts`         | Plugin factory                                                        |
+| `AuthPluginOptions`     | `src/interfaces/index.ts`           | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)          |
+| `JwtOptions`            | `src/interfaces/index.ts`           | JWT config (key material, algorithm, expected aud/iss, header/scheme) |
+| `ApiKeyOptions`         | `src/interfaces/index.ts`           | API-key strategy config (header + `validate` callback)                |
+| `LocalOptions`          | `src/interfaces/index.ts`           | Local credential config (`verify` callback)                           |
+| `PasswordHasher`        | `src/services/password-hasher.ts`   | PBKDF2-SHA256 hash/verify utility                                     |
+| `authMiddleware`        | `src/middleware/auth-middleware.ts` | Global middleware: authenticates and populates `ctx.request.user`     |
+| `requireAuth`           | `src/guards/index.ts`               | Guard: require an authenticated principal (401)                       |
+| `requireRole`           | `src/guards/index.ts`               | Guard: require a role (401/403)                                       |
+| `requirePermission`     | `src/guards/index.ts`               | Guard: require a permission (401/403)                                 |
+| `requireAnyRole`        | `src/guards/index.ts`               | Guard: require any of the given roles                                 |
+| `requireAllPermissions` | `src/guards/index.ts`               | Guard: require all of the given permissions                           |
+| `publicRoute`           | `src/guards/index.ts`               | Guard: explicitly allow unauthenticated access                        |
+| `IAuthService`          | re-export                           | From `@hono-enterprise/common`                                        |
+| `IJwtService`           | re-export                           | From `@hono-enterprise/common`                                        |
+| `IAuthorizationService` | re-export                           | From `@hono-enterprise/common`                                        |
+| `IAuthStrategy`         | re-export                           | From `@hono-enterprise/common`                                        |
+| `IPrincipal`            | re-export                           | From `@hono-enterprise/common`                                        |
+| `JwtSignOptions`        | re-export                           | From `@hono-enterprise/common`                                        |
+| `RbacConfig`            | re-export                           | From `@hono-enterprise/common`                                        |
+| `RoleDefinition`        | re-export                           | From `@hono-enterprise/common`                                        |
 
 ### Registration
 
 ```typescript
-import { AuthenticationPlugin } from '@hono-enterprise/auth-plugin';
+import { authMiddleware, AuthPlugin } from '@hono-enterprise/auth-plugin';
 
-app.register(AuthenticationPlugin({
+app.register(AuthPlugin({
   jwt: {
-    secret: config.get('JWT_SECRET'),
-    expiresIn: '1h',
-    refreshExpiresIn: '7d',
-    issuer: 'my-app',
-    audience: 'my-app-users',
+    secret: config.get('JWT_SECRET'), // HS256; use privateKey/publicKey PEMs for RS256
+    audience: 'my-app-users', // expected `aud`, enforced on verify
+    issuer: 'my-app', // expected `iss`, enforced on verify
   },
   apiKey: {
     header: 'X-API-Key',
-    validate: async (key) => {
-      const user = await apiKeyService.validate(key);
-      return user ? { id: user.id, roles: user.roles } : null;
-    },
+    validate: (key) => apiKeyService.validate(key), // (key) => Promise<IPrincipal | null>
+  },
+  local: {
+    // (identifier, secret) => Promise<IPrincipal | null>
+    verify: (identifier, secret) => userService.checkPassword(identifier, secret),
   },
   rbac: {
     roles: {
-      admin: {
-        permissions: ['*'],
-        inherits: ['manager'],
-      },
-      manager: {
-        permissions: ['users:read', 'users:write', 'reports:read'],
-        inherits: ['user'],
-      },
-      user: {
-        permissions: ['profile:read', 'profile:write'],
-      },
+      admin: { permissions: ['*'], inherits: ['manager'] },
+      manager: { permissions: ['users:read', 'users:write'], inherits: ['user'] },
+      user: { permissions: ['profile:read', 'profile:write'] },
     },
   },
-  rateLimit: {
-    windowMs: 60000,
-    max: 100,
-    storage: 'memory', // 'memory' | 'redis'
-  },
 }));
+
+// Global middleware: authenticates every request and sets ctx.request.user.
+app.middleware.add(authMiddleware());
 ```
 
 ### Login (Issue Token)
 
+`IAuthService.verifyCredentials({ identifier, secret })` resolves to an `IPrincipal | null`; mint a
+JWT with the separate `IJwtService` resolved from `'jwt'`. There is no refresh-token API in M16.
+
 ```typescript
+import type { IAuthService, IJwtService } from '@hono-enterprise/common';
+
 app.router.post('/auth/login', async (ctx) => {
   const auth = ctx.services.get<IAuthService>('authentication');
-  const { email, password } = ctx.request.body;
+  const jwt = ctx.services.get<IJwtService>('jwt');
+  const { username, password } = await ctx.request.json();
 
-  const user = await userService.verifyCredentials(email, password);
-  if (!user) {
+  const principal = await auth.verifyCredentials({ identifier: username, secret: password });
+  if (!principal) {
     return ctx.response.status(401).json({ error: 'Invalid credentials' });
   }
 
-  const accessToken = auth.jwt.sign({
-    userId: user.id,
-    roles: user.roles,
-  });
-
-  const refreshToken = auth.jwt.signRefresh({
-    userId: user.id,
-  });
-
-  return ctx.response.json({ accessToken, refreshToken });
+  const accessToken = await jwt.sign(
+    { sub: principal.id, roles: principal.roles },
+    { expiresIn: '1h', audience: 'my-app-users', issuer: 'my-app' },
+  );
+  return ctx.response.json({ accessToken });
 });
 ```
 
 ### Protecting Routes
 
+Guards are free `MiddlewareFunction` factories. The authorization guards resolve
+`IAuthorizationService` from `'authorization'`, return **401** when no principal is attached and
+**403** when the check fails, and short-circuit (they do **not** call `next()`). `authMiddleware`
+always calls `next()`, so an unauthenticated request still reaches the guard. (`publicRoute` is used
+instead of `public` because `public` is a reserved word.)
+
 ```typescript
-import { requireAuth, requireRole, requirePermission } from '@hono-enterprise/auth-plugin';
+import {
+  publicRoute,
+  requireAllPermissions,
+  requireAnyRole,
+  requireAuth,
+  requirePermission,
+  requireRole,
+} from '@hono-enterprise/auth-plugin';
 
 // Require authentication
 app.router.get('/profile', {
   middleware: [requireAuth()],
-  handler: async (ctx) => {
-    return ctx.response.json(ctx.request.user);
-  },
+  handler: async (ctx) => ctx.response.json(ctx.request.user),
 });
 
-// Require specific role
+// Require a role (admin satisfies 'user' via the configured `inherits` hierarchy)
 app.router.delete('/users/:id', {
   middleware: [requireAuth(), requireRole('admin')],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 
-// Require specific permission
+// Require a permission
 app.router.post('/users', {
   middleware: [requireAuth(), requirePermission('users:write')],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
 });
 
-// Require any of multiple roles
+// Require any of several roles / all of several permissions
 app.router.get('/reports', {
   middleware: [requireAuth(), requireAnyRole(['admin', 'manager'])],
-  handler: async (ctx) => { /* ... */ },
+  handler: async (ctx) => {/* ... */},
+});
+app.router.post('/bulk', {
+  middleware: [requireAuth(), requireAllPermissions(['users:read', 'users:write'])],
+  handler: async (ctx) => {/* ... */},
 });
 
-// Public route (bypass auth)
+// Explicitly public route
 app.router.get('/health', {
-  middleware: [public()],
+  middleware: [publicRoute()],
   handler: async (ctx) => ctx.response.json({ status: 'ok' }),
 });
 ```
 
 ### Accessing the Current User
 
+`authMiddleware` writes the authenticated principal to `ctx.request.user` (`user` is the one
+writable field on `IRequest`, so the shipped `@CurrentUser` decorator resolves it).
+
 ```typescript
 app.router.get('/me', {
   middleware: [requireAuth()],
   handler: async (ctx) => {
-    const user = ctx.request.user;
-    return ctx.response.json({
-      id: user.id,
-      roles: user.roles,
-      permissions: user.permissions,
-    });
+    const user = ctx.request.user!;
+    return ctx.response.json({ id: user.id, roles: user.roles, permissions: user.permissions });
   },
 });
 ```
 
-### API Key Authentication
+### Password Hashing
+
+`PasswordHasher` is an exported utility for provisioning passwords and verifying them inside a
+`local.verify` callback. It draws a random salt and derives a 32-byte key with PBKDF2-SHA256 (100
+000 iterations) via `runtime.subtle` / `runtime.randomBytes`.
 
 ```typescript
-app.router.get('/api/data', {
-  middleware: [requireApiKey()],
-  handler: async (ctx) => {
-    // ctx.request.user is populated from API key validation
-    return ctx.response.json({ data: 'protected' });
-  },
-});
+import { PasswordHasher } from '@hono-enterprise/auth-plugin';
+
+const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from the 'runtime' token
+const stored = await hasher.hash('correct horse battery staple');
+const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 ```
 
 ---
@@ -3094,7 +3139,7 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 app.register(DatabasePlugin({ type: 'prisma' }));
 
 // Add auth
-app.register(AuthenticationPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
+app.register(AuthPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
 
 // Add OpenAPI docs
 app.register(OpenApiPlugin({ title: 'My API', version: '1.0.0' }));

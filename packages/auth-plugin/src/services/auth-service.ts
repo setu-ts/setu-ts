@@ -40,7 +40,7 @@ export class AuthService implements IAuthService {
   /**
    * Verify credentials for login flow (delegates to LocalStrategy).
    */
-  async verifyCredentials(
+  verifyCredentials(
     credentials: { readonly identifier: string; readonly secret: string },
   ): Promise<IPrincipal | null> {
     return this.localStrategy.verify(credentials.identifier, credentials.secret);
@@ -64,7 +64,7 @@ export class LocalStrategy {
   /**
    * Verify credentials by delegating to the app-supplied callback.
    */
-  async verify(
+  verify(
     identifier: string,
     secret: string,
   ): Promise<IPrincipal | null> {

@@ -51,7 +51,7 @@ graph TB
         Config[ConfigPlugin]
         Validation[ValidationPlugin]
         Database[DatabasePlugin]
-        Auth[AuthenticationPlugin]
+        Auth[AuthPlugin]
         Messaging[MessagingPlugin]
         OpenApi[OpenApiPlugin]
         Scheduler[SchedulerPlugin]
@@ -311,7 +311,7 @@ hono-enterprise/
 │   ├── cqrs-plugin/              # CqrsPlugin (commands, queries, buses)
 │   ├── messaging-plugin/         # MessagingPlugin (Memory, Redis Streams; RabbitMQ/NATS/Kafka in M14b)
 │   ├── queue-plugin/             # QueuePlugin (Redis, RabbitMQ, Memory)
-│   ├── auth-plugin/              # AuthenticationPlugin (JWT, API Key, RBAC)
+│   ├── auth-plugin/              # AuthPlugin (JWT, API Key, RBAC; refresh + rate limiting in M16b)
 │   ├── http-security-plugin/     # HttpSecurityPlugin (CORS, headers, CSRF, rate limit)
 │   ├── scheduler-plugin/         # SchedulerPlugin (cron, delayed, recurring)
 │   ├── metrics-plugin/           # MetricsPlugin (Prometheus)
@@ -1884,119 +1884,119 @@ also out of scope (recurring metadata is in-process, matching `MemoryQueue`).
 
 ## Milestone 16: Auth Plugin — Authentication and Authorization
 
-**Objective:** Provide authentication, authorization, RBAC, and guards.
+**Objective:** Provide authentication (JWT, API key, local credentials), authorization (RBAC with
+role hierarchy), and short-circuiting route guards. All cryptography (HS256/RS256 JWT, PBKDF2-SHA256
+password hashing) runs through Web Crypto (`runtime.subtle` / `runtime.randomBytes`), so the package
+ships with **zero npm dependencies**.
+
+> **Phasing:** the **refresh-token strategy** and **rate limiting** are deferred to **M16b** (see
+> the M16b sub-section below), mirroring the M14 → M14b and M15 → M15b splits. Status:
+> implemented-but-not-merged (deliverable checkboxes are not flipped until the PR merges).
 
 ### Package: `@hono-enterprise/auth-plugin`
+
+Registers `IJwtService` under `'jwt'`, `IAuthService` under `'authentication'`, and
+`IAuthorizationService` under `'authorization'`.
 
 **Plugin Registration:**
 
 ```typescript
+import { authMiddleware, AuthPlugin } from '@hono-enterprise/auth-plugin';
+
 app.register(AuthPlugin({
-  jwt: {
-    secret: config.get('JWT_SECRET'),
-    expiresIn: '1h',
-    refreshExpiresIn: '7d',
-  },
-  apiKey: {
-    header: 'X-API-Key',
-    validate: async (key) => await apiKeyService.validate(key),
-  },
-  rbac: {
-    roles: roleDefinitions,
-    permissions: permissionDefinitions,
-  },
-  rateLimit: {
-    windowMs: 60000,
-    max: 100,
-    storage: 'memory',
-  },
+  jwt: { secret: config.get('JWT_SECRET') }, // HS256; use privateKey/publicKey PEMs for RS256
+  apiKey: { header: 'X-API-Key', validate: (key) => apiKeyService.validate(key) },
+  local: { verify: (identifier, secret) => userService.checkPassword(identifier, secret) },
+  rbac: { roles: roleDefinitions },
 }));
+app.middleware.add(authMiddleware());
 ```
 
 **Programmatic API:**
 
 ```typescript
+import type { IAuthService, IJwtService } from '@hono-enterprise/common';
+
 const auth = ctx.services.get<IAuthService>('authentication');
 const jwt = ctx.services.get<IJwtService>('jwt');
 
-// Sign token
-const token = jwt.sign({ userId: '123', roles: ['admin'] });
+// Login: verifyCredentials returns an IPrincipal (or null); mint a JWT separately.
+const principal = await auth.verifyCredentials({ identifier: username, secret: password });
+const token = await jwt.sign({ sub: principal.id, roles: principal.roles }, { expiresIn: '1h' });
 
-// Verify
-const payload = jwt.verify(token);
+// Verify (signature + exp/nbf/aud/iss).
+const payload = await jwt.verify(token);
 
-// Middleware
-app.router.post('/login', {
-  handler: async (ctx) => {
-    const token = await auth.authenticate(ctx.request);
-    return ctx.response.json({ token });
-  },
-});
-
-// Guard middleware
+// Guards are free middleware factories (NOT methods on IAuthService).
 app.router.get('/admin', {
-  middleware: [auth.requireRole('admin')],
-  handler: async (ctx) => {/* ... */},
-});
-
-// Permission check
-app.router.delete('/users/:id', {
-  middleware: [auth.requirePermission('users:delete')],
+  middleware: [requireAuth(), requireRole('admin')],
   handler: async (ctx) => {/* ... */},
 });
 ```
 
 **Strategies:**
 
-- `JwtStrategy` — JWT authentication
-- `ApiKeyStrategy` — API key authentication
-- `LocalStrategy` — Username/password
-- `RefreshTokenStrategy` — Refresh tokens
+- `JwtStrategy` — passive bearer-token authentication (in the `authenticate` chain)
+- `ApiKeyStrategy` — passive API-key authentication (header + app-supplied `validate`)
+- `LocalStrategy` — explicit credentials verification via `verifyCredentials` (login route)
+- `RefreshTokenStrategy` — **M16b** (deferred)
 
-**Guards (as middleware factories):**
+**Guards (middleware factories):**
 
-- `requireAuth()` — Require authentication
-- `requireRole(role)` — Require specific role
-- `requirePermission(permission)` — Require specific permission
-- `requireAnyRole(roles)` — Require any of the roles
-- `requireAllPermissions(permissions)` — Require all permissions
-- `public()` — Bypass auth
+- `requireAuth()` — require an authenticated principal (401)
+- `requireRole(role)` — require a role, honoring the configured hierarchy (401/403)
+- `requirePermission(permission)` — require a permission (401/403)
+- `requireAnyRole(roles)` — require any of the roles
+- `requireAllPermissions(permissions)` — require all permissions
+- `publicRoute()` — explicitly allow unauthenticated access (named `publicRoute`, not `public`,
+  because `public` is a reserved word)
+
+All guards short-circuit (no `next()`) on 401/403; `authMiddleware` always calls `next()`.
 
 **Implementation Files:**
 
 - `src/plugin/auth-plugin.ts`
-- `src/services/auth-service.ts`
+- `src/services/auth-service.ts` (`AuthService` + `LocalStrategy`)
 - `src/services/jwt-service.ts`
 - `src/services/rbac-service.ts`
 - `src/services/password-hasher.ts`
 - `src/strategies/jwt-strategy.ts`
 - `src/strategies/api-key-strategy.ts`
 - `src/strategies/local-strategy.ts`
-- `src/strategies/refresh-token-strategy.ts`
-- `src/guards/require-auth.ts`
-- `src/guards/require-role.ts`
-- `src/guards/require-permission.ts`
+- `src/guards/index.ts` (consolidated guard factories)
 - `src/middleware/auth-middleware.ts`
-- `src/middleware/rate-limit-middleware.ts`
+- `src/utils/{duration,base64url,buffer,pem}.ts`
 - `src/index.ts`
 
 ### Tests
 
-- JWT sign/verify
-- API key validation
-- RBAC role checks
-- Permission checks
-- All guards
-- Rate limiting
+- JWT HS256/RS256 sign/verify/decode (incl. tampered/expired/`nbf`/`aud`/`iss` failures)
+- API key, local strategy, and `AuthService` strategy-chain (first-match-wins) behavior
+- RBAC direct + inherited role/permission resolution (transitive, cycle-safe)
+- PBKDF2 password hash/verify round-trip
+- All guards (pass / 401 / 403) with short-circuit (downstream-not-invoked) assertions
+- End-to-end plugin integration
 
 ### Deliverables
 
 - [ ] AuthPlugin
-- [ ] JWT, API Key, Local, Refresh strategies
+- [ ] JWT, API Key, Local strategies (Refresh deferred to M16b)
 - [ ] RBAC with role hierarchy
-- [ ] Guard middleware factories
-- [ ] Rate limiting
-- [ ] Full test coverage
+- [ ] Guard middleware factories (`publicRoute`, not `public`)
+- [ ] Password hashing (PBKDF2 via Web Crypto)
+- [ ] Full test coverage (per-file 90% bar)
+- [ ] Rate limiting — **M16b** (deferred)
+
+## Milestone 16b: Auth Plugin — Refresh Tokens & Rate Limiting (deferred)
+
+Follow-up to M16, mirroring the M14 → M14b / M15 → M15b splits. No `@hono-enterprise/common`
+contract change is required — refresh access tokens are minted with the existing
+`IJwtService.sign({ expiresIn })`.
+
+- `RefreshTokenStrategy` — a thin layer over `sign({ expiresIn })` plus a pluggable server-side
+  token store and a refresh-endpoint helper.
+- Rate limiting (`src/middleware/rate-limit-middleware.ts` + memory/redis storage) — a
+  transport-level concern, treated as a separate capability rather than identity.
 
 ---
 
@@ -3447,6 +3447,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
 | 16        | ⬜     | auth-plugin          |
+| 16b       | ⬜     | auth-plugin          |
 | 17        | ⬜     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |
 | 19        | ⬜     | metrics-plugin       |

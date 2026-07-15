@@ -27,7 +27,7 @@ describe('ApiKeyStrategy', () => {
   it('returns a principal when the key validates', async () => {
     const expectedPrincipal: IPrincipal = { id: 'api-user', roles: ['service'] };
     const strategy = new ApiKeyStrategy({
-      validate: async (key) => key === 'valid-key' ? expectedPrincipal : null,
+      validate: (key) => Promise.resolve(key === 'valid-key' ? expectedPrincipal : null),
     });
     const request = createRequest({ 'X-API-Key': 'valid-key' });
     const principal = await strategy.authenticate(request);
@@ -38,7 +38,7 @@ describe('ApiKeyStrategy', () => {
 
   it('returns null when the header is absent', async () => {
     const strategy = new ApiKeyStrategy({
-      validate: async () => ({ id: 'should-not-reach' }),
+      validate: () => Promise.resolve({ id: 'should-not-reach' }),
     });
     const request = createRequest();
     const principal = await strategy.authenticate(request);
@@ -47,7 +47,7 @@ describe('ApiKeyStrategy', () => {
 
   it('returns null when validate returns null', async () => {
     const strategy = new ApiKeyStrategy({
-      validate: async () => null,
+      validate: () => Promise.resolve(null),
     });
     const request = createRequest({ 'X-API-Key': 'invalid-key' });
     const principal = await strategy.authenticate(request);
@@ -56,9 +56,7 @@ describe('ApiKeyStrategy', () => {
 
   it('returns null when validate throws', async () => {
     const strategy = new ApiKeyStrategy({
-      validate: async () => {
-        throw new Error('lookup failed');
-      },
+      validate: () => Promise.reject(new Error('lookup failed')),
     });
     const request = createRequest({ 'X-API-Key': 'some-key' });
     const principal = await strategy.authenticate(request);
@@ -69,7 +67,7 @@ describe('ApiKeyStrategy', () => {
     const expectedPrincipal: IPrincipal = { id: 'api-user' };
     const strategy = new ApiKeyStrategy({
       header: 'X-Custom-Key',
-      validate: async () => expectedPrincipal,
+      validate: () => Promise.resolve(expectedPrincipal),
     });
     const request = createRequest({ 'X-Custom-Key': 'my-key' });
     const principal = await strategy.authenticate(request);
@@ -80,7 +78,7 @@ describe('ApiKeyStrategy', () => {
   it('does not read the default header when a custom header is set', async () => {
     const strategy = new ApiKeyStrategy({
       header: 'X-Custom-Key',
-      validate: async () => ({ id: 'reached' }),
+      validate: () => Promise.resolve({ id: 'reached' }),
     });
     const request = createRequest({ 'X-API-Key': 'some-key' });
     const principal = await strategy.authenticate(request);
@@ -89,7 +87,7 @@ describe('ApiKeyStrategy', () => {
 
   it('has the name "api-key"', () => {
     const strategy = new ApiKeyStrategy({
-      validate: async () => null,
+      validate: () => Promise.resolve(null),
     });
     expect(strategy.name).toBe('api-key');
   });

@@ -27,7 +27,7 @@ Web Crypto) under [`CAPABILITIES.JWT`](packages/common/src/tokens.ts:61), a new
 strategies (JWT bearer token, API key) and populates
 [`ctx.request.user`](packages/common/src/http.ts:47); authorization is enforced by guard middleware
 factories (`requireAuth`, `requireRole`, `requirePermission`, `requireAnyRole`,
-`requireAllPermissions`, `public`) that short-circuit with 401/403. A `PasswordHasher`
+`requireAllPermissions`, `publicRoute`) that short-circuit with 401/403. A `PasswordHasher`
 (PBKDF2-SHA256 via Web Crypto) supports the Local login flow.
 
 This milestone is deliberately **phased** (mirrors the M14 → M14b and M15 → M15b splits the user
@@ -57,7 +57,7 @@ dependencies** and is cross-runtime by construction (AI_GUIDELINES §4).
   - `RbacService implements IAuthorizationService` — role-hierarchy resolution + permission checks.
   - `PasswordHasher` — PBKDF2-SHA256 hash/verify via Web Crypto.
   - Guards (`requireAuth`, `requireRole`, `requirePermission`, `requireAnyRole`,
-    `requireAllPermissions`, `public`) + `authMiddleware`.
+    `requireAllPermissions`, `publicRoute`) + `authMiddleware`.
   - `AuthPlugin(options): IPlugin` factory mirroring the
     [`MessagingPlugin`](packages/messaging-plugin/src/plugin/messaging-plugin.ts:74) wiring
     (register services, `onClose` cleanup).
@@ -247,14 +247,14 @@ consistent with the design once C3/C6 are reconciled).
   `false`; different salts → different stored strings; a tampered stored string (wrong format) →
   `verify` returns `false` (never throws).
 
-### 3.7 Guards short-circuit (401/403), `public`, and the short-circuit test mandate
+### 3.7 Guards short-circuit (401/403), `publicRoute`, and the short-circuit test mandate
 
 - **Decision:** Guards are `MiddlewareFunction` factories. `requireAuth()` reads `ctx.request.user`;
   absent → `ctx.response.status(401).json(...)` and **no `next()`**.
   `requireRole`/`requirePermission`/ `requireAnyRole`/`requireAllPermissions` resolve
   `IAuthorizationService` via `ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)`,
   then: no principal → 401; principal present but the check fails → 403
-  (`ctx.response.status(403).json(...)`, no `next()`); pass → `await next()`. `public()` always
+  (`ctx.response.status(403).json(...)`, no `next()`); pass → `await next()`. `publicRoute()` always
   `await next()` (explicit opt-out, paralleling the `@Public` decorator interop). The auth
   middleware (`authMiddleware`) **always** `await next()` — it authenticates only; it never
   short-circuits (so an unauthenticated request still reaches guards).
@@ -264,7 +264,7 @@ consistent with the design once C3/C6 are reconciled).
 - **Test home:** `test/unit/guards.test.ts` — each guard: pass case calls `next`; 401 case sets
   status and does **not** call `next` (a downstream spy asserts it was not invoked — the CLAUDE.md
   short-circuit mandate); 403 case likewise; `requireAnyRole`/`requireAllPermissions` all-of/any-of
-  semantics; `public()` always continues. `test/unit/auth-middleware.test.ts` — sets `user` and
+  semantics; `publicRoute()` always continues. `test/unit/auth-middleware.test.ts` — sets `user` and
   calls `next` whether or not a principal was found.
 
 ### 3.8 Single-instance plugin (no `name` option), wiring, and `onClose`
@@ -312,7 +312,7 @@ consistent with the design once C3/C6 are reconciled).
 | `requirePermission`                                                                                     | fn                         | `middleware: [requirePermission('users:write')]`.                                                    |
 | `requireAnyRole`                                                                                        | fn                         | `middleware: [requireAnyRole(['admin','manager'])]`.                                                 |
 | `requireAllPermissions`                                                                                 | fn                         | `middleware: [requireAllPermissions(['users:read','users:write'])]`.                                 |
-| `public`                                                                                                | fn                         | `middleware: [public()]` explicit bypass (parallels `@Public`).                                      |
+| `publicRoute`                                                                                           | fn                         | `middleware: [publicRoute()]` explicit bypass (parallels `@Public`).                                 |
 | `IAuthService`, `IJwtService`, `IAuthorizationService`, `IAuthStrategy`, `IPrincipal`, `JwtSignOptions` | re-exported `common` types | Consumers import contracts from the plugin package (messaging/queue precedent).                      |
 
 **Intentionally not exported** (internal, resolved by token or plugin-private): `JwtService`,
@@ -357,7 +357,7 @@ satisfy `exactOptionalPropertyTypes` ([`deno.json:57`](deno.json)).
 | `packages/auth-plugin/src/strategies/jwt-strategy.ts`     | `JwtStrategy implements IAuthStrategy` — bearer extraction + `IJwtService.verify`. Internal.                                                                                                                                                                                                                                                                              |
 | `packages/auth-plugin/src/strategies/api-key-strategy.ts` | `ApiKeyStrategy implements IAuthStrategy` — header extraction + `validate`. Internal.                                                                                                                                                                                                                                                                                     |
 | `packages/auth-plugin/src/strategies/local-strategy.ts`   | `LocalStrategy` — holds `local.verify`; reached via `verifyCredentials`. Internal.                                                                                                                                                                                                                                                                                        |
-| `packages/auth-plugin/src/guards/index.ts`                | `requireAuth`/`requireRole`/`requirePermission`/`requireAnyRole`/`requireAllPermissions`/`public` — short-circuiting middleware factories. Exported. (Consolidates the ROADMAP's three guard files into one DRY file; see §9 reconciliation note.)                                                                                                                        |
+| `packages/auth-plugin/src/guards/index.ts`                | `requireAuth`/`requireRole`/`requirePermission`/`requireAnyRole`/`requireAllPermissions`/`publicRoute` — short-circuiting middleware factories. Exported. (Consolidates the ROADMAP's three guard files into one DRY file; see §9 reconciliation note.)                                                                                                                   |
 | `packages/auth-plugin/src/middleware/auth-middleware.ts`  | `authMiddleware()` — runs `IAuthService.authenticate`, sets `ctx.request.user`, `await next()`. Exported.                                                                                                                                                                                                                                                                 |
 | `packages/auth-plugin/src/plugin/auth-plugin.ts`          | `AuthPlugin(options): IPlugin` — builds services + strategies, registers under the three tokens, `provides`, `onClose` cleanup (mirrors messaging wiring).                                                                                                                                                                                                                |
 | `packages/auth-plugin/src/index.ts`                       | Barrel: `AuthPlugin`, option types, `PasswordHasher`, `authMiddleware`, the six guards; re-export `IAuthService`/`IJwtService`/`IAuthorizationService`/`IAuthStrategy`/`IPrincipal`/`JwtSignOptions`/`RbacConfig`/`RoleDefinition`.                                                                                                                                       |
@@ -388,7 +388,7 @@ therefore no guarded real-import test to write.
 | `test/unit/api-key-strategy.test.ts`        | `src/strategies/api-key-strategy.ts`                                      | `authenticate(request)`: key present + `validate` resolves → principal; absent header → `null`; `validate` returns `null` → `null`; custom header name honored.                                                                                                                                                                                                                                                                                                                                                                        |
 | `test/unit/local-strategy.test.ts`          | `src/strategies/local-strategy.ts`                                        | `verify(identifier, secret)` delegates to the configured `local.verify`; returns the principal or `null` on miss; propagates the callback's resolved value.                                                                                                                                                                                                                                                                                                                                                                            |
 | `test/unit/auth-service.test.ts`            | `src/services/auth-service.ts`                                            | `authenticate(request): Promise<IPrincipal \| null>` runs strategies in order — first non-null wins; all return `null` → `null`; `verifyCredentials({ identifier, secret }): Promise<IPrincipal \| null>` delegates to `LocalStrategy`.                                                                                                                                                                                                                                                                                                |
-| `test/unit/guards.test.ts`                  | `src/guards/index.ts`                                                     | For each guard against `MiddlewareFunction`: pass → `next` invoked; 401 (no principal) → status set, `next` **not** invoked (downstream spy asserts zero calls — short-circuit mandate); 403 (principal present, check fails) → status set, `next` not invoked; `requireAnyRole` any-of / `requireAllPermissions` all-of; `public()` always continues; guard resolves `IAuthorizationService` from `ctx.services`.                                                                                                                     |
+| `test/unit/guards.test.ts`                  | `src/guards/index.ts`                                                     | For each guard against `MiddlewareFunction`: pass → `next` invoked; 401 (no principal) → status set, `next` **not** invoked (downstream spy asserts zero calls — short-circuit mandate); 403 (principal present, check fails) → status set, `next` not invoked; `requireAnyRole` any-of / `requireAllPermissions` all-of; `publicRoute()` always continues; guard resolves `IAuthorizationService` from `ctx.services`.                                                                                                                |
 | `test/unit/auth-middleware.test.ts`         | `src/middleware/auth-middleware.ts`                                       | `authMiddleware()` runs `authenticate`, sets `ctx.request.user` to the principal (read back through `IRequest.user`) and calls `next`; when `authenticate` returns `null`, `user` is absent and `next` is still called (no short-circuit).                                                                                                                                                                                                                                                                                             |
 | `test/unit/auth-plugin.test.ts`             | `src/plugin/auth-plugin.ts` (+ `src/interfaces/index.ts` via compilation) | `AuthPlugin(options): IPlugin` `register()` resolves `IJwtService` under `jwt`, `IAuthService` under `authentication`, `IAuthorizationService` under `authorization`; `provides` lists the three tokens; options without any key material throw; HS256 path (secret) and RS256 path (keys) both build; `onClose` resolves.                                                                                                                                                                                                             |
 | `test/unit/barrel-exports.test.ts`          | `src/index.ts`                                                            | Asserts `AuthPlugin`, the option types, `PasswordHasher`, `authMiddleware`, the six guards, and the re-exported `IAuthService`/`IJwtService`/`IAuthorizationService`/`IAuthStrategy`/`IPrincipal`/`JwtSignOptions`/`RbacConfig`/`RoleDefinition` are exported, and that `JwtService`/`AuthService`/`RbacService`/strategies/`parseDuration` are **not**.                                                                                                                                                                               |
