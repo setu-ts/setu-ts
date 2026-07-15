@@ -44,7 +44,7 @@ export interface IRequest {
    * The authenticated principal, populated by authentication middleware.
    * Absent when the request is unauthenticated.
    */
-  readonly user?: IPrincipal;
+  user?: IPrincipal;
   /**
    * Reads and parses the body as JSON.
    *
