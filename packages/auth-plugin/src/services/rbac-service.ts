@@ -6,6 +6,9 @@
 
 import type { IAuthorizationService, IPrincipal, RbacConfig } from '@hono-enterprise/common';
 
+/** Permission that grants every permission. */
+const WILDCARD = '*';
+
 /**
  * RBAC service implementing IAuthorizationService.
  */
@@ -122,11 +125,13 @@ export class RbacService implements IAuthorizationService {
 
   /**
    * Check if a principal has a specific permission (direct or via role hierarchy).
+   * The wildcard permission `'*'` — held directly or granted by any of the
+   * principal's (direct or inherited) roles — grants every permission.
    */
   hasPermission(principal: IPrincipal, permission: string): boolean {
     // Check direct permissions
     const principalPermissions = principal.permissions ?? [];
-    if (principalPermissions.includes(permission)) {
+    if (principalPermissions.includes(permission) || principalPermissions.includes(WILDCARD)) {
       return true;
     }
 
@@ -135,7 +140,7 @@ export class RbacService implements IAuthorizationService {
     for (const roleName of principalRoles) {
       if (this.resolvedPermissions.has(roleName)) {
         const permissions = this.resolvedPermissions.get(roleName)!;
-        if (permissions.has(permission)) {
+        if (permissions.has(permission) || permissions.has(WILDCARD)) {
           return true;
         }
       }

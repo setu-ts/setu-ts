@@ -6,7 +6,13 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IAuthService, IPluginContext, IPrincipal } from '@hono-enterprise/common';
+import type {
+  IAuthService,
+  IJwtService,
+  IPluginContext,
+  IPrincipal,
+  IRequest,
+} from '@hono-enterprise/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /**
@@ -278,7 +284,51 @@ describe('AuthPlugin', () => {
     await plugin.register!(ctx);
     expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
   });
+
+  it('forwards jwt.header and jwt.scheme to the JWT strategy', async () => {
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret', header: 'x-auth-token', scheme: 'token' },
+      rbac: { roles: {} },
+    });
+    const { ctx, registered } = createFakeContext();
+    await plugin.register!(ctx);
+
+    const jwt = registered.get(CAPABILITIES.JWT) as IJwtService;
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const token = await jwt.sign({ sub: 'carol' });
+
+    const viaConfigured = await auth.authenticate(
+      makeRequest({ 'x-auth-token': `Token ${token}` }),
+    );
+    expect(viaConfigured).not.toBeNull();
+    expect(viaConfigured!.id).toBe('carol');
+
+    // The default header must NOT authenticate once a custom one is configured.
+    const viaDefault = await auth.authenticate(
+      makeRequest({ authorization: `Bearer ${token}` }),
+    );
+    expect(viaDefault).toBeNull();
+  });
 });
+
+/**
+ * Build a minimal IRequest carrying the given headers.
+ */
+function makeRequest(headers: Record<string, string>): IRequest {
+  const h = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    h.set(key, value);
+  }
+  return {
+    method: 'GET',
+    url: 'http://localhost/',
+    path: '/',
+    headers: h,
+    json: <T>() => Promise.resolve({} as T),
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+  };
+}
 
 /**
  * Format DER bytes as a PEM string.

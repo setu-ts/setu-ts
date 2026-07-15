@@ -19,16 +19,22 @@
  * ```
  */
 export function pemToDer(pem: string, label: 'PUBLIC KEY' | 'PRIVATE KEY'): Uint8Array {
-  const lines = pem.replace(/\r\n/g, '\n').split('\n');
+  // Blank lines are dropped so the standard trailing newline of a PEM key
+  // file (and any surrounding blank lines) is tolerated.
+  const lines = pem
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 
   const expectedBegin = `-----BEGIN ${label}-----`;
   const expectedEnd = `-----END ${label}-----`;
 
-  if (lines[0].trim() !== expectedBegin) {
+  if (lines[0] !== expectedBegin) {
     throw new Error(`PEM must start with "${expectedBegin}"`);
   }
 
-  if (lines[lines.length - 1].trim() !== expectedEnd) {
+  if (lines[lines.length - 1] !== expectedEnd) {
     throw new Error(`PEM must end with "${expectedEnd}"`);
   }
 

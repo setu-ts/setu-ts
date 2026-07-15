@@ -185,6 +185,45 @@ describe('RbacService', () => {
     });
   });
 
+  describe('wildcard permission', () => {
+    const config: RbacConfig = {
+      roles: {
+        user: { permissions: ['users:read'] },
+        admin: { permissions: ['*'], inherits: ['user'] },
+      },
+    };
+
+    it('grants any permission to a role holding "*"', () => {
+      const rbac = new RbacService(config);
+      const principal: IPrincipal = { id: '1', roles: ['admin'] };
+      expect(rbac.hasPermission(principal, 'users:delete')).toBe(true);
+      expect(rbac.hasPermission(principal, 'anything:else')).toBe(true);
+    });
+
+    it('grants any permission to a principal with a direct "*" permission', () => {
+      const rbac = new RbacService(config);
+      const principal: IPrincipal = { id: '1', permissions: ['*'] };
+      expect(rbac.hasPermission(principal, 'users:delete')).toBe(true);
+    });
+
+    it('grants a wildcard inherited through the role hierarchy', () => {
+      const rbac = new RbacService({
+        roles: {
+          root: { permissions: ['*'] },
+          superadmin: { inherits: ['root'] },
+        },
+      });
+      const principal: IPrincipal = { id: '1', roles: ['superadmin'] };
+      expect(rbac.hasPermission(principal, 'users:delete')).toBe(true);
+    });
+
+    it('satisfies hasAllPermissions via the wildcard', () => {
+      const rbac = new RbacService(config);
+      const principal: IPrincipal = { id: '1', roles: ['admin'] };
+      expect(rbac.hasAllPermissions(principal, ['users:read', 'audit:write'])).toBe(true);
+    });
+  });
+
   describe('cyclic inherits', () => {
     it('does not hang on cyclic inheritance and resolves the acyclic part', () => {
       const config: RbacConfig = {

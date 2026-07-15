@@ -918,7 +918,9 @@ Guards are free `MiddlewareFunction` factories. The authorization guards resolve
 `IAuthorizationService` from `'authorization'`, return **401** when no principal is attached and
 **403** when the check fails, and short-circuit (they do **not** call `next()`). `authMiddleware`
 always calls `next()`, so an unauthenticated request still reaches the guard. (`publicRoute` is used
-instead of `public` because `public` is a reserved word.)
+instead of `public` because `public` is a reserved word.) Role hierarchy is resolved transitively,
+and the wildcard permission `'*'` — held directly or granted by any (direct or inherited) role —
+satisfies every permission check.
 
 ```typescript
 import {

@@ -100,7 +100,8 @@ non-null principal wins, and `null` is returned when none match.
 `IAuthorizationService` (the `'authorization'` service) resolves a transitive role hierarchy before
 checking. A principal with `admin` satisfies `requireRole('user')` when `admin` inherits `user`
 (directly or transitively). Hierarchy resolution is cycle-safe (a self/cyclic `inherits` is
-ignored).
+ignored). The wildcard permission `'*'` — held directly by the principal or granted by any of its
+(direct or inherited) roles — satisfies every `hasPermission`/`hasAllPermissions` check.
 
 ```typescript
 import type { IAuthorizationService } from '@hono-enterprise/common';

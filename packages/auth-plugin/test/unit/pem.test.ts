@@ -65,6 +65,16 @@ describe('pemToDer', () => {
     expect(decoded).toEqual(publicKeyDer);
   });
 
+  it('handles a trailing newline (OpenSSL key-file format)', () => {
+    expect(pemToDer(publicKeyPem + '\n', 'PUBLIC KEY')).toEqual(publicKeyDer);
+    expect(pemToDer(privateKeyPem + '\n', 'PRIVATE KEY')).toEqual(privateKeyDer);
+  });
+
+  it('handles surrounding blank lines', () => {
+    const decoded = pemToDer('\n' + publicKeyPem + '\r\n\n', 'PUBLIC KEY');
+    expect(decoded).toEqual(publicKeyDer);
+  });
+
   it('round-trips into subtle.importKey (SPKI public key)', async () => {
     const der = pemToDer(publicKeyPem, 'PUBLIC KEY');
     const key = await crypto.subtle.importKey(

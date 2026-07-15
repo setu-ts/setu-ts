@@ -94,7 +94,18 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       const strategies: IAuthStrategy[] = [];
 
       // JWT strategy (always present)
-      strategies.push(new JwtStrategy({ jwtService }));
+      const jwtStrategyOpts: {
+        jwtService: JwtService;
+        header?: string;
+        scheme?: string;
+      } = { jwtService };
+      if (options.jwt.header !== undefined) {
+        jwtStrategyOpts.header = options.jwt.header;
+      }
+      if (options.jwt.scheme !== undefined) {
+        jwtStrategyOpts.scheme = options.jwt.scheme;
+      }
+      strategies.push(new JwtStrategy(jwtStrategyOpts));
 
       // API key strategy (optional)
       if (options.apiKey) {
