@@ -160,3 +160,186 @@ Deno.test('RefreshTokenService — tampered token returns null', async () => {
   }
   assertEquals(refreshed, null); // Signature mismatch
 });
+
+// --- Option-coverage tests for accessToken and refreshTokenExpiresIn ---
+
+Deno.test('RefreshTokenService — accessToken option flows through to token claims', async () => {
+  const runtime = createFakeRuntime();
+  const jwt = new JwtService(runtime, {
+    algorithm: 'HS256',
+    secret: 'test-secret',
+  });
+  const store = new MemoryRefreshTokenStore(runtime);
+  const service = new RefreshTokenService({
+    jwt,
+    store,
+    runtime,
+    accessToken: { expiresIn: '15m', audience: 'my-app', issuer: 'auth-svc' },
+  });
+
+  const principal = { id: 'user-123', roles: ['user'] };
+  const pair = await service.issue(principal);
+
+  // Access token carries audience and issuer
+  const accessPayload = await jwt.verify<{
+    sub: string;
+    aud: string;
+    iss: string;
+  }>(pair.accessToken);
+  assertEquals(accessPayload.aud, 'my-app');
+  assertEquals(accessPayload.iss, 'auth-svc');
+
+  // Refresh token also carries audience and issuer from accessToken option
+  const refreshPayload = await jwt.verify<{
+    type: 'refresh';
+    aud: string;
+    iss: string;
+  }>(pair.refreshToken);
+  assertEquals(refreshPayload.type, 'refresh');
+  assertEquals(refreshPayload.aud, 'my-app');
+  assertEquals(refreshPayload.iss, 'auth-svc');
+});
+
+Deno.test(
+  'RefreshTokenService — refreshTokenExpiresIn controls store record expiry',
+  async () => {
+    const runtime = createFakeRuntime();
+    const jwt = new JwtService(runtime, {
+      algorithm: 'HS256',
+      secret: 'test-secret',
+    });
+    const store = new MemoryRefreshTokenStore(runtime);
+    const service = new RefreshTokenService({
+      jwt,
+      store,
+      runtime,
+      refreshTokenExpiresIn: '1h', // 3600000 ms
+    });
+
+    const principal = { id: 'user-123' };
+    const pair = await service.issue(principal);
+    const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
+
+    // Record exists before expiry
+    const record = await store.get(refreshPayload.jti);
+    assertEquals(record?.principalId, 'user-123');
+
+    // Advance 1h + 1ms past the expiry — record should be evicted
+    runtime.setNow(runtime.now() + 3600001);
+    const afterExpiry = await store.get(refreshPayload.jti);
+    assertEquals(afterExpiry, null);
+  },
+);
+
+Deno.test(
+  'RefreshTokenService — refreshTokenExpiresIn default is 7d',
+  async () => {
+    const runtime = createFakeRuntime();
+    const jwt = new JwtService(runtime, {
+      algorithm: 'HS256',
+      secret: 'test-secret',
+    });
+    const store = new MemoryRefreshTokenStore(runtime);
+    const service = new RefreshTokenService({
+      jwt,
+      store,
+      runtime,
+      // No refreshTokenExpiresIn — defaults to '7d'
+    });
+
+    const principal = { id: 'user-123' };
+    const pair = await service.issue(principal);
+    const refreshPayload = await jwt.verify<{ jti: string }>(pair.refreshToken);
+
+    // Record still exists before 7d
+    const beforeExpiry = await store.get(refreshPayload.jti);
+    assertEquals(beforeExpiry?.principalId, 'user-123');
+
+    // Advance 7d + 1ms — record should be evicted
+    runtime.setNow(runtime.now() + 7 * 24 * 60 * 60 * 1000 + 1);
+    const afterExpiry = await store.get(refreshPayload.jti);
+    assertEquals(afterExpiry, null);
+  },
+);
+
+Deno.test(
+  'RefreshTokenService — revoke with malformed token falls back to decode',
+  async () => {
+    const runtime = createFakeRuntime();
+    const jwt = new JwtService(runtime, {
+      algorithm: 'HS256',
+      secret: 'test-secret',
+    });
+    const store = new MemoryRefreshTokenStore(runtime);
+    const service = new RefreshTokenService({ jwt, store, runtime });
+
+    const principal = { id: 'user-123' };
+    const pair = await service.issue(principal);
+
+    // Tamper the token so verify fails but decode still extracts jti
+    const parts = pair.refreshToken.split('.');
+    const tamperedPayload = globalThis.btoa(
+      JSON.stringify({
+        sub: 'user-123',
+        type: 'refresh',
+        jti: (await jwt.verify<{ jti: string }>(pair.refreshToken)).jti,
+      }),
+    );
+    const tampered = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
+
+    // Revoke with tampered token — verify fails, decode fallback extracts jti, store revokes
+    const revoked = await service.revoke(tampered);
+    assertEquals(revoked, true);
+
+    // Original token is now revoked in store
+    const refreshed = await service.refresh(pair.refreshToken);
+    assertEquals(refreshed, null);
+  },
+);
+
+Deno.test('RefreshTokenService — revoke with completely unparseable token returns false', async () => {
+  const runtime = createFakeRuntime();
+  const jwt = new JwtService(runtime, {
+    algorithm: 'HS256',
+    secret: 'test-secret',
+  });
+  const store = new MemoryRefreshTokenStore(runtime);
+  const service = new RefreshTokenService({ jwt, store, runtime });
+
+  // Totally invalid token — decode returns null
+  const revoked = await service.revoke('not.a.token');
+  assertEquals(revoked, false);
+});
+
+Deno.test(
+  'RefreshTokenService — accessToken.expiresIn only (no audience/issuer)',
+  async () => {
+    const runtime = createFakeRuntime();
+    const jwt = new JwtService(runtime, {
+      algorithm: 'HS256',
+      secret: 'test-secret',
+    });
+    const store = new MemoryRefreshTokenStore(runtime);
+    const service = new RefreshTokenService({
+      jwt,
+      store,
+      runtime,
+      accessToken: { expiresIn: '30m' },
+    });
+
+    const principal = { id: 'user-123' };
+    const pair = await service.issue(principal);
+
+    const accessPayload = await jwt.verify<{ iat: number; exp: number }>(
+      pair.accessToken,
+    );
+    assertEquals(accessPayload.exp - accessPayload.iat, 1800); // 30m = 1800s
+
+    // Refresh token also uses accessToken.expiresIn
+    const refreshPayload = await jwt.verify<{
+      iat: number;
+      exp: number;
+    }>(pair.refreshToken);
+    assertEquals(refreshPayload.exp - refreshPayload.iat, 1800);
+  },
+);
