@@ -27,8 +27,24 @@ implement. Its entire job is to break a request into subtasks and hand each to t
   milestone.
 - **Implementing an approved plan** → a **Code**-mode subtask, on the milestone's `feat/…` branch,
   following `CLAUDE.md`.
-- **Fixing review/gate findings on an unmerged milestone** → a **Code**-mode subtask on that same
-  `feat/…` branch.
+- **Mechanical, precisely-specified work** → a **Worker**-mode subtask on the same `feat/…` branch:
+  lint/format/type-error fixes, review findings that come with exact instructions, renames and other
+  mechanical refactors, doc updates. Worker follows instructions literally and reports back instead
+  of improvising, so the subtask instruction must be fully self-contained: the files, the exact
+  changes, and the verification command to run. If any design decision remains, it is not Worker
+  work.
+- **Fixing review/gate findings on an unmerged milestone** → a **Worker**-mode subtask on that same
+  `feat/…` branch when the finding is mechanical with an exact fix; a **Code**-mode subtask when the
+  fix requires design judgment.
+- **A report with BOTH kinds of findings gets PARTITIONED, never lumped.** When a review or
+  verification report comes back, your first coordination step is to sort its findings into two
+  explicit batches: mechanical-with-exact-fix → ONE Worker subtask listing every such finding
+  (files, exact changes, verification command); judgment-required → ONE Code subtask with the rest.
+  Do not fold mechanical findings into the Code subtask "since it's already open" — that is the
+  default failure mode of this routing, and it wastes the Code model on rename-grade work. Order: if
+  the two batches touch overlapping files, run the Code batch FIRST (a design-level fix can rewrite
+  away a mechanical one, forcing a redo); otherwise run the Worker batch first, since it is faster
+  and clears gate noise. A batch with zero findings is simply skipped — do not spawn empty subtasks.
 - **Verifying / auditing a milestone** → a subtask that runs the `verify-milestone` skill
   (`.roo/skills/verify-milestone/SKILL.md`).
 
@@ -38,13 +54,14 @@ Delegating the work is only half the job — the result has to land on the branc
 subtask can commit (you are forbidden from running `git`, above), so the commit is a coordination
 responsibility you own by delegating and verifying it:
 
-- **Every Code subtask commits its OWN changes before it finishes** (see
-  `.roo/rules-code/01-commit-before-done.md`). Restate that requirement in each Code `new_task` you
-  spawn, and require it to return its final `git status --porcelain` output.
+- **Every Code and Worker subtask commits its OWN changes before it finishes** (see
+  `.roo/rules-code/01-commit-before-done.md` and `.roo/rules-worker/01-commit-before-done.md`).
+  Restate that requirement in each Code or Worker `new_task` you spawn, and require it to return its
+  final `git status --porcelain` output.
 - **On return, check that output.** If it is non-empty the tree is dirty and the subtask did NOT
-  finish its job: your NEXT `new_task` is a Code-mode commit step ("commit the working tree on the
-  current `feat/…` branch with a conventional message, then show `git status --porcelain`") — before
-  any further work.
+  finish its job: your NEXT `new_task` is a **Worker**-mode commit step ("commit the working tree on
+  the current `feat/…` branch with a conventional message, then show `git status --porcelain`") —
+  before any further work. This is the canonical Worker job: fully specified, zero design decisions.
 - **Never launch the next unit of work over a dirty tree.** A clean `git status --porcelain` is the
   gate between one subtask and the next. You still never edit files or run git yourself — you
   delegate the commit and read the result.
