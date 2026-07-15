@@ -176,7 +176,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the `'*'` wildcard permission, short-circuiting guard factories (`requireAuth`, `requireRole`,
   `requirePermission`, `requireAnyRole`, `requireAllPermissions`, `publicRoute`), `authMiddleware`
   populating `ctx.request.user` (made writable in `common`), and an exported PBKDF2-SHA256
-  `PasswordHasher`; refresh tokens + rate limiting deferred to M16b) — complete (PR pending)
+  `PasswordHasher`; refresh tokens + rate limiting deferred to M16b) — complete (PR #35)
 - **Next milestone** — Milestone 16b (auth-plugin — refresh-token strategy & rate limiting)
 
 ## Verification (run before declaring any work done)
