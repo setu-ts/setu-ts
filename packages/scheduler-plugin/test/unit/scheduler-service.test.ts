@@ -992,6 +992,41 @@ describe('SchedulerService', () => {
     expect(fireCount).toBe(1); // Still 1
   });
 
+  // C6 TEST: delay job remove mid-fire does not throw
+  it('delay job remove mid-fire does not throw (C6)', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fireCount = 0;
+    let resolveFire: () => void;
+    const firePromise = new Promise<void>((resolve) => {
+      resolveFire = resolve;
+    });
+
+    // Schedule a delay job with an async handler
+    await service.delay('c6-delay-remove', 100, async () => {
+      fireCount++;
+      // Remove WHILE the handler is in flight
+      await service.remove('c6-delay-remove');
+      resolveFire();
+    });
+
+    // Advance to trigger the fire
+    await runtime.advance(150);
+    await firePromise;
+
+    // Should have fired exactly once and not thrown
+    expect(fireCount).toBe(1);
+    // Delay job should be removed after firing (even though remove() was called mid-fire)
+    expect(runtime.getPendingTimerCount()).toBe(0);
+
+    // Advance again - should NOT fire because job is gone
+    await runtime.advance(150);
+    expect(fireCount).toBe(1); // Still 1 - no extra fire
+  });
+
   // C4 TEST: pause+resume mid-fire does not double-arm
   it('pause+resume mid-fire results in single timer (C4)', async () => {
     const runtime = new FakeRuntime();

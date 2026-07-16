@@ -291,7 +291,7 @@ describe('RedisLock N2 - error message', () => {
       throw new Error('expected throw');
     } catch (e) {
       const msg = (e as Error).message;
-      expect(msg).toContain('get');
+      expect(msg).toContain('set');
       expect(msg).toContain('eval');
     }
   });

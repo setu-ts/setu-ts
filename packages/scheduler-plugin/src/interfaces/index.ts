@@ -163,10 +163,6 @@ export type RegistryEntry<T = unknown> =
 export interface IRedisLockClient {
   /** SET key value [NX] [PX ttl] - PX is the milliseconds flag */
   set(key: string, value: string, option: string, px: 'PX', ttl: number): Promise<string | null>;
-  /** GET key */
-  get(key: string): Promise<string | null>;
-  /** DEL key */
-  del(key: string): Promise<number>;
   /** Quit the connection */
   quit(): Promise<void>;
   /** EVAL script numkeys keys... argv... */

@@ -338,8 +338,12 @@ export class SchedulerService implements IScheduler {
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {
-      this.#registry.remove(entry.name);
-      this.#names.delete(entry.name);
+      // C6 FIX: Guard against mid-fire remove() — if remove() was called while
+      // the handler was in flight, the entry is already gone; skip removing again.
+      if (this.#registry.has(entry.name)) {
+        this.#registry.remove(entry.name);
+        this.#names.delete(entry.name);
+      }
       return;
     }
 

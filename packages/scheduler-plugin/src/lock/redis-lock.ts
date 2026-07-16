@@ -31,7 +31,7 @@ export function validateClient(client: unknown): client is IRedisLockClient {
   if (client === null || typeof client !== 'object') {
     return false;
   }
-  const required = ['set', 'get', 'del', 'quit', 'eval'];
+  const required = ['set', 'quit', 'eval'];
   for (const method of required) {
     if (typeof (client as Record<string, unknown>)[method] !== 'function') {
       return false;
@@ -57,7 +57,7 @@ async function resolveClient(
     if (!validateClient(injectedClient)) {
       throw new Error(
         'Injected Redis client does not match the required structural shape ' +
-          '(needs: set, get, del, quit, eval)',
+          '(needs: set, quit, eval)',
       );
     }
     return injectedClient;
@@ -156,8 +156,6 @@ export class RedisLock implements IDistributedLock {
       end
     `;
 
-    // C5 FIX: Use atomic Lua script to prevent race conditions
-    // Script: if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end
     await this.#client.eval(script, 1, key, token);
     // Returns 1 if lock was released, 0 if token didn't match
   }
