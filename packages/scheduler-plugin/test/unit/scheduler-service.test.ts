@@ -274,13 +274,11 @@ describe('SchedulerService', () => {
     const runtime = new FakeRuntime();
     let acquires = 0;
     const lock = {
-      // deno-lint-ignore require-await
-      acquire: async () => {
+      acquire: (): Promise<string | null> => {
         acquires++;
-        return acquires === 1 ? null : 'token';
+        return Promise.resolve(acquires === 1 ? null : 'token');
       },
-      // deno-lint-ignore require-await
-      release: async () => {},
+      release: (): Promise<void> => Promise.resolve(),
     };
     const service = new SchedulerService(runtime, lock);
     await service.connect();
@@ -304,13 +302,10 @@ describe('SchedulerService', () => {
     const runtime = new FakeRuntime();
     let releases = 0;
     const lock = {
-      // deno-lint-ignore require-await
-      acquire: async () => 'token',
-      release: async () => {
+      acquire: (): Promise<string | null> => Promise.resolve('token'),
+      release: (): Promise<void> => {
         releases++;
-        if (releases === 1) {
-          throw new Error('redis blip');
-        }
+        return releases === 1 ? Promise.reject(new Error('redis blip')) : Promise.resolve();
       },
     };
     const service = new SchedulerService(runtime, lock);
@@ -330,15 +325,11 @@ describe('SchedulerService', () => {
     const runtime = new FakeRuntime();
     let acquires = 0;
     const lock = {
-      acquire: async () => {
+      acquire: (): Promise<string | null> => {
         acquires++;
-        if (acquires === 1) {
-          throw new Error('redis down');
-        }
-        return await Promise.resolve('token');
+        return acquires === 1 ? Promise.reject(new Error('redis down')) : Promise.resolve('token');
       },
-      // deno-lint-ignore require-await
-      release: async () => {},
+      release: (): Promise<void> => Promise.resolve(),
     };
     const service = new SchedulerService(runtime, lock);
     await service.connect();
@@ -373,12 +364,8 @@ describe('SchedulerService', () => {
     const { logger, entries } = createRecordingLogger();
 
     const lock = {
-      // deno-lint-ignore require-await
-      acquire: async () => 'token',
-      // deno-lint-ignore require-await
-      release: async () => {
-        throw new Error('release exploded');
-      },
+      acquire: (): Promise<string | null> => Promise.resolve('token'),
+      release: (): Promise<void> => Promise.reject(new Error('release exploded')),
     };
     const service = new SchedulerService(runtime, lock, { logger });
     await service.connect();
@@ -395,12 +382,8 @@ describe('SchedulerService', () => {
     const { logger, entries } = createRecordingLogger();
 
     const lock = {
-      // deno-lint-ignore require-await
-      acquire: async (): Promise<string | null> => {
-        throw new Error('acquire exploded');
-      },
-      // deno-lint-ignore require-await
-      release: async () => {},
+      acquire: (): Promise<string | null> => Promise.reject(new Error('acquire exploded')),
+      release: (): Promise<void> => Promise.resolve(),
     };
     const service = new SchedulerService(runtime, lock, { logger });
     await service.connect();
@@ -418,12 +401,8 @@ describe('SchedulerService', () => {
 
     // A lock backend that rejects with a bare string, not an Error.
     const lock = {
-      // deno-lint-ignore require-await
-      acquire: async (): Promise<string | null> => {
-        throw 'acquire string failure';
-      },
-      // deno-lint-ignore require-await
-      release: async () => {},
+      acquire: (): Promise<string | null> => Promise.reject('acquire string failure'),
+      release: (): Promise<void> => Promise.resolve(),
     };
     const service = new SchedulerService(runtime, lock, { logger });
     await service.connect();
@@ -435,12 +414,8 @@ describe('SchedulerService', () => {
     // Same for a non-Error from release.
     const { logger: logger2, entries: entries2 } = createRecordingLogger();
     const lock2 = {
-      // deno-lint-ignore require-await
-      acquire: async () => 'token',
-      // deno-lint-ignore require-await
-      release: async () => {
-        throw 'release string failure';
-      },
+      acquire: (): Promise<string | null> => Promise.resolve('token'),
+      release: (): Promise<void> => Promise.reject('release string failure'),
     };
     const service2 = new SchedulerService(runtime, lock2, { logger: logger2 });
     await service2.connect();
