@@ -3,8 +3,7 @@
  *
  * Job scheduling plugin: cron, delayed, recurring jobs with distributed locking.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * @since 0.1.0
  */
-export {};
+export { SchedulerPlugin } from './plugin/scheduler-plugin.ts';
+export type { IDistributedLock, SchedulerPluginOptions } from './interfaces/index.ts';

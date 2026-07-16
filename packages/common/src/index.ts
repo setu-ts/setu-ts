@@ -149,3 +149,11 @@ export type {
   IQueryBus,
   IQueryHandler,
 } from './services/cqrs.ts';
+export type {
+  IScheduler,
+  RetryOptions,
+  ScheduledJob,
+  ScheduleOptions,
+  SchedulerBackoff,
+  SchedulerJobHandler,
+} from './services/scheduler.ts';
