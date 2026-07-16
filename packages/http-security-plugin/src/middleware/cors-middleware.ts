@@ -102,13 +102,13 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
       if (credentials) {
         ctx.response.header('Access-Control-Allow-Credentials', 'true');
       }
-      ctx.response.header('Allow-Methods', methods.join(', '));
+      ctx.response.header('Access-Control-Allow-Methods', methods.join(', '));
 
       if (allowedHeaders.length > 0) {
-        ctx.response.header('Allow-Headers', allowedHeaders.join(', '));
+        ctx.response.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
       }
       if (maxAge !== undefined) {
-        ctx.response.header('Max-Age', String(maxAge));
+        ctx.response.header('Access-Control-Max-Age', String(maxAge));
       }
 
       return ctx.response.send();

@@ -1,8 +1,16 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IMiddlewareApi, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
+import type {
+  IMiddlewareApi,
+  IPluginContext,
+  IRuntimeServices,
+  MiddlewareFunction,
+} from '@hono-enterprise/common';
 import { HttpSecurityPlugin } from '../../src/plugin/http-security-plugin.ts';
+import type { CorsOptions } from '../../src/middleware/cors-middleware.ts';
+import { corsMiddleware } from '../../src/middleware/cors-middleware.ts';
+import { createFakeContext } from '../fixtures/fake-request-context.ts';
 
 describe('HttpSecurityPlugin', () => {
   function createFakePluginContext(): {
@@ -209,6 +217,50 @@ describe('HttpSecurityPlugin', () => {
       expect(byName.get('CorsMiddleware')).toBe(200);
       expect(byName.get('SecurityHeadersMiddleware')).toBe(250);
       expect(byName.get('CsrfMiddleware')).toBe(270);
+    });
+  });
+
+  describe('both entry points share one implementation', () => {
+    it('CORS via plugin and via standalone factory behaves identically under non-default options', async () => {
+      const corsOptions: CorsOptions = {
+        origin: ['https://app.example.com'],
+        credentials: true,
+        exposedHeaders: ['X-Request-Id'],
+      };
+
+      // Entry point 1: the middleware the plugin registers
+      const { ctx: pluginCtx, middlewareAdded } = createFakePluginContext();
+      HttpSecurityPlugin({ cors: corsOptions }).register(pluginCtx);
+      const viaPlugin = middlewareAdded.find((m) => m.options.name === 'CorsMiddleware')!
+        .fn as MiddlewareFunction;
+
+      // Entry point 2: the standalone factory
+      const viaFactory = corsMiddleware(corsOptions);
+
+      const request = {
+        method: 'GET' as const,
+        headers: { Origin: 'https://app.example.com' },
+      };
+      const first = createFakeContext({ request });
+      const second = createFakeContext({ request });
+
+      await viaPlugin(first.ctx, async () => {
+        first.nextCalled.push(true);
+      });
+      await viaFactory(second.ctx, async () => {
+        second.nextCalled.push(true);
+      });
+
+      expect(first.nextCalled).toHaveLength(1);
+      expect(second.nextCalled).toHaveLength(1);
+      expect(Object.fromEntries(first.response.headers)).toEqual(
+        Object.fromEntries(second.response.headers),
+      );
+      expect(first.response.headers.get('access-control-allow-origin')).toBe(
+        'https://app.example.com',
+      );
+      expect(first.response.headers.get('access-control-allow-credentials')).toBe('true');
+      expect(first.response.headers.get('access-control-expose-headers')).toBe('X-Request-Id');
     });
   });
 });

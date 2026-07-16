@@ -217,7 +217,7 @@ describe('corsMiddleware', () => {
       expect(Array.isArray(varyValues) && varyValues.includes('Origin')).toBe(true);
     });
 
-    it('preflight sets Allow-Methods and Allow-Headers', async () => {
+    it('preflight sets Access-Control-Allow-Methods and Access-Control-Allow-Headers', async () => {
       const { ctx, response } = createFakeContext({
         request: {
           method: 'OPTIONS',
@@ -234,9 +234,15 @@ describe('corsMiddleware', () => {
         maxAge: 86400,
       });
       await mw(ctx, async () => {});
-      expect(response.headers.get('allow-methods')).toBe('GET, POST');
-      expect(response.headers.get('allow-headers')).toBe('Content-Type, Authorization');
-      expect(response.headers.get('max-age')).toBe('86400');
+      expect(response.headers.get('access-control-allow-methods')).toBe('GET, POST');
+      expect(response.headers.get('access-control-allow-headers')).toBe(
+        'Content-Type, Authorization',
+      );
+      expect(response.headers.get('access-control-max-age')).toBe('86400');
+      // The short forms are NOT real CORS headers and must not be emitted
+      expect(response.headers.get('allow-methods')).toBeUndefined();
+      expect(response.headers.get('allow-headers')).toBeUndefined();
+      expect(response.headers.get('max-age')).toBeUndefined();
     });
 
     it('disallowed preflight returns 204 with no CORS headers', async () => {

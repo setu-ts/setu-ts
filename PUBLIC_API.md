@@ -1127,14 +1127,23 @@ app.register(HttpSecurityPlugin({
 
 ### Exports
 
-| Export                      | Description                         |
-| --------------------------- | ----------------------------------- |
-| `HttpSecurityPlugin`        | Plugin factory                      |
-| `corsMiddleware`            | CORS middleware factory             |
-| `securityHeadersMiddleware` | Security headers middleware factory |
-| `csrfMiddleware`            | CSRF middleware factory             |
-| `requestSizeMiddleware`     | Request-size middleware factory     |
-| `ipSecurityMiddleware`      | IP security middleware factory      |
+| Export                           | Description                            |
+| -------------------------------- | -------------------------------------- |
+| `HttpSecurityPlugin`             | Plugin factory                         |
+| `corsMiddleware`                 | CORS middleware factory                |
+| `securityHeadersMiddleware`      | Security headers middleware factory    |
+| `csrfMiddleware`                 | CSRF middleware factory                |
+| `requestSizeMiddleware`          | Request-size middleware factory        |
+| `ipSecurityMiddleware`           | IP security middleware factory         |
+| `HttpSecurityPluginOptions`      | Plugin factory options (type)          |
+| `CorsOptions`                    | CORS middleware options (type)         |
+| `CorsOriginMatcher`              | Dynamic origin matcher function (type) |
+| `SecurityHeadersOptions`         | Security headers options (type)        |
+| `ContentSecurityPolicyOptions`   | CSP directive options (type)           |
+| `StrictTransportSecurityOptions` | HSTS options (type)                    |
+| `CsrfOptions`                    | CSRF middleware options (type)         |
+| `RequestSizeOptions`             | Request-size options (type)            |
+| `IpSecurityOptions`              | IP security options (type)             |
 
 ### Options
 
@@ -1151,8 +1160,10 @@ app.register(HttpSecurityPlugin({
 #### CORS (`corsMiddleware`)
 
 Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTIONS` + `Origin` +
-`Access-Control-Request-Method`) → 204 short-circuit. Credentials reflect specific origin (never
-`*`). Non-preflight disallowed origins call `next()` without CORS headers (browser enforces block).
+`Access-Control-Request-Method`) → 204 short-circuit with `Access-Control-Allow-Origin`,
+`Access-Control-Allow-Methods`, and (when configured) `Access-Control-Allow-Headers` /
+`Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
+origins call `next()` without CORS headers (browser enforces block).
 
 #### Security Headers (`securityHeadersMiddleware`)
 
