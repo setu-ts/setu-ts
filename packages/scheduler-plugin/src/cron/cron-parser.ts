@@ -35,7 +35,8 @@ function parseField(field: string, min: number, max: number): Set<number> {
     const start = parseInt(stepMatch[1], 10);
     const end = parseInt(stepMatch[2], 10);
     const step = parseInt(stepMatch[3], 10);
-    if (start < min || end > max || step <= 0) {
+    // N1 FIX: Add start > end validation (same as plain-range branch)
+    if (start < min || end > max || start > end || step <= 0) {
       throw new Error(`Invalid cron field: ${field}`);
     }
     for (let i = start; i <= end; i += step) {

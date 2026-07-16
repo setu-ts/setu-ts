@@ -190,3 +190,109 @@ describe('validateClient', () => {
     expect(validateClient('not-an-object')).toBe(false);
   });
 });
+
+// C2 TEST: acquire uses 'PX' flag
+describe('RedisLock C2 - PX flag', () => {
+  it('acquires lock via SET NX PX (C2)', async () => {
+    const fake = new FakeRedisClient();
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: fake });
+    await lock.connect();
+    const token = await lock.acquire('key1', 5000);
+    expect(token).toBeTruthy();
+
+    // C2: Verify SET was called with 'PX' flag
+    const setCall = fake.calls.find((c) => c.method === 'set');
+    expect(setCall).toBeDefined();
+    expect(setCall!.args).toContain('PX');
+    // Also verify TTL is passed
+    expect(setCall!.args).toContain(5000);
+
+    await lock.disconnect();
+  });
+});
+
+// C5 TEST: release uses atomic EVAL
+describe('RedisLock C5 - atomic release', () => {
+  it('releases lock via atomic EVAL (C5)', async () => {
+    const fake = new FakeRedisClient();
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: fake });
+    await lock.connect();
+    const token = await lock.acquire('key1', 5000);
+    expect(token).toBeTruthy();
+
+    await lock.release('key1', token!);
+
+    // C5: Verify EVAL was called for atomic release
+    const evalCall = fake.calls.find((c) => c.method === 'eval');
+    expect(evalCall).toBeDefined();
+    // Script should contain 'get' and 'del' commands
+    expect(evalCall!.args[0]).toContain('get');
+    expect(evalCall!.args[0]).toContain('del');
+
+    await lock.disconnect();
+  });
+
+  it('atomic release does not delete if token mismatch (C5)', async () => {
+    const fake = new FakeRedisClient();
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: fake });
+    await lock.connect();
+    const token1 = await lock.acquire('key1', 5000);
+    expect(token1).toBeTruthy();
+
+    // Try to release with wrong token
+    await lock.release('key1', 'wrong-token');
+
+    // Lock should still be held - second acquire should fail
+    const token2 = await lock.acquire('key1', 5000);
+    expect(token2).toBeNull();
+
+    await lock.disconnect();
+  });
+
+  it('atomic release handles race where key expired and re-acquired (C5)', async () => {
+    const fake = new FakeRedisClient();
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: fake });
+    await lock.connect();
+
+    // First instance acquires lock
+    const token1 = await lock.acquire('key1', 100); // Short TTL
+    expect(token1).toBeTruthy();
+
+    // Simulate time passing - lock expires
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // Second instance acquires lock (first one expired)
+    const token2 = await lock.acquire('key1', 5000);
+    expect(token2).toBeTruthy();
+    expect(token2).not.toBe(token1);
+
+    // First instance tries to release (should NOT delete second instance's lock)
+    await lock.release('key1', token1!);
+
+    // Second instance's lock should still be valid
+    const token3 = await lock.acquire('key1', 5000);
+    expect(token3).toBeNull(); // Still held by token2
+
+    await lock.disconnect();
+  });
+});
+
+// N2 TEST: error message includes all required methods
+describe('RedisLock N2 - error message', () => {
+  it('error message includes get and eval (N2)', async () => {
+    const badClient = { notAValidClient: true };
+    const lock = new RedisLock({
+      url: 'redis://localhost:6379',
+      // deno-lint-ignore no-explicit-any
+      client: badClient as any,
+    });
+    try {
+      await lock.connect();
+      throw new Error('expected throw');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toContain('get');
+      expect(msg).toContain('eval');
+    }
+  });
+});

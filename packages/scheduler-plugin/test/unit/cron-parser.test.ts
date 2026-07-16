@@ -151,6 +151,12 @@ describe('cronNextMs', () => {
     expect(result).toBe(jan2025);
   });
 
+  // N1 TEST: step-range with start > end should be rejected
+  it('throws on step-range with start > end (N1)', () => {
+    // "5-1/2" should be rejected because 5 > 1
+    expect(() => cronNextMs('5-1/2 * * * *', base)).toThrow();
+  });
+
   it('handles fixed minute and fixed hour with no current match', () => {
     // Start at 10:30, target 08:00 — should roll to next day
     const start = new Date(Date.UTC(2024, 0, 15, 10, 30)).getTime();

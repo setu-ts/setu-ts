@@ -105,6 +105,12 @@ interface RegistryEntryBase<T = unknown> {
   nextRunAtMs: number;
   /** Armed timer handle. */
   timerHandle: import('@hono-enterprise/common').TimerHandle | null;
+  /**
+   * Generation counter for re-arm guarding (C4).
+   * Incremented on each resume() to prevent double-fire when pause()+resume()
+   * fires during an in-flight job's await.
+   */
+  generation?: number;
 }
 
 /**
@@ -155,14 +161,16 @@ export type RegistryEntry<T = unknown> =
  * Minimal ioredis client shape required by RedisLock.
  */
 export interface IRedisLockClient {
-  /** SET key value [NX] [PX ttl] */
-  set(key: string, value: string, option: string, ttl: number): Promise<string | null>;
+  /** SET key value [NX] [PX ttl] - PX is the milliseconds flag */
+  set(key: string, value: string, option: string, px: 'PX', ttl: number): Promise<string | null>;
   /** GET key */
   get(key: string): Promise<string | null>;
   /** DEL key */
   del(key: string): Promise<number>;
   /** Quit the connection */
   quit(): Promise<void>;
+  /** EVAL script numkeys keys... argv... */
+  eval(script: string, numkeys: number, ...keysAndArgs: string[]): Promise<number | string | null>;
 }
 
 /**

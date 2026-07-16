@@ -133,6 +133,7 @@ export class SchedulerService implements IScheduler {
       paused: false,
       nextRunAtMs,
       timerHandle: null,
+      generation: 0,
       ...(options?.data !== undefined ? { data: options.data as unknown } : {}),
       ...(options?.retry !== undefined ? { retry: options.retry } : {}),
     };
@@ -166,6 +167,7 @@ export class SchedulerService implements IScheduler {
       paused: false,
       nextRunAtMs,
       timerHandle: null,
+      generation: 0,
       ...(options?.data !== undefined ? { data: options.data as unknown } : {}),
       ...(options?.retry !== undefined ? { retry: options.retry } : {}),
     };
@@ -199,6 +201,7 @@ export class SchedulerService implements IScheduler {
       paused: false,
       nextRunAtMs,
       timerHandle: null,
+      generation: 0,
       ...(options?.data !== undefined ? { data: options.data as unknown } : {}),
       ...(options?.retry !== undefined ? { retry: options.retry } : {}),
     };
@@ -245,10 +248,14 @@ export class SchedulerService implements IScheduler {
         break;
     }
 
+    // C1 FIX: Assign nextRunAtMs BEFORE arming the timer so #armTimer uses the fresh value
+    entry.nextRunAtMs = nextRunAtMs;
+
     const timerHandle = entry.kind === 'every' ? this.#armInterval(entry) : this.#armTimer(entry);
 
     entry.paused = false;
-    entry.nextRunAtMs = nextRunAtMs;
+    // C4 FIX: Increment generation to prevent double-fire if pause()+resume() fires during an in-flight job
+    entry.generation = (entry.generation ?? 0) + 1;
     entry.timerHandle = timerHandle;
   }
 
@@ -297,6 +304,9 @@ export class SchedulerService implements IScheduler {
   }
 
   async #fire(entry: RegistryEntry<unknown>): Promise<void> {
+    // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
+    const fireGen = entry.generation ?? 0;
+
     const lockKey = `scheduler:job:${entry.name}`;
     const token = await this.#lock.acquire(lockKey, this.#ttlMs);
 
@@ -333,9 +343,30 @@ export class SchedulerService implements IScheduler {
       return;
     }
 
+    // C3 FIX: Guard for disconnect() — if service disconnected while fire was in flight,
+    // do not re-arm a new timer.
+    if (!this.#connected) {
+      return;
+    }
+
+    // C3 FIX: Guard for remove() — if entry was removed while fire was in flight,
+    // do not re-arm.
+    if (!this.#registry.has(entry.name)) {
+      return;
+    }
+
     // If the job was paused while this fire was in flight (across the lock /
     // handler awaits), do not re-arm — resume() arms a fresh timer instead.
     if (entry.paused) {
+      return;
+    }
+
+    // C4 FIX: Re-check generation — if it changed, a resume() armed a new timer; skip.
+    if (entry.generation !== fireGen) {
+      // Generation changed due to pause()+resume() during this fire.
+      // The resume() already armed a new timer, so skip re-arming here.
+      // Reset generation to allow normal re-arming on the NEXT fire.
+      entry.generation = fireGen;
       return;
     }
 

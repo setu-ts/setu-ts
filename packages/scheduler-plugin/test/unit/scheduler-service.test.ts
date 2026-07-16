@@ -897,4 +897,131 @@ describe('SchedulerService', () => {
     const service = new SchedulerService(runtime, lock, { logger });
     expect(service.isReady()).toBe(false);
   });
+
+  // C1 TEST: resume() uses freshly computed nextRunAtMs (not stale value)
+  it('resume computes fresh delay from current time (C1)', async () => {
+    // Verify that resume() arms the timer with the freshly computed nextRunAtMs,
+    // not the stale value from before pause.
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    // Schedule a delay job with 5000ms delay
+    await service.delay('c1-delay', 5000, () => {});
+    // Get initial next run time to verify the job was scheduled
+    await service.getNextRun('c1-delay');
+
+    // Pause the job
+    await service.pause('c1-delay');
+
+    // Advance time by 3000ms
+    await runtime.advance(3000);
+
+    // Resume - should compute fresh nextRunAtMs from current time (now + 5000 = 8000ms from start)
+    await service.resume('c1-delay');
+
+    // The armed timer delay should be ~5000ms (from resume time), not 2000ms (stale)
+    const delay = runtime.getNextTimerDelay();
+    expect(delay).toBeGreaterThan(4000); // Should be close to 5000, not 2000
+  });
+
+  // C3 TEST: disconnect() mid-fire prevents re-arm
+  it('disconnect mid-fire prevents re-arm (C3)', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fireCount = 0;
+    let resolveFire: () => void;
+    const firePromise = new Promise<void>((resolve) => {
+      resolveFire = resolve;
+    });
+
+    // Create a job that pauses itself and waits during fire
+    await service.every('c3-disconnect', 100, async () => {
+      fireCount++;
+      // Disconnect WHILE firing
+      await service.disconnect();
+      resolveFire();
+    });
+
+    // Advance to trigger first fire
+    await runtime.advance(150);
+    await firePromise;
+
+    expect(fireCount).toBe(1);
+    // Service should be disconnected and no timer should be pending
+    expect(service.isReady()).toBe(false);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+
+    // Advance again - should NOT fire because disconnected
+    await runtime.advance(150);
+    expect(fireCount).toBe(1); // Still 1
+  });
+
+  // C3 TEST: remove() mid-fire prevents re-arm
+  it('remove mid-fire prevents re-arm (C3)', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fireCount = 0;
+    let resolveFire: () => void;
+    const firePromise = new Promise<void>((resolve) => {
+      resolveFire = resolve;
+    });
+
+    await service.every('c3-remove', 100, async () => {
+      fireCount++;
+      // Remove WHILE firing
+      await service.remove('c3-remove');
+      resolveFire();
+    });
+
+    await runtime.advance(150);
+    await firePromise;
+
+    expect(fireCount).toBe(1);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+
+    // Advance again - should NOT fire because removed
+    await runtime.advance(150);
+    expect(fireCount).toBe(1); // Still 1
+  });
+
+  // C4 TEST: pause+resume mid-fire does not double-arm
+  it('pause+resume mid-fire results in single timer (C4)', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fireCount = 0;
+    let resolveFire: () => void;
+    const firePromise = new Promise<void>((resolve) => {
+      resolveFire = resolve;
+    });
+
+    await service.every('c4-pause-resume', 100, async () => {
+      fireCount++;
+      // Pause then resume WHILE firing - this should NOT cause double-arm
+      await service.pause('c4-pause-resume');
+      await service.resume('c4-pause-resume');
+      resolveFire();
+    });
+
+    await runtime.advance(150);
+    await firePromise;
+
+    expect(fireCount).toBe(1);
+    // Should have exactly ONE pending timer (from resume), not two
+    expect(runtime.getPendingTimerCount()).toBe(1);
+
+    // Advance again - should fire exactly once more
+    await runtime.advance(150);
+    expect(fireCount).toBe(2);
+  });
 });

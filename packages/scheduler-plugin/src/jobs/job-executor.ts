@@ -49,10 +49,13 @@ export async function run<T = unknown>(
 
   while (true) {
     attempt++;
+    // N6 FIX: Remove the `?? undefined as T` pattern that defeats type safety.
+    // The `data` parameter is `T | undefined`, so `T` is inferred as `unknown | undefined`
+    // from the call site, and `data` passes through correctly.
     const job: ScheduledJob<T> = {
       id: jobId,
       name: jobName,
-      data: data ?? undefined as T,
+      data: data as T,
       attempts: attempt,
     };
 
