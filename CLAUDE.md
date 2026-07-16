@@ -185,8 +185,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   short-circuit, `Retry-After` + `RateLimit-*` delta-seconds headers) over `RateLimitStore` with
   `MemoryRateLimitStore` + `RedisRateLimitStore` (inject-or-lazy `npm:ioredis@5.x`, guarded
   real-import test)) — complete (PR pending)
-- **Next milestone** — Milestone 17 (`packages/http-security-plugin` — CORS, security headers, CSRF,
-  request-size, ip-security)
+- **Milestone 17** (`packages/http-security-plugin` — CORS, security headers, CSRF, request-size,
+  ip-security) — complete (PR pending)
+- **Next milestone** — Milestone 18 (`packages/scheduler-plugin` — cron jobs, delayed jobs, job
+  scheduling)
 
 ## Verification (run before declaring any work done)
 
