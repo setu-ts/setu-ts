@@ -26,17 +26,16 @@ describe('SchedulerPlugin integration', () => {
       fireCount++;
     });
 
-    // Advance clock past delay
-    runtime.advance(1000);
+    // Advance clock past delay — FakeRuntime.advance fires timers
+    await runtime.advance(1000);
 
     // Job should have fired once
-    // (the delay job auto-removes after fire)
-    expect(fireCount).toBeGreaterThanOrEqual(0);
+    expect(fireCount).toBe(1);
 
     await service.disconnect();
   });
 
-  it('lock prevents duplicate fires', async () => {
+  it('every job schedules and fires at least once', async () => {
     const runtime = new FakeRuntime();
     const lock = new MemoryLock(runtime);
     const service = new SchedulerService(runtime, lock);
@@ -47,10 +46,9 @@ describe('SchedulerPlugin integration', () => {
       fireCount++;
     });
 
-    // Advance past first fire
-    runtime.advance(1000);
-
-    expect(fireCount).toBeGreaterThanOrEqual(0);
+    // Advance past first fire - every job should fire at least once
+    await runtime.advance(100);
+    expect(fireCount).toBeGreaterThanOrEqual(1);
 
     await service.disconnect();
   });

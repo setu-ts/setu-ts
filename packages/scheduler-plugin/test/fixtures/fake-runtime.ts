@@ -14,7 +14,7 @@ export interface PendingTimer {
   /** Unique timer id. */
   id: number;
   /** Callback to invoke when the timer fires. */
-  fn: () => void;
+  fn: () => void | Promise<void>;
   /** Delay in ms. */
   delay: number;
   /** Whether this is an interval. */
@@ -40,6 +40,9 @@ export class FakeRuntime implements IRuntimeServices {
 
   /** Controlled environment variables. */
   #env: Readonly<Record<string, string | undefined>>;
+
+  /** Pending async timer callbacks to await. */
+  #pendingAsync: Array<Promise<void>> = [];
 
   constructor(env: Readonly<Record<string, string | undefined>> = {}) {
     this.#env = env;
@@ -81,11 +84,11 @@ export class FakeRuntime implements IRuntimeServices {
 
   /**
    * Advance the fake clock by the given ms.
-   * Fires any timers whose delay has elapsed.
+   * Fires any timers whose delay has elapsed and awaits async callbacks.
    *
    * @param ms - Milliseconds to advance
    */
-  advance(ms: number): void {
+  async advance(ms: number): Promise<void> {
     this.#time += ms;
 
     // Fire timers whose delay has elapsed
@@ -97,13 +100,20 @@ export class FakeRuntime implements IRuntimeServices {
     }
 
     for (const timer of fired) {
-      timer.fn();
+      const result = timer.fn();
+      if (result instanceof Promise) {
+        this.#pendingAsync.push(result);
+      }
       if (!timer.interval) {
         this.#timers.delete(timer.id);
-      } else {
-        timer.delay -= ms;
       }
+      // Note: interval timers are NOT auto-rearmed here - the scheduler
+      // re-arms them after each fire via #armInterval().
     }
+
+    // Await all async callbacks
+    await Promise.all(this.#pendingAsync);
+    this.#pendingAsync = [];
   }
 
   /**

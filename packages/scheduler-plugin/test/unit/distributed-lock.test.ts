@@ -43,4 +43,45 @@ describe('resolveLock', () => {
     const token = await lock.acquire('test', 5000);
     expect(token).toBeTruthy();
   });
+
+  it('returns MemoryLock when no options at all', async () => {
+    const runtime = new FakeRuntime();
+    const lock = await resolveLock({}, runtime);
+    const token = await lock.acquire('test', 5000);
+    expect(token).toBeTruthy();
+  });
+
+  it('returns MemoryLock when enabled true but storage not redis', async () => {
+    const runtime = new FakeRuntime();
+    const lock = await resolveLock(
+      { distributedLock: { enabled: true } },
+      runtime,
+    );
+    const token = await lock.acquire('test', 5000);
+    expect(token).toBeTruthy();
+  });
+
+  it('custom lock takes priority over redis storage', async () => {
+    const runtime = new FakeRuntime();
+    const custom: IDistributedLock = {
+      acquire() {
+        return Promise.resolve('custom');
+      },
+      release() {
+        return Promise.resolve();
+      },
+    };
+    const lock = await resolveLock(
+      {
+        distributedLock: {
+          lock: custom,
+          storage: 'redis',
+          enabled: true,
+          url: 'redis://localhost:6379',
+        },
+      },
+      runtime,
+    );
+    expect(lock).toBe(custom);
+  });
 });

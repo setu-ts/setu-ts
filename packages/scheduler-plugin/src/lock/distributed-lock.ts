@@ -14,6 +14,17 @@ import type { IDistributedLock, SchedulerPluginOptions } from '../interfaces/ind
 export type { IDistributedLock } from '../interfaces/index.ts';
 
 /**
+ * Lifecycle-aware lock that can optionally connect/disconnect.
+ *
+ * Used by the scheduler plugin to call `connect()` on Redis-backed locks
+ * before use and `disconnect()` on shutdown, without fragile `as` casts.
+ */
+export interface ILifecyclableLock extends IDistributedLock {
+  connect?(): Promise<void>;
+  disconnect?(): Promise<void>;
+}
+
+/**
  * Resolves a distributed lock implementation based on plugin options.
  *
  * Priority: injected `lock` > `storage: 'redis'` > `MemoryLock` (default).

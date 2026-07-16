@@ -311,14 +311,21 @@ export class SchedulerService implements IScheduler {
 
     try {
       const jobId = this.#runtime.uuid();
-      await run(
-        jobId,
-        entry.name,
-        entry.handler,
-        entry.data,
-        entry.retry,
-        { runtime: this.#runtime, logger: this.#logger },
-      );
+      try {
+        await run(
+          jobId,
+          entry.name,
+          entry.handler,
+          entry.data,
+          entry.retry,
+          { runtime: this.#runtime, logger: this.#logger },
+        );
+      } catch (error) {
+        // Handler exhausted retries — log but do not crash the scheduler loop.
+        this.#logger?.error(`Job '${entry.name}' failed permanently`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     } finally {
       await this.#lock.release(lockKey, token);
     }

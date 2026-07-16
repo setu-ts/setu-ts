@@ -9,6 +9,7 @@
 import type { HealthIndicatorFn, IPlugin, IScheduler } from '@hono-enterprise/common';
 import type { SchedulerPluginOptions } from '../interfaces/index.ts';
 import { resolveLock } from '../lock/distributed-lock.ts';
+import type { ILifecyclableLock } from '../lock/distributed-lock.ts';
 import { SchedulerService } from '../services/scheduler-service.ts';
 
 /**
@@ -51,10 +52,10 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
         options.distributedLock.storage === 'redis' &&
         options.distributedLock.lock === undefined
       ) {
-        // RedisLock needs to be connected — cast to access connect
-        const redisLock = lock as { connect?: () => Promise<void> };
-        if (typeof redisLock.connect === 'function') {
-          await redisLock.connect();
+        // RedisLock needs to be connected — use ILifecyclableLock seam
+        const lifecycleLock = lock as ILifecyclableLock;
+        if (typeof lifecycleLock.connect === 'function') {
+          await lifecycleLock.connect();
         }
       }
 
@@ -79,9 +80,9 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
         await service.disconnect();
 
         // Disconnect Redis lock if needed
-        const redisLock = lock as { disconnect?: () => Promise<void> };
-        if (typeof redisLock.disconnect === 'function') {
-          await redisLock.disconnect();
+        const lifecycleLock = lock as ILifecyclableLock;
+        if (typeof lifecycleLock.disconnect === 'function') {
+          await lifecycleLock.disconnect();
         }
       });
     },
