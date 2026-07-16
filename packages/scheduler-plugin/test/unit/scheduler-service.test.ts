@@ -259,10 +259,196 @@ describe('SchedulerService', () => {
     };
     const service = new SchedulerService(runtime, lock);
     await service.connect();
-    // Lock skip path is exercised — no fire happens
-    await service.delay('lock-job', 50, () => {});
+    let fired = 0;
+    await service.delay('lock-job', 50, () => {
+      fired++;
+    });
     // Advance past delay — lock still not acquired, so no fire
     await runtime.advance(200);
+    expect(fired).toBe(0);
+  });
+
+  it('a contended lock skips only that fire and keeps the schedule', async () => {
+    // Two-instance deployment: this instance loses the FIRST lock race, then wins.
+    // Skipping a fire must never cancel the job's schedule.
+    const runtime = new FakeRuntime();
+    let acquires = 0;
+    const lock = {
+      // deno-lint-ignore require-await
+      acquire: async () => {
+        acquires++;
+        return acquires === 1 ? null : 'token';
+      },
+      // deno-lint-ignore require-await
+      release: async () => {},
+    };
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fired = 0;
+    await service.every('contended', 50, () => {
+      fired++;
+    });
+
+    await runtime.advance(50); // fire 1 — lock held elsewhere, skipped
+    expect(fired).toBe(0);
+
+    await runtime.advance(50); // fire 2 — lock free again
+    await runtime.advance(50); // fire 3
+    expect(acquires).toBe(3);
+    expect(fired).toBe(2);
+  });
+
+  it('a rejecting release does not kill the schedule', async () => {
+    // A transient lock-backend blip on release must not cancel the job.
+    const runtime = new FakeRuntime();
+    let releases = 0;
+    const lock = {
+      // deno-lint-ignore require-await
+      acquire: async () => 'token',
+      release: async () => {
+        releases++;
+        if (releases === 1) {
+          throw new Error('redis blip');
+        }
+      },
+    };
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fired = 0;
+    await service.every('flaky-release', 50, () => {
+      fired++;
+    });
+
+    await runtime.advance(50); // fire 1 — release rejects
+    await runtime.advance(50); // fire 2 — must still happen
+    expect(fired).toBe(2);
+  });
+
+  it('a rejecting acquire does not kill the schedule', async () => {
+    const runtime = new FakeRuntime();
+    let acquires = 0;
+    const lock = {
+      acquire: async () => {
+        acquires++;
+        if (acquires === 1) {
+          throw new Error('redis down');
+        }
+        return await Promise.resolve('token');
+      },
+      // deno-lint-ignore require-await
+      release: async () => {},
+    };
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+
+    let fired = 0;
+    await service.every('flaky-acquire', 50, () => {
+      fired++;
+    });
+
+    await runtime.advance(50); // fire 1 — acquire rejects
+    expect(fired).toBe(0);
+
+    await runtime.advance(50); // fire 2 — backend recovered
+    expect(fired).toBe(1);
+  });
+
+  /** Collects the messages + metadata the service logs at error level. */
+  function createRecordingLogger() {
+    const entries: Array<{ msg: string; meta: Record<string, unknown> | undefined }> = [];
+    const logger = {
+      error: (msg: string, meta?: Record<string, unknown>) => entries.push({ msg, meta }),
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+      child: () => logger,
+    } as unknown as ILogger;
+    return { logger, entries };
+  }
+
+  it('logs when a lock cannot be released, preserving the Error message', async () => {
+    const runtime = new FakeRuntime();
+    const { logger, entries } = createRecordingLogger();
+
+    const lock = {
+      // deno-lint-ignore require-await
+      acquire: async () => 'token',
+      // deno-lint-ignore require-await
+      release: async () => {
+        throw new Error('release exploded');
+      },
+    };
+    const service = new SchedulerService(runtime, lock, { logger });
+    await service.connect();
+    await service.delay('log-job', 50, () => {});
+    await runtime.advance(50);
+
+    const entry = entries.find((e) => e.msg.includes('could not release lock'));
+    expect(entry).toBeDefined();
+    expect(entry?.meta?.['error']).toBe('release exploded');
+  });
+
+  it('logs when a lock cannot be acquired, preserving the Error message', async () => {
+    const runtime = new FakeRuntime();
+    const { logger, entries } = createRecordingLogger();
+
+    const lock = {
+      // deno-lint-ignore require-await
+      acquire: async (): Promise<string | null> => {
+        throw new Error('acquire exploded');
+      },
+      // deno-lint-ignore require-await
+      release: async () => {},
+    };
+    const service = new SchedulerService(runtime, lock, { logger });
+    await service.connect();
+    await service.delay('log-job', 50, () => {});
+    await runtime.advance(50);
+
+    const entry = entries.find((e) => e.msg.includes('could not acquire lock'));
+    expect(entry).toBeDefined();
+    expect(entry?.meta?.['error']).toBe('acquire exploded');
+  });
+
+  it('stringifies a non-Error thrown by acquire or release', async () => {
+    const runtime = new FakeRuntime();
+    const { logger, entries } = createRecordingLogger();
+
+    // A lock backend that rejects with a bare string, not an Error.
+    const lock = {
+      // deno-lint-ignore require-await
+      acquire: async (): Promise<string | null> => {
+        throw 'acquire string failure';
+      },
+      // deno-lint-ignore require-await
+      release: async () => {},
+    };
+    const service = new SchedulerService(runtime, lock, { logger });
+    await service.connect();
+    await service.delay('non-error-acquire', 50, () => {});
+    await runtime.advance(50);
+
+    expect(entries[0]?.meta?.['error']).toBe('acquire string failure');
+
+    // Same for a non-Error from release.
+    const { logger: logger2, entries: entries2 } = createRecordingLogger();
+    const lock2 = {
+      // deno-lint-ignore require-await
+      acquire: async () => 'token',
+      // deno-lint-ignore require-await
+      release: async () => {
+        throw 'release string failure';
+      },
+    };
+    const service2 = new SchedulerService(runtime, lock2, { logger: logger2 });
+    await service2.connect();
+    await service2.delay('non-error-release', 50, () => {});
+    await runtime.advance(50);
+
+    const relEntry = entries2.find((e) => e.msg.includes('could not release lock'));
+    expect(relEntry?.meta?.['error']).toBe('release string failure');
   });
 
   it('permanent handler failure does not crash scheduler (F2)', async () => {

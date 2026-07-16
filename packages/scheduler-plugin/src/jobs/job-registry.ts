@@ -86,25 +86,6 @@ export class JobRegistry {
   }
 
   /**
-   * Resume a paused job.
-   *
-   * Idempotent — resuming a running job is a no-op.
-   *
-   * @param name - The job name
-   * @param nextRunAtMs - The new next fire time
-   * @param timerHandle - The new armed timer handle
-   * @throws {Error} If no job with `name` exists
-   */
-  resume(name: string, nextRunAtMs: number, timerHandle: number): void {
-    const entry = this.get(name);
-    if (entry.paused) {
-      entry.nextRunAtMs = nextRunAtMs;
-      entry.timerHandle = timerHandle;
-      entry.paused = false;
-    }
-  }
-
-  /**
    * Get the next fire time for a job.
    *
    * @param name - The job name

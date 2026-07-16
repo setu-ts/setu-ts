@@ -303,38 +303,68 @@ export class SchedulerService implements IScheduler {
     return handle;
   }
 
-  async #fire(entry: RegistryEntry<unknown>): Promise<void> {
-    // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
-    const fireGen = entry.generation ?? 0;
-
-    const lockKey = `scheduler:job:${entry.name}`;
-    const token = await this.#lock.acquire(lockKey, this.#ttlMs);
+  /**
+   * Acquire the lock, run the handler, and release — containing every failure.
+   *
+   * A `null` token (another instance holds the lock) and a rejecting
+   * `acquire`/`release` are all skip-this-fire conditions, never
+   * cancel-the-schedule conditions, so this never throws to the caller.
+   */
+  async #runWithLock(entry: RegistryEntry<unknown>, lockKey: string): Promise<void> {
+    let token: string | null;
+    try {
+      token = await this.#lock.acquire(lockKey, this.#ttlMs);
+    } catch (error) {
+      // Lock backend unreachable — skip this fire, keep the schedule.
+      this.#logger?.error(`Job '${entry.name}': could not acquire lock`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
 
     if (token === null) {
-      // Another instance holds the lock — skip this fire
+      // Another instance holds the lock — it is running this fire.
+      this.#logger?.debug(`Job '${entry.name}': lock held elsewhere, skipping this fire`);
       return;
     }
 
     try {
       const jobId = this.#runtime.uuid();
+      await run(
+        jobId,
+        entry.name,
+        entry.handler,
+        entry.data,
+        entry.retry,
+        { runtime: this.#runtime, logger: this.#logger },
+      );
+    } catch (error) {
+      // Handler exhausted retries — log but do not crash the scheduler loop.
+      this.#logger?.error(`Job '${entry.name}' failed permanently`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
       try {
-        await run(
-          jobId,
-          entry.name,
-          entry.handler,
-          entry.data,
-          entry.retry,
-          { runtime: this.#runtime, logger: this.#logger },
-        );
+        await this.#lock.release(lockKey, token);
       } catch (error) {
-        // Handler exhausted retries — log but do not crash the scheduler loop.
-        this.#logger?.error(`Job '${entry.name}' failed permanently`, {
+        // The lock expires on its own TTL — a failed release must not kill the job.
+        this.#logger?.error(`Job '${entry.name}': could not release lock`, {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-    } finally {
-      await this.#lock.release(lockKey, token);
     }
+  }
+
+  async #fire(entry: RegistryEntry<unknown>): Promise<void> {
+    // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
+    const fireGen = entry.generation ?? 0;
+
+    const lockKey = `scheduler:job:${entry.name}`;
+
+    // Skipping a fire must never cancel the schedule: a contended lock is the
+    // NORMAL multi-instance path, and a lock backend blip is transient. Every
+    // lock failure below is contained here so the re-arm logic still runs.
+    await this.#runWithLock(entry, lockKey);
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {
