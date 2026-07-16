@@ -3455,7 +3455,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 15b       | ✅     | queue-plugin         |
 | 16        | ✅     | auth-plugin          |
 | 16b       | ✅     | auth-plugin          |
-| 17        | ⬜     | http-security-plugin |
+| 17        | ✅     | http-security-plugin |
 | 18        | ⬜     | scheduler-plugin     |
 | 19        | ⬜     | metrics-plugin       |
 | 20        | ⬜     | health-plugin        |

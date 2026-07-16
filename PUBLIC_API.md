@@ -17,32 +17,33 @@
 8. [DatabasePlugin()](#databaseplugin)
 9. [AuthPlugin()](#authplugin)
 10. [CachePlugin()](#cacheplugin)
-11. [EventsPlugin()](#eventsplugin)
-12. [CQRS](#cqrs)
-13. [Messaging](#messaging)
-14. [Queue](#queue)
-15. [Scheduler](#scheduler)
-16. [HttpClient](#httpclient)
-17. [Storage](#storage)
-18. [Mail](#mail)
-19. [Notifications](#notifications)
-20. [Feature Flags](#feature-flags)
-21. [Health](#health)
-22. [Metrics](#metrics)
-23. [Telemetry](#telemetry)
-24. [OpenAPI](#openapi)
-25. [CLI](#cli)
-26. [REST API Application](#rest-api-application)
-27. [Microservice Application](#microservice-application)
-28. [CQRS Application](#cqrs-application)
-29. [Plugin Creation](#plugin-creation)
-30. [Custom Middleware](#custom-middleware)
-31. [Custom Decorators](#custom-decorators)
-32. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-33. [Developer Ergonomics](#developer-ergonomics)
-34. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
-35. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
-36. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
+11. [HttpSecurityPlugin()](#httpsecurityplugin)
+12. [EventsPlugin()](#eventsplugin)
+13. [CQRS](#cqrs)
+14. [Messaging](#messaging)
+15. [Queue](#queue)
+16. [Scheduler](#scheduler)
+17. [HttpClient](#httpclient)
+18. [Storage](#storage)
+19. [Mail](#mail)
+20. [Notifications](#notifications)
+21. [Feature Flags](#feature-flags)
+22. [Health](#health)
+23. [Metrics](#metrics)
+24. [Telemetry](#telemetry)
+25. [OpenAPI](#openapi)
+26. [CLI](#cli)
+27. [REST API Application](#rest-api-application)
+28. [Microservice Application](#microservice-application)
+29. [CQRS Application](#cqrs-application)
+30. [Plugin Creation](#plugin-creation)
+31. [Custom Middleware](#custom-middleware)
+32. [Custom Decorators](#custom-decorators)
+33. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+34. [Developer Ergonomics](#developer-ergonomics)
+35. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
+36. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
+37. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
 
 ---
 
@@ -1098,6 +1099,97 @@ const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from th
 const stored = await hasher.hash('correct horse battery staple');
 const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 ```
+
+---
+
+## HttpSecurityPlugin()
+
+Provides HTTP transport security as a middleware-only plugin: CORS, security response headers, CSRF
+(stateless Origin/Referer validation), request-size limiting, and IP resolution. Registers **no
+capability token** and **no service** — each concern is registered as global middleware via
+`ctx.middleware.add(...)` and also exported as a standalone factory for per-route use.
+
+**Defaults:** Security headers are ON by default; CORS, CSRF, request-size, and IP-security are
+opt-in via their option blocks. Each concern is secure-by-default when enabled.
+
+### Registration
+
+```typescript
+import { HttpSecurityPlugin } from '@hono-enterprise/http-security-plugin';
+
+app.register(HttpSecurityPlugin({
+  cors: { origin: 'https://example.com', credentials: true },
+  csrf: { trustedOrigins: ['https://example.com'] },
+  requestSize: { maxBodySize: 2_097_152 },
+  ipSecurity: { trustProxy: true },
+}));
+```
+
+### Exports
+
+| Export                           | Description                            |
+| -------------------------------- | -------------------------------------- |
+| `HttpSecurityPlugin`             | Plugin factory                         |
+| `corsMiddleware`                 | CORS middleware factory                |
+| `securityHeadersMiddleware`      | Security headers middleware factory    |
+| `csrfMiddleware`                 | CSRF middleware factory                |
+| `requestSizeMiddleware`          | Request-size middleware factory        |
+| `ipSecurityMiddleware`           | IP security middleware factory         |
+| `HttpSecurityPluginOptions`      | Plugin factory options (type)          |
+| `CorsOptions`                    | CORS middleware options (type)         |
+| `CorsOriginMatcher`              | Dynamic origin matcher function (type) |
+| `SecurityHeadersOptions`         | Security headers options (type)        |
+| `ContentSecurityPolicyOptions`   | CSP directive options (type)           |
+| `StrictTransportSecurityOptions` | HSTS options (type)                    |
+| `CsrfOptions`                    | CSRF middleware options (type)         |
+| `RequestSizeOptions`             | Request-size options (type)            |
+| `IpSecurityOptions`              | IP security options (type)             |
+
+### Options
+
+| Option         | Type                     | Default            | Description                                        |
+| -------------- | ------------------------ | ------------------ | -------------------------------------------------- |
+| `cors?`        | `CorsOptions`            | —                  | Presence enables CORS (priority 200).              |
+| `headers?`     | `SecurityHeadersOptions` | default secure set | Omitted → defaults ON. `{ enabled: false }` → off. |
+| `csrf?`        | `CsrfOptions`            | —                  | Presence enables CSRF (priority 270).              |
+| `requestSize?` | `RequestSizeOptions`     | —                  | Presence enables size limiting (priority 180).     |
+| `ipSecurity?`  | `IpSecurityOptions`      | —                  | Presence enables IP resolution (priority 120).     |
+
+### Per-concern Behavior
+
+#### CORS (`corsMiddleware`)
+
+Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTIONS` + `Origin` +
+`Access-Control-Request-Method`) → 204 short-circuit with `Access-Control-Allow-Origin`,
+`Access-Control-Allow-Methods`, and (when configured) `Access-Control-Allow-Headers` /
+`Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
+origins call `next()` without CORS headers (browser enforces block).
+
+#### Security Headers (`securityHeadersMiddleware`)
+
+Sets headers **before** `next()` so they persist through handler and downstream short-circuits.
+Default set: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer`, `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+CSP and Permissions-Policy have no default (explicitly configure to enable). Per-header `false`
+omits that header.
+
+#### CSRF (`csrfMiddleware`)
+
+Stateless Origin/Referer validation for unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`). The
+request's own origin (from `request.url`) is always implicitly trusted. `trustedOrigins` adds
+further allowed origins. Both headers absent → pass through (non-browser clients). Optional
+`customHeader` requires that header on unsafe methods (403 when absent).
+
+#### Request Size (`requestSizeMiddleware`)
+
+Checks `Content-Length` against `maxBodySize` (default 1 MiB). Over limit → 413 short-circuit
+without reading body. Absent or malformed `Content-Length` → pass through.
+
+#### IP Security (`ipSecurityMiddleware`)
+
+Resolves client IP and publishes to `ctx.state.set('clientIp', ip)`. When `trustProxy: true`, reads
+the configured `ipHeader` (default `X-Forwarded-For`) and takes the leftmost address. Never
+short-circuits.
 
 ---
 
