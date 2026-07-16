@@ -31,6 +31,22 @@ implement. Its entire job is to break a request into subtasks and hand each to t
   `feat/…` branch.
 - **Verifying / auditing a milestone** → a subtask that runs the `verify-milestone` skill
   (`.roo/skills/verify-milestone/SKILL.md`).
+- **Code-reviewing a milestone before merge** → a **Code Review**-mode subtask (slug `code-review`,
+  rules in `.roo/rules-code-review/`), run AFTER `verify-milestone` has passed and its findings are
+  fixed, and BEFORE the PR merges. It is READ-ONLY by design (no `edit` access): it reviews
+  `git diff main...HEAD` at high effort and returns a ranked findings report. Do NOT let it fix
+  anything — route each **correctness** finding it returns to a **Code**-mode subtask (the "Fixing
+  review/gate findings" row above), then re-verify and re-review. **Correctness findings BLOCK the
+  merge; reuse/simplification/efficiency findings are advisory.**
+
+## Milestone pipeline order (the sequence you orchestrate)
+
+Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit) →
+`verify-milestone` subtask (verify) → Code subtask (fix findings, commit) → **Code Review subtask
+(this repo's `code-review` mode)** → Code subtask (fix any correctness findings, commit) →
+re-verify + re-review until the Code Review verdict is **merge-ready** → _[human pushes + opens the
+PR]_. Never advance a step over a dirty tree, and never skip the Code Review gate: a milestone is
+not merge-ready until a `code-review`-mode subtask has returned **merge-ready**.
 
 ## Persisting each subtask's work (you coordinate the commit; you never run it)
 
