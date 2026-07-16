@@ -85,19 +85,14 @@ export interface DistributedLockOptions {
 }
 
 /**
- * Internal registry entry for a scheduled job.
+ * Fields common to every registry-entry variant.
+ *
+ * Variant-specific fields live on the discriminated union members below; the
+ * shared scheduling state (pause flag, next fire time, armed timer) lives here.
  */
-export interface RegistryEntry<T = unknown> {
+interface RegistryEntryBase<T = unknown> {
   /** Unique job name (registry key). */
   name: string;
-  /** Job kind. */
-  kind: 'cron' | 'every' | 'delay';
-  /** Cron expression (for `cron` kind). */
-  expression?: string;
-  /** Interval in ms (for `every` kind). */
-  intervalMs?: number;
-  /** Original delay in ms (for `delay` kind). */
-  delayMs?: number;
   /** Handler callback. */
   handler: (job: import('@hono-enterprise/common').ScheduledJob<T>) => void | Promise<void>;
   /** Optional payload. */
@@ -111,6 +106,50 @@ export interface RegistryEntry<T = unknown> {
   /** Armed timer handle. */
   timerHandle: import('@hono-enterprise/common').TimerHandle | null;
 }
+
+/**
+ * Registry entry for a cron-scheduled job.
+ */
+export interface CronRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
+  /** Discriminator: this entry is scheduled via a cron expression. */
+  kind: 'cron';
+  /** 5-field cron expression (UTC). Always present for `cron` entries. */
+  expression: string;
+}
+
+/**
+ * Registry entry for a fixed-interval (every) job.
+ */
+export interface EveryRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
+  /** Discriminator: this entry fires on a fixed interval. */
+  kind: 'every';
+  /** Interval in milliseconds. Always present for `every` entries. */
+  intervalMs: number;
+}
+
+/**
+ * Registry entry for a one-shot delayed job.
+ */
+export interface DelayRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
+  /** Discriminator: this entry fires once after a delay. */
+  kind: 'delay';
+  /** Original delay in milliseconds. Always present for `delay` entries. */
+  delayMs: number;
+}
+
+/**
+ * Internal registry entry for a scheduled job.
+ *
+ * A discriminated union over `kind`: each variant carries exactly the fields
+ * its scheduling strategy needs. Consumers narrow by `kind` and read those
+ * fields directly, so there is no need for defensive `?? 0` defaults,
+ * `=== undefined` guards, or a switch `default: throw` — the union is closed
+ * and TypeScript enforces exhaustiveness.
+ */
+export type RegistryEntry<T = unknown> =
+  | CronRegistryEntry<T>
+  | EveryRegistryEntry<T>
+  | DelayRegistryEntry<T>;
 
 /**
  * Minimal ioredis client shape required by RedisLock.

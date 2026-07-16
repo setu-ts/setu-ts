@@ -208,7 +208,10 @@ describe('JobRegistry', () => {
     registry.add(entry);
     const got = registry.get('every-job');
     expect(got.kind).toBe('every');
-    expect(got.intervalMs).toBe(5000);
+    // Narrow the union by `kind` to read the every-specific field directly.
+    if (got.kind === 'every') {
+      expect(got.intervalMs).toBe(5000);
+    }
   });
 
   it('adds entry with "delay" kind', () => {
@@ -225,6 +228,9 @@ describe('JobRegistry', () => {
     registry.add(entry);
     const got = registry.get('delay-job');
     expect(got.kind).toBe('delay');
-    expect(got.delayMs).toBe(10000);
+    // Narrow the union by `kind` to read the delay-specific field directly.
+    if (got.kind === 'delay') {
+      expect(got.delayMs).toBe(10000);
+    }
   });
 });

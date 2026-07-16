@@ -22,7 +22,13 @@ import type {
   SchedulerJobHandler,
   TimerHandle,
 } from '@hono-enterprise/common';
-import type { IDistributedLock, RegistryEntry } from '../interfaces/index.ts';
+import type {
+  CronRegistryEntry,
+  DelayRegistryEntry,
+  EveryRegistryEntry,
+  IDistributedLock,
+  RegistryEntry,
+} from '../interfaces/index.ts';
 import { cronNextMs } from '../cron/cron-parser.ts';
 import { JobRegistry } from '../jobs/job-registry.ts';
 import { run } from '../jobs/job-executor.ts';
@@ -119,7 +125,7 @@ export class SchedulerService implements IScheduler {
     const now = this.#runtime.now();
     const nextRunAtMs = cronNextMs(expression, now);
 
-    const entry: RegistryEntry<unknown> = {
+    const entry: CronRegistryEntry<unknown> = {
       name,
       kind: 'cron',
       expression,
@@ -152,7 +158,7 @@ export class SchedulerService implements IScheduler {
     const now = this.#runtime.now();
     const nextRunAtMs = now + intervalMs;
 
-    const entry: RegistryEntry<unknown> = {
+    const entry: EveryRegistryEntry<unknown> = {
       name,
       kind: 'every',
       intervalMs,
@@ -185,7 +191,7 @@ export class SchedulerService implements IScheduler {
     const now = this.#runtime.now();
     const nextRunAtMs = now + delayMs;
 
-    const entry: RegistryEntry<unknown> = {
+    const entry: DelayRegistryEntry<unknown> = {
       name,
       kind: 'delay',
       delayMs,
@@ -224,21 +230,19 @@ export class SchedulerService implements IScheduler {
     const now = this.#runtime.now();
 
     let nextRunAtMs: number;
+    // Exhaustive over the `RegistryEntry` discriminated union: TypeScript
+    // guarantees `nextRunAtMs` is assigned in every case, so no `default`
+    // arm is needed (or reachable).
     switch (entry.kind) {
       case 'cron':
-        if (entry.expression === undefined) {
-          throw new Error(`Job '${name}' has no cron expression`);
-        }
         nextRunAtMs = cronNextMs(entry.expression, now);
         break;
       case 'every':
-        nextRunAtMs = now + (entry.intervalMs ?? 0);
+        nextRunAtMs = now + entry.intervalMs;
         break;
       case 'delay':
-        nextRunAtMs = now + (entry.delayMs ?? 0);
+        nextRunAtMs = now + entry.delayMs;
         break;
-      default:
-        throw new Error(`Unknown job kind: ${entry.kind}`);
     }
 
     const timerHandle = entry.kind === 'every' ? this.#armInterval(entry) : this.#armTimer(entry);
@@ -281,8 +285,8 @@ export class SchedulerService implements IScheduler {
     return handle;
   }
 
-  #armInterval(entry: RegistryEntry<unknown>): TimerHandle {
-    const delay = entry.intervalMs ?? 1000;
+  #armInterval(entry: EveryRegistryEntry<unknown>): TimerHandle {
+    const delay = entry.intervalMs;
 
     const handle = this.#runtime.setTimeout(async () => {
       await this.#fire(entry);
@@ -293,10 +297,6 @@ export class SchedulerService implements IScheduler {
   }
 
   async #fire(entry: RegistryEntry<unknown>): Promise<void> {
-    if (entry.paused) {
-      return;
-    }
-
     const lockKey = `scheduler:job:${entry.name}`;
     const token = await this.#lock.acquire(lockKey, this.#ttlMs);
 
@@ -326,17 +326,24 @@ export class SchedulerService implements IScheduler {
       await this.#lock.release(lockKey, token);
     }
 
-    // For delay (one-shot) jobs: remove after fire
+    // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {
       this.#registry.remove(entry.name);
       this.#names.delete(entry.name);
-    } else if (entry.kind === 'cron') {
-      // Re-arm for cron
-      entry.nextRunAtMs = cronNextMs(entry.expression!, this.#runtime.now());
+      return;
+    }
+
+    // If the job was paused while this fire was in flight (across the lock /
+    // handler awaits), do not re-arm — resume() arms a fresh timer instead.
+    if (entry.paused) {
+      return;
+    }
+
+    if (entry.kind === 'cron') {
+      entry.nextRunAtMs = cronNextMs(entry.expression, this.#runtime.now());
       this.#armTimer(entry);
-    } else if (entry.kind === 'every') {
-      // Re-arm for every
-      entry.nextRunAtMs = this.#runtime.now() + (entry.intervalMs ?? 1000);
+    } else {
+      entry.nextRunAtMs = this.#runtime.now() + entry.intervalMs;
       this.#armInterval(entry);
     }
   }

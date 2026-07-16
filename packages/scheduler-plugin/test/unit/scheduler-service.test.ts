@@ -333,6 +333,31 @@ describe('SchedulerService', () => {
     await service.getNextRun('data-job');
   });
 
+  it('cron job with data option stores data', async () => {
+    const { service } = createService();
+    await service.connect();
+    await service.cron('cron-data-job', '* * * * *', (_job) => {}, { data: 'cron-data' });
+    await service.getNextRun('cron-data-job');
+  });
+
+  it('every job with retry option stores retry config', async () => {
+    const { service } = createService();
+    await service.connect();
+    await service.every('every-retry-job', 1000, () => {}, {
+      retry: { limit: 2, delay: 50, backoff: 'fixed' },
+    });
+    await service.getNextRun('every-retry-job');
+  });
+
+  it('delay job with retry option stores retry config', async () => {
+    const { service } = createService();
+    await service.connect();
+    await service.delay('delay-retry-job', 50, () => {}, {
+      retry: { limit: 2, delay: 50, backoff: 'fixed' },
+    });
+    await service.getNextRun('delay-retry-job');
+  });
+
   it('delay job fires when timer advances', async () => {
     const runtime = new FakeRuntime();
     const lock = new MemoryLock(runtime);
@@ -498,23 +523,6 @@ describe('SchedulerService', () => {
     expect(runtime.getPendingTimerCount()).toBe(0);
   });
 
-  it('paused job skips fire in #fire() method', async () => {
-    // This test covers the `if (entry.paused) return` branch in #fire()
-    const runtime = new FakeRuntime();
-    const lock = new MemoryLock(runtime);
-    const service = new SchedulerService(runtime, lock);
-    await service.connect();
-    let fireCount = 0;
-    await service.every('pause-before-fire', 100, () => {
-      fireCount++;
-    });
-    // Pause immediately after scheduling but before timer fires
-    await service.pause('pause-before-fire');
-    // Advance time - timer fires but #fire() should return early due to pause
-    await runtime.advance(150);
-    expect(fireCount).toBe(0);
-  });
-
   it('resume every job uses #armInterval path', async () => {
     // Explicitly cover the every case in resume() switch statement
     const runtime = new FakeRuntime();
@@ -571,8 +579,7 @@ describe('SchedulerService', () => {
   });
 
   it('cron job after fire re-arms via #fire() cron branch', async () => {
-    // This test specifically covers the `else if (entry.kind === 'cron' && !entry.paused)`
-    // branch in #fire() method
+    // Covers the cron re-arm branch in #fire() (entry.kind === 'cron').
     const runtime = new FakeRuntime();
     const lock = new MemoryLock(runtime);
     const service = new SchedulerService(runtime, lock);
@@ -594,8 +601,7 @@ describe('SchedulerService', () => {
   });
 
   it('every job after fire re-arms via #fire() every branch', async () => {
-    // This test specifically covers the `else if (entry.kind === 'every' && !entry.paused)`
-    // branch in #fire() method
+    // Covers the every re-arm branch in #fire() (else of entry.kind === 'cron').
     const runtime = new FakeRuntime();
     const lock = new MemoryLock(runtime);
     const service = new SchedulerService(runtime, lock);
@@ -616,6 +622,29 @@ describe('SchedulerService', () => {
     // Third fire to be sure
     await runtime.advance(150);
     expect(fireCount).toBe(3);
+  });
+
+  it('does not re-arm a job paused while its fire is in flight', async () => {
+    // Covers the `if (entry.paused) return;` re-arm guard in #fire(): a job
+    // paused during its own fire (across the lock/handler awaits) must NOT be
+    // re-armed, otherwise a leaked timer could double-fire after resume().
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    await service.connect();
+    let fireCount = 0;
+    await service.cron('pause-mid-fire', '* * * * *', () => {
+      fireCount++;
+      // Pause WHILE firing — registry.pause runs synchronously inside the
+      // handler, so entry.paused is true before #fire reaches its re-arm tail.
+      void service.pause('pause-mid-fire');
+    });
+    expect(runtime.getPendingTimerCount()).toBe(1);
+    // Fire the armed timer; the handler pauses the job mid-fire.
+    await runtime.advance(60000);
+    expect(fireCount).toBe(1);
+    // Re-arm is skipped for a paused entry, so no timer remains armed.
+    expect(runtime.getPendingTimerCount()).toBe(0);
   });
 
   it('fire with lock failure skips execution', async () => {
@@ -667,30 +696,6 @@ describe('SchedulerService', () => {
     expect(runtime.getPendingTimerCount()).toBe(0);
   });
 
-  it('resume throws for unknown job kind default case', async () => {
-    // Cover the `default: throw` case in resume() switch statement
-    const runtime = new FakeRuntime();
-    const lock = new MemoryLock(runtime);
-    const service = new SchedulerService(runtime, lock);
-    await service.connect();
-    // Create a job with an unknown kind by directly manipulating the registry
-    // We'll use the pause/resume flow: pause a job, then corrupt its kind
-    await service.cron('unknown-kind-job', '* * * * *', () => {});
-    await service.pause('unknown-kind-job');
-    // The resume will throw because after pause, the entry kind is still 'cron'
-    // To test the default case, we need a different approach - test via direct entry manipulation
-    // Since we can't access private registry, we'll test via a mock that returns unknown kind
-    const service2 = new SchedulerService(runtime, lock);
-    await service2.connect();
-    await service2.cron('test-job', '* * * * *', () => {});
-    await service2.pause('test-job');
-    // Resume should work for cron
-    await service2.resume('test-job');
-    // The default case is covered by the type system - unknown kinds can't be created
-    // So this test documents that the default case is a safety net
-    expect(service2.isReady()).toBe(true);
-  });
-
   it('disconnect handles registry error gracefully', async () => {
     // Cover the catch block in disconnect() when registry.get() throws
     const runtime = new FakeRuntime();
@@ -701,29 +706,6 @@ describe('SchedulerService', () => {
     // Normal disconnect should handle errors gracefully
     await service.disconnect();
     expect(runtime.getPendingTimerCount()).toBe(0);
-  });
-
-  it('resume cron with undefined expression throws', async () => {
-    // Cover the `if (entry.expression === undefined)` branch in resume()
-    // We need to create a scenario where a cron job has no expression
-    // This can happen if the job registry is corrupted or if there's a bug
-    const runtime = new FakeRuntime();
-    const lock = new MemoryLock(runtime);
-    const service = new SchedulerService(runtime, lock);
-    await service.connect();
-
-    // Create a mock registry entry without expression by using a custom approach
-    // Since we can't directly manipulate private fields, we'll test via the pause/resume flow
-    // The cron job should have an expression, so we test the error path by
-    // creating a scenario where expression is missing
-
-    // Actually, since we can't create a cron job without an expression through the public API,
-    // we'll document that this branch is covered by type safety
-    // The test verifies the resume flow works correctly for valid cron jobs
-    await service.cron('valid-cron', '* * * * *', () => {});
-    await service.pause('valid-cron');
-    await service.resume('valid-cron');
-    expect(service.isReady()).toBe(true);
   });
 
   it('resume every job covers every branch in switch', async () => {
@@ -766,17 +748,16 @@ describe('SchedulerService', () => {
     expect(service.isReady()).toBe(false);
   });
 
-  it('armInterval uses default intervalMs when undefined', async () => {
-    // Cover the `entry.intervalMs ?? 1000` branch in #armInterval()
-    // This tests the fallback when intervalMs is undefined
+  it('armInterval uses the job intervalMs as the timer delay', async () => {
+    // Verifies #armInterval arms the timer with the job's intervalMs (200ms),
+    // not any hard-coded fallback. intervalMs is required on every entries, so
+    // there is no `?? 1000` default to fall back to.
     const runtime = new FakeRuntime();
     const lock = new MemoryLock(runtime);
     const service = new SchedulerService(runtime, lock);
     await service.connect();
-    // Create an every job with a defined interval
     await service.every('interval-test', 200, () => {});
     expect(runtime.getPendingTimerCount()).toBe(1);
-    // The interval should be 200ms, not the default 1000ms
     const nextTimer = runtime.getNextTimerDelay();
     expect(nextTimer).toBe(200);
   });
@@ -826,24 +807,6 @@ describe('SchedulerService', () => {
     expect(fireCount).toBe(1);
   });
 
-  it('resume cron with missing expression throws', async () => {
-    // Cover the `if (entry.expression === undefined)` branch in resume()
-    // We need to mock the registry to return an entry without expression
-    const runtime = new FakeRuntime();
-    const lock = new MemoryLock(runtime);
-    const service = new SchedulerService(runtime, lock);
-    await service.connect();
-
-    // Create a custom lock that allows us to test this edge case
-    // Since we can't directly manipulate the registry, we'll test via a workaround
-    // by creating a job, pausing it, and then testing that resume works normally
-    // The expression === undefined case is covered by type safety in normal usage
-    await service.cron('expression-test', '* * * * *', () => {});
-    await service.pause('expression-test');
-    await service.resume('expression-test');
-    expect(service.isReady()).toBe(true);
-  });
-
   it('resume every job covers every case in switch', async () => {
     // Ensure the every case in resume() switch is covered
     const runtime = new FakeRuntime();
@@ -881,19 +844,6 @@ describe('SchedulerService', () => {
     await service.remove('rapid-job');
     await service.disconnect();
     expect(service.isReady()).toBe(false);
-  });
-
-  it('armInterval uses default 1000 when intervalMs is undefined', async () => {
-    // Cover the `entry.intervalMs ?? 1000` branch in #armInterval()
-    // This tests the fallback when intervalMs is undefined
-    // Since every() always sets intervalMs, we test via direct method call simulation
-    // by creating a job with a very small interval that exercises the default path
-    const runtime = new FakeRuntime();
-    const lock = new MemoryLock(runtime);
-    const service = new SchedulerService(runtime, lock);
-    await service.connect();
-    await service.every('default-interval-test', 1000, () => {});
-    expect(runtime.getPendingTimerCount()).toBe(1);
   });
 
   it('resume uses ternary for every vs cron/delay timer arming', async () => {
