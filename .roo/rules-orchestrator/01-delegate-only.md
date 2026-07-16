@@ -39,6 +39,45 @@ implement. Its entire job is to break a request into subtasks and hand each to t
   review/gate findings" row above), then re-verify and re-review. **Correctness findings BLOCK the
   merge; reuse/simplification/efficiency findings are advisory.**
 
+## Every `new_task` states its mode boundary (or the subtask stalls on the human)
+
+A subtask starts fresh and knows only what your instruction tells it. Modes are not equally capable
+— **Architect can read, run commands, and edit markdown ONLY; Code Review can read and run commands
+but cannot edit at all; only Code can touch `src/`, `test/`, `deno.json`, or commit.** When a
+subtask meets work outside its own mode's reach and the instruction never said what to do about it,
+it has two bad options: ask the user to switch it to Code, or `switch_mode` itself. The first stalls
+the pipeline waiting for a human who is not watching; the second silently voids the plan-only and
+read-only gates. Both are your bug, not the subtask's — you left the boundary unstated. So, in every
+`new_task`:
+
+- **Route by the DELIVERABLE, not the topic.** Design-flavored wording does not make it an Architect
+  subtask. If the deliverable is anything other than a markdown plan or doc — a scaffold, a `src/`
+  or `test/` file, a `deno.json`, a commit — it is a **Code** subtask from the start. Architect gets
+  a milestone's ONE plan file and nothing else.
+- **Spell out the allowed actions.** Do not assume the subtask infers them from its mode. For an
+  Architect milestone-start subtask, say verbatim: "You may read any file, run read-only commands
+  (`git branch --show-current`, `deno task check:plan`), and create or edit ONLY
+  `plans/milestone-<N>-<desc>.md`. You may NOT create or edit any `src/`, `test/`, or `deno.json`
+  file, and you may NOT commit."
+- **Forbid `switch_mode` and forbid asking the user; require a return instead.** Close every subtask
+  instruction with: "Do NOT use `switch_mode`, and do NOT ask the user how to proceed. If finishing
+  this subtask would need an action outside the list above, STOP and `attempt_completion`
+  immediately with what you have plus the exact action that is blocked — the orchestrator will spawn
+  the right subtask for it." A subtask's only two endings are a finished result or a blocked
+  `attempt_completion`; a question to the human is neither.
+- **A blocked return is a normal result, not a failure.** When Architect comes back saying it needed
+  a `src/` edit, that is the handshake working. Your next move is a Code `new_task` carrying that
+  blocked item — never relay the question to the human, and never widen the Architect subtask's
+  scope to unblock it.
+- **Name the branch and the return payload.** Give every subtask the `feat/…` branch it runs on
+  (never `main`) and state exactly what to return: for Architect, the plan path + the clean
+  `deno task check:plan` output + the key design decisions; for Code, the final
+  `git status --porcelain`.
+
+The one thing you never do here is escalate to the human mid-pipeline. The human's only steps are
+reviewing the plan and pushing/opening the PR (see below) — anything else that "needs the user" is a
+subtask you have not spawned yet.
+
 ## Milestone pipeline order (the sequence you orchestrate)
 
 Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit) →
