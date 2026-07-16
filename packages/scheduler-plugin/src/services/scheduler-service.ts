@@ -273,8 +273,8 @@ export class SchedulerService implements IScheduler {
     const now = this.#runtime.now();
     const delay = Math.max(0, entry.nextRunAtMs - now);
 
-    const handle = this.#runtime.setTimeout(() => {
-      void this.#fire(entry);
+    const handle = this.#runtime.setTimeout(async () => {
+      await this.#fire(entry);
     }, delay);
 
     entry.timerHandle = handle;
@@ -284,12 +284,8 @@ export class SchedulerService implements IScheduler {
   #armInterval(entry: RegistryEntry<unknown>): TimerHandle {
     const delay = entry.intervalMs ?? 1000;
 
-    const handle = this.#runtime.setTimeout(() => {
-      void this.#fire(entry);
-      if (entry.kind === 'every' && !entry.paused) {
-        entry.nextRunAtMs = this.#runtime.now() + delay;
-        this.#armInterval(entry);
-      }
+    const handle = this.#runtime.setTimeout(async () => {
+      await this.#fire(entry);
     }, delay);
 
     entry.timerHandle = handle;
@@ -334,10 +330,14 @@ export class SchedulerService implements IScheduler {
     if (entry.kind === 'delay') {
       this.#registry.remove(entry.name);
       this.#names.delete(entry.name);
+    } else if (entry.kind === 'cron') {
       // Re-arm for cron
-    } else if (entry.kind === 'cron' && !entry.paused) {
       entry.nextRunAtMs = cronNextMs(entry.expression!, this.#runtime.now());
       this.#armTimer(entry);
+    } else if (entry.kind === 'every') {
+      // Re-arm for every
+      entry.nextRunAtMs = this.#runtime.now() + (entry.intervalMs ?? 1000);
+      this.#armInterval(entry);
     }
   }
 }
