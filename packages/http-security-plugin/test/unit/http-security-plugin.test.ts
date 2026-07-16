@@ -244,11 +244,13 @@ describe('HttpSecurityPlugin', () => {
       const first = createFakeContext({ request });
       const second = createFakeContext({ request });
 
-      await viaPlugin(first.ctx, async () => {
+      await viaPlugin(first.ctx, () => {
         first.nextCalled.push(true);
+        return Promise.resolve();
       });
-      await viaFactory(second.ctx, async () => {
+      await viaFactory(second.ctx, () => {
         second.nextCalled.push(true);
+        return Promise.resolve();
       });
 
       expect(first.nextCalled).toHaveLength(1);
