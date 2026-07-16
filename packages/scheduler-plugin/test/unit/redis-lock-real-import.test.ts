@@ -11,14 +11,18 @@ describe('RedisLock real import', () => {
   it(
     'loads ioredis constructor',
     async () => {
+      // Only the load is guarded — assertions run outside the catch so a real
+      // failure cannot masquerade as an absent dependency.
+      let mod: { Redis: unknown };
       try {
-        const mod = await import('npm:ioredis@5.x');
-        expect(mod.Redis).toBeDefined();
-        expect(typeof mod.Redis).toBe('function');
+        mod = await import('npm:ioredis@5.x');
       } catch {
-        // Skip when ioredis is not available
         console.log('Skipping: npm:ioredis@5.x not available');
+        return;
       }
+
+      expect(mod.Redis).toBeDefined();
+      expect(typeof mod.Redis).toBe('function');
     },
   );
 });
