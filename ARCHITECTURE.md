@@ -1239,14 +1239,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/http-security-plugin
 
-| Aspect               | Detail                                                                  |
-| -------------------- | ----------------------------------------------------------------------- |
-| **Purpose**          | HTTP transport security                                                 |
-| **Responsibilities** | CORS; security headers; CSRF; request size limiting; IP security        |
-| **Dependencies**     | `common`, `kernel`                                                      |
-| **Public API**       | `HttpSecurityPlugin()`                                                  |
-| **Extension Points** | Custom security headers; custom CORS policies                           |
-| **Rules**            | Secure defaults; all security features are opt-out (enabled by default) |
+| Aspect               | Detail                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | HTTP transport security                                                                                                                                     |
+| **Responsibilities** | CORS; security headers; CSRF; request size limiting; IP security                                                                                            |
+| **Dependencies**     | `common`, `kernel`                                                                                                                                          |
+| **Public API**       | `HttpSecurityPlugin()`; `corsMiddleware()`; `securityHeadersMiddleware()`; `csrfMiddleware()`; `requestSizeMiddleware()`; `ipSecurityMiddleware()`          |
+| **Extension Points** | Custom security headers; custom CORS policies; custom CSRF trusted origins                                                                                  |
+| **Rules**            | Secure defaults: security headers on by default; CORS/CSRF/request-size/IP-security are opt-in via their option blocks, each secure-by-default when enabled |
 
 #### @hono-enterprise/scheduler-plugin
 
