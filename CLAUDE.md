@@ -187,8 +187,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   real-import test)) — complete (PR pending)
 - **Milestone 17** (`packages/http-security-plugin` — CORS, security headers, CSRF, request-size,
   ip-security) — complete (PR #38)
-- **Next milestone** — Milestone 18 (`packages/scheduler-plugin` — cron jobs, delayed jobs, job
-  scheduling)
+- **Milestone 18** (`packages/scheduler-plugin` — cron jobs, delayed jobs, job scheduling) — complete
+- **Next milestone** — Milestone 19 (`packages/metrics-plugin` — Prometheus metrics collection)
 
 ## Verification (run before declaring any work done)
 

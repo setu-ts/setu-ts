@@ -2135,10 +2135,10 @@ ensure only one instance executes a job.
 
 ### Deliverables
 
-- [ ] SchedulerPlugin
-- [ ] Cron, delayed, recurring jobs
-- [ ] Distributed locking
-- [ ] Full test coverage
+- [x] SchedulerPlugin
+- [x] Cron, delayed, recurring jobs
+- [x] Distributed locking
+- [x] Full test coverage
 
 ---
 
