@@ -192,7 +192,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   one-shot `delay` jobs, retry with fixed/exponential backoff, pause/resume/remove/getNextRun, and
   distributed locking behind an `IDistributedLock` seam with a process-local `MemoryLock` default
   and a `RedisLock` (inject-or-lazy `npm:ioredis@5.x`); scheduler contracts added to
-  `common/services/scheduler.ts`) — complete (PR pending)
+  `common/services/scheduler.ts`) — complete (PR #40)
 - **Next milestone** — Milestone 19 (`packages/metrics-plugin` — Prometheus metrics collection)
 
 ## Verification (run before declaring any work done)
