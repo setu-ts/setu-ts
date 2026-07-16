@@ -33,6 +33,12 @@ In Architect mode, for a milestone start, do exactly this and nothing more:
 - **Do NOT switch to Code mode or begin implementing** until the plan has been reviewed and
   approved. A plan that fails the checklist is fixed as a plan first, never "fixed during
   implementation."
+- **If the pass needs an action you cannot take, end the subtask — do not ask to be switched.**
+  Running as a delegated subtask, your only two endings are the finished plan or an immediate
+  `attempt_completion` naming the exact blocked action (e.g. "this needs a `src/` edit"). Asking the
+  user for permission to switch to Code mode stalls the pipeline on a human who is not watching; the
+  orchestrator spawns the Code subtask from your blocked return instead (see
+  `.roo/rules-orchestrator/01-delegate-only.md`).
 - Only ONE plan file per milestone at `plans/` root (`plans/milestone-<N>-<desc>.md`). Continuation
   notes, fix-round prompts, and hand-off scratch go in a scratch dir, NEVER under `plans/` and never
   `git add`-ed.
