@@ -187,8 +187,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   real-import test)) — complete (PR pending)
 - **Milestone 17** (`packages/http-security-plugin` — CORS, security headers, CSRF, request-size,
   ip-security) — complete (PR #38)
-- **Next milestone** — Milestone 18 (`packages/scheduler-plugin` — cron jobs, delayed jobs, job
-  scheduling)
+- **Milestone 18** (`packages/scheduler-plugin` — SchedulerPlugin registering an `IScheduler` under
+  `CAPABILITIES.SCHEDULER`; zero-dependency 5-field UTC cron parser, fixed-interval `every` and
+  one-shot `delay` jobs, retry with fixed/exponential backoff, pause/resume/remove/getNextRun, and
+  distributed locking behind an `IDistributedLock` seam with a process-local `MemoryLock` default
+  and a `RedisLock` (inject-or-lazy `npm:ioredis@5.x`); scheduler contracts added to
+  `common/services/scheduler.ts`) — complete (PR #40)
+- **Next milestone** — Milestone 19 (`packages/metrics-plugin` — Prometheus metrics collection)
 
 ## Verification (run before declaring any work done)
 

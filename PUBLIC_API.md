@@ -1874,50 +1874,88 @@ interface IQueue {
 
 ## Scheduler
 
-Provides cron jobs and scheduled tasks.
+Provides cron jobs, fixed-interval recurring jobs, and one-shot delayed jobs, with retry and
+distributed locking.
+
+Registers `IScheduler` under `CAPABILITIES.SCHEDULER` (`'scheduler'`).
+
+Execution is in-process and time-driven — jobs are **not** durably persisted, so a restart drops the
+schedule until the registering plugin re-creates it. For durable background work, use
+[Queue](#queue) instead.
+
+### Exports
+
+- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service
+- **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
+- **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
+  `lock?`, `ttlMs?`)
+- **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation
+- **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`
+- **`IScheduler`** — Scheduler service interface (re-exported from `@hono-enterprise/common`)
+- **`ScheduledJob<T>`** — Job instance handed to the handler (re-exported)
+- **`SchedulerJobHandler<T>`** — Handler callback type (re-exported)
+- **`ScheduleOptions<T>`** — Options for `cron()`/`every()`/`delay()` (re-exported)
+- **`RetryOptions`** — Retry configuration (re-exported)
+- **`SchedulerBackoff`** — `'fixed' | 'exponential'` (re-exported)
 
 ### Registration
 
 ```typescript
 import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
 
+// Process-local locking (default)
+app.register(SchedulerPlugin());
+
+// Distributed locking via Redis, for multi-instance deployments
 app.register(SchedulerPlugin({
   timezone: 'UTC',
   distributedLock: {
     enabled: true,
     storage: 'redis',
     url: config.get('REDIS_URL'),
+    ttlMs: 30000,
   },
 }));
 ```
 
+`timezone` defaults to `'UTC'`, and `'UTC'` is the only supported value — any other value **throws**
+from the factory. Cron expressions are always evaluated in UTC.
+
+When `distributedLock` is absent or `enabled: false`, a process-local memory lock is used. With
+`enabled: true` and `storage: 'redis'`, an ioredis client is lazily imported (`npm:ioredis@5.x`)
+unless you inject one via `client`, or supply your own `IDistributedLock` via `lock` (which takes
+priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
+if the lock expires mid-run, another instance may start the same job.
+
 ### Scheduling Jobs
 
 ```typescript
+import type { IScheduler } from '@hono-enterprise/common';
+
 app.register({
   name: 'scheduled-jobs',
   version: '1.0.0',
   dependencies: ['scheduler'],
-  register(ctx) {
+  async register(ctx) {
     const scheduler = ctx.services.get<IScheduler>('scheduler');
 
-    // Cron expression
-    scheduler.cron('cleanup-temp-files', '0 2 * * *', async (job) => {
+    // Cron expression (5-field, UTC)
+    await scheduler.cron('cleanup-temp-files', '0 2 * * *', async () => {
       await cleanupTempFiles();
     });
 
     // Every 5 minutes
-    scheduler.every('health-check', 300000, async (job) => {
+    await scheduler.every('health-check', 300000, async () => {
       await runHealthCheck();
     });
 
-    // One-time delayed job
-    scheduler.delay('send-followup', 86400000, async (job) => {
+    // One-time delayed job — auto-removed once it fires
+    await scheduler.delay('send-followup', 86400000, async (job) => {
       await sendFollowupEmail(job.data.userId);
     }, { data: { userId: '123' } });
 
     // With retry
-    scheduler.cron('sync-external-api', '*/30 * * * *', async (job) => {
+    await scheduler.cron('sync-external-api', '*/30 * * * *', async () => {
       await syncFromExternalApi();
     }, {
       retry: {
@@ -1930,23 +1968,85 @@ app.register({
 });
 ```
 
+Every scheduling call is async and **throws** if `name` is already scheduled. Job names are unique
+per scheduler instance.
+
+Cron expressions use the standard 5 fields (`minute hour day-of-month month day-of-week`) and
+support `*`, lists (`1,15`), ranges (`1-5`), and steps (`*/30`, `1-59/2`). An invalid field or
+expression throws.
+
+### Retry Behavior
+
+Without `retry`, a handler that throws runs once and the failure is logged. With `retry`, the job is
+re-attempted up to `limit` **total** attempts (`limit: 3` means at most 3 runs, not 3 retries after
+the first). `delay` is the base delay in milliseconds before the first retry; `backoff: 'fixed'`
+reuses it unchanged, while `backoff: 'exponential'` doubles it per attempt. `job.attempts` is
+1-based and increments on each attempt. A job that exhausts its retries is logged and does not crash
+the scheduler; recurring jobs still fire on their next scheduled tick.
+
 ### Managing Jobs
 
 ```typescript
 const scheduler = ctx.services.get<IScheduler>('scheduler');
 
-// Pause
+// Pause (idempotent — pausing a paused job is a no-op)
 await scheduler.pause('cleanup-temp-files');
 
-// Resume
+// Resume (idempotent — resuming a running job is a no-op)
 await scheduler.resume('cleanup-temp-files');
 
 // Remove
 await scheduler.remove('cleanup-temp-files');
 
-// Get next run time
+// Next run time, as epoch milliseconds
 const nextRun = await scheduler.getNextRun('cleanup-temp-files');
 ```
+
+All four **throw** if no job with that name exists — including after a `delay` job has fired and
+auto-removed itself. `getNextRun` additionally throws if the job is currently paused.
+
+`resume` re-arms from the current time rather than resuming the original countdown: cron jobs
+compute the next fire from now, `every` jobs restart the interval from now, and `delay` jobs re-arm
+the **full** original `delayMs` from now.
+
+### IScheduler Interface
+
+```typescript
+interface IScheduler {
+  cron<T>(
+    name: string,
+    expression: string,
+    handler: SchedulerJobHandler<T>,
+    options?: ScheduleOptions<T>,
+  ): Promise<void>;
+  every<T>(
+    name: string,
+    intervalMs: number,
+    handler: SchedulerJobHandler<T>,
+    options?: ScheduleOptions<T>,
+  ): Promise<void>;
+  delay<T>(
+    name: string,
+    delayMs: number,
+    handler: SchedulerJobHandler<T>,
+    options?: ScheduleOptions<T>,
+  ): Promise<void>;
+  pause(name: string): Promise<void>;
+  resume(name: string): Promise<void>;
+  remove(name: string): Promise<void>;
+  getNextRun(name: string): Promise<number>;
+}
+
+interface ScheduledJob<T = unknown> {
+  readonly id: string;
+  readonly name: string;
+  readonly data: T;
+  readonly attempts: number;
+}
+```
+
+The plugin registers a `'scheduler'` health indicator and an `onClose` hook that clears all armed
+timers and disconnects the Redis lock on shutdown.
 
 ---
 
@@ -3413,6 +3513,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                         |
 | Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`                                                                                                                                            |
 | Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                            |
+| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                      |
 | Secrets             | `ISecretManager`                                                                                                                                                                                                                         |
 | Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                             |
 | Resilience          | `ICircuitBreaker`, `CircuitState`                                                                                                                                                                                                        |
