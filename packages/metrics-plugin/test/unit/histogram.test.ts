@@ -533,3 +533,28 @@ Deno.test('Histogram — value just below bucket boundary', () => {
   assertEquals(buckets.get(10), 1); // 4.999 <= 10
   assertEquals(buckets.get(Number.POSITIVE_INFINITY), 1);
 });
+
+Deno.test('Histogram — getAllBucketCounts with single label set exercises loop', () => {
+  const config = {
+    type: 'histogram' as const,
+    help: 'Test histogram',
+    labels: ['endpoint'],
+    buckets: [0.1, 0.5, 1],
+  };
+  const histogram = new Histogram('test_histogram', config);
+
+  // Single observation to ensure getAllBucketCounts loop has data
+  histogram.observe(0.3, { endpoint: '/api/users' });
+
+  const allData = histogram.getAllBucketCounts();
+  assertEquals(allData.size, 1);
+
+  const endpointData = allData.get('endpoint=/api/users');
+  assertExists(endpointData);
+  assertEquals(endpointData.count, 1);
+  assertEquals(endpointData.sum, 0.3);
+  assertEquals(endpointData.buckets.get(0.1), 0); // 0.3 > 0.1
+  assertEquals(endpointData.buckets.get(0.5), 1); // 0.3 <= 0.5
+  assertEquals(endpointData.buckets.get(1), 1); // 0.3 <= 1
+  assertEquals(endpointData.buckets.get(Number.POSITIVE_INFINITY), 1);
+});

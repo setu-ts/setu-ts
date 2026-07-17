@@ -13,6 +13,7 @@ import type { IPlugin } from '@hono-enterprise/common';
  */
 class FakeServiceRegistry {
   #services = new Map<string, unknown>();
+  #mockAll = new Map<string, unknown[]>();
 
   register<T>(token: string, service: T): void {
     this.#services.set(token, service);
@@ -22,8 +23,16 @@ class FakeServiceRegistry {
     return this.#services.get(token) as T | undefined;
   }
 
-  getAll<T>(_token: string): T[] {
+  getAll<T>(token: string): T[] {
+    const mock = this.#mockAll.get(token);
+    if (mock) {
+      return mock as T[];
+    }
     return [];
+  }
+
+  setMockAll<T>(token: string, items: T[]): void {
+    this.#mockAll.set(token, items as unknown[]);
   }
 
   has(token: string): boolean {
@@ -41,7 +50,7 @@ class FakeServiceRegistry {
 function createFakeContext() {
   const services = new FakeServiceRegistry();
   const middleware: Array<{ fn: unknown; priority: number }> = [];
-  const routes: Array<{ method: string; path: string }> = [];
+  const routes: Array<{ method: string; path: string; handler?: unknown }> = [];
   const lifecycleHooks: { onInit?: (() => void)[]; onClose?: (() => void)[] } = {
     onInit: [],
     onClose: [],
@@ -55,8 +64,8 @@ function createFakeContext() {
       },
     },
     router: {
-      get: (path: string, _handler: unknown) => {
-        routes.push({ method: 'GET', path });
+      get: (path: string, handler: unknown) => {
+        routes.push({ method: 'GET', path, handler });
       },
     },
     lifecycle: {
@@ -183,6 +192,80 @@ Deno.test('MetricsPlugin — onInit hook drains METRIC_REGISTRATION', async () =
   assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
 });
 
+Deno.test('MetricsPlugin — route handler executes and returns metrics', async () => {
+  const plugin = MetricsPlugin();
+  const ctx = createFakeContext();
+
+  await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
+
+  // Find the metrics route handler
+  const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
+  assertEquals(metricsRoute !== undefined, true);
+  assertEquals(metricsRoute?.handler !== undefined, true);
+
+  // Create a fake context for the handler
+  const fakeHandlerContext = {
+    response: {
+      header: (_key: string, _value: string) => fakeHandlerContext.response,
+      status: (_code: number) => fakeHandlerContext.response,
+      text: (body: string) => ({ status: 200, body }),
+    },
+  };
+
+  // Invoke the handler
+  const handler = metricsRoute?.handler as (
+    ctx: unknown,
+  ) => Promise<{ status: number; body: string }>;
+  const result = await handler(fakeHandlerContext);
+
+  assertEquals(result.status, 200);
+  assertEquals(typeof result.body, 'string');
+});
+
+Deno.test('MetricsPlugin — onInit hook with METRIC_REGISTRATION contributions executes registration loop', async () => {
+  const plugin = MetricsPlugin();
+  const ctx = createFakeContext();
+
+  // Mock getAll to return METRIC_REGISTRATION contributions
+  const mockRegistrations = [
+    { name: 'test_counter', config: { type: 'counter' as const, help: 'Test counter' } },
+    { name: 'test_gauge', config: { type: 'gauge' as const, help: 'Test gauge' } },
+  ];
+  (ctx.services as FakeServiceRegistry).setMockAll(
+    CAPABILITIES.METRIC_REGISTRATION,
+    mockRegistrations,
+  );
+
+  await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
+
+  // Trigger onInit hooks - this will execute the registration loop
+  for (const hook of ctx.lifecycleHooks.onInit ?? []) {
+    hook();
+  }
+
+  // The service should be registered
+  assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+});
+
+Deno.test('MetricsPlugin — onInit hook materializes custom metrics from options', async () => {
+  const plugin = MetricsPlugin({
+    customMetrics: [
+      { type: 'counter' as const, name: 'custom_counter', help: 'A custom counter' },
+    ],
+  });
+  const ctx = createFakeContext();
+
+  await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
+
+  // Trigger onInit hooks
+  for (const hook of ctx.lifecycleHooks.onInit ?? []) {
+    hook();
+  }
+
+  // The service should be registered
+  assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+});
+
 Deno.test('MetricsPlugin — httpMetrics disabled skips middleware', async () => {
   const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: false });
   const ctx = createFakeContext();
@@ -204,4 +287,46 @@ Deno.test('MetricsPlugin — defaultMetrics disabled skips everything', async ()
   // But middleware should not be
   const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
   assertEquals(metricsMiddleware, undefined);
+});
+
+Deno.test('MetricsPlugin — customQuantiles option is accepted', async () => {
+  const plugin = MetricsPlugin({
+    defaultBuckets: [1, 5, 10],
+    defaultQuantiles: [0.25, 0.5, 0.75],
+  });
+  const ctx = createFakeContext();
+
+  await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
+
+  assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+});
+
+Deno.test('MetricsPlugin — all options disabled still registers route', async () => {
+  const plugin = MetricsPlugin({
+    defaultMetrics: false,
+    httpMetrics: false,
+    customMetrics: [],
+  });
+  const ctx = createFakeContext();
+
+  await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
+
+  // Route should still be registered
+  const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
+  assertEquals(metricsRoute !== undefined, true);
+
+  // No middleware should be registered
+  const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
+  assertEquals(metricsMiddleware, undefined);
+});
+
+Deno.test('MetricsPlugin — defaultBuckets option is accepted', async () => {
+  const plugin = MetricsPlugin({
+    defaultBuckets: [0.1, 0.5, 1, 5],
+  });
+  const ctx = createFakeContext();
+
+  await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
+
+  assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
 });
