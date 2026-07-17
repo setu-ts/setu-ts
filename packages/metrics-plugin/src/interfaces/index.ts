@@ -44,6 +44,8 @@ export interface MetricValue {
   readonly buckets?: ReadonlyMap<number, number>;
   /** Quantile values (summary). */
   readonly quantiles?: ReadonlyMap<number, number>;
+  /** The label values for this entry (for rendering - avoids lossy round-trip). */
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
 /**

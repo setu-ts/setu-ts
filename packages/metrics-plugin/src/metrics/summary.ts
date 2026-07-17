@@ -21,12 +21,17 @@ const DEFAULT_MAX_SAMPLES = 512;
  *
  * `observe()` records a sample; quantiles are computed from the window.
  */
+interface SummaryData {
+  samples: number[];
+  sum: number;
+  count: number;
+  labels?: Readonly<Record<string, string>>;
+}
+
 export class Summary extends MetricBase {
   readonly #quantiles: readonly number[];
   readonly #maxSamples: number;
-  readonly #samples = new Map<string, number[]>();
-  readonly #sums = new Map<string, number>();
-  readonly #counts = new Map<string, number>();
+  readonly #data = new Map<string, SummaryData>();
 
   /**
    * Creates a new summary.
@@ -43,7 +48,7 @@ export class Summary extends MetricBase {
     maxSamples?: number,
   ) {
     super(name, config);
-    this.#quantiles = quantiles ?? quantiles ?? DEFAULT_QUANTILES;
+    this.#quantiles = quantiles ?? DEFAULT_QUANTILES;
     this.#maxSamples = maxSamples ?? DEFAULT_MAX_SAMPLES;
 
     // Validate quantiles
@@ -72,15 +77,18 @@ export class Summary extends MetricBase {
     const key = this.labelKey(labels);
 
     // Initialize per-label-set storage
-    if (!this.#samples.has(key)) {
-      this.#samples.set(key, []);
-      this.#sums.set(key, 0);
-      this.#counts.set(key, 0);
+    if (!this.#data.has(key)) {
+      const data: SummaryData = { samples: [], sum: 0, count: 0 };
+      if (labels) {
+        data.labels = labels;
+      }
+      this.#data.set(key, data);
     }
 
-    const samples = this.#samples.get(key)!;
-    let sum = this.#sums.get(key)!;
-    let count = this.#counts.get(key)!;
+    const data = this.#data.get(key)!;
+    const samples = data.samples;
+    let sum = data.sum;
+    let count = data.count;
 
     // Add sample to window (bounded)
     samples.push(value);
@@ -92,8 +100,8 @@ export class Summary extends MetricBase {
     sum += value;
     count++;
 
-    this.#sums.set(key, sum);
-    this.#counts.set(key, count);
+    data.sum = sum;
+    data.count = count;
   }
 
   /**
@@ -132,15 +140,15 @@ export class Summary extends MetricBase {
    */
   getQuantiles(labels?: Readonly<Record<string, string>>): ReadonlyMap<number, number> {
     const key = this.labelKey(labels);
-    const samples = this.#samples.get(key);
+    const data = this.#data.get(key);
 
-    if (!samples || samples.length === 0) {
+    if (!data || data.samples.length === 0) {
       return new Map();
     }
 
     const result = new Map<number, number>();
     for (const q of this.#quantiles) {
-      result.set(q, this.computeQuantile(samples, q));
+      result.set(q, this.computeQuantile(data.samples, q));
     }
     return result;
   }
@@ -153,7 +161,8 @@ export class Summary extends MetricBase {
    */
   getSum(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    return this.#sums.get(key) ?? 0;
+    const data = this.#data.get(key);
+    return data?.sum ?? 0;
   }
 
   /**
@@ -164,7 +173,8 @@ export class Summary extends MetricBase {
    */
   getCount(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    return this.#counts.get(key) ?? 0;
+    const data = this.#data.get(key);
+    return data?.count ?? 0;
   }
 
   /**
@@ -175,8 +185,8 @@ export class Summary extends MetricBase {
    */
   getSampleCount(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    const samples = this.#samples.get(key);
-    return samples?.length ?? 0;
+    const data = this.#data.get(key);
+    return data?.samples.length ?? 0;
   }
 
   /**
@@ -186,23 +196,42 @@ export class Summary extends MetricBase {
    */
   getAllQuantiles(): ReadonlyMap<
     string,
-    { quantiles: ReadonlyMap<number, number>; sum: number; count: number }
+    {
+      quantiles: ReadonlyMap<number, number>;
+      sum: number;
+      count: number;
+      labels?: Readonly<Record<string, string>>;
+    }
   > {
     const result = new Map<
       string,
-      { quantiles: ReadonlyMap<number, number>; sum: number; count: number }
+      {
+        quantiles: ReadonlyMap<number, number>;
+        sum: number;
+        count: number;
+        labels?: Readonly<Record<string, string>>;
+      }
     >();
-    for (const [key, samples] of this.#samples.entries()) {
-      if (samples.length > 0) {
+    for (const [key, data] of this.#data.entries()) {
+      if (data.samples.length > 0) {
         const quantiles = new Map<number, number>();
         for (const q of this.#quantiles) {
-          quantiles.set(q, this.computeQuantile(samples, q));
+          quantiles.set(q, this.computeQuantile(data.samples, q));
         }
-        result.set(key, {
+        const entry: {
+          quantiles: ReadonlyMap<number, number>;
+          sum: number;
+          count: number;
+          labels?: Readonly<Record<string, string>>;
+        } = {
           quantiles,
-          sum: this.#sums.get(key) ?? 0,
-          count: this.#counts.get(key) ?? 0,
-        });
+          sum: data.sum,
+          count: data.count,
+        };
+        if (data.labels) {
+          entry.labels = data.labels;
+        }
+        result.set(key, entry);
       }
     }
     return result;

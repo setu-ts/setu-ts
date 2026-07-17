@@ -16,11 +16,16 @@ const DEFAULT_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10
  *
  * `observe()` records a sample value into the appropriate bucket.
  */
+interface HistogramData {
+  bucketCounts: Map<number, number>;
+  sum: number;
+  count: number;
+  labels?: Readonly<Record<string, string>>;
+}
+
 export class Histogram extends MetricBase {
   readonly #buckets: readonly number[];
-  readonly #bucketCounts = new Map<string, Map<number, number>>();
-  readonly #sums = new Map<string, number>();
-  readonly #counts = new Map<string, number>();
+  readonly #bucketCounts = new Map<string, HistogramData>();
 
   /**
    * Creates a new histogram.
@@ -69,14 +74,18 @@ export class Histogram extends MetricBase {
         bucketCounts.set(bound, 0);
       }
       bucketCounts.set(Number.POSITIVE_INFINITY, 0);
-      this.#bucketCounts.set(key, bucketCounts);
-      this.#sums.set(key, 0);
-      this.#counts.set(key, 0);
+      const data: HistogramData = { bucketCounts, sum: 0, count: 0 };
+      if (labels) {
+        data.labels = labels;
+      }
+      this.#bucketCounts.set(key, data);
     }
 
-    const bucketCounts = this.#bucketCounts.get(key)!;
-    let sum = this.#sums.get(key)!;
-    let count = this.#counts.get(key)!;
+    const data = this.#bucketCounts.get(key)!;
+    let sum = data.sum;
+    let count = data.count;
+
+    const bucketCounts = data.bucketCounts;
 
     // Update sum and count
     sum += value;
@@ -92,8 +101,8 @@ export class Histogram extends MetricBase {
     // Update +Inf bucket (always incremented for values > all buckets)
     bucketCounts.set(Number.POSITIVE_INFINITY, bucketCounts.get(Number.POSITIVE_INFINITY)! + 1);
 
-    this.#sums.set(key, sum);
-    this.#counts.set(key, count);
+    data.sum = sum;
+    data.count = count;
   }
 
   /**
@@ -104,11 +113,11 @@ export class Histogram extends MetricBase {
    */
   getBucketCounts(labels?: Readonly<Record<string, string>>): ReadonlyMap<number, number> {
     const key = this.labelKey(labels);
-    const bucketCounts = this.#bucketCounts.get(key);
-    if (!bucketCounts) {
+    const data = this.#bucketCounts.get(key);
+    if (!data) {
       return new Map();
     }
-    return new Map(bucketCounts);
+    return new Map(data.bucketCounts);
   }
 
   /**
@@ -118,18 +127,37 @@ export class Histogram extends MetricBase {
    */
   getAllBucketCounts(): ReadonlyMap<
     string,
-    { buckets: ReadonlyMap<number, number>; sum: number; count: number }
+    {
+      buckets: ReadonlyMap<number, number>;
+      sum: number;
+      count: number;
+      labels?: Readonly<Record<string, string>>;
+    }
   > {
     const result = new Map<
       string,
-      { buckets: ReadonlyMap<number, number>; sum: number; count: number }
+      {
+        buckets: ReadonlyMap<number, number>;
+        sum: number;
+        count: number;
+        labels?: Readonly<Record<string, string>>;
+      }
     >();
-    for (const [key, bucketCounts] of this.#bucketCounts.entries()) {
-      result.set(key, {
-        buckets: new Map(bucketCounts),
-        sum: this.#sums.get(key) ?? 0,
-        count: this.#counts.get(key) ?? 0,
-      });
+    for (const [key, data] of this.#bucketCounts.entries()) {
+      const entry: {
+        buckets: ReadonlyMap<number, number>;
+        sum: number;
+        count: number;
+        labels?: Readonly<Record<string, string>>;
+      } = {
+        buckets: new Map(data.bucketCounts),
+        sum: data.sum,
+        count: data.count,
+      };
+      if (data.labels) {
+        entry.labels = data.labels;
+      }
+      result.set(key, entry);
     }
     return result;
   }
@@ -142,7 +170,8 @@ export class Histogram extends MetricBase {
    */
   getSum(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    return this.#sums.get(key) ?? 0;
+    const data = this.#bucketCounts.get(key);
+    return data?.sum ?? 0;
   }
 
   /**
@@ -153,6 +182,7 @@ export class Histogram extends MetricBase {
    */
   getCount(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    return this.#counts.get(key) ?? 0;
+    const data = this.#bucketCounts.get(key);
+    return data?.count ?? 0;
   }
 }

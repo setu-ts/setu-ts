@@ -11,8 +11,13 @@ import { MetricBase } from './base-metric.ts';
  *
  * `set()` sets the value, `inc()`/`dec()` adjust it.
  */
+interface GaugeValue {
+  value: number;
+  labels?: Readonly<Record<string, string>>;
+}
+
 export class Gauge extends MetricBase {
-  readonly #values = new Map<string, number>();
+  readonly #values = new Map<string, GaugeValue>();
 
   /**
    * Creates a new gauge.
@@ -33,7 +38,11 @@ export class Gauge extends MetricBase {
   set(value: number, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
     const key = this.labelKey(labels);
-    this.#values.set(key, value);
+    const entry: GaugeValue = { value };
+    if (labels) {
+      entry.labels = labels;
+    }
+    this.#values.set(key, entry);
   }
 
   /**
@@ -45,8 +54,12 @@ export class Gauge extends MetricBase {
   inc(value: number = 1, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
     const key = this.labelKey(labels);
-    const current = this.#values.get(key) ?? 0;
-    this.#values.set(key, current + value);
+    const current = this.#values.get(key)?.value ?? 0;
+    const entry: GaugeValue = { value: current + value };
+    if (labels) {
+      entry.labels = labels;
+    }
+    this.#values.set(key, entry);
   }
 
   /**
@@ -58,8 +71,12 @@ export class Gauge extends MetricBase {
   dec(value: number = 1, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
     const key = this.labelKey(labels);
-    const current = this.#values.get(key) ?? 0;
-    this.#values.set(key, current - value);
+    const current = this.#values.get(key)?.value ?? 0;
+    const entry: GaugeValue = { value: current - value };
+    if (labels) {
+      entry.labels = labels;
+    }
+    this.#values.set(key, entry);
   }
 
   /**
@@ -80,7 +97,7 @@ export class Gauge extends MetricBase {
    */
   getValue(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    return this.#values.get(key) ?? 0;
+    return this.#values.get(key)?.value ?? 0;
   }
 
   /**
@@ -89,6 +106,19 @@ export class Gauge extends MetricBase {
    * @returns A map of label keys to values
    */
   get values(): ReadonlyMap<string, number> {
+    const result = new Map<string, number>();
+    for (const [key, entry] of this.#values.entries()) {
+      result.set(key, entry.value);
+    }
+    return result;
+  }
+
+  /**
+   * Gets all value entries with labels.
+   *
+   * @returns A map of label keys to value entries
+   */
+  get valueEntries(): ReadonlyMap<string, GaugeValue> {
     return new Map(this.#values);
   }
 }

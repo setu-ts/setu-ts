@@ -11,8 +11,13 @@ import { MetricBase } from './base-metric.ts';
  *
  * `inc()` adds a non-negative value (default 1) to the counter.
  */
+interface CounterValue {
+  value: number;
+  labels?: Readonly<Record<string, string>>;
+}
+
 export class Counter extends MetricBase {
-  readonly #values = new Map<string, number>();
+  readonly #values = new Map<string, CounterValue>();
 
   /**
    * Creates a new counter.
@@ -36,8 +41,12 @@ export class Counter extends MetricBase {
     }
     this.validateLabels(labels);
     const key = this.labelKey(labels);
-    const current = this.#values.get(key) ?? 0;
-    this.#values.set(key, current + value);
+    const current = this.#values.get(key)?.value ?? 0;
+    const entry: CounterValue = { value: current + value };
+    if (labels) {
+      entry.labels = labels;
+    }
+    this.#values.set(key, entry);
   }
 
   /**
@@ -58,7 +67,7 @@ export class Counter extends MetricBase {
    */
   getValue(labels?: Readonly<Record<string, string>>): number {
     const key = this.labelKey(labels);
-    return this.#values.get(key) ?? 0;
+    return this.#values.get(key)?.value ?? 0;
   }
 
   /**
@@ -67,6 +76,19 @@ export class Counter extends MetricBase {
    * @returns A map of label keys to values
    */
   get values(): ReadonlyMap<string, number> {
+    const result = new Map<string, number>();
+    for (const [key, entry] of this.#values.entries()) {
+      result.set(key, entry.value);
+    }
+    return result;
+  }
+
+  /**
+   * Gets all value entries with labels.
+   *
+   * @returns A map of label keys to value entries
+   */
+  get valueEntries(): ReadonlyMap<string, CounterValue> {
     return new Map(this.#values);
   }
 }

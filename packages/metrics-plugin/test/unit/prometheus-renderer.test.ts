@@ -117,7 +117,7 @@ Deno.test('renderPrometheus — label escaping handles backslash and newline', (
     type: 'counter',
     help: 'Test',
     labels: ['method'],
-    values: new Map([['method=GET', { value: 1 }]]),
+    values: new Map([['method=GET', { value: 1, labels: { method: 'GET' } }]]),
   };
 
   const result = renderPrometheus([snapshot]);
@@ -168,6 +168,7 @@ Deno.test('renderPrometheus — histogram with labels emits correct format', () 
             [0.5, 4],
             [Number.POSITIVE_INFINITY, 5],
           ]),
+          labels: { method: 'GET', status: '200' },
         },
       ],
     ]),
@@ -191,8 +192,8 @@ Deno.test('renderPrometheus — counter with labels', () => {
     help: 'HTTP requests',
     labels: ['method', 'status'],
     values: new Map([
-      ['method=GET|status=200', { value: 10 }],
-      ['method=POST|status=201', { value: 5 }],
+      ['method=GET|status=200', { value: 10, labels: { method: 'GET', status: '200' } }],
+      ['method=POST|status=201', { value: 5, labels: { method: 'POST', status: '201' } }],
     ]),
   };
 
@@ -214,8 +215,8 @@ Deno.test('renderPrometheus — gauge with labels', () => {
     help: 'Active connections',
     labels: ['host'],
     values: new Map([
-      ['host=server1', { value: 100 }],
-      ['host=server2', { value: 200 }],
+      ['host=server1', { value: 100, labels: { host: 'server1' } }],
+      ['host=server2', { value: 200, labels: { host: 'server2' } }],
     ]),
   };
 
@@ -244,6 +245,7 @@ Deno.test('renderPrometheus — summary with labels', () => {
             [0.5, 5],
             [0.9, 9],
           ]),
+          labels: { endpoint: '/api/users' },
         },
       ],
     ]),
@@ -348,6 +350,7 @@ Deno.test('renderPrometheus — histogram with labels and sum/count', () => {
             [1, 3],
             [Number.POSITIVE_INFINITY, 5],
           ]),
+          labels: { method: 'GET' },
         },
       ],
     ]),
@@ -379,6 +382,7 @@ Deno.test('renderPrometheus — summary with labels', () => {
             [0.5, 10],
             [0.9, 15],
           ]),
+          labels: { method: 'POST' },
         },
       ],
     ]),
@@ -474,8 +478,8 @@ Deno.test('renderPrometheus — counter with multiple label sets', () => {
     help: 'Test counter',
     labels: ['method'],
     values: new Map([
-      ['method=GET', { value: 10 }],
-      ['method=POST', { value: 20 }],
+      ['method=GET', { value: 10, labels: { method: 'GET' } }],
+      ['method=POST', { value: 20, labels: { method: 'POST' } }],
     ]),
   };
 
@@ -593,37 +597,34 @@ Deno.test('renderPrometheus — histogram with single bucket', () => {
   assertStringIncludes(result, 'test_histogram_count 1');
 });
 
-Deno.test('renderPrometheus — extractLabelValue handles pipe in key', () => {
-  // Test the extractLabelValue function with a key containing pipe separator
+Deno.test('renderPrometheus — label values with pipe character are rendered correctly', () => {
+  // Test that label values containing pipe characters are not truncated
   const snapshot: MetricSnapshot = {
     name: 'test_counter',
     type: 'counter',
     help: 'Test',
-    labels: ['method', 'status'],
-    values: new Map([['method=GET|status=200', { value: 1 }]]),
+    labels: ['name'],
+    values: new Map([['name=a|b', { value: 1, labels: { name: 'a|b' } }]]),
   };
 
   const result = renderPrometheus([snapshot]);
 
-  assertStringIncludes(result, 'method="GET"');
-  assertStringIncludes(result, 'status="200"');
+  assertStringIncludes(result, 'name="a|b"');
 });
 
-Deno.test('renderPrometheus — formatLabels with null label value', () => {
-  // Test that formatLabels handles null label values correctly
+Deno.test('renderPrometheus — label values with equals character are rendered correctly', () => {
+  // Test that label values containing equals characters are not confused with label names
   const snapshot: MetricSnapshot = {
     name: 'test_counter',
     type: 'counter',
-    help: 'Test counter',
-    labels: ['method', 'status'],
-    values: new Map([
-      ['method=GET', { value: 1 }], // missing status label
-    ]),
+    help: 'Test',
+    labels: ['q'],
+    values: new Map([['q=x=y', { value: 1, labels: { q: 'x=y' } }]]),
   };
 
   const result = renderPrometheus([snapshot]);
-  // Should render with partial labels
-  assertStringIncludes(result, 'method="GET"');
+
+  assertStringIncludes(result, 'q="x=y"');
 });
 
 Deno.test('renderPrometheus — no-label histogram bucket format (no leading comma)', () => {
@@ -744,7 +745,7 @@ Deno.test('renderPrometheus — one-label counter format', () => {
     type: 'counter',
     help: 'Test',
     labels: ['method'],
-    values: new Map([['method=GET', { value: 10 }]]),
+    values: new Map([['method=GET', { value: 10, labels: { method: 'GET' } }]]),
   };
 
   const result = renderPrometheus([snapshot]);
@@ -760,7 +761,7 @@ Deno.test('renderPrometheus — one-label gauge format', () => {
     type: 'gauge',
     help: 'Test',
     labels: ['host'],
-    values: new Map([['host=server1', { value: 100 }]]),
+    values: new Map([['host=server1', { value: 100, labels: { host: 'server1' } }]]),
   };
 
   const result = renderPrometheus([snapshot]);
@@ -786,6 +787,7 @@ Deno.test('renderPrometheus — one-label histogram bucket format', () => {
             [0.1, 1],
             [Number.POSITIVE_INFINITY, 3],
           ]),
+          labels: { method: 'GET' },
         },
       ],
     ]),
@@ -814,6 +816,7 @@ Deno.test('renderPrometheus — one-label summary quantile format', () => {
           quantiles: new Map([
             [0.5, 5],
           ]),
+          labels: { endpoint: '/api' },
         },
       ],
     ]),
@@ -832,7 +835,10 @@ Deno.test('renderPrometheus — two-labels counter format', () => {
     type: 'counter',
     help: 'Test',
     labels: ['method', 'status'],
-    values: new Map([['method=GET|status=200', { value: 10 }]]),
+    values: new Map([['method=GET|status=200', {
+      value: 10,
+      labels: { method: 'GET', status: '200' },
+    }]]),
   };
 
   const result = renderPrometheus([snapshot]);
@@ -859,6 +865,7 @@ Deno.test('renderPrometheus — two-labels histogram bucket format', () => {
             [0.1, 4],
             [Number.POSITIVE_INFINITY, 5],
           ]),
+          labels: { method: 'GET', status: '200' },
         },
       ],
     ]),
@@ -889,6 +896,7 @@ Deno.test('renderPrometheus — two-labels summary quantile format', () => {
             [0.5, 5],
             [0.9, 9],
           ]),
+          labels: { endpoint: '/api', method: 'GET' },
         },
       ],
     ]),

@@ -255,17 +255,25 @@ export class MetricsService implements IMetricsService {
       let values: ReadonlyMap<string, MetricValue>;
 
       if (metric instanceof Counter) {
-        // Convert number values to MetricValue
+        // Convert number values to MetricValue with labels
         const map = new Map<string, MetricValue>();
-        for (const [key, val] of metric.values.entries()) {
-          map.set(key, { value: val });
+        for (const [key, entry] of metric.valueEntries.entries()) {
+          if (entry.labels) {
+            map.set(key, { value: entry.value, labels: entry.labels });
+          } else {
+            map.set(key, { value: entry.value });
+          }
         }
         values = map;
       } else if (metric instanceof Gauge) {
-        // Convert number values to MetricValue
+        // Convert number values to MetricValue with labels
         const map = new Map<string, MetricValue>();
-        for (const [key, val] of metric.values.entries()) {
-          map.set(key, { value: val });
+        for (const [key, entry] of metric.valueEntries.entries()) {
+          if (entry.labels) {
+            map.set(key, { value: entry.value, labels: entry.labels });
+          } else {
+            map.set(key, { value: entry.value });
+          }
         }
         values = map;
       } else if (metric instanceof Histogram) {
@@ -296,17 +304,31 @@ export class MetricsService implements IMetricsService {
     const histogram = metric as unknown as {
       getAllBucketCounts(): ReadonlyMap<
         string,
-        { buckets: ReadonlyMap<number, number>; sum: number; count: number }
+        {
+          buckets: ReadonlyMap<number, number>;
+          sum: number;
+          count: number;
+          labels?: Readonly<Record<string, string>>;
+        }
       >;
     };
 
     const allData = histogram.getAllBucketCounts();
     for (const [key, data] of allData.entries()) {
-      result.set(key, {
-        value: data.count,
-        sum: data.sum,
-        buckets: data.buckets,
-      });
+      if (data.labels) {
+        result.set(key, {
+          value: data.count,
+          sum: data.sum,
+          buckets: data.buckets,
+          labels: data.labels,
+        });
+      } else {
+        result.set(key, {
+          value: data.count,
+          sum: data.sum,
+          buckets: data.buckets,
+        });
+      }
     }
 
     return result;
@@ -320,17 +342,31 @@ export class MetricsService implements IMetricsService {
     const summary = metric as unknown as {
       getAllQuantiles(): ReadonlyMap<
         string,
-        { quantiles: ReadonlyMap<number, number>; sum: number; count: number }
+        {
+          quantiles: ReadonlyMap<number, number>;
+          sum: number;
+          count: number;
+          labels?: Readonly<Record<string, string>>;
+        }
       >;
     };
 
     const allData = summary.getAllQuantiles();
     for (const [key, data] of allData.entries()) {
-      result.set(key, {
-        value: data.count,
-        sum: data.sum,
-        quantiles: data.quantiles,
-      });
+      if (data.labels) {
+        result.set(key, {
+          value: data.count,
+          sum: data.sum,
+          quantiles: data.quantiles,
+          labels: data.labels,
+        });
+      } else {
+        result.set(key, {
+          value: data.count,
+          sum: data.sum,
+          quantiles: data.quantiles,
+        });
+      }
     }
 
     return result;

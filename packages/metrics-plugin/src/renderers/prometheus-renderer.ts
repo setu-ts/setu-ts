@@ -19,6 +19,26 @@ function escapeLabelValue(value: string): string {
 }
 
 /**
+ * Formats a metric value for Prometheus text format.
+ * Handles special values (Infinity, -Infinity, NaN) per Prometheus 0.0.4 spec.
+ *
+ * @param value - The value to format
+ * @returns The formatted value string
+ */
+function formatValue(value: number): string {
+  if (Number.isNaN(value)) {
+    return 'NaN';
+  }
+  if (value === Number.POSITIVE_INFINITY) {
+    return '+Inf';
+  }
+  if (value === Number.NEGATIVE_INFINITY) {
+    return '-Inf';
+  }
+  return String(value);
+}
+
+/**
  * Formats a label set as Prometheus labels string.
  *
  * @param labels - The label names
@@ -28,7 +48,7 @@ function escapeLabelValue(value: string): string {
  */
 function formatLabels(
   labels: readonly string[],
-  _values: ReadonlyMap<string, MetricValue>,
+  values: ReadonlyMap<string, MetricValue>,
   key?: string,
 ): string {
   if (labels.length === 0) {
@@ -40,10 +60,18 @@ function formatLabels(
     return '{}';
   }
 
+  // Get the labels from the MetricValue directly - no lossy round-trip
+  const value = values.get(key);
+  if (!value?.labels) {
+    return '{}';
+  }
+
+  // Sort label names for deterministic output
+  const sortedNames = [...labels].sort();
   const parts: string[] = [];
-  for (const name of labels) {
-    const labelValue = extractLabelValue(key, name);
-    if (labelValue !== null) {
+  for (const name of sortedNames) {
+    const labelValue = value.labels[name];
+    if (labelValue !== undefined) {
       parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
     }
   }
@@ -67,26 +95,6 @@ function appendLabel(baseLabels: string, newLabel: string): string {
 }
 
 /**
- * Extracts a label value from a label key string.
- *
- * @param key - The label key (e.g., "method=GET|status=200")
- * @param labelName - The label name to extract
- * @returns The label value, or null if not found
- */
-function extractLabelValue(key: string, labelName: string): string | null {
-  const pattern = `${labelName}=`;
-  const idx = key.indexOf(pattern);
-  if (idx === -1) {
-    return null;
-  }
-
-  const start = idx + pattern.length;
-  const end = key.indexOf('|', start);
-
-  return key.slice(start, end === -1 ? key.length : end);
-}
-
-/**
  * Renders a counter metric.
  *
  * @param snapshot - The metric snapshot
@@ -102,7 +110,7 @@ function renderCounter(snapshot: MetricSnapshot): string {
     const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const val = value.value ?? 0;
     // For no labels, don't emit braces
-    lines.push(`${snapshot.name}${labels} ${val}`);
+    lines.push(`${snapshot.name}${labels} ${formatValue(val)}`);
   }
 
   return lines.join('\n');
@@ -124,7 +132,7 @@ function renderGauge(snapshot: MetricSnapshot): string {
     const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const val = value.value ?? 0;
     // For no labels, don't emit braces
-    lines.push(`${snapshot.name}${labels} ${val}`);
+    lines.push(`${snapshot.name}${labels} ${formatValue(val)}`);
   }
 
   return lines.join('\n');
@@ -161,8 +169,8 @@ function renderHistogram(snapshot: MetricSnapshot): string {
     }
 
     // Emit sum and count (no braces for no-label case)
-    lines.push(`${snapshot.name}_sum${labels} ${value.sum!}`);
-    lines.push(`${snapshot.name}_count${labels} ${value.value!}`);
+    lines.push(`${snapshot.name}_sum${labels} ${formatValue(value.sum!)}`);
+    lines.push(`${snapshot.name}_count${labels} ${formatValue(value.value!)}`);
   }
 
   return lines.join('\n');
@@ -188,13 +196,13 @@ function renderSummary(snapshot: MetricSnapshot): string {
       for (const [quantile, val] of value.quantiles.entries()) {
         // Use appendLabel to handle empty labels correctly
         const qLabels = appendLabel(labels, `quantile="${quantile}"`);
-        lines.push(`${snapshot.name}${qLabels} ${val}`);
+        lines.push(`${snapshot.name}${qLabels} ${formatValue(val)}`);
       }
     }
 
     // Emit sum and count (no braces for no-label case)
-    lines.push(`${snapshot.name}_sum${labels} ${value.sum!}`);
-    lines.push(`${snapshot.name}_count${labels} ${value.value!}`);
+    lines.push(`${snapshot.name}_sum${labels} ${formatValue(value.sum!)}`);
+    lines.push(`${snapshot.name}_count${labels} ${formatValue(value.value!)}`);
   }
 
   return lines.join('\n');
