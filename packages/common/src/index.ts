@@ -101,7 +101,16 @@ export type {
   ValidationTarget,
 } from './services/validation.ts';
 export type { HealthCheckResult, HealthIndicatorFn, IHealthIndicator } from './services/health.ts';
-export type { IMetric, MetricConfig } from './services/metrics.ts';
+export type {
+  ICounter,
+  IGauge,
+  IHistogram,
+  IMetric,
+  IMetricsService,
+  ISummary,
+  MetricConfig,
+  MetricOptions,
+} from './services/metrics.ts';
 export type {
   IAuthorizationService,
   IAuthService,
