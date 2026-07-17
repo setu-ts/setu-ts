@@ -625,3 +625,315 @@ Deno.test('renderPrometheus — formatLabels with null label value', () => {
   // Should render with partial labels
   assertStringIncludes(result, 'method="GET"');
 });
+
+Deno.test('renderPrometheus — no-label histogram bucket format (no leading comma)', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_hist',
+    type: 'histogram',
+    help: 'Test',
+    labels: [],
+    values: new Map([
+      [
+        '',
+        {
+          value: 3,
+          sum: 10,
+          buckets: new Map([
+            [0.1, 1],
+            [Number.POSITIVE_INFINITY, 3],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should NOT contain leading comma
+  assertEquals(result.includes('{,le='), false, 'Should not have leading comma in bucket labels');
+
+  // Should have correct format: name_bucket{le="0.1"}
+  assertStringIncludes(result, 'test_hist_bucket{le="0.1"}');
+  assertStringIncludes(result, 'test_hist_bucket{le="+Inf"}');
+  assertStringIncludes(result, 'test_hist_sum 10');
+  assertStringIncludes(result, 'test_hist_count 3');
+});
+
+Deno.test('renderPrometheus — no-label counter renders line (not zero lines)', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: 10 }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should render as "name value" with no braces
+  assertStringIncludes(result, 'test_counter 10');
+
+  // Should NOT have empty braces for no-label case
+  assertEquals(
+    result.includes('test_counter{}'),
+    false,
+    'Should not have empty braces for no-label counter',
+  );
+});
+
+Deno.test('renderPrometheus — no-label gauge renders line (not zero lines)', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_gauge',
+    type: 'gauge',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: 42 }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should render as "name value" with no braces
+  assertStringIncludes(result, 'test_gauge 42');
+
+  // Should NOT have empty braces for no-label case
+  assertEquals(
+    result.includes('test_gauge{}'),
+    false,
+    'Should not have empty braces for no-label gauge',
+  );
+});
+
+Deno.test('renderPrometheus — no-label summary quantile format (no leading comma)', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_summary',
+    type: 'summary',
+    help: 'Test',
+    labels: [],
+    values: new Map([
+      [
+        '',
+        {
+          value: 3,
+          sum: 30,
+          quantiles: new Map([
+            [0.5, 5],
+            [0.9, 9],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should NOT contain leading comma
+  assertEquals(
+    result.includes('{,quantile='),
+    false,
+    'Should not have leading comma in quantile labels',
+  );
+
+  // Should have correct format: name{quantile="0.5"}
+  assertStringIncludes(result, 'test_summary{quantile="0.5"} 5');
+  assertStringIncludes(result, 'test_summary{quantile="0.9"} 9');
+});
+
+Deno.test('renderPrometheus — one-label counter format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test',
+    labels: ['method'],
+    values: new Map([['method=GET', { value: 10 }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{label="value"}
+  assertStringIncludes(result, 'test_counter{method="GET"} 10');
+  assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — one-label gauge format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_gauge',
+    type: 'gauge',
+    help: 'Test',
+    labels: ['host'],
+    values: new Map([['host=server1', { value: 100 }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{label="value"}
+  assertStringIncludes(result, 'test_gauge{host="server1"} 100');
+  assertEquals(result.includes('{,host='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — one-label histogram bucket format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_hist',
+    type: 'histogram',
+    help: 'Test',
+    labels: ['method'],
+    values: new Map([
+      [
+        'method=GET',
+        {
+          value: 3,
+          sum: 10,
+          buckets: new Map([
+            [0.1, 1],
+            [Number.POSITIVE_INFINITY, 3],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{method="GET",le="0.1"}
+  assertStringIncludes(result, 'test_hist_bucket{method="GET",le="0.1"}');
+  assertStringIncludes(result, 'test_hist_bucket{method="GET",le="+Inf"}');
+  assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — one-label summary quantile format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_summary',
+    type: 'summary',
+    help: 'Test',
+    labels: ['endpoint'],
+    values: new Map([
+      [
+        'endpoint=/api',
+        {
+          value: 3,
+          sum: 30,
+          quantiles: new Map([
+            [0.5, 5],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{endpoint="/api",quantile="0.5"}
+  assertStringIncludes(result, 'test_summary{endpoint="/api",quantile="0.5"} 5');
+  assertEquals(result.includes('{,endpoint='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — two-labels counter format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test',
+    labels: ['method', 'status'],
+    values: new Map([['method=GET|status=200', { value: 10 }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{label1="v1",label2="v2"}
+  assertStringIncludes(result, 'test_counter{method="GET",status="200"} 10');
+  assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — two-labels histogram bucket format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'http_duration',
+    type: 'histogram',
+    help: 'Test',
+    labels: ['method', 'status'],
+    values: new Map([
+      [
+        'method=GET|status=200',
+        {
+          value: 5,
+          sum: 50,
+          buckets: new Map([
+            [0.005, 2],
+            [0.1, 4],
+            [Number.POSITIVE_INFINITY, 5],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{method="GET",status="200",le="0.005"}
+  assertStringIncludes(result, 'http_duration_bucket{method="GET",status="200",le="0.005"}');
+  assertStringIncludes(result, 'http_duration_bucket{method="GET",status="200",le="0.1"}');
+  assertStringIncludes(result, 'http_duration_bucket{method="GET",status="200",le="+Inf"}');
+  assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — two-labels summary quantile format', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'response_time',
+    type: 'summary',
+    help: 'Test',
+    labels: ['endpoint', 'method'],
+    values: new Map([
+      [
+        'endpoint=/api|method=GET',
+        {
+          value: 3,
+          sum: 30,
+          quantiles: new Map([
+            [0.5, 5],
+            [0.9, 9],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should have correct format: name{endpoint="/api",method="GET",quantile="0.5"}
+  assertStringIncludes(result, 'response_time{endpoint="/api",method="GET",quantile="0.5"} 5');
+  assertStringIncludes(result, 'response_time{endpoint="/api",method="GET",quantile="0.9"} 9');
+  assertEquals(result.includes('{,endpoint='), false, 'Should not have leading comma');
+});
+
+Deno.test('renderPrometheus — customBuckets option has observable effect', () => {
+  const snapshot: MetricSnapshot = {
+    name: 'custom_hist',
+    type: 'histogram',
+    help: 'Test',
+    labels: [],
+    values: new Map([
+      [
+        '',
+        {
+          value: 5,
+          sum: 25,
+          buckets: new Map([
+            [0.01, 1],
+            [0.1, 3],
+            [10, 5],
+            [Number.POSITIVE_INFINITY, 5],
+          ]),
+        },
+      ],
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Custom bucket boundaries should be observable
+  assertStringIncludes(result, 'custom_hist_bucket{le="0.01"}');
+  assertStringIncludes(result, 'custom_hist_bucket{le="0.1"}');
+  assertStringIncludes(result, 'custom_hist_bucket{le="10"}');
+  assertStringIncludes(result, 'custom_hist_bucket{le="+Inf"}');
+
+  // Should NOT have default bucket boundaries
+  assertEquals(result.includes('le="0.005"'), false, 'Should not have default bucket 0.005');
+  assertEquals(result.includes('le="0.025"'), false, 'Should not have default bucket 0.025');
+});

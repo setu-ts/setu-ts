@@ -51,6 +51,22 @@ function formatLabels(
 }
 
 /**
+ * Appends an additional label to an existing label string.
+ * Handles the case where base labels are empty.
+ *
+ * @param baseLabels - The existing labels string (empty or {a="1",b="2"})
+ * @param newLabel - The new label to append (e.g., le="0.1")
+ * @returns The combined labels string
+ */
+function appendLabel(baseLabels: string, newLabel: string): string {
+  if (baseLabels === '') {
+    return `{${newLabel}}`;
+  }
+  // baseLabels is like {a="1",b="2"} - remove trailing } and append
+  return `${baseLabels.slice(0, -1)},${newLabel}}`;
+}
+
+/**
  * Extracts a label value from a label key string.
  *
  * @param key - The label key (e.g., "method=GET|status=200")
@@ -85,6 +101,7 @@ function renderCounter(snapshot: MetricSnapshot): string {
   for (const [key, value] of snapshot.values.entries()) {
     const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const val = value.value ?? 0;
+    // For no labels, don't emit braces
     lines.push(`${snapshot.name}${labels} ${val}`);
   }
 
@@ -106,6 +123,7 @@ function renderGauge(snapshot: MetricSnapshot): string {
   for (const [key, value] of snapshot.values.entries()) {
     const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const val = value.value ?? 0;
+    // For no labels, don't emit braces
     lines.push(`${snapshot.name}${labels} ${val}`);
   }
 
@@ -128,7 +146,6 @@ function renderHistogram(snapshot: MetricSnapshot): string {
   for (const [key, value] of snapshot.values.entries()) {
     // Format labels for this specific label set
     const labels = formatLabels(snapshot.labels, snapshot.values, key);
-    const labelsWithBraces = labels || '{}';
 
     // Emit bucket counts with cumulative sum
     if (value.buckets) {
@@ -137,13 +154,13 @@ function renderHistogram(snapshot: MetricSnapshot): string {
       for (const bound of sortedBuckets) {
         const count = value.buckets.get(bound)!;
         const le = bound === Number.POSITIVE_INFINITY ? '+Inf' : String(bound);
-        // For bucket lines, add le label to the existing labels
-        const bucketLabels = `${labelsWithBraces.slice(0, -1)},le="${le}"}`;
+        // For bucket lines, use appendLabel to handle empty labels correctly
+        const bucketLabels = appendLabel(labels, `le="${le}"`);
         lines.push(`${snapshot.name}_bucket${bucketLabels} ${count}`);
       }
     }
 
-    // Emit sum and count
+    // Emit sum and count (no braces for no-label case)
     lines.push(`${snapshot.name}_sum${labels} ${value.sum!}`);
     lines.push(`${snapshot.name}_count${labels} ${value.value!}`);
   }
@@ -169,12 +186,13 @@ function renderSummary(snapshot: MetricSnapshot): string {
     // Emit quantiles
     if (value.quantiles) {
       for (const [quantile, val] of value.quantiles.entries()) {
-        const qLabels = `${labels}{quantile="${quantile}"}`.replace('{}', '');
+        // Use appendLabel to handle empty labels correctly
+        const qLabels = appendLabel(labels, `quantile="${quantile}"`);
         lines.push(`${snapshot.name}${qLabels} ${val}`);
       }
     }
 
-    // Emit sum and count
+    // Emit sum and count (no braces for no-label case)
     lines.push(`${snapshot.name}_sum${labels} ${value.sum!}`);
     lines.push(`${snapshot.name}_count${labels} ${value.value!}`);
   }
