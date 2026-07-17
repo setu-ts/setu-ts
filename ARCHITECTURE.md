@@ -1524,10 +1524,15 @@ calling `next()` short-circuits the pipeline.
 
 ### Ordering
 
-Middleware is ordered by priority (lower numbers execute first):
+Middleware is ordered by priority (lower numbers execute first). **The pipeline is an onion**:
+pre-`next()` code runs in ascending priority order, then the route handler (terminal), then
+post-`next()` code unwinds in descending order. A LOW priority number is outermost (first inbound,
+last outbound).
 
 | Priority | Middleware                | Purpose                  |
 | -------- | ------------------------- | ------------------------ |
+| 0        | ErrorHandler              | Outermost error handler  |
+| 20       | MetricsMiddleware         | Record metrics           |
 | 50       | LoggingMiddleware         | Log incoming request     |
 | 100      | RequestIdMiddleware       | Generate request ID      |
 | 150      | CorrelationIdMiddleware   | Propagate correlation ID |
@@ -1536,10 +1541,6 @@ Middleware is ordered by priority (lower numbers execute first):
 | 300      | AuthMiddleware            | Authenticate request     |
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
-| 500      | RouteHandler              | Execute route handler    |
-| 600      | ResponseInterceptors      | Transform response       |
-| 700      | MetricsMiddleware         | Record metrics           |
-| 800      | ErrorHandler              | Handle errors            |
 
 ### Registration
 
