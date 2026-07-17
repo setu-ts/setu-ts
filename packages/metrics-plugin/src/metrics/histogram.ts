@@ -114,6 +114,29 @@ export class Histogram extends MetricBase {
   }
 
   /**
+   * Gets all bucket counts for all observed label sets.
+   *
+   * @returns A map of label keys to their bucket counts, sum, and count
+   */
+  getAllBucketCounts(): ReadonlyMap<
+    string,
+    { buckets: ReadonlyMap<number, number>; sum: number; count: number }
+  > {
+    const result = new Map<
+      string,
+      { buckets: ReadonlyMap<number, number>; sum: number; count: number }
+    >();
+    for (const [key, bucketCounts] of this.#bucketCounts.entries()) {
+      result.set(key, {
+        buckets: new Map(bucketCounts),
+        sum: this.#sums.get(key) ?? 0,
+        count: this.#counts.get(key) ?? 0,
+      });
+    }
+    return result;
+  }
+
+  /**
    * Gets the sum for a label set.
    *
    * @param labels - Label values keyed by label name

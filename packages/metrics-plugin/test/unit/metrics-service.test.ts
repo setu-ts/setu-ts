@@ -144,3 +144,122 @@ Deno.test('MetricsService — register() for declarative registration', () => {
   assertEquals(metric.name, 'declared_metric');
   assertEquals(metric.type, 'counter');
 });
+
+Deno.test('MetricsService — register() for histogram', () => {
+  const service = new MetricsService();
+
+  const metric = service.register('histogram_metric', {
+    type: 'histogram',
+    help: 'Histogram metric',
+    buckets: [1, 5, 10],
+  });
+
+  assertEquals(metric.name, 'histogram_metric');
+  assertEquals(metric.type, 'histogram');
+});
+
+Deno.test('MetricsService — register() for summary', () => {
+  const service = new MetricsService();
+
+  const metric = service.register('summary_metric', {
+    type: 'summary',
+    help: 'Summary metric',
+  });
+
+  assertEquals(metric.name, 'summary_metric');
+  assertEquals(metric.type, 'summary');
+});
+
+Deno.test('MetricsService — register() throws on type mismatch', () => {
+  const service = new MetricsService();
+
+  service.register('test_metric', {
+    type: 'counter',
+    help: 'Counter',
+  });
+
+  assertThrows(
+    () =>
+      service.register('test_metric', {
+        type: 'gauge',
+        help: 'Gauge',
+      }),
+    Error,
+    'already registered as "counter"',
+  );
+});
+
+Deno.test('MetricsService — snapshot() includes histogram data', () => {
+  const service = new MetricsService();
+
+  const histogram = service.histogram('test_histogram', {
+    help: 'Test histogram',
+    buckets: [1, 5],
+  });
+
+  histogram.observe(3);
+  histogram.observe(10);
+
+  const snapshot = service.snapshot();
+  const histogramSnapshot = snapshot.find((s) => s.name === 'test_histogram');
+
+  assertEquals(histogramSnapshot !== undefined, true);
+  assertEquals(histogramSnapshot?.type, 'histogram');
+  assertEquals(histogramSnapshot?.values.size, 1);
+});
+
+Deno.test('MetricsService — snapshot() includes summary data', () => {
+  const service = new MetricsService();
+
+  const summary = service.summary('test_summary', {
+    help: 'Test summary',
+  });
+
+  summary.observe(3);
+  summary.observe(10);
+
+  const snapshot = service.snapshot();
+  const summarySnapshot = snapshot.find((s) => s.name === 'test_summary');
+
+  assertEquals(summarySnapshot !== undefined, true);
+  assertEquals(summarySnapshot?.type, 'summary');
+  assertEquals(summarySnapshot?.values.size, 1);
+});
+
+Deno.test('MetricsService — render() produces Prometheus format', () => {
+  const service = new MetricsService();
+
+  const counter = service.counter('test_counter', {
+    help: 'Test counter',
+  });
+
+  counter.inc(10);
+
+  const rendered = service.render();
+
+  assertEquals(rendered.includes('# HELP test_counter Test counter'), true);
+  assertEquals(rendered.includes('# TYPE test_counter counter'), true);
+  assertEquals(rendered.includes('test_counter 10'), true);
+});
+
+Deno.test('MetricsService — defaultBuckets are used', () => {
+  const service = new MetricsService({
+    defaultBuckets: [0.1, 0.5, 1],
+  });
+
+  const histogram = service.histogram('test_histogram');
+
+  assertEquals(histogram.buckets.length, 3);
+  assertEquals(histogram.buckets[0], 0.1);
+});
+
+Deno.test('MetricsService — defaultQuantiles are used', () => {
+  const service = new MetricsService({
+    defaultQuantiles: [0.25, 0.75],
+  });
+
+  const summary = service.summary('test_summary');
+
+  assertEquals(summary.quantiles.length, 2);
+  assertEquals(summary.quantiles[0], 0.25);
+});

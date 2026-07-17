@@ -291,19 +291,48 @@ export class MetricsService implements IMetricsService {
   /**
    * Creates a snapshot for a histogram metric.
    */
-  #snapshotHistogram(_metric: IMetric & IHistogram): ReadonlyMap<string, MetricValue> {
-    // For now, return empty - the actual implementation would need
-    // to track all observed label sets
-    return new Map();
+  #snapshotHistogram(metric: IMetric & IHistogram): ReadonlyMap<string, MetricValue> {
+    const result = new Map<string, MetricValue>();
+    const histogram = metric as unknown as {
+      getAllBucketCounts(): ReadonlyMap<
+        string,
+        { buckets: ReadonlyMap<number, number>; sum: number; count: number }
+      >;
+    };
+
+    const allData = histogram.getAllBucketCounts();
+    for (const [key, data] of allData.entries()) {
+      result.set(key, {
+        value: data.count,
+        sum: data.sum,
+        buckets: data.buckets,
+      });
+    }
+
+    return result;
   }
 
   /**
    * Creates a snapshot for a summary metric.
    */
-  #snapshotSummary(_metric: IMetric & ISummary): ReadonlyMap<string, MetricValue> {
+  #snapshotSummary(metric: IMetric & ISummary): ReadonlyMap<string, MetricValue> {
     const result = new Map<string, MetricValue>();
+    const summary = metric as unknown as {
+      getAllQuantiles(): ReadonlyMap<
+        string,
+        { quantiles: ReadonlyMap<number, number>; sum: number; count: number }
+      >;
+    };
 
-    // Similar to histogram, we need to track all observed label sets
+    const allData = summary.getAllQuantiles();
+    for (const [key, data] of allData.entries()) {
+      result.set(key, {
+        value: data.count,
+        sum: data.sum,
+        quantiles: data.quantiles,
+      });
+    }
+
     return result;
   }
 

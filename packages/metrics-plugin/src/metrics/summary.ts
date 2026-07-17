@@ -178,4 +178,33 @@ export class Summary extends MetricBase {
     const samples = this.#samples.get(key);
     return samples?.length ?? 0;
   }
+
+  /**
+   * Gets all quantile data for all observed label sets.
+   *
+   * @returns A map of label keys to their quantiles, sum, and count
+   */
+  getAllQuantiles(): ReadonlyMap<
+    string,
+    { quantiles: ReadonlyMap<number, number>; sum: number; count: number }
+  > {
+    const result = new Map<
+      string,
+      { quantiles: ReadonlyMap<number, number>; sum: number; count: number }
+    >();
+    for (const [key, samples] of this.#samples.entries()) {
+      if (samples.length > 0) {
+        const quantiles = new Map<number, number>();
+        for (const q of this.#quantiles) {
+          quantiles.set(q, this.computeQuantile(samples, q));
+        }
+        result.set(key, {
+          quantiles,
+          sum: this.#sums.get(key) ?? 0,
+          count: this.#counts.get(key) ?? 0,
+        });
+      }
+    }
+    return result;
+  }
 }

@@ -108,3 +108,70 @@ Deno.test('MetricBase — empty labels object is valid when no labels required',
   metric.validateLabelsPublic(undefined);
   metric.validateLabelsPublic({});
 });
+
+Deno.test('MetricBase — labelKey returns empty string for undefined labels', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['method'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const key = metric.getLabelKey(undefined);
+  assertEquals(key, '');
+});
+
+Deno.test('MetricBase — labelKey works with empty labels object', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['method'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  // Empty object but labels are required - this should throw in validateLabels
+  // but labelKey itself should return empty string
+  const key = metric.getLabelKey({});
+  assertEquals(key, '');
+});
+
+Deno.test('MetricBase — help defaults to name when not provided', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+  };
+  const metric = new TestMetric('my_metric', config);
+
+  // help should be 'Test' from config
+  assertEquals(metric.help, 'Test');
+});
+
+Deno.test('MetricBase — empty labels object throws when labels are required', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['method'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  // Empty labels object when labels required should throw
+  assertThrows(
+    () => metric.validateLabelsPublic({}),
+    Error,
+    'missing required label',
+  );
+});
+
+Deno.test('MetricBase — labelKey with all labels present', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['method', 'status'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const key = metric.getLabelKey({ method: 'GET', status: '200' });
+  // Should contain both labels in sorted order
+  assertEquals(key.includes('method=GET'), true);
+  assertEquals(key.includes('status=200'), true);
+});

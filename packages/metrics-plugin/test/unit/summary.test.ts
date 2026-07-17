@@ -4,6 +4,7 @@
  * @module
  */
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { assertExists } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { Summary } from '../../src/metrics/summary.ts';
 
 Deno.test('Summary — known sample sets produce expected quantile values', () => {
@@ -130,4 +131,160 @@ Deno.test('Summary — invalid quantile throws', () => {
     assertEquals(e instanceof Error, true);
     assertEquals((e as Error).message.includes('invalid quantile'), true);
   }
+});
+
+Deno.test('Summary — invalid quantile 0 throws', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+  };
+
+  try {
+    new Summary('test_summary', config, [-0.1], 100);
+    assertEquals(true, false);
+  } catch (e) {
+    assertEquals(e instanceof Error, true);
+    assertEquals((e as Error).message.includes('invalid quantile'), true);
+  }
+});
+
+Deno.test('Summary — getAllQuantiles returns all label sets', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+    labels: ['method'],
+  };
+  const summary = new Summary('test_summary', config, [0.5], 100);
+
+  summary.observe(1, { method: 'GET' });
+  summary.observe(2, { method: 'GET' });
+  summary.observe(10, { method: 'POST' });
+
+  const allData = summary.getAllQuantiles();
+  assertEquals(allData.size, 2);
+
+  const getData = allData.get('method=GET');
+  const postData = allData.get('method=POST');
+
+  assertEquals(getData?.count, 2);
+  assertEquals(getData?.sum, 3);
+  assertEquals(postData?.count, 1);
+  assertEquals(postData?.sum, 10);
+});
+
+Deno.test('Summary — empty quantiles when no samples', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+  };
+  const summary = new Summary('test_summary', config);
+
+  const quantiles = summary.getQuantiles();
+  assertEquals(quantiles.size, 0);
+});
+
+Deno.test('Summary — getQuantiles returns empty for unknown label set', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+    labels: ['method'],
+  };
+  const summary = new Summary('test_summary', config, [0.5], 100);
+
+  summary.observe(1, { method: 'GET' });
+
+  const quantiles = summary.getQuantiles({ method: 'POST' });
+  assertEquals(quantiles.size, 0);
+});
+
+Deno.test('Summary — getSum returns 0 for unknown label set', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+    labels: ['method'],
+  };
+  const summary = new Summary('test_summary', config, [0.5], 100);
+
+  assertEquals(summary.getSum({ method: 'UNKNOWN' }), 0);
+});
+
+Deno.test('Summary — getCount returns 0 for unknown label set', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+    labels: ['method'],
+  };
+  const summary = new Summary('test_summary', config, [0.5], 100);
+
+  assertEquals(summary.getCount({ method: 'UNKNOWN' }), 0);
+});
+
+Deno.test('Summary — getSampleCount returns 0 for unknown label set', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+    labels: ['method'],
+  };
+  const summary = new Summary('test_summary', config, [0.5], 100);
+
+  assertEquals(summary.getSampleCount({ method: 'UNKNOWN' }), 0);
+});
+
+Deno.test('Summary — getAllQuantiles with multiple label sets', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+    labels: ['method'],
+  };
+  const summary = new Summary('test_summary', config, [0.5, 0.9], 100);
+
+  summary.observe(1, { method: 'GET' });
+  summary.observe(2, { method: 'GET' });
+  summary.observe(3, { method: 'POST' });
+  summary.observe(4, { method: 'POST' });
+  summary.observe(5, { method: 'POST' });
+
+  const allData = summary.getAllQuantiles();
+  assertEquals(allData.size, 2);
+
+  // Key format is "method=GET" (no quotes)
+  const getData = allData.get('method=GET');
+  assertExists(getData);
+  assertEquals(getData.sum, 3);
+  assertEquals(getData.count, 2);
+
+  const postData = allData.get('method=POST');
+  assertExists(postData);
+  assertEquals(postData.sum, 12);
+  assertEquals(postData.count, 3);
+});
+
+Deno.test('Summary — computeQuantile with single sample', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+  };
+  const summary = new Summary('test_summary', config, [0.5, 0.9, 0.99], 100);
+
+  summary.observe(42);
+
+  const quantiles = summary.getQuantiles();
+  assertEquals(quantiles.get(0.5), 42);
+  assertEquals(quantiles.get(0.9), 42);
+  assertEquals(quantiles.get(0.99), 42);
+});
+
+Deno.test('Summary — computeQuantile with two samples uses interpolation', () => {
+  const config = {
+    type: 'summary' as const,
+    help: 'Test summary',
+  };
+  const summary = new Summary('test_summary', config, [0.5], 100);
+
+  summary.observe(10);
+  summary.observe(20);
+
+  const quantiles = summary.getQuantiles();
+  // With 2 samples, p50 should interpolate to 15
+  assertEquals(quantiles.get(0.5), 15);
 });

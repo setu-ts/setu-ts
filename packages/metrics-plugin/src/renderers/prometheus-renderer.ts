@@ -23,35 +23,38 @@ function escapeLabelValue(value: string): string {
  *
  * @param labels - The label names
  * @param values - The label values map
+ * @param key - Optional key to extract labels from (for per-label-set rendering)
  * @returns The formatted labels string (including braces)
  */
-function formatLabels(labels: readonly string[], values: ReadonlyMap<string, MetricValue>): string {
+function formatLabels(
+  labels: readonly string[],
+  values: ReadonlyMap<string, MetricValue>,
+  key?: string,
+): string {
   if (labels.length === 0) {
     return '';
   }
 
-  const parts: string[] = [];
-  for (const name of labels) {
-    for (const [_key, _val] of values.entries()) {
-      if (_key.includes(name + '=')) {
-        const labelValue = extractLabelValue(_key, name);
-        if (labelValue !== null) {
-          parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
-          break;
-        }
+  // If a specific key is provided, use it to extract labels
+  if (key) {
+    const parts: string[] = [];
+    for (const name of labels) {
+      const labelValue = extractLabelValue(key, name);
+      if (labelValue !== null) {
+        parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
       }
     }
+    return parts.length > 0 ? `{${parts.join(',')}}` : '';
   }
 
-  if (parts.length === 0) {
-    // Try to extract from the first value's key
-    const firstKey = values.keys().next().value;
-    if (firstKey) {
-      for (const name of labels) {
-        const labelValue = extractLabelValue(firstKey, name);
-        if (labelValue !== null) {
-          parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
-        }
+  // Fallback: try to extract from the first value's key
+  const parts: string[] = [];
+  const firstKey = values.keys().next().value;
+  if (firstKey) {
+    for (const name of labels) {
+      const labelValue = extractLabelValue(firstKey, name);
+      if (labelValue !== null) {
+        parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
       }
     }
   }
@@ -97,8 +100,8 @@ function renderCounter(snapshot: MetricSnapshot): string {
   lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
   lines.push(`# TYPE ${snapshot.name} counter`);
 
-  for (const [_key, value] of snapshot.values.entries()) {
-    const labels = formatLabels(snapshot.labels, snapshot.values);
+  for (const [key, value] of snapshot.values.entries()) {
+    const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const val = value.value ?? 0;
     lines.push(`${snapshot.name}${labels} ${val}`);
   }
@@ -118,8 +121,8 @@ function renderGauge(snapshot: MetricSnapshot): string {
   lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
   lines.push(`# TYPE ${snapshot.name} gauge`);
 
-  for (const [_key, value] of snapshot.values.entries()) {
-    const labels = formatLabels(snapshot.labels, snapshot.values);
+  for (const [key, value] of snapshot.values.entries()) {
+    const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const val = value.value ?? 0;
     lines.push(`${snapshot.name}${labels} ${val}`);
   }
@@ -140,21 +143,23 @@ function renderHistogram(snapshot: MetricSnapshot): string {
   lines.push(`# TYPE ${snapshot.name} histogram`);
 
   // Histograms need special handling for buckets
-  // This is a simplified implementation
-  for (const [_key, value] of snapshot.values.entries()) {
-    const labels = formatLabels(snapshot.labels, snapshot.values);
+  for (const [key, value] of snapshot.values.entries()) {
+    // Format labels for this specific label set
+    const labels = formatLabels(snapshot.labels, snapshot.values, key);
     const labelsWithBraces = labels || '{}';
 
-    // Emit bucket counts
+    // Emit bucket counts with cumulative sum
     if (value.buckets) {
       const sortedBuckets = Array.from(value.buckets.keys()).sort((a, b) => a - b);
-      let cumulative = 0;
 
       for (const bound of sortedBuckets) {
         const count = value.buckets.get(bound) ?? 0;
-        cumulative += count;
         const le = bound === Number.POSITIVE_INFINITY ? '+Inf' : String(bound);
-        lines.push(`${snapshot.name}_bucket${labelsWithBraces} le="${le}" ${cumulative}`);
+        // For bucket lines, add le label to the existing labels
+        const bucketLabels = labelsWithBraces
+          ? `${labelsWithBraces.slice(0, -1)},le="${le}"}`
+          : `{le="${le}"}`;
+        lines.push(`${snapshot.name}_bucket${bucketLabels} ${count}`);
       }
     }
 
@@ -182,8 +187,8 @@ function renderSummary(snapshot: MetricSnapshot): string {
   lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
   lines.push(`# TYPE ${snapshot.name} summary`);
 
-  for (const [_key, value] of snapshot.values.entries()) {
-    const labels = formatLabels(snapshot.labels, snapshot.values);
+  for (const [key, value] of snapshot.values.entries()) {
+    const labels = formatLabels(snapshot.labels, snapshot.values, key);
 
     // Emit quantiles
     if (value.quantiles) {
