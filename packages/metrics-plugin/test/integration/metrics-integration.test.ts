@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { describe, it } from '@std/testing/bdd';
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { MetricsPlugin } from '../../src/index.ts';
 import type { MetricsService } from '../../src/services/metrics-service.ts';
@@ -102,146 +103,148 @@ function createFakeContext() {
   };
 }
 
-Deno.test('Integration — plugin registers IMetricsService', async () => {
-  const plugin = MetricsPlugin();
-  const ctx = createFakeContext();
+describe('Integration', () => {
+  it('plugin registers IMetricsService', async () => {
+    const plugin = MetricsPlugin();
+    const ctx = createFakeContext();
 
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
 
-  const service = ctx.services.get<IMetricsService>(CAPABILITIES.METRICS);
-  assertEquals(service !== undefined, true);
-  assertEquals(typeof service?.counter, 'function');
-});
-
-Deno.test('Integration — service records and renders metrics', async () => {
-  const plugin = MetricsPlugin();
-  const ctx = createFakeContext();
-
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
-
-  const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-
-  // Record some metrics
-  const counter = service?.counter('test_counter', { help: 'Test counter' });
-  counter?.inc(10);
-
-  const gauge = service?.gauge('test_gauge', { help: 'Test gauge' });
-  gauge?.set(42);
-
-  // Render should produce Prometheus format
-  const rendered = service?.render();
-  assertEquals(typeof rendered, 'string');
-  assertEquals(rendered!.length > 0, true);
-});
-
-Deno.test('Integration — /metrics route returns Prometheus format', async () => {
-  const plugin = MetricsPlugin({ defaultMetrics: false }); // Disable auto middleware
-  const ctx = createFakeContext();
-
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
-
-  // Find the /metrics route handler
-  const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
-  assertEquals(metricsRoute !== undefined, true);
-
-  // The handler should exist
-  assertEquals(metricsRoute?.handler !== undefined, true);
-});
-
-Deno.test('Integration — custom metrics are registered', async () => {
-  const plugin = MetricsPlugin({
-    customMetrics: [
-      {
-        name: 'custom_counter',
-        type: 'counter',
-        help: 'Custom counter',
-      },
-    ],
+    const service = ctx.services.get<IMetricsService>(CAPABILITIES.METRICS);
+    assertEquals(service !== undefined, true);
+    assertEquals(typeof service?.counter, 'function');
   });
-  const ctx = createFakeContext();
 
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
+  it('service records and renders metrics', async () => {
+    const plugin = MetricsPlugin();
+    const ctx = createFakeContext();
 
-  // Trigger onInit
-  for (const hook of ctx.lifecycleHooks.onInit ?? []) {
-    hook();
-  }
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
 
-  const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-  const metric = service?.get('custom_counter');
-  assertEquals(metric !== undefined, true);
-  assertEquals(metric?.type, 'counter');
-});
+    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
 
-Deno.test('Integration — HTTP metrics are registered with defaultMetrics', async () => {
-  const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: true });
-  const ctx = createFakeContext();
+    // Record some metrics
+    const counter = service?.counter('test_counter', { help: 'Test counter' });
+    counter?.inc(10);
 
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
+    const gauge = service?.gauge('test_gauge', { help: 'Test gauge' });
+    gauge?.set(42);
 
-  const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-
-  // Check that HTTP metrics exist
-  assertEquals(service?.get('http_request_duration_seconds') !== undefined, true);
-  assertEquals(service?.get('http_requests_total') !== undefined, true);
-  assertEquals(service?.get('http_request_errors_total') !== undefined, true);
-  assertEquals(service?.get('http_active_requests') !== undefined, true);
-});
-
-Deno.test('Integration — middleware is registered at priority 20', async () => {
-  const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: true });
-  const ctx = createFakeContext();
-
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
-
-  const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
-  assertEquals(metricsMiddleware !== undefined, true);
-});
-
-Deno.test('Integration — defaultBuckets are used for histograms', async () => {
-  const plugin = MetricsPlugin({
-    defaultBuckets: [0.1, 0.5, 1],
-    defaultMetrics: false,
+    // Render should produce Prometheus format
+    const rendered = service?.render();
+    assertEquals(typeof rendered, 'string');
+    assertEquals(rendered!.length > 0, true);
   });
-  const ctx = createFakeContext();
 
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
+  it('/metrics route returns Prometheus format', async () => {
+    const plugin = MetricsPlugin({ defaultMetrics: false }); // Disable auto middleware
+    const ctx = createFakeContext();
 
-  const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-  const histogram = service?.histogram('test_histogram');
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
 
-  assertEquals(histogram?.buckets.length, 3);
-  assertEquals(histogram?.buckets[0], 0.1);
-});
+    // Find the /metrics route handler
+    const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
+    assertEquals(metricsRoute !== undefined, true);
 
-Deno.test('Integration — defaultQuantiles are used for summaries', async () => {
-  const plugin = MetricsPlugin({
-    defaultQuantiles: [0.25, 0.75],
-    defaultMetrics: false,
+    // The handler should exist
+    assertEquals(metricsRoute?.handler !== undefined, true);
   });
-  const ctx = createFakeContext();
 
-  await plugin.register(
-    ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-  );
+  it('custom metrics are registered', async () => {
+    const plugin = MetricsPlugin({
+      customMetrics: [
+        {
+          name: 'custom_counter',
+          type: 'counter',
+          help: 'Custom counter',
+        },
+      ],
+    });
+    const ctx = createFakeContext();
 
-  const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-  const summary = service?.summary('test_summary');
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
 
-  assertEquals(summary?.quantiles.length, 2);
-  assertEquals(summary?.quantiles[0], 0.25);
+    // Trigger onInit
+    for (const hook of ctx.lifecycleHooks.onInit ?? []) {
+      hook();
+    }
+
+    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
+    const metric = service?.get('custom_counter');
+    assertEquals(metric !== undefined, true);
+    assertEquals(metric?.type, 'counter');
+  });
+
+  it('HTTP metrics are registered with defaultMetrics', async () => {
+    const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: true });
+    const ctx = createFakeContext();
+
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
+
+    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
+
+    // Check that HTTP metrics exist
+    assertEquals(service?.get('http_request_duration_seconds') !== undefined, true);
+    assertEquals(service?.get('http_requests_total') !== undefined, true);
+    assertEquals(service?.get('http_request_errors_total') !== undefined, true);
+    assertEquals(service?.get('http_active_requests') !== undefined, true);
+  });
+
+  it('middleware is registered at priority 20', async () => {
+    const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: true });
+    const ctx = createFakeContext();
+
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
+
+    const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
+    assertEquals(metricsMiddleware !== undefined, true);
+  });
+
+  it('defaultBuckets are used for histograms', async () => {
+    const plugin = MetricsPlugin({
+      defaultBuckets: [0.1, 0.5, 1],
+      defaultMetrics: false,
+    });
+    const ctx = createFakeContext();
+
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
+
+    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
+    const histogram = service?.histogram('test_histogram');
+
+    assertEquals(histogram?.buckets.length, 3);
+    assertEquals(histogram?.buckets[0], 0.1);
+  });
+
+  it('defaultQuantiles are used for summaries', async () => {
+    const plugin = MetricsPlugin({
+      defaultQuantiles: [0.25, 0.75],
+      defaultMetrics: false,
+    });
+    const ctx = createFakeContext();
+
+    await plugin.register(
+      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
+    );
+
+    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
+    const summary = service?.summary('test_summary');
+
+    assertEquals(summary?.quantiles.length, 2);
+    assertEquals(summary?.quantiles[0], 0.25);
+  });
 });
