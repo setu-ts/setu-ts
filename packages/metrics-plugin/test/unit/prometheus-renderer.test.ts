@@ -945,3 +945,94 @@ Deno.test('renderPrometheus — customBuckets option has observable effect', () 
   assertEquals(result.includes('le="0.005"'), false, 'Should not have default bucket 0.005');
   assertEquals(result.includes('le="0.025"'), false, 'Should not have default bucket 0.025');
 });
+
+Deno.test('renderPrometheus — formatValue handles NaN', () => {
+  // Test that formatValue correctly formats NaN as "NaN"
+  const snapshot: MetricSnapshot = {
+    name: 'test_gauge',
+    type: 'gauge',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: NaN }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  assertStringIncludes(result, 'test_gauge NaN');
+});
+
+Deno.test('renderPrometheus — formatValue handles +Inf', () => {
+  // Test that formatValue correctly formats positive infinity as "+Inf"
+  const snapshot: MetricSnapshot = {
+    name: 'test_gauge',
+    type: 'gauge',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: Number.POSITIVE_INFINITY }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  assertStringIncludes(result, 'test_gauge +Inf');
+});
+
+Deno.test('renderPrometheus — formatValue handles -Inf', () => {
+  // Test that formatValue correctly formats negative infinity as "-Inf"
+  const snapshot: MetricSnapshot = {
+    name: 'test_gauge',
+    type: 'gauge',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: Number.NEGATIVE_INFINITY }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  assertStringIncludes(result, 'test_gauge -Inf');
+});
+
+Deno.test('renderPrometheus — formatLabels with key but no labels in value returns {}', () => {
+  // Test that when a key is provided but the value has no labels, formatLabels returns {}
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test',
+    labels: ['method'],
+    values: new Map([['', { value: 1 }]]), // key is empty string but no labels property
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  // Should return {} for no-label case even when labels array is defined
+  assertStringIncludes(result, 'test_counter{} 1');
+});
+
+Deno.test('renderPrometheus — renderCounter with undefined value uses 0', () => {
+  // Test that renderCounter handles undefined value by using 0
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: undefined as unknown as number }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  assertStringIncludes(result, 'test_counter 0');
+});
+
+Deno.test('renderPrometheus — renderGauge with undefined value uses 0', () => {
+  // Test that renderGauge handles undefined value by using 0
+  const snapshot: MetricSnapshot = {
+    name: 'test_gauge',
+    type: 'gauge',
+    help: 'Test',
+    labels: [],
+    values: new Map([['', { value: undefined as unknown as number }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  assertStringIncludes(result, 'test_gauge 0');
+});

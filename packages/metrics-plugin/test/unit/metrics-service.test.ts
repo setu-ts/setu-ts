@@ -259,7 +259,176 @@ Deno.test('MetricsService — defaultQuantiles are used', () => {
   });
 
   const summary = service.summary('test_summary');
-
   assertEquals(summary.quantiles.length, 2);
   assertEquals(summary.quantiles[0], 0.25);
+});
+
+Deno.test('MetricsService — counter type mismatch throws', () => {
+  const service = new MetricsService();
+
+  service.counter('test_metric');
+
+  // Try to get it as gauge - should throw
+  assertThrows(
+    () => service.gauge('test_metric'),
+    Error,
+    'already registered as "counter"',
+  );
+});
+
+Deno.test('MetricsService — gauge type mismatch throws', () => {
+  const service = new MetricsService();
+
+  service.gauge('test_metric');
+
+  assertThrows(
+    () => service.histogram('test_metric'),
+    Error,
+    'already registered as "gauge"',
+  );
+});
+
+Deno.test('MetricsService — histogram type mismatch throws', () => {
+  const service = new MetricsService();
+
+  service.histogram('test_metric');
+
+  assertThrows(
+    () => service.summary('test_metric'),
+    Error,
+    'already registered as "histogram"',
+  );
+});
+
+Deno.test('MetricsService — summary type mismatch throws', () => {
+  const service = new MetricsService();
+
+  service.summary('test_metric');
+
+  assertThrows(
+    () => service.counter('test_metric'),
+    Error,
+    'already registered as "summary"',
+  );
+});
+
+Deno.test('MetricsService — register type mismatch throws', () => {
+  const service = new MetricsService();
+
+  service.register('test_metric', {
+    type: 'counter',
+    help: 'Counter',
+  });
+
+  assertThrows(
+    () =>
+      service.register('test_metric', {
+        type: 'gauge',
+        help: 'Gauge',
+      }),
+    Error,
+    'already registered as "counter"',
+  );
+});
+
+Deno.test('MetricsService — register unknown type throws', () => {
+  const service = new MetricsService();
+
+  assertThrows(
+    () =>
+      service.register('test_metric', {
+        type: 'unknown' as unknown as 'counter',
+        help: 'Unknown',
+      }),
+    Error,
+    'Unknown metric type',
+  );
+});
+
+Deno.test('MetricsService — snapshot with counter labels', () => {
+  const service = new MetricsService();
+
+  const counter = service.counter('test_counter', {
+    labels: ['method'],
+  });
+
+  counter.inc(10, { method: 'GET' });
+  counter.inc(5, { method: 'POST' });
+
+  const snapshot = service.snapshot();
+  const counterSnapshot = snapshot.find((s) => s.name === 'test_counter');
+
+  assertEquals(counterSnapshot !== undefined, true);
+  assertEquals(counterSnapshot?.values.size, 2);
+
+  // Check that labels are preserved
+  const entries = Array.from(counterSnapshot!.values.entries());
+  const firstEntry = entries[0][1];
+  assertEquals(firstEntry.labels !== undefined, true);
+});
+
+Deno.test('MetricsService — snapshot with gauge labels', () => {
+  const service = new MetricsService();
+
+  const gauge = service.gauge('test_gauge', {
+    labels: ['host'],
+  });
+
+  gauge.set(100, { host: 'server1' });
+  gauge.set(200, { host: 'server2' });
+
+  const snapshot = service.snapshot();
+  const gaugeSnapshot = snapshot.find((s) => s.name === 'test_gauge');
+
+  assertEquals(gaugeSnapshot !== undefined, true);
+  assertEquals(gaugeSnapshot?.values.size, 2);
+
+  const entries = Array.from(gaugeSnapshot!.values.entries());
+  const firstEntry = entries[0][1];
+  assertEquals(firstEntry.labels !== undefined, true);
+});
+
+Deno.test('MetricsService — snapshot with histogram labels', () => {
+  const service = new MetricsService();
+
+  const histogram = service.histogram('test_histogram', {
+    labels: ['method'],
+    buckets: [1, 5],
+  });
+
+  histogram.observe(3, { method: 'GET' });
+  histogram.observe(10, { method: 'GET' });
+
+  const snapshot = service.snapshot();
+  const histogramSnapshot = snapshot.find((s) => s.name === 'test_histogram');
+
+  assertEquals(histogramSnapshot !== undefined, true);
+  assertEquals(histogramSnapshot?.values.size, 1);
+
+  const entries = Array.from(histogramSnapshot!.values.entries());
+  const firstEntry = entries[0][1];
+  assertEquals(firstEntry.labels !== undefined, true);
+  assertEquals(firstEntry.buckets !== undefined, true);
+});
+
+Deno.test('MetricsService — snapshot with summary labels', () => {
+  const service = new MetricsService();
+
+  const summary = service.summary('test_summary', {
+    labels: ['endpoint'],
+  });
+
+  summary.observe(3, { endpoint: '/api/users' });
+  summary.observe(10, { endpoint: '/api/users' });
+
+  const snapshot = service.snapshot();
+  const summarySnapshot = snapshot.find((s) => s.name === 'test_summary');
+
+  assertEquals(summarySnapshot !== undefined, true);
+  assertEquals(summarySnapshot?.values.size, 1);
+
+  const entries = Array.from(summarySnapshot!.values.entries());
+  const firstEntry = entries[0][1];
+  assertEquals(firstEntry.labels !== undefined, true);
+  assertEquals(firstEntry.quantiles !== undefined, true);
 });
