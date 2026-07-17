@@ -40,7 +40,7 @@ export class Gauge extends MetricBase {
     const key = this.labelKey(labels);
     const entry: GaugeValue = { value };
     if (labels) {
-      entry.labels = labels;
+      entry.labels = { ...labels }; // Defensive shallow copy
     }
     this.#values.set(key, entry);
   }
@@ -57,7 +57,7 @@ export class Gauge extends MetricBase {
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current + value };
     if (labels) {
-      entry.labels = labels;
+      entry.labels = { ...labels }; // Defensive shallow copy
     }
     this.#values.set(key, entry);
   }
@@ -74,7 +74,7 @@ export class Gauge extends MetricBase {
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current - value };
     if (labels) {
-      entry.labels = labels;
+      entry.labels = { ...labels }; // Defensive shallow copy
     }
     this.#values.set(key, entry);
   }

@@ -44,7 +44,7 @@ export class Counter extends MetricBase {
     const current = this.#values.get(key)?.value ?? 0;
     const entry: CounterValue = { value: current + value };
     if (labels) {
-      entry.labels = labels;
+      entry.labels = { ...labels }; // Defensive shallow copy
     }
     this.#values.set(key, entry);
   }

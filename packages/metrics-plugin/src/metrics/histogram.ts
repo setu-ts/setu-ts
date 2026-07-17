@@ -76,7 +76,7 @@ export class Histogram extends MetricBase {
       bucketCounts.set(Number.POSITIVE_INFINITY, 0);
       const data: HistogramData = { bucketCounts, sum: 0, count: 0 };
       if (labels) {
-        data.labels = labels;
+        data.labels = { ...labels }; // Defensive shallow copy
       }
       this.#bucketCounts.set(key, data);
     }

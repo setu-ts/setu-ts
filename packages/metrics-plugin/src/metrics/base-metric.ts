@@ -101,8 +101,11 @@ export abstract class MetricBase implements IMetric {
     if (!labels) {
       return '';
     }
-    const keys = Object.keys(labels).sort();
-    return keys.map((k) => `${k}=${labels[k]}`).join('|');
+    // JSON.stringify of sorted entries ensures injectivity:
+    // - Distinct label-sets → distinct keys (no collision from |, =, or \ in values)
+    // - Same label-set → same key (stable)
+    // - Order-independent (entries sorted before stringify)
+    return JSON.stringify(Object.entries(labels).sort());
   }
 
   /**

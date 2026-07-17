@@ -80,7 +80,7 @@ export class Summary extends MetricBase {
     if (!this.#data.has(key)) {
       const data: SummaryData = { samples: [], sum: 0, count: 0 };
       if (labels) {
-        data.labels = labels;
+        data.labels = { ...labels }; // Defensive shallow copy
       }
       this.#data.set(key, data);
     }

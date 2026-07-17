@@ -163,8 +163,9 @@ Deno.test('Summary — getAllQuantiles returns all label sets', () => {
   const allData = summary.getAllQuantiles();
   assertEquals(allData.size, 2);
 
-  const getData = allData.get('method=GET');
-  const postData = allData.get('method=POST');
+  // New JSON.stringify-based key format
+  const getData = allData.get('[["method","GET"]]');
+  const postData = allData.get('[["method","POST"]]');
 
   assertEquals(getData?.count, 2);
   assertEquals(getData?.sum, 3);
@@ -247,13 +248,13 @@ Deno.test('Summary — getAllQuantiles with multiple label sets', () => {
   const allData = summary.getAllQuantiles();
   assertEquals(allData.size, 2);
 
-  // Key format is "method=GET" (no quotes)
-  const getData = allData.get('method=GET');
+  // New JSON.stringify-based key format
+  const getData = allData.get('[["method","GET"]]');
   assertExists(getData);
   assertEquals(getData.sum, 3);
   assertEquals(getData.count, 2);
 
-  const postData = allData.get('method=POST');
+  const postData = allData.get('[["method","POST"]]');
   assertExists(postData);
   assertEquals(postData.sum, 12);
   assertEquals(postData.count, 3);

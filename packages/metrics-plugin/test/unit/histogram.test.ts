@@ -119,8 +119,9 @@ Deno.test('Histogram — getAllBucketCounts returns all label sets', () => {
   const allData = histogram.getAllBucketCounts();
   assertEquals(allData.size, 2);
 
-  const getData = allData.get('method=GET');
-  const postData = allData.get('method=POST');
+  // New JSON.stringify-based key format
+  const getData = allData.get('[["method","GET"]]');
+  const postData = allData.get('[["method","POST"]]');
 
   assertEquals(getData?.count, 2);
   assertEquals(getData?.sum, 5);
@@ -314,13 +315,13 @@ Deno.test('Histogram — getAllBucketCounts with multiple label sets', () => {
   const allData = histogram.getAllBucketCounts();
   assertEquals(allData.size, 2);
 
-  // Key format is "method=GET" (no quotes)
-  const getData = allData.get('method=GET');
+  // New JSON.stringify-based key format
+  const getData = allData.get('[["method","GET"]]');
   assertExists(getData);
   assertEquals(getData.sum, 1);
   assertEquals(getData.count, 1);
 
-  const postData = allData.get('method=POST');
+  const postData = allData.get('[["method","POST"]]');
   assertExists(postData);
   assertEquals(postData.sum, 5);
   assertEquals(postData.count, 2);
@@ -362,7 +363,8 @@ Deno.test('Histogram — observe with labels that trigger fallback paths', () =>
   const allData = histogram.getAllBucketCounts();
   assertEquals(allData.size, 1);
 
-  const getData = allData.get('method=GET');
+  // New JSON.stringify-based key format
+  const getData = allData.get('[["method","GET"]]');
   assertExists(getData);
   // sum and count should be populated
   assertEquals(getData.sum, 1.5);
@@ -549,7 +551,8 @@ Deno.test('Histogram — getAllBucketCounts with single label set exercises loop
   const allData = histogram.getAllBucketCounts();
   assertEquals(allData.size, 1);
 
-  const endpointData = allData.get('endpoint=/api/users');
+  // New JSON.stringify-based key format
+  const endpointData = allData.get('[["endpoint","/api/users"]]');
   assertExists(endpointData);
   assertEquals(endpointData.count, 1);
   assertEquals(endpointData.sum, 0.3);

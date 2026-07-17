@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { assertEquals, assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { assertEquals, assertNotEquals, assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { MetricBase } from '../../src/metrics/base-metric.ts';
 
 /**
@@ -50,8 +50,8 @@ Deno.test('MetricBase — labelKey is deterministic and order-independent', () =
   const key2 = metric.getLabelKey(labels2);
 
   assertEquals(key1, key2);
-  assertEquals(key1.includes('method=GET'), true);
-  assertEquals(key1.includes('status=200'), true);
+  // New JSON.stringify-based format: sorted entries as JSON
+  assertEquals(key1, '[["method","GET"],["status","200"]]');
 });
 
 Deno.test('MetricBase — unknown label names are rejected', () => {
@@ -130,9 +130,9 @@ Deno.test('MetricBase — labelKey works with empty labels object', () => {
   const metric = new TestMetric('test_metric', config);
 
   // Empty object but labels are required - this should throw in validateLabels
-  // but labelKey itself should return empty string
+  // but labelKey itself should return JSON of empty array
   const key = metric.getLabelKey({});
-  assertEquals(key, '');
+  assertEquals(key, '[]');
 });
 
 Deno.test('MetricBase — help defaults to name when not provided', () => {
@@ -171,7 +171,75 @@ Deno.test('MetricBase — labelKey with all labels present', () => {
   const metric = new TestMetric('test_metric', config);
 
   const key = metric.getLabelKey({ method: 'GET', status: '200' });
-  // Should contain both labels in sorted order
-  assertEquals(key.includes('method=GET'), true);
-  assertEquals(key.includes('status=200'), true);
+  // New JSON.stringify-based format: sorted entries as JSON
+  assertEquals(key, '[["method","GET"],["status","200"]]');
+});
+
+Deno.test('MetricBase — labelKey is injective: multi-label values with | do not collide', () => {
+  // Regression test for F1: old key scheme (k=v|k2=v2) allowed collision when
+  // label values contained | or = characters.
+  // Example collision under old scheme:
+  //   {a:'1|b=2', b:'3'} → key "a=1|b=2|b=3"
+  //   {a:'1', b:'2|b=3'} → SAME key "a=1|b=2|b=3" (collision!)
+  // New scheme uses JSON.stringify(sorted entries) which is injective.
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['a', 'b'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const labels1 = { a: '1|b=2', b: '3' };
+  const labels2 = { a: '1', b: '2|b=3' };
+
+  const key1 = metric.getLabelKey(labels1);
+  const key2 = metric.getLabelKey(labels2);
+
+  // Keys must be distinct (no collision)
+  assertNotEquals(key1, key2);
+
+  // Each key must uniquely encode its label set
+  // key1 should encode [["a","1|b=2"],["b","3"]]
+  assertEquals(key1, '[["a","1|b=2"],["b","3"]]');
+  // key2 should encode [["a","1"],["b","2|b=3"]]
+  assertEquals(key2, '[["a","1"],["b","2|b=3"]]');
+});
+
+Deno.test('MetricBase — labelKey is order-independent (same labels, different order → same key)', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['a', 'b'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const labels1 = { a: '1', b: '2' };
+  const labels2 = { b: '2', a: '1' }; // Same labels, different order
+
+  const key1 = metric.getLabelKey(labels1);
+  const key2 = metric.getLabelKey(labels2);
+
+  assertEquals(key1, key2);
+  assertEquals(key1, '[["a","1"],["b","2"]]');
+});
+
+Deno.test('MetricBase — labelKey handles special characters in label values correctly', () => {
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['x'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  // Single label with | character
+  const key1 = metric.getLabelKey({ x: 'a|b' });
+  assertEquals(key1, '[["x","a|b"]]');
+
+  // Single label with = character
+  const key2 = metric.getLabelKey({ x: 'a=b' });
+  assertEquals(key2, '[["x","a=b"]]');
+
+  // Single label with \ character
+  const key3 = metric.getLabelKey({ x: 'a\\b' });
+  assertEquals(key3, '[["x","a\\\\b"]]');
 });

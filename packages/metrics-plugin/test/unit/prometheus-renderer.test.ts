@@ -398,9 +398,9 @@ Deno.test('renderPrometheus — summary with labels', () => {
   assertStringIncludes(result, 'test_summary_count');
 });
 
-Deno.test('renderPrometheus — extractLabelValue with unknown label', () => {
-  // Test that extractLabelValue returns null for unknown labels
-  // This is tested indirectly through formatLabels
+Deno.test('renderPrometheus — label rendering from MetricValue.labels handles partial labels', () => {
+  // Test that labels are rendered correctly from MetricValue.labels
+  // when some label values are missing (falls back to empty object for that entry)
   const snapshot: MetricSnapshot = {
     name: 'test_counter',
     type: 'counter',
