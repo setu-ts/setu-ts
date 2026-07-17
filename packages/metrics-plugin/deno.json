@@ -1,5 +1,8 @@
 {
   "name": "@hono-enterprise/metrics-plugin",
   "version": "0.1.0",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "@hono-enterprise/common": "../common/src/index.ts"
+  }
 }
