@@ -201,6 +201,29 @@ Deno.test('Gauge — dec with default value', () => {
   assertEquals(gauge.getValue(), 9);
 });
 
+Deno.test('Gauge — N1: undefined ≡ {} for no-label metrics (single series)', () => {
+  // N1 behavioral test: a no-label metric where set(10) (undefined) and set(3, {}) (empty object)
+  // are both used → the registry/snapshot holds ONE entry.
+  const config = {
+    type: 'gauge' as const,
+    help: 'Test gauge',
+  };
+  const gauge = new Gauge('test_gauge', config);
+
+  // Set with undefined (no labels)
+  gauge.set(10);
+  // Set with empty object
+  gauge.set(3, {});
+
+  // Both should access the same series (key = '')
+  // Last set wins for gauge, so value should be 3
+  assertEquals(gauge.getValue(), 3);
+
+  // The internal values map should have only ONE entry
+  assertEquals(gauge.values.size, 1);
+  assertEquals(gauge.values.get(''), 3);
+});
+
 Deno.test('Gauge — empty labels object when no labels configured', () => {
   const config = {
     type: 'gauge' as const,

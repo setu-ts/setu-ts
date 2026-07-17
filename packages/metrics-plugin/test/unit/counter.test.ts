@@ -108,3 +108,24 @@ Deno.test('Counter — values Map is readonly', () => {
   assertEquals(values instanceof Map, true);
   assertEquals(values.get(''), 10);
 });
+
+Deno.test('Counter — N1: undefined ≡ {} for no-label metrics (sums correctly)', () => {
+  // N1 behavioral test for counter: inc(5) and inc(7, {}) should sum to ONE series with value 12
+  const config = {
+    type: 'counter' as const,
+    help: 'Test counter',
+  };
+  const counter = new Counter('test_counter', config);
+
+  // Inc with undefined (no labels)
+  counter.inc(5);
+  // Inc with empty object
+  counter.inc(7, {});
+
+  // Both should access the same series (key = ''), values should sum
+  assertEquals(counter.getValue(), 12);
+
+  // The internal values map should have only ONE entry
+  assertEquals(counter.values.size, 1);
+  assertEquals(counter.values.get(''), 12);
+});

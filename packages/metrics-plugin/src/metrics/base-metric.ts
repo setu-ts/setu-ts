@@ -98,7 +98,7 @@ export abstract class MetricBase implements IMetric {
    * @returns A deterministic string key
    */
   protected labelKey(labels: Readonly<Record<string, string>> | undefined): string {
-    if (!labels) {
+    if (!labels || Object.keys(labels).length === 0) {
       return '';
     }
     // JSON.stringify of sorted entries ensures injectivity:

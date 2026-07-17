@@ -134,9 +134,9 @@ Deno.test('MetricBase — labelKey works with empty labels object', () => {
   const metric = new TestMetric('test_metric', config);
 
   // Empty object but labels are required - this should throw in validateLabels
-  // but labelKey itself should return JSON of empty array
+  // but labelKey itself now returns '' (N1 fix: {} ≡ undefined for no-label metrics)
   const key = metric.getLabelKey({});
-  assertEquals(key, '[]');
+  assertEquals(key, '');
 });
 
 Deno.test('MetricBase — help defaults to name when not provided', () => {
@@ -246,4 +246,82 @@ Deno.test('MetricBase — labelKey handles special characters in label values co
   // Single label with \ character
   const key3 = metric.getLabelKey({ x: 'a\\b' });
   assertEquals(key3, '[["x","a\\\\b"]]');
+});
+
+Deno.test('MetricBase — labelKey normalizes undefined and {} to empty string (N1 fix)', () => {
+  // N1: no-label metrics with undefined and {} must map to the SAME key ('')
+  // to avoid creating duplicate series.
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const keyUndefined = metric.getLabelKey(undefined);
+  const keyEmptyObj = metric.getLabelKey({});
+
+  // Both must be '' (the empty key for no-label metrics)
+  assertEquals(keyUndefined, '');
+  assertEquals(keyEmptyObj, '');
+  assertEquals(keyUndefined, keyEmptyObj);
+});
+
+Deno.test('MetricBase — labelKey preserves F1 injectivity for non-empty labels', () => {
+  // F1: distinct label-sets must produce distinct keys (no collision from |, =, \ in values)
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['a', 'b'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  // These two label-sets would collide under old k=v|k2=v2 scheme
+  const labels1 = { a: '1|b=2', b: '3' };
+  const labels2 = { a: '1', b: '2|b=3' };
+
+  const key1 = metric.getLabelKey(labels1);
+  const key2 = metric.getLabelKey(labels2);
+
+  // Keys must be distinct (no collision)
+  assertNotEquals(key1, key2);
+  assertEquals(key1, '[["a","1|b=2"],["b","3"]]');
+  assertEquals(key2, '[["a","1"],["b","2|b=3"]]');
+});
+
+Deno.test('MetricBase — labelKey is order-independent for non-empty labels', () => {
+  // Same label-set in different order must produce same key
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['a', 'b'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const labels1 = { a: '1', b: '2' };
+  const labels2 = { b: '2', a: '1' };
+
+  const key1 = metric.getLabelKey(labels1);
+  const key2 = metric.getLabelKey(labels2);
+
+  assertEquals(key1, key2);
+  assertEquals(key1, '[["a","1"],["b","2"]]');
+});
+
+Deno.test('MetricBase — labelKey handles special characters (B1)', () => {
+  // B1: single-label special chars must be properly encoded
+  const config = {
+    type: 'counter' as const,
+    help: 'Test',
+    labels: ['x'],
+  };
+  const metric = new TestMetric('test_metric', config);
+
+  const key1 = metric.getLabelKey({ x: 'a|b' });
+  assertEquals(key1, '[["x","a|b"]]');
+
+  const key2 = metric.getLabelKey({ x: 'c=d' });
+  assertEquals(key2, '[["x","c=d"]]');
+
+  const key3 = metric.getLabelKey({ x: 'e"f' });
+  assertEquals(key3, '[["x","e\\"f"]]');
 });
