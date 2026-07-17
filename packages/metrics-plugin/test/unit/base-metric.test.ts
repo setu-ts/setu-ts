@@ -3,7 +3,11 @@
  *
  * @module
  */
-import { assertEquals, assertNotEquals, assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import {
+  assertEquals,
+  assertNotEquals,
+  assertThrows,
+} from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import { MetricBase } from '../../src/metrics/base-metric.ts';
 
 /**
