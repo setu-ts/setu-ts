@@ -13,7 +13,7 @@ describe('HealthService', () => {
     const runtime = createFakeRuntime();
     const service = new HealthService(runtime);
 
-    service.registerIndicator('test', async () => ({ status: 'up' }));
+    service.registerIndicator('test', () => Promise.resolve({ status: 'up' }));
 
     // Verify indicator is registered by checking if it appears in a check
     expect(service).toBeDefined();
@@ -23,10 +23,10 @@ describe('HealthService', () => {
     const runtime = createFakeRuntime();
     const service = new HealthService(runtime);
 
-    service.registerIndicator('test', async () => ({ status: 'up' }));
+    service.registerIndicator('test', () => Promise.resolve({ status: 'up' }));
 
     expect(() => {
-      service.registerIndicator('test', async () => ({ status: 'down' }));
+      service.registerIndicator('test', () => Promise.resolve({ status: 'down' }));
     }).toThrow('Duplicate health indicator name: "test"');
   });
 
@@ -35,8 +35,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
-      service.registerIndicator('indicator2', async () => ({ status: 'up' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('indicator2', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.check();
 
@@ -50,8 +50,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
-      service.registerIndicator('indicator2', async () => ({ status: 'degraded' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('indicator2', () => Promise.resolve({ status: 'degraded' }));
 
       const report = await service.check();
 
@@ -62,8 +62,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
-      service.registerIndicator('indicator2', async () => ({ status: 'down' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('indicator2', () => Promise.resolve({ status: 'down' }));
 
       const report = await service.check();
 
@@ -74,7 +74,7 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.check();
 
@@ -85,10 +85,11 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({
-        status: 'up',
-        data: { version: '1.0.0' },
-      }));
+      service.registerIndicator('indicator1', () =>
+        Promise.resolve({
+          status: 'up',
+          data: { version: '1.0.0' },
+        }));
 
       const report = await service.check();
 
@@ -102,13 +103,14 @@ describe('HealthService', () => {
       const service = new HealthService(runtime);
 
       // Register self indicator
-      service.registerIndicator('self', async () => ({
-        status: 'up',
-        data: { platform: 'node' },
-      }));
+      service.registerIndicator('self', () =>
+        Promise.resolve({
+          status: 'up',
+          data: { platform: 'node' },
+        }));
 
       // Register other indicators
-      service.registerIndicator('other', async () => ({ status: 'up' }));
+      service.registerIndicator('other', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.checkLive();
 
@@ -120,7 +122,7 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.checkLive();
 
@@ -131,7 +133,7 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.checkLive();
 
@@ -144,9 +146,9 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
-      service.registerIndicator('contributed1', async () => ({ status: 'up' }));
-      service.registerIndicator('contributed2', async () => ({ status: 'up' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('contributed1', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('contributed2', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.checkReady();
 
@@ -159,8 +161,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
-      service.registerIndicator('contributed1', async () => ({ status: 'up' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('contributed1', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.checkReady();
 
@@ -171,8 +173,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
-      service.registerIndicator('contributed1', async () => ({ status: 'down' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('contributed1', () => Promise.resolve({ status: 'down' }));
 
       const report = await service.checkReady();
 
@@ -183,8 +185,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
-      service.registerIndicator('contributed1', async () => ({ status: 'degraded' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('contributed1', () => Promise.resolve({ status: 'degraded' }));
 
       const report = await service.checkReady();
 
@@ -195,7 +197,7 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('self', async () => ({ status: 'up' }));
+      service.registerIndicator('self', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.checkReady();
 
@@ -209,8 +211,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'degraded' }));
-      service.registerIndicator('indicator2', async () => ({ status: 'down' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'degraded' }));
+      service.registerIndicator('indicator2', () => Promise.resolve({ status: 'down' }));
 
       const report = await service.check();
 
@@ -221,8 +223,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
-      service.registerIndicator('indicator2', async () => ({ status: 'degraded' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('indicator2', () => Promise.resolve({ status: 'degraded' }));
 
       const report = await service.check();
 
@@ -233,8 +235,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
-      service.registerIndicator('indicator2', async () => ({ status: 'up' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator('indicator2', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.check();
 
@@ -248,11 +250,27 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: fixedTime, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator('indicator1', async () => ({ status: 'up' }));
+      service.registerIndicator('indicator1', () => Promise.resolve({ status: 'up' }));
 
       const report = await service.check();
 
       expect(report.timestamp).toBe('2021-01-01T00:00:00.000Z');
+    });
+  });
+
+  describe('checkLive() edge cases', () => {
+    it('should return empty report when self indicator is not found', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+
+      // Don't register self indicator - only register other indicators
+      service.registerIndicator('other', () => Promise.resolve({ status: 'up' }));
+
+      const report = await service.checkLive();
+
+      expect(report.status).toBe('up');
+      expect(report.timestamp).toBe('2001-09-09T01:46:40.000Z');
+      expect(Object.keys(report.checks)).toHaveLength(0);
     });
   });
 });

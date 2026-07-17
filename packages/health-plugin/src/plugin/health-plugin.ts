@@ -158,7 +158,7 @@ function createHealthHandler(
  * @param method - The method that produced the report
  * @returns The HTTP status code
  */
-function determineStatusCode(
+export function determineStatusCode(
   report: HealthReport,
   method: 'check' | 'checkLive' | 'checkReady',
 ): number {

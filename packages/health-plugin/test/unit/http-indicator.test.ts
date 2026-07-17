@@ -15,9 +15,10 @@ describe('createHttpIndicator', () => {
   });
 
   it('should return up on 2xx status', async () => {
-    const mockFetcher = async () => ({
-      status: 200,
-    } as Response);
+    const mockFetcher = () =>
+      Promise.resolve({
+        status: 200,
+      } as Response);
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
@@ -35,9 +36,10 @@ describe('createHttpIndicator', () => {
   });
 
   it('should return up on 3xx status', async () => {
-    const mockFetcher = async () => ({
-      status: 301,
-    } as Response);
+    const mockFetcher = () =>
+      Promise.resolve({
+        status: 301,
+      } as Response);
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
@@ -50,9 +52,10 @@ describe('createHttpIndicator', () => {
   });
 
   it('should return down on 4xx status', async () => {
-    const mockFetcher = async () => ({
-      status: 404,
-    } as Response);
+    const mockFetcher = () =>
+      Promise.resolve({
+        status: 404,
+      } as Response);
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
@@ -70,9 +73,10 @@ describe('createHttpIndicator', () => {
   });
 
   it('should return down on 5xx status', async () => {
-    const mockFetcher = async () => ({
-      status: 500,
-    } as Response);
+    const mockFetcher = () =>
+      Promise.resolve({
+        status: 500,
+      } as Response);
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
@@ -104,16 +108,17 @@ describe('createHttpIndicator', () => {
     );
   });
 
-  it('should return down on timeout', async () => {
-    // Skip this test - timeout behavior is tested via integration
-    // with a real fetcher that times out
-  });
+  it('should handle timeout via AbortError', async () => {
+    // Simulate a timeout by throwing an AbortError
+    const mockFetcher = () => {
+      const abortError = new DOMException('The operation was aborted', 'AbortError');
+      throw abortError;
+    };
 
-  it.skip('should handle timeout via real fetcher', async () => {
-    // This would require a real server to test
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
-      timeoutMs: 1,
+      timeoutMs: 5000,
+      fetcher: mockFetcher,
     });
 
     const result = await indicator.check();
@@ -126,10 +131,33 @@ describe('createHttpIndicator', () => {
     );
   });
 
+  it('should include error message for non-2xx/3xx status', async () => {
+    const mockFetcher = () =>
+      Promise.resolve({
+        status: 404,
+      } as Response);
+
+    const indicator = createHttpIndicator('test-api', {
+      url: 'http://example.com',
+      fetcher: mockFetcher,
+    });
+
+    const result = await indicator.check();
+
+    expect(result.status).toBe('down');
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        statusCode: 404,
+        error: 'Unexpected status code: 404',
+      }),
+    );
+  });
+
   it('should include latencyMs on success', async () => {
-    const mockFetcher = async () => ({
-      status: 200,
-    } as Response);
+    const mockFetcher = () =>
+      Promise.resolve({
+        status: 200,
+      } as Response);
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',

@@ -7,11 +7,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createHttpIndicator, HealthPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import type {
-  IApplication,
-  IPluginContext,
-  RuntimePlatform,
-} from '@hono-enterprise/common';
+import type { IApplication, IPluginContext, RuntimePlatform } from '@hono-enterprise/common';
 import type {
   ICliApi,
   IConfig,
@@ -119,10 +115,10 @@ describe('HealthPlugin integration', () => {
   });
 
   it('should handle createHttpIndicator factory', () => {
-    const mockFetcher = async () =>
-      ({
+    const mockFetcher = () =>
+      Promise.resolve({
         status: 200,
-      }) as Response;
+      } as Response);
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
