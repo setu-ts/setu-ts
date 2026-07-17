@@ -2294,12 +2294,40 @@ app.router.get('/beta', {
 
 ## Health
 
-Provides health check endpoints.
+Provides health check endpoints with pluggable indicators.
+
+### Service Interface
+
+Resolve the service via `ctx.services.get<IHealthService>('health')`. The service provides:
+
+```typescript
+interface IHealthService {
+  registerIndicator(name: string, indicator: HealthIndicatorFn): void;
+  check(): Promise<HealthReport>;
+  checkLive(): Promise<HealthReport>;
+  checkReady(): Promise<HealthReport>;
+}
+
+interface HealthReport {
+  readonly status: HealthStatus;
+  readonly timestamp: string;
+  readonly checks: Readonly<
+    Record<string, Readonly<HealthCheckResult & { readonly latencyMs?: number }>>
+  >;
+}
+
+interface HealthCheckResult {
+  readonly status: HealthStatus;
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
+type HealthStatus = 'up' | 'down' | 'degraded';
+```
 
 ### Registration
 
 ```typescript
-import { HealthPlugin } from '@hono-enterprise/health-plugin';
+import { createHttpIndicator, HealthPlugin } from '@hono-enterprise/health-plugin';
 
 app.register(HealthPlugin({
   endpoints: {
@@ -2308,9 +2336,10 @@ app.register(HealthPlugin({
     ready: '/ready',
   },
   indicators: [
-    'database',
-    'cache',
-    'queue',
+    createHttpIndicator('external-api', {
+      url: 'https://api.example.com/health',
+      timeoutMs: 3000,
+    }),
   ],
 }));
 ```
@@ -2338,21 +2367,36 @@ app.register({
 });
 ```
 
+### Endpoints
+
+| Endpoint  | Method | Description                            | Status Codes                          |
+| --------- | ------ | -------------------------------------- | ------------------------------------- |
+| `/health` | GET    | Overall health (all indicators)        | 200 (up/degraded), 503 (down)         |
+| `/live`   | GET    | Liveness (self indicator only)         | 200 (always, unless self is down)     |
+| `/ready`  | GET    | Readiness (all contributed indicators) | 200 (all up), 503 (any down/degraded) |
+
 ### Response
 
 ```json
 GET /health
 {
-  "status": "ok",
+  "status": "up",
   "timestamp": "2024-01-01T00:00:00.000Z",
   "checks": {
-    "database": { "status": "up", "latency": 5 },
-    "cache": { "status": "up", "latency": 2 },
-    "queue": { "status": "up", "latency": 10 },
-    "external-api": { "status": "down", "error": "Connection failed" }
+    "self": { "status": "up", "latencyMs": 1, "data": { "platform": "node", "version": "18.0.0", "hostname": "my-host" } },
+    "database": { "status": "up", "latencyMs": 5 },
+    "cache": { "status": "up", "latencyMs": 2 },
+    "external-api": { "status": "down", "latencyMs": 3000, "data": { "error": "timeout" } }
   }
 }
 ```
+
+**Status aggregation rules:**
+
+- `/live`: Always 200 as long as the process responds (self indicator always returns 'up')
+- `/ready`: 200 when all contributed indicators are 'up', 503 when any is 'degraded' or 'down'
+- `/health`: 200 when no participating indicator is 'down' (degraded stays 200), 503 when any is
+  'down'
 
 ---
 
@@ -3551,7 +3595,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                 |
 | Config              | `IConfig`                                                                                                                                                                                                                                |
 | Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                              |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`                                                                                                                                                                             |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                           |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                            |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                            |
 | Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                            |

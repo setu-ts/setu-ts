@@ -100,7 +100,13 @@ export type {
   ValidationIssue,
   ValidationTarget,
 } from './services/validation.ts';
-export type { HealthCheckResult, HealthIndicatorFn, IHealthIndicator } from './services/health.ts';
+export type {
+  HealthCheckResult,
+  HealthIndicatorFn,
+  HealthReport,
+  IHealthIndicator,
+  IHealthService,
+} from './services/health.ts';
 export type {
   ICounter,
   IGauge,

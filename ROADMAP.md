@@ -2257,32 +2257,44 @@ health.registerIndicator('external-api', async () => {
 
 **Built-in Indicators:**
 
-- Database, Cache, Queue, Disk, Memory, HTTP
+- **Self indicator**: Runtime liveness (always up, includes platform diagnostics)
+- **HTTP probe indicator**: Outbound URL health check with configurable timeout
+- **Contributed indicators**: Database, Cache, Queue, Scheduler indicators are self-registered by
+  their respective plugins via `ctx.health.register()`
+
+**Deferred:**
+
+- **Disk and Memory indicators**: Deferred pending a runtime resource-usage seam in
+  `IRuntimeServices` (same deferral as M19's memory/cpu collectors)
 
 **Implementation Files:**
 
 - `src/plugin/health-plugin.ts`
 - `src/services/health-service.ts`
-- `src/indicators/database-indicator.ts`
-- `src/indicators/cache-indicator.ts`
-- `src/indicators/queue-indicator.ts`
-- `src/indicators/disk-indicator.ts`
-- `src/indicators/memory-indicator.ts`
+- `src/indicators/self-indicator.ts`
 - `src/indicators/http-indicator.ts`
+- `src/interfaces/index.ts`
 - `src/index.ts`
 
 ### Tests
 
-- Health check execution
-- All indicators
-- Endpoint responses
+- HealthService indicator registration and duplicate detection
+- Health aggregation (worst-of: down > degraded > up)
+- Liveness vs readiness vs overall endpoints
+- Self indicator (always up with platform diagnostics)
+- HTTP indicator (up/down/timeout branches via injectable fetcher)
+- Plugin registration and endpoint routing
+- Contribution drain at onInit
+- Integration: full kernel with contributing plugins
 
 ### Deliverables
 
-- [ ] HealthPlugin
-- [ ] Built-in indicators
-- [ ] Health endpoints
-- [ ] Full test coverage
+- [x] HealthPlugin with configurable endpoints
+- [x] HealthService implementing IHealthService
+- [x] Self liveness indicator
+- [x] HTTP probe indicator
+- [x] Contribution drain at onInit
+- [x] Full test coverage (90%+ per file)
 
 ---
 
@@ -3458,7 +3470,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 17        | ✅     | http-security-plugin |
 | 18        | ✅     | scheduler-plugin     |
 | 19        | ✅     | metrics-plugin       |
-| 20        | ⬜     | health-plugin        |
+| 20        | ✅     | health-plugin        |
 | 21        | ⬜     | openapi-plugin       |
 | 22        | ⬜     | telemetry-plugin     |
 | 23        | ⬜     | secrets-plugin       |
