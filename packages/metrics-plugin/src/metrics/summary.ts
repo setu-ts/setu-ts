@@ -105,31 +105,32 @@ export class Summary extends MetricBase {
   }
 
   /**
-   * Computes a quantile value from samples.
+   * Computes all configured quantiles from a sample window, sorting the
+   * window exactly ONCE (not once per quantile).
    *
-   * @param samples - Sorted samples
-   * @param quantile - The quantile to compute (0-1)
-   * @returns The quantile value
+   * @param samples - The (unsorted) sample window
+   * @returns A map of quantile → interpolated value
    */
-  private computeQuantile(samples: number[], quantile: number): number {
+  #computeQuantiles(samples: readonly number[]): ReadonlyMap<number, number> {
+    const result = new Map<number, number>();
     if (samples.length === 0) {
-      return NaN;
+      return result;
     }
-
     const sorted = [...samples].sort((a, b) => a - b);
     const n = sorted.length;
-
-    // Use linear interpolation
-    const pos = quantile * (n - 1);
-    const lower = Math.floor(pos);
-    const upper = Math.ceil(pos);
-
-    if (lower === upper) {
-      return sorted[lower];
+    for (const quantile of this.#quantiles) {
+      // Linear interpolation between the two nearest ranks.
+      const pos = quantile * (n - 1);
+      const lower = Math.floor(pos);
+      const upper = Math.ceil(pos);
+      if (lower === upper) {
+        result.set(quantile, sorted[lower]);
+      } else {
+        const fraction = pos - lower;
+        result.set(quantile, sorted[lower] + fraction * (sorted[upper] - sorted[lower]));
+      }
     }
-
-    const fraction = pos - lower;
-    return sorted[lower] + fraction * (sorted[upper] - sorted[lower]);
+    return result;
   }
 
   /**
@@ -146,11 +147,7 @@ export class Summary extends MetricBase {
       return new Map();
     }
 
-    const result = new Map<number, number>();
-    for (const q of this.#quantiles) {
-      result.set(q, this.computeQuantile(data.samples, q));
-    }
-    return result;
+    return this.#computeQuantiles(data.samples);
   }
 
   /**
@@ -214,10 +211,7 @@ export class Summary extends MetricBase {
     >();
     for (const [key, data] of this.#data.entries()) {
       if (data.samples.length > 0) {
-        const quantiles = new Map<number, number>();
-        for (const q of this.#quantiles) {
-          quantiles.set(q, this.computeQuantile(data.samples, q));
-        }
+        const quantiles = this.#computeQuantiles(data.samples);
         const entry: {
           quantiles: ReadonlyMap<number, number>;
           sum: number;

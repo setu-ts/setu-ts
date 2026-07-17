@@ -19,6 +19,20 @@ function escapeLabelValue(value: string): string {
 }
 
 /**
+ * Escapes `# HELP` text for Prometheus format: backslash and newline only
+ * (double-quote is NOT escaped in HELP, unlike label values). Prevents a
+ * help string containing a newline from splitting the HELP directive.
+ *
+ * @param help - The help text to escape
+ * @returns The escaped help text
+ */
+function escapeHelp(help: string): string {
+  return help
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n');
+}
+
+/**
  * Formats a metric value for Prometheus text format.
  * Handles special values (Infinity, -Infinity, NaN) per Prometheus 0.0.4 spec.
  *
@@ -103,7 +117,7 @@ function appendLabel(baseLabels: string, newLabel: string): string {
 function renderCounter(snapshot: MetricSnapshot): string {
   const lines: string[] = [];
 
-  lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
+  lines.push(`# HELP ${snapshot.name} ${escapeHelp(snapshot.help)}`);
   lines.push(`# TYPE ${snapshot.name} counter`);
 
   for (const [key, value] of snapshot.values.entries()) {
@@ -125,7 +139,7 @@ function renderCounter(snapshot: MetricSnapshot): string {
 function renderGauge(snapshot: MetricSnapshot): string {
   const lines: string[] = [];
 
-  lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
+  lines.push(`# HELP ${snapshot.name} ${escapeHelp(snapshot.help)}`);
   lines.push(`# TYPE ${snapshot.name} gauge`);
 
   for (const [key, value] of snapshot.values.entries()) {
@@ -147,7 +161,7 @@ function renderGauge(snapshot: MetricSnapshot): string {
 function renderHistogram(snapshot: MetricSnapshot): string {
   const lines: string[] = [];
 
-  lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
+  lines.push(`# HELP ${snapshot.name} ${escapeHelp(snapshot.help)}`);
   lines.push(`# TYPE ${snapshot.name} histogram`);
 
   // Histograms need special handling for buckets
@@ -185,7 +199,7 @@ function renderHistogram(snapshot: MetricSnapshot): string {
 function renderSummary(snapshot: MetricSnapshot): string {
   const lines: string[] = [];
 
-  lines.push(`# HELP ${snapshot.name} ${snapshot.help}`);
+  lines.push(`# HELP ${snapshot.name} ${escapeHelp(snapshot.help)}`);
   lines.push(`# TYPE ${snapshot.name} summary`);
 
   for (const [key, value] of snapshot.values.entries()) {

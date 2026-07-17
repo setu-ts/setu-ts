@@ -15,6 +15,25 @@ describe('renderPrometheus', () => {
     assertEquals(result, '');
   });
 
+  it('escapes newline and backslash in HELP text (no line splitting)', () => {
+    const snapshot: MetricSnapshot = {
+      name: 'weird',
+      type: 'counter',
+      help: 'line1\nline2 with a \\ backslash',
+      labels: [],
+      values: new Map([['', { value: 1 }]]),
+    };
+
+    const result = renderPrometheus([snapshot]);
+
+    // The raw newline must NOT survive — it would split the HELP directive.
+    assertEquals(result.includes('# HELP weird line1\\nline2 with a \\\\ backslash'), true);
+    assertEquals(result.includes('line1\nline2'), false);
+    // The HELP + TYPE + one value line — HELP stays a single physical line.
+    const helpLines = result.split('\n').filter((l) => l.startsWith('# HELP'));
+    assertEquals(helpLines.length, 1);
+  });
+
   it('counter emits # HELP / # TYPE / value', () => {
     const snapshot: MetricSnapshot = {
       name: 'test_counter',

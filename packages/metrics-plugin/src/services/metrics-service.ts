@@ -218,10 +218,15 @@ export class MetricsService implements IMetricsService {
         metric = new Gauge(name, config);
         break;
       case 'histogram':
-        metric = new Histogram(name, config, config.buckets);
+        // Honor the service-configured defaultBuckets when the declarative
+        // config omits buckets — same rule as the histogram() factory, so
+        // both entry points respect the plugin's defaultBuckets (plan §4.1).
+        metric = new Histogram(name, config, config.buckets ?? this.#defaultBuckets);
         break;
       case 'summary':
-        metric = new Summary(name, config, undefined, undefined);
+        // MetricConfig cannot carry quantiles, so a declarative summary always
+        // takes the service-configured defaultQuantiles (matching summary()).
+        metric = new Summary(name, config, this.#defaultQuantiles, undefined);
         break;
       default:
         throw new Error(`Unknown metric type: ${config.type}`);
@@ -254,28 +259,9 @@ export class MetricsService implements IMetricsService {
 
       let values: ReadonlyMap<string, MetricValue>;
 
-      if (metric instanceof Counter) {
-        // Convert number values to MetricValue with labels
-        const map = new Map<string, MetricValue>();
-        for (const [key, entry] of metric.valueEntries.entries()) {
-          if (entry.labels) {
-            map.set(key, { value: entry.value, labels: entry.labels });
-          } else {
-            map.set(key, { value: entry.value });
-          }
-        }
-        values = map;
-      } else if (metric instanceof Gauge) {
-        // Convert number values to MetricValue with labels
-        const map = new Map<string, MetricValue>();
-        for (const [key, entry] of metric.valueEntries.entries()) {
-          if (entry.labels) {
-            map.set(key, { value: entry.value, labels: entry.labels });
-          } else {
-            map.set(key, { value: entry.value });
-          }
-        }
-        values = map;
+      if (metric instanceof Counter || metric instanceof Gauge) {
+        // Counters and gauges share the same scalar value-entry shape.
+        values = MetricsService.#snapshotScalar(metric);
       } else if (metric instanceof Histogram) {
         values = this.#snapshotHistogram(metric);
       } else if (metric instanceof Summary) {
@@ -297,22 +283,25 @@ export class MetricsService implements IMetricsService {
   }
 
   /**
+   * Snapshots a scalar instrument (counter or gauge) into MetricValues.
+   */
+  static #snapshotScalar(metric: Counter | Gauge): ReadonlyMap<string, MetricValue> {
+    const map = new Map<string, MetricValue>();
+    for (const [key, entry] of metric.valueEntries.entries()) {
+      if (entry.labels) {
+        map.set(key, { value: entry.value, labels: entry.labels });
+      } else {
+        map.set(key, { value: entry.value });
+      }
+    }
+    return map;
+  }
+
+  /**
    * Creates a snapshot for a histogram metric.
    */
-  #snapshotHistogram(metric: IMetric & IHistogram): ReadonlyMap<string, MetricValue> {
+  #snapshotHistogram(histogram: Histogram): ReadonlyMap<string, MetricValue> {
     const result = new Map<string, MetricValue>();
-    const histogram = metric as unknown as {
-      getAllBucketCounts(): ReadonlyMap<
-        string,
-        {
-          buckets: ReadonlyMap<number, number>;
-          sum: number;
-          count: number;
-          labels?: Readonly<Record<string, string>>;
-        }
-      >;
-    };
-
     const allData = histogram.getAllBucketCounts();
     for (const [key, data] of allData.entries()) {
       if (data.labels) {
@@ -337,20 +326,8 @@ export class MetricsService implements IMetricsService {
   /**
    * Creates a snapshot for a summary metric.
    */
-  #snapshotSummary(metric: IMetric & ISummary): ReadonlyMap<string, MetricValue> {
+  #snapshotSummary(summary: Summary): ReadonlyMap<string, MetricValue> {
     const result = new Map<string, MetricValue>();
-    const summary = metric as unknown as {
-      getAllQuantiles(): ReadonlyMap<
-        string,
-        {
-          quantiles: ReadonlyMap<number, number>;
-          sum: number;
-          count: number;
-          labels?: Readonly<Record<string, string>>;
-        }
-      >;
-    };
-
     const allData = summary.getAllQuantiles();
     for (const [key, data] of allData.entries()) {
       if (data.labels) {

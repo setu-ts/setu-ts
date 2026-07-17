@@ -460,4 +460,34 @@ describe('MetricsService', () => {
     // Verify the two series have different label strings
     assertEquals(labels1 !== labels2, true);
   });
+
+  it('declarative register() honors the service defaultBuckets (same as histogram())', () => {
+    const service = new MetricsService({ defaultBuckets: [1, 5, 10] });
+
+    const viaFactory = service.histogram('h_factory') as IHistogram;
+    service.register('h_declarative', { type: 'histogram', help: 'd' });
+    const viaDeclarative = service.get('h_declarative') as IHistogram;
+
+    // Both entry points must reflect the configured defaultBuckets.
+    assertEquals([...viaFactory.buckets], [1, 5, 10]);
+    assertEquals([...viaDeclarative.buckets], [1, 5, 10]);
+  });
+
+  it('declarative register() honors the service defaultQuantiles (same as summary())', () => {
+    const service = new MetricsService({ defaultQuantiles: [0.25, 0.75] });
+
+    const viaFactory = service.summary('s_factory') as ISummary;
+    service.register('s_declarative', { type: 'summary', help: 'd' });
+    const viaDeclarative = service.get('s_declarative') as ISummary;
+
+    assertEquals([...viaFactory.quantiles], [0.25, 0.75]);
+    assertEquals([...viaDeclarative.quantiles], [0.25, 0.75]);
+  });
+
+  it('an explicit declarative bucket set still overrides the service default', () => {
+    const service = new MetricsService({ defaultBuckets: [1, 5, 10] });
+    service.register('h_explicit', { type: 'histogram', help: 'd', buckets: [0.1, 0.2] });
+    const hist = service.get('h_explicit') as IHistogram;
+    assertEquals([...hist.buckets], [0.1, 0.2]);
+  });
 });
