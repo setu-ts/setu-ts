@@ -2360,6 +2360,52 @@ GET /health
 
 Provides Prometheus metrics.
 
+### Service Interface
+
+Resolve the service via `ctx.services.get<IMetricsService>('metrics')`. Each factory method is
+**get-or-create**: the first call for a name constructs and registers the instrument; later calls
+return the same handle. Record methods are **value-first** (`inc(value?, labels?)`,
+`set(value, labels?)`, `observe(value, labels?)`), matching the committed `IMetric.observe`.
+
+```typescript
+interface MetricOptions {
+  readonly help?: string; // defaults to the metric name
+  readonly labels?: readonly string[];
+  readonly buckets?: readonly number[]; // histogram; falls back to defaultBuckets
+  readonly quantiles?: readonly number[]; // summary; falls back to defaultQuantiles
+  readonly maxSamples?: number; // summary sliding-window size (default 512)
+}
+
+interface IMetricsService {
+  counter(name: string, options?: MetricOptions): ICounter;
+  gauge(name: string, options?: MetricOptions): IGauge;
+  histogram(name: string, options?: MetricOptions): IHistogram;
+  summary(name: string, options?: MetricOptions): ISummary;
+  get(name: string): IMetric | undefined;
+}
+
+interface ICounter extends IMetric {
+  inc(value?: number, labels?: Readonly<Record<string, string>>): void;
+}
+interface IGauge extends IMetric {
+  set(value: number, labels?: Readonly<Record<string, string>>): void;
+  inc(value?: number, labels?: Readonly<Record<string, string>>): void;
+  dec(value?: number, labels?: Readonly<Record<string, string>>): void;
+}
+interface IHistogram extends IMetric {
+  observe(value: number, labels?: Readonly<Record<string, string>>): void;
+  readonly buckets: readonly number[];
+}
+interface ISummary extends IMetric {
+  observe(value: number, labels?: Readonly<Record<string, string>>): void;
+  readonly quantiles: readonly number[];
+}
+```
+
+The declarative `MetricConfig` (`type` and `help` required) remains the shape for
+`ctx.metrics.register(name, config)` and the plugin's `customMetrics` option. The `GET /metrics`
+scrape endpoint responds with `Content-Type: text/plain; version=0.0.4; charset=utf-8`.
+
 ### Registration
 
 ```typescript
@@ -3506,7 +3552,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Config              | `IConfig`                                                                                                                                                                                                                                |
 | Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                              |
 | Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`                                                                                                                                                                             |
-| Metrics             | `IMetric`, `MetricConfig`                                                                                                                                                                                                                |
+| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                            |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                            |
 | Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                            |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                            |

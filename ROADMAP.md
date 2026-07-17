@@ -2167,13 +2167,13 @@ app.register(MetricsPlugin({
 const metrics = ctx.services.get<IMetricsService>('metrics');
 
 const counter = metrics.counter('requests_total', { labels: ['method', 'path'] });
-counter.inc({ method: 'GET', path: '/users' });
+counter.inc(1, { method: 'GET', path: '/users' });
 
 const histogram = metrics.histogram('request_duration_seconds', {
   labels: ['method'],
   buckets: [0.1, 0.5, 1, 5],
 });
-histogram.observe({ method: 'GET' }, 0.234);
+histogram.observe(0.234, { method: 'GET' });
 
 const gauge = metrics.gauge('active_connections');
 gauge.set(42);

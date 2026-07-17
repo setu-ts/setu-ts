@@ -4,5 +4,13 @@
   "exports": "./src/index.ts",
   "imports": {
     "@hono-enterprise/common": "../common/src/index.ts"
+  },
+  "test": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "sys": ["hostname"]
+    }
   }
 }

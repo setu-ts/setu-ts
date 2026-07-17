@@ -56,41 +56,33 @@ export class HttpCollector {
    * @param runtime - The runtime services
    * @param options - Collector options
    */
+  /**
+   * @param metricsService - The metrics service the instruments register into
+   * @param runtime - Runtime services (monotonic `hrtime`)
+   * @param durationBuckets - Upper bounds for the duration histogram; the
+   *   plugin passes its `defaultBuckets` here so that option governs the
+   *   built-in HTTP histogram (plan §4.1).
+   */
   constructor(
     metricsService: MetricsService,
     runtime: IRuntimeServices,
-    options?: {
-      readonly durationBuckets?: readonly number[];
-      readonly durationLabels?: readonly string[];
-      readonly requestsLabels?: readonly string[];
-    },
+    durationBuckets: readonly number[],
   ) {
     this.#metricsService = metricsService;
     this.#runtime = runtime;
 
-    const durationLabels = options?.durationLabels ?? ['method', 'status'];
-    const requestsLabels = options?.requestsLabels ?? ['method', 'status'];
+    // HTTP series are labelled by method + status ONLY — never by path
+    // (unbounded cardinality). These labels are fixed, not configurable.
+    const labels: readonly string[] = ['method', 'status'];
 
     this.#durationOptions = {
       help: 'HTTP request duration in seconds',
-      labels: durationLabels as readonly string[],
-      buckets: options?.durationBuckets ??
-        [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+      labels,
+      buckets: durationBuckets,
     };
-
-    this.#requestsOptions = {
-      help: 'Total HTTP requests',
-      labels: requestsLabels as readonly string[],
-    };
-
-    this.#errorsOptions = {
-      help: 'Total HTTP request errors (5xx)',
-      labels: requestsLabels as readonly string[],
-    };
-
-    this.#activeOptions = {
-      help: 'Active HTTP requests',
-    };
+    this.#requestsOptions = { help: 'Total HTTP requests', labels };
+    this.#errorsOptions = { help: 'Total HTTP request errors (5xx)', labels };
+    this.#activeOptions = { help: 'Active HTTP requests' };
   }
 
   /**
@@ -147,7 +139,8 @@ export class HttpCollector {
     } finally {
       // Always record duration and request count for non-error paths
       if (!errorOccurred) {
-        const status = ctx.response.snapshot().status?.toString() ?? '500';
+        // `snapshot().status` is a non-optional number (IResponse contract).
+        const status = ctx.response.snapshot().status.toString();
         const method = ctx.request.method;
 
         // Decrement active requests

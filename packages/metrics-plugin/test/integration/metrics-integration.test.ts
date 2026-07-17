@@ -1,250 +1,208 @@
 /**
- * Integration tests for the metrics plugin.
+ * Integration tests for the metrics plugin — driven through a REAL kernel
+ * application (`createApplication` + `app.inject`), so the middleware runs
+ * inside the kernel's actual onion pipeline and error path. A fake plugin
+ * context cannot prove the collector survives a thrown request or that it
+ * sits outside a short-circuiting middleware — both are properties of the
+ * real pipeline (§3.6 / C5).
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
+
+import type { IHistogram, IPluginContext, IRequestContext } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@hono-enterprise/common';
+import { createApplication } from '@hono-enterprise/kernel';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
+
 import { MetricsPlugin } from '../../src/index.ts';
 import type { MetricsService } from '../../src/services/metrics-service.ts';
-import { CAPABILITIES, type IMetricsService } from '@hono-enterprise/common';
+import type { Counter } from '../../src/metrics/counter.ts';
+import type { Gauge } from '../../src/metrics/gauge.ts';
 
-/**
- * Fake service registry for integration testing.
- */
-class FakeServiceRegistry {
-  #services = new Map<string, unknown>();
-
-  register<T>(token: string, service: T): void {
-    this.#services.set(token, service);
-  }
-
-  get<T>(token: string): T | undefined {
-    return this.#services.get(token) as T | undefined;
-  }
-
-  getAll<T>(_token: string): T[] {
-    return [];
-  }
-
-  has(token: string): boolean {
-    return this.#services.has(token);
-  }
-
-  unregister(token: string): void {
-    this.#services.delete(token);
-  }
+/** Resolves the concrete service so tests can read metric values back. */
+function metricsOf(app: ReturnType<typeof createApplication>): MetricsService {
+  return app.services.get<MetricsService>(CAPABILITIES.METRICS);
 }
 
-/**
- * Fake plugin context for integration testing.
- */
-function createFakeContext() {
-  const services = new FakeServiceRegistry();
-  const middleware: Array<{ fn: unknown; priority: number }> = [];
-  const routes: Array<{ method: string; path: string; handler?: unknown }> = [];
-  const lifecycleHooks: { onInit?: (() => void)[]; onClose?: (() => void)[] } = {
-    onInit: [],
-    onClose: [],
-  };
+describe('Metrics integration (through the real kernel pipeline)', () => {
+  it('registers a resolvable IMetricsService under the metrics token', async () => {
+    const app = createApplication({ plugins: [RuntimePlugin(), MetricsPlugin()] });
+    await app.start();
 
-  return {
-    services,
-    middleware: {
-      add: (fn: unknown, options?: { priority?: number; name?: string }) => {
-        middleware.push({ fn, priority: options?.priority ?? 500 });
-      },
-    },
-    router: {
-      get: (path: string, handler: unknown) => {
-        routes.push({ method: 'GET', path, handler });
-      },
-    },
-    lifecycle: {
-      onInit: (fn: () => void) => {
-        lifecycleHooks.onInit?.push(fn);
-      },
-      onClose: (fn: () => void) => {
-        lifecycleHooks.onClose?.push(fn);
-      },
-    },
-    metrics: {
-      register: (_name: string, _config: unknown) => {
-        // No-op for testing
-      },
-    },
-    health: {
-      register: (_name: string, _indicator: unknown) => {
-        // No-op for testing
-      },
-    },
-    runtime: {
-      platform: () => 'deno' as const,
-      version: () => '2.0.0',
-      hostname: () => 'test',
-      uuid: () => 'test-uuid',
-      randomBytes: (n: number) => new Uint8Array(n),
-      subtle: {} as SubtleCrypto,
-      now: () => Date.now(),
-      hrtime: () => Date.now(),
-      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms) as unknown as number,
-      clearTimeout: (h: number) => clearTimeout(h as unknown as number),
-      setInterval: (fn: () => void, ms: number) => setInterval(fn, ms) as unknown as number,
-      clearInterval: (h: number) => clearInterval(h as unknown as number),
-      env: {},
-      exit: () => {
-        throw new Error('exit called');
-      },
-    },
-    logger: undefined,
-    middlewareList: middleware,
-    routeList: routes,
-    lifecycleHooks,
-  };
-}
+    expect(app.services.has(CAPABILITIES.METRICS)).toBe(true);
+    const service = metricsOf(app);
+    expect(typeof service.counter).toBe('function');
 
-describe('Integration', () => {
-  it('plugin registers IMetricsService', async () => {
-    const plugin = MetricsPlugin();
-    const ctx = createFakeContext();
-
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
-
-    const service = ctx.services.get<IMetricsService>(CAPABILITIES.METRICS);
-    assertEquals(service !== undefined, true);
-    assertEquals(typeof service?.counter, 'function');
+    await app.stop();
   });
 
-  it('service records and renders metrics', async () => {
-    const plugin = MetricsPlugin();
-    const ctx = createFakeContext();
-
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
-
-    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-
-    // Record some metrics
-    const counter = service?.counter('test_counter', { help: 'Test counter' });
-    counter?.inc(10);
-
-    const gauge = service?.gauge('test_gauge', { help: 'Test gauge' });
-    gauge?.set(42);
-
-    // Render should produce Prometheus format
-    const rendered = service?.render();
-    assertEquals(typeof rendered, 'string');
-    assertEquals(rendered!.length > 0, true);
-  });
-
-  it('/metrics route returns Prometheus format', async () => {
-    const plugin = MetricsPlugin({ defaultMetrics: false }); // Disable auto middleware
-    const ctx = createFakeContext();
-
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
-
-    // Find the /metrics route handler
-    const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
-    assertEquals(metricsRoute !== undefined, true);
-
-    // The handler should exist
-    assertEquals(metricsRoute?.handler !== undefined, true);
-  });
-
-  it('custom metrics are registered', async () => {
-    const plugin = MetricsPlugin({
-      customMetrics: [
+  it('GET /metrics returns Prometheus 0.0.4 text with the exposition body', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MetricsPlugin(),
         {
-          name: 'custom_counter',
-          type: 'counter',
-          help: 'Custom counter',
+          name: 'seed-metric',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.lifecycle.onInit(() => {
+              const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
+              service.counter('users_total', { help: 'Total users' }).inc(3);
+            });
+          },
         },
       ],
     });
-    const ctx = createFakeContext();
+    await app.start();
 
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/metrics' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/plain; version=0.0.4; charset=utf-8');
+    expect(res.body).toContain('# TYPE users_total counter');
+    expect(res.body).toContain('users_total 3');
 
-    // Trigger onInit
-    for (const hook of ctx.lifecycleHooks.onInit ?? []) {
-      hook();
-    }
-
-    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-    const metric = service?.get('custom_counter');
-    assertEquals(metric !== undefined, true);
-    assertEquals(metric?.type, 'counter');
+    await app.stop();
   });
 
-  it('HTTP metrics are registered with defaultMetrics', async () => {
-    const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: true });
-    const ctx = createFakeContext();
-
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
-
-    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-
-    // Check that HTTP metrics exist
-    assertEquals(service?.get('http_request_duration_seconds') !== undefined, true);
-    assertEquals(service?.get('http_requests_total') !== undefined, true);
-    assertEquals(service?.get('http_request_errors_total') !== undefined, true);
-    assertEquals(service?.get('http_active_requests') !== undefined, true);
-  });
-
-  it('middleware is registered at priority 20', async () => {
-    const plugin = MetricsPlugin({ defaultMetrics: true, httpMetrics: true });
-    const ctx = createFakeContext();
-
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
-
-    const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
-    assertEquals(metricsMiddleware !== undefined, true);
-  });
-
-  it('defaultBuckets are used for histograms', async () => {
-    const plugin = MetricsPlugin({
-      defaultBuckets: [0.1, 0.5, 1],
-      defaultMetrics: false,
+  it('a successful request is counted and leaves the active gauge at 0', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MetricsPlugin(),
+        {
+          name: 'work-route',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.router.get(
+              '/work',
+              (c: IRequestContext) => c.response.status(200).json({ ok: true }),
+            );
+          },
+        },
+      ],
     });
-    const ctx = createFakeContext();
+    await app.start();
 
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/work' });
+    expect(res.statusCode).toBe(200);
 
-    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-    const histogram = service?.histogram('test_histogram');
+    const service = metricsOf(app);
+    const requests = service.get('http_requests_total') as Counter;
+    const active = service.get('http_active_requests') as Gauge;
+    expect(requests.getValue({ method: 'GET', status: '200' })).toBe(1);
+    expect(active.getValue()).toBe(0);
 
-    assertEquals(histogram?.buckets.length, 3);
-    assertEquals(histogram?.buckets[0], 0.1);
+    await app.stop();
   });
 
-  it('defaultQuantiles are used for summaries', async () => {
-    const plugin = MetricsPlugin({
-      defaultQuantiles: [0.25, 0.75],
-      defaultMetrics: false,
+  it('a thrown handler yields a 500 AND leaves the active gauge at 0 (no leak)', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MetricsPlugin(),
+        {
+          name: 'boom-route',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.router.get('/boom', (): never => {
+              throw new Error('handler blew up');
+            });
+          },
+        },
+      ],
     });
-    const ctx = createFakeContext();
+    await app.start();
 
-    await plugin.register(
-      ctx as unknown as Parameters<import('@hono-enterprise/common').IPlugin['register']>[0],
-    );
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/boom' });
+    expect(res.statusCode).toBe(500);
 
-    const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
-    const summary = service?.summary('test_summary');
+    const service = metricsOf(app);
+    const active = service.get('http_active_requests') as Gauge;
+    const errors = service.get('http_request_errors_total') as Counter;
+    const requests = service.get('http_requests_total') as Counter;
 
-    assertEquals(summary?.quantiles.length, 2);
-    assertEquals(summary?.quantiles[0], 0.25);
+    // The blocker: the gauge must not be stuck at 1 after a thrown request.
+    // (Read via the service rather than a /metrics scrape — a scrape is itself
+    // an in-flight request, so the rendered gauge would legitimately read 1.)
+    expect(active.getValue()).toBe(0);
+    expect(errors.getValue({ method: 'GET', status: '500' })).toBe(1);
+    expect(requests.getValue({ method: 'GET', status: '500' })).toBe(1);
+
+    await app.stop();
+  });
+
+  it('counts a request short-circuited by an outer middleware — proving metrics is outermost', async () => {
+    // A middleware at priority 300 responds 401 WITHOUT calling next(). Because
+    // MetricsMiddleware registers at 20 (outermost), it still wraps this stage
+    // and records the request. At the ARCHITECTURE table's mistaken 700 the
+    // request would never reach metrics and this assertion would fail.
+    let handlerCalls = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MetricsPlugin(),
+        {
+          name: 'guard-route',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.middleware.add(
+              (c: IRequestContext) => c.response.status(401).json({ error: 'unauthorized' }),
+              { priority: 300, name: 'fake-auth' },
+            );
+            ctx.router.get('/guarded', (c: IRequestContext) => {
+              handlerCalls++;
+              return c.response.status(200).json({ ok: true });
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/guarded' });
+
+    // Short-circuit: the 401 stands and the route handler never ran.
+    expect(res.statusCode).toBe(401);
+    expect(handlerCalls).toBe(0);
+
+    // Placement: the request was still counted by the outer metrics middleware.
+    const requests = metricsOf(app).get('http_requests_total') as Counter;
+    expect(requests.getValue({ method: 'GET', status: '401' })).toBe(1);
+
+    await app.stop();
+  });
+
+  it('defaultBuckets governs the built-in HTTP duration histogram', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), MetricsPlugin({ defaultBuckets: [0.1, 0.2, 0.3] })],
+    });
+    await app.start();
+
+    const duration = metricsOf(app).get('http_request_duration_seconds') as IHistogram;
+    expect(duration.buckets).toContain(0.1);
+    expect(duration.buckets).toContain(0.3);
+    expect(duration.buckets).not.toContain(10);
+
+    await app.stop();
+  });
+
+  it('custom metrics from options are materialized at onInit', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MetricsPlugin({
+          customMetrics: [{ name: 'custom_counter', type: 'counter', help: 'Custom counter' }],
+        }),
+      ],
+    });
+    await app.start();
+
+    const metric = metricsOf(app).get('custom_counter');
+    expect(metric).toBeDefined();
+    expect(metric?.type).toBe('counter');
+
+    await app.stop();
   });
 });

@@ -205,23 +205,42 @@ describe('MetricsPlugin', () => {
     assertEquals(metricsRoute !== undefined, true);
     assertEquals(metricsRoute?.handler !== undefined, true);
 
-    // Create a fake context for the handler
+    // Create a fake context whose response builder records header + status +
+    // body, mirroring the kernel's `text()` which sets a default text/plain
+    // content-type that the handler must override afterwards.
+    const headers = new Map<string, string>();
+    let statusCode = 0;
+    let bodyText = '';
     const fakeHandlerContext = {
       response: {
-        header: (_key: string, _value: string) => fakeHandlerContext.response,
-        status: (_code: number) => fakeHandlerContext.response,
-        text: (body: string) => ({ status: 200, body }),
+        header: (key: string, value: string) => {
+          headers.set(key.toLowerCase(), value);
+          return fakeHandlerContext.response;
+        },
+        status: (code: number) => {
+          statusCode = code;
+          return fakeHandlerContext.response;
+        },
+        text: (body: string) => {
+          bodyText = body;
+          // Kernel behavior: text() sets its own content-type.
+          headers.set('content-type', 'text/plain; charset=utf-8');
+          return { __handlerResult: true } as const;
+        },
       },
     };
 
     // Invoke the handler
-    const handler = metricsRoute?.handler as (
-      ctx: unknown,
-    ) => Promise<{ status: number; body: string }>;
-    const result = await handler(fakeHandlerContext);
+    const handler = metricsRoute?.handler as (ctx: unknown) => unknown;
+    await handler(fakeHandlerContext);
 
-    assertEquals(result.status, 200);
-    assertEquals(typeof result.body, 'string');
+    assertEquals(statusCode, 200);
+    assertEquals(typeof bodyText, 'string');
+    // The Prometheus version parameter must survive text()'s clobber.
+    assertEquals(
+      headers.get('content-type'),
+      'text/plain; version=0.0.4; charset=utf-8',
+    );
   });
 
   it('onInit hook with METRIC_REGISTRATION contributions executes registration loop', async () => {
@@ -279,16 +298,19 @@ describe('MetricsPlugin', () => {
     assertEquals(metricsMiddleware, undefined);
   });
 
-  it('defaultMetrics disabled skips everything', async () => {
+  it('defaultMetrics disabled skips collectors + middleware but keeps the scrape route', async () => {
     const plugin = MetricsPlugin({ defaultMetrics: false });
     const ctx = createFakeContext();
 
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
-    // Route should still be registered (for manual metrics)
-    // But middleware should not be
+    // No metrics middleware registered.
     const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
     assertEquals(metricsMiddleware, undefined);
+
+    // The scrape route is registered independently of defaultMetrics.
+    const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
+    assertEquals(metricsRoute !== undefined, true);
   });
 
   it('customQuantiles option is accepted', async () => {

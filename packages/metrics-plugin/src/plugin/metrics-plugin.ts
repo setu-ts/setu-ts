@@ -70,7 +70,7 @@ export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
       // Register HTTP metrics and middleware if enabled
       if (defaultMetrics) {
         if (httpMetrics) {
-          const collector = new HttpCollector(service, ctx.runtime);
+          const collector = new HttpCollector(service, ctx.runtime, defaultBuckets);
           collector.register();
 
           ctx.middleware.add(collector.middleware.bind(collector), {
@@ -80,12 +80,14 @@ export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
         }
       }
 
-      // Register the /metrics route
-      ctx.router.get(endpoint, (ctx) => {
-        return ctx.response
-          .header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
-          .status(200)
-          .text(service.render());
+      // Register the /metrics route.
+      // The kernel's `text()` sets `content-type: text/plain; charset=utf-8`
+      // and clobbers any pre-set value, so the Prometheus `version=0.0.4`
+      // parameter must be applied AFTER `text()` or it is stripped.
+      ctx.router.get(endpoint, (c) => {
+        const result = c.response.status(200).text(service.render());
+        c.response.header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+        return result;
       });
 
       // Drain METRIC_REGISTRATION contributions at onInit
