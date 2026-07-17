@@ -432,3 +432,29 @@ Deno.test('MetricsService — snapshot with summary labels', () => {
   assertEquals(firstEntry.labels !== undefined, true);
   assertEquals(firstEntry.quantiles !== undefined, true);
 });
+
+Deno.test('MetricsService — F1: multi-label | values produce distinct series', () => {
+  const service = new MetricsService();
+
+  const counter = service.counter('test_counter', {
+    labels: ['a', 'b'],
+  }) as ICounter;
+
+  // Two different label combinations with | characters in values
+  counter.inc(1, { a: '1|b=2', b: '3' });
+  counter.inc(1, { a: '1', b: '2|b=3' });
+
+  const snapshot = service.snapshot();
+  const counterSnapshot = snapshot.find((s) => s.name === 'test_counter');
+
+  assertEquals(counterSnapshot !== undefined, true);
+  // Should have 2 distinct series (different label key-value pairs)
+  assertEquals(counterSnapshot?.values.size, 2);
+
+  const entries = Array.from(counterSnapshot!.values.entries());
+  const labels1 = entries[0][0];
+  const labels2 = entries[1][0];
+
+  // Verify the two series have different label strings
+  assertEquals(labels1 !== labels2, true);
+});
