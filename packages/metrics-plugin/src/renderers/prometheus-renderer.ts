@@ -28,38 +28,26 @@ function escapeLabelValue(value: string): string {
  */
 function formatLabels(
   labels: readonly string[],
-  values: ReadonlyMap<string, MetricValue>,
+  _values: ReadonlyMap<string, MetricValue>,
   key?: string,
 ): string {
   if (labels.length === 0) {
     return '';
   }
 
-  // If a specific key is provided, use it to extract labels
-  if (key) {
-    const parts: string[] = [];
-    for (const name of labels) {
-      const labelValue = extractLabelValue(key, name);
-      if (labelValue !== null) {
-        parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
-      }
-    }
-    return parts.length > 0 ? `{${parts.join(',')}}` : '';
+  // Key is always provided when rendering metrics with labels
+  if (!key) {
+    return '{}';
   }
 
-  // Fallback: try to extract from the first value's key
   const parts: string[] = [];
-  const firstKey = values.keys().next().value;
-  if (firstKey) {
-    for (const name of labels) {
-      const labelValue = extractLabelValue(firstKey, name);
-      if (labelValue !== null) {
-        parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
-      }
+  for (const name of labels) {
+    const labelValue = extractLabelValue(key, name);
+    if (labelValue !== null) {
+      parts.push(`${name}="${escapeLabelValue(labelValue)}"`);
     }
   }
-
-  return parts.length > 0 ? `{${parts.join(',')}}` : '';
+  return parts.length > 0 ? `{${parts.join(',')}}` : '{}';
 }
 
 /**
@@ -78,14 +66,8 @@ function extractLabelValue(key: string, labelName: string): string | null {
 
   const start = idx + pattern.length;
   const end = key.indexOf('|', start);
-  const end2 = key.indexOf('"', start);
 
-  let actualEnd = end === -1 ? key.length : end;
-  if (end2 !== -1 && end2 < actualEnd) {
-    actualEnd = end2;
-  }
-
-  return key.slice(start, actualEnd);
+  return key.slice(start, end === -1 ? key.length : end);
 }
 
 /**
@@ -153,23 +135,17 @@ function renderHistogram(snapshot: MetricSnapshot): string {
       const sortedBuckets = Array.from(value.buckets.keys()).sort((a, b) => a - b);
 
       for (const bound of sortedBuckets) {
-        const count = value.buckets.get(bound) ?? 0;
+        const count = value.buckets.get(bound)!;
         const le = bound === Number.POSITIVE_INFINITY ? '+Inf' : String(bound);
         // For bucket lines, add le label to the existing labels
-        const bucketLabels = labelsWithBraces
-          ? `${labelsWithBraces.slice(0, -1)},le="${le}"}`
-          : `{le="${le}"}`;
+        const bucketLabels = `${labelsWithBraces.slice(0, -1)},le="${le}"}`;
         lines.push(`${snapshot.name}_bucket${bucketLabels} ${count}`);
       }
     }
 
     // Emit sum and count
-    if (value.sum !== undefined) {
-      lines.push(`${snapshot.name}_sum${labels} ${value.sum}`);
-    }
-    if (value.value !== undefined) {
-      lines.push(`${snapshot.name}_count${labels} ${value.value}`);
-    }
+    lines.push(`${snapshot.name}_sum${labels} ${value.sum!}`);
+    lines.push(`${snapshot.name}_count${labels} ${value.value!}`);
   }
 
   return lines.join('\n');
@@ -199,12 +175,8 @@ function renderSummary(snapshot: MetricSnapshot): string {
     }
 
     // Emit sum and count
-    if (value.sum !== undefined) {
-      lines.push(`${snapshot.name}_sum${labels} ${value.sum}`);
-    }
-    if (value.value !== undefined) {
-      lines.push(`${snapshot.name}_count${labels} ${value.value}`);
-    }
+    lines.push(`${snapshot.name}_sum${labels} ${value.sum!}`);
+    lines.push(`${snapshot.name}_count${labels} ${value.value!}`);
   }
 
   return lines.join('\n');
@@ -239,13 +211,9 @@ export function renderPrometheus(snapshots: readonly MetricSnapshot[]): string {
       case 'summary':
         rendered = renderSummary(snapshot);
         break;
-      default:
-        continue;
     }
 
-    if (rendered) {
-      lines.push(rendered);
-    }
+    lines.push(rendered);
   }
 
   return lines.join('\n\n') + '\n';

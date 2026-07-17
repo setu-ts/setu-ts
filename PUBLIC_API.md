@@ -2399,7 +2399,7 @@ app.router.get('/search', async (ctx) => {
 
   const start = Date.now();
   const results = await search(ctx.request.query);
-  histogram.observe({ query_type: 'full-text' }, (Date.now() - start) / 1000);
+  histogram.observe((Date.now() - start) / 1000, { query_type: 'full-text' });
 
   return ctx.response.json(results);
 });

@@ -408,8 +408,8 @@ Deno.test('renderPrometheus — extractLabelValue with unknown label', () => {
   };
 
   const result = renderPrometheus([snapshot]);
-  // Should still render even with missing labels
-  assertStringIncludes(result, 'test_counter 1');
+  // Should still render even with missing labels (returns {} for empty labels)
+  assertStringIncludes(result, 'test_counter{} 1');
 });
 
 Deno.test('renderPrometheus — empty snapshot array returns empty string', () => {
@@ -591,4 +591,37 @@ Deno.test('renderPrometheus — histogram with single bucket', () => {
   assertStringIncludes(result, 'le="+Inf"');
   assertStringIncludes(result, 'test_histogram_sum 10');
   assertStringIncludes(result, 'test_histogram_count 1');
+});
+
+Deno.test('renderPrometheus — extractLabelValue handles pipe in key', () => {
+  // Test the extractLabelValue function with a key containing pipe separator
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test',
+    labels: ['method', 'status'],
+    values: new Map([['method=GET|status=200', { value: 1 }]]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+
+  assertStringIncludes(result, 'method="GET"');
+  assertStringIncludes(result, 'status="200"');
+});
+
+Deno.test('renderPrometheus — formatLabels with null label value', () => {
+  // Test that formatLabels handles null label values correctly
+  const snapshot: MetricSnapshot = {
+    name: 'test_counter',
+    type: 'counter',
+    help: 'Test counter',
+    labels: ['method', 'status'],
+    values: new Map([
+      ['method=GET', { value: 1 }], // missing status label
+    ]),
+  };
+
+  const result = renderPrometheus([snapshot]);
+  // Should render with partial labels
+  assertStringIncludes(result, 'method="GET"');
 });

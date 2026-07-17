@@ -476,3 +476,60 @@ Deno.test('Histogram — getBucketCounts returns empty map for unknown label set
   const buckets = histogram.getBucketCounts({ method: 'POST' });
   assertEquals(buckets.size, 0);
 });
+
+Deno.test('Histogram — empty buckets array results in empty buckets', () => {
+  const config = {
+    type: 'histogram' as const,
+    help: 'Test histogram',
+    buckets: [],
+  };
+  const histogram = new Histogram('test_histogram', config);
+
+  // Empty buckets array should result in empty buckets
+  assertEquals(histogram.buckets.length, 0);
+
+  // Observing a value with empty buckets should still increment +Inf
+  histogram.observe(5);
+
+  const bucketCounts = histogram.getBucketCounts();
+  // +Inf bucket is still created even with empty buckets
+  assertEquals(bucketCounts.get(Number.POSITIVE_INFINITY), 1);
+  assertEquals(histogram.getSum(), 5);
+  assertEquals(histogram.getCount(), 1);
+});
+
+Deno.test('Histogram — value exactly at bucket boundary increments that bucket', () => {
+  const config = {
+    type: 'histogram' as const,
+    help: 'Test histogram',
+    buckets: [1, 5, 10],
+  };
+  const histogram = new Histogram('test_histogram', config);
+
+  // Value exactly at 5 should increment bucket 5 (and all buckets > 5, and +Inf)
+  histogram.observe(5);
+
+  const buckets = histogram.getBucketCounts();
+  assertEquals(buckets.get(1), 0); // 5 > 1, so NOT in bucket 1
+  assertEquals(buckets.get(5), 1); // 5 <= 5, so in bucket 5
+  assertEquals(buckets.get(10), 1); // 5 <= 10, so in bucket 10
+  assertEquals(buckets.get(Number.POSITIVE_INFINITY), 1);
+});
+
+Deno.test('Histogram — value just below bucket boundary', () => {
+  const config = {
+    type: 'histogram' as const,
+    help: 'Test histogram',
+    buckets: [1, 5, 10],
+  };
+  const histogram = new Histogram('test_histogram', config);
+
+  // Value 4.999 is < 5, so NOT in bucket 5
+  histogram.observe(4.999);
+
+  const buckets = histogram.getBucketCounts();
+  assertEquals(buckets.get(1), 0); // 4.999 > 1
+  assertEquals(buckets.get(5), 1); // 4.999 <= 5
+  assertEquals(buckets.get(10), 1); // 4.999 <= 10
+  assertEquals(buckets.get(Number.POSITIVE_INFINITY), 1);
+});

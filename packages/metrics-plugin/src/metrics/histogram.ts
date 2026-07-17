@@ -84,15 +84,13 @@ export class Histogram extends MetricBase {
 
     // Find all buckets where value <= bound (cumulative counts)
     for (const bound of this.#buckets) {
-      const current = bucketCounts.get(bound) ?? 0;
       if (value <= bound) {
-        bucketCounts.set(bound, current + 1);
+        bucketCounts.set(bound, bucketCounts.get(bound)! + 1);
       }
     }
 
     // Update +Inf bucket (always incremented for values > all buckets)
-    const infCount = bucketCounts.get(Number.POSITIVE_INFINITY) ?? 0;
-    bucketCounts.set(Number.POSITIVE_INFINITY, infCount + 1);
+    bucketCounts.set(Number.POSITIVE_INFINITY, bucketCounts.get(Number.POSITIVE_INFINITY)! + 1);
 
     this.#sums.set(key, sum);
     this.#counts.set(key, count);
