@@ -203,7 +203,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMetricsService` + `ICounter`/`IGauge`/`IHistogram`/`ISummary` + `MetricOptions` added to
   `common`; memory/cpu resource collectors deferred pending a runtime resource seam) — complete (PR
   #42)
-- **Next milestone** — Milestone 20 (`packages/health-plugin` — Health checks and readiness probes)
+- **Milestone 20** (`packages/health-plugin` — Health checks and readiness probes) — complete (PR
+  #44)
+- **Next milestone** — Milestone 21 (`packages/openapi-plugin` — OpenAPI spec generation)
 
 ## Verification (run before declaring any work done)
 

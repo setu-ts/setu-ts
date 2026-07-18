@@ -3,8 +3,49 @@
  *
  * Health check plugin: /health, /live, /ready endpoints with pluggable indicators.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * This plugin provides:
+ * - `HealthPlugin` - Main plugin factory that registers `IHealthService`
+ * - `HealthService` - Concrete implementation of the health service
+ * - `createHttpIndicator` - Factory for HTTP probe indicators
+ * - Re-exports of `IHealthService`, `IHealthIndicator`, `HealthCheckResult`,
+ *   `HealthIndicatorFn`, `HealthStatus`, `HealthReport` from `@hono-enterprise/common`
+ *
+ * @example
+ * ```typescript
+ * import { HealthPlugin, createHttpIndicator } from '@hono-enterprise/health-plugin';
+ *
+ * app.register(HealthPlugin({
+ *   endpoints: {
+ *     health: '/health',
+ *     live: '/live',
+ *     ready: '/ready',
+ *   },
+ *   indicators: [
+ *     createHttpIndicator('external-api', { url: 'https://api.example.com/health' }),
+ *   ],
+ * }));
+ * ```
+ *
+ * @since 0.20.0
  */
-export {};
+
+// Plugin factory
+export { HealthPlugin } from './plugin/health-plugin.ts';
+export type { HealthPluginOptions } from './interfaces/index.ts';
+
+// Service
+export { HealthService } from './services/health-service.ts';
+
+// Indicators
+export { createHttpIndicator } from './indicators/http-indicator.ts';
+export type { HttpIndicatorOptions } from './indicators/http-indicator.ts';
+
+// Re-exports from @hono-enterprise/common
+export type {
+  HealthCheckResult,
+  HealthIndicatorFn,
+  HealthReport,
+  HealthStatus,
+  IHealthIndicator,
+  IHealthService,
+} from '@hono-enterprise/common';
