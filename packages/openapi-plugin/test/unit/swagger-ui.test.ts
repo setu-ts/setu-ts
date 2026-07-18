@@ -74,4 +74,91 @@ describe('swaggerUiHtml', () => {
     expect(html).toContain('#swagger-ui');
     expect(html).toContain('max-width: 1460px');
   });
+
+  it('should escape ampersand characters', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: 'Test & Demo',
+    });
+
+    expect(html).toContain('Test ' + String.fromCharCode(38) + 'amp; Demo');
+  });
+
+  it('should escape less-than characters', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: 'Test <Demo>',
+    });
+
+    expect(html).toContain(
+      'Test ' + String.fromCharCode(38) + 'lt;Demo' + String.fromCharCode(38) + 'gt;',
+    );
+  });
+
+  it('should escape greater-than characters', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: 'Test >Demo<',
+    });
+
+    expect(html).toContain(
+      'Test ' + String.fromCharCode(38) + 'gt;Demo' + String.fromCharCode(38) + 'lt;',
+    );
+  });
+
+  it('should escape double quote characters', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: 'Test "Demo"',
+    });
+
+    expect(html).toContain(
+      'Test ' + String.fromCharCode(38) + 'quot;Demo' + String.fromCharCode(38) + 'quot;',
+    );
+  });
+
+  it('should escape single quote characters', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: "Test 'Demo'",
+    });
+
+    expect(html).toContain(
+      'Test ' + String.fromCharCode(38) + 'apos;Demo' + String.fromCharCode(38) + 'apos;',
+    );
+  });
+
+  it('should escape multiple special characters', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: '<script>alert("XSS")</script>',
+    });
+
+    expect(html).toContain(
+      String.fromCharCode(38) + 'lt;script' + String.fromCharCode(38) + 'gt;alert(' +
+        String.fromCharCode(38) + 'quot;XSS' + String.fromCharCode(38) + 'quot;)' +
+        String.fromCharCode(38) + 'lt;/script' + String.fromCharCode(38) + 'gt;',
+    );
+  });
+
+  it('should escape ampersand in spec URL', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/api/spec.json?foo=1&bar=2',
+      title: 'Test',
+    });
+
+    expect(html).toContain('/api/spec.json?foo=1' + String.fromCharCode(38) + 'amp;bar=2');
+  });
+
+  it('should prevent XSS via malicious title input', () => {
+    const maliciousTitle = '<script>alert("XSS")</script>';
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: maliciousTitle,
+    });
+
+    // The malicious script should be escaped, not executed
+    expect(html).not.toContain('<script>alert("XSS")</script>');
+    expect(html).toContain(String.fromCharCode(38) + 'lt;script' + String.fromCharCode(38) + 'gt;');
+  });
 });

@@ -49,7 +49,11 @@ class MockRouter {
     configure(subRouter);
   }
 
-  listRoutes(): readonly { readonly method: string; readonly path: string; readonly definition: { readonly handler: unknown } }[] {
+  listRoutes(): readonly {
+    readonly method: string;
+    readonly path: string;
+    readonly definition: { readonly handler: unknown };
+  }[] {
     return this.routes.map((r) => ({
       method: r.method,
       path: r.path,
@@ -264,6 +268,108 @@ describe('OpenApiService', () => {
     const spec = service.getSpec() as Record<string, unknown>;
 
     // The schema should be registered
+    expect(spec).toBeDefined();
+  });
+
+  it('should register pre-registered schemas from options', () => {
+    const testSchema = z.object({ id: z.string(), name: z.string() });
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      schemas: [{ name: 'TestModel', schema: testSchema }],
+    });
+
+    const spec = service.getSpec() as Record<string, unknown>;
+
+    expect(spec).toBeDefined();
+    expect(spec.components).toBeDefined();
+  });
+
+  it('should call addSchema to register a new schema', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+    });
+
+    const newSchema = z.object({ userId: z.string() });
+    service.addSchema('UserSchema', newSchema);
+
+    const spec = service.getSpec() as Record<string, unknown>;
+
+    expect(spec).toBeDefined();
+  });
+
+  it('should invalidate cache when addSchema is called', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+    });
+
+    const spec1 = service.getSpec();
+    service.addSchema('NewSchema', z.object({ foo: z.string() }));
+    const spec2 = service.getSpec();
+
+    expect(spec1).not.toBe(spec2);
+  });
+
+  it('should call addSchema with description option', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      description: 'Test description',
+    });
+
+    service.addSchema('TestSchema', z.object({ id: z.string() }));
+
+    const spec = service.getSpec() as Record<string, unknown>;
+    expect(spec).toBeDefined();
+  });
+
+  it('should call addSchema with servers option', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      servers: [{ url: 'https://api.example.com', description: 'Production' }],
+    });
+
+    service.addSchema('TestSchema', z.object({ id: z.string() }));
+
+    const spec = service.getSpec() as Record<string, unknown>;
+    expect(spec).toBeDefined();
+  });
+
+  it('should call addSchema with securitySchemes option', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+    });
+
+    service.addSchema('TestSchema', z.object({ id: z.string() }));
+
+    const spec = service.getSpec() as Record<string, unknown>;
+    expect(spec).toBeDefined();
+  });
+
+  it('should call addSchema with all options', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      description: 'Test description',
+      servers: [{ url: 'https://api.example.com', description: 'Production' }],
+      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+    });
+
+    service.addSchema('TestSchema', z.object({ id: z.string() }));
+
+    const spec = service.getSpec() as Record<string, unknown>;
     expect(spec).toBeDefined();
   });
 });

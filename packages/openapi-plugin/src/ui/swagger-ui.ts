@@ -66,11 +66,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 </html>
 `;
 
-const AMP_ENTITY = '&';
-const LT_ENTITY = '<';
-const GT_ENTITY = '>';
-const QUOT_ENTITY = String.fromCharCode(34);
-const APOS_ENTITY = "'";
+const AMP_ENTITY = '&amp;';
+const LT_ENTITY = '&lt;';
+const GT_ENTITY = '&gt;';
+const QUOT_ENTITY = '&quot;';
+const APOS_ENTITY = '&apos;';
 
 /**
  * HTML-escapes a string for safe embedding in HTML.
