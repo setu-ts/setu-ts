@@ -205,6 +205,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   #42)
 - **Milestone 20** (`packages/health-plugin` — Health checks and readiness probes) — complete (PR
   #44)
+- **Milestone 21** (`packages/openapi-plugin` — OpenAPI 3.1 spec generation from routes, Swagger UI
+  serving, Zod-to-OpenAPI schema transformer, schema deduplication) — complete (PR pending)
 - **Next milestone** — Milestone 22 (`packages/telemetry-plugin` — Telemetry and distributed
   tracing)
 

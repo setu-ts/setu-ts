@@ -343,7 +343,8 @@ describe('OpenApiGenerator', () => {
 
       const result = generator.generate(routes);
 
-      expect(result.components?.schemas).toHaveProperty('NamedEntity');
+      // Per plan §3.4: schemas used more than once get Schema<n> names and are hoisted
+      expect(result.components?.schemas).toHaveProperty('Schema1');
     });
 
     it('should use $ref for deduplicated schemas', () => {
@@ -354,7 +355,23 @@ describe('OpenApiGenerator', () => {
 
       const userSchema = z.object({ id: z.string(), name: z.string() });
 
+      // Use the same schema twice to trigger deduplication
       const routes: readonly RouteInfo[] = [
+        {
+          method: 'POST',
+          path: '/users',
+          definition: {
+            handler: () => {
+              throw new Error('not used');
+            },
+            schema: {
+              body: userSchema,
+              response: {
+                201: userSchema,
+              },
+            },
+          },
+        },
         {
           method: 'GET',
           path: '/users/:id',
@@ -375,8 +392,9 @@ describe('OpenApiGenerator', () => {
 
       const responseSchema = result.paths['/users/{id}']?.get?.responses['200']?.content
         ?.['application/json']?.schema;
+      // Per plan §3.4: reused schemas get $ref with Schema<n> name
       expect(responseSchema).toEqual({
-        $ref: '#/components/schemas/NamedEntity',
+        $ref: '#/components/schemas/Schema1',
       });
     });
 

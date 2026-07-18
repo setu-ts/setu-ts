@@ -145,6 +145,8 @@ export class OpenApiGenerator {
   readonly #transformer: ZodToOpenApi;
   readonly #schemaMap: Map<unknown, string>;
   readonly #componentSchemas: Map<string, OpenApiSchemaObject>;
+  readonly #seenSchemas: Set<unknown>;
+  #anonymousSchemaCounter: number;
 
   /**
    * Creates a new OpenAPI generator.
@@ -167,6 +169,8 @@ export class OpenApiGenerator {
     this.#transformer = new ZodToOpenApi();
     this.#schemaMap = new Map();
     this.#componentSchemas = new Map();
+    this.#seenSchemas = new Set();
+    this.#anonymousSchemaCounter = 0;
   }
 
   /**
@@ -187,12 +191,8 @@ export class OpenApiGenerator {
    * @returns The complete OpenAPI 3.1 document
    */
   generate(routes: readonly RouteInfo[]): OpenApiDocument {
-    // Reset schema map but preserve pre-registered schemas
-    this.#schemaMap.clear();
-    // Keep pre-registered schemas from addSchema calls
-
-    // First, register any pre-registered schemas
-    // (for schemas contributed via ctx.openapi.addSchema)
+    // Do NOT clear #schemaMap - pre-registered schemas from addSchema must persist
+    // so #resolveSchema finds them by object identity and emits the contributor's chosen name
 
     const paths: Record<string, {
       get?: OpenApiOperation;
@@ -324,9 +324,18 @@ export class OpenApiGenerator {
     // Extract path parameters from the path template
     const pathParams = this.#extractPathParams(route.path);
 
+    // Hoist transform of params schema to avoid repeated transforms
+    let paramsTransformed: Record<string, OpenApiSchemaObject> | undefined;
+    if (schema?.params) {
+      const paramsObj = this.#transformer.transform(schema.params);
+      paramsTransformed = paramsObj.properties ?? {};
+    }
+
     // Add path parameters
     for (const paramName of pathParams) {
-      const paramSchema = schema?.params ? this.#getPropertySchema(schema.params, paramName) : {};
+      const paramSchema = paramsTransformed && paramName in paramsTransformed
+        ? paramsTransformed[paramName]
+        : {};
 
       parameters.push({
         name: paramName,
@@ -336,11 +345,13 @@ export class OpenApiGenerator {
       });
     }
 
-    // Add query parameters from schema
+    // Hoist transform of query schema to avoid repeated transforms
     if (schema?.query) {
-      const queryProps = this.#getObjectProperties(schema.query);
+      const queryObj = this.#transformer.transform(schema.query);
+      const queryProps = queryObj.properties ?? {};
+      const queryRequired = queryObj.required ?? [];
       for (const [name, propSchema] of Object.entries(queryProps)) {
-        const isOptional = this.#isPropertyOptional(schema.query, name);
+        const isOptional = !queryRequired.includes(name);
         parameters.push({
           name,
           in: 'query',
@@ -362,44 +373,6 @@ export class OpenApiGenerator {
   #extractPathParams(path: string): readonly string[] {
     const matches = path.match(/:([a-zA-Z_][a-zA-Z0-9_]*)/g) || [];
     return matches.map((m) => m.slice(1));
-  }
-
-  /**
-   * Gets the schema for a specific property.
-   *
-   * @param schema - The object schema
-   * @param propertyName - Property name
-   * @returns The property schema
-   */
-  #getPropertySchema(schema: unknown, propertyName: string): OpenApiSchemaObject {
-    const transformed = this.#transformer.transform(schema);
-    if (transformed.properties && propertyName in transformed.properties) {
-      return transformed.properties[propertyName];
-    }
-    return {};
-  }
-
-  /**
-   * Gets object properties from a schema.
-   *
-   * @param schema - The schema
-   * @returns Properties object
-   */
-  #getObjectProperties(schema: unknown): Record<string, OpenApiSchemaObject> {
-    const transformed = this.#transformer.transform(schema);
-    return transformed.properties ?? {};
-  }
-
-  /**
-   * Checks if a property is optional.
-   *
-   * @param schema - The object schema
-   * @param propertyName - Property name
-   * @returns True if optional
-   */
-  #isPropertyOptional(schema: unknown, propertyName: string): boolean {
-    const transformed = this.#transformer.transform(schema);
-    return !transformed.required?.includes(propertyName);
   }
 
   /**
@@ -464,56 +437,55 @@ export class OpenApiGenerator {
   /**
    * Resolves a schema, potentially creating a $ref for deduplication.
    *
+   * Anonymous schemas used more than once get a generated name (Schema<n>)
+   * on first reuse and are hoisted to components/schemas; schemas used
+   * exactly once are inlined.
+   *
+   * Pre-registered named schemas (from addSchema/OPENAPI_SCHEMA contributions)
+   * keep their contributor-chosen name and are always hoisted.
+   *
    * @param schema - The schema to resolve
    * @returns The schema or a $ref
    */
   #resolveSchema(schema: unknown): OpenApiSchemaObject {
-    // Check if we've seen this schema before
+    // Check if we've seen this schema before (pre-registered or previously hoisted)
     const existingRef = this.#schemaMap.get(schema);
     if (existingRef) {
       return { $ref: `#/components/schemas/${existingRef}` };
     }
 
-    // Transform the schema
-    const transformed = this.#transformer.transform(schema);
-
-    // For object schemas, try to generate a name and deduplicate
-    if (transformed.type === 'object' && transformed.properties) {
-      // Generate a name from the schema structure
-      const propName = this.#generateSchemaName(transformed);
-      if (propName && !this.#componentSchemas.has(propName)) {
-        this.#componentSchemas.set(propName, transformed);
-        this.#schemaMap.set(schema, propName);
-        return { $ref: `#/components/schemas/${propName}` };
-      }
+    // Check if this is a second use (first reuse)
+    if (this.#seenSchemas.has(schema)) {
+      // This is a reuse - hoist it with a generated name
+      const transformed = this.#transformer.transform(schema);
+      const name = this.#hoistSchema(schema, transformed);
+      return { $ref: `#/components/schemas/${name}` };
     }
+
+    // First use: transform and mark as seen
+    const transformed = this.#transformer.transform(schema);
+    this.#seenSchemas.add(schema);
 
     return transformed;
   }
 
   /**
-   * Generates a schema name from schema structure.
+   * Hoists a schema to components/schemas with a generated Schema<n> name.
+   * Called when a schema is encountered for the second time (first reuse).
    *
-   * @param schema - The schema
-   * @returns Generated name or null
+   * @param schema - The schema to hoist
+   * @param transformed - The already-transformed schema
+   * @returns The generated schema name
    */
-  #generateSchemaName(schema: OpenApiSchemaObject): string | null {
-    // For now, use a simple heuristic based on property names
-    if (schema.properties) {
-      const propNames = Object.keys(schema.properties);
-      if (propNames.length > 0) {
-        // Try to find a common pattern (e.g., 'id', 'name', 'email')
-        if (propNames.includes('id') && propNames.includes('name')) {
-          return 'NamedEntity';
-        }
-        if (propNames.includes('email')) {
-          return 'User';
-        }
-        if (propNames.includes('title')) {
-          return 'Article';
-        }
-      }
-    }
-    return null;
+  #hoistSchema(schema: unknown, transformed: OpenApiSchemaObject): string {
+    // Generate a Schema<n> name
+    this.#anonymousSchemaCounter++;
+    const name = `Schema${this.#anonymousSchemaCounter}`;
+
+    // Store the mapping
+    this.#schemaMap.set(schema, name);
+    this.#componentSchemas.set(name, transformed);
+
+    return name;
   }
 }

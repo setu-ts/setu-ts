@@ -8,7 +8,48 @@ import { expect } from '@std/expect';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IApplication, IPluginContext } from '@hono-enterprise/common';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
-import { Router } from '@hono-enterprise/kernel';
+
+/**
+ * Minimal Router mock for testing.
+ */
+class Router {
+  readonly routes: Array<{ method: string; path: string; handler: unknown }> = [];
+
+  get(path: string, handler: unknown): void {
+    this.routes.push({ method: 'GET', path, handler });
+  }
+
+  post(path: string, handler: unknown): void {
+    this.routes.push({ method: 'POST', path, handler });
+  }
+
+  put(path: string, handler: unknown): void {
+    this.routes.push({ method: 'PUT', path, handler });
+  }
+
+  patch(path: string, handler: unknown): void {
+    this.routes.push({ method: 'PATCH', path, handler });
+  }
+
+  delete(path: string, handler: unknown): void {
+    this.routes.push({ method: 'DELETE', path, handler });
+  }
+
+  head(path: string, handler: unknown): void {
+    this.routes.push({ method: 'HEAD', path, handler });
+  }
+
+  options(path: string, handler: unknown): void {
+    this.routes.push({ method: 'OPTIONS', path, handler });
+  }
+
+  match(method: string, path: string): unknown | null {
+    const route = this.routes.find(
+      (r) => r.method === method && r.path === path,
+    );
+    return route?.handler ?? null;
+  }
+}
 
 describe('OpenApiPlugin', () => {
   let ctx: IPluginContext;

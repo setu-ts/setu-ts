@@ -232,15 +232,15 @@ export class ZodToOpenApi {
     const shape = typeof shapeFn === 'function' ? shapeFn() : {};
     const properties: Record<string, OpenApiSchemaObject> = {};
     const required: string[] = [];
-    const requiredKeys = def.requiredKeys as Set<string> | undefined;
 
     for (const [key, value] of Object.entries(shape)) {
       properties[key] = this.transform(value);
 
-      const isOptional = (value._def?.typeName as string | undefined) === 'ZodOptional';
-      if (!isOptional && requiredKeys?.has(key)) {
-        required.push(key);
-      } else if (!isOptional && !requiredKeys?.has(key)) {
+      // A field is optional if it's ZodOptional OR ZodDefault (has a default value)
+      const typeName = value._def?.typeName as string | undefined;
+      const isOptional = typeName === 'ZodOptional' || typeName === 'ZodDefault';
+
+      if (!isOptional) {
         required.push(key);
       }
     }

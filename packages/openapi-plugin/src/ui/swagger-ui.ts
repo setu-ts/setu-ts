@@ -66,6 +66,39 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 </html>
 `;
 
+const AMP_ENTITY = '&';
+const LT_ENTITY = '<';
+const GT_ENTITY = '>';
+const QUOT_ENTITY = String.fromCharCode(34);
+const APOS_ENTITY = "'";
+
+/**
+ * HTML-escapes a string for safe embedding in HTML.
+ *
+ * @param str - The string to escape
+ * @returns The escaped string
+ */
+function htmlEscape(str: string): string {
+  let result = '';
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '&') {
+      result += AMP_ENTITY;
+    } else if (char === '<') {
+      result += LT_ENTITY;
+    } else if (char === '>') {
+      result += GT_ENTITY;
+    } else if (char === '"') {
+      result += QUOT_ENTITY;
+    } else if (char === "'") {
+      result += APOS_ENTITY;
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
 /**
  * Generates the Swagger UI HTML page.
  *
@@ -79,7 +112,11 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
     ? 'API Documentation'
     : (options.title ?? 'API Documentation');
 
+  // Escape both title and specUrl to prevent XSS via malicious input
+  const escapedTitle = htmlEscape(title);
+  const escapedSpecUrl = htmlEscape(specUrl);
+
   return HTML_TEMPLATE
-    .replace(/<title>.*?<\/title>/, `<title>${title}</title>`)
-    .replace(/__SPEC_URL__/g, specUrl);
+    .replace(/<title>.*?<\/title>/, `<title>${escapedTitle}</title>`)
+    .replace(/__SPEC_URL__/g, escapedSpecUrl);
 }

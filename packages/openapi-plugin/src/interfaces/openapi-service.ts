@@ -18,4 +18,11 @@ export interface IOpenApiService {
    * @returns The complete OpenAPI document as a readonly record
    */
   getSpec(): Readonly<Record<string, unknown>>;
+  /**
+   * Registers a named schema for deduplication.
+   *
+   * @param name - Schema name
+   * @param schema - The schema to register
+   */
+  addSchema(name: string, schema: unknown): void;
 }

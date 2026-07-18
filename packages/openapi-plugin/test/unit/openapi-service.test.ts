@@ -5,17 +5,65 @@
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IApplication, IRouterApi } from '@hono-enterprise/common';
+import type { IApplication } from '@hono-enterprise/common';
 import { OpenApiService } from '../../src/services/openapi-service.ts';
-import { Router } from '@hono-enterprise/kernel';
 import { z } from 'npm:zod@^3.24.0';
+
+/**
+ * Minimal Router mock for testing.
+ */
+class MockRouter {
+  readonly routes: Array<{ method: string; path: string; handler: unknown }> = [];
+
+  get(path: string, handler: unknown): void {
+    this.routes.push({ method: 'GET', path, handler });
+  }
+
+  post(path: string, handler: unknown): void {
+    this.routes.push({ method: 'POST', path, handler });
+  }
+
+  put(path: string, handler: unknown): void {
+    this.routes.push({ method: 'PUT', path, handler });
+  }
+
+  patch(path: string, handler: unknown): void {
+    this.routes.push({ method: 'PATCH', path, handler });
+  }
+
+  delete(path: string, handler: unknown): void {
+    this.routes.push({ method: 'DELETE', path, handler });
+  }
+
+  head(path: string, handler: unknown): void {
+    this.routes.push({ method: 'HEAD', path, handler });
+  }
+
+  options(path: string, handler: unknown): void {
+    this.routes.push({ method: 'OPTIONS', path, handler });
+  }
+
+  group(_prefix: string, configure: (router: unknown) => void): void {
+    // Simple mock implementation
+    const subRouter = new MockRouter();
+    configure(subRouter);
+  }
+
+  listRoutes(): readonly { readonly method: string; readonly path: string; readonly definition: { readonly handler: unknown } }[] {
+    return this.routes.map((r) => ({
+      method: r.method,
+      path: r.path,
+      definition: { handler: r.handler },
+    }));
+  }
+}
 
 describe('OpenApiService', () => {
   let app: IApplication;
-  let router: IRouterApi;
+  let router: MockRouter;
 
   beforeEach(() => {
-    router = new Router();
+    router = new MockRouter();
     app = {
       router,
       services: {

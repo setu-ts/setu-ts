@@ -78,12 +78,6 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     priority: PLUGIN_PRIORITY.OPENAPI,
 
     register(ctx: IPluginContext): void {
-      // Drain contributed schemas
-      const schemas = ctx.services.getAll(CAPABILITIES.OPENAPI_SCHEMA) as {
-        name: string;
-        schema: unknown;
-      }[];
-
       // Create the OpenAPI service
       const openApiService = new OpenApiService({
         app: ctx.app,
@@ -92,11 +86,23 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
         ...(description !== undefined ? { description } : {}),
         ...(servers !== undefined ? { servers } : {}),
         ...(securitySchemes !== undefined ? { securitySchemes } : {}),
-        schemas: schemas,
+        schemas: [], // Will be populated at onInit
       });
 
       // Register the service
       ctx.services.register<IOpenApiService>(CAPABILITIES.OPENAPI, openApiService);
+
+      // Drain contributed schemas at onInit (after all plugins have registered)
+      ctx.lifecycle.onInit(() => {
+        const schemas = ctx.services.getAll(CAPABILITIES.OPENAPI_SCHEMA) as {
+          name: string;
+          schema: unknown;
+        }[];
+        // Add each contributed schema to the generator
+        for (const { name, schema } of schemas) {
+          openApiService.addSchema(name, schema);
+        }
+      });
 
       // Register the spec endpoint
       ctx.router.get(specEndpoint, (ctx) => {

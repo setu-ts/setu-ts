@@ -53,6 +53,32 @@ export class OpenApiService implements IOpenApiService {
   }
 
   /**
+   * Registers a named schema for deduplication.
+   *
+   * @param name - Schema name
+   * @param schema - The schema to register
+   */
+  addSchema(name: string, schema: unknown): void {
+    // Initialize generator if not already created
+    if (!this.#generator) {
+      this.#generator = new OpenApiGenerator({
+        title: this.#options.title ?? 'API',
+        version: this.#options.version ?? '1.0.0',
+        ...(this.#options.description !== undefined
+          ? { description: this.#options.description }
+          : {}),
+        ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
+        ...(this.#options.securitySchemes !== undefined
+          ? { securitySchemes: this.#options.securitySchemes }
+          : {}),
+      });
+    }
+    // Invalidate cache when new schemas are added
+    this.#cachedSpec = null;
+    this.#generator.addSchema(name, schema);
+  }
+
+  /**
    * Builds the OpenAPI specification from registered routes.
    *
    * @returns The complete OpenAPI document
