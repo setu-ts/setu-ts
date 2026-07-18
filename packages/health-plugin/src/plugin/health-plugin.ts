@@ -13,6 +13,8 @@ import type {
   IHealthService,
   IPlugin,
   IPluginContext,
+  IRequestContext,
+  RouteHandler,
 } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { HealthPluginOptions } from '../interfaces/index.ts';
@@ -108,41 +110,35 @@ function registerHealthEndpoints(
 ): void {
   // Register /health endpoint
   if (endpoints.health !== undefined) {
-    ctx.router.get(endpoints.health, createHealthHandler(ctx, service, 'check'));
+    ctx.router.get(endpoints.health, createHealthHandler(service, 'check'));
   }
 
   // Register /live endpoint
   if (endpoints.live !== undefined) {
-    ctx.router.get(endpoints.live, createHealthHandler(ctx, service, 'checkLive'));
+    ctx.router.get(endpoints.live, createHealthHandler(service, 'checkLive'));
   }
 
   // Register /ready endpoint
   if (endpoints.ready !== undefined) {
-    ctx.router.get(endpoints.ready, createHealthHandler(ctx, service, 'checkReady'));
+    ctx.router.get(endpoints.ready, createHealthHandler(service, 'checkReady'));
   }
 }
 
 /**
- * Creates a handler for a health endpoint.
+ * Creates a route handler for a health endpoint.
  *
- * @param ctx - Plugin context
  * @param service - Health service instance
  * @param method - The method to call on the service
- * @returns A route handler function
+ * @returns A route handler that serializes the report with the right status code
  */
 function createHealthHandler(
-  _ctx: IPluginContext,
   service: HealthService,
   method: 'check' | 'checkLive' | 'checkReady',
-): (
-  c: { response: { status: (code: number) => { json: <T>(body: T) => HandlerResult } } },
-) => Promise<HandlerResult> {
-  return async (
-    c: { response: { status: (code: number) => { json: <T>(body: T) => HandlerResult } } },
-  ): Promise<HandlerResult> => {
+): RouteHandler {
+  return async (ctx: IRequestContext): Promise<HandlerResult> => {
     const report = await service[method]();
     const statusCode = determineStatusCode(report, method);
-    return c.response.status(statusCode).json(report);
+    return ctx.response.status(statusCode).json(report);
   };
 }
 
