@@ -4,6 +4,7 @@
  * @module
  */
 import type {
+  HealthCheckResult,
   HealthIndicatorFn,
   HealthReport,
   HealthStatus,
@@ -57,7 +58,7 @@ export class HealthService implements IHealthService {
    * {@inheritDoc IHealthService.check}
    */
   check(): Promise<HealthReport> {
-    return this.#runAllIndicators();
+    return this.#runIndicators(() => true);
   }
 
   /**
@@ -65,27 +66,8 @@ export class HealthService implements IHealthService {
    *
    * Only runs the "self" indicator.
    */
-  async checkLive(): Promise<HealthReport> {
-    const selfIndicator = this.#indicators.get('self');
-    if (!selfIndicator) {
-      // Should never happen - self indicator is always registered
-      return this.#emptyReport('up');
-    }
-
-    const startTime = this.#runtime.hrtime();
-    const result = await selfIndicator.check();
-    const latencyMs = this.#runtime.hrtime() - startTime;
-
-    return {
-      status: result.status,
-      timestamp: new Date(this.#runtime.now()).toISOString(),
-      checks: {
-        [selfIndicator.name]: {
-          ...result,
-          latencyMs,
-        },
-      },
-    };
+  checkLive(): Promise<HealthReport> {
+    return this.#runIndicators((name) => name === 'self');
   }
 
   /**
@@ -94,48 +76,18 @@ export class HealthService implements IHealthService {
    * Runs all indicators except "self".
    */
   checkReady(): Promise<HealthReport> {
-    return this.#runContributedIndicators();
+    return this.#runIndicators((name) => name !== 'self');
   }
 
   /**
-   * Runs all registered indicators.
+   * Runs indicators filtered by the provided predicate.
    */
-  async #runAllIndicators(): Promise<HealthReport> {
-    const checks: Record<string, Readonly<HealthCheckResultWithLatency>> = {};
-    let worstStatus: HealthStatus = 'up';
-
-    const entries = Array.from(this.#indicators.entries());
-
-    for (const [, indicator] of entries) {
-      const startTime = this.#runtime.hrtime();
-      const result = await indicator.check();
-      const latencyMs = this.#runtime.hrtime() - startTime;
-
-      checks[indicator.name] = {
-        ...result,
-        latencyMs,
-      };
-
-      worstStatus = this.#worstStatus(worstStatus, result.status);
-    }
-
-    return {
-      status: worstStatus,
-      timestamp: new Date(this.#runtime.now()).toISOString(),
-      checks,
-    };
-  }
-
-  /**
-   * Runs all contributed indicators (excludes "self").
-   */
-  async #runContributedIndicators(): Promise<HealthReport> {
-    const checks: Record<string, Readonly<HealthCheckResultWithLatency>> = {};
+  async #runIndicators(filter: (name: string) => boolean): Promise<HealthReport> {
+    const checks: Record<string, Readonly<HealthCheckResult & { latencyMs?: number }>> = {};
     let worstStatus: HealthStatus = 'up';
 
     for (const [name, indicator] of this.#indicators.entries()) {
-      // Skip the self indicator for readiness
-      if (name === 'self') {
+      if (!filter(name)) {
         continue;
       }
 
@@ -171,26 +123,4 @@ export class HealthService implements IHealthService {
     };
     return rank[a] < rank[b] ? a : b;
   }
-
-  /**
-   * Returns an empty report with the given status.
-   */
-  #emptyReport(status: HealthStatus): HealthReport {
-    return {
-      status,
-      timestamp: new Date(this.#runtime.now()).toISOString(),
-      checks: {},
-    };
-  }
-}
-
-/**
- * Internal type for a health check result with latency.
- *
- * @since 0.20.0
- */
-interface HealthCheckResultWithLatency {
-  readonly status: HealthStatus;
-  readonly data?: Readonly<Record<string, unknown>>;
-  readonly latencyMs: number;
 }

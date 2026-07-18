@@ -828,11 +828,14 @@ describe('HealthPlugin', () => {
       };
 
       // Call the handler for /live
-      const result = await handler?.(mockContext);
-      expect(result).toBeDefined();
+      const result = (await handler?.(mockContext)) as { status: number; body: { status: string; checks: Record<string, unknown> } };
+      expect(result.status).toBe(200);
+      // checkLive returns 200 with the self indicator result
+      expect(result.body.status).toBe('up');
+      expect(typeof result.body.checks).toBe('object');
     });
 
-    it('should return 503 for /ready endpoint when status is down', async () => {
+    it('should return 200 for /ready endpoint when all indicators are up', async () => {
       let handler:
         | ((
           c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
@@ -926,11 +929,17 @@ describe('HealthPlugin', () => {
       };
 
       // Call the handler
-      const result = await handler?.(mockContext);
-      expect(result).toBeDefined();
+      const result = (await handler?.(mockContext)) as { status: number; body: unknown };
+      expect(result.status).toBe(200);
+      // checkReady excludes self, so checks is empty
+      expect(result.body).toEqual({
+        status: 'up',
+        timestamp: expect.any(String),
+        checks: {},
+      });
     });
 
-    it('should return 200 for /health endpoint when status is degraded', async () => {
+    it('should return 200 for /health endpoint when self indicator is up', async () => {
       let handler:
         | ((
           c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
@@ -1024,8 +1033,11 @@ describe('HealthPlugin', () => {
       };
 
       // Call the handler
-      const result = await handler?.(mockContext);
-      expect(result).toBeDefined();
+      const result = (await handler?.(mockContext)) as { status: number; body: { status: string; checks: Record<string, unknown> } };
+      expect(result.status).toBe(200);
+      // check returns 200 with all indicators
+      expect(result.body.status).toBe('up');
+      expect(typeof result.body.checks).toBe('object');
     });
   });
 

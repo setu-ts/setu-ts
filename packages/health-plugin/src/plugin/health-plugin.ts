@@ -17,8 +17,6 @@ import { CAPABILITIES } from '@hono-enterprise/common';
 import type { HealthPluginOptions } from '../interfaces/index.ts';
 import { HealthService } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
-export { createHttpIndicator } from '../indicators/http-indicator.ts';
-export type { HttpIndicatorOptions } from '../indicators/http-indicator.ts';
 
 /**
  * Creates a health plugin.
@@ -158,7 +156,7 @@ function createHealthHandler(
  * @param method - The method that produced the report
  * @returns The HTTP status code
  */
-export function determineStatusCode(
+function determineStatusCode(
   report: HealthReport,
   method: 'check' | 'checkLive' | 'checkReady',
 ): number {

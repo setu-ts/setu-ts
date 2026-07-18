@@ -3,7 +3,11 @@
  *
  * @module
  */
-import type { HealthCheckResult, IHealthIndicator } from '@hono-enterprise/common';
+import type {
+  HealthCheckResult,
+  IHealthIndicator,
+  IRuntimeServices,
+} from '@hono-enterprise/common';
 
 /**
  * Options for creating an HTTP probe indicator.
@@ -27,10 +31,16 @@ export interface HttpIndicatorOptions {
    * Defaults to `globalThis.fetch`.
    */
   readonly fetcher?: typeof fetch;
+
+  /**
+   * Runtime services for monotonic time measurements.
+   *
+   * Required for clock-discipline-compliant latency tracking.
+   */
+  readonly runtime: IRuntimeServices;
 }
 
 /**
- * Creates an HTTP probe indicator.
  * Creates an HTTP probe indicator.
  *
  * This indicator performs an HTTP GET request to the specified URL and
@@ -63,6 +73,7 @@ export function createHttpIndicator(
   const url = options.url;
   const timeoutMs = options.timeoutMs ?? 5000;
   const fetcher = options.fetcher ?? globalThis.fetch;
+  const runtime = options.runtime;
 
   return {
     name,
@@ -71,12 +82,12 @@ export function createHttpIndicator(
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const startTime = performance.now();
+        const startTime = runtime.hrtime();
         const response = await fetcher(url, {
           signal: controller.signal,
           method: 'GET',
         });
-        const latencyMs = performance.now() - startTime;
+        const latencyMs = runtime.hrtime() - startTime;
 
         clearTimeout(timeoutId);
 

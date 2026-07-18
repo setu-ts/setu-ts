@@ -6,10 +6,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createHttpIndicator } from '../../src/indicators/http-indicator.ts';
+import { createFakeRuntime } from '../../test/fixtures/fake-runtime.ts';
 
 describe('createHttpIndicator', () => {
+  const runtime = createFakeRuntime({ hrtime: 0 });
+
   it('should have the provided name', () => {
-    const indicator = createHttpIndicator('test-api', { url: 'http://example.com' });
+    const indicator = createHttpIndicator('test-api', { url: 'http://example.com', runtime });
 
     expect(indicator.name).toBe('test-api');
   });
@@ -23,6 +26,7 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -44,6 +48,7 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -60,6 +65,7 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -81,6 +87,7 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -96,6 +103,7 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -119,6 +127,7 @@ describe('createHttpIndicator', () => {
       url: 'http://example.com',
       timeoutMs: 5000,
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -140,6 +149,7 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime,
     });
 
     const result = await indicator.check();
@@ -153,15 +163,26 @@ describe('createHttpIndicator', () => {
     );
   });
 
-  it('should include latencyMs on success', async () => {
-    const mockFetcher = () =>
-      Promise.resolve({
+  it('should measure latency using runtime.hrtime()', async () => {
+    let hrtimeValue = 0;
+    const fakeRuntime = {
+      ...createFakeRuntime({ hrtime: 0 }),
+      hrtime() {
+        return hrtimeValue;
+      },
+    };
+
+    const mockFetcher = () => {
+      hrtimeValue = 100; // Simulate 100ms elapsed
+      return Promise.resolve({
         status: 200,
       } as Response);
+    };
 
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime: fakeRuntime,
     });
 
     const result = await indicator.check();
@@ -169,16 +190,16 @@ describe('createHttpIndicator', () => {
     expect(result.data).toEqual(
       expect.objectContaining({
         statusCode: 200,
-        latencyMs: expect.any(Number),
+        latencyMs: 100,
       }),
     );
-    expect(typeof result.data?.latencyMs).toBe('number');
   });
 
   it('should use default timeout of 5000ms', () => {
     // Just verify the indicator is created without error
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
+      runtime,
     });
 
     expect(indicator).toBeDefined();
@@ -188,14 +209,44 @@ describe('createHttpIndicator', () => {
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       timeoutMs: 3000,
+      runtime,
     });
 
     expect(indicator).toBeDefined();
   });
 
   describe('timeout behavior', () => {
-    it.skip('should cancel pending request on timeout', async () => {
-      // Skip - requires complex mocking that conflicts with fetcher type
+    it('should cancel pending request on timeout', async () => {
+      // Simulate timeout by having fetcher throw AbortError after "delay"
+      let hrtimeValue = 0;
+      const fakeRuntime = {
+        ...createFakeRuntime({ hrtime: 0 }),
+        hrtime() {
+          return hrtimeValue;
+        },
+      };
+
+      const mockFetcher = () => {
+        hrtimeValue = 6000; // After timeout threshold
+        const abortError = new DOMException('The operation was aborted', 'AbortError');
+        throw abortError;
+      };
+
+      const indicator = createHttpIndicator('test-api', {
+        url: 'http://example.com',
+        timeoutMs: 5000,
+        fetcher: mockFetcher,
+        runtime: fakeRuntime,
+      });
+
+      const result = await indicator.check();
+
+      expect(result.status).toBe('down');
+      expect(result.data).toEqual(
+        expect.objectContaining({
+          error: 'timeout',
+        }),
+      );
     });
   });
 
@@ -208,6 +259,7 @@ describe('createHttpIndicator', () => {
       const indicator = createHttpIndicator('test-api', {
         url: 'http://example.com',
         fetcher: mockFetcher,
+        runtime,
       });
 
       const result = await indicator.check();
@@ -224,6 +276,7 @@ describe('createHttpIndicator', () => {
       const indicator = createHttpIndicator('test-api', {
         url: 'http://example.com',
         fetcher: mockFetcher,
+        runtime,
       });
 
       const result = await indicator.check();

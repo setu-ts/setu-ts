@@ -93,30 +93,3 @@ export function createFakeRuntime(options?: FakeRuntimeOptions): IRuntimeService
     fs: {} as IRuntimeServices['fs'],
   } as IRuntimeServices;
 }
-
-/**
- * Advances the fake runtime's monotonic clock.
- *
- * @param runtime - The fake runtime
- * @param ms - Milliseconds to advance
- *
- * @example
- * ```typescript
- * const runtime = createFakeRuntime({ hrtime: 0 });
- * advanceFakeTime(runtime, 100); // hrtime is now 100
- * ```
- *
- * @since 0.20.0
- */
-/**
- * Advances the fake runtime's monotonic clock.
- *
- * @param _runtime - The fake runtime (unused, kept for API compatibility)
- * @param _ms - Milliseconds to advance (unused, kept for API compatibility)
- *
- * @since 0.20.0
- */
-export function advanceFakeTime(_runtime: IRuntimeServices, _ms: number): void {
-  // This is a workaround since we can't directly modify the hrtime closure
-  // Tests should use a fresh runtime with the desired initial hrtime value
-}

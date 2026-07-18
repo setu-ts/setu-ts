@@ -120,9 +120,30 @@ describe('HealthPlugin integration', () => {
         status: 200,
       } as Response);
 
+    const fakeRuntime = {
+      now: () => 1_000_000_000_000,
+      hrtime: () => 0,
+      platform: () => 'node' as RuntimePlatform,
+      version: () => '18.0.0',
+      hostname: () => 'test-host',
+      uuid: () => '00000000-0000-0000-0000-000000000000',
+      randomBytes: () => new Uint8Array(32),
+      subtle: {} as Crypto['subtle'],
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      setInterval: globalThis.setInterval.bind(globalThis),
+      clearInterval: globalThis.clearInterval.bind(globalThis),
+      env: {} as Record<string, string | undefined>,
+      exit: (() => {
+        throw new Error('exit called');
+      }) as () => never,
+      fs: {} as IRuntimeServices['fs'],
+    } as unknown as IRuntimeServices;
+
     const indicator = createHttpIndicator('test-api', {
       url: 'http://example.com',
       fetcher: mockFetcher,
+      runtime: fakeRuntime,
     });
 
     expect(indicator.name).toBe('test-api');

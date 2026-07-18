@@ -23,39 +23,6 @@ describe('Barrel exports', () => {
     expect(typeof healthPlugin.createHttpIndicator).toBe('function');
   });
 
-  it('should re-export IHealthService type', () => {
-    // Type-only export, so we just verify the module loads correctly
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should re-export IHealthIndicator type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should re-export HealthCheckResult type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should re-export HealthIndicatorFn type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should re-export HealthStatus type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should re-export HealthReport type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should export HealthPluginOptions type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
-  it('should export HttpIndicatorOptions type', () => {
-    expect(healthPlugin).toBeDefined();
-  });
-
   it('should have all expected exports', () => {
     const expectedExports = [
       'HealthPlugin',
