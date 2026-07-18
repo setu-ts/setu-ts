@@ -30,12 +30,37 @@ export class OpenApiService implements IOpenApiService {
   #cachedSpec: OpenApiDocument | null = null;
 
   /**
+   * Builds generator options from service options, omitting undefined fields.
+   */
+  #makeGeneratorOptions(): OpenApiGeneratorOptions {
+    const base: Record<string, unknown> = {
+      title: this.#options.title ?? 'API',
+      version: this.#options.version ?? '1.0.0',
+    };
+    if (this.#options.description !== undefined) base.description = this.#options.description;
+    if (this.#options.servers !== undefined) base.servers = this.#options.servers;
+    if (this.#options.securitySchemes !== undefined) {
+      base.securitySchemes = this.#options.securitySchemes;
+    }
+    return base as OpenApiGeneratorOptions;
+  }
+
+  /**
    * Creates a new OpenAPI service.
    *
    * @param options - Service options
    */
   constructor(options: OpenApiServiceOptions) {
     this.#options = options;
+
+    // Register pre-registered schemas immediately in the generator (lazy-create it)
+    // so they are present regardless of whether addSchema() is called before getSpec().
+    if (options.schemas && options.schemas.length > 0) {
+      this.#generator = new OpenApiGenerator(this.#makeGeneratorOptions());
+      for (const { name, schema } of options.schemas) {
+        this.#generator.addSchema(name, schema);
+      }
+    }
   }
 
   /**
@@ -61,17 +86,7 @@ export class OpenApiService implements IOpenApiService {
   addSchema(name: string, schema: unknown): void {
     // Initialize generator if not already created
     if (!this.#generator) {
-      this.#generator = new OpenApiGenerator({
-        title: this.#options.title ?? 'API',
-        version: this.#options.version ?? '1.0.0',
-        ...(this.#options.description !== undefined
-          ? { description: this.#options.description }
-          : {}),
-        ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
-        ...(this.#options.securitySchemes !== undefined
-          ? { securitySchemes: this.#options.securitySchemes }
-          : {}),
-      });
+      this.#generator = new OpenApiGenerator(this.#makeGeneratorOptions());
     }
     // Invalidate cache when new schemas are added
     this.#cachedSpec = null;
@@ -84,26 +99,10 @@ export class OpenApiService implements IOpenApiService {
    * @returns The complete OpenAPI document
    */
   #buildSpec(): OpenApiDocument {
-    // Create generator with options (once, lazily)
+    // Create generator with options (once, lazily) — only if not already created
+    // (constructor may have created it if schemas were provided)
     if (!this.#generator) {
-      this.#generator = new OpenApiGenerator({
-        title: this.#options.title ?? 'API',
-        version: this.#options.version ?? '1.0.0',
-        ...(this.#options.description !== undefined
-          ? { description: this.#options.description }
-          : {}),
-        ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
-        ...(this.#options.securitySchemes !== undefined
-          ? { securitySchemes: this.#options.securitySchemes }
-          : {}),
-      });
-
-      // Register pre-registered schemas once
-      if (this.#options.schemas) {
-        for (const { name, schema } of this.#options.schemas) {
-          this.#generator.addSchema(name, schema);
-        }
-      }
+      this.#generator = new OpenApiGenerator(this.#makeGeneratorOptions());
     }
 
     // Get routes from the application

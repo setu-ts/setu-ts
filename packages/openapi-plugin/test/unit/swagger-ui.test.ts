@@ -64,7 +64,7 @@ describe('swaggerUiHtml', () => {
     const html = swaggerUiHtml('/openapi.json');
 
     expect(html).toContain('SwaggerUIBundle');
-    expect(html).toContain("dom_id: '#swagger-ui'");
+    expect(html).toContain('dom_id: "#swagger-ui"');
     expect(html).toContain('deepLinking: true');
   });
 
@@ -160,5 +160,37 @@ describe('swaggerUiHtml', () => {
     // The malicious script should be escaped, not executed
     expect(html).not.toContain('<script>alert("XSS")</script>');
     expect(html).toContain(String.fromCharCode(38) + 'lt;script' + String.fromCharCode(38) + 'gt;');
+  });
+
+  // N1 regression tests: $-patterns in replacement strings must not be interpreted
+  it('should render $-patterns in title verbatim (not as .replace() backreferences)', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: 'Pricing: $1 plan & $2 plan',
+    });
+
+    // The escaped title preserves $1/$2 literally, & becomes &amp;
+    expect(html).toContain('Pricing: $1 plan &amp; $2 plan');
+    expect(html).toContain('<title>Pricing: $1 plan &amp; $2 plan</title>');
+  });
+
+  it('should render $& in title verbatim (not as .replace() whole-match reference)', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      title: 'Price: $&',
+    });
+
+    // $& is preserved literally, & becomes &amp;
+    expect(html).toContain('Price: $&amp;');
+    expect(html).toContain('<title>Price: $&amp;</title>');
+  });
+
+  it('should render $-patterns in specUrl verbatim', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/api/v1/$1/$2/spec.json',
+      title: 'Test',
+    });
+
+    expect(html).toContain('/api/v1/$1/$2/spec.json');
   });
 });

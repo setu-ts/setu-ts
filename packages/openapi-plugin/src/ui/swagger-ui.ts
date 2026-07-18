@@ -51,14 +51,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <script>
     window.onload = function () {
       window.ui = SwaggerUIBundle({
-        url: '__SPEC_URL__',
-        dom_id: '#swagger-ui',
+        url: "__SPEC_URL__",
+        dom_id: "#swagger-ui",
         deepLinking: true,
         presets: [
           SwaggerUIBundle.presets.apis,
           SwaggerUIStandalonePreset,
         ],
-        layout: 'StandaloneLayout',
+        layout: "StandaloneLayout",
       });
     };
   </script>
@@ -90,7 +90,7 @@ function htmlEscape(str: string): string {
       result += GT_ENTITY;
     } else if (char === '"') {
       result += QUOT_ENTITY;
-    } else if (char === "'") {
+    } else if (char === '\x27') {
       result += APOS_ENTITY;
     } else {
       result += char;
@@ -116,7 +116,9 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
   const escapedTitle = htmlEscape(title);
   const escapedSpecUrl = htmlEscape(specUrl);
 
+  // Use function replacement for title to avoid JS $-pattern interpretation in replacement strings
+  // (e.g., $&, $1, $2 would otherwise be treated as backreferences)
   return HTML_TEMPLATE
-    .replace(/<title>.*?<\/title>/, `<title>${escapedTitle}</title>`)
+    .replace(/<title>.*?<\/title>/, () => `<title>${escapedTitle}</title>`)
     .replace(/__SPEC_URL__/g, escapedSpecUrl);
 }
