@@ -1,5 +1,10 @@
 {
   "name": "@hono-enterprise/openapi-plugin",
   "version": "0.1.0",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0",
+    "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0",
+    "npm:zod@^3.24.0": "npm:zod@^3.24.0"
+  }
 }

@@ -52,6 +52,7 @@ function createFakePluginContext(): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     lifecycle: {
       onRegister: () => {},

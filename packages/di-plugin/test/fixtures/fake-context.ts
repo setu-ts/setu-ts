@@ -106,6 +106,7 @@ export function createFakeContext(): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     lifecycle: {
       onRegister: () => {},

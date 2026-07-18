@@ -16,3 +16,7 @@ export type {
 } from './application/application.ts';
 
 export { createApplication } from './application/application.ts';
+
+// Router
+export { Router } from './router/router.ts';
+export type { RouteEntry } from './router/router.ts';

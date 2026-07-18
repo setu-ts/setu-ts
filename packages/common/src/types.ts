@@ -82,6 +82,8 @@ export const PLUGIN_PRIORITY = {
   HIGH: 100,
   /** Default band for ordinary capability plugins. */
   NORMAL: 500,
+  /** OpenAPI plugin — generates spec after routes are registered. */
+  OPENAPI: 700,
   /** Plugins that want most capabilities available before they register. */
   LOW: 900,
   /** Observers that must register after everything else. */

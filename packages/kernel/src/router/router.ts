@@ -9,12 +9,13 @@ import type {
   IRouterApi,
   RouteDefinition,
   RouteHandler,
+  RouteInfo,
 } from '@hono-enterprise/common';
 
 import { match as matchPath, parsePattern, staticSegmentCount } from './route-matcher.ts';
 import type { Segment } from './route-matcher.ts';
 
-interface RouteEntry {
+export interface RouteEntry {
   pattern: string;
   method: HttpMethod;
   definition: RouteDefinition;
@@ -129,6 +130,14 @@ export class Router implements IRouterApi {
   getAll(): readonly RouteEntry[] {
     return this.#routes;
   }
+
+  listRoutes(): readonly RouteInfo[] {
+    return this.#routes.map((entry) => ({
+      method: entry.method,
+      path: entry.pattern,
+      definition: entry.definition,
+    }));
+  }
 }
 
 /**
@@ -180,5 +189,9 @@ class GroupRouter implements IRouterApi {
 
   group(prefix: string, configure: (router: IRouterApi) => void): void {
     this.#parent.group(this.#prefix + prefix, configure);
+  }
+
+  listRoutes(): readonly RouteInfo[] {
+    return this.#parent.listRoutes();
   }
 }

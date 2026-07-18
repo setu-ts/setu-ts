@@ -54,6 +54,7 @@ function createFakeContext(): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     environment: {
       validate: () => {},

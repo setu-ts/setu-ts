@@ -69,6 +69,7 @@ function createFakeContext(runtime: IRuntimeServices): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     lifecycle: {
       onRegister: () => {},
@@ -299,6 +300,7 @@ describe('LoggerPlugin (integration)', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       },
       lifecycle: {
         onRegister: () => {},

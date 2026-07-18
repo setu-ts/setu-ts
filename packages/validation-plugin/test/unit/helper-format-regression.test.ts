@@ -67,6 +67,7 @@ function registerPlugin(options?: Parameters<typeof ValidationPlugin>[0]): IVali
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     lifecycle: {
       onRegister: () => {},

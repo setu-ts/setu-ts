@@ -85,6 +85,7 @@ function createPluginContext(): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     environment: { validate: () => {} },
     health: { register: () => {} },

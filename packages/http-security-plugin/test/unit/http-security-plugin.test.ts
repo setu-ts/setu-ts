@@ -64,6 +64,7 @@ describe('HttpSecurityPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       },
       environment: { validate: () => {} },
       health: { register: () => {} },
