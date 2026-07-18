@@ -8,6 +8,7 @@
  */
 import type {
   HandlerResult,
+  HealthIndicatorFn,
   HealthReport,
   IHealthService,
   IPlugin,
@@ -82,7 +83,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       ctx.lifecycle.onInit(() => {
         const contributions = ctx.services.getAll<{
           name: string;
-          check: import('@hono-enterprise/common').HealthIndicatorFn;
+          check: HealthIndicatorFn;
         }>(CAPABILITIES.HEALTH_INDICATOR);
 
         for (const contribution of contributions) {

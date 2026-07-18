@@ -22,6 +22,13 @@ interface RegisteredIndicator {
   readonly check: HealthIndicatorFn;
 }
 
+/** Severity ranking used to compute the worst status. Lower is worse. */
+const STATUS_RANK: Readonly<Record<HealthStatus, number>> = {
+  up: 2,
+  degraded: 1,
+  down: 0,
+};
+
 /**
  * Default implementation of {@linkcode IHealthService}.
  *
@@ -116,11 +123,6 @@ export class HealthService implements IHealthService {
    * Order: 'down' < 'degraded' < 'up'
    */
   #worstStatus(a: HealthStatus, b: HealthStatus): HealthStatus {
-    const rank: Record<HealthStatus, number> = {
-      up: 2,
-      degraded: 1,
-      down: 0,
-    };
-    return rank[a] < rank[b] ? a : b;
+    return STATUS_RANK[a] < STATUS_RANK[b] ? a : b;
   }
 }

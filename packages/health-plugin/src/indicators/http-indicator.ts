@@ -3,11 +3,7 @@
  *
  * @module
  */
-import type {
-  HealthCheckResult,
-  IHealthIndicator,
-  IRuntimeServices,
-} from '@hono-enterprise/common';
+import type { HealthCheckResult, IHealthIndicator } from '@hono-enterprise/common';
 
 /**
  * Options for creating an HTTP probe indicator.
@@ -31,20 +27,17 @@ export interface HttpIndicatorOptions {
    * Defaults to `globalThis.fetch`.
    */
   readonly fetcher?: typeof fetch;
-
-  /**
-   * Runtime services for monotonic time measurements.
-   *
-   * Required for clock-discipline-compliant latency tracking.
-   */
-  readonly runtime: IRuntimeServices;
 }
 
 /**
  * Creates an HTTP probe indicator.
  *
  * This indicator performs an HTTP GET request to the specified URL and
- * reports 'up' if the response status is 2xx or 3xx, 'down' otherwise.
+ * reports 'up' if the response status is 2xx or 3xx, 'down' otherwise. The
+ * request is aborted after `timeoutMs` via the web-standard
+ * {@linkcode AbortSignal.timeout}, so the indicator needs no runtime services
+ * and can be constructed at app-registration time. Per-indicator latency is
+ * measured by the health service, not here.
  *
  * The `fetcher` option allows injecting a custom fetch implementation
  * for testing purposes.
@@ -73,32 +66,21 @@ export function createHttpIndicator(
   const url = options.url;
   const timeoutMs = options.timeoutMs ?? 5000;
   const fetcher = options.fetcher ?? globalThis.fetch;
-  const runtime = options.runtime;
 
   return {
     name,
     async check(): Promise<HealthCheckResult> {
-      const controller = new AbortController();
-      const timeoutId = runtime.setTimeout(() => controller.abort(), timeoutMs);
-
       try {
-        const startTime = runtime.hrtime();
         const response = await fetcher(url, {
-          signal: controller.signal,
+          signal: AbortSignal.timeout(timeoutMs),
           method: 'GET',
         });
-        const latencyMs = runtime.hrtime() - startTime;
-
-        runtime.clearTimeout(timeoutId);
 
         // 2xx and 3xx are considered up
         if (response.status >= 200 && response.status < 400) {
           return {
             status: 'up',
-            data: {
-              statusCode: response.status,
-              latencyMs: Math.round(latencyMs),
-            } as Readonly<Record<string, unknown>>,
+            data: { statusCode: response.status },
           };
         }
 
@@ -108,29 +90,20 @@ export function createHttpIndicator(
           data: {
             statusCode: response.status,
             error: `Unexpected status code: ${response.status}`,
-          } as Readonly<Record<string, unknown>>,
+          },
         };
       } catch (error) {
-        runtime.clearTimeout(timeoutId);
-
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        // Check if it was a timeout
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          return {
-            status: 'down',
-            data: {
-              error: 'timeout',
-            } as Readonly<Record<string, unknown>>,
-          };
+        // AbortSignal.timeout aborts with a TimeoutError; a caller-supplied
+        // signal or fake may surface an AbortError — treat both as a timeout.
+        if (
+          error instanceof DOMException &&
+          (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ) {
+          return { status: 'down', data: { error: 'timeout' } };
         }
 
-        return {
-          status: 'down',
-          data: {
-            error: errorMessage,
-          } as Readonly<Record<string, unknown>>,
-        };
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { status: 'down', data: { error: errorMessage } };
       }
     },
   };

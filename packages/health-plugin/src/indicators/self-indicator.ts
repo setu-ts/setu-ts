@@ -38,7 +38,7 @@ export function createSelfIndicator(runtime: IRuntimeServices): IHealthIndicator
           platform: runtime.platform(),
           version: runtime.version(),
           hostname: runtime.hostname(),
-        } as Readonly<Record<string, unknown>>,
+        },
       };
     },
   };
