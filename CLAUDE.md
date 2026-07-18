@@ -205,7 +205,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   #42)
 - **Milestone 20** (`packages/health-plugin` — Health checks and readiness probes) — complete (PR
   #44)
-- **Next milestone** — Milestone 21 (`packages/openapi-plugin` — OpenAPI spec generation)
+- **Next milestone** — Milestone 22 (`packages/telemetry-plugin` — Telemetry and distributed
+  tracing)
 
 ## Verification (run before declaring any work done)
 

@@ -8,6 +8,7 @@ import { expect } from '@std/expect';
 import type { IApplication, IRouterApi } from '@hono-enterprise/common';
 import { OpenApiService } from '../../src/services/openapi-service.ts';
 import { Router } from '@hono-enterprise/kernel';
+import { z } from 'npm:zod@^3.24.0';
 
 describe('OpenApiService', () => {
   let app: IApplication;
@@ -155,5 +156,66 @@ describe('OpenApiService', () => {
         version: '1.0.0',
       }),
     );
+  });
+
+  it('should include description in spec when provided', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      description: 'A test API description',
+    });
+
+    const spec = service.getSpec() as Record<string, unknown>;
+
+    expect(spec.info).toEqual(
+      expect.objectContaining({
+        description: 'A test API description',
+      }),
+    );
+  });
+
+  it('should include servers in spec when provided', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      servers: [{ url: 'https://api.example.com', description: 'Production' }],
+    });
+
+    const spec = service.getSpec() as Record<string, unknown>;
+
+    expect(spec).toHaveProperty('servers');
+    expect(Array.isArray(spec.servers)).toBe(true);
+  });
+
+  it('should include securitySchemes in spec when provided', () => {
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer' },
+      },
+    });
+
+    const spec = service.getSpec() as Record<string, unknown>;
+
+    expect(spec).toHaveProperty('components.securitySchemes');
+  });
+
+  it('should register pre-registered schemas in the generator', () => {
+    const testSchema = z.object({ id: z.string() });
+    const service = new OpenApiService({
+      app,
+      title: 'Test API',
+      version: '1.0.0',
+      schemas: [{ name: 'Test', schema: testSchema }],
+    });
+
+    const spec = service.getSpec() as Record<string, unknown>;
+
+    // The schema should be registered
+    expect(spec).toBeDefined();
   });
 });

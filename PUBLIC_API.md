@@ -2573,8 +2573,7 @@ Provides automatic OpenAPI documentation.
 import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
 
 app.register(OpenApiPlugin({
-  endpoint: '/docs',
-  specEndpoint: '/openapi.json',
+  // OpenAPI spec metadata
   title: 'My API',
   version: '1.0.0',
   description: 'A sample API built with Hono Enterprise',
@@ -2586,6 +2585,10 @@ app.register(OpenApiPlugin({
     bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
     apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
   },
+  // Endpoint configuration
+  endpoint: '/docs', // Path for Swagger UI HTML (default: '/docs')
+  specEndpoint: '/openapi.json', // Path for OpenAPI JSON spec (default: '/openapi.json')
+  swagger: true, // Whether to serve Swagger UI (default: true)
 }));
 ```
 
@@ -2621,8 +2624,6 @@ app.router.post('/users', {
     },
     tags: ['Users'],
     summary: 'Create a new user',
-    description: 'Creates a new user account',
-    security: [{ bearerAuth: [] }],
   },
   handler: async (ctx) => {/* ... */},
 });

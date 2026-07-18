@@ -3471,7 +3471,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 18        | ✅     | scheduler-plugin     |
 | 19        | ✅     | metrics-plugin       |
 | 20        | ✅     | health-plugin        |
-| 21        | ⬜     | openapi-plugin       |
+| 21        | ✅     | openapi-plugin       |
 | 22        | ⬜     | telemetry-plugin     |
 | 23        | ⬜     | secrets-plugin       |
 | 24        | ⬜     | audit-plugin         |

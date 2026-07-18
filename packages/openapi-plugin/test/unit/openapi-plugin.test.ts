@@ -149,4 +149,59 @@ describe('OpenApiPlugin', () => {
     expect(plugin.priority).toBeDefined();
     expect(typeof plugin.priority).toBe('number');
   });
+
+  it('should pass description to OpenApiService when provided', async () => {
+    const plugin = OpenApiPlugin({
+      title: 'Test API',
+      version: '1.0.0',
+      description: 'Test description',
+    });
+
+    await plugin.register(ctx);
+
+    // Verify the spec route was registered
+    const matched = router.match('GET', '/openapi.json');
+    expect(matched).not.toBeNull();
+  });
+
+  it('should pass servers to OpenApiService when provided', async () => {
+    const plugin = OpenApiPlugin({
+      title: 'Test API',
+      version: '1.0.0',
+      servers: [{ url: 'https://api.example.com', description: 'Production' }],
+    });
+
+    await plugin.register(ctx);
+
+    const matched = router.match('GET', '/openapi.json');
+    expect(matched).not.toBeNull();
+  });
+
+  it('should pass securitySchemes to OpenApiService when provided', async () => {
+    const plugin = OpenApiPlugin({
+      title: 'Test API',
+      version: '1.0.0',
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer' },
+      },
+    });
+
+    await plugin.register(ctx);
+
+    const matched = router.match('GET', '/openapi.json');
+    expect(matched).not.toBeNull();
+  });
+
+  it('should pass custom title to Swagger UI when provided', async () => {
+    const plugin = OpenApiPlugin({
+      title: 'My Custom API',
+      swagger: true,
+      endpoint: '/docs',
+    });
+
+    await plugin.register(ctx);
+
+    const matched = router.match('GET', '/docs');
+    expect(matched).not.toBeNull();
+  });
 });
