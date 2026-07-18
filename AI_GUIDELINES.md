@@ -691,6 +691,13 @@ A public API is any export from a package's `src/index.ts` file.
     error if it is not installed.
 - The framework never installs a database driver by default.
 - Users install the driver for the adapter they choose.
+- **Build-time app tooling is NOT a §12.2 dependency.** A frontend build tool (e.g. Vite for the
+  React Router SSR plugin, M44) is never imported by a plugin and never appears in a JSR package's
+  dependency graph. It lives in the consuming application's `devDependencies` and runs at build time
+  on the Node/npm toolchain; the plugin consumes only the built artifacts (plus the runtime library
+  via the lazy `import()` above). §12.2 governs drivers a plugin loads **at runtime** — a build tool
+  is loaded at neither runtime nor plugin-import time. A plugin MUST NOT import a build tool; the
+  frontend build is the application's responsibility, exactly as installing a database driver is.
 
 ### 12.3 No Dependency Cycles
 
