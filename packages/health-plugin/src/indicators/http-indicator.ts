@@ -79,7 +79,7 @@ export function createHttpIndicator(
     name,
     async check(): Promise<HealthCheckResult> {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const timeoutId = runtime.setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const startTime = runtime.hrtime();
@@ -89,7 +89,7 @@ export function createHttpIndicator(
         });
         const latencyMs = runtime.hrtime() - startTime;
 
-        clearTimeout(timeoutId);
+        runtime.clearTimeout(timeoutId);
 
         // 2xx and 3xx are considered up
         if (response.status >= 200 && response.status < 400) {
@@ -111,7 +111,7 @@ export function createHttpIndicator(
           } as Readonly<Record<string, unknown>>,
         };
       } catch (error) {
-        clearTimeout(timeoutId);
+        runtime.clearTimeout(timeoutId);
 
         const errorMessage = error instanceof Error ? error.message : String(error);
 

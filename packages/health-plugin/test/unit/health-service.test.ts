@@ -242,6 +242,21 @@ describe('HealthService', () => {
 
       expect(report.status).toBe('up');
     });
+
+    it('keeps the worse status when a healthier indicator follows it', async () => {
+      // Iteration order matters: a 'down' seen before an 'up' must not be
+      // "healed" by the later 'up' — exercises the branch where the running
+      // worst is already worse than the incoming status.
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+
+      service.registerIndicator('first', () => Promise.resolve({ status: 'down' }));
+      service.registerIndicator('second', () => Promise.resolve({ status: 'up' }));
+
+      const report = await service.check();
+
+      expect(report.status).toBe('down');
+    });
   });
 
   describe('timestamp', () => {

@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { HealthPlugin } from '../../src/plugin/health-plugin.ts';
+import type { HealthService } from '../../src/services/health-service.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type {
   IApplication,
@@ -652,14 +653,24 @@ describe('HealthPlugin', () => {
     expect(plugin.provides).toContain(CAPABILITIES.HEALTH);
   });
 
-  it('should register contributed indicators via onInit hook', () => {
+  it('should register contributed indicators via onInit hook', async () => {
     let onInitHook: (() => void) | undefined;
 
+    // A HEALTH_INDICATOR contribution, shaped exactly as the kernel stores it
+    // (see application.ts: { name, check }).
+    const contribution = {
+      name: 'db',
+      check: () => Promise.resolve({ status: 'up' as const }),
+    };
+
+    const services = new Map<string, unknown>();
     const fakeRegistry = {
-      register: () => {},
-      get: () => undefined,
-      getAll: () => [],
-      has: () => false,
+      register: (token: string, service: unknown) => {
+        services.set(token, service);
+      },
+      get: (token: string) => services.get(token),
+      getAll: (token: string) => token === CAPABILITIES.HEALTH_INDICATOR ? [contribution] : [],
+      has: (token: string) => services.has(token),
       registerFactory: () => {},
       unregister: () => false,
     } as unknown as IServiceRegistry;
@@ -725,12 +736,16 @@ describe('HealthPlugin', () => {
     const plugin = HealthPlugin();
     plugin.register(ctx);
 
-    // Trigger the onInit hook
+    // Trigger the onInit hook — this is where the drain runs.
     expect(onInitHook).toBeDefined();
     onInitHook?.();
 
-    // Verify that getAll was called for HEALTH_INDICATOR contributions
-    expect(fakeRegistry.getAll).toBeDefined();
+    // The contributed indicator must actually land on the resolved service,
+    // not merely be "available" to drain. Read it back through the service.
+    const service = services.get(CAPABILITIES.HEALTH) as HealthService;
+    const report = await service.checkReady();
+    expect(Object.keys(report.checks)).toContain('db');
+    expect(report.checks.db.status).toBe('up');
   });
 
   describe('health endpoint handlers', () => {
