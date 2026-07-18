@@ -828,7 +828,10 @@ describe('HealthPlugin', () => {
       };
 
       // Call the handler for /live
-      const result = (await handler?.(mockContext)) as { status: number; body: { status: string; checks: Record<string, unknown> } };
+      const result = (await handler?.(mockContext)) as {
+        status: number;
+        body: { status: string; checks: Record<string, unknown> };
+      };
       expect(result.status).toBe(200);
       // checkLive returns 200 with the self indicator result
       expect(result.body.status).toBe('up');
@@ -1033,7 +1036,10 @@ describe('HealthPlugin', () => {
       };
 
       // Call the handler
-      const result = (await handler?.(mockContext)) as { status: number; body: { status: string; checks: Record<string, unknown> } };
+      const result = (await handler?.(mockContext)) as {
+        status: number;
+        body: { status: string; checks: Record<string, unknown> };
+      };
       expect(result.status).toBe(200);
       // check returns 200 with all indicators
       expect(result.body.status).toBe('up');
@@ -1041,7 +1047,464 @@ describe('HealthPlugin', () => {
     });
   });
 
-  // Note: The determineStatusCode function is tested indirectly through the
-  // health endpoint handler tests above. The function's branches are exercised
-  // by the different endpoint tests (/live, /ready, /health).
+  describe('determineStatusCode coverage - 503 status paths', () => {
+    it('should return 503 for /ready endpoint when an indicator returns down', async () => {
+      let handler:
+        | ((
+          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+        ) => Promise<unknown>)
+        | undefined;
+
+      const fakeRegistry = {
+        register: () => {},
+        get: () => undefined,
+        getAll: () => [],
+        has: () => false,
+        registerFactory: () => {},
+        unregister: () => false,
+      } as unknown as IServiceRegistry;
+
+      const fakeRuntime = {
+        now: () => 1_000_000_000_000,
+        hrtime: () => 0,
+        platform: () => 'node' as RuntimePlatform,
+        version: () => '18.0.0',
+        hostname: () => 'test-host',
+        uuid: () => '00000000-0000-0000-0000-000000000000',
+        randomBytes: () => new Uint8Array(32),
+        subtle: {} as Crypto['subtle'],
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        setInterval: globalThis.setInterval.bind(globalThis),
+        clearInterval: globalThis.clearInterval.bind(globalThis),
+        env: {} as Record<string, string | undefined>,
+        exit: (() => {
+          throw new Error('exit called');
+        }) as () => never,
+        fs: {} as IRuntimeServices['fs'],
+      } as unknown as IRuntimeServices;
+
+      const ctx = {
+        services: fakeRegistry,
+        router: {
+          get: (
+            _path: string,
+            h: (
+              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+            ) => Promise<unknown>,
+          ) => {
+            handler = h;
+          },
+          post: () => {},
+          put: () => {},
+          patch: () => {},
+          delete: () => {},
+          head: () => {},
+          options: () => {},
+          group: () => {},
+        } as IRouterApi,
+        lifecycle: {
+          onInit: () => {},
+          onShutdown: () => {},
+          onRegister: () => {},
+          onBootstrap: () => {},
+          onRequest: () => {},
+          onResponse: () => {},
+          onError: () => {},
+          onClose: () => {},
+        } as ILifecycleApi,
+        middleware: { add: () => {} } as IMiddlewareApi,
+        runtime: fakeRuntime,
+        logger: {} as ILogger,
+        config: {} as IConfig,
+        environment: {} as IEnvironmentApi,
+        health: {} as IHealthApi,
+        metrics: {} as IMetricsApi,
+        openapi: {} as IOpenApiApi,
+        decorators: {} as IDecoratorApi,
+        cli: {} as ICliApi,
+        options: {},
+        app: {} as IApplication,
+      } as unknown as IPluginContext;
+
+      // Pass an indicator that returns 'down' - checkReady excludes 'self' so it will see this
+      const plugin = HealthPlugin({
+        indicators: [
+          {
+            name: 'database',
+            check: () => Promise.resolve({ status: 'down' as const }),
+          },
+        ],
+      });
+      plugin.register(ctx);
+
+      // Mock the response object
+      const mockResponse = {
+        status: (code: number) => ({
+          json: (body: unknown) => ({ status: code, body }),
+        }),
+      };
+
+      const mockContext = {
+        response: mockResponse,
+      };
+
+      // Call the handler for /ready (which uses checkReady)
+      const result = (await handler?.(mockContext)) as {
+        status: number;
+        body: { status: string; checks: Record<string, unknown> };
+      };
+      expect(result.status).toBe(503);
+      expect(result.body.status).toBe('down');
+      expect(result.body.checks.database).toBeDefined();
+    });
+
+    it('should return 503 for /ready endpoint when an indicator returns degraded', async () => {
+      let handler:
+        | ((
+          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+        ) => Promise<unknown>)
+        | undefined;
+
+      const fakeRegistry = {
+        register: () => {},
+        get: () => undefined,
+        getAll: () => [],
+        has: () => false,
+        registerFactory: () => {},
+        unregister: () => false,
+      } as unknown as IServiceRegistry;
+
+      const fakeRuntime = {
+        now: () => 1_000_000_000_000,
+        hrtime: () => 0,
+        platform: () => 'node' as RuntimePlatform,
+        version: () => '18.0.0',
+        hostname: () => 'test-host',
+        uuid: () => '00000000-0000-0000-0000-000000000000',
+        randomBytes: () => new Uint8Array(32),
+        subtle: {} as Crypto['subtle'],
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        setInterval: globalThis.setInterval.bind(globalThis),
+        clearInterval: globalThis.clearInterval.bind(globalThis),
+        env: {} as Record<string, string | undefined>,
+        exit: (() => {
+          throw new Error('exit called');
+        }) as () => never,
+        fs: {} as IRuntimeServices['fs'],
+      } as unknown as IRuntimeServices;
+
+      const ctx = {
+        services: fakeRegistry,
+        router: {
+          get: (
+            _path: string,
+            h: (
+              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+            ) => Promise<unknown>,
+          ) => {
+            handler = h;
+          },
+          post: () => {},
+          put: () => {},
+          patch: () => {},
+          delete: () => {},
+          head: () => {},
+          options: () => {},
+          group: () => {},
+        } as IRouterApi,
+        lifecycle: {
+          onInit: () => {},
+          onShutdown: () => {},
+          onRegister: () => {},
+          onBootstrap: () => {},
+          onRequest: () => {},
+          onResponse: () => {},
+          onError: () => {},
+          onClose: () => {},
+        } as ILifecycleApi,
+        middleware: { add: () => {} } as IMiddlewareApi,
+        runtime: fakeRuntime,
+        logger: {} as ILogger,
+        config: {} as IConfig,
+        environment: {} as IEnvironmentApi,
+        health: {} as IHealthApi,
+        metrics: {} as IMetricsApi,
+        openapi: {} as IOpenApiApi,
+        decorators: {} as IDecoratorApi,
+        cli: {} as ICliApi,
+        options: {},
+        app: {} as IApplication,
+      } as unknown as IPluginContext;
+
+      // Pass an indicator that returns 'degraded' - checkReady excludes 'self' so it will see this
+      const plugin = HealthPlugin({
+        indicators: [
+          {
+            name: 'cache',
+            check: () => Promise.resolve({ status: 'degraded' as const }),
+          },
+        ],
+      });
+      plugin.register(ctx);
+
+      // Mock the response object
+      const mockResponse = {
+        status: (code: number) => ({
+          json: (body: unknown) => ({ status: code, body }),
+        }),
+      };
+
+      const mockContext = {
+        response: mockResponse,
+      };
+
+      // Call the handler for /ready (which uses checkReady)
+      const result = (await handler?.(mockContext)) as {
+        status: number;
+        body: { status: string; checks: Record<string, unknown> };
+      };
+      expect(result.status).toBe(503);
+      expect(result.body.status).toBe('degraded');
+      expect(result.body.checks.cache).toBeDefined();
+    });
+
+    it('should return 503 for /health endpoint when self indicator returns down', async () => {
+      let handler:
+        | ((
+          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+        ) => Promise<unknown>)
+        | undefined;
+
+      const fakeRegistry = {
+        register: () => {},
+        get: () => undefined,
+        getAll: () => [],
+        has: () => false,
+        registerFactory: () => {},
+        unregister: () => false,
+      } as unknown as IServiceRegistry;
+
+      const fakeRuntime = {
+        now: () => 1_000_000_000_000,
+        hrtime: () => 0,
+        platform: () => 'node' as RuntimePlatform,
+        version: () => '18.0.0',
+        hostname: () => 'test-host',
+        uuid: () => '00000000-0000-0000-0000-000000000000',
+        randomBytes: () => new Uint8Array(32),
+        subtle: {} as Crypto['subtle'],
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        setInterval: globalThis.setInterval.bind(globalThis),
+        clearInterval: globalThis.clearInterval.bind(globalThis),
+        env: {} as Record<string, string | undefined>,
+        exit: (() => {
+          throw new Error('exit called');
+        }) as () => never,
+        fs: {} as IRuntimeServices['fs'],
+      } as unknown as IRuntimeServices;
+
+      const ctx = {
+        services: fakeRegistry,
+        router: {
+          get: (
+            path: string,
+            h: (
+              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+            ) => Promise<unknown>,
+          ) => {
+            // Capture the /health handler specifically
+            if (path === '/health') {
+              handler = h;
+            }
+          },
+          post: () => {},
+          put: () => {},
+          patch: () => {},
+          delete: () => {},
+          head: () => {},
+          options: () => {},
+          group: () => {},
+        } as IRouterApi,
+        lifecycle: {
+          onInit: () => {},
+          onShutdown: () => {},
+          onRegister: () => {},
+          onBootstrap: () => {},
+          onRequest: () => {},
+          onResponse: () => {},
+          onError: () => {},
+          onClose: () => {},
+        } as ILifecycleApi,
+        middleware: { add: () => {} } as IMiddlewareApi,
+        runtime: fakeRuntime,
+        logger: {} as ILogger,
+        config: {} as IConfig,
+        environment: {} as IEnvironmentApi,
+        health: {} as IHealthApi,
+        metrics: {} as IMetricsApi,
+        openapi: {} as IOpenApiApi,
+        decorators: {} as IDecoratorApi,
+        cli: {} as ICliApi,
+        options: {},
+        app: {} as IApplication,
+      } as unknown as IPluginContext;
+
+      // The self indicator always returns 'up', but we can override it by registering
+      // a duplicate indicator with the same name - but the plugin throws on duplicates.
+      // Instead, we test the /health path by noting that if any indicator (including self)
+      // returns 'down', the overall status is 'down' and /health returns 503.
+      // Since we can't override self, we test via checkReady which excludes self.
+      // For /health specifically, we need a different approach - let's verify the logic
+      // by testing that when an app indicator returns down, /health also returns 503.
+      const plugin = HealthPlugin({
+        indicators: [
+          {
+            name: 'database',
+            check: () => Promise.resolve({ status: 'down' as const }),
+          },
+        ],
+      });
+      plugin.register(ctx);
+
+      // Mock the response object
+      const mockResponse = {
+        status: (code: number) => ({
+          json: (body: unknown) => ({ status: code, body }),
+        }),
+      };
+
+      const mockContext = {
+        response: mockResponse,
+      };
+
+      // Call the handler for /health (which uses check)
+      // check() includes all indicators, so if database is down, overall status is down
+      const result = (await handler?.(mockContext)) as {
+        status: number;
+        body: { status: string; checks: Record<string, unknown> };
+      };
+      // Note: The self indicator is always 'up', but database is 'down', so worst status is 'down'
+      expect(result.status).toBe(503);
+      expect(result.body.status).toBe('down');
+    });
+
+    it('should return 200 for /health endpoint when status is degraded (not down)', async () => {
+      let handler:
+        | ((
+          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+        ) => Promise<unknown>)
+        | undefined;
+
+      const fakeRegistry = {
+        register: () => {},
+        get: () => undefined,
+        getAll: () => [],
+        has: () => false,
+        registerFactory: () => {},
+        unregister: () => false,
+      } as unknown as IServiceRegistry;
+
+      const fakeRuntime = {
+        now: () => 1_000_000_000_000,
+        hrtime: () => 0,
+        platform: () => 'node' as RuntimePlatform,
+        version: () => '18.0.0',
+        hostname: () => 'test-host',
+        uuid: () => '00000000-0000-0000-0000-000000000000',
+        randomBytes: () => new Uint8Array(32),
+        subtle: {} as Crypto['subtle'],
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        setInterval: globalThis.setInterval.bind(globalThis),
+        clearInterval: globalThis.clearInterval.bind(globalThis),
+        env: {} as Record<string, string | undefined>,
+        exit: (() => {
+          throw new Error('exit called');
+        }) as () => never,
+        fs: {} as IRuntimeServices['fs'],
+      } as unknown as IRuntimeServices;
+
+      const ctx = {
+        services: fakeRegistry,
+        router: {
+          get: (
+            path: string,
+            h: (
+              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
+            ) => Promise<unknown>,
+          ) => {
+            // Capture the /health handler specifically
+            if (path === '/health') {
+              handler = h;
+            }
+          },
+          post: () => {},
+          put: () => {},
+          patch: () => {},
+          delete: () => {},
+          head: () => {},
+          options: () => {},
+          group: () => {},
+        } as IRouterApi,
+        lifecycle: {
+          onInit: () => {},
+          onShutdown: () => {},
+          onRegister: () => {},
+          onBootstrap: () => {},
+          onRequest: () => {},
+          onResponse: () => {},
+          onError: () => {},
+          onClose: () => {},
+        } as ILifecycleApi,
+        middleware: { add: () => {} } as IMiddlewareApi,
+        runtime: fakeRuntime,
+        logger: {} as ILogger,
+        config: {} as IConfig,
+        environment: {} as IEnvironmentApi,
+        health: {} as IHealthApi,
+        metrics: {} as IMetricsApi,
+        openapi: {} as IOpenApiApi,
+        decorators: {} as IDecoratorApi,
+        cli: {} as ICliApi,
+        options: {},
+        app: {} as IApplication,
+      } as unknown as IPluginContext;
+
+      // Per design: /health returns 200 for degraded (only 'down' triggers 503)
+      const plugin = HealthPlugin({
+        indicators: [
+          {
+            name: 'cache',
+            check: () => Promise.resolve({ status: 'degraded' as const }),
+          },
+        ],
+      });
+      plugin.register(ctx);
+
+      // Mock the response object
+      const mockResponse = {
+        status: (code: number) => ({
+          json: (body: unknown) => ({ status: code, body }),
+        }),
+      };
+
+      const mockContext = {
+        response: mockResponse,
+      };
+
+      // Call the handler for /health (which uses check)
+      // Self is 'up', cache is 'degraded', so worst status is 'degraded'
+      // /health returns 200 for degraded
+      const result = (await handler?.(mockContext)) as {
+        status: number;
+        body: { status: string; checks: Record<string, unknown> };
+      };
+      expect(result.status).toBe(200);
+      expect(result.body.status).toBe('degraded');
+      expect(result.body.checks.cache).toBeDefined();
+    });
+  });
 });
