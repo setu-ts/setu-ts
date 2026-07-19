@@ -389,6 +389,15 @@ export interface IApplication {
    * Stops the server and runs shutdown hooks.
    */
   stop(): Promise<void>;
+  /**
+   * Delegates a web-standard `Request` to the registered `IHttpAdapter.fetch`.
+   * This works regardless of whether `start()` was called (Cloudflare Workers
+   * path: `setHandler` runs at `start()` time, `fetch` works without `listen`).
+   *
+   * @param request - A web-standard `Request`
+   * @returns A web-standard `Response`
+   */
+  fetch(request: Request): Promise<Response>;
 }
 
 /**

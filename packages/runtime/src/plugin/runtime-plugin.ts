@@ -20,10 +20,11 @@ import { detectRuntime } from '../detector/runtime-detector.ts';
 import { createDenoRuntimeServices } from '../adapters/deno/deno-runtime.ts';
 import { createNodeRuntimeServices } from '../adapters/node/node-runtime.ts';
 import { createBunRuntimeServices } from '../adapters/bun/bun-runtime.ts';
-import { createCloudflareRuntimeServices } from '../adapters/cloudflare/cf-runtime.ts';
+import { createCloudflareRuntimeServices } from '../adapters/workers/cf-runtime.ts';
 import { DenoHttpAdapter } from '../adapters/deno/deno-http-adapter.ts';
 import { NodeHttpAdapter } from '../adapters/node/node-http-adapter.ts';
 import { BunHttpAdapter } from '../adapters/bun/bun-http-adapter.ts';
+import { CloudflareWorkersHttpAdapter } from '../adapters/workers/cf-http-adapter.ts';
 
 /**
  * Options for {@linkcode RuntimePlugin}.
@@ -84,7 +85,7 @@ const defaultHttpAdapters: HttpAdapterFactories = {
   deno: () => new DenoHttpAdapter(),
   node: () => new NodeHttpAdapter(),
   bun: () => new BunHttpAdapter(),
-  // Cloudflare Workers is explicitly not supported (no listen/close model)
+  'cloudflare-workers': () => new CloudflareWorkersHttpAdapter(),
 };
 
 /**
@@ -96,20 +97,12 @@ const defaultHttpAdapters: HttpAdapterFactories = {
  *
  * @param options - Optional configuration
  * @returns The runtime plugin
- * @throws {Error} If the resolved platform is `cloudflare-workers` (not yet
- *   implemented) or if no HTTP adapter is available for the platform
+ * @throws {Error} If no HTTP adapter is available for the platform
  */
 export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const platform: RuntimePlatform = options?.platform ?? detectRuntime();
   const runtimeAdapters = options?.adapters ?? defaultRuntimeAdapters;
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
-
-  if (platform === 'cloudflare-workers') {
-    throw new Error(
-      'Cloudflare Workers runtime is not yet supported. ' +
-        'Use a different platform or implement the Cloudflare adapter.',
-    );
-  }
 
   return {
     name: 'runtime',

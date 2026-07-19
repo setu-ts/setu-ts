@@ -1,16 +1,16 @@
 // deno-lint-ignore-file no-explicit-any
 /**
- * Unit tests for NodeHttpAdapter — uses a fake NodeServeHost.
+ * Unit tests for DenoHttpAdapter — uses a fake DenoServeHost.
  *
  * @module
  */
 
-import type { NodeServeHost, NodeServer } from '../../src/adapters/node/node-http-adapter.ts';
+import type { DenoServeHost, DenoServer } from '../../src/adapters/deno/deno-http-adapter.ts';
 import {
-  isNodeHttpServerHandle,
-  NodeHttpAdapter,
-  NodeHttpServerHandle,
-} from '../../src/adapters/node/node-http-adapter.ts';
+  DenoHttpAdapter,
+  DenoHttpServerHandle,
+  isDenoHttpServerHandle,
+} from '../../src/adapters/deno/deno-http-adapter.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
@@ -19,33 +19,30 @@ import { expect } from '@std/expect';
 // ---------------------------------------------------------------------------
 
 function createFakeHost(): {
-  host: NodeServeHost;
+  host: DenoServeHost;
   recorded: {
-    fetch?: (r: Request) => Response | Promise<Response>;
     port?: number;
     hostname?: string;
-    overrideGlobalObjects?: boolean;
+    fetch?: (r: Request) => Response | Promise<Response>;
   };
 } {
   const recorded: {
-    fetch?: (r: Request) => Response | Promise<Response>;
     port?: number;
     hostname?: string;
-    overrideGlobalObjects?: boolean;
+    fetch?: (r: Request) => Response | Promise<Response>;
   } = {};
 
-  const host: NodeServeHost = {
+  const host: DenoServeHost = {
     serve: (options) => {
-      recorded.fetch = options.fetch;
       recorded.port = options.port;
       if (options.hostname !== undefined) {
         recorded.hostname = options.hostname;
       }
-      recorded.overrideGlobalObjects = options.overrideGlobalObjects ?? false;
+      recorded.fetch = options.fetch;
 
       return {
-        close() {},
-      } as unknown as NodeServer;
+        shutdown: async () => {},
+      } as unknown as DenoServer;
     },
   };
 
@@ -56,27 +53,26 @@ function createFakeHost(): {
 // setHandler / fetch round-trip
 // ---------------------------------------------------------------------------
 
-describe('node-http-adapter | setHandler/fetch', () => {
+describe('deno-http-adapter | setHandler/fetch', () => {
   it('stores handler; fetch round-trips', async () => {
     const { host } = createFakeHost();
+    const adapter = new DenoHttpAdapter(host);
 
-    // Simpler: directly test fetch with a handler that returns a known response
-    const adapter = new NodeHttpAdapter(host);
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers({ 'x-test': 'ok' }), body: 'hello' }),
+        snapshot: () => ({ status: 200, headers: new Headers({ 'x-den': 'ok' }), body: 'deno' }),
       } as any;
     });
 
     const response = await adapter.fetch(new Request('https://example.com/'));
     expect(response.status).toBe(200);
-    expect(response.headers.get('x-test')).toBe('ok');
+    expect(response.headers.get('x-den')).toBe('ok');
   });
 
   it('fetch without setHandler returns 500', async () => {
     const { host } = createFakeHost();
-    const adapter = new NodeHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     const response = await adapter.fetch(new Request('https://example.com/'));
     expect(response.status).toBe(500);
@@ -87,66 +83,65 @@ describe('node-http-adapter | setHandler/fetch', () => {
 // listen calls host.serve with correct options
 // ---------------------------------------------------------------------------
 
-describe('node-http-adapter | listen', () => {
-  it('calls host.serve with fetch/port/hostname and overrideGlobalObjects:false', async () => {
+describe('deno-http-adapter | listen', () => {
+  it('calls host.serve with port/hostname/fetch', async () => {
     const { host, recorded } = createFakeHost();
-    const adapter = new NodeHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    const handle = await adapter.listen(8080, 'localhost');
+    const handle = await adapter.listen(3000, '0.0.0.0');
 
     expect(recorded.fetch).toBeDefined();
-    expect(recorded.port).toBe(8080);
-    expect(recorded.hostname).toBe('localhost');
-    expect(recorded.overrideGlobalObjects).toBe(false);
-    expect(isNodeHttpServerHandle(handle)).toBe(true);
+    expect(recorded.port).toBe(3000);
+    expect(recorded.hostname).toBe('0.0.0.0');
+    expect(isDenoHttpServerHandle(handle)).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// close calls server.close
+// close calls server.shutdown
 // ---------------------------------------------------------------------------
 
-describe('node-http-adapter | close', () => {
-  it('calls server.close on valid handle', async () => {
-    let closeCalled = false;
+describe('deno-http-adapter | close', () => {
+  it('calls server.shutdown on valid handle', async () => {
+    let shutdownCalled = false;
     const { host } = createFakeHost();
+    const adapter = new DenoHttpAdapter(host);
 
-    const adapter = new NodeHttpAdapter(host);
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    const handle = await adapter.listen(8080);
+    const handle = await adapter.listen(3000);
 
-    // Override the server to track close
-    (handle as NodeHttpServerHandle).server = {
-      close() {
-        closeCalled = true;
+    (handle as DenoHttpServerHandle).server = {
+      // deno-lint-ignore require-await
+      shutdown: async () => {
+        shutdownCalled = true;
       },
-    } as unknown as NodeServer;
+    } as unknown as DenoServer;
 
     await adapter.close(handle);
-    expect(closeCalled).toBe(true);
+    expect(shutdownCalled).toBe(true);
   });
 
   it('close with null server is a no-op', async () => {
     const { host } = createFakeHost();
-    const adapter = new NodeHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
+
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    const handle = await adapter.listen(8080);
-    (handle as NodeHttpServerHandle).server = null;
+    const handle = await adapter.listen(3000);
+    (handle as DenoHttpServerHandle).server = null;
 
-    // Should not throw
     await adapter.close(handle);
   });
 });
@@ -155,13 +150,12 @@ describe('node-http-adapter | close', () => {
 // Type guard
 // ---------------------------------------------------------------------------
 
-describe('node-http-adapter | isNodeHttpServerHandle', () => {
+describe('deno-http-adapter | isDenoHttpServerHandle', () => {
   it('accepts valid handles', () => {
-    expect(isNodeHttpServerHandle(new NodeHttpServerHandle())).toBe(true);
+    expect(isDenoHttpServerHandle(new DenoHttpServerHandle())).toBe(true);
   });
 
   it('rejects invalid handles', () => {
-    expect(isNodeHttpServerHandle({} as any)).toBe(false);
-    expect(isNodeHttpServerHandle(null as any)).toBe(false);
+    expect(isDenoHttpServerHandle({} as any)).toBe(false);
   });
 });

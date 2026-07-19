@@ -1,15 +1,77 @@
 /**
  * Node HTTP server adapter — implements {@linkcode IHttpAdapter} using
- * Node's `node:http` API.
+ * `@hono/node-server` (Hono's platform serve layer).
  *
- * Uses static `node:` imports (supported by Deno, Node, and Bun).
+ * Uses an injectable {@linkcode NodeServeHost} interface that exposes
+ * `serve({ fetch, port, hostname })` defaulting to a lazy `npm:` import of
+ * `@hono/node-server@^2.0.0`. This allows unit testing without a real Node
+ * server and prevents global mutation via `overrideGlobalObjects: false`.
  *
  * @module
  */
 
 import type { IHttpAdapter, IRequest, IResponse, ServerHandle } from '@hono-enterprise/common';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mapNodeRequest, writeSnapshotToNodeResponse } from './node-http-mapping.ts';
+import {
+  mapSnapshotToWebResponse,
+  mapWebRequestToFrameworkRequest,
+} from '../shared/fetch-mapping.ts';
+
+// ---------------------------------------------------------------------------
+// Host seam — what the adapter depends on
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal interface covering the `@hono/node-server` `serve()` operation.
+ * Inject this interface to test the adapter without a real Node server.
+ */
+export interface NodeServeHost {
+  /**
+   * Starts an HTTP server.
+   *
+   * @param options - Server options including `fetch`, `port`, `hostname`
+   * @returns A Node.js HTTP server handle
+   */
+  serve(options: {
+    fetch: (request: Request) => Response | Promise<Response>;
+    port: number;
+    hostname?: string;
+    overrideGlobalObjects?: boolean;
+  }): NodeServer;
+}
+
+/**
+ * Node.js HTTP server handle (returned by `@hono/node-server` `serve()`).
+ */
+export interface NodeServer {
+  /**
+   * Stops the server gracefully.
+   */
+  close(): void;
+}
+
+/**
+ * Default Node serve host — lazy-loads `@hono/node-server` on first `serve()`
+ * call. Throws a clear error if the package is not installed.
+ *
+ * @internal - Not exported from package index
+ */
+const defaultNodeServeHost: NodeServeHost = {
+  serve: (options) => {
+    // Lazy import — only loads when listen() is actually called
+    // We need to inline the import synchronously via a cached module reference
+    // Since @hono/node-server's serve() is synchronous (returns http.Server),
+    // we import it eagerly once and reuse.
+    return import('npm:@hono/node-server@^2.0.0').then((mod) => {
+      // overrideGlobalObjects: false prevents @hono/node-server from mutating
+      // the global Request/Response which would corrupt the shared mapping.
+      return mod.serve({ ...options, overrideGlobalObjects: false });
+    }) as unknown as NodeServer;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Handle
+// ---------------------------------------------------------------------------
 
 /**
  * Internal handle for a Node HTTP server.
@@ -17,47 +79,41 @@ import { mapNodeRequest, writeSnapshotToNodeResponse } from './node-http-mapping
  * @internal - Not exported from package index
  */
 export class NodeHttpServerHandle {
-  readonly #handler: (request: IRequest) => Promise<IResponse>;
-  #server: Server | null = null;
+  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
+  #server: NodeServer | null = null;
 
-  constructor(handler: (request: IRequest) => Promise<IResponse>) {
+  /**
+   * Stores the handler set by `setHandler`.
+   */
+  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handler = handler;
   }
 
   /**
-   * Gets the underlying http.Server (after listen is called).
+   * Gets the underlying Node server (after listen is called).
    */
-  get server(): Server | null {
+  get server(): NodeServer | null {
     return this.#server;
   }
 
   /**
    * Sets the server instance after listen.
    */
-  set server(value: Server | null) {
+  set server(value: NodeServer | null) {
     this.#server = value;
   }
 
   /**
-   * Creates the request listener for http.Server.
+   * Creates the web-standard fetch handler for @hono/node-server.
    */
-  createNodeRequestListener(): (req: IncomingMessage, res: ServerResponse) => void {
-    return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      // Read body as bytes first (for idempotent body access)
-      const chunks: Uint8Array[] = [];
-      for await (const chunk of req) {
-        chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk));
+  createFetchHandler(): (request: Request) => Promise<Response> {
+    return async (request: Request): Promise<Response> => {
+      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+      if (!this.#handler) {
+        return new Response('Handler not set', { status: 500 });
       }
-      const bodyBytes = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0));
-      let offset = 0;
-      for (const chunk of chunks) {
-        bodyBytes.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      const frameworkRequest = mapNodeRequest(req, bodyBytes);
       const frameworkResponse = await this.#handler(frameworkRequest);
-      writeSnapshotToNodeResponse(frameworkResponse.snapshot(), res);
+      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
   }
 }
@@ -72,58 +128,52 @@ export function isNodeHttpServerHandle(handle: ServerHandle): handle is NodeHttp
   return handle instanceof NodeHttpServerHandle;
 }
 
+// ---------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------
+
 /**
  * Node HTTP adapter implementation.
+ *
+ * @param host - Injected Node serve host (defaults to lazy @hono/node-server)
  */
 export class NodeHttpAdapter implements IHttpAdapter {
-  createServer(handler: (request: IRequest) => Promise<IResponse>): ServerHandle {
-    return new NodeHttpServerHandle(handler);
+  #host: NodeServeHost;
+  #handle: NodeHttpServerHandle;
+
+  constructor(host?: NodeServeHost) {
+    this.#host = host ?? defaultNodeServeHost;
+    this.#handle = new NodeHttpServerHandle();
   }
 
-  listen(handle: ServerHandle, port: number, hostname?: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (!isNodeHttpServerHandle(handle)) {
-        reject(new Error('Invalid server handle for NodeHttpAdapter'));
-        return;
-      }
+  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+    this.#handle.setHandler(handler);
+  }
 
-      const requestListener = handle.createNodeRequestListener();
-      const server = createServer(requestListener);
+  fetch(request: Request): Promise<Response> {
+    return this.#handle.createFetchHandler()(request);
+  }
 
-      server.on('listening', () => {
-        handle.server = server;
-        resolve();
-      });
-
-      server.on('error', (err) => {
-        reject(err);
-      });
-
-      server.listen(port, hostname);
+  listen(port: number, hostname?: string): Promise<ServerHandle> {
+    const fetchHandler = this.#handle.createFetchHandler();
+    const server = this.#host.serve({
+      fetch: fetchHandler,
+      port,
+      ...(hostname !== undefined && { hostname }),
     });
+    this.#handle.server = server;
+    return Promise.resolve(this.#handle);
   }
 
   close(handle: ServerHandle): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (!isNodeHttpServerHandle(handle)) {
-        reject(new Error('Invalid server handle for NodeHttpAdapter'));
-        return;
-      }
+    if (!isNodeHttpServerHandle(handle)) {
+      throw new Error('Invalid server handle for NodeHttpAdapter');
+    }
 
-      if (handle.server === null) {
-        // Never listened, nothing to close
-        resolve();
-        return;
-      }
-
-      handle.server.close((err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        handle.server = null;
-        resolve();
-      });
-    });
+    if (handle.server !== null) {
+      handle.server.close();
+      handle.server = null;
+    }
+    return Promise.resolve();
   }
 }

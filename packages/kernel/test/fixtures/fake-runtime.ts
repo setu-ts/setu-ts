@@ -110,15 +110,23 @@ export class FakeHttpAdapter implements IHttpAdapter {
   #listening = false;
   #port = 0;
 
-  createServer(handler: (request: IRequest) => Promise<unknown>): ServerHandle {
+  setHandler(handler: (request: IRequest) => Promise<unknown>): void {
     this.#handler = handler;
-    return {} as ServerHandle;
   }
 
-  listen(_handle: ServerHandle, port: number, _hostname?: string): Promise<void> {
+  fetch(_request: Request): Promise<Response> {
+    if (!this.#handler) {
+      return Promise.resolve(new Response('Handler not set', { status: 500 }));
+    }
+    // This is for app.fetch testing; the handler expects IRequest, not web Request.
+    // For unit tests that only use inject(), this path isn't exercised.
+    return Promise.resolve(new Response('Not implemented for web Request', { status: 501 }));
+  }
+
+  listen(_port: number, _hostname?: string): Promise<ServerHandle> {
     this.#listening = true;
-    this.#port = port;
-    return Promise.resolve();
+    this.#port = _port;
+    return Promise.resolve({} as ServerHandle);
   }
 
   close(_handle: ServerHandle): Promise<void> {

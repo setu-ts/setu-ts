@@ -11,15 +11,18 @@
  */
 
 import type { IHttpAdapter, IRequest, IResponse, ServerHandle } from '@hono-enterprise/common';
-import { mapBunRequest, mapSnapshotToBunResponse } from './bun-http-mapping.ts';
+import {
+  mapSnapshotToWebResponse,
+  mapWebRequestToFrameworkRequest,
+} from '../shared/fetch-mapping.ts';
+
+// ---------------------------------------------------------------------------
+// Host seam (existing)
+// ---------------------------------------------------------------------------
 
 /**
  * Minimal interface covering the Bun-specific HTTP operations used by this adapter.
  * Inject this interface to test the adapter without real Bun.
- *
- * This is the critical injection seam (§3.6) that makes BunHttpAdapter fully
- * unit-testable with NO guarded skips. A fake host can record `serve()` calls
- * and `stop()` invocations.
  */
 export interface BunServeHost {
   /**
@@ -54,16 +57,23 @@ export interface BunServer {
 const defaultBunServeHost: BunServeHost = (globalThis as { Bun?: BunServeHost })
   .Bun! as BunServeHost;
 
+// ---------------------------------------------------------------------------
+// Handle
+// ---------------------------------------------------------------------------
+
 /**
  * Internal handle for a Bun HTTP server.
  *
  * @internal - Not exported from package index
  */
 export class BunHttpServerHandle {
-  readonly #handler: (request: IRequest) => Promise<IResponse>;
+  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: BunServer | null = null;
 
-  constructor(handler: (request: IRequest) => Promise<IResponse>) {
+  /**
+   * Stores the handler set by `setHandler`.
+   */
+  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handler = handler;
   }
 
@@ -84,11 +94,14 @@ export class BunHttpServerHandle {
   /**
    * Creates the fetch handler for Bun.serve.
    */
-  createBunFetchHandler(): (request: Request) => Promise<Response> {
+  createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
-      const frameworkRequest = mapBunRequest(request);
+      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+      if (!this.#handler) {
+        return new Response('Handler not set', { status: 500 });
+      }
       const frameworkResponse = await this.#handler(frameworkRequest);
-      return mapSnapshotToBunResponse(frameworkResponse.snapshot());
+      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
   }
 }
@@ -103,6 +116,10 @@ export function isBunHttpServerHandle(handle: ServerHandle): handle is BunHttpSe
   return handle instanceof BunHttpServerHandle;
 }
 
+// ---------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------
+
 /**
  * Bun HTTP adapter implementation.
  *
@@ -110,29 +127,32 @@ export function isBunHttpServerHandle(handle: ServerHandle): handle is BunHttpSe
  */
 export class BunHttpAdapter implements IHttpAdapter {
   #host: BunServeHost;
+  #handle: BunHttpServerHandle;
 
-  constructor(host: BunServeHost = defaultBunServeHost) {
-    this.#host = host;
+  constructor(host?: BunServeHost) {
+    this.#host = host ?? defaultBunServeHost;
+    this.#handle = new BunHttpServerHandle();
   }
 
-  createServer(handler: (request: IRequest) => Promise<IResponse>): ServerHandle {
-    return new BunHttpServerHandle(handler);
+  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+    this.#handle.setHandler(handler);
   }
 
-  listen(handle: ServerHandle, port: number, hostname?: string): Promise<void> {
-    if (!isBunHttpServerHandle(handle)) {
-      throw new Error('Invalid server handle for BunHttpAdapter');
-    }
+  fetch(request: Request): Promise<Response> {
+    return this.#handle.createFetchHandler()(request);
+  }
 
-    const fetchHandler = handle.createBunFetchHandler();
+  // deno-lint-ignore require-await
+  async listen(port: number, hostname?: string): Promise<ServerHandle> {
+    const fetchHandler = this.#handle.createFetchHandler();
     const server = this.#host.serve({
       port,
       ...(hostname !== undefined ? { hostname } : {}),
       fetch: fetchHandler,
     });
 
-    handle.server = server;
-    return Promise.resolve();
+    this.#handle.server = server;
+    return this.#handle;
   }
 
   close(handle: ServerHandle): Promise<void> {
