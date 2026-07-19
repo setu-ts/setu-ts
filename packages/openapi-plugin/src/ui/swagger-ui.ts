@@ -120,5 +120,5 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
   // (e.g., $&, $1, $2 would otherwise be treated as backreferences)
   return HTML_TEMPLATE
     .replace(/<title>.*?<\/title>/, () => `<title>${escapedTitle}</title>`)
-    .replace(/__SPEC_URL__/g, escapedSpecUrl);
+    .replace(/__SPEC_URL__/g, () => escapedSpecUrl);
 }

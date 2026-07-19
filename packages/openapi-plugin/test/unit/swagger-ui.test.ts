@@ -193,4 +193,39 @@ describe('swaggerUiHtml', () => {
 
     expect(html).toContain('/api/v1/$1/$2/spec.json');
   });
+
+  it('should render $& (whole-match backreference) in specUrl without injection', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/api/v1/$&/spec.json',
+      title: 'Test',
+    });
+
+    // $& is preserved literally; & becomes &amp; via htmlEscape
+    expect(html).toContain('/api/v1/$&amp;/spec.json');
+    // The old string-replacement bug would corrupt $& into the matched substring (__SPEC_URL__)
+    // Function replacement preserves it literally
+    expect(html).not.toContain('__SPEC_URL__');
+  });
+
+  it('should render $` (pre-match backreference) in specUrl without injection', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/api/v1/$`/spec.json',
+      title: 'Test',
+    });
+
+    // $` is preserved literally; ` is not escaped by htmlEscape
+    expect(html).toContain('/api/v1/$`/spec.json');
+    expect(html).not.toContain('__SPEC_URL__');
+  });
+
+  it("should render $' (post-match backreference) in specUrl without injection", () => {
+    const html = swaggerUiHtml({
+      specUrl: "/api/v1/$'/spec.json",
+      title: 'Test',
+    });
+
+    // $' is preserved literally; ' is not escaped by htmlEscape
+    expect(html).toContain('/api/v1/$&apos;/spec.json');
+    expect(html).not.toContain('__SPEC_URL__');
+  });
 });
