@@ -337,6 +337,53 @@ describe('OpenApiService', () => {
     expect(spec1).not.toBe(spec2);
   });
 
+  // Regression: rebuilding after addSchema must be deterministic. Previously the
+  // service reused one generator whose per-call dedup state leaked, so a
+  // single-use route schema that was inlined on the first getSpec() turned into
+  // a $ref on the rebuild after addSchema().
+  it('should keep a single-use route schema inline across a rebuild triggered by addSchema', () => {
+    const routeResponseSchema = z.object({ id: z.string() });
+    const routedApp = {
+      ...(app as unknown as Record<string, unknown>),
+      router: {
+        listRoutes: () => [{
+          method: 'GET' as const,
+          path: '/widgets',
+          definition: {
+            handler: () => {
+              throw new Error('not used');
+            },
+            schema: { response: { 200: routeResponseSchema } },
+          },
+        }],
+      },
+    } as unknown as IApplication;
+
+    const service = new OpenApiService({ app: routedApp, title: 'T', version: '1.0.0' });
+
+    const readResponseSchema = (spec: Record<string, unknown>): unknown => {
+      const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
+      const responses = paths['/widgets'].get.responses as Record<
+        string,
+        Record<string, Record<string, Record<string, unknown>>>
+      >;
+      return responses['200'].content['application/json'].schema;
+    };
+
+    const first = readResponseSchema(service.getSpec() as unknown as Record<string, unknown>);
+    // Unrelated contribution forces a cache invalidation + rebuild.
+    service.addSchema('Unrelated', z.object({ other: z.string() }));
+    const second = readResponseSchema(service.getSpec() as unknown as Record<string, unknown>);
+
+    // The route schema stays inline (no $ref) and identical on the rebuild.
+    expect(first).toEqual({
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    });
+    expect(second).toEqual(first);
+  });
+
   it('should call addSchema with description option', () => {
     const service = new OpenApiService({
       app,

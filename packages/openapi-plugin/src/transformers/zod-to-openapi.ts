@@ -10,8 +10,8 @@
  * @since 0.1.0
  */
 export interface OpenApiSchemaObject {
-  /** Type of the value (string, number, integer, boolean, array, object). */
-  type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+  /** Type of the value (string, number, integer, boolean, array, object, null). */
+  type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | 'null';
   /** Format (e.g., 'email', 'uri', 'uuid', 'date-time'). */
   format?: string;
   /** For arrays: schema of items. */
@@ -46,8 +46,6 @@ export interface OpenApiSchemaObject {
   anyOf?: readonly OpenApiSchemaObject[];
   /** AllOf for intersections. */
   allOf?: readonly OpenApiSchemaObject[];
-  /** Nullable flag. */
-  nullable?: boolean;
   /** Default value. */
   default?: unknown;
   /** Reference to a component schema. */
@@ -268,9 +266,13 @@ export class ZodToOpenApi {
   }
 
   private transformNullable(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
+    // OpenAPI 3.1 (JSON Schema 2020-12) removed the 3.0 `nullable` keyword;
+    // nullability is expressed via a `null` type. Represent it as
+    // `anyOf: [<inner>, { type: 'null' }]`, which is valid 3.1 and preserves
+    // the inner schema (plan §3.3: unwrap ZodNullable to its inner type).
     const innerType = def.innerType as ZodSchema | undefined;
     const innerSchema = innerType ? this.transform(innerType) : {};
-    return { ...innerSchema, nullable: true };
+    return { anyOf: [innerSchema, { type: 'null' as const }] };
   }
 
   private transformEnum(def: ZodDef): OpenApiSchemaObject {

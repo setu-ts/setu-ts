@@ -26,7 +26,13 @@ export interface OpenApiServiceOptions extends OpenApiGeneratorOptions {
  */
 export class OpenApiService implements IOpenApiService {
   readonly #options: OpenApiServiceOptions;
-  #generator: OpenApiGenerator | null = null;
+  /**
+   * Accumulated named-schema contributions. A fresh generator is seeded from
+   * this map on every build, so a rebuild after {@linkcode addSchema} is
+   * deterministic — {@linkcode OpenApiGenerator.generate} mutates per-call
+   * dedup state and is not safe to reuse across builds.
+   */
+  readonly #namedSchemas = new Map<string, unknown>();
   #cachedSpec: OpenApiDocument | null = null;
 
   /**
@@ -53,12 +59,11 @@ export class OpenApiService implements IOpenApiService {
   constructor(options: OpenApiServiceOptions) {
     this.#options = options;
 
-    // Register pre-registered schemas immediately in the generator (lazy-create it)
-    // so they are present regardless of whether addSchema() is called before getSpec().
-    if (options.schemas && options.schemas.length > 0) {
-      this.#generator = new OpenApiGenerator(this.#makeGeneratorOptions());
+    // Seed pre-registered schemas so they are present regardless of whether
+    // addSchema() is called before getSpec().
+    if (options.schemas) {
       for (const { name, schema } of options.schemas) {
-        this.#generator.addSchema(name, schema);
+        this.#namedSchemas.set(name, schema);
       }
     }
   }
@@ -84,31 +89,30 @@ export class OpenApiService implements IOpenApiService {
    * @param schema - The schema to register
    */
   addSchema(name: string, schema: unknown): void {
-    // Initialize generator if not already created
-    if (!this.#generator) {
-      this.#generator = new OpenApiGenerator(this.#makeGeneratorOptions());
-    }
-    // Invalidate cache when new schemas are added
+    this.#namedSchemas.set(name, schema);
+    // Invalidate cache so the next getSpec() rebuilds with the new schema.
     this.#cachedSpec = null;
-    this.#generator.addSchema(name, schema);
   }
 
   /**
    * Builds the OpenAPI specification from registered routes.
    *
+   * A new generator is created per build and seeded with the accumulated
+   * named schemas, so repeated builds (e.g. getSpec → addSchema → getSpec)
+   * are deterministic and never inherit stale dedup state.
+   *
    * @returns The complete OpenAPI document
    */
   #buildSpec(): OpenApiDocument {
-    // Create generator with options (once, lazily) — only if not already created
-    // (constructor may have created it if schemas were provided)
-    if (!this.#generator) {
-      this.#generator = new OpenApiGenerator(this.#makeGeneratorOptions());
+    const generator = new OpenApiGenerator(this.#makeGeneratorOptions());
+    for (const [name, schema] of this.#namedSchemas) {
+      generator.addSchema(name, schema);
     }
 
     // Get routes from the application
     const routes = this.#options.app.router.listRoutes();
 
     // Generate the document
-    return this.#generator.generate(routes);
+    return generator.generate(routes);
   }
 }

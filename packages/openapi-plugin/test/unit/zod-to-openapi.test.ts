@@ -151,11 +151,12 @@ describe('ZodToOpenApi', () => {
       expect(result).toEqual({ type: 'string' });
     });
 
-    it('should transform ZodNullable', () => {
+    it('should transform ZodNullable to a valid 3.1 null-type union', () => {
       const schema = z.string().nullable();
       const result = transformer.transform(schema);
 
-      expect(result).toEqual({ type: 'string', nullable: true });
+      // OpenAPI 3.1 has no `nullable` keyword; nullability is a `null` type.
+      expect(result).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] });
     });
 
     it('should transform ZodEnum', () => {
@@ -445,7 +446,7 @@ describe('transformNullable edge cases', () => {
     const schema = z.string().nullable();
     const result = transformer.transform(schema);
 
-    expect(result).toEqual({ type: 'string', nullable: true });
+    expect(result).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] });
   });
 });
 
@@ -611,7 +612,7 @@ describe('transformNullable edge cases continued', () => {
     };
     const result = transformer.transform(mockSchema);
 
-    expect(result).toEqual({ nullable: true });
+    expect(result).toEqual({ anyOf: [{}, { type: 'null' }] });
   });
 });
 
