@@ -143,19 +143,45 @@ and replaced by a single shared web-standard mapping helper plus thin per-platfo
 
 - **Decision:** The Node adapter takes an injectable `NodeServeHost` interface
   (`serve({ fetch, port, hostname }): NodeServer` where `NodeServer` has `close()`). The default
-  host lazy-loads `@hono/node-server` via `await import('npm:@hono/node-server@^1.13.0')` inside
+  host lazy-loads `@hono/node-server` via `await import('npm:@hono/node-server@^2.0.0')` inside
   `serve()` and throws a clear error if the import fails (package not installed). Unit tests inject
   a fake host that records `serve`/`close` calls; one guarded integration test exercises the REAL
   `import('npm:@hono/node-server')` (skipped when the dep is absent).
+- **Verified API surface (web search, 2026-07-19):** The latest published line is **v2.x**
+  (GitHub releases tag `v2.0.10` "Latest" on 2026-07-15; `v2.0.0` shipped 2026-04-21 — see
+  https://github.com/honojs/node-server/releases). The plan's earlier `^1.13.0` pin was stale and
+  would resolve only to the v1 line, missing v2's perf and security fixes. `serve(options,
+  listeningListener?)` accepts `options.fetch` (a **web-standard** `(request: Request) =>
+  Response | Promise<Response>` handler — the adapter does the `IncomingMessage`→`Request` and
+  `Response`→`ServerResponse` bridging itself), `options.port` (default `3000`), `options.hostname`,
+  `options.createServer`, `options.serverOptions`, `options.overrideGlobalObjects` (default `true`),
+  `options.autoCleanupIncoming` (default `true`), and `options.websocket`. It returns a native
+  Node.js `http.Server` / `http2.Http2Server` / `http2.Http2SecureServer` whose close method is
+  **`close()`** (standard `http.Server.close()`, NOT `shutdown()` — source: README
+  https://github.com/honojs/node-server and DeepWiki Server API
+  https://deepwiki.com/honojs/node-server/4.1-server-api). The package is ESM-only (`type: module`
+  added in v2, PR #336) with bundled TypeScript types (99.2% TS), so the `npm:` specifier resolves
+  cleanly under Deno. **v2 breaking changes** (https://github.com/honojs/node-server/releases/tag/v2.0.0):
+  (1) dropped Node.js v18 — requires **Node.js v20+**; (2) removed `@hono/node-server/vercel`
+  (unused by M23); (3) the public `serve()` API is unchanged. None of these affect M23's
+  `serve({ fetch, port, hostname })` usage.
+- **`overrideGlobalObjects: false` in the default host:** `@hono/node-server` v2 defaults
+  `overrideGlobalObjects` to `true`, which rewrites the global `Request`/`Response` with lightweight
+  implementations for speed. Inside the Hono Enterprise runtime that global mutation would leak
+  across adapters and corrupt the shared web-standard mapping (§3.2). The default `NodeServeHost`
+  therefore calls `serve({ fetch, port, hostname, overrideGlobalObjects: false })` so the Node
+  adapter never mutates globals; the `NodeServeHost` interface exposes the full options object so a
+  consumer can opt back in. This is asserted in the unit test (fake host records
+  `overrideGlobalObjects: false`).
 - **Why:** `@hono/node-server` is a Node-only npm package (AI_GUIDELINES §12.2 — heavy dep, never a
   hard dependency). The injectable-host pattern is identical to the existing `BunServeHost` seam
   (`bun-http-adapter.ts:24`), making the Node adapter fully unit-testable with no `net` permission
   and no guarded skips for the branching logic. The lazy import is the ONLY load path; there is no
   `globalThis.__` shim (CLAUDE.md "Common pitfalls").
 - **Test home:** `test/unit/node-http-adapter.test.ts` (fake host: `listen` calls `host.serve` with
-  the `fetch`/`port`/`hostname`; `close` calls `server.close`; type-guard on the handle);
-  `test/integration/node-http-adapter.test.ts` (guarded real `@hono/node-server` import + real
-  socket round-trip, skipped when the dep is missing).
+  the `fetch`/`port`/`hostname` and `overrideGlobalObjects: false`; `close` calls `server.close`;
+  type-guard on the handle); `test/integration/node-http-adapter.test.ts` (guarded real
+  `@hono/node-server` import + real socket round-trip, skipped when the dep is missing).
 
 ### 3.6 Deno adapter — injectable `DenoServeHost` seam
 
@@ -312,7 +338,7 @@ and replaced by a single shared web-standard mapping helper plus thin per-platfo
 | `packages/runtime/test/unit/cf-runtime.test.ts` (rewritten from existing stub test) | `src/adapters/workers/cf-runtime.ts` | `platform()` returns `'cloudflare-workers'`; `uuid()`/`randomBytes()` use `crypto`; `subtle` is `crypto.subtle`; `now()`/`hrtime()` use `performance`; timers work; `env` reads from the injected env seam; `fs` is `undefined`; `exit` throws. |
 | `packages/runtime/test/unit/runtime-plugin.test.ts` (rewritten) | `src/plugin/runtime-plugin.ts` | CF platform NO LONGER throws; CF registers a `CloudflareWorkersHttpAdapter` under `HTTP_ADAPTER`; `HttpAdapterFactories` accepts a `'cloudflare-workers'` entry; default factories map each platform to the right adapter; `setHandler`/`fetch`/`listen`/`close` are the adapter surface (fake adapter records calls). |
 | `packages/runtime/test/unit/barrel-exports.test.ts` (NEW) | `src/index.ts` | Asserts every documented export is present and every removed export is gone (no stale `mapNodeRequest` etc. leaks). |
-| `packages/runtime/test/integration/node-http-adapter.test.ts` (rewritten) | `src/adapters/node/node-http-adapter.ts` (real path) | Guarded REAL `await import('npm:@hono/node-server@^1.13.0')` — skipped when the dep is absent; when present, binds a real socket, issues a real `fetch`, asserts the round-trip status/body/headers, then `close`. |
+| `packages/runtime/test/integration/node-http-adapter.test.ts` (rewritten) | `src/adapters/node/node-http-adapter.ts` (real path) | Guarded REAL `await import('npm:@hono/node-server@^2.0.0')` — skipped when the dep is absent; when present, binds a real socket, issues a real `fetch`, asserts the round-trip status/body/headers, then `close()`. |
 | `packages/runtime/test/integration/deno-http-adapter.test.ts` (rewritten) | `src/adapters/deno/deno-http-adapter.ts` (real path) | Real `Deno.serve` socket round-trip: `fetch` returns the handler's response; `close` shuts the server down. |
 | `packages/runtime/test/integration/runtime-plugin.test.ts` (extended) | `src/plugin/runtime-plugin.ts` (real path) | A kernel app with `RuntimePlugin({ platform: 'deno' })` + a route, started on a real port, round-trips a request through `app.fetch`/`adapter.fetch` end-to-end. |
 | `packages/kernel/test/integration/application.test.ts` (extended) | `packages/kernel/src/application/application.ts` | `app.fetch(Request)` returns the route handler's `Response`; `start({ port })` calls `setHandler` then `listen`; `start()` with no port still enables `app.fetch` (CF-style path, using a fake adapter); `stop()` calls `close`. |
@@ -339,16 +365,18 @@ deno task test:coverage     # read ANSI-stripped per-file table; >=90% branch/fu
 
 After implementation, also grep for forbidden constructs in the touched packages:
 `grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore\|Date.now()\|globalThis.__" packages/common/src packages/kernel/src packages/runtime/src`
-— must be empty (comments excepted). The lazy `await import('npm:@hono/node-server@^1.13.0')` is
+— must be empty (comments excepted). The lazy `await import('npm:@hono/node-server@^2.0.0')` is
 the only dynamic import; there is no `globalThis.__` shim and no `new Function`.
 
 ## 8. Risks & mitigations
 
-- **`@hono/node-server` version drift:** the lazy import pins `^1.13.0`. If the published API of
-  `serve({ fetch, port, hostname })` differs at the pinned version, the guarded real-import
-  integration test fails loudly (not silently). Mitigation: the `NodeServeHost` interface is the
-  only surface the adapter depends on; if `@hono/node-server`'s return shape changes, only the
-  default host's cast changes, not the adapter logic.
+- **`@hono/node-server` version drift:** the lazy import pins `^2.0.0` (verified latest line is
+  v2.x — `v2.0.10` "Latest" on 2026-07-15, per https://github.com/honojs/node-server/releases). If
+  the published API of `serve({ fetch, port, hostname })` differs at the pinned version, the guarded
+  real-import integration test fails loudly (not silently). Mitigation: the `NodeServeHost`
+  interface is the only surface the adapter depends on; if `@hono/node-server`'s return shape
+  changes, only the default host's cast changes, not the adapter logic. Note v2 requires Node.js
+  v20+ (v18 dropped) — the runtime's Node detector already requires v20+, so no new constraint.
 - **CF Workers runtime services env access:** CF Workers does not expose a global `env` object the
   way Node/Deno do; bindings arrive via the `env` parameter of the `fetch` handler. Mitigation:
   `createCloudflareRuntimeServices` accepts an injectable env source (defaulting to an empty record
