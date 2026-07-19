@@ -160,6 +160,24 @@ describe('bun-http-adapter | close', () => {
 });
 
 // ---------------------------------------------------------------------------
+// close throws on invalid handle type
+// ---------------------------------------------------------------------------
+
+describe('bun-http-adapter | close with invalid handle', () => {
+  it('throws when handle is not a BunHttpServerHandle', () => {
+    const { host } = createFakeHost();
+    const adapter = new BunHttpAdapter(host);
+
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+    });
+
+    expect(() => adapter.close({} as any)).toThrow('Invalid server handle for BunHttpAdapter');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Type guard
 // ---------------------------------------------------------------------------
 

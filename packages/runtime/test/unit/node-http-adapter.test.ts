@@ -105,6 +105,20 @@ describe('node-http-adapter | listen', () => {
     expect(recorded.overrideGlobalObjects).toBe(false);
     expect(isNodeHttpServerHandle(handle)).toBe(true);
   });
+
+  it('without hostname omits it', async () => {
+    const { host, recorded } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+    });
+
+    await adapter.listen(8080);
+
+    expect(recorded.hostname).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -148,6 +162,24 @@ describe('node-http-adapter | close', () => {
 
     // Should not throw
     await adapter.close(handle);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// close throws on invalid handle type
+// ---------------------------------------------------------------------------
+
+describe('node-http-adapter | close with invalid handle', () => {
+  it('throws when handle is not a NodeHttpServerHandle', () => {
+    const { host } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+    });
+
+    expect(() => adapter.close({} as any)).toThrow('Invalid server handle for NodeHttpAdapter');
   });
 });
 

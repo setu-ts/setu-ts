@@ -380,11 +380,17 @@ class Application implements IKernelApplication {
       headers.set('content-type', 'application/json');
     }
 
+    // Normalize relative paths to a full URL so createRequestContext can parse
+    // query params without throwing.  Only normalize paths starting with `/` —
+    // arbitrary strings like `'not-a-valid-url'` should still reach
+    // createRequestContext so its URL-parse failure is surfaced as a 400.
+    const fullUrl = request.url.startsWith('/') ? `http://localhost${request.url}` : request.url;
+
     const syntheticRequest: IRequest = {
       method: request.method as IRequest['method'],
-      url: request.url,
+      url: fullUrl,
       get path() {
-        return new URL(request.url).pathname;
+        return new URL(fullUrl).pathname;
       },
       headers,
       json<T>(): Promise<T> {

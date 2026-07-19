@@ -2475,12 +2475,12 @@ socket-based adapters (M41, formerly M39) structurally cannot. **Depends on M22.
 
 ### Deliverables
 
-- [ ] `IHttpAdapter` web-`fetch` entry (PUBLIC_API.md updated)
-- [ ] Node/Deno/Bun serve on Hono; ~1,030 LOC of native mapping removed
-- [ ] Cloudflare Workers adapter (`fetch` export)
-- [ ] **ARCHITECTURE.md runtime-support corrected** — CF Workers now real; the M41 "CF Workers
+- [x] `IHttpAdapter` web-`fetch` entry (PUBLIC_API.md updated)
+- [x] Node/Deno/Bun serve on Hono; ~1,030 LOC of native mapping removed
+- [x] Cloudflare Workers adapter (`fetch` export)
+- [x] **ARCHITECTURE.md runtime-support corrected** — CF Workers now real; the M41 "CF Workers
       excluded" note updated
-- [ ] Full per-file coverage; all plugin suites re-verified green
+- [x] Full per-file coverage; all plugin suites re-verified green
 
 ---
 
@@ -3825,7 +3825,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 20        | ✅     | health-plugin        |
 | 21        | ✅     | openapi-plugin       |
 | 22        | ✅     | kernel-on-hono       |
-| 23        | ⬜     | runtime-serve-hono   |
+| 23        | ✅     | runtime-serve-hono   |
 | 24        | ⬜     | telemetry-plugin     |
 | 25        | ⬜     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |

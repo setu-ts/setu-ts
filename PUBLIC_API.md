@@ -3692,9 +3692,11 @@ Contract notes:
 
 ## API Reference: @hono-enterprise/runtime
 
-RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, and Bun.
+RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, Bun, and
+Cloudflare Workers.
 
-> **M3 provides runtime services only; HTTP server adapters are deferred to a dedicated milestone.**
+> **M23 replaced the old HTTP server adapters with the new `IHttpAdapter` contract
+> (`setHandler`/`fetch`/`listen`/`close`)** and added the Cloudflare Workers adapter.
 
 ### Values (runtime exports)
 
@@ -3706,42 +3708,46 @@ RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Den
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
 | `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
 | `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
-| `createCloudflareRuntimeServices` | function | Stub — throws (Cloudflare Workers not yet implemented)                                     |
+| `createCloudflareRuntimeServices` | function | Creates `IRuntimeServices` backed by Cloudflare Workers APIs (edge-compatible)             |
 | `DenoHttpAdapter`                 | class    | Deno HTTP server adapter implementing `IHttpAdapter`                                       |
 | `NodeHttpAdapter`                 | class    | Node.js HTTP server adapter implementing `IHttpAdapter`                                    |
 | `BunHttpAdapter`                  | class    | Bun HTTP server adapter implementing `IHttpAdapter`                                        |
+| `CloudflareWorkersHttpAdapter`    | class    | Cloudflare Workers HTTP adapter implementing `IHttpAdapter` (fetch-only, no listen)        |
 | `isDenoHttpServerHandle`          | function | Type guard for `DenoHttpServerHandle`                                                      |
 | `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                      |
 | `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                       |
 
 ### Types
 
-| Export                 | Kind | Purpose                                                        |
-| ---------------------- | ---- | -------------------------------------------------------------- |
-| `RuntimeOptions`       | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`) |
-| `GlobalScope`          | type | Injectable global scope shape for `detectRuntime`              |
-| `DenoHost`             | type | Host interface for the Deno adapter (extension point)          |
-| `DenoFileInfo`         | type | File info returned by `DenoHost.stat()`                        |
-| `DenoDirEntry`         | type | Directory entry returned by `DenoHost.readdir()`               |
-| `NodeHost`             | type | Host interface for the Node adapter (extension point)          |
-| `NodeFsInfo`           | type | File info returned by `NodeHost.stat()`                        |
-| `NodeModules`          | type | Injectable Node built-ins for `buildNodeHost` (testing seam)   |
-| `BunHost`              | type | Host interface for the Bun adapter (extension point)           |
-| `BunFileInfo`          | type | File info returned by `BunHost.stat()`                         |
-| `DenoHttpServerHandle` | type | Internal server handle for DenoHttpAdapter                     |
-| `NodeHttpServerHandle` | type | Internal server handle for NodeHttpAdapter                     |
-| `BunHttpServerHandle`  | type | Internal server handle for BunHttpAdapter                      |
-| `BunServeHost`         | type | Injectable host interface for BunHttpAdapter (extension point) |
-| `BunServer`            | type | Bun server handle returned by `Bun.serve`                      |
-| `HttpAdapterFactories` | type | Platform→adapter factory map for RuntimePlugin                 |
+| Export                              | Kind | Purpose                                                         |
+| ----------------------------------- | ---- | --------------------------------------------------------------- |
+| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)  |
+| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`               |
+| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)           |
+| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                         |
+| `DenoDirEntry`                      | type | Directory entry returned by `DenoHost.readdir()`                |
+| `NodeHost`                          | type | Host interface for the Node adapter (extension point)           |
+| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                         |
+| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)    |
+| `BunHost`                           | type | Host interface for the Bun adapter (extension point)            |
+| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                          |
+| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                      |
+| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                      |
+| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                       |
+| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter         |
+| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point) |
+| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point) |
+| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)  |
+| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                       |
+| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin                  |
 
 Contract notes:
 
-- **M39 implemented HTTP server adapters for Node, Deno, and Bun.** The `IHttpAdapter` contract
-  hands the adapter a `Promise<IResponse>`. `IResponse` exposes a read surface — `snapshot()` (see
-  the HTTP abstractions above) — so adapters serialize the response (status, headers, body) without
-  reaching into kernel internals. M39 wired the concrete adapters (`NodeHttpAdapter`,
-  `DenoHttpAdapter`, `BunHttpAdapter`) and registered them under `CAPABILITIES.HTTP_ADAPTER` via
+- **M23 replaced M39's HTTP server adapters.** The `IHttpAdapter` contract now exposes the
+  web-standard `fetch` entry: `setHandler` installs the framework handler, `fetch` is the universal
+  entry point callable without `listen` (Cloudflare Workers), `listen` binds a real TCP socket, and
+  `close` tears it down. Adapters (`NodeHttpAdapter`, `DenoHttpAdapter`, `BunHttpAdapter`,
+  `CloudflareWorkersHttpAdapter`) are registered under `CAPABILITIES.HTTP_ADAPTER` via
   `RuntimePlugin`.
 - The `RuntimePlugin` is **mandatory** in every application. It registers at
   `PLUGIN_PRIORITY.HIGHEST` so its services are available to all other plugins during registration.
