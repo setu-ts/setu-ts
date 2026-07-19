@@ -214,7 +214,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   serving, Zod-to-OpenAPI schema transformer, schema deduplication) — complete (PR #46)
 - **Milestone 22** (`packages/kernel` — kernel routing on Hono: delegates `Router.match()` to
   `jsr:@hono/hono` with `LinearRouter`, preserves custom middleware pipeline, static-over-param
-  precedence, and `inject()` parity) — complete (pending PR)
+  precedence, and `inject()` parity) — complete (PR #47)
 - **Next milestone** — **Milestone 23** (runtime serve on Hono + Cloudflare Workers: replaces M41
   socket adapters with Hono's `fetch` entry, changes `IHttpAdapter`)
 
