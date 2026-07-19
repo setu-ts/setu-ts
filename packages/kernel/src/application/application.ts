@@ -291,7 +291,13 @@ class Application implements IKernelApplication {
     // 7. Run bootstrap hooks
     await this.#lifecycle.runBootstrap();
 
-    // 8. Listen only if adapter + port are available
+    // 8. Set the handler (always, so app.fetch works even without listen — CF Workers path)
+    if (this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
+      const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
+      adapter.setHandler((request: IRequest) => this.#handleRequest(request));
+    }
+
+    // 9. Listen only if adapter + port are available
     if (options?.port !== undefined) {
       if (!this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
         throw new Error(
@@ -300,10 +306,7 @@ class Application implements IKernelApplication {
         );
       }
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
-      this.#serverHandle = adapter.createServer((request: IRequest) =>
-        this.#handleRequest(request)
-      );
-      await adapter.listen(this.#serverHandle, options.port, options.hostname);
+      this.#serverHandle = await adapter.listen(options.port, options.hostname);
     }
   }
 
@@ -350,6 +353,17 @@ class Application implements IKernelApplication {
     await this.#lifecycle.runClose();
   }
 
+  /** Delegates a web-standard Request to the registered IHttpAdapter. */
+  fetch(request: Request): Promise<Response> {
+    if (!this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
+      throw new Error(
+        'No HTTP adapter registered. Call register(RuntimePlugin) or provide a custom IHttpAdapter.',
+      );
+    }
+    const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
+    return adapter.fetch(request);
+  }
+
   /** Synthesizes an inject request and runs it through the full pipeline. */
   async inject(request: InjectRequest): Promise<InjectResponse> {
     const bodyStr = typeof request.body === 'string'
@@ -366,11 +380,17 @@ class Application implements IKernelApplication {
       headers.set('content-type', 'application/json');
     }
 
+    // Normalize relative paths to a full URL so createRequestContext can parse
+    // query params without throwing.  Only normalize paths starting with `/` —
+    // arbitrary strings like `'not-a-valid-url'` should still reach
+    // createRequestContext so its URL-parse failure is surfaced as a 400.
+    const fullUrl = request.url.startsWith('/') ? `http://localhost${request.url}` : request.url;
+
     const syntheticRequest: IRequest = {
       method: request.method as IRequest['method'],
-      url: request.url,
+      url: fullUrl,
       get path() {
-        return new URL(request.url).pathname;
+        return new URL(fullUrl).pathname;
       },
       headers,
       json<T>(): Promise<T> {

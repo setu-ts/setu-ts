@@ -894,21 +894,31 @@ function detectRuntime(): RuntimePlatform {
 
 ### HTTP Server Abstraction
 
-The Runtime Plugin also provides HTTP server adapters:
+The Runtime Plugin also provides HTTP server adapters implementing the `IHttpAdapter` interface:
 
 ```typescript
 interface IHttpAdapter {
-  createServer(handler: (req: IRequest) => Promise<IResponse>): ServerHandle;
-  listen(handle: ServerHandle, port: number, hostname?: string): Promise<void>;
+  setHandler(handler: (request: IRequest) => Promise<IResponse>): void;
+  fetch(request: Request): Promise<Response>;
+  listen(port: number, hostname?: string): Promise<ServerHandle>;
   close(handle: ServerHandle): Promise<void>;
 }
 ```
 
+The contract is web-fetch-centric: `setHandler` installs the framework handler, `fetch` is the
+universal entry point callable without `listen` (Cloudflare Workers), `listen` binds a real TCP
+socket, and `close` tears it down.
+
 Each runtime has its own implementation:
 
-- **NodeHttpAdapter** — Uses Node's `http.createServer()`.
-- **DenoHttpAdapter** — Uses Deno's `Deno.serve()`.
-- **BunHttpAdapter** — Uses Bun's `Bun.serve()`.
+- **NodeHttpAdapter** — Uses `@hono/node-server` `serve()`.
+- **DenoHttpAdapter** — Uses `Deno.serve()`.
+- **BunHttpAdapter** — Uses `Bun.serve()`.
+- **CloudflareWorkersHttpAdapter** — Exports `fetch` only; `listen` throws.
+
+Because the mapping is web-standard, `IRequest.ip` is intentionally left unset — a web `Request`
+carries no client address (the pre-M23 Node adapter derived it from `socket.remoteAddress`).
+Consumers needing the client IP read a proxy header (`X-Forwarded-For` / `X-Real-IP`) in middleware.
 
 ### Why Only Runtime May Use Runtime-Specific APIs
 

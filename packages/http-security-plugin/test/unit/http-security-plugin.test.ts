@@ -88,6 +88,7 @@ describe('HttpSecurityPlugin', () => {
         register: () => ctx.app,
         start: async () => {},
         stop: async () => {},
+        fetch: () => Promise.resolve(new Response('mock')),
         router: {} as IPluginContext['router'],
         middleware: middlewareApi,
         services: {} as IPluginContext['services'],

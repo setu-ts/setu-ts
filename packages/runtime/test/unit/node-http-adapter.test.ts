@@ -1,289 +1,201 @@
-// deno-lint-ignore-file no-explicit-any require-await -- test fakes need these
+// deno-lint-ignore-file no-explicit-any
 /**
- * Unit tests for Node HTTP adapter — socket-independent coverage of
- * `NodeHttpServerHandle` internals and `NodeHttpAdapter` error paths.
+ * Unit tests for NodeHttpAdapter — uses a fake NodeServeHost.
+ *
+ * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import type { NodeServeHost, NodeServer } from '../../src/adapters/node/node-http-adapter.ts';
 import {
   isNodeHttpServerHandle,
   NodeHttpAdapter,
   NodeHttpServerHandle,
 } from '../../src/adapters/node/node-http-adapter.ts';
-import type { IRequest, IResponse } from '@hono-enterprise/common';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 
-/**
- * Creates a minimal IResponse mock for testing.
- */
-function createMockResponse(body: string = 'OK', status = 200): IResponse {
-  const state = {
-    _status: status,
-    _headers: new Headers(),
-    _body: body as Uint8Array | string | null,
+// ---------------------------------------------------------------------------
+// Fake host
+// ---------------------------------------------------------------------------
+
+function createFakeHost(): {
+  host: NodeServeHost;
+  recorded: {
+    fetch?: (r: Request) => Response | Promise<Response>;
+    port?: number;
+    hostname?: string;
+    overrideGlobalObjects?: boolean;
   };
+} {
+  const recorded: {
+    fetch?: (r: Request) => Response | Promise<Response>;
+    port?: number;
+    hostname?: string;
+    overrideGlobalObjects?: boolean;
+  } = {};
 
-  // @ts-ignore - test fake
-  const mock: IResponse = {
-    status: (code: number): IResponse => {
-      state._status = code;
-      return mock;
-    },
-    header: (name: string, value: string): IResponse => {
-      state._headers.set(name, value);
-      return mock;
-    },
-    appendHeader: (name: string, value: string): IResponse => {
-      state._headers.append(name, value);
-      return mock;
-    },
-    json: <T>(_body: T) => {
-      return { __handlerResult: true } as any;
-    },
-    text: (_body: string) => {
-      return { __handlerResult: true } as any;
-    },
-    send: (_body?: Uint8Array) => {
-      return { __handlerResult: true } as any;
-    },
-    redirect: (_url: string, _status?: number) => {
-      return { __handlerResult: true } as any;
-    },
-    snapshot: () => {
+  const host: NodeServeHost = {
+    serve: async (options) => {
+      // Await Promise.resolve to satisfy deno lint require-await rule
+      await Promise.resolve();
+      recorded.fetch = options.fetch;
+      recorded.port = options.port;
+      if (options.hostname !== undefined) {
+        recorded.hostname = options.hostname;
+      }
+      recorded.overrideGlobalObjects = options.overrideGlobalObjects ?? false;
+
       return {
-        status: state._status,
-        headers: state._headers,
-        body: state._body,
-      };
+        close() {},
+      } as NodeServer;
     },
   };
 
-  return mock;
+  return { host, recorded };
 }
 
-describe('NodeHttpServerHandle', () => {
-  describe('constructor', () => {
-    it('stores the handler function', () => {
-      const handler = async (_request: IRequest): Promise<IResponse> => {
-        return createMockResponse();
-      };
+// ---------------------------------------------------------------------------
+// setHandler / fetch round-trip
+// ---------------------------------------------------------------------------
 
-      const handle = new NodeHttpServerHandle(handler);
+describe('node-http-adapter | setHandler/fetch', () => {
+  it('stores handler; fetch round-trips', async () => {
+    const { host } = createFakeHost();
 
-      expect(handle).toBeInstanceOf(NodeHttpServerHandle);
+    // Simpler: directly test fetch with a handler that returns a known response
+    const adapter = new NodeHttpAdapter(host);
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return {
+        snapshot: () => ({ status: 200, headers: new Headers({ 'x-test': 'ok' }), body: 'hello' }),
+      } as any;
     });
+
+    const response = await adapter.fetch(new Request('https://example.com/'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-test')).toBe('ok');
   });
 
-  describe('server getter/setter', () => {
-    it('returns null before server is set', () => {
-      const handler = async (): Promise<IResponse> => {
-        return createMockResponse();
-      };
+  it('fetch without setHandler returns 500', async () => {
+    const { host } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
 
-      const handle = new NodeHttpServerHandle(handler);
-
-      expect(handle.server).toBeNull();
-    });
-
-    it('stores and returns the server instance', () => {
-      const handler = async (): Promise<IResponse> => {
-        return createMockResponse();
-      };
-
-      const handle = new NodeHttpServerHandle(handler);
-      // @ts-ignore - test fake
-      const fakeServer = { id: 'fake-server' } as any;
-
-      handle.server = fakeServer;
-
-      expect(handle.server).toBe(fakeServer);
-    });
-  });
-
-  describe('createNodeRequestListener', () => {
-    it('returns a function', () => {
-      const handler = async (): Promise<IResponse> => {
-        return createMockResponse();
-      };
-
-      const handle = new NodeHttpServerHandle(handler);
-      const listener = handle.createNodeRequestListener();
-
-      expect(typeof listener).toBe('function');
-    });
-
-    it('handles request and writes response', async () => {
-      const handler = async (request: IRequest): Promise<IResponse> => {
-        expect(request.path).toBe('/test');
-        return createMockResponse('Hello', 200);
-      };
-
-      const handle = new NodeHttpServerHandle(handler);
-      const listener = handle.createNodeRequestListener();
-
-      // @ts-ignore - test fake
-      const req = {
-        method: 'GET',
-        url: '/test',
-        headers: {},
-        socket: {},
-        [Symbol.asyncIterator]() {
-          return {
-            next() {
-              return { done: true, value: undefined };
-            },
-          };
-        },
-      };
-
-      let body: string | Uint8Array | undefined;
-      const headers: Record<string, string> = {};
-
-      // @ts-ignore - test fake
-      const res = {
-        statusCode: 200,
-        setHeader: (key: string, value: string) => {
-          headers[key.toLowerCase()] = value;
-        },
-        end: (chunk?: string) => {
-          body = chunk;
-        },
-      };
-
-      await listener(req as any, res as any);
-
-      expect(typeof body).toBe('string');
-      expect(body).toBe('Hello');
-    });
-
-    it('caches body bytes on request', async () => {
-      let receivedMethod = '';
-      const handler = async (request: IRequest): Promise<IResponse> => {
-        receivedMethod = request.method;
-        return createMockResponse();
-      };
-
-      const handle = new NodeHttpServerHandle(handler);
-      const listener = handle.createNodeRequestListener();
-
-      // @ts-ignore - test fake
-      const req = {
-        method: 'POST',
-        url: '/api',
-        headers: {},
-        socket: {},
-        [Symbol.asyncIterator]() {
-          return {
-            next() {
-              return { done: true, value: undefined };
-            },
-          };
-        },
-      };
-
-      // @ts-ignore - test fake
-      const res = {
-        statusCode: 200,
-        setHeader: () => {},
-        end: () => {},
-      };
-
-      await listener(req as any, res as any);
-
-      expect(receivedMethod).toBe('POST');
-    });
+    const response = await adapter.fetch(new Request('https://example.com/'));
+    expect(response.status).toBe(500);
   });
 });
 
-describe('isNodeHttpServerHandle', () => {
-  it('returns true for NodeHttpServerHandle', () => {
-    const handler = async (): Promise<IResponse> => {
-      return createMockResponse();
-    };
+// ---------------------------------------------------------------------------
+// listen calls host.serve with correct options
+// ---------------------------------------------------------------------------
 
-    const handle = new NodeHttpServerHandle(handler);
+describe('node-http-adapter | listen', () => {
+  it('calls host.serve with fetch/port/hostname and overrideGlobalObjects:false', async () => {
+    const { host, recorded } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
 
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+    });
+
+    const handle = await adapter.listen(8080, 'localhost');
+
+    expect(recorded.fetch).toBeDefined();
+    expect(recorded.port).toBe(8080);
+    expect(recorded.hostname).toBe('localhost');
+    expect(recorded.overrideGlobalObjects).toBe(false);
     expect(isNodeHttpServerHandle(handle)).toBe(true);
   });
 
-  it('returns false for non-handle objects', () => {
-    expect(isNodeHttpServerHandle({})).toBe(false);
-    expect(isNodeHttpServerHandle(null)).toBe(false);
-    expect(isNodeHttpServerHandle(undefined)).toBe(false);
-    expect(isNodeHttpServerHandle('string')).toBe(false);
-    expect(isNodeHttpServerHandle(123)).toBe(false);
+  it('without hostname omits it', async () => {
+    const { host, recorded } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+    });
+
+    await adapter.listen(8080);
+
+    expect(recorded.hostname).toBeUndefined();
   });
 });
 
-describe('NodeHttpAdapter', () => {
-  describe('createServer', () => {
-    it('returns a NodeHttpServerHandle', () => {
-      const handler = async (): Promise<IResponse> => {
-        return createMockResponse();
-      };
+// ---------------------------------------------------------------------------
+// close calls server.close
+// ---------------------------------------------------------------------------
 
-      const adapter = new NodeHttpAdapter();
-      const handle = adapter.createServer(handler);
+describe('node-http-adapter | close', () => {
+  it('calls server.close on valid handle', async () => {
+    let closeCalled = false;
+    const { host } = createFakeHost();
 
-      expect(handle).toBeInstanceOf(NodeHttpServerHandle);
+    const adapter = new NodeHttpAdapter(host);
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
+
+    const handle = await adapter.listen(8080);
+
+    // Override the server to track close
+    (handle as NodeHttpServerHandle).server = {
+      close() {
+        closeCalled = true;
+      },
+    } as unknown as NodeServer;
+
+    await adapter.close(handle);
+    expect(closeCalled).toBe(true);
   });
 
-  describe('listen', () => {
-    it('rejects on invalid handle', async () => {
-      const adapter = new NodeHttpAdapter();
-      // @ts-ignore - test fake
-      const invalidHandle = { not: 'a handle' };
-
-      await expect(adapter.listen(invalidHandle, 3000)).rejects.toThrow(
-        'Invalid server handle for NodeHttpAdapter',
-      );
+  it('close with null server is a no-op', async () => {
+    const { host } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    it('rejects on invalid handle (Promise path)', async () => {
-      const adapter = new NodeHttpAdapter();
-      // @ts-ignore - test fake
-      const invalidHandle = { not: 'a handle' };
+    const handle = await adapter.listen(8080);
+    (handle as NodeHttpServerHandle).server = null;
 
-      const promise = adapter.listen(invalidHandle, 3000);
-      await expect(promise).rejects.toThrow('Invalid server handle');
+    // Should not throw
+    await adapter.close(handle);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// close throws on invalid handle type
+// ---------------------------------------------------------------------------
+
+describe('node-http-adapter | close with invalid handle', () => {
+  it('throws when handle is not a NodeHttpServerHandle', () => {
+    const { host } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (_request) => {
+      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
+
+    expect(() => adapter.close({} as any)).toThrow('Invalid server handle for NodeHttpAdapter');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Type guard
+// ---------------------------------------------------------------------------
+
+describe('node-http-adapter | isNodeHttpServerHandle', () => {
+  it('accepts valid handles', () => {
+    expect(isNodeHttpServerHandle(new NodeHttpServerHandle())).toBe(true);
   });
 
-  describe('close', () => {
-    it('resolves when handle.server is null (never listened)', async () => {
-      const handler = async (): Promise<IResponse> => {
-        return createMockResponse();
-      };
-
-      const adapter = new NodeHttpAdapter();
-      const handle = adapter.createServer(handler);
-      // Never call listen, so server is null
-
-      await expect(adapter.close(handle)).resolves.toBeUndefined();
-    });
-
-    it('rejects on invalid handle', async () => {
-      const adapter = new NodeHttpAdapter();
-      // @ts-ignore - test fake
-      const invalidHandle = { not: 'a handle' };
-
-      await expect(adapter.close(invalidHandle)).rejects.toThrow(
-        'Invalid server handle for NodeHttpAdapter',
-      );
-    });
-
-    it('handles server error during listen', async () => {
-      const adapter = new NodeHttpAdapter();
-      const handler = async (): Promise<IResponse> => {
-        return createMockResponse();
-      };
-
-      const handle = adapter.createServer(handler);
-
-      // Try to listen on port 0 (should work in test environment)
-      // but we can test the error path by using an invalid handle
-      await expect(adapter.listen(handle, 0, '127.0.0.1')).resolves.toBeUndefined();
-    });
+  it('rejects invalid handles', () => {
+    expect(isNodeHttpServerHandle({} as any)).toBe(false);
+    expect(isNodeHttpServerHandle(null as any)).toBe(false);
   });
 });

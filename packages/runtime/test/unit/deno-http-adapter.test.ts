@@ -1,16 +1,16 @@
 // deno-lint-ignore-file no-explicit-any
 /**
- * Unit tests for BunHttpAdapter — uses a fake BunServeHost.
+ * Unit tests for DenoHttpAdapter — uses a fake DenoServeHost.
  *
  * @module
  */
 
-import type { BunServeHost, BunServer } from '../../src/adapters/bun/bun-http-adapter.ts';
+import type { DenoServeHost, DenoServer } from '../../src/adapters/deno/deno-http-adapter.ts';
 import {
-  BunHttpAdapter,
-  BunHttpServerHandle,
-  isBunHttpServerHandle,
-} from '../../src/adapters/bun/bun-http-adapter.ts';
+  DenoHttpAdapter,
+  DenoHttpServerHandle,
+  isDenoHttpServerHandle,
+} from '../../src/adapters/deno/deno-http-adapter.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
@@ -19,7 +19,7 @@ import { expect } from '@std/expect';
 // ---------------------------------------------------------------------------
 
 function createFakeHost(): {
-  host: BunServeHost;
+  host: DenoServeHost;
   recorded: {
     port?: number;
     hostname?: string;
@@ -32,7 +32,7 @@ function createFakeHost(): {
     fetch?: (r: Request) => Response | Promise<Response>;
   } = {};
 
-  const host: BunServeHost = {
+  const host: DenoServeHost = {
     serve: (options) => {
       recorded.port = options.port;
       if (options.hostname !== undefined) {
@@ -41,8 +41,8 @@ function createFakeHost(): {
       recorded.fetch = options.fetch;
 
       return {
-        stop() {},
-      } as unknown as BunServer;
+        shutdown: async () => {},
+      } as unknown as DenoServer;
     },
   };
 
@@ -53,26 +53,26 @@ function createFakeHost(): {
 // setHandler / fetch round-trip
 // ---------------------------------------------------------------------------
 
-describe('bun-http-adapter | setHandler/fetch', () => {
+describe('deno-http-adapter | setHandler/fetch', () => {
   it('stores handler; fetch round-trips', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers({ 'x-bun': 'ok' }), body: 'bun' }),
+        snapshot: () => ({ status: 200, headers: new Headers({ 'x-den': 'ok' }), body: 'deno' }),
       } as any;
     });
 
     const response = await adapter.fetch(new Request('https://example.com/'));
     expect(response.status).toBe(200);
-    expect(response.headers.get('x-bun')).toBe('ok');
+    expect(response.headers.get('x-den')).toBe('ok');
   });
 
   it('fetch without setHandler returns 500', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     const response = await adapter.fetch(new Request('https://example.com/'));
     expect(response.status).toBe(500);
@@ -83,97 +83,66 @@ describe('bun-http-adapter | setHandler/fetch', () => {
 // listen calls host.serve with correct options
 // ---------------------------------------------------------------------------
 
-describe('bun-http-adapter | listen', () => {
+describe('deno-http-adapter | listen', () => {
   it('calls host.serve with port/hostname/fetch', async () => {
     const { host, recorded } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    const handle = await adapter.listen(9000, '127.0.0.1');
+    const handle = await adapter.listen(3000, '0.0.0.0');
 
     expect(recorded.fetch).toBeDefined();
-    expect(recorded.port).toBe(9000);
-    expect(recorded.hostname).toBe('127.0.0.1');
-    expect(isBunHttpServerHandle(handle)).toBe(true);
-  });
-
-  it('without hostname omits it', async () => {
-    const { host, recorded } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
-
-    // deno-lint-ignore require-await
-    adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
-    });
-
-    await adapter.listen(9000);
-
-    expect(recorded.hostname).toBeUndefined();
+    expect(recorded.port).toBe(3000);
+    expect(recorded.hostname).toBe('0.0.0.0');
+    expect(isDenoHttpServerHandle(handle)).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// close calls server.stop
+// close calls server.shutdown
 // ---------------------------------------------------------------------------
 
-describe('bun-http-adapter | close', () => {
-  it('calls server.stop on valid handle', async () => {
-    let stopCalled = false;
+describe('deno-http-adapter | close', () => {
+  it('calls server.shutdown on valid handle', async () => {
+    let shutdownCalled = false;
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    const handle = await adapter.listen(9000);
+    const handle = await adapter.listen(3000);
 
-    (handle as BunHttpServerHandle).server = {
-      stop() {
-        stopCalled = true;
+    (handle as DenoHttpServerHandle).server = {
+      // deno-lint-ignore require-await
+      shutdown: async () => {
+        shutdownCalled = true;
       },
-    } as unknown as BunServer;
+    } as unknown as DenoServer;
 
     await adapter.close(handle);
-    expect(stopCalled).toBe(true);
+    expect(shutdownCalled).toBe(true);
   });
 
   it('close with null server is a no-op', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
+    const adapter = new DenoHttpAdapter(host);
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
     });
 
-    const handle = await adapter.listen(9000);
-    (handle as BunHttpServerHandle).server = null;
+    const handle = await adapter.listen(3000);
+    (handle as DenoHttpServerHandle).server = null;
 
     await adapter.close(handle);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// close throws on invalid handle type
-// ---------------------------------------------------------------------------
-
-describe('bun-http-adapter | close with invalid handle', () => {
-  it('throws when handle is not a BunHttpServerHandle', () => {
-    const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
-
-    // deno-lint-ignore require-await
-    adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
-    });
-
-    expect(() => adapter.close({} as any)).toThrow('Invalid server handle for BunHttpAdapter');
   });
 });
 
@@ -181,12 +150,12 @@ describe('bun-http-adapter | close with invalid handle', () => {
 // Type guard
 // ---------------------------------------------------------------------------
 
-describe('bun-http-adapter | isBunHttpServerHandle', () => {
+describe('deno-http-adapter | isDenoHttpServerHandle', () => {
   it('accepts valid handles', () => {
-    expect(isBunHttpServerHandle(new BunHttpServerHandle())).toBe(true);
+    expect(isDenoHttpServerHandle(new DenoHttpServerHandle())).toBe(true);
   });
 
   it('rejects invalid handles', () => {
-    expect(isBunHttpServerHandle({} as any)).toBe(false);
+    expect(isDenoHttpServerHandle({} as any)).toBe(false);
   });
 });

@@ -199,29 +199,42 @@ export interface IRuntimeServices {
  * HTTP server adapter provided by the runtime plugin. No other plugin may
  * create HTTP servers (AI_GUIDELINES §4.3).
  *
+ * The contract is web-standard `fetch`-centric: `setHandler` installs the
+ * request handler, `fetch` is the universal entry point callable without
+ * `listen` (Cloudflare Workers), `listen` binds a real socket, and `close`
+ * tears it down.
+ *
  * @since 0.1.0
  */
 export interface IHttpAdapter {
   /**
-   * Creates (but does not start) an HTTP server around the framework's
-   * request handler.
+   * Installs the framework request handler. Called once at `start()` time,
+   * after the middleware pipeline compiles and before any `fetch` or `listen`.
    *
    * @param handler - Handles a normalized request, produces a response
-   * @returns An opaque server handle
    */
-  createServer(handler: (request: IRequest) => Promise<IResponse>): ServerHandle;
+  setHandler(handler: (request: IRequest) => Promise<IResponse>): void;
   /**
-   * Starts listening.
+   * The universal web-standard entry point. Accepts a web `Request` and
+   * returns a web `Response`. May be called without `listen` (e.g. Cloudflare
+   * Workers where `export default { fetch: app.fetch }` is the deploy path).
    *
-   * @param handle - The server handle
-   * @param port - TCP port
-   * @param hostname - Bind address (defaults to all interfaces)
+   * @param request - A web-standard `Request`
+   * @returns A web-standard `Response`
    */
-  listen(handle: ServerHandle, port: number, hostname?: string): Promise<void>;
+  fetch(request: Request): Promise<Response>;
+  /**
+   * Binds the adapter's `fetch` to a real TCP socket.
+   *
+   * @param port - TCP port to bind
+   * @param hostname - Bind address (defaults to all interfaces)
+   * @returns An opaque server handle (returned from `listen`, passed to `close`)
+   */
+  listen(port: number, hostname?: string): Promise<ServerHandle>;
   /**
    * Stops the server gracefully.
    *
-   * @param handle - The server handle
+   * @param handle - The server handle returned by `listen`
    */
   close(handle: ServerHandle): Promise<void>;
 }

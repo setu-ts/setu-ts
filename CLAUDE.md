@@ -215,8 +215,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 22** (`packages/kernel` — kernel routing on Hono: delegates `Router.match()` to
   `jsr:@hono/hono` with `LinearRouter`, preserves custom middleware pipeline, static-over-param
   precedence, and `inject()` parity) — complete (PR #47)
-- **Next milestone** — **Milestone 23** (runtime serve on Hono + Cloudflare Workers: replaces M41
-  socket adapters with Hono's `fetch` entry, changes `IHttpAdapter`)
+- **Milestone 23** (`packages/runtime` — runtime serve on Hono + Cloudflare Workers: replaces M41
+  socket adapters with Hono's `fetch` entry, changes `IHttpAdapter` to
+  `setHandler`/`fetch`/`listen`/`close`) — complete (PR #48)
+- **Next milestone** — **Milestone 24** (telemetry plugin — OpenTelemetry distributed tracing)
 
 ## Verification (run before declaring any work done)
 

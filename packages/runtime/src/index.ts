@@ -2,8 +2,8 @@
  * @module
  *
  * RuntimePlugin and runtime adapters providing {@linkcode IRuntimeServices}
- * for Node.js, Deno, and Bun. HTTP server adapters are also provided for
- * running the framework on real HTTP servers.
+ * for Node.js, Deno, Bun, and Cloudflare Workers. HTTP server adapters are
+ * also provided for running the framework on real HTTP servers.
  *
  * Every export is documented in PUBLIC_API.md section 36.
  */
@@ -26,18 +26,17 @@ export type { NodeFsInfo, NodeHost, NodeModules } from './adapters/node/node-run
 export { createBunRuntimeServices } from './adapters/bun/bun-runtime.ts';
 export type { BunFileInfo, BunHost } from './adapters/bun/bun-runtime.ts';
 
-export { createCloudflareRuntimeServices } from './adapters/cloudflare/cf-runtime.ts';
+export { createCloudflareRuntimeServices } from './adapters/workers/cf-runtime.ts';
+export type { CloudflareEnv, CloudflareRuntimeOptions } from './adapters/workers/cf-runtime.ts';
 
 // HTTP adapters
 export { DenoHttpAdapter } from './adapters/deno/deno-http-adapter.ts';
-export type { DenoHttpServerHandle } from './adapters/deno/deno-http-adapter.ts';
+export type { DenoServeHost, DenoServer } from './adapters/deno/deno-http-adapter.ts';
 
 export { NodeHttpAdapter } from './adapters/node/node-http-adapter.ts';
-export type { NodeHttpServerHandle } from './adapters/node/node-http-adapter.ts';
+export type { NodeServeHost, NodeServer } from './adapters/node/node-http-adapter.ts';
 
 export { BunHttpAdapter } from './adapters/bun/bun-http-adapter.ts';
-export type {
-  BunHttpServerHandle,
-  BunServeHost,
-  BunServer,
-} from './adapters/bun/bun-http-adapter.ts';
+export type { BunServeHost, BunServer } from './adapters/bun/bun-http-adapter.ts';
+
+export { CloudflareWorkersHttpAdapter } from './adapters/workers/cf-http-adapter.ts';
