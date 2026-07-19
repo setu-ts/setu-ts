@@ -31,9 +31,12 @@ export interface RouteEntry {
   statics: number;
 }
 
-// Hono imports — use LinearRouter for correct string param extraction.
-// SmartRouter (default) delegates to TrieRouter/RegExpRouter which coerce
-// numeric-looking params to numbers; LinearRouter preserves strings.
+// Hono imports — use LinearRouter (not the default SmartRouter) because the
+// kernel's tie-break (§3.6) needs Hono to return EVERY overlapping candidate
+// for a path so it can re-rank them by static-segment count + registration
+// order. LinearRouter matches routes linearly and yields all candidates;
+// it also never raises RegExpRouter's UnsupportedPathError on overlapping
+// param patterns. Extracted params are strings either way.
 import { Hono } from '@hono/hono';
 import { LinearRouter } from '@hono/hono/router/linear-router';
 import type { Context as HonoContext, Next as HonoNext } from '@hono/hono';
