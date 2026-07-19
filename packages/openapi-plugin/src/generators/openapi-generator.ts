@@ -304,10 +304,7 @@ export class OpenApiGenerator {
    */
   #generateOperationId(method: string, path: string): string {
     const methodLower = method.toLowerCase();
-    const pathParts = path.split('/').filter(Boolean);
-    const pathSlug = pathParts
-      .map((part) => part.replace(/\{([^}]+)\}/g, '{$1}'))
-      .join('-');
+    const pathSlug = path.split('/').filter(Boolean).join('-');
     return `${methodLower}-${pathSlug || 'root'}`;
   }
 
@@ -387,13 +384,13 @@ export class OpenApiGenerator {
     const responses: Record<string, OpenApiResponse> = {};
 
     if (responseSchema) {
-      for (const [status, schema] of Object.entries(responseSchema)) {
+      for (const [status, value] of Object.entries(responseSchema)) {
         const statusCode = parseInt(status, 10);
-        const description = this.#getStatusDescription(statusCode);
+        const { schema, description } = this.#normalizeResponse(value, statusCode);
 
         responses[String(statusCode)] = {
           description,
-          ...(schema
+          ...(schema !== undefined
             ? {
               content: {
                 'application/json': {
@@ -412,6 +409,42 @@ export class OpenApiGenerator {
     }
 
     return responses;
+  }
+
+  /**
+   * Normalizes a response schema value into a schema + description pair.
+   *
+   * Programmatic routes store the response schema directly (a Zod schema,
+   * identified by its `_def`). Decorator routes (`@ApiResponse`) store a
+   * `{ schema?, description? }` wrapper (`buildResponseSchemas` in the
+   * decorator plugin); this unwraps that shape so the inner schema is
+   * transformed instead of collapsing to `{}`, and prefers the
+   * decorator-provided description over the status-code default.
+   *
+   * @param value - The raw response schema value from `RouteSchema.response`
+   * @param statusCode - The HTTP status code (for the default description)
+   * @returns The inner schema (if any) and the resolved description
+   */
+  #normalizeResponse(
+    value: unknown,
+    statusCode: number,
+  ): { schema: unknown; description: string } {
+    const fallback = this.#getStatusDescription(statusCode);
+
+    if (value === null || typeof value !== 'object') {
+      // Falsy / non-object — no schema to render.
+      return { schema: undefined, description: fallback };
+    }
+
+    // Bare Zod schema (programmatic convention) — identified by `_def`.
+    if ('_def' in value) {
+      return { schema: value, description: fallback };
+    }
+
+    // Decorator `{ schema?, description? }` wrapper.
+    const wrapper = value as { schema?: unknown; description?: unknown };
+    const description = typeof wrapper.description === 'string' ? wrapper.description : fallback;
+    return { schema: wrapper.schema, description };
   }
 
   /**

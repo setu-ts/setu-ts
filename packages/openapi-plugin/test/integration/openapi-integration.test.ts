@@ -11,6 +11,16 @@ import { RuntimePlugin } from '@hono-enterprise/runtime';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  Controller,
+  DecoratorPlugin,
+  Get,
+  Post,
+  ValidateBody,
+} from '@hono-enterprise/decorator-plugin';
 
 describe('OpenAPI Integration', () => {
   it('should generate OpenAPI spec for programmatic routes', async () => {
@@ -326,6 +336,90 @@ describe('OpenAPI Integration', () => {
     const userSchema = schemas.User as Record<string, unknown>;
     expect(userSchema.type).toBe('object');
     expect(userSchema.properties).toBeDefined();
+
+    await app.stop();
+  });
+
+  // §3.6: decorator-registered routes must reach the served spec with the SAME
+  // body/response schemas as a programmatic route. Regression guard for the
+  // decorator `@ApiResponse({ schema })` wrapper being dropped to `{}`.
+  it('should generate spec for decorator-based controllers with body and response schemas', async () => {
+    // Distinct schemas per operation so each renders inline (dedup of a shared
+    // schema into components/$ref is covered separately in the generator unit tests).
+    const ProductSchema = z.object({ id: z.string(), name: z.string() });
+    const CreateProductSchema = z.object({ name: z.string() });
+    const CreatedProductSchema = z.object({ id: z.string(), createdAt: z.string() });
+
+    @Controller('/products')
+    @ApiTags('Products')
+    class ProductController {
+      @Get('/:id')
+      @ApiOperation({ summary: 'Get a product' })
+      @ApiResponse({ status: 200, description: 'The product', schema: ProductSchema })
+      get(): unknown {
+        return { id: '1', name: 'Widget' };
+      }
+
+      @Post('/')
+      @ApiOperation({ summary: 'Create a product' })
+      @ValidateBody(CreateProductSchema)
+      @ApiResponse({ status: 201, schema: CreatedProductSchema })
+      create(): unknown {
+        return { id: '2', createdAt: 'now' };
+      }
+    }
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DecoratorPlugin({ controllers: [ProductController] }),
+        OpenApiPlugin({ title: 'Decorator API', version: '2.0.0' }),
+      ],
+    });
+
+    await app.start();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/openapi.json',
+    });
+    expect(response.statusCode).toBe(200);
+
+    const spec = response.json() as Record<string, unknown>;
+    const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
+
+    // Path templating + tags/summary reach the spec.
+    expect(paths).toHaveProperty('/products/{id}');
+    expect(paths).toHaveProperty('/products');
+    const getOp = paths['/products/{id}'].get;
+    expect(getOp.tags).toEqual(['Products']);
+    expect(getOp.summary).toBe('Get a product');
+
+    // The GET response schema is the REAL converted Zod object, not `{}`,
+    // and the decorator-provided description wins over the status default.
+    const getResp = getOp.responses as Record<string, Record<string, unknown>>;
+    expect(getResp['200'].description).toBe('The product');
+    const getSchema =
+      ((getResp['200'].content as Record<string, Record<string, unknown>>)['application/json']
+        .schema) as Record<string, unknown>;
+    expect(getSchema.type).toBe('object');
+    expect(getSchema.properties).toEqual(
+      expect.objectContaining({ id: { type: 'string' }, name: { type: 'string' } }),
+    );
+
+    // The POST request body (via @ValidateBody) and response schema both render.
+    const postOp = paths['/products'].post;
+    const postBody = postOp.requestBody as Record<string, Record<string, Record<string, unknown>>>;
+    const postBodySchema = postBody.content['application/json'].schema as Record<string, unknown>;
+    expect(postBodySchema.type).toBe('object');
+    expect(postBodySchema.properties).toHaveProperty('name');
+
+    const postResp = postOp.responses as Record<string, Record<string, unknown>>;
+    const postRespSchema =
+      ((postResp['201'].content as Record<string, Record<string, unknown>>)['application/json']
+        .schema) as Record<string, unknown>;
+    expect(postRespSchema.type).toBe('object');
+    expect(postRespSchema.properties).toHaveProperty('id');
 
     await app.stop();
   });

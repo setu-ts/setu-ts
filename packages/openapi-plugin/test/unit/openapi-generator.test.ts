@@ -301,6 +301,61 @@ describe('OpenApiGenerator', () => {
       });
     });
 
+    it('should unwrap the decorator { schema, description } response shape', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const routes: readonly RouteInfo[] = [
+        {
+          method: 'GET',
+          path: '/users/:id',
+          definition: {
+            handler: () => {
+              throw new Error('not used');
+            },
+            schema: {
+              // Shape produced by the decorator plugin's @ApiResponse.
+              response: {
+                200: { description: 'The user', schema: z.object({ id: z.string() }) },
+              },
+            },
+          },
+        },
+      ];
+
+      const response = generator.generate(routes).paths['/users/{id}']?.get?.responses['200'];
+      // The decorator description wins over the status-code default.
+      expect(response?.description).toBe('The user');
+      // The inner Zod schema is transformed, NOT collapsed to `{}`.
+      expect(response?.content?.['application/json']?.schema).toEqual({
+        type: 'object',
+        properties: { id: { type: 'string' } },
+        required: ['id'],
+      });
+    });
+
+    it('should emit a bare response (no content) for a schemaless status', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const routes: readonly RouteInfo[] = [
+        {
+          method: 'DELETE',
+          path: '/users/:id',
+          definition: {
+            handler: () => {
+              throw new Error('not used');
+            },
+            // A non-object response value (e.g. an unset status) yields a
+            // description-only response with no content block.
+            schema: { response: { 204: null as unknown as undefined } },
+          },
+        },
+      ];
+
+      const response = generator.generate(routes).paths['/users/{id}']?.delete?.responses['204'];
+      expect(response?.description).toBe('No content');
+      expect(response?.content).toBeUndefined();
+    });
+
     it('should deduplicate schemas into components/schemas', () => {
       const generator = new OpenApiGenerator({
         title: 'Test API',

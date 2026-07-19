@@ -2,6 +2,9 @@
   "name": "@hono-enterprise/openapi-plugin",
   "version": "0.1.0",
   "exports": "./src/index.ts",
+  "compilerOptions": {
+    "experimentalDecorators": true
+  },
   "imports": {
     "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0",
     "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0",
