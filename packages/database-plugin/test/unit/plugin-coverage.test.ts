@@ -118,6 +118,7 @@ function createFakeRouter(): IRouterApi {
     head: () => {},
     options: () => {},
     group: () => {},
+    listRoutes: () => [],
   };
 }
 

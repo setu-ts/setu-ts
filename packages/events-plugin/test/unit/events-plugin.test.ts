@@ -47,6 +47,7 @@ describe('EventsPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       },
       config: {
         get: () => {},

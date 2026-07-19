@@ -52,6 +52,7 @@ describe('HealthPlugin', () => {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     };
 
     const fakeLifecycle = {
@@ -159,6 +160,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -235,6 +237,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -301,6 +304,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -367,6 +371,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -433,6 +438,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -509,6 +515,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -583,6 +590,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: {
         onRegister: () => {},
@@ -699,6 +707,7 @@ describe('HealthPlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       } as IRouterApi,
       lifecycle: fakeLifecycle,
       middleware: { add: () => {} } as IMiddlewareApi,
@@ -803,6 +812,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
@@ -907,6 +917,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
@@ -1011,6 +1022,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
@@ -1117,6 +1129,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
@@ -1228,6 +1241,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
@@ -1342,6 +1356,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
@@ -1463,6 +1478,7 @@ describe('HealthPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},

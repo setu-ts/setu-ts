@@ -210,13 +210,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   #42)
 - **Milestone 20** (`packages/health-plugin` — Health checks and readiness probes) — complete (PR
   #44)
-- **Next milestone** — Milestone 21 (`packages/openapi-plugin` — OpenAPI spec generation) is in
-  progress. **Top priority thereafter: the Hono foundation migration** — Milestone 22 (kernel
-  routing on Hono, behind the existing `common` contracts) then Milestone 23 (runtime serve on
-  Hono + Cloudflare Workers) — before any remaining plugin milestones (telemetry onward, renumbered
-  +2). Note: the framework does NOT yet use Hono; M22/M23 make ARCHITECTURE.md's "Why It Uses Hono"
-  true. A 1–2 day router-on-Hono spike is recommended before M22 to de-risk route-precedence/inject/
-  snapshot parity.
+- **Milestone 21** (`packages/openapi-plugin` — OpenAPI 3.1 spec generation from routes, Swagger UI
+  serving, Zod-to-OpenAPI schema transformer, schema deduplication) — complete (PR #46)
+- **Next milestone** — **the Hono foundation migration** — Milestone 22 (kernel routing on Hono,
+  behind the existing `common` contracts) then Milestone 23 (runtime serve on Hono + Cloudflare
+  Workers) — before any remaining plugin milestones (telemetry onward, renumbered +2). Note: the
+  framework does NOT yet use Hono; M22/M23 make ARCHITECTURE.md's "Why It Uses Hono" true. A 1–2 day
+  router-on-Hono spike is recommended before M22 to de-risk route-precedence/inject/snapshot parity.
 
 ## Verification (run before declaring any work done)
 

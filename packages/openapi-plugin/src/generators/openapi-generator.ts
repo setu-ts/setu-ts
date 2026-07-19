@@ -1,0 +1,524 @@
+import type { RouteInfo } from '@hono-enterprise/common';
+
+import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
+import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
+
+/**
+ * OpenAPI 3.1 document structure.
+ *
+ * @since 0.1.0
+ */
+export interface OpenApiDocument {
+  /** OpenAPI version. */
+  readonly openapi: string;
+  /** API metadata. */
+  readonly info: {
+    readonly title: string;
+    readonly version: string;
+    readonly description?: string;
+  };
+  /** Server URLs. */
+  readonly servers?: readonly {
+    readonly url: string;
+    readonly description?: string;
+  }[];
+  /** API paths. */
+  readonly paths: Record<string, {
+    readonly get?: OpenApiOperation;
+    readonly post?: OpenApiOperation;
+    readonly put?: OpenApiOperation;
+    readonly patch?: OpenApiOperation;
+    readonly delete?: OpenApiOperation;
+    readonly head?: OpenApiOperation;
+    readonly options?: OpenApiOperation;
+  }>;
+  /** Reusable components. */
+  readonly components?: {
+    readonly schemas?: Record<string, OpenApiSchemaObject>;
+    readonly securitySchemes?: Record<string, unknown>;
+  };
+}
+
+/**
+ * OpenAPI operation definition.
+ *
+ * @since 0.1.0
+ */
+export interface OpenApiOperation {
+  /** Unique operation identifier. */
+  readonly operationId: string;
+  /** Operation summary. */
+  readonly summary?: string;
+  /** Operation tags. */
+  readonly tags?: readonly string[];
+  /** Path/query parameters. */
+  readonly parameters?: readonly OpenApiParameter[];
+  /** Request body. */
+  readonly requestBody?: OpenApiRequestBody;
+  /** Response codes. */
+  readonly responses: Record<string, OpenApiResponse>;
+  /** Security requirements. */
+  readonly security?: readonly Record<string, readonly string[]>[];
+}
+
+/**
+ * OpenAPI parameter definition.
+ *
+ * @since 0.1.0
+ */
+export interface OpenApiParameter {
+  /** Parameter name. */
+  readonly name: string;
+  /** Parameter location. */
+  readonly in: 'path' | 'query' | 'header' | 'cookie';
+  /** Whether parameter is required. */
+  readonly required: boolean;
+  /** Parameter schema. */
+  readonly schema: OpenApiSchemaObject;
+  /** Parameter description. */
+  readonly description?: string;
+}
+
+/**
+ * OpenAPI request body definition.
+ *
+ * @since 0.1.0
+ */
+export interface OpenApiRequestBody {
+  /** Whether body is required. */
+  readonly required: boolean;
+  /** Content types. */
+  readonly content: {
+    readonly 'application/json': {
+      readonly schema: OpenApiSchemaObject;
+    };
+  };
+}
+
+/**
+ * OpenAPI response definition.
+ *
+ * @since 0.1.0
+ */
+export interface OpenApiResponse {
+  /** Response description. */
+  readonly description: string;
+  /** Response content. */
+  readonly content?: {
+    readonly 'application/json'?: {
+      readonly schema: OpenApiSchemaObject;
+    };
+  };
+}
+
+/**
+ * Options for OpenAPI document generation.
+ *
+ * @since 0.1.0
+ */
+export interface OpenApiGeneratorOptions {
+  /** API title (required, defaults to 'API'). */
+  readonly title?: string;
+  /** API version (required, defaults to '1.0.0'). */
+  readonly version?: string;
+  /** API description. */
+  readonly description?: string;
+  /** Server URLs. */
+  readonly servers?: readonly {
+    readonly url: string;
+    readonly description?: string;
+  }[];
+  /** Security schemes. */
+  readonly securitySchemes?: Record<string, unknown>;
+}
+
+/**
+ * Generates OpenAPI 3.1 documents from route information.
+ *
+ * @since 0.1.0
+ */
+export class OpenApiGenerator {
+  readonly #options: OpenApiGeneratorOptions & {
+    title: string;
+    version: string;
+  };
+  readonly #transformer: ZodToOpenApi;
+  readonly #schemaMap: Map<unknown, string>;
+  readonly #componentSchemas: Map<string, OpenApiSchemaObject>;
+  readonly #seenSchemas: Set<unknown>;
+  #anonymousSchemaCounter: number;
+
+  /**
+   * Creates a new OpenAPI generator.
+   *
+   * @param options - Generator options
+   */
+  constructor(options: OpenApiGeneratorOptions) {
+    this.#options = {
+      title: options.title ?? 'API',
+      version: options.version ?? '1.0.0',
+      ...(options.description !== undefined ? { description: options.description } : {}),
+      ...(options.servers !== undefined ? { servers: options.servers } : {}),
+      ...(options.securitySchemes !== undefined
+        ? { securitySchemes: options.securitySchemes }
+        : {}),
+    } as OpenApiGeneratorOptions & {
+      title: string;
+      version: string;
+    };
+    this.#transformer = new ZodToOpenApi();
+    this.#schemaMap = new Map();
+    this.#componentSchemas = new Map();
+    this.#seenSchemas = new Set();
+    this.#anonymousSchemaCounter = 0;
+  }
+
+  /**
+   * Registers a named schema for deduplication.
+   *
+   * @param name - Schema name
+   * @param schema - The schema to register
+   */
+  addSchema(name: string, schema: unknown): void {
+    this.#schemaMap.set(schema, name);
+    this.#componentSchemas.set(name, this.#transformer.transform(schema));
+  }
+
+  /**
+   * Generates an OpenAPI document from routes.
+   *
+   * @param routes - Array of route information
+   * @returns The complete OpenAPI 3.1 document
+   */
+  generate(routes: readonly RouteInfo[]): OpenApiDocument {
+    // Do NOT clear #schemaMap - pre-registered schemas from addSchema must persist
+    // so #resolveSchema finds them by object identity and emits the contributor's chosen name
+
+    const paths: Record<string, {
+      get?: OpenApiOperation;
+      post?: OpenApiOperation;
+      put?: OpenApiOperation;
+      patch?: OpenApiOperation;
+      delete?: OpenApiOperation;
+      head?: OpenApiOperation;
+      options?: OpenApiOperation;
+    }> = {};
+
+    // Group routes by path
+    for (const route of routes) {
+      const openApiPath = this.#convertPath(route.path);
+      const method = route.method.toLowerCase() as keyof typeof paths;
+
+      if (!paths[openApiPath]) {
+        paths[openApiPath] = {};
+      }
+
+      const operation = this.#createOperation(route, openApiPath);
+      (paths[openApiPath] as Record<string, OpenApiOperation>)[method] = operation;
+    }
+
+    // Build components section
+    const components: Record<string, unknown> = {};
+    if (this.#componentSchemas.size > 0) {
+      components.schemas = Object.fromEntries(this.#componentSchemas);
+    }
+    if (
+      this.#options.securitySchemes &&
+      Object.keys(this.#options.securitySchemes).length > 0
+    ) {
+      components.securitySchemes = this.#options.securitySchemes;
+    }
+
+    return {
+      openapi: '3.1.0',
+      info: {
+        title: this.#options.title,
+        version: this.#options.version,
+        ...(this.#options.description !== undefined
+          ? { description: this.#options.description }
+          : {}),
+      },
+      ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
+      paths,
+      ...(Object.keys(components).length > 0 ? { components } : {}),
+    };
+  }
+
+  /**
+   * Converts router-style path to OpenAPI path template syntax.
+   *
+   * @param path - Router-style path (e.g., `/users/:id`)
+   * @returns OpenAPI path template (e.g., `/users/{id}`)
+   */
+  #convertPath(path: string): string {
+    return path.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '{$1}');
+  }
+
+  /**
+   * Creates an OpenAPI operation from route information.
+   *
+   * @param route - Route information
+   * @param openApiPath - Converted OpenAPI path
+   * @returns The operation object
+   */
+  #createOperation(route: RouteInfo, openApiPath: string): OpenApiOperation {
+    const schema = route.definition.schema;
+
+    // Generate operationId from method and path
+    const operationId = this.#generateOperationId(route.method, openApiPath);
+
+    // Build parameters from params and query schemas
+    const parameters = this.#buildParameters(route);
+
+    // Build request body from body schema
+    const requestBody = schema?.body
+      ? {
+        required: true,
+        content: {
+          'application/json': {
+            schema: this.#resolveSchema(schema.body),
+          },
+        },
+      }
+      : undefined;
+
+    // Build responses from response schema
+    const responses = this.#buildResponses(schema?.response);
+
+    return {
+      operationId,
+      ...(schema?.summary ? { summary: schema.summary } : {}),
+      ...(schema?.tags && schema.tags.length > 0 ? { tags: schema.tags } : {}),
+      ...(parameters.length > 0 ? { parameters } : {}),
+      ...(requestBody ? { requestBody } : {}),
+      responses,
+    };
+  }
+
+  /**
+   * Generates an operationId from method and path.
+   *
+   * @param method - HTTP method
+   * @param path - OpenAPI path template
+   * @returns Operation ID
+   */
+  #generateOperationId(method: string, path: string): string {
+    const methodLower = method.toLowerCase();
+    const pathSlug = path.split('/').filter(Boolean).join('-');
+    return `${methodLower}-${pathSlug || 'root'}`;
+  }
+
+  /**
+   * Builds parameters from params and query schemas.
+   *
+   * @param route - Route information
+   * @returns Array of parameters
+   */
+  #buildParameters(route: RouteInfo): readonly OpenApiParameter[] {
+    const parameters: OpenApiParameter[] = [];
+    const schema = route.definition.schema;
+
+    // Extract path parameters from the path template
+    const pathParams = this.#extractPathParams(route.path);
+
+    // Hoist transform of params schema to avoid repeated transforms
+    let paramsTransformed: Record<string, OpenApiSchemaObject> | undefined;
+    if (schema?.params) {
+      const paramsObj = this.#transformer.transform(schema.params);
+      paramsTransformed = paramsObj.properties ?? {};
+    }
+
+    // Add path parameters
+    for (const paramName of pathParams) {
+      const paramSchema = paramsTransformed && paramName in paramsTransformed
+        ? paramsTransformed[paramName]
+        : {};
+
+      parameters.push({
+        name: paramName,
+        in: 'path',
+        required: true,
+        schema: paramSchema,
+      });
+    }
+
+    // Hoist transform of query schema to avoid repeated transforms
+    if (schema?.query) {
+      const queryObj = this.#transformer.transform(schema.query);
+      const queryProps = queryObj.properties ?? {};
+      const queryRequired = queryObj.required ?? [];
+      for (const [name, propSchema] of Object.entries(queryProps)) {
+        const isOptional = !queryRequired.includes(name);
+        parameters.push({
+          name,
+          in: 'query',
+          required: !isOptional,
+          schema: propSchema,
+        });
+      }
+    }
+
+    return parameters;
+  }
+
+  /**
+   * Extracts path parameter names from a path template.
+   *
+   * @param path - Route path
+   * @returns Array of parameter names
+   */
+  #extractPathParams(path: string): readonly string[] {
+    const matches = path.match(/:([a-zA-Z_][a-zA-Z0-9_]*)/g) || [];
+    return matches.map((m) => m.slice(1));
+  }
+
+  /**
+   * Builds responses from response schema.
+   *
+   * @param responseSchema - Response schema map
+   * @returns Responses object
+   */
+  #buildResponses(
+    responseSchema?: Readonly<Record<number, unknown>>,
+  ): Record<string, OpenApiResponse> {
+    const responses: Record<string, OpenApiResponse> = {};
+
+    if (responseSchema) {
+      for (const [status, value] of Object.entries(responseSchema)) {
+        const statusCode = parseInt(status, 10);
+        const { schema, description } = this.#normalizeResponse(value, statusCode);
+
+        responses[String(statusCode)] = {
+          description,
+          ...(schema !== undefined
+            ? {
+              content: {
+                'application/json': {
+                  schema: this.#resolveSchema(schema),
+                },
+              },
+            }
+            : {}),
+        };
+      }
+    } else {
+      // Default response
+      responses['200'] = {
+        description: 'Successful response',
+      };
+    }
+
+    return responses;
+  }
+
+  /**
+   * Normalizes a response schema value into a schema + description pair.
+   *
+   * Programmatic routes store the response schema directly (a Zod schema,
+   * identified by its `_def`). Decorator routes (`@ApiResponse`) store a
+   * `{ schema?, description? }` wrapper (`buildResponseSchemas` in the
+   * decorator plugin); this unwraps that shape so the inner schema is
+   * transformed instead of collapsing to `{}`, and prefers the
+   * decorator-provided description over the status-code default.
+   *
+   * @param value - The raw response schema value from `RouteSchema.response`
+   * @param statusCode - The HTTP status code (for the default description)
+   * @returns The inner schema (if any) and the resolved description
+   */
+  #normalizeResponse(
+    value: unknown,
+    statusCode: number,
+  ): { schema: unknown; description: string } {
+    const fallback = this.#getStatusDescription(statusCode);
+
+    if (value === null || typeof value !== 'object') {
+      // Falsy / non-object — no schema to render.
+      return { schema: undefined, description: fallback };
+    }
+
+    // Bare Zod schema (programmatic convention) — identified by `_def`.
+    if ('_def' in value) {
+      return { schema: value, description: fallback };
+    }
+
+    // Decorator `{ schema?, description? }` wrapper.
+    const wrapper = value as { schema?: unknown; description?: unknown };
+    const description = typeof wrapper.description === 'string' ? wrapper.description : fallback;
+    return { schema: wrapper.schema, description };
+  }
+
+  /**
+   * Gets a description for HTTP status code.
+   *
+   * @param status - Status code
+   * @returns Description
+   */
+  #getStatusDescription(status: number): string {
+    const descriptions: Record<number, string> = {
+      200: 'Successful response',
+      201: 'Resource created',
+      204: 'No content',
+      400: 'Bad request',
+      401: 'Unauthorized',
+      403: 'Forbidden',
+      404: 'Not found',
+      500: 'Internal server error',
+    };
+    return descriptions[status] ?? 'Response';
+  }
+
+  /**
+   * Resolves a schema, potentially creating a $ref for deduplication.
+   *
+   * Anonymous schemas used more than once get a generated name (Schema<n>)
+   * on first reuse and are hoisted to components/schemas; schemas used
+   * exactly once are inlined.
+   *
+   * Pre-registered named schemas (from addSchema/OPENAPI_SCHEMA contributions)
+   * keep their contributor-chosen name and are always hoisted.
+   *
+   * @param schema - The schema to resolve
+   * @returns The schema or a $ref
+   */
+  #resolveSchema(schema: unknown): OpenApiSchemaObject {
+    // Check if we've seen this schema before (pre-registered or previously hoisted)
+    const existingRef = this.#schemaMap.get(schema);
+    if (existingRef) {
+      return { $ref: `#/components/schemas/${existingRef}` };
+    }
+
+    // Check if this is a second use (first reuse)
+    if (this.#seenSchemas.has(schema)) {
+      // This is a reuse - hoist it with a generated name
+      const transformed = this.#transformer.transform(schema);
+      const name = this.#hoistSchema(schema, transformed);
+      return { $ref: `#/components/schemas/${name}` };
+    }
+
+    // First use: transform and mark as seen
+    const transformed = this.#transformer.transform(schema);
+    this.#seenSchemas.add(schema);
+
+    return transformed;
+  }
+
+  /**
+   * Hoists a schema to components/schemas with a generated Schema<n> name.
+   * Called when a schema is encountered for the second time (first reuse).
+   *
+   * @param schema - The schema to hoist
+   * @param transformed - The already-transformed schema
+   * @returns The generated schema name
+   */
+  #hoistSchema(schema: unknown, transformed: OpenApiSchemaObject): string {
+    // Generate a Schema<n> name
+    this.#anonymousSchemaCounter++;
+    const name = `Schema${this.#anonymousSchemaCounter}`;
+
+    // Store the mapping
+    this.#schemaMap.set(schema, name);
+    this.#componentSchemas.set(name, transformed);
+
+    return name;
+  }
+}

@@ -69,6 +69,7 @@ function createFakeContext(runtime: ReturnType<typeof createFakeRuntime>): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     environment: {
       validate: () => {},

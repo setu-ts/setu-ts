@@ -60,6 +60,7 @@ describe('CachePlugin', () => {
         head: () => {},
         options: () => {},
         group: () => {},
+        listRoutes: () => [],
       },
       environment: {
         validate: () => {},

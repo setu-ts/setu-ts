@@ -68,6 +68,7 @@ function createFakeContext(runtime: IRuntimeServices): {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     lifecycle: {
       onRegister: () => {},

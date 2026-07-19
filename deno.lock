@@ -309,6 +309,13 @@
           "jsr:@hono-enterprise/common@0.1"
         ]
       },
+      "packages/openapi-plugin": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@0.1",
+          "jsr:@hono-enterprise/kernel@0.1",
+          "npm:zod@^3.24.0"
+        ]
+      },
       "packages/runtime": {
         "dependencies": [
           "jsr:@hono-enterprise/common@0.1",

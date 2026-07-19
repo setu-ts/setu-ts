@@ -2363,10 +2363,10 @@ class UserController {
 
 ### Deliverables
 
-- [ ] OpenApiPlugin
-- [ ] Zod to OpenAPI transformer
-- [ ] Swagger UI
-- [ ] Full test coverage
+- [x] OpenApiPlugin
+- [x] Zod to OpenAPI transformer
+- [x] Swagger UI
+- [x] Full test coverage
 
 ---
 
@@ -3822,7 +3822,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 18        | ✅     | scheduler-plugin     |
 | 19        | ✅     | metrics-plugin       |
 | 20        | ✅     | health-plugin        |
-| 21        | ⬜     | openapi-plugin       |
+| 21        | ✅     | openapi-plugin       |
 | 22        | ⬜     | kernel-on-hono       |
 | 23        | ⬜     | runtime-serve-hono   |
 | 24        | ⬜     | telemetry-plugin     |

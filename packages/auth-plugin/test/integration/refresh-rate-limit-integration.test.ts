@@ -61,6 +61,7 @@ function registerAuthPlugin(runtime: FakeRuntime): Map<string, unknown> {
       head: () => {},
       options: () => {},
       group: () => {},
+      listRoutes: () => [],
     },
     environment: { validate: () => {} },
     health: { register: () => {} },

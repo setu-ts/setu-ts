@@ -10,6 +10,7 @@
  */
 import type { CapabilityToken } from './tokens.ts';
 import type { IServiceRegistry } from './registry.ts';
+import type { HttpMethod } from './types.ts';
 import type { IRequestContext, MiddlewareFunction, RouteDefinition, RouteHandler } from './http.ts';
 import type { IRuntimeServices } from './runtime.ts';
 import type { Constructor, IContainer } from './container.ts';
@@ -56,6 +57,20 @@ export interface IMiddlewareApi {
  *
  * @since 0.1.0
  */
+/**
+ * Route information returned by {@linkcode IRouterApi.listRoutes}.
+ *
+ * @since 0.1.0
+ */
+export interface RouteInfo {
+  /** HTTP method of the route. */
+  readonly method: HttpMethod;
+  /** Route path pattern (router-style with `:param` segments). */
+  readonly path: string;
+  /** The route definition including handler, middleware, and schema. */
+  readonly definition: RouteDefinition;
+}
+
 export interface IRouterApi {
   /**
    * Registers a GET route.
@@ -114,6 +129,15 @@ export interface IRouterApi {
    * @param configure - Receives a router scoped to the prefix
    */
   group(prefix: string, configure: (router: IRouterApi) => void): void;
+  /**
+   * Returns all registered routes for introspection.
+   *
+   * Used by the OpenAPI plugin to generate documentation from route definitions.
+   *
+   * @returns Immutable array of route information in registration order
+   * @since 0.1.0
+   */
+  listRoutes(): readonly RouteInfo[];
 }
 
 /**

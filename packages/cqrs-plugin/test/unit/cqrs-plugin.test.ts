@@ -68,6 +68,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -154,6 +155,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -223,6 +225,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -286,6 +289,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -351,6 +355,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -413,6 +418,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -474,6 +480,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -530,6 +537,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},
@@ -586,6 +594,7 @@ describe('CqrsPlugin', () => {
           head: () => {},
           options: () => {},
           group: () => {},
+          listRoutes: () => [],
         },
         lifecycle: {
           onRegister: () => {},

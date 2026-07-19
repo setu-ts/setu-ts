@@ -130,6 +130,13 @@ export function createFakeContext(options: FakeContextOptions = {}): {
     group(_prefix, configure) {
       configure(router);
     },
+    listRoutes() {
+      return routes.map((r) => ({
+        method: r.method as import('@hono-enterprise/common').HttpMethod,
+        path: r.path,
+        definition: { handler: r.route as import('@hono-enterprise/common').RouteHandler },
+      }));
+    },
   };
 
   const decoratorsApi = {

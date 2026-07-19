@@ -89,6 +89,7 @@ export type {
   IPluginContext,
   IRouterApi,
   MiddlewareOptions,
+  RouteInfo,
   StartOptions,
 } from './plugin.ts';
 
