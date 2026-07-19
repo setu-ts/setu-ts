@@ -151,11 +151,16 @@ export class Router implements IRouterApi {
     ];
     const candidatesRaw = honoMatch[0] as unknown as HonoCandidate[];
 
-    if (!candidatesRaw || candidatesRaw.length === 0) {
+    // Hono always returns honoMatch[0] as an array; early-return when empty
+    // covers the case where no routes are registered or nothing matches.
+    if (candidatesRaw.length === 0) {
       return null;
     }
 
     // Build candidates array: map each Hono candidate to the kernel RouteEntry.
+    // Hono always provides well-formed routeInfo/method/path on matched
+    // candidates, and every candidate maps back to #entryMap since we
+    // register both simultaneously with identical paths.
     const candidates: Array<{
       routePath: string;
       params: Record<string, string>;
@@ -163,20 +168,12 @@ export class Router implements IRouterApi {
     }> = [];
 
     for (const [handlerRouteTuple, rawParams] of candidatesRaw) {
-      // handlerRouteTuple[0] = handler function, handlerRouteTuple[1] = route info
-      const routeInfo = handlerRouteTuple?.[1] as Record<string, unknown> | undefined;
-      if (routeInfo == null) continue;
-      const routePath = routeInfo.path as string | undefined;
-      if (routePath == null) continue;
-      const entry = this.#entryMap.get(`${routeInfo.method as string} ${routePath}`);
-      if (entry == null) continue;
-      // LinearRouter already returns string params; no coercion needed.
+      const routeInfo = handlerRouteTuple![1] as Record<string, unknown>;
+      const routePath = routeInfo.path as string;
+      const method = routeInfo.method as string;
+      const entry = this.#entryMap.get(`${method} ${routePath}`)!;
       const params: Record<string, string> = { ...(rawParams as Record<string, string>) };
       candidates.push({ routePath, params, entry });
-    }
-
-    if (candidates.length === 0) {
-      return null;
     }
 
     // If only one candidate, return it directly.
