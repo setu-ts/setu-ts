@@ -79,8 +79,9 @@ export function mapSnapshotToWebResponse(
 
   // Uint8Array can be passed directly to Response constructor (A1 — no slice needed).
   // Cast to BlobPart (which Response accepts) to satisfy Deno's stricter ArrayBufferView type.
-  const bodyPart: string | BlobPart | null =
-    body === null ? null : (typeof body === 'string' ? body : body as unknown as BlobPart);
+  const bodyPart: string | BlobPart | null = body === null
+    ? null
+    : (typeof body === 'string' ? body : body as unknown as BlobPart);
 
   // Pass the Headers object directly — preserves multi-valued Set-Cookie headers (C2)
   return new Response(bodyPart, {
