@@ -97,6 +97,13 @@ Hono Enterprise inverts this:
 | Runtime          | Node.js only | Node, Deno, Bun, CF Workers |
 | Bundle size      | Large        | Pay only for what you use   |
 
+> **Runtime vs build toolchain.** The Runtime row describes where the framework _runs_. The React
+> Router SSR plugin (M44) is web-standard at runtime — it runs wherever `Request`/`Response` do —
+> but its _frontend build_ uses the Node/npm toolchain (Vite) outside the Deno workspace, and is
+> never a dependency of a JSR-published package (see AI_GUIDELINES §12.2). CF Workers support for
+> React Router framework mode specifically carries additional constraints and is not implied by this
+> row.
+
 A Hono Enterprise application can be as minimal as:
 
 ```typescript

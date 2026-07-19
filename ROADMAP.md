@@ -659,10 +659,10 @@ await app.start();
 
 **Objective:** Provide runtime-agnostic services (UUID, timers, crypto, fs, env).
 
-> **Scope change (historical):** HTTP server adapters were deferred from M3 to Milestone 39 (see
+> **Scope change (historical):** HTTP server adapters were deferred from M3 to Milestone 41 (see
 > "HTTP Server Adapters"). M3 shipped runtime services + detection + plugin only. The deferral was
 > originally because `IResponse` had no read surface; that was resolved in M11 by the
-> `IResponse.snapshot()` read seam, which M39's adapters now use to serialize responses without
+> `IResponse.snapshot()` read seam, which M41's adapters now use to serialize responses without
 > reaching into kernel internals. The framework already ran via `app.inject()` with no server, so
 > nothing was blocked.
 
@@ -2370,7 +2370,120 @@ class UserController {
 
 ---
 
-## Milestone 22: Telemetry Plugin — OpenTelemetry
+## Milestone 22: Kernel Routing on Hono — Foundational Migration
+
+**Objective:** Replace the kernel's hand-rolled router with **Hono** as the internal routing engine,
+_behind the existing `common` contracts_, so the framework is genuinely built on Hono as
+ARCHITECTURE.md has always claimed. Highest-priority foundational work: it lands immediately after
+M21 and before all remaining plugins, because every later milestone should target the Hono-based
+kernel. **This makes the "Why It Uses Hono" section true** — today the kernel uses a from-scratch
+matcher and imports no Hono at all.
+
+> **Why this is a ~2-package change, not a rewrite (coupling audit, branch
+> `docs/roadmap-streaming-ssr`).** The abstraction boundary is clean: **0 of ~20 plugins import
+> `@hono-enterprise/kernel`** — all depend only on `common`; **no plugin touches kernel internals**
+> (`ResponseBuilder`/`route-matcher`/`createRequestContext`) or `IHttpAdapter`. The only coupling
+> past `json`/`text` is `IResponse.snapshot()`, used by exactly two plugins (cache, metrics) — and
+> it is a `common` contract method, so preserving it keeps them unchanged. Requests funnel through a
+> single seam, `#handleRequest(IRequest) → router.match + pipeline`, which is the choke point to
+> redirect through Hono.
+
+### Package: `@hono-enterprise/kernel` (+ `jsr:@hono/hono`)
+
+**De-risking constraint — preserve every `common` contract exactly.** `IRequestContext`, `IResponse`
+(incl. `snapshot()`), `IRouterApi`, `MiddlewareFunction`/`IMiddleware`, and the
+`InjectRequest`/`InjectResponse` shapes do NOT change. The custom middleware pipeline
+(`(ctx, next)`) is **kept and run inside the Hono dispatch** — middleware is NOT converted to Hono
+middleware — so priority ordering (e.g. metrics outermost at priority 20) and short-circuit
+semantics are identical and no plugin middleware changes.
+
+**Tasks:**
+
+1. Add `jsr:@hono/hono` to the kernel; build a `new Hono()` internally and register each
+   `IRouterApi` route on it, preserving static-over-param precedence and `:param` extraction.
+2. Map Hono's matched result → the existing `{ definition, params }` the pipeline terminal expects;
+   keep `executeChain` for route middleware + handler.
+3. Back `inject()` with Hono's `app.request()` (or keep the pipeline path) while preserving the
+   `InjectRequest`/`InjectResponse` shape — all 13 inject-based suites must stay green.
+4. Preserve `IResponse.snapshot()` fidelity from the Hono-backed response so cache/metrics are
+   unaffected.
+
+**Implementation Files:**
+
+- `packages/kernel/src/router/router.ts` + `route-matcher.ts` — delegate matching to Hono
+- `packages/kernel/src/application/application.ts` — Hono dispatch at the `#handleRequest` seam
+- `packages/kernel/src/context/*` — build `IRequestContext` from Hono's `Context`
+- `packages/kernel/deno.json` — add `jsr:@hono/hono`
+
+### Tests
+
+- **Route-precedence parity**: static-over-param, multi-param, trailing-slash, method-not-found —
+  asserted identical to pre-migration behavior (guard against Hono ordering differences).
+- All 13 `inject()` suites green unchanged; short-circuit (middleware responds without `next()` →
+  handler not run); `snapshot()` consumers (cache, metrics) unchanged.
+- One real kernel-app round-trip through the Hono engine.
+
+### Deliverables
+
+- [ ] Kernel routing delegated to Hono behind unchanged `common` contracts
+- [ ] Custom pipeline preserved (no plugin middleware changes); all 13 inject suites green
+- [ ] **ARCHITECTURE.md "Why It Uses Hono" corrected to describe the real (now-true) design**
+- [ ] Full per-file coverage; all ~20 plugin suites re-verified green against the Hono kernel
+
+> **Recommended spike first (1–2 days, not committed to a milestone):** prototype the
+> router+pipeline-on-Hono seam to convert the four known unknowns — route-precedence parity,
+> `inject()` parity, `snapshot()` fidelity, pipeline-nesting — into facts before implementing.
+
+---
+
+## Milestone 23: Runtime Serve on Hono + Cloudflare Workers
+
+**Objective:** Replace the hand-rolled Node/Deno/Bun socket adapters with **Hono's serve layer**,
+expose the app as a web-standard `fetch(Request) => Response`, and add a **Cloudflare Workers**
+adapter — delivering the CF Workers support the comparison tables already advertise but the
+socket-based adapters (M41, formerly M39) structurally cannot. **Depends on M22.**
+
+> **Supersedes the M41 adapters.** M41 (formerly M39) implemented
+> `NodeHttpAdapter`/`DenoHttpAdapter`/ `BunHttpAdapter` by binding sockets and hand-mapping native
+> req/res (~1,030 LOC). This milestone replaces that mapping with Hono's platform serve adapters, a
+> net LOC _reduction_. `IHttpAdapter` (`common`) changes from
+> `createServer((IRequest) => IResponse)` to a web-standard `fetch` entry — safe because **no plugin
+> references `IHttpAdapter`/`HTTP_ADAPTER`** (only kernel + runtime do).
+
+### Packages: `@hono-enterprise/common`, `@hono-enterprise/runtime`
+
+**Tasks:**
+
+1. Change `IHttpAdapter` to expose the app's `fetch(Request): Promise<Response>` (the universal
+   entry) instead of the `IRequest`-based `createServer` handler; PUBLIC_API.md updated.
+2. Runtime delegates binding to Hono serve: `@hono/node-server` `serve`, `Deno.serve(app.fetch)`,
+   Bun serve, and `export default app` for Cloudflare Workers (no `listen(port)` — the model the old
+   adapters could not support).
+3. `app.start({ port })` binds via the platform adapter; Workers export path documented.
+
+**Implementation Files:**
+
+- `packages/common/src/runtime.ts` — `IHttpAdapter` fetch entry
+- `packages/runtime/src/adapters/{node,deno,bun}/*` — delegate to Hono serve (delete native mapping)
+- `packages/runtime/src/adapters/workers/*` — new Cloudflare Workers adapter (`fetch` export)
+
+### Tests
+
+- Request/response round-trip per platform through Hono serve (net socket bind for Node/Deno/Bun).
+- Workers path driven via `app.fetch(Request)` (no socket) — the capability the old adapters lacked.
+
+### Deliverables
+
+- [ ] `IHttpAdapter` web-`fetch` entry (PUBLIC_API.md updated)
+- [ ] Node/Deno/Bun serve on Hono; ~1,030 LOC of native mapping removed
+- [ ] Cloudflare Workers adapter (`fetch` export)
+- [ ] **ARCHITECTURE.md runtime-support corrected** — CF Workers now real; the M41 "CF Workers
+      excluded" note updated
+- [ ] Full per-file coverage; all plugin suites re-verified green
+
+---
+
+## Milestone 24: Telemetry Plugin — OpenTelemetry
 
 **Objective:** Provide distributed tracing.
 
@@ -2426,7 +2539,7 @@ await telemetry.withSpan('process-order', async (span) => {
 
 ---
 
-## Milestone 23: Secrets Plugin — Secret Management
+## Milestone 25: Secrets Plugin — Secret Management
 
 **Objective:** Provide secret management with KMS/Vault integration.
 
@@ -2487,7 +2600,7 @@ await secrets.rotate('database/password', newPassword);
 
 ---
 
-## Milestone 24: Audit Plugin — Audit Logging
+## Milestone 26: Audit Plugin — Audit Logging
 
 **Objective:** Provide audit trail logging.
 
@@ -2549,7 +2662,7 @@ await audit.log({
 
 ---
 
-## Milestone 25: Resilience Plugin — Circuit Breaker, Retry, Timeout
+## Milestone 27: Resilience Plugin — Circuit Breaker, Retry, Timeout
 
 **Objective:** Provide resilience patterns.
 
@@ -2615,7 +2728,7 @@ const result = await safeCall();
 
 ---
 
-## Milestone 26: Storage Plugin — File Storage
+## Milestone 28: Storage Plugin — File Storage
 
 **Objective:** Provide file storage abstraction.
 
@@ -2691,7 +2804,7 @@ app.router.post('/upload', {
 
 ---
 
-## Milestone 27: Mail Plugin — Email Sending
+## Milestone 29: Mail Plugin — Email Sending
 
 **Objective:** Provide email capability.
 
@@ -2760,7 +2873,7 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 
 ---
 
-## Milestone 28: Notification Plugin — Multi-Channel
+## Milestone 30: Notification Plugin — Multi-Channel
 
 **Objective:** Provide multi-channel notifications.
 
@@ -2823,7 +2936,7 @@ await notifier.sendSms('+1234567890', 'Your code is 123456');
 
 ---
 
-## Milestone 29: Feature Flags Plugin
+## Milestone 31: Feature Flags Plugin
 
 **Objective:** Provide feature flag capability.
 
@@ -2892,7 +3005,7 @@ app.router.get('/dashboard', {
 
 ---
 
-## Milestone 30: Multi-Tenancy Plugin
+## Milestone 32: Multi-Tenancy Plugin
 
 **Objective:** Provide multi-tenancy support.
 
@@ -2962,7 +3075,7 @@ const users = await userRepo.findAll(); // Scoped to current tenant
 
 ---
 
-## Milestone 31: Testing Package — Test Utilities
+## Milestone 33: Testing Package — Test Utilities
 
 **Objective:** Provide testing utilities.
 
@@ -3037,7 +3150,7 @@ const testApp = await createTestApp({
 
 ---
 
-## Milestone 32: CLI — Plugin-Aware Generators
+## Milestone 34: CLI — Plugin-Aware Generators
 
 **Objective:** Provide CLI with plugin-aware scaffolding.
 
@@ -3110,7 +3223,7 @@ packages via JSR's npm compatibility layer.
 
 ---
 
-## Milestone 33: SDK — Client SDK
+## Milestone 35: SDK — Client SDK
 
 **Objective:** Provide client SDK for external consumers.
 
@@ -3153,7 +3266,7 @@ packages via JSR's npm compatibility layer.
 
 ---
 
-## Milestone 34: Starters — Opinionated Bundles
+## Milestone 36: Starters — Opinionated Bundles
 
 **Objective:** Provide starter bundles for common use cases.
 
@@ -3191,7 +3304,7 @@ sensible defaults.
 
 ---
 
-## Milestone 35: Examples — Sample Applications
+## Milestone 37: Examples — Sample Applications
 
 **Objective:** Create example applications.
 
@@ -3213,7 +3326,7 @@ sensible defaults.
 
 ---
 
-## Milestone 36: Documentation
+## Milestone 38: Documentation
 
 **Objective:** Generate comprehensive documentation.
 
@@ -3238,7 +3351,7 @@ sensible defaults.
 
 ---
 
-## Milestone 37: Docker and Kubernetes
+## Milestone 39: Docker and Kubernetes
 
 **Objective:** Containerization and orchestration.
 
@@ -3262,7 +3375,7 @@ sensible defaults.
 
 ---
 
-## Milestone 38: Final Polish and Release
+## Milestone 40: Final Polish and Release
 
 **Objective:** Final integration, testing, and release.
 
@@ -3285,12 +3398,12 @@ sensible defaults.
 
 ---
 
-## Milestone 39: HTTP Server Adapters
+## Milestone 41: HTTP Server Adapters
 
 **Objective:** Provide HTTP server adapters for Node.js, Deno, and Bun, registering them under
 `CAPABILITIES.HTTP_ADAPTER` so the kernel can listen on a real port.
 
-> **Completed in Milestone 39.** The `IResponse.snapshot()` read seam designed in M11 enables
+> **Completed in Milestone 41.** The `IResponse.snapshot()` read seam designed in M11 enables
 > adapters to serialize responses without reaching into kernel internals. This milestone implements
 > the three HTTP adapters (Node, Deno, Bun), registers them under `CAPABILITIES.HTTP_ADAPTER` via
 > `RuntimePlugin`, and wires `app.start({ port })` to bind a real socket. Cloudflare Workers is
@@ -3315,6 +3428,244 @@ sensible defaults.
 - [x] `app.start({ port })` listens on a real server
 - [x] Full test coverage (request/response round-trip per adapter)
 - [x] `net: true` permission added to runtime test permissions
+
+---
+
+## Milestone 42: Streaming Response Body — `IResponse` Streaming Primitive
+
+**Objective:** Add a streaming response body to the `IResponse` contract so a handler can flush
+bytes progressively over a long-lived connection, instead of buffering a whole body before send.
+This is the shared foundation both Server-Sent Events (M43) and React SSR streaming (M44) build on;
+it also serves large file downloads (storage-plugin, M28) and big export/report responses. Numbered
+out of order (like M41); **it must land before M43 and M44**, which have no other prerequisite on
+it.
+
+> **Why a `common` primitive, not a plugin.** The gap is in the response contract itself
+> (`packages/common/src/http.ts` `IResponse` today terminates only via `json`/`text`/`send`/
+> `redirect`, all buffered). A plugin cannot add a response terminal; the contract must. This is a
+> deliberate `common` API addition — additive, minor-version — shipped with its PUBLIC_API.md delta
+> in the same PR.
+
+### Packages: `@hono-enterprise/common`, `@hono-enterprise/kernel`, `@hono-enterprise/runtime`
+
+**Contract additions (`common`):**
+
+1. `IResponse.stream(body: ReadableStream<Uint8Array>): HandlerResult` — a new terminal that hands
+   the response a web-standard readable stream. No new capability token (it is a contract method,
+   not a service).
+2. Widen `IResponse.snapshot()` body type to
+   `Uint8Array | string | ReadableStream<Uint8Array> |
+   null` and add a `streaming: boolean`
+   marker to the snapshot, so response-reading middleware can detect a live stream and decline to
+   buffer it.
+3. `IRequestContext.signal: AbortSignal` (populated by the HTTP adapter) — fires on client
+   disconnect so a streaming producer can stop. Required for SSE/long-lived responses to avoid
+   leaking producers.
+
+**Kernel:**
+
+4. Thread a streaming `HandlerResult` through the pipeline without awaiting completion — the
+   response must begin flushing as chunks arrive, never buffer-then-send.
+5. Response-caching middleware (M11) and any `snapshot()` consumer MUST skip streaming bodies
+   (`streaming === true`): a live stream is not cacheable and must not be drained by an observer.
+
+**Runtime adapters:**
+
+6. `NodeHttpAdapter` — write headers before the first chunk (`flushHeaders`), then pump the
+   `ReadableStream` to `res.write`/`res.end`; wire `req` close/abort to the context `AbortSignal`.
+7. `DenoHttpAdapter` / `BunHttpAdapter` — pass the `ReadableStream` straight through as the native
+   `Response` body; map the native request signal to the context `AbortSignal`.
+
+**Implementation Files:**
+
+- `packages/common/src/http.ts` — `IResponse.stream`, widened `snapshot()`, `IRequestContext.signal`
+- `packages/kernel/src/pipeline/*` — streaming-aware result handling; cache/snapshot guard
+- `packages/kernel/src/http/response.ts` — `stream()` implementation + snapshot marker
+- `packages/runtime/src/adapters/{node,deno,bun}/*` — streaming write path + abort wiring
+
+### Tests
+
+- Round-trip a multi-chunk stream through each adapter; assert chunks arrive incrementally (not one
+  buffered blob) via a fake host that records `write` calls.
+- Abort propagation: closing the client aborts `ctx.signal` and the producer stops.
+- Snapshot/cache guard: a streaming response reports `streaming: true` and is NOT cached or drained
+  by response-reading middleware (short-circuit-style assertion).
+- Buffered terminals (`json`/`text`/`send`) unchanged (regression).
+
+### Deliverables
+
+- [ ] `IResponse.stream()` + widened `snapshot()` + `IRequestContext.signal` in `common`
+- [ ] Kernel streaming pipeline path + cache/snapshot guard
+- [ ] Node/Deno/Bun adapter streaming write path with abort wiring
+- [ ] PUBLIC_API.md updated for every new/changed `common` export
+- [ ] Full per-file coverage (incl. abort and disconnect branches via injected fakes)
+
+---
+
+## Milestone 43: SSE Plugin — Server-Sent Events
+
+**Objective:** Provide Server-Sent Events (`text/event-stream`) as a first-class capability, built
+entirely on the M42 streaming primitive. **Depends on M42.**
+
+### Package: `@hono-enterprise/sse-plugin`
+
+Registers an `ISseService` under a new `CAPABILITIES.SSE = 'sse'` token (added to `common`, with the
+interface documented in PUBLIC_API.md — a token resolves to a documented `common` interface).
+
+**Plugin Registration:**
+
+```typescript
+app.register(SsePlugin({
+  heartbeatMs: 15000, // keep-alive comment interval; omit to disable
+  retryMs: 3000, // advertised client reconnect delay
+}));
+```
+
+**Usage:**
+
+```typescript
+app.router.get('/events', (ctx) => {
+  const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+  const conn = sse.open(ctx); // opens the event-stream over IResponse.stream()
+  conn.send({ event: 'tick', data: { now: Date.now() }, id: '1' });
+  sse.channel('room:42').add(conn); // named channel for broadcast
+  return conn.result; // HandlerResult; connection stays open until ctx.signal aborts
+});
+```
+
+**Behavior:**
+
+- SSE frame encoding — `id:` / `event:` / `data:` (multi-line split) / `retry:`, double-newline
+  terminated; comment/keep-alive frames (`: heartbeat`).
+- Named channels with broadcast (`publish`) and per-connection membership; auto-remove on abort.
+- `Last-Event-ID` request header exposed to the handler for resume logic.
+- Heartbeat timer over the streaming body; cleared on `ctx.signal` abort (no leaked timers).
+
+**Implementation Files:**
+
+- `src/plugin/sse-plugin.ts`
+- `src/services/sse-service.ts` — open/channel/publish
+- `src/connection/sse-connection.ts` — frame encoding over `IResponse.stream()`
+- `src/channels/channel-registry.ts` — named channels + broadcast
+- `src/index.ts`
+
+### Tests
+
+- Frame encoder field-by-field (`id`/`event`/multi-line `data`/`retry`, `\n\n` terminator, comment
+  frames) — a spec-shaped output asserted exactly, including absent fields.
+- Broadcast reaches every connection on a channel; abort removes a connection and stops its
+  heartbeat (leaked-timer guard).
+- `Last-Event-ID` surfaced to the handler.
+- Real streaming round-trip through a kernel app + M42 adapter (not just a fake).
+
+### Deliverables
+
+- [ ] `CAPABILITIES.SSE` + `ISseService` in `common` (PUBLIC_API.md updated)
+- [ ] SsePlugin, frame encoder, channel registry, heartbeat
+- [ ] Full per-file coverage
+
+---
+
+## Milestone 44: React SSR + File-Based Routing — React Router v7 Embed
+
+**Objective:** Serve a React frontend with SSR and file-based routing by embedding React Router v7
+framework mode (the Remix successor) as a plugin. RR framework mode is bring-your-own-server: its
+server contract is a web-standard
+`createRequestHandler(build): (Request, loadContext) =>
+Promise<Response>`, which maps cleanly onto
+a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M43.
+
+> **Scope boundary.** RR owns SSR, file-based routing, loaders/actions, client hydration, and code
+> splitting via its Vite build — this plugin does NOT reimplement any of that. The plugin owns three
+> things: (1) mounting RR's request handler, (2) bridging kernel DI into loaders via `loadContext`,
+> (3) serving the built client assets. Vite/HMR dev integration is explicitly deferred — in
+> development, run `react-router dev` as a separate process; this plugin consumes the production
+> build (`build/server`, `build/client`). React/RR packages are never hard dependencies: the server
+> build path is app-provided via options, and `react-router` / `@react-router/node` are loaded via
+> lazy `npm:`/`await import()` (guarded real-import test), so `register()` is async.
+>
+> **Vite is an app-level, build-time dependency — NOT a dependency of this plugin or any JSR
+> package.** The plugin never imports Vite; it imports only `react-router` / `@react-router/node`
+> (lazily) and reads the already-built bundles. Vite lives in the consuming app's `package.json`
+> `devDependencies` and runs on the Node/npm toolchain — the same tier as installing Prisma to use
+> the Prisma adapter. This is the framework's first developer build step outside the Deno workspace,
+> so the Deno-first/dependency docs get a boundary-drawing update (see Doc Deliverables below); it
+> is **not** a §12.2 runtime heavy-dep case (§12.2 governs drivers a plugin loads at runtime — Vite
+> is never loaded at runtime at all). At runtime the embed is web-standard (`Request`/`Response`),
+> so it runs wherever those do; only the build is Node-bound.
+
+### Package: `@hono-enterprise/react-router-plugin`
+
+Registers an `ISsrService` under a new `CAPABILITIES.SSR = 'ssr'` token (added to `common`,
+documented in PUBLIC_API.md).
+
+**Plugin Registration:**
+
+```typescript
+app.register(ReactRouterPlugin({
+  serverBuildPath: './build/server/index.js', // RR production server build
+  assetsDir: './build/client', // hashed client assets + static files
+  basename: '/', // mount point
+  getLoadContext: (ctx) => ({ services: ctx.services, user: ctx.request.user }),
+}));
+```
+
+**Behavior:**
+
+- Catch-all handler: reconstruct a web `Request` from `ctx.request` (`method`/`url`/web `Headers`/
+  buffered body), invoke `createRequestHandler(build)`, and write the returned `Response` back —
+  streaming via `IResponse.stream()` (M42) so Suspense/deferred data stream progressively; abort
+  wired to `ctx.signal`.
+- `loadContext` bridge exposes `ctx.services` (DI), config, and `ctx.request.user` to RR loaders and
+  actions — the integration's core value.
+- Static asset serving for `assetsDir` (hashed immutable assets, long-lived `Cache-Control`), built
+  on `IRuntimeServices.readFile` + content-type — the only static-file handler in the tree; flagged
+  as a candidate for later extraction into a shared static middleware.
+
+**Implementation Files:**
+
+- `src/plugin/react-router-plugin.ts` — async register, lazy build import, catch-all mount
+- `src/handler/request-bridge.ts` — `IRequestContext` ↔ web `Request`/`Response`
+- `src/handler/load-context.ts` — DI → RR `loadContext`
+- `src/assets/static-assets.ts` — `build/client` serving over `runtime.readFile`
+- `src/index.ts`
+
+### Tests
+
+- Request bridge: `ctx.request` → web `Request` (method/url/headers/body) and RR `Response` →
+  `IResponse` (streamed) round-trip, driven by an injected fake handler that records `loadContext`.
+- `loadContext` carries `ctx.services` and `ctx.request.user` through to a loader (DI-into-loader
+  assertion).
+- Static assets: correct content-type + cache headers; 404 for missing asset (drive the not-found
+  branch with a fake `readFile`).
+- One guarded REAL `await import()` of the RR server build (skipped when the dep is absent).
+
+### Deliverables
+
+- [ ] `CAPABILITIES.SSR` + `ISsrService` in `common` (PUBLIC_API.md updated)
+- [ ] ReactRouterPlugin — request bridge, `loadContext` DI bridge, streaming write-back
+- [ ] Static asset handler for `build/client`
+- [ ] Lazy build import with guarded real-import test; async `register()`
+- [ ] Full per-file coverage
+
+### Doc Deliverables
+
+Drawing the Vite/npm-toolchain boundary — the framework's first developer build step outside the
+Deno workspace. Vite stays app-level and build-time; these edits make that explicit so no future
+change pulls a build tool into a plugin or assumes the backend needs Node. The boundary edits below
+were made up front with this roadmap plan (branch `docs/roadmap-streaming-ssr`); M44's PR need only
+revisit them if its implementation deviates.
+
+- [x] **CLAUDE.md** — RR frontend build noted as an intentional npm/Vite exception to the Deno-first
+      toolchain, scoped to the app's frontend, outside the Deno workspace and JSR packages
+- [x] **AI_GUIDELINES.md §12.2** — clause distinguishing build-time app tooling (Vite) from §12.2
+      runtime heavy deps: a plugin must never import a build tool; the frontend build is the app's
+      responsibility
+- [x] **ARCHITECTURE.md** — runtime-vs-build-toolchain note under the runtime-support matrix: the
+      RR-SSR embed is web-standard at runtime (runs wherever `Request`/`Response` do) but its build
+      is Node/npm-bound; the backend stays Deno-first. CF Workers caveat for RR flagged
+- [x] **PUBLIC_API.md** — no Vite-specific change (nothing Vite-related is exported); covered by the
+      `CAPABILITIES.SSR` + `ISsrService` delta above
 
 ---
 
@@ -3472,21 +3823,26 @@ app.register(MyPlugin({ option1: 'value' }));
 | 19        | ✅     | metrics-plugin       |
 | 20        | ✅     | health-plugin        |
 | 21        | ✅     | openapi-plugin       |
-| 22        | ⬜     | telemetry-plugin     |
-| 23        | ⬜     | secrets-plugin       |
-| 24        | ⬜     | audit-plugin         |
-| 25        | ⬜     | resilience-plugin    |
-| 26        | ⬜     | storage-plugin       |
-| 27        | ⬜     | mail-plugin          |
-| 28        | ⬜     | notification-plugin  |
-| 29        | ⬜     | feature-flags-plugin |
-| 30        | ⬜     | multi-tenancy-plugin |
-| 31        | ⬜     | testing              |
-| 32        | ⬜     | cli                  |
-| 33        | ⬜     | sdk                  |
-| 34        | ⬜     | starters             |
-| 35        | ⬜     | examples             |
-| 36        | ⬜     | documentation        |
-| 37        | ⬜     | docker/kubernetes    |
-| 38        | ⬜     | final release        |
-| 39        | ✅     | http-adapters        |
+| 22        | ⬜     | kernel-on-hono       |
+| 23        | ⬜     | runtime-serve-hono   |
+| 24        | ⬜     | telemetry-plugin     |
+| 25        | ⬜     | secrets-plugin       |
+| 26        | ⬜     | audit-plugin         |
+| 27        | ⬜     | resilience-plugin    |
+| 28        | ⬜     | storage-plugin       |
+| 29        | ⬜     | mail-plugin          |
+| 30        | ⬜     | notification-plugin  |
+| 31        | ⬜     | feature-flags-plugin |
+| 32        | ⬜     | multi-tenancy-plugin |
+| 33        | ⬜     | testing              |
+| 34        | ⬜     | cli                  |
+| 35        | ⬜     | sdk                  |
+| 36        | ⬜     | starters             |
+| 37        | ⬜     | examples             |
+| 38        | ⬜     | documentation        |
+| 39        | ⬜     | docker/kubernetes    |
+| 40        | ⬜     | final release        |
+| 41        | ✅     | http-adapters        |
+| 42        | ⬜     | streaming-response   |
+| 43        | ⬜     | sse-plugin           |
+| 44        | ⬜     | react-router-plugin  |

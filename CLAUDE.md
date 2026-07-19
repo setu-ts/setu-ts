@@ -3,6 +3,11 @@
 Plugin-first enterprise backend framework. **Deno-first toolchain** (Deno 2 workspaces), published
 to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compatibility.
 
+The backend toolchain is Deno-only. The **sole exception** is an application's _frontend build_ —
+the React Router SSR plugin (M44) is built with Vite on the Node/npm toolchain, outside the Deno
+workspace. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and
+never appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
+
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
 **Step 0 — be on the milestone's feature branch before you touch anything.** `main` is protected;
@@ -113,7 +118,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 2** (`packages/kernel` — plugin kernel, service registry, pipeline, router,
   application lifecycle) — complete (PR #3)
 - **Milestone 3** (`packages/runtime` — runtime services for Node/Deno/Bun, detection,
-  RuntimePlugin) — complete (PR #4). HTTP server adapters were deferred to Milestone 39 and are now
+  RuntimePlugin) — complete (PR #4). HTTP server adapters were deferred to Milestone 41 and are now
   implemented there via the `IResponse.snapshot()` read seam (added in M11).
 - **Milestone 4** (`packages/logger-plugin` — structured logging) — complete (PR #5)
 - **Milestone 5** (`packages/config-plugin` — configuration with env loading, variable expansion,
@@ -163,7 +168,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   TTL with a dead-letter-exchange for delayed enqueue/requeue, per-name ready/delay/dead queues,
   in-process recurring; inject-or-lazy `npm:amqplib` client with a guarded real-import test; no
   `common` change, no new capability token) — complete (PR #32)
-- **Milestone 39** (`packages/runtime` — HTTP server adapters taken out of order, before M16:
+- **Milestone 41** (`packages/runtime` — HTTP server adapters taken out of order, before M16:
   `DenoHttpAdapter`/`NodeHttpAdapter`/`BunHttpAdapter` implementing `IHttpAdapter`, registered under
   `CAPABILITIES.HTTP_ADAPTER` via the `RuntimePlugin` `httpAdapters` map; `app.start({ port })`
   binds a real socket and throws when no adapter is registered; Bun is unit-tested via an injectable
@@ -206,9 +211,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 20** (`packages/health-plugin` — Health checks and readiness probes) — complete (PR
   #44)
 - **Milestone 21** (`packages/openapi-plugin` — OpenAPI 3.1 spec generation from routes, Swagger UI
-  serving, Zod-to-OpenAPI schema transformer, schema deduplication) — complete (PR pending)
-- **Next milestone** — Milestone 22 (`packages/telemetry-plugin` — Telemetry and distributed
-  tracing)
+  serving, Zod-to-OpenAPI schema transformer, schema deduplication) — complete (PR #46)
+- **Next milestone** — **the Hono foundation migration** — Milestone 22 (kernel routing on Hono,
+  behind the existing `common` contracts) then Milestone 23 (runtime serve on Hono + Cloudflare
+  Workers) — before any remaining plugin milestones (telemetry onward, renumbered +2). Note: the
+  framework does NOT yet use Hono; M22/M23 make ARCHITECTURE.md's "Why It Uses Hono" true. A 1–2 day
+  router-on-Hono spike is recommended before M22 to de-risk route-precedence/inject/snapshot parity.
 
 ## Verification (run before declaring any work done)
 
