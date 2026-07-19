@@ -77,8 +77,13 @@ export class Router implements IRouterApi {
       // Stub — never called during matching.
       return new Response();
     };
-    // deno-lint-ignore no-explicit-any -- Hono's `on()` method is not typed in the public API
-    (this.#hono as any).on(method.toUpperCase(), path, stubHandler);
+    // Hono's `on()` method is not typed in the public API; cast through unknown
+    // to avoid a direct `as any` while keeping the call site minimal.
+    type HonoOnHandler = (c: HonoContext, next: HonoNext) => Response | Promise<Response>;
+    interface HonoOn {
+      on(method: string, path: string, handler: HonoOnHandler): Response | Promise<Response>;
+    }
+    (this.#hono as unknown as HonoOn).on(method.toUpperCase(), path, stubHandler as HonoOnHandler);
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {

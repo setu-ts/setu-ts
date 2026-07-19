@@ -7,6 +7,10 @@
  * [`Application.#handleRequest`](../application/application.ts) to reject
  * malformed percent-escapes with a 400 **before** routing.
  *
+ * > **Note:** `parsePattern` and `staticSegmentCount` were moved to
+ * > [`router.ts`](./router.ts) during the M22 migration so the Hono-backed
+ * > tie-break logic can reuse them without a circular dependency.
+ *
  * @module
  */
 

@@ -2426,10 +2426,10 @@ semantics are identical and no plugin middleware changes.
 
 ### Deliverables
 
-- [ ] Kernel routing delegated to Hono behind unchanged `common` contracts
-- [ ] Custom pipeline preserved (no plugin middleware changes); all 13 inject suites green
-- [ ] **ARCHITECTURE.md "Why It Uses Hono" corrected to describe the real (now-true) design**
-- [ ] Full per-file coverage; all ~20 plugin suites re-verified green against the Hono kernel
+- [x] Kernel routing delegated to Hono behind unchanged `common` contracts
+- [x] Custom pipeline preserved (no plugin middleware changes); all 13 inject suites green
+- [x] **ARCHITECTURE.md "Why It Uses Hono" corrected to describe the real (now-true) design**
+- [x] Full per-file coverage; all ~20 plugin suites re-verified green against the Hono kernel
 
 > **Recommended spike first (1–2 days, not committed to a milestone):** prototype the
 > router+pipeline-on-Hono seam to convert the four known unknowns — route-precedence parity,
