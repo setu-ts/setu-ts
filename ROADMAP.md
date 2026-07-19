@@ -2403,8 +2403,9 @@ semantics are identical and no plugin middleware changes.
    `IRouterApi` route on it, preserving static-over-param precedence and `:param` extraction.
 2. Map Hono's matched result → the existing `{ definition, params }` the pipeline terminal expects;
    keep `executeChain` for route middleware + handler.
-3. Back `inject()` with Hono's `app.request()` (or keep the pipeline path) while preserving the
-   `InjectRequest`/`InjectResponse` shape — all 13 inject-based suites must stay green.
+3. Keep the pipeline path for `inject()` (calls `#handleRequest` → custom pipeline → Hono-backed
+   `match()`) while preserving the `InjectRequest`/`InjectResponse` shape — all 13 inject-based
+   suites stay green.
 4. Preserve `IResponse.snapshot()` fidelity from the Hono-backed response so cache/metrics are
    unaffected.
 
@@ -2425,10 +2426,10 @@ semantics are identical and no plugin middleware changes.
 
 ### Deliverables
 
-- [ ] Kernel routing delegated to Hono behind unchanged `common` contracts
-- [ ] Custom pipeline preserved (no plugin middleware changes); all 13 inject suites green
-- [ ] **ARCHITECTURE.md "Why It Uses Hono" corrected to describe the real (now-true) design**
-- [ ] Full per-file coverage; all ~20 plugin suites re-verified green against the Hono kernel
+- [x] Kernel routing delegated to Hono behind unchanged `common` contracts
+- [x] Custom pipeline preserved (no plugin middleware changes); all 13 inject suites green
+- [x] **ARCHITECTURE.md "Why It Uses Hono" corrected to describe the real (now-true) design**
+- [x] Full per-file coverage; all ~20 plugin suites re-verified green against the Hono kernel
 
 > **Recommended spike first (1–2 days, not committed to a milestone):** prototype the
 > router+pipeline-on-Hono seam to convert the four known unknowns — route-precedence parity,
@@ -3823,7 +3824,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 19        | ✅     | metrics-plugin       |
 | 20        | ✅     | health-plugin        |
 | 21        | ✅     | openapi-plugin       |
-| 22        | ⬜     | kernel-on-hono       |
+| 22        | ✅     | kernel-on-hono       |
 | 23        | ⬜     | runtime-serve-hono   |
 | 24        | ⬜     | telemetry-plugin     |
 | 25        | ⬜     | secrets-plugin       |

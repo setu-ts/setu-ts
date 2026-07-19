@@ -3648,8 +3648,9 @@ Contract notes:
 ## API Reference: @hono-enterprise/kernel
 
 The plugin kernel: resolves plugin dependencies, builds the middleware pipeline and router,
-validates environment variables, and dispatches requests. Implemented in **Milestone 2**; this
-section is the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
+validates environment variables, and dispatches requests. Implemented in **Milestone 2**; route
+matching was delegated to Hono in **Milestone 22** (behind the unchanged `IRouterApi` contract).
+This section is the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
 ### Values (runtime exports)
 

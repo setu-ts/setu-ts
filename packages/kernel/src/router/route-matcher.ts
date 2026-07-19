@@ -1,6 +1,14 @@
 /**
- * Route matcher — parses parameterized path patterns and matches incoming
- * paths against them, extracting typed parameters.
+ * Route matcher utilities — path decoding guard and pattern-parsing helpers
+ * for the kernel router.
+ *
+ * As of Milestone 22, route *matching* is delegated to Hono inside the
+ * [`Router`](./router.ts).  This module exports:
+ *
+ * - {@linkcode isPathDecodable} — used by the application to reject malformed
+ *   percent-escapes with a 400 **before** routing.
+ * - {@linkcode Segment}, {@linkcode parsePattern}, {@linkcode staticSegmentCount}
+ *   — parsing primitives shared with the Router's tie-break logic.
  *
  * @module
  */
@@ -15,13 +23,20 @@ interface ParamSegment {
   name: string;
 }
 
+/**
+ * A parsed route segment — either a static path component or a `:name`
+ * parameter placeholder.
+ *
+ * @since 0.1.0
+ */
 export type Segment = StaticSegment | ParamSegment;
 
 /**
  * Parses a route pattern like `/users/:id` into segments.
  *
- * @param pattern - The route pattern
- * @returns The parsed segments
+ * @param pattern - The route pattern to parse
+ * @returns An array of `Segment` objects
+ * @internal Used only at registration time for tie-break statics counting.
  */
 export function parsePattern(pattern: string): readonly Segment[] {
   const normalized = pattern === '/' ? '/' : pattern.replace(/\/+$/, '');
@@ -37,60 +52,20 @@ export function parsePattern(pattern: string): readonly Segment[] {
 }
 
 /**
- * Normalizes a path by collapsing trailing slashes (except root `/`).
+ * Counts the number of static (non-parameter) segments in a pattern.
  *
- * @param path - The raw path
- * @returns The normalized path
+ * @param segments - The parsed segments array
+ * @returns The count of static segments
+ * @internal Used only at registration time for tie-break specificity.
  */
-function normalizePath(path: string): string {
-  if (path === '/') {
-    return path;
-  }
-  return path.replace(/\/+$/, '');
-}
-
-/**
- * Matches a route pattern against an incoming path.
- *
- * @param segments - The parsed pattern segments
- * @param path - The incoming request path
- * @returns Extracted parameters on match, or `null` when the path doesn't match
- */
-export function match(
-  segments: readonly Segment[],
-  path: string,
-): Record<string, string> | null {
-  const normalized = normalizePath(path);
-  const parts = normalized === '/' ? [''] : normalized.slice(1).split('/');
-
-  if (parts.length !== segments.length) {
-    return null;
-  }
-
-  const params: Record<string, string> = {};
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(parts[i]);
-    } catch {
-      // Malformed percent-encoding (e.g. `%zz`) cannot equal any static
-      // value or form a valid parameter, so this route simply does not
-      // match. Keeping `match` total (it never throws) means a raw
-      // `decodeURIComponent` failure can never escalate to a 500. The
-      // application rejects such paths with a 400 BEFORE routing via
-      // {@linkcode isPathDecodable}; this guard covers any direct caller.
-      return null;
-    }
+export function staticSegmentCount(segments: readonly Segment[]): number {
+  let count = 0;
+  for (const segment of segments) {
     if (segment.type === 'static') {
-      if (decoded !== segment.value) {
-        return null;
-      }
-    } else {
-      params[segment.name] = decoded;
+      count++;
     }
   }
-  return params;
+  return count;
 }
 
 /**
@@ -103,6 +78,7 @@ export function match(
  *
  * @param path - The raw (still percent-encoded) request path
  * @returns `true` when the path decodes cleanly, `false` when it is malformed
+ * @since 0.1.0
  */
 export function isPathDecodable(path: string): boolean {
   try {
@@ -111,20 +87,4 @@ export function isPathDecodable(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Counts the number of static (non-parameter) segments in a pattern.
- *
- * @param segments - The parsed pattern segments
- * @returns The static segment count (higher = more specific match)
- */
-export function staticSegmentCount(segments: readonly Segment[]): number {
-  let count = 0;
-  for (const segment of segments) {
-    if (segment.type === 'static') {
-      count++;
-    }
-  }
-  return count;
 }

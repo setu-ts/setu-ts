@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "exports": "./src/index.ts",
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0"
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0",
+    "@hono/hono": "jsr:@hono/hono@^4.12.30"
   }
 }

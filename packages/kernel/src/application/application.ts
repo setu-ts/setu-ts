@@ -440,7 +440,11 @@ class Application implements IKernelApplication {
         await hook(ctx);
       }
 
-      // Execute pipeline with route dispatch as terminal
+      // Execute pipeline with route dispatch as terminal.
+      // Note: Router.match() is backed by Hono's LinearRouter (M22) — it
+      // delegates to Hono for route matching and param extraction, then
+      // applies the kernel's own deterministic tie-break for equal-specificity
+      // routes (§3.6 of the M22 plan).
       await this.#pipeline.execute(ctx, async () => {
         const url = new URL(request.url);
         const routeResult = this.#router.match(request.method, url.pathname);
