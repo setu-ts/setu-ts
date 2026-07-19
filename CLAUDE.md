@@ -217,7 +217,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   precedence, and `inject()` parity) — complete (PR #47)
 - **Milestone 23** (`packages/runtime` — runtime serve on Hono + Cloudflare Workers: replaces M41
   socket adapters with Hono's `fetch` entry, changes `IHttpAdapter` to
-  `setHandler`/`fetch`/`listen`/`close`) — complete (PR pending)
+  `setHandler`/`fetch`/`listen`/`close`) — complete (PR #48)
 - **Next milestone** — **Milestone 24** (telemetry plugin — OpenTelemetry distributed tracing)
 
 ## Verification (run before declaring any work done)
