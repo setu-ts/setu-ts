@@ -916,6 +916,10 @@ Each runtime has its own implementation:
 - **BunHttpAdapter** — Uses `Bun.serve()`.
 - **CloudflareWorkersHttpAdapter** — Exports `fetch` only; `listen` throws.
 
+Because the mapping is web-standard, `IRequest.ip` is intentionally left unset — a web `Request`
+carries no client address (the pre-M23 Node adapter derived it from `socket.remoteAddress`).
+Consumers needing the client IP read a proxy header (`X-Forwarded-For` / `X-Real-IP`) in middleware.
+
 ### Why Only Runtime May Use Runtime-Specific APIs
 
 This rule is enforced because:

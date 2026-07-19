@@ -8,7 +8,18 @@
  */
 
 import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { NodeHttpAdapter } from '../../src/adapters/node/node-http-adapter.ts';
+
+/**
+ * Finds a free TCP port by binding one and releasing it.
+ */
+function findFreePort(): number {
+  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
+  const { port } = listener.addr as Deno.NetAddr;
+  listener.close();
+  return port;
+}
 
 describe('node-http-adapter integration', () => {
   it('guarded real @hono/node-server round-trip', async () => {
@@ -54,14 +65,15 @@ describe('node-http-adapter integration', () => {
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
-          status: 200,
-          headers: new Headers({ 'content-type': 'text/plain' }),
+          status: 201,
+          headers: new Headers({ 'content-type': 'text/plain', 'x-adapter': 'node' }),
           body: 'hello from node',
         }),
       } as any;
     });
 
-    const handle = await adapter.listen(0, '127.0.0.1');
+    const port = findFreePort();
+    const handle = await adapter.listen(port, '127.0.0.1');
 
     // C1 test: verify the server handle is a real object, not a Promise
     const serverHandle = (handle as any).server;
@@ -72,6 +84,29 @@ describe('node-http-adapter integration', () => {
       throw new Error('C1 regression: server.handle.close is not a function (likely a Promise)');
     }
 
-    await adapter.close(handle);
+    try {
+      // REAL request over the bound socket, through @hono/node-server into the
+      // adapter's fetch handler and back out — proves the full round-trip, not
+      // just that the server binds. @hono/node-server binds asynchronously, so
+      // retry the connect briefly until the socket is listening.
+      let response: Response | undefined;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try {
+          response = await fetch(`http://127.0.0.1:${port}/hello`);
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+      if (response === undefined) {
+        throw new Error('server never became reachable');
+      }
+      expect(response.status).toBe(201);
+      expect(response.headers.get('content-type')).toBe('text/plain');
+      expect(response.headers.get('x-adapter')).toBe('node');
+      expect(await response.text()).toBe('hello from node');
+    } finally {
+      await adapter.close(handle);
+    }
   });
 });

@@ -3749,6 +3749,12 @@ Contract notes:
   `close` tears it down. Adapters (`NodeHttpAdapter`, `DenoHttpAdapter`, `BunHttpAdapter`,
   `CloudflareWorkersHttpAdapter`) are registered under `CAPABILITIES.HTTP_ADAPTER` via
   `RuntimePlugin`.
+- **Migration note — `IRequest.ip` is no longer populated (M23).** The web-standard `fetch` mapping
+  does not set `IRequest.ip`; a web `Request` carries no client address. The old M39 Node adapter
+  populated `ip` from the native `socket.remoteAddress`, so Node consumers that read
+  `ctx.request.ip` will now see `undefined`. Read the client IP from a proxy header
+  (`X-Forwarded-For` / `X-Real-IP`) in your own middleware instead — `ip` remains optional on
+  `IRequest`.
 - The `RuntimePlugin` is **mandatory** in every application. It registers at
   `PLUGIN_PRIORITY.HIGHEST` so its services are available to all other plugins during registration.
 - Each adapter factory accepts an injectable `*Host` interface (the documented extension point for
