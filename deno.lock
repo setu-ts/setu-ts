@@ -1,6 +1,7 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@hono/hono@^4.12.30": "4.12.30",
     "jsr:@std/assert@^1.0.19": "1.0.19",
     "jsr:@std/async@^1.4.0": "1.5.0",
     "jsr:@std/data-structures@^1.1.0": "1.1.1",
@@ -24,6 +25,9 @@
     "npm:zod@^3.24.0": "3.25.76"
   },
   "jsr": {
+    "@hono/hono@4.12.30": {
+      "integrity": "cd8e61aedab7e765e4e262728273ee0fdea3bc667af5eb6badd2772223b544fc"
+    },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
       "dependencies": [
@@ -301,7 +305,8 @@
       },
       "packages/kernel": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1"
+          "jsr:@hono-enterprise/common@0.1",
+          "jsr:@hono/hono@^4.12.30"
         ]
       },
       "packages/logger-plugin": {

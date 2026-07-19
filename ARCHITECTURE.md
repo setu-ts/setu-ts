@@ -117,7 +117,15 @@ via plugins.
 
 ### Why It Uses Hono
 
-Hono is used as the **routing engine** for several reasons:
+As of Milestone 22, Hono is used as the **internal routing engine** inside the kernel `Router`
+class. Route matching is delegated to a `new Hono({ strict: false })` instance constructed with
+Hono's `LinearRouter`; the kernel's custom `(ctx, next)` middleware pipeline runs **inside** the
+Hono dispatch, and the application's `#handleRequest` method calls `router.match()` which maps
+Hono's matched route back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map
+so `getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own
+deterministic tie-break (statics-count + registration order) on top of Hono's match result.
+
+Hono is chosen for several reasons:
 
 1. **Performance** — Hono is one of the fastest TypeScript routers, competitive with Fastify.
 2. **Runtime portability** — Hono already runs on Node.js, Deno, Bun, and Cloudflare Workers.
@@ -125,9 +133,9 @@ Hono is used as the **routing engine** for several reasons:
    build on top.
 4. **Standards-based** — Hono uses the standard `Request`/`Response` Web APIs.
 
-Hono Enterprise does not expose Hono directly to application developers. Instead, it wraps Hono in a
-runtime adapter that abstracts the HTTP server, request, and response objects. This allows the
-framework to swap Hono for another router in the future without breaking applications.
+Hono Enterprise does not expose Hono directly to application developers. Instead, it wraps Hono in
+the kernel router; the runtime adapter (M41 today, M23 next) handles only socket serving. This
+allows the framework to swap Hono for another router in the future without breaking applications.
 
 ### Why It Is Plugin-First
 
