@@ -2363,10 +2363,10 @@ class UserController {
 
 ### Deliverables
 
-- [ ] OpenApiPlugin
-- [ ] Zod to OpenAPI transformer
-- [ ] Swagger UI
-- [ ] Full test coverage
+- [x] OpenApiPlugin
+- [x] Zod to OpenAPI transformer
+- [x] Swagger UI
+- [x] Full test coverage
 
 ---
 
