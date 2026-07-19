@@ -47,6 +47,8 @@ export function createCloudflareRuntimeServices(
     platform: () => 'cloudflare-workers',
     version: () => '',
     hostname: () => '',
+    // Cloudflare env bindings are often objects (KV/D1/R2), so we keep envSource
+    // typed as Record<string, unknown> and cast only at this boundary.
     env: envSource as Readonly<Record<string, string | undefined>>,
     exit: () => {
       throw new Error('Process exit is not supported in Cloudflare Workers');

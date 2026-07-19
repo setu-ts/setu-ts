@@ -35,7 +35,9 @@ function createFakeHost(): {
   } = {};
 
   const host: NodeServeHost = {
-    serve: (options) => {
+    serve: async (options) => {
+      // Await Promise.resolve to satisfy deno lint require-await rule
+      await Promise.resolve();
       recorded.fetch = options.fetch;
       recorded.port = options.port;
       if (options.hostname !== undefined) {
@@ -45,7 +47,7 @@ function createFakeHost(): {
 
       return {
         close() {},
-      } as unknown as NodeServer;
+      } as NodeServer;
     },
   };
 

@@ -31,24 +31,12 @@ export type { CloudflareEnv, CloudflareRuntimeOptions } from './adapters/workers
 
 // HTTP adapters
 export { DenoHttpAdapter } from './adapters/deno/deno-http-adapter.ts';
-export type {
-  DenoHttpServerHandle,
-  DenoServeHost,
-  DenoServer,
-} from './adapters/deno/deno-http-adapter.ts';
+export type { DenoServeHost, DenoServer } from './adapters/deno/deno-http-adapter.ts';
 
 export { NodeHttpAdapter } from './adapters/node/node-http-adapter.ts';
-export type {
-  NodeHttpServerHandle,
-  NodeServeHost,
-  NodeServer,
-} from './adapters/node/node-http-adapter.ts';
+export type { NodeServeHost, NodeServer } from './adapters/node/node-http-adapter.ts';
 
 export { BunHttpAdapter } from './adapters/bun/bun-http-adapter.ts';
-export type {
-  BunHttpServerHandle,
-  BunServeHost,
-  BunServer,
-} from './adapters/bun/bun-http-adapter.ts';
+export type { BunServeHost, BunServer } from './adapters/bun/bun-http-adapter.ts';
 
 export { CloudflareWorkersHttpAdapter } from './adapters/workers/cf-http-adapter.ts';

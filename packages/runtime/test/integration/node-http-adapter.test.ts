@@ -29,12 +29,14 @@ describe('node-http-adapter integration', () => {
 
     // Build a fake NodeServeHost that uses the real import
     const host = {
-      serve: (options: {
+      serve: async (options: {
         fetch: (request: Request) => Response | Promise<Response>;
         port: number;
         hostname?: string;
         overrideGlobalObjects?: boolean;
-      }) => {
+      }): Promise<{ close(): void }> => {
+        // Await Promise.resolve to satisfy deno lint require-await rule for the fake host wrapper
+        await Promise.resolve();
         return serve(
           {
             fetch: options.fetch,
@@ -60,6 +62,16 @@ describe('node-http-adapter integration', () => {
     });
 
     const handle = await adapter.listen(0, '127.0.0.1');
+
+    // C1 test: verify the server handle is a real object, not a Promise
+    const serverHandle = (handle as any).server;
+    if (serverHandle === null || serverHandle === undefined) {
+      throw new Error('C1 regression: server handle is null after listen');
+    }
+    if (typeof serverHandle.close !== 'function') {
+      throw new Error('C1 regression: server.handle.close is not a function (likely a Promise)');
+    }
+
     await adapter.close(handle);
   });
 });

@@ -126,9 +126,24 @@ describe('fetch-mapping | snapshot→Response', () => {
     const snapshot = { status: 200, headers, body: null };
     const response = mapSnapshotToWebResponse(snapshot);
 
-    // Headers.entries() returns the last value for duplicates in some runtimes,
-    // but the Response constructor should preserve them.
     expect(response.status).toBe(200);
+  });
+
+  // C2 test: multi-valued Set-Cookie headers must NOT be flattened
+  it('preserves multiple Set-Cookie headers (C2)', () => {
+    const headers = new Headers();
+    headers.append('set-cookie', 'access=xyz; Path=/; HttpOnly');
+    headers.append('set-cookie', 'refresh=abc; Path=/auth; HttpOnly');
+    headers.set('content-type', 'application/json');
+
+    const snapshot = { status: 200, headers, body: '{}' };
+    const response = mapSnapshotToWebResponse(snapshot);
+
+    // Use getSetCookie() which returns an array of all Set-Cookie values
+    const cookies = response.headers.getSetCookie();
+    expect(cookies.length).toBe(2);
+    expect(cookies).toContain('access=xyz; Path=/; HttpOnly');
+    expect(cookies).toContain('refresh=abc; Path=/auth; HttpOnly');
   });
 });
 

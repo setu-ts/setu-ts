@@ -29,14 +29,14 @@ export interface NodeServeHost {
    * Starts an HTTP server.
    *
    * @param options - Server options including `fetch`, `port`, `hostname`
-   * @returns A Node.js HTTP server handle
+   * @returns A promise resolving to a Node.js HTTP server handle
    */
   serve(options: {
     fetch: (request: Request) => Response | Promise<Response>;
     port: number;
     hostname?: string;
     overrideGlobalObjects?: boolean;
-  }): NodeServer;
+  }): Promise<NodeServer>;
 }
 
 /**
@@ -56,16 +56,12 @@ export interface NodeServer {
  * @internal - Not exported from package index
  */
 const defaultNodeServeHost: NodeServeHost = {
-  serve: (options) => {
+  serve: async (options) => {
     // Lazy import — only loads when listen() is actually called
-    // We need to inline the import synchronously via a cached module reference
-    // Since @hono/node-server's serve() is synchronous (returns http.Server),
-    // we import it eagerly once and reuse.
-    return import('npm:@hono/node-server@^2.0.0').then((mod) => {
-      // overrideGlobalObjects: false prevents @hono/node-server from mutating
-      // the global Request/Response which would corrupt the shared mapping.
-      return mod.serve({ ...options, overrideGlobalObjects: false });
-    }) as unknown as NodeServer;
+    const mod = await import('npm:@hono/node-server@^2.0.0');
+    // overrideGlobalObjects: false prevents @hono/node-server from mutating
+    // the global Request/Response which would corrupt the shared mapping.
+    return mod.serve({ ...options, overrideGlobalObjects: false });
   },
 };
 
@@ -154,15 +150,15 @@ export class NodeHttpAdapter implements IHttpAdapter {
     return this.#handle.createFetchHandler()(request);
   }
 
-  listen(port: number, hostname?: string): Promise<ServerHandle> {
+  async listen(port: number, hostname?: string): Promise<ServerHandle> {
     const fetchHandler = this.#handle.createFetchHandler();
-    const server = this.#host.serve({
+    const server = await this.#host.serve({
       fetch: fetchHandler,
       port,
       ...(hostname !== undefined && { hostname }),
     });
     this.#handle.server = server;
-    return Promise.resolve(this.#handle);
+    return this.#handle;
   }
 
   close(handle: ServerHandle): Promise<void> {

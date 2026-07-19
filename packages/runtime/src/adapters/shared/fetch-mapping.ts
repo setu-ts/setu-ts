@@ -12,6 +12,9 @@
 
 import type { HttpMethod, IRequest } from '@hono-enterprise/common';
 
+// Hoisted TextDecoder — avoids per-call allocation (A2)
+const decoder = new TextDecoder();
+
 /**
  * Maps a web-standard `Request` to the framework's `IRequest`.
  * Pre-reads the body via `arrayBuffer()` for idempotent access.
@@ -43,12 +46,12 @@ export async function mapWebRequestToFrameworkRequest(request: Request): Promise
     // own middleware. (Deliberated regression on the Node path.)
     // deno-lint-ignore require-await
     json: async (): Promise<unknown> => {
-      const text = new TextDecoder().decode(bodyBytes);
+      const text = decoder.decode(bodyBytes);
       return JSON.parse(text);
     },
     // deno-lint-ignore require-await
     text: async (): Promise<string> => {
-      return new TextDecoder().decode(bodyBytes);
+      return decoder.decode(bodyBytes);
     },
     // deno-lint-ignore require-await
     bytes: async (): Promise<Uint8Array> => {
@@ -74,17 +77,14 @@ export function mapSnapshotToWebResponse(
 ): Response {
   const { status, headers, body } = snapshot;
 
-  // Convert Headers to a plain object for the Response constructor
-  const headersObj: Record<string, string> = {};
-  for (const [key, value] of headers.entries()) {
-    headersObj[key] = value;
-  }
+  // Uint8Array can be passed directly to Response constructor (A1 — no slice needed).
+  // Cast to BlobPart (which Response accepts) to satisfy Deno's stricter ArrayBufferView type.
+  const bodyPart: string | BlobPart | null =
+    body === null ? null : (typeof body === 'string' ? body : body as unknown as BlobPart);
 
-  // Uint8Array needs to be wrapped for Response constructor
-  const bodyInit = body === null ? null : (typeof body === 'string' ? body : body.slice(0));
-
-  return new Response(bodyInit, {
+  // Pass the Headers object directly — preserves multi-valued Set-Cookie headers (C2)
+  return new Response(bodyPart, {
     status,
-    headers: headersObj,
+    headers,
   });
 }
