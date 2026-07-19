@@ -1,15 +1,14 @@
 /**
- * Route matcher utilities — path decoding guard for the kernel router.
+ * Route matcher utilities — path decoding guard and pattern-parsing helpers
+ * for the kernel router.
  *
- * As of Milestone 22, route matching is delegated to Hono inside the
- * [`Router`](./router.ts).  This module retains only
- * {@linkcode isPathDecodable}, which is used by
- * [`Application.#handleRequest`](../application/application.ts) to reject
- * malformed percent-escapes with a 400 **before** routing.
+ * As of Milestone 22, route *matching* is delegated to Hono inside the
+ * [`Router`](./router.ts).  This module exports:
  *
- * > **Note:** `parsePattern` and `staticSegmentCount` were moved to
- * > [`router.ts`](./router.ts) during the M22 migration so the Hono-backed
- * > tie-break logic can reuse them without a circular dependency.
+ * - {@linkcode isPathDecodable} — used by the application to reject malformed
+ *   percent-escapes with a 400 **before** routing.
+ * - {@linkcode Segment}, {@linkcode parsePattern}, {@linkcode staticSegmentCount}
+ *   — parsing primitives shared with the Router's tie-break logic.
  *
  * @module
  */
@@ -31,6 +30,43 @@ interface ParamSegment {
  * @since 0.1.0
  */
 export type Segment = StaticSegment | ParamSegment;
+
+/**
+ * Parses a route pattern like `/users/:id` into segments.
+ *
+ * @param pattern - The route pattern to parse
+ * @returns An array of `Segment` objects
+ * @internal Used only at registration time for tie-break statics counting.
+ */
+export function parsePattern(pattern: string): readonly Segment[] {
+  const normalized = pattern === '/' ? '/' : pattern.replace(/\/+$/, '');
+  if (normalized === '/') {
+    return [{ type: 'static', value: '' }];
+  }
+  return normalized.slice(1).split('/').map((part) => {
+    if (part.startsWith(':')) {
+      return { type: 'param', name: part.slice(1) };
+    }
+    return { type: 'static', value: part };
+  });
+}
+
+/**
+ * Counts the number of static (non-parameter) segments in a pattern.
+ *
+ * @param segments - The parsed segments array
+ * @returns The count of static segments
+ * @internal Used only at registration time for tie-break specificity.
+ */
+export function staticSegmentCount(segments: readonly Segment[]): number {
+  let count = 0;
+  for (const segment of segments) {
+    if (segment.type === 'static') {
+      count++;
+    }
+  }
+  return count;
+}
 
 /**
  * Reports whether a path can be percent-decoded without error.

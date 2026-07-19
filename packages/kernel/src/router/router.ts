@@ -18,6 +18,7 @@ import type {
 } from '@hono-enterprise/common';
 
 import type { Segment } from './route-matcher.ts';
+import { parsePattern, staticSegmentCount } from './route-matcher.ts';
 
 export interface RouteEntry {
   pattern: string;
@@ -48,7 +49,7 @@ export class Router implements IRouterApi {
   readonly #routes: RouteEntry[] = [];
   #index = 0;
   readonly #hono = new Hono({ strict: false, router: new LinearRouter() });
-  /** Maps a Hono-registered route path → the kernel's RouteEntry. */
+  /** Maps `${method} ${path}` → the kernel's RouteEntry. */
   readonly #entryMap = new Map<string, RouteEntry>();
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
@@ -65,7 +66,7 @@ export class Router implements IRouterApi {
       statics: staticSegmentCount(segments),
     };
     this.#routes.push(entry);
-    this.#entryMap.set(path, entry);
+    this.#entryMap.set(`${method} ${path}`, entry);
 
     // Register on Hono with a stub handler. The stub does NOT execute the
     // framework handler — it exists only so Hono's matcher records the
@@ -79,7 +80,7 @@ export class Router implements IRouterApi {
     };
     // Hono's `on()` method is not typed in the public API; cast through unknown
     // to avoid a direct `as any` while keeping the call site minimal.
-    type HonoOnHandler = (c: HonoContext, next: HonoNext) => Response | Promise<Response>;
+    type HonoOnHandler = (c: HonoContext, next: HonoNext) => Response | Promise<Response> | void;
     interface HonoOn {
       on(method: string, path: string, handler: HonoOnHandler): Response | Promise<Response>;
     }
@@ -167,14 +168,10 @@ export class Router implements IRouterApi {
       if (routeInfo == null) continue;
       const routePath = routeInfo.path as string | undefined;
       if (routePath == null) continue;
-      const entry = this.#entryMap.get(routePath);
+      const entry = this.#entryMap.get(`${routeInfo.method as string} ${routePath}`);
       if (entry == null) continue;
-      // Coerce Hono param values to strings (belt-and-suspenders; LinearRouter
-      // already returns strings).
-      const params: Record<string, string> = {};
-      for (const [key, val] of Object.entries(rawParams)) {
-        params[key] = String(val);
-      }
+      // LinearRouter already returns string params; no coercion needed.
+      const params: Record<string, string> = { ...(rawParams as Record<string, string>) };
       candidates.push({ routePath, params, entry });
     }
 
@@ -271,42 +268,4 @@ class GroupRouter implements IRouterApi {
   listRoutes(): readonly RouteInfo[] {
     return this.#parent.listRoutes();
   }
-}
-
-// ---------------------------------------------------------------------------
-// Retained from the legacy matcher — used for RouteEntry.statics computation
-// (§3.6 tie-break). Kept here as internal helpers so the tie-break logic is
-// self-contained in the Router, while isPathDecodable stays in
-// route-matcher.ts for the #handleRequest 400 guard.
-// ---------------------------------------------------------------------------
-
-/**
- * Parses a route pattern like `/users/:id` into segments.
- * @internal Used only at registration time for statics counting.
- */
-function parsePattern(pattern: string): readonly Segment[] {
-  const normalized = pattern === '/' ? '/' : pattern.replace(/\/+$/, '');
-  if (normalized === '/') {
-    return [{ type: 'static', value: '' }];
-  }
-  return normalized.slice(1).split('/').map((part) => {
-    if (part.startsWith(':')) {
-      return { type: 'param', name: part.slice(1) };
-    }
-    return { type: 'static', value: part };
-  });
-}
-
-/**
- * Counts the number of static (non-parameter) segments in a pattern.
- * @internal Used only at registration time for tie-break specificity.
- */
-function staticSegmentCount(segments: readonly Segment[]): number {
-  let count = 0;
-  for (const segment of segments) {
-    if (segment.type === 'static') {
-      count++;
-    }
-  }
-  return count;
 }

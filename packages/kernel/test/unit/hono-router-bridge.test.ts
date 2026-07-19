@@ -112,3 +112,24 @@ describe('Hono router bridge — trailing slash parity', () => {
     expect(result!.params).toEqual({ id: '123' });
   });
 });
+
+// C1 regression — same-path-different-method must return correct definition identity
+describe('C1 regression — same path, different methods', () => {
+  it('match(GET, /api/users) returns the GET definition, not POST', () => {
+    const router = new Router();
+    const getDef = { handler: () => ({ __handlerResult: true } as never) };
+    const postDef = { handler: () => ({ __handlerResult: true } as never) };
+    router.get('/api/users', getDef);
+    router.post('/api/users', postDef);
+
+    const getResult = router.match('GET', '/api/users');
+    expect(getResult).not.toBe(null);
+    expect(getResult!.definition).toBe(getDef);
+    expect(getResult!.params).toEqual({});
+
+    const postResult = router.match('POST', '/api/users');
+    expect(postResult).not.toBe(null);
+    expect(postResult!.definition).toBe(postDef);
+    expect(postResult!.params).toEqual({});
+  });
+});
