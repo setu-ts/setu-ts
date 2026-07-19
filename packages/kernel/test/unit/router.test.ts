@@ -286,13 +286,22 @@ describe('Router', () => {
     expect(routes.length).toBe(2);
   });
 
-  // M22 coverage — match() branches: routeInfo == null, routePath == null, entry == null
-  it('match returns null when no candidates have routeInfo', () => {
+  // M22 parity — Hono's low-level router.match() returns raw param values;
+  // match() must decode them (the pre-M22 matcher decoded per segment).
+  it('decodes percent-encoded param values (parity with pre-M22 matcher)', () => {
     const router = new Router();
-    router.get('/test', () => ({ __handlerResult: true } as never));
-    // Normal match should work
-    const result = router.match('GET', '/test');
-    expect(result).not.toBe(null);
+    router.get('/users/:id', () => ({ __handlerResult: true } as never));
+    expect(router.match('GET', '/users/a%20b')?.params).toEqual({ id: 'a b' });
+    expect(router.match('GET', '/users/jos%C3%A9')?.params).toEqual({ id: 'josé' });
+  });
+
+  // M22 coverage — a malformed param escape drops the candidate → null
+  // (the application 400s these upstream via isPathDecodable; this guards
+  // direct callers of match()).
+  it('match returns null when a param value is a malformed percent-escape', () => {
+    const router = new Router();
+    router.get('/users/:id', () => ({ __handlerResult: true } as never));
+    expect(router.match('GET', '/users/%zz')).toBe(null);
   });
 
   // M22 coverage — tie-break: multiple candidates, statics differ

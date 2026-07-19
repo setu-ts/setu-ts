@@ -173,10 +173,35 @@ export class Router implements IRouterApi {
     for (const [handlerRouteTuple, rawParams] of candidatesRaw) {
       const routeInfo = handlerRouteTuple![1] as Record<string, unknown>;
       const routePath = routeInfo.path as string;
-      const method = routeInfo.method as string;
-      const entry = this.#entryMap.get(`${method} ${routePath}`)!;
-      const params: Record<string, string> = { ...(rawParams as Record<string, string>) };
+      const routeMethod = routeInfo.method as string;
+      const entry = this.#entryMap.get(`${routeMethod} ${routePath}`)!;
+      // Hono's low-level `router.match()` returns raw (still percent-encoded)
+      // param values — decoding normally happens in Hono's Context layer,
+      // which this code bypasses. Decode each value to preserve pre-M22
+      // parity (the from-scratch matcher decoded params per segment). A
+      // malformed escape means this route does not match (mirroring the old
+      // matcher's `null` return); the application already rejects such paths
+      // with a 400 via `isPathDecodable` before routing, so this branch only
+      // guards direct callers of `match()`.
+      const params: Record<string, string> = {};
+      let decodable = true;
+      for (const [key, value] of Object.entries(rawParams as Record<string, string>)) {
+        try {
+          params[key] = decodeURIComponent(value);
+        } catch {
+          decodable = false;
+          break;
+        }
+      }
+      if (!decodable) {
+        continue;
+      }
       candidates.push({ routePath, params, entry });
+    }
+
+    // Every candidate may have been dropped for a malformed param escape.
+    if (candidates.length === 0) {
+      return null;
     }
 
     // If only one candidate, return it directly.
