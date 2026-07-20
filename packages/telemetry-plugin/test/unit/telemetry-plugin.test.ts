@@ -115,14 +115,25 @@ describe('TelemetryPlugin', () => {
 
   it('should register onShutdown hook in real mode', async () => {
     const mock = createMockContext();
+    let shutdownCalled = false;
     const plugin = TelemetryPlugin({
       serviceName: 'test',
       exporter: 'console',
-      tracerProviderFactory: () => Promise.resolve(createFakeTracerHost()),
+      tracerProviderFactory: () =>
+        Promise.resolve({
+          ...createFakeTracerHost(),
+          shutdown: () => {
+            shutdownCalled = true;
+            return Promise.resolve();
+          },
+        }),
     });
     await plugin.register(mock.ctx);
 
     expect(mock.shutdownHooks).toHaveLength(1);
+    // Execute the shutdown hook to cover lines 82-86
+    await mock.shutdownHooks[0]!();
+    expect(shutdownCalled).toBe(true);
   });
 
   it('should register ITelemetryService typed service', async () => {

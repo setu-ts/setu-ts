@@ -61,6 +61,23 @@ describe('NoopTelemetryService', () => {
     }, opts);
     expect(result).toBe('ok');
   });
+
+  it('should exercise all NoopSpan methods', async () => {
+    const service = new NoopTelemetryService();
+    let receivedSpan: ISpan | null = null;
+    await service.withSpan('noop-all-methods', async (span) => {
+      receivedSpan = span;
+      // Exercise every NoopSpan method to achieve coverage
+      span.setAttribute('a', 1);
+      span.setAttributes({ b: 2, c: 'three' });
+      span.setStatus('ok');
+      span.setStatus('error');
+      span.setStatus('unset');
+      span.recordException(new Error('test error'));
+      span.end();
+    });
+    expect(receivedSpan).not.toBeNull();
+  });
 });
 
 describe('TelemetryService', () => {

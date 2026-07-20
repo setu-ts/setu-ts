@@ -11,40 +11,98 @@ import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 
 /**
- * Lazy-loads the OpenTelemetry SDK and builds a `TracerHost`.
+ * Module handle returned by lazy-loading `npm:@opentelemetry/sdk-trace-base`.
  *
- * Uses the **2.x constructor-config** shape — `addSpanProcessor()` does not
- * exist on `BasicTracerProvider` in the 2.x line.
- *
- * @param options - Plugin options controlling exporter, sampling, etc.
- * @returns A `TracerHost` wrapping the OTel provider
- * @throws {Error} If the npm package is not installed or required options are missing
+ * @internal
  */
-export async function loadOtelTracerProvider(
-  options: TelemetryPluginOptions,
-): Promise<TracerHost> {
-  const { serviceName = 'hono-app', serviceVersion = '1.0.0' } = options;
+export interface OtelSdkModule {
+  BasicTracerProvider: new (config: {
+    resource: unknown;
+    spanProcessors: unknown[];
+    sampler: unknown;
+  }) => {
+    getTracer(
+      name: string,
+      version?: string,
+    ): {
+      startSpan(
+        name: string,
+        options?: Record<string, unknown>,
+      ): unknown;
+    };
+    forceFlush(): Promise<void>;
+    shutdown(): Promise<void>;
+  };
+  SimpleSpanProcessor: new (exporter: unknown) => unknown;
+  TraceIdRatioBasedSampler: new (ratio: number) => unknown;
+  AlwaysOnSampler: new () => unknown;
+}
 
-  // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
-  if (options.exporter === 'otlp' && !options.endpoint) {
-    throw new Error(
-      `TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'`,
-    );
-  }
-  if (options.exporter && options.exporter !== 'otlp' && options.exporter !== 'console') {
-    throw new Error(
-      `TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`,
-    );
-  }
+/**
+ * Module handle returned by lazy-loading `npm:@opentelemetry/resources`.
+ *
+ * @internal
+ */
+export interface OtelResourcesModule {
+  resourceFromAttributes(attrs: Record<string, string>): unknown;
+}
 
-  // Lazy-load sdk-trace-base
-  const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
-  // Lazy-load resources
-  const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
+/**
+ * OTLP exporter constructor type.
+ *
+ * @internal
+ */
+export type OtlpExporterCtor = new (
+  args?: { url?: string; headers?: Record<string, string> },
+) => unknown;
 
-  const { BasicTracerProvider, SimpleSpanProcessor, TraceIdRatioBasedSampler, AlwaysOnSampler } =
-    sdkMod;
+/**
+ * Console span exporter constructor type.
+ *
+ * @internal
+ */
+export type ConsoleExporterCtor = new () => unknown;
+
+/**
+ * Options for building a TracerHost from already-loaded modules.
+ *
+ * @internal
+ */
+export interface BuildTracerHostOptions {
+  sdkMod: OtelSdkModule;
+  resourcesMod: OtelResourcesModule;
+  pluginOptions: TelemetryPluginOptions;
+  /** OTLP exporter constructor — required when `pluginOptions.exporter === 'otlp'`. */
+  otlpExporterCtor?: OtlpExporterCtor;
+  /** Console span exporter constructor — required when `pluginOptions.exporter === 'console'`. */
+  consoleExporterCtor?: ConsoleExporterCtor;
+}
+
+/**
+ * Builds a `TracerHost` from already-loaded OTel modules.
+ *
+ * This function isolates all post-import logic so it can be tested
+ * with fake modules — the only truly unreachable line is the
+ * `await import(...)` in `loadOtelTracerProvider`.
+ *
+ * The exporter constructor must be provided via `otlpExporterCtor` or
+ * `consoleExporterCtor`; lazy-loading fallbacks are handled by
+ * [loadOtelTracerProvider][].
+ *
+ * @internal
+ */
+export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
+  const { sdkMod, resourcesMod, pluginOptions } = opts;
+
+  const {
+    BasicTracerProvider,
+    SimpleSpanProcessor,
+    TraceIdRatioBasedSampler,
+    AlwaysOnSampler,
+  } = sdkMod;
   const { resourceFromAttributes } = resourcesMod;
+
+  const { serviceName = 'hono-app', serviceVersion = '1.0.0' } = pluginOptions;
 
   // Build resource
   const resourceAttrs: Record<string, string> = {
@@ -57,26 +115,32 @@ export async function loadOtelTracerProvider(
 
   // Build exporter
   let exporter: unknown;
-  const exporterKind = options.exporter;
+  const exporterKind = pluginOptions.exporter;
 
   if (exporterKind === 'otlp') {
     // Early validation guarantees endpoint is set
-    const endpoint = options.endpoint!;
-    // Verify the exporter package loads
-    await loadOtlpExporter(endpoint, options.headers);
-    const OTLPTraceExporterCtor = await loadOtlpExporter(
-      endpoint,
-      options.headers,
-    );
+    const endpoint = pluginOptions.endpoint!;
+    const OTLPTraceExporterCtor = opts.otlpExporterCtor;
+    if (!OTLPTraceExporterCtor) {
+      throw new Error(
+        'TelemetryPlugin: otlpExporterCtor is required when exporter is "otlp"',
+      );
+    }
+
     const exporterArgs: { url: string; headers?: Record<string, string> } = {
       url: endpoint,
     };
-    if (options.headers) {
-      exporterArgs.headers = options.headers;
+    if (pluginOptions.headers) {
+      exporterArgs.headers = pluginOptions.headers;
     }
     exporter = new OTLPTraceExporterCtor(exporterArgs);
   } else if (exporterKind === 'console') {
-    const ConsoleSpanExporter = await loadConsoleExporter();
+    const ConsoleSpanExporter = opts.consoleExporterCtor;
+    if (!ConsoleSpanExporter) {
+      throw new Error(
+        'TelemetryPlugin: consoleExporterCtor is required when exporter is "console"',
+      );
+    }
     exporter = new ConsoleSpanExporter();
   } else {
     throw new Error(
@@ -86,9 +150,9 @@ export async function loadOtelTracerProvider(
 
   // Build sampler
   let sampler: unknown;
-  if (options.sampling?.type === 'traceidratio') {
+  if (pluginOptions.sampling?.type === 'traceidratio') {
     sampler = new TraceIdRatioBasedSampler(
-      options.sampling.ratio ?? 1.0,
+      pluginOptions.sampling.ratio ?? 1.0,
     );
   } else {
     sampler = new AlwaysOnSampler();
@@ -132,4 +196,62 @@ export async function loadOtelTracerProvider(
     shutdown: () => provider.shutdown(),
     forceFlush: () => provider.forceFlush(),
   };
+}
+
+/**
+ * Lazy-loads the OpenTelemetry SDK and builds a `TracerHost`.
+ *
+ * Uses the **2.x constructor-config** shape — `addSpanProcessor()` does not
+ * exist on `BasicTracerProvider` in the 2.x line.
+ *
+ * @param options - Plugin options controlling exporter, sampling, etc.
+ * @returns A `TracerHost` wrapping the OTel provider
+ * @throws {Error} If the npm package is not installed or required options are missing
+ */
+export async function loadOtelTracerProvider(
+  options: TelemetryPluginOptions,
+): Promise<TracerHost> {
+  // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
+  if (options.exporter === 'otlp' && !options.endpoint) {
+    throw new Error(
+      `TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'`,
+    );
+  }
+  if (options.exporter && options.exporter !== 'otlp' && options.exporter !== 'console') {
+    throw new Error(
+      `TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`,
+    );
+  }
+
+  // Lazy-load sdk-trace-base
+  const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
+  // Lazy-load resources
+  const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
+
+  // Build exporter constructors from loaded modules
+  let otlpExporterCtor: OtlpExporterCtor | undefined;
+  let consoleExporterCtor: ConsoleExporterCtor | undefined;
+
+  if (options.exporter === 'otlp') {
+    otlpExporterCtor = (await loadOtlpExporter(
+      options.endpoint!,
+      options.headers,
+    )) as OtlpExporterCtor;
+  } else if (options.exporter === 'console') {
+    consoleExporterCtor = (await loadConsoleExporter()) as ConsoleExporterCtor;
+  }
+
+  // Build and return the TracerHost using the loaded modules
+  const buildOpts: BuildTracerHostOptions = {
+    sdkMod: sdkMod as OtelSdkModule,
+    resourcesMod: resourcesMod as OtelResourcesModule,
+    pluginOptions: options,
+  };
+  if (otlpExporterCtor) {
+    buildOpts.otlpExporterCtor = otlpExporterCtor;
+  }
+  if (consoleExporterCtor) {
+    buildOpts.consoleExporterCtor = consoleExporterCtor;
+  }
+  return buildTracerHost(buildOpts);
 }
