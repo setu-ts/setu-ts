@@ -1,3 +1,4 @@
+// deno-lint-ignore-file require-await
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES, none, ok, PLUGIN_PRIORITY, some } from '../../src/index.ts';
@@ -8,6 +9,14 @@ import type {
   ScheduleOptions,
   SchedulerBackoff,
   SchedulerJobHandler,
+} from '../../src/index.ts';
+import type {
+  ISpan,
+  ITelemetryService,
+  SpanAttributeValue,
+  SpanKind,
+  SpanOptions,
+  SpanStatus,
 } from '../../src/index.ts';
 
 describe('@hono-enterprise/common barrel', () => {
@@ -40,5 +49,39 @@ describe('@hono-enterprise/common barrel', () => {
 
   it('should have SCHEDULER capability token', () => {
     expect(CAPABILITIES.SCHEDULER).toBe('scheduler');
+  });
+
+  it('should export telemetry types', () => {
+    // Compile-time verification that telemetry types resolve from barrel
+    const _status: SpanStatus = 'ok';
+    const _kind: SpanKind = 'internal';
+    const _attr: SpanAttributeValue = 'value';
+    const _opts: SpanOptions = { kind: 'server' };
+    const _span: ISpan = {
+      setAttribute: () => _span,
+      setAttributes: () => _span,
+      setStatus: () => {},
+      recordException: () => {},
+      end: () => {},
+      spanContext: () => ({ traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' }),
+    };
+    const _fakeSpan: ISpan = {
+      setAttribute: () => _fakeSpan,
+      setAttributes: () => _fakeSpan,
+      setStatus: () => {},
+      recordException: () => {},
+      end: () => {},
+      spanContext: () => ({ traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' }),
+    };
+    const _service: ITelemetryService = {
+      withSpan: async <T>(_name: string, fn: (span: ISpan) => Promise<T>): Promise<T> =>
+        fn(_fakeSpan),
+    };
+    expect(_status).toBe('ok');
+    expect(_kind).toBe('internal');
+    expect(_attr).toBe('value');
+    expect(_opts.kind).toBe('server');
+    expect(_span).toBeDefined();
+    expect(_service).toBeDefined();
   });
 });

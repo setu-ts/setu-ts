@@ -1,5 +1,16 @@
 {
   "name": "@hono-enterprise/telemetry-plugin",
   "version": "0.1.0",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "@hono-enterprise/common": "../common/src/index.ts"
+  },
+  "tests": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "net": true
+    }
+  }
 }

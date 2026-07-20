@@ -218,7 +218,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 23** (`packages/runtime` — runtime serve on Hono + Cloudflare Workers: replaces M41
   socket adapters with Hono's `fetch` entry, changes `IHttpAdapter` to
   `setHandler`/`fetch`/`listen`/`close`) — complete (PR #48)
-- **Next milestone** — **Milestone 24** (telemetry plugin — OpenTelemetry distributed tracing)
+- **Milestone 24** (`packages/telemetry-plugin` — TelemetryPlugin registering `ITelemetryService`
+  under `CAPABILITIES.TELEMETRY`; `TelemetryService`/`NoopTelemetryService`; request-span middleware
+  at priority 30 with W3C `traceparent` propagation; lazy OTel SDK import via `npm:` specifiers;
+  `ConsoleSpanExporter` and `OTLPTraceExporter` loaders; `TELEMETRY_CONTEXT_OPAQUE` symbol exported
+  from `common`; `TracerHost` injectable seam) — complete (PR #49)
+- **Next milestone** — **Milestone 24b** (`packages/telemetry-plugin` — auto-instrumentation:
+  runtime-gated `http`/fetch/ioredis/amqplib/kafkajs instrumentation behind the M24 `TracerHost`
+  seam; defines the public per-instrumentation `instrumentations` option (not a bare `string[]`)
+  that M24 shipped no placeholder for; adds `BatchSpanProcessor` as a `spanProcessor` choice — see
+  ROADMAP §Milestone 24b). Then **Milestone 25** (secrets plugin — secret management with KMS/Vault
+  integration).
 
 ## Verification (run before declaring any work done)
 

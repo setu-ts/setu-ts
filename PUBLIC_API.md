@@ -2519,31 +2519,68 @@ http_request_duration_seconds_bucket{le="0.5"} 150
 
 ## Telemetry
 
-Provides OpenTelemetry distributed tracing.
+Provides OpenTelemetry distributed tracing. The `TelemetryPlugin` registers an `ITelemetryService`
+under `CAPABILITIES.TELEMETRY` (`'telemetry'`), exposing manual span creation via `withSpan` plus a
+request-span middleware at priority 30 (inside metrics at 20, outside auth at 300) that wraps every
+inbound HTTP request in a server span with W3C `traceparent`/`tracestate` propagation.
+
+The OpenTelemetry SDK is a **heavy optional dependency**: the plugin lazy-loads
+`@opentelemetry/sdk-trace-base` and an exporter via dynamic `npm:` imports, failing with a clear
+error when the package is absent. A `NoopTelemetryService` is the default when no exporter is
+configured, so the plugin always registers a usable service with zero npm deps in that mode.
+
+An injectable `tracerProviderFactory` option lets tests (and consumers with a pre-built provider)
+bypass the lazy import entirely.
+
+> **Auto-instrumentation** is deferred to **M24b**. M24 ships manual spans + the request-span
+> middleware only and accepts **no** `instrumentations` option — M24b introduces the option (and its
+> shape) when it lands the runtime-gated instrumentation packages. See ROADMAP.md §Milestone 24b.
+
+### Options
+
+| Option                  | Type                                      | Required        | Description                                        |
+| ----------------------- | ----------------------------------------- | --------------- | -------------------------------------------------- |
+| `serviceName`           | `string`                                  | Yes (real mode) | Service name reported to the exporter              |
+| `serviceVersion`        | `string`                                  | No              | Service version (default: `'1.0.0'`)               |
+| `exporter`              | `'otlp' \| 'console'`                     | No              | Exporter kind; absent = noop mode                  |
+| `endpoint`              | `string`                                  | Yes (otlp)      | OTLP HTTP endpoint URL                             |
+| `headers`               | `Record<string, string>`                  | No              | Optional OTLP HTTP headers                         |
+| `sampling`              | `{ type: 'traceidratio'; ratio: number }` | No              | Sampling config (default ratio: 1.0)               |
+| `tracerProviderFactory` | `() => Promise<TracerHost>`               | No              | Injectable factory to bypass lazy import           |
+| `middleware`            | `boolean`                                 | No              | Register request-span middleware (default: `true`) |
 
 ### Registration
 
 ```typescript
 import { TelemetryPlugin } from '@hono-enterprise/telemetry-plugin';
 
+// Noop mode (zero dependencies)
+app.register(TelemetryPlugin({ serviceName: 'my-service' }));
+
+// Real mode with console exporter
 app.register(TelemetryPlugin({
   serviceName: 'my-service',
   serviceVersion: '1.0.0',
+  exporter: 'console',
+}));
+
+// Real mode with OTLP exporter
+app.register(TelemetryPlugin({
+  serviceName: 'my-service',
   exporter: 'otlp',
   endpoint: config.get('OTLP_ENDPOINT'),
-  instrumentations: ['http', 'database', 'queue'],
-  sampling: {
-    type: 'traceidratio',
-    ratio: 0.1,
-  },
+  sampling: { type: 'traceidratio', ratio: 0.1 },
 }));
 ```
 
 ### Manual Spans
 
 ```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ITelemetryService } from '@hono-enterprise/common';
+
 app.router.post('/orders', async (ctx) => {
-  const telemetry = ctx.services.get<ITelemetryService>('telemetry');
+  const telemetry = ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY);
 
   const order = await telemetry.withSpan('create-order', async (span) => {
     span.setAttribute('customerId', ctx.request.body.customerId);
@@ -2560,6 +2597,49 @@ app.router.post('/orders', async (ctx) => {
   return ctx.response.status(201).json(order);
 });
 ```
+
+### Request-Span Middleware
+
+The plugin registers `telemetryMiddleware` at priority 30 by default. It:
+
+1. Extracts `traceparent`/`tracestate` from `ctx.request.headers` (W3C Trace Context)
+2. Starts a server span named `<METHOD> <path>`
+3. Stores the span on `ctx.state` under `TELEMETRY_SPAN_KEY` (`'__he_telemetry_span'`)
+4. Sets HTTP attributes (`http.method`, `http.route`, `http.status_code`)
+5. Injects `traceparent` into the response headers
+
+Downstream handlers can read the active span via:
+
+```typescript
+import { TELEMETRY_SPAN_KEY } from '@hono-enterprise/telemetry-plugin';
+import type { ISpan } from '@hono-enterprise/common';
+
+const activeSpan = ctx.state.get(TELEMETRY_SPAN_KEY) as ISpan | undefined;
+```
+
+### Contract Types
+
+The telemetry contract is framework-owned and exported from `@hono-enterprise/common` (zero
+dependencies — importable without the OTel SDK installed). The telemetry-plugin translates these to
+OTel types at its implementation seam.
+
+| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                             |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`.                                                  |
+| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                         |
+| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                    |
+| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                   |
+| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                   |
+| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                    |
+| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly (there is no implicit parent linking — see note below). |
+| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                        |
+| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                        |
+
+> **No implicit parent/child linking.** The framework registers no OTel `ContextManager` (the only
+> runtime-agnostic option depends on `node:async_hooks`), so a `withSpan` nested inside another does
+> not auto-parent. To create a child span, pass `parentContext` (or the extracted context) on
+> `SpanOptions`. The request-span middleware always passes the incoming `traceparent` as the parent
+> explicitly, so cross-process propagation (incoming header → server span) works out of the box.
 
 ---
 
