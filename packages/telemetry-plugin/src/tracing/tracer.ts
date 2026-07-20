@@ -11,16 +11,35 @@ import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 
 // OTel API handle — populated by loadOtelTracerProvider when the SDK is loaded.
-let _otelApi: unknown;
+let _otelApi: OtelApi | null = null;
+
+/**
+ * Minimal interface for the @opentelemetry/api module — covers the methods
+ * actually used by buildTracerHost's startSpan() parent-context path.
+ *
+ * @internal
+ */
+interface OtelApi {
+  trace: {
+    wrapSpanContext(
+      ctx: { traceId: string; spanId: string; traceFlags: number; isRemote?: boolean },
+    ): unknown;
+    setSpan(context: unknown, span: unknown): unknown;
+    getSpan(context: unknown): unknown | undefined;
+    setGlobalTracerProvider(provider: unknown): void;
+  };
+  context: {
+    active(): unknown;
+  };
+}
 
 // Public setter called by loadOtelTracerProvider after importing @opentelemetry/api.
-export function setOtelApi(api: unknown): void {
+export function setOtelApi(api: OtelApi): void {
   _otelApi = api;
 }
 
-// deno-lint-ignore no-explicit-any
-function getOtelApi(): any {
-  return _otelApi || null;
+function getOtelApi(): OtelApi | null {
+  return _otelApi;
 }
 
 // --- W3C traceparent propagation helpers ---
@@ -379,9 +398,9 @@ export async function loadOtelTracerProvider(
   // Lazy-load resources
   const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
   // Lazy-load the OTel API (transitive dep of sdk-trace-base) for span parenting.
-  // deno-lint-ignore no-explicit-any
-  const apiMod = await import('npm:@opentelemetry/api@^1.9.0') as any;
-  setOtelApi(apiMod);
+  // F2 fix: typed import — no `as any`, no lint-ignore.
+  const apiMod = await import('npm:@opentelemetry/api@^1.9.0');
+  setOtelApi(apiMod as OtelApi);
 
   // Build exporter constructors from loaded modules
   let otlpExporterCtor: OtlpExporterCtor | undefined;

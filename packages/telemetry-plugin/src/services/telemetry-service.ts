@@ -36,23 +36,6 @@ interface SpanHandle {
  *
  * @internal
  */
-/**
- * Extracts parentContext from a parentSpan bridge (backward compat).
- *
- * @internal
- */
-function extractParentContextFromBridge(
-  startSpanOptions: { parentContext?: TelemetryContext },
-  parentSpan: ISpan | undefined,
-): void {
-  if (parentSpan) {
-    const ctx = (parentSpan as { _context?: TelemetryContext })._context;
-    if (ctx) {
-      startSpanOptions.parentContext = ctx;
-    }
-  }
-}
-
 const SPAN_KIND_MAP: Record<SpanKind, number> = {
   internal: 0,
   server: 2,
@@ -109,8 +92,9 @@ class OtelSpan implements ISpan {
     if (typeof this.#span.spanContext === 'function') {
       return this.#span.spanContext();
     }
-    // Fallback: return a minimal context (noop-like).
-    return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+    // Fallback: return empty strings (not truthy all-zeros) so the
+    // middleware's falsy check in telemetry-middleware.ts skips injection.
+    return { traceId: '', spanId: '', traceFlags: '' };
   }
 }
 
@@ -142,12 +126,9 @@ export class TelemetryService implements ITelemetryService {
     if (options?.attributes) {
       startSpanOptions.attributes = options.attributes;
     }
-    // N4 fix: use parentContext directly from SpanOptions (no bridge).
+    // Use parentContext directly from SpanOptions (F5: no bridge).
     if (options?.parentContext) {
       startSpanOptions.parentContext = options.parentContext;
-    } else {
-      // Fall back to parentSpan bridge for backward compat (existing tests).
-      extractParentContextFromBridge(startSpanOptions, options?.parentSpan);
     }
     const span = this.#tracerHost.startSpan(name, startSpanOptions) as SpanHandle;
     const heSpan = new OtelSpan(span);
@@ -210,12 +191,16 @@ const NOOP_SPAN: NoopSpan = new NoopSpan();
  * @since 0.24.0
  */
 export class NoopTelemetryService implements ITelemetryService {
-  // deno-lint-ignore require-await
   async withSpan<T>(
     _name: string,
     fn: (span: ISpan) => Promise<T>,
     _options?: SpanOptions,
   ): Promise<T> {
-    return fn(NOOP_SPAN);
+    try {
+      return await fn(NOOP_SPAN);
+    } finally {
+      // F1 fix: NoopTelemetryService now owns span ending (exactly once).
+      NOOP_SPAN.end();
+    }
   }
 }

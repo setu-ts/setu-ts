@@ -14,7 +14,6 @@ import type {
   ITelemetryService,
   MiddlewareFunction,
   NextFunction,
-  SpanContext,
   TelemetryContext,
 } from '@hono-enterprise/common';
 import type { TracerHost } from '../interfaces/index.ts';
@@ -47,15 +46,12 @@ export function telemetryMiddleware(
     );
 
     // N4 fix: pass parentContext directly (no bridge).
-    let serverSpanContext: SpanContext | null = null;
-    await service.withSpan(
+    // Capture the span's context synchronously by returning it from withSpan.
+    const spanContext = await service.withSpan(
       spanName,
       async (span) => {
         // Store the span on ctx.state for downstream consumers.
         ctx.state.set(TELEMETRY_SPAN_KEY, span);
-
-        // Capture the span's own context for the response header (N2 fix).
-        serverSpanContext = span.spanContext();
 
         // Set HTTP attributes.
         span.setAttribute('http.method', request.method);
@@ -80,22 +76,22 @@ export function telemetryMiddleware(
             span.recordException(error);
           }
           throw error;
-        } finally {
-          span.end();
         }
+        // F1 fix: withSpan owns span.end() exactly once — no redundant end() here.
+        // Return the span's context for response header injection.
+        return span.spanContext();
       },
       { kind: 'server', parentContext },
     );
 
     // N2 fix: inject response traceparent from the span's own traceId/spanId/traceFlags.
     // Per plan §3.5, noop skips injection (empty traceId/spanId).
-    // deno-lint-ignore no-explicit-any
-    const sc: any = serverSpanContext;
-    if (sc && sc.traceId && sc.spanId) {
-      const flags = sc.traceFlags ?? '01';
+    // F3 fix: no redundant `: any` cast — use direct field access on typed SpanContext.
+    if (spanContext && spanContext.traceId && spanContext.spanId) {
+      const flags = spanContext.traceFlags ?? '01';
       ctx.response.header(
         'traceparent',
-        `00-${sc.traceId}-${sc.spanId}-${flags}`,
+        `00-${spanContext.traceId}-${spanContext.spanId}-${flags}`,
       );
     }
   };

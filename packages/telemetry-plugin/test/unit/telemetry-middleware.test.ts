@@ -8,8 +8,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { telemetryMiddleware } from '../../src/middleware/telemetry-middleware.ts';
 import type { ISpan, ITelemetryService, NextFunction } from '@hono-enterprise/common';
+import { TELEMETRY_CONTEXT_OPAQUE } from '@hono-enterprise/common';
 import { TELEMETRY_SPAN_KEY } from '../../src/interfaces/index.ts';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
+import { TelemetryService } from '../../src/services/telemetry-service.ts';
 
 describe('telemetryMiddleware', () => {
   interface RecordedSpan {
@@ -73,6 +75,8 @@ describe('telemetryMiddleware', () => {
         try {
           return await fn(fakeSpan as ISpan);
         } finally {
+          // Mirror TelemetryService.withSpan: own span.end() exactly once.
+          fakeSpan.end();
           recordedSpans.push({
             name,
             attributes: { ...fakeSpan._attrs },
@@ -120,7 +124,8 @@ describe('telemetryMiddleware', () => {
       params: {},
       query: {},
       state,
-      startTime: Date.now(),
+      // F6 fix: monotonic-style value (matches runtime.hrtime() contract, not Date.now()).
+      startTime: performance.now(),
     };
   }
 
@@ -266,6 +271,77 @@ describe('telemetryMiddleware', () => {
     expect(errorThrown).toBe(true);
     expect(recordedSpans).toHaveLength(1);
     expect(recordedSpans[0]!.status).toBe('error');
+  });
+
+  // --- F1 fix: exactly-once end() test ---
+
+  /**
+   * F1 regression test: asserts that withSpan ends the span EXACTLY ONCE.
+   *
+   * The real TelemetryService.withSpan owns span.end() in its finally block.
+   * If the middleware ALSO called span.end(), the counter would be 2.
+   * This is the test that would have caught the double-end bug.
+   */
+  it('should call end() EXACTLY ONCE through real TelemetryService path (F1 regression)', async () => {
+    // Count end() invocations on the underlying span handle.
+    let endCount = 0;
+
+    const fakeSpan = {
+      _attrs: {} as Record<string, unknown>,
+      _status: null as string | null,
+      _ended: false as boolean,
+      _traceId: '0'.repeat(32),
+      _spanId: '0'.repeat(16),
+      setAttribute(key: string, value: unknown) {
+        this._attrs[key] = value;
+        return this;
+      },
+      setAttributes(attrs: Record<string, unknown>) {
+        for (const [k, v] of Object.entries(attrs)) {
+          this._attrs[k] = v;
+        }
+        return this;
+      },
+      setStatus(status: string) {
+        this._status = status;
+      },
+      recordException(_error: Error) {
+        // no-op
+      },
+      end() {
+        endCount++;
+        this._ended = true;
+      },
+      spanContext() {
+        return { traceId: this._traceId, spanId: this._spanId, traceFlags: '01' };
+      },
+    };
+
+    const tracerHost = {
+      startSpan() {
+        return fakeSpan;
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
+    // Use the REAL TelemetryService (not a fake).
+    const service = new TelemetryService(tracerHost);
+    const middlewareFn = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/exact-once');
+    await middlewareFn(ctx as never, async () => {});
+
+    // F1 assertion: end() must be called EXACTLY ONCE by withSpan's finally.
+    // If the middleware also called end(), endCount would be 2.
+    expect(endCount).toBe(1);
+    expect(fakeSpan._ended).toBe(true);
   });
 
   // --- Propagation tests (C1, C2, R2) ---
