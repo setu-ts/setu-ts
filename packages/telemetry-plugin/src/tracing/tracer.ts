@@ -389,10 +389,7 @@ export async function loadOtelTracerProvider(
   let consoleExporterCtor: ConsoleExporterCtor | undefined;
 
   if (options.exporter === 'otlp') {
-    otlpExporterCtor = (await loadOtlpExporter(
-      options.endpoint!,
-      options.headers,
-    )) as OtlpExporterCtor;
+    otlpExporterCtor = (await loadOtlpExporter(options.endpoint!)) as OtlpExporterCtor;
   } else if (options.exporter === 'console') {
     consoleExporterCtor = (await loadConsoleExporter()) as ConsoleExporterCtor;
   }

@@ -11,6 +11,15 @@ import { createNoopTracerHost, TelemetryPlugin } from '../../src/plugin/telemetr
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IPluginContext, ITelemetryService } from '@hono-enterprise/common';
 
+/** Whether `npm:` imports are available in this environment. */
+function canImportNpm(): boolean {
+  try {
+    return Deno.permissions.querySync({ name: 'import' }).state === 'granted';
+  } catch {
+    return false;
+  }
+}
+
 describe('TelemetryPlugin', () => {
   it('should return an IPlugin with correct metadata', () => {
     const plugin = TelemetryPlugin();
@@ -54,33 +63,34 @@ describe('TelemetryPlugin', () => {
     expect(mock.middlewareAdded).toHaveLength(0);
   });
 
-  it('should take the loadOtelTracerProvider import path when exporter is console without tracerProviderFactory', async () => {
+  it({
+    name: 'should take the real loadOtelTracerProvider path (console) and register the service',
+    ignore: !canImportNpm(),
+  }, async () => {
+    // Guarded (not swallowed): with imports available this drives the real
+    // lazy-load path in loadOtelTracerProvider and must register a usable
+    // service under the telemetry token — a failure here is a real failure.
     const mock = createMockContext();
     const plugin = TelemetryPlugin({
       serviceName: 'test',
       exporter: 'console',
     });
-    try {
-      await plugin.register(mock.ctx);
-    } catch {
-      // OTel SDK not installed — the import path at lines 107-110 is taken
-      // (the lazy import of ../tracing/tracer.ts fails), but we verify the
-      // code path is exercised by the absence of a "factory not called" error.
-    }
+    await plugin.register(mock.ctx);
+
+    expect(mock.registeredTokens).toContain(CAPABILITIES.TELEMETRY);
+    expect(mock.shutdownHooks).toHaveLength(1);
   });
 
-  it('should throw when exporter is otlp but endpoint is missing', async () => {
+  it('should reject when exporter is otlp but endpoint is missing', async () => {
     const mock = createMockContext();
     const plugin = TelemetryPlugin({
       serviceName: 'test',
       exporter: 'otlp',
     });
-    try {
-      await plugin.register(mock.ctx);
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain('endpoint');
-    }
+    // rejects.toThrow so a no-throw regression FAILS (the old catch-only form
+    // passed silently when register did not throw). Validation runs before any
+    // npm import, so this is deterministic regardless of import availability.
+    await expect(plugin.register(mock.ctx)).rejects.toThrow('endpoint');
   });
 
   it('should call tracerProviderFactory when provided (real mode)', async () => {

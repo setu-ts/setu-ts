@@ -8,8 +8,11 @@
 /**
  * Loads the OTLP trace exporter via dynamic import.
  *
- * @param url - The OTLP endpoint URL
- * @param headers - Optional headers to include in OTLP requests
+ * Only returns the exporter constructor; the `url` and `headers` are applied
+ * when the constructor is invoked in {@link buildTracerHost}. The `url` is
+ * required here purely so the loader can fail fast on a misconfigured plugin.
+ *
+ * @param url - The OTLP endpoint URL (validated; not applied here)
  * @returns The `OTLPTraceExporter` constructor
  * @throws {Error} If the npm package is not installed or `url` is missing
  *
@@ -20,7 +23,6 @@
  */
 export async function loadOtlpExporter(
   url: string,
-  _headers?: Record<string, string>,
 ): Promise<new (opts?: { url?: string; headers?: Record<string, string> }) => unknown> {
   if (!url) {
     throw new Error('OTLP exporter requires a `url` option');
