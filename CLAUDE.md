@@ -222,7 +222,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   under `CAPABILITIES.TELEMETRY`; `TelemetryService`/`NoopTelemetryService`; request-span middleware
   at priority 30 with W3C `traceparent` propagation; lazy OTel SDK import via `npm:` specifiers;
   `ConsoleSpanExporter` and `OTLPTraceExporter` loaders; `TELEMETRY_CONTEXT_OPAQUE` symbol exported
-  from `common`; `TracerHost` injectable seam) — complete (PR pending)
+  from `common`; `TracerHost` injectable seam) — complete (PR #49)
 - **Next milestone** — **Milestone 25** (secrets plugin — secret management with KMS/Vault
   integration)
 
