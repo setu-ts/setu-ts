@@ -14,6 +14,7 @@ import type {
   ITelemetryService,
   MiddlewareFunction,
   NextFunction,
+  SpanContext,
   TelemetryContext,
 } from '@hono-enterprise/common';
 import type { TracerHost } from '../interfaces/index.ts';
@@ -40,33 +41,23 @@ export function telemetryMiddleware(
     const request = ctx.request;
     const spanName = `${request.method} ${request.path}`;
 
-    // C4 fix: extract incoming parent context via TracerHost (not local parse)
+    // Extract incoming parent context via TracerHost.
     const parentContext: TelemetryContext = tracerHost.extractContext(
       request.headers,
     );
 
-    // C1 fix: pass parentContext into withSpan via SpanOptions.parentSpan.
-    // The TelemetryService translates parentSpan into parentContext on startSpan.
-    const bridge: ISpanBridge = {
-      _context: parentContext,
-      setAttribute() {
-        return bridge;
-      },
-      setAttributes() {
-        return bridge;
-      },
-      setStatus() {/* no-op for bridge */},
-      recordException() {/* no-op for bridge */},
-      end() {/* no-op for bridge */},
-    };
-
+    // N4 fix: pass parentContext directly (no bridge).
+    let serverSpanContext: SpanContext | null = null;
     await service.withSpan(
       spanName,
       async (span) => {
-        // Store the span on ctx.state for downstream consumers
+        // Store the span on ctx.state for downstream consumers.
         ctx.state.set(TELEMETRY_SPAN_KEY, span);
 
-        // Set HTTP attributes
+        // Capture the span's own context for the response header (N2 fix).
+        serverSpanContext = span.spanContext();
+
+        // Set HTTP attributes.
         span.setAttribute('http.method', request.method);
         span.setAttribute('http.url', request.url);
         span.setAttribute('http.route', request.path);
@@ -74,7 +65,7 @@ export function telemetryMiddleware(
         try {
           await next();
 
-          // After next(), set the status code from the response snapshot
+          // After next(), set the status code from the response snapshot.
           const snapshot = ctx.response.snapshot();
           span.setAttribute('http.status_code', snapshot.status);
 
@@ -93,53 +84,19 @@ export function telemetryMiddleware(
           span.end();
         }
       },
-      { kind: 'server', parentSpan: bridge },
+      { kind: 'server', parentContext },
     );
 
-    // C2+R2 fix: inject response traceparent via TracerHost.injectContext.
-    // Build a context carrying the span's own traceId/spanId.
-    // When parentContext carried a valid incoming trace, the span inherited
-    // that traceId. We generate a fresh spanId to represent the server span.
-    const spanContext: TelemetryContext = {
-      _opaque: parentContext._opaque,
-      traceId: parentContext.traceId ?? generateHexId(32),
-      spanId: generateHexId(16),
-      traceFlags: parentContext.traceFlags ?? '01',
-    };
-    const responseHeaders = tracerHost.injectContext(spanContext);
-    if (responseHeaders.traceparent) {
-      ctx.response.header('traceparent', responseHeaders.traceparent);
+    // N2 fix: inject response traceparent from the span's own traceId/spanId/traceFlags.
+    // Per plan §3.5, noop skips injection (empty traceId/spanId).
+    // deno-lint-ignore no-explicit-any
+    const sc: any = serverSpanContext;
+    if (sc && sc.traceId && sc.spanId) {
+      const flags = sc.traceFlags ?? '01';
+      ctx.response.header(
+        'traceparent',
+        `00-${sc.traceId}-${sc.spanId}-${flags}`,
+      );
     }
   };
-}
-
-/**
- * Bridge object that wraps a TelemetryContext as an ISpan for the parentSpan option.
- *
- * @internal
- */
-interface ISpanBridge {
-  _context: TelemetryContext;
-  setAttribute(): ISpanBridge;
-  setAttributes(): ISpanBridge;
-  setStatus(): void;
-  recordException(): void;
-  end(): void;
-}
-
-/**
- * Generates a lowercase hex string of the given length.
- *
- * @internal
- */
-function generateHexId(length: number): string {
-  const chars = '0123456789abcdef';
-  const bytes = new Uint8Array(length / 2);
-  crypto.getRandomValues(bytes);
-  let result = '';
-  for (const byte of bytes) {
-    result += chars[(byte >> 4) & 0x0f];
-    result += chars[byte & 0x0f];
-  }
-  return result;
 }

@@ -70,6 +70,9 @@ describe('telemetry contract types', () => {
       setStatus(_status: SpanStatus): void {/* no-op */}
       recordException(_error: Error): void {/* no-op */}
       end(): void {/* no-op */}
+      spanContext() {
+        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+      }
     }
 
     const fakeService: ITelemetryService = {
@@ -98,6 +101,9 @@ describe('telemetry contract types', () => {
       setStatus(_status: SpanStatus): void {/* no-op */}
       recordException(_error: Error): void {/* no-op */}
       end(): void {/* no-op */}
+      spanContext() {
+        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+      }
     }
 
     const fakeSpan = new TestSpan();

@@ -177,6 +177,7 @@ export type {
   ISpan,
   ITelemetryService,
   SpanAttributeValue,
+  SpanContext,
   SpanKind,
   SpanOptions,
   SpanStatus,

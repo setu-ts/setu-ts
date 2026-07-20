@@ -8,6 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { NoopTelemetryService, TelemetryService } from '../../src/services/telemetry-service.ts';
 import type { ISpan, ITelemetryService, SpanOptions } from '@hono-enterprise/common';
+import { TELEMETRY_CONTEXT_OPAQUE } from '@hono-enterprise/common';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
 
 describe('NoopTelemetryService', () => {
@@ -218,5 +219,185 @@ describe('TelemetryService', () => {
     expect(fakeHost.recordedCalls).toHaveLength(1);
     const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
     expect(callArgs?.attributes).toEqual({ 'http.method': 'GET', 'custom.tag': 'value' });
+  });
+
+  // N4 backward-compat: test the parentSpan bridge fallback path with _context.
+  it('should fall back to parentSpan bridge when parentContext is not set', async () => {
+    const fakeHost = createFakeTracerHost();
+    const service = new TelemetryService(fakeHost);
+
+    // Create a fake ISpan bridge carrying a TelemetryContext via _context.
+    const bridgeSpan = {
+      setAttribute() {
+        return bridgeSpan;
+      },
+      setAttributes() {
+        return bridgeSpan;
+      },
+      setStatus() {
+        /* no-op */
+      },
+      recordException() {
+        /* no-op */
+      },
+      end() {
+        /* no-op */
+      },
+      spanContext() {
+        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+      },
+    } as ISpan & { _context?: { traceId: string; spanId: string; traceFlags: string } };
+    bridgeSpan._context = {
+      traceId: 'abc123',
+      spanId: 'def456',
+      traceFlags: '01',
+    };
+
+    await service.withSpan(
+      'bridge-span',
+      () => Promise.resolve(),
+      { parentSpan: bridgeSpan },
+    );
+
+    // The bridge's _context should be extracted and passed as parentContext.
+    expect(fakeHost.recordedCalls).toHaveLength(1);
+    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
+    expect(callArgs?.parentContext).toEqual({
+      traceId: 'abc123',
+      spanId: 'def456',
+      traceFlags: '01',
+    });
+  });
+
+  // N4: when both parentContext and parentSpan are set, parentContext takes precedence.
+  it('should prefer parentContext over parentSpan when both are set', async () => {
+    const fakeHost = createFakeTracerHost();
+    const service = new TelemetryService(fakeHost);
+
+    const bridgeSpan = {
+      setAttribute() {
+        return bridgeSpan;
+      },
+      setAttributes() {
+        return bridgeSpan;
+      },
+      setStatus() {
+        /* no-op */
+      },
+      recordException() {
+        /* no-op */
+      },
+      end() {
+        /* no-op */
+      },
+      spanContext() {
+        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+      },
+    } as ISpan & { _context?: unknown };
+    bridgeSpan._context = { traceId: 'bridge-id', spanId: 'bridge-span' } as never;
+
+    await service.withSpan(
+      'both-contexts',
+      () => Promise.resolve(),
+      {
+        parentContext: {
+          _opaque: TELEMETRY_CONTEXT_OPAQUE,
+          traceId: 'direct-id',
+          spanId: 'direct-span',
+        },
+        parentSpan: bridgeSpan,
+      },
+    );
+
+    // parentContext should win; bridge's _context should NOT be used.
+    expect(fakeHost.recordedCalls).toHaveLength(1);
+    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
+    expect(callArgs?.parentContext).toEqual({
+      _opaque: TELEMETRY_CONTEXT_OPAQUE,
+      traceId: 'direct-id',
+      spanId: 'direct-span',
+    });
+  });
+
+  // N4 backward-compat: test the parentSpan bridge fallback path when _context is falsy.
+  it('should skip parentContext when parentSpan bridge has no _context', async () => {
+    const fakeHost = createFakeTracerHost();
+    const service = new TelemetryService(fakeHost);
+
+    // Create a fake ISpan bridge WITHOUT _context.
+    const bridgeSpan = {
+      setAttribute() {
+        return bridgeSpan;
+      },
+      setAttributes() {
+        return bridgeSpan;
+      },
+      setStatus() {
+        /* no-op */
+      },
+      recordException() {
+        /* no-op */
+      },
+      end() {
+        /* no-op */
+      },
+      spanContext() {
+        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+      },
+    } as ISpan & { _context?: unknown };
+    // Explicitly do NOT set _context.
+
+    await service.withSpan(
+      'bridge-no-context',
+      () => Promise.resolve(),
+      { parentSpan: bridgeSpan },
+    );
+
+    // The bridge's _context is undefined, so startSpanOptions.parentContext should NOT be set.
+    expect(fakeHost.recordedCalls).toHaveLength(1);
+    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
+    expect(callArgs?.parentContext).toBeUndefined();
+  });
+
+  // Exercise the `else if (options?.parentSpan)` path when parentContext is falsy.
+  it('should use parentSpan bridge when only parentSpan is provided (no parentContext)', async () => {
+    const fakeHost = createFakeTracerHost();
+    const service = new TelemetryService(fakeHost);
+
+    const bridgeSpan = {
+      setAttribute() {
+        return bridgeSpan;
+      },
+      setAttributes() {
+        return bridgeSpan;
+      },
+      setStatus() {
+        /* no-op */
+      },
+      recordException() {
+        /* no-op */
+      },
+      end() {
+        /* no-op */
+      },
+      spanContext() {
+        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+      },
+    } as ISpan & { _context?: { traceId: string; spanId: string } };
+    bridgeSpan._context = { traceId: 'fallback-trace', spanId: 'fallback-span' };
+
+    // Only parentSpan is set — no parentContext.
+    await service.withSpan(
+      'parentSpan-only',
+      () => Promise.resolve(),
+      { parentSpan: bridgeSpan },
+    );
+
+    expect(fakeHost.recordedCalls).toHaveLength(1);
+    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
+    expect(callArgs?.parentContext).toEqual({
+      traceId: 'fallback-trace',
+      spanId: 'fallback-span',
+    });
   });
 });

@@ -63,6 +63,7 @@ describe('@hono-enterprise/common barrel', () => {
       setStatus: () => {},
       recordException: () => {},
       end: () => {},
+      spanContext: () => ({ traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' }),
     };
     const _fakeSpan: ISpan = {
       setAttribute: () => _fakeSpan,
@@ -70,6 +71,7 @@ describe('@hono-enterprise/common barrel', () => {
       setStatus: () => {},
       recordException: () => {},
       end: () => {},
+      spanContext: () => ({ traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' }),
     };
     const _service: ITelemetryService = {
       withSpan: async <T>(_name: string, fn: (span: ISpan) => Promise<T>): Promise<T> =>

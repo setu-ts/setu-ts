@@ -4,6 +4,7 @@
  * @module
  */
 import type { TracerHost } from '../../src/interfaces/index.ts';
+import type { SpanContext } from '@hono-enterprise/common';
 import {
   type ISpan,
   type SpanAttributeValue,
@@ -53,6 +54,10 @@ export function createFakeTracerHost(): FakeTracerHost {
     ) {
       recordedCalls.push({ type: 'startSpan', args: [name, options] });
 
+      // Generate a unique spanId for this fake span.
+      const fakeSpanId = generateHexId(16);
+      const fakeTraceId = options?.parentContext?.traceId ?? generateHexId(32);
+
       const span: ISpan & { _recorded: RecordedSpan } = {
         _recorded: {
           name,
@@ -79,6 +84,9 @@ export function createFakeTracerHost(): FakeTracerHost {
         },
         end() {
           this._recorded.ended = true;
+        },
+        spanContext(): SpanContext {
+          return { traceId: fakeTraceId, spanId: fakeSpanId, traceFlags: '01' };
         },
       };
 
@@ -123,6 +131,19 @@ export function createFakeTracerHost(): FakeTracerHost {
       return Promise.resolve();
     },
   };
+}
+
+/** Generates a random lowercase hex string. */
+function generateHexId(length: number): string {
+  const chars = '0123456789abcdef';
+  const bytes = new Uint8Array(length / 2);
+  crypto.getRandomValues(bytes);
+  let result = '';
+  for (const byte of bytes) {
+    result += chars[(byte >> 4) & 0x0f];
+    result += chars[byte & 0x0f];
+  }
+  return result;
 }
 
 export interface FakeTracerHost extends TracerHost {

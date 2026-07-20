@@ -9,6 +9,7 @@ import type {
   ISpan,
   ITelemetryService,
   SpanAttributeValue,
+  SpanContext,
   SpanKind,
   SpanOptions,
   SpanStatus,
@@ -27,6 +28,7 @@ interface SpanHandle {
   setStatus(status: SpanStatus): void;
   recordException(error: Error): void;
   end(): void;
+  spanContext?(): SpanContext;
 }
 
 /**
@@ -34,6 +36,23 @@ interface SpanHandle {
  *
  * @internal
  */
+/**
+ * Extracts parentContext from a parentSpan bridge (backward compat).
+ *
+ * @internal
+ */
+function extractParentContextFromBridge(
+  startSpanOptions: { parentContext?: TelemetryContext },
+  parentSpan: ISpan | undefined,
+): void {
+  if (parentSpan) {
+    const ctx = (parentSpan as { _context?: TelemetryContext })._context;
+    if (ctx) {
+      startSpanOptions.parentContext = ctx;
+    }
+  }
+}
+
 const SPAN_KIND_MAP: Record<SpanKind, number> = {
   internal: 0,
   server: 2,
@@ -85,6 +104,14 @@ class OtelSpan implements ISpan {
   end(): void {
     this.#span.end();
   }
+
+  spanContext(): SpanContext {
+    if (typeof this.#span.spanContext === 'function') {
+      return this.#span.spanContext();
+    }
+    // Fallback: return a minimal context (noop-like).
+    return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
+  }
 }
 
 /**
@@ -115,14 +142,12 @@ export class TelemetryService implements ITelemetryService {
     if (options?.attributes) {
       startSpanOptions.attributes = options.attributes;
     }
-    // C3 fix: consume SpanOptions.parentSpan and wire it as parentContext.
-    if (options?.parentSpan) {
-      const ctx = (options.parentSpan as unknown as {
-        _context?: TelemetryContext;
-      })._context;
-      if (ctx) {
-        startSpanOptions.parentContext = ctx;
-      }
+    // N4 fix: use parentContext directly from SpanOptions (no bridge).
+    if (options?.parentContext) {
+      startSpanOptions.parentContext = options.parentContext;
+    } else {
+      // Fall back to parentSpan bridge for backward compat (existing tests).
+      extractParentContextFromBridge(startSpanOptions, options?.parentSpan);
     }
     const span = this.#tracerHost.startSpan(name, startSpanOptions) as SpanHandle;
     const heSpan = new OtelSpan(span);
@@ -165,6 +190,11 @@ class NoopSpan implements ISpan {
 
   end(): void {
     // no-op
+  }
+
+  spanContext(): SpanContext {
+    // Noop spans have no real context — return null-like values.
+    return { traceId: '', spanId: '', traceFlags: '' };
   }
 }
 

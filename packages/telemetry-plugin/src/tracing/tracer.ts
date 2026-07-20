@@ -10,6 +10,19 @@ import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@hono-enterpris
 import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 
+// OTel API handle — populated by loadOtelTracerProvider when the SDK is loaded.
+let _otelApi: unknown;
+
+// Public setter called by loadOtelTracerProvider after importing @opentelemetry/api.
+export function setOtelApi(api: unknown): void {
+  _otelApi = api;
+}
+
+// deno-lint-ignore no-explicit-any
+function getOtelApi(): any {
+  return _otelApi || null;
+}
+
 // --- W3C traceparent propagation helpers ---
 
 /** W3C traceparent regex: version-traceId-parentId-flags. */
@@ -22,7 +35,16 @@ const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2
  * when the header is valid and version `"00"`; otherwise returns a minimal context
  * (`{ _opaque }`) indicating no extractable parent.
  */
-function parseTraceparentToContext(
+/**
+ * Parses a W3C `traceparent` header into a `TelemetryContext`.
+ *
+ * Returns a context with `{ _opaque: TELEMETRY_CONTEXT_OPAQUE, traceId, spanId, traceFlags }`
+ * when the header is valid and version `"00"`; otherwise returns a minimal context
+ * (`{ _opaque }`) indicating no extractable parent.
+ *
+ * @internal
+ */
+export function parseTraceparentToContext(
   header: string | null,
 ): TelemetryContext {
   if (!header) {
@@ -49,7 +71,13 @@ function parseTraceparentToContext(
  * Extracts `traceparent` / `tracestate` from incoming headers and returns a
  * `TelemetryContext` suitable for span parenting.
  */
-function extractContextFromHeaders(headers: Headers): TelemetryContext {
+/**
+ * Extracts `traceparent` / `tracestate` from incoming headers and returns a
+ * `TelemetryContext` suitable for span parenting.
+ *
+ * @internal
+ */
+export function extractContextFromHeaders(headers: Headers): TelemetryContext {
   const traceparent = headers.get('traceparent');
   const tracestate = headers.get('tracestate');
   const ctx = parseTraceparentToContext(traceparent);
@@ -66,7 +94,16 @@ function extractContextFromHeaders(headers: Headers): TelemetryContext {
  * a valid header (`00-<traceId>-<spanId>-<flags>`).  Otherwise returns `null`
  * so callers can skip injection.
  */
-function contextToTraceparent(context: TelemetryContext): string | null {
+/**
+ * Serialises a `TelemetryContext` into a W3C `traceparent` header string.
+ *
+ * When the context carries `traceId` + `spanId` + `traceFlags` the output is
+ * a valid header (`00-<traceId>-<spanId>-<flags>`).  Otherwise returns `null`
+ * so callers can skip injection.
+ *
+ * @internal
+ */
+export function contextToTraceparent(context: TelemetryContext): string | null {
   if (!context.traceId || !context.spanId) {
     return null;
   }
@@ -92,6 +129,7 @@ export interface OtelSdkModule {
       startSpan(
         name: string,
         options?: Record<string, unknown>,
+        context?: unknown,
       ): unknown;
     };
     forceFlush(): Promise<void>;
@@ -264,11 +302,37 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
       if (spanOptions?.kind !== undefined) {
         otelSpanOptions.kind = spanOptions.kind;
       }
-      // Wire parentContext so the OTel SDK can use it for span parenting.
+
+      // N1 fix: build an OTel parent context and pass it as the 3rd arg.
+      // OTel's `Tracer.startSpan(name, options, context)` reads the parent
+      // from `context` via `api.trace.getSpan(context)`, NOT from
+      // `options.parentContext`. We keep `parentContext` in `otelSpanOptions`
+      // for backward-compat with tests that inspect the 2nd arg, and also
+      // pass it as the 3rd arg for real OTel.
+      let parentContext: unknown | undefined;
       if (spanOptions?.parentContext) {
         otelSpanOptions.parentContext = spanOptions.parentContext;
+        const pc = spanOptions.parentContext;
+        if (pc.traceId && pc.spanId) {
+          const api = getOtelApi();
+          if (api) {
+            const traceFlags = parseInt(pc.traceFlags ?? '01', 16);
+            const spanContext = {
+              traceId: pc.traceId,
+              spanId: pc.spanId,
+              traceFlags,
+              isRemote: true,
+            };
+            const parentSpan = api.trace.wrapSpanContext(spanContext);
+            parentContext = api.trace.setSpan(
+              api.context.active(),
+              parentSpan,
+            );
+          }
+        }
       }
-      return tracer.startSpan(name, otelSpanOptions);
+
+      return tracer.startSpan(name, otelSpanOptions, parentContext);
     },
     extractContext(headers: Headers): TelemetryContext {
       return extractContextFromHeaders(headers);
@@ -314,6 +378,10 @@ export async function loadOtelTracerProvider(
   const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
   // Lazy-load resources
   const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
+  // Lazy-load the OTel API (transitive dep of sdk-trace-base) for span parenting.
+  // deno-lint-ignore no-explicit-any
+  const apiMod = await import('npm:@opentelemetry/api@^1.9.0') as any;
+  setOtelApi(apiMod);
 
   // Build exporter constructors from loaded modules
   let otlpExporterCtor: OtlpExporterCtor | undefined;

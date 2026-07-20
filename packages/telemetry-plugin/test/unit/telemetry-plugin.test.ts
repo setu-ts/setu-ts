@@ -191,11 +191,10 @@ describe('TelemetryPlugin', () => {
 
     await mock.capturedMiddlewareFn!(ctx as never, async () => {});
 
-    // Response header set proves injectTraceparent was called (via injectContext on noop host).
-    expect(responseHeaders.has('traceparent')).toBe(true);
-    // The response traceparent carries the same traceId as the incoming one.
-    const respHeader = responseHeaders.get('traceparent');
-    expect(respHeader).toContain('0af7651916cd43dd8448eb211c80319c');
+    // N2 fix: noop mode skips response traceparent injection (plan §3.5 "noop skips it").
+    // In noop mode, NoopSpan.spanContext() returns empty traceId/spanId, so the middleware
+    // does not inject a response header.
+    expect(responseHeaders.has('traceparent')).toBe(false);
   });
 
   it('should exercise injectTraceparent returning empty when context has no traceId/spanId', async () => {
@@ -238,8 +237,8 @@ describe('TelemetryPlugin', () => {
 
     await mock.capturedMiddlewareFn!(ctx as never, async () => {});
 
-    // Fresh traceId/spanId generated — injectTraceparent returns non-empty.
-    expect(responseHeaders.has('traceparent')).toBe(true);
+    // Noop mode skips injection when there's no incoming traceparent.
+    expect(responseHeaders.has('traceparent')).toBe(false);
   });
 
   it('should exercise extractTraceparentContext with invalid version (non-00)', async () => {
@@ -283,8 +282,8 @@ describe('TelemetryPlugin', () => {
 
     await mock.capturedMiddlewareFn!(ctx as never, async () => {});
 
-    // Even with invalid version, middleware generates a fresh traceparent.
-    expect(responseHeaders.has('traceparent')).toBe(true);
+    // Invalid version → noop parentContext → no injection.
+    expect(responseHeaders.has('traceparent')).toBe(false);
   });
 
   it('should exercise extractTraceparentContext with malformed header', async () => {
@@ -328,8 +327,8 @@ describe('TelemetryPlugin', () => {
 
     await mock.capturedMiddlewareFn!(ctx as never, async () => {});
 
-    // Malformed header — middleware still generates a fresh traceparent.
-    expect(responseHeaders.has('traceparent')).toBe(true);
+    // Malformed header → noop parentContext → no injection.
+    expect(responseHeaders.has('traceparent')).toBe(false);
   });
 });
 

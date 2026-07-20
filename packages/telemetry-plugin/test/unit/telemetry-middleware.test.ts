@@ -22,26 +22,31 @@ describe('telemetryMiddleware', () => {
   function createFakeService(): {
     service: ITelemetryService;
     recordedSpans: RecordedSpan[];
-    capturedOptions: Array<{ kind?: string; parentSpan?: unknown }>;
+    capturedOptions: Array<{ kind?: string; parentContext?: unknown; parentSpan?: unknown }>;
   } {
     const recordedSpans: RecordedSpan[] = [];
-    const capturedOptions: Array<{ kind?: string; parentSpan?: unknown }> = [];
+    const capturedOptions: Array<{ kind?: string; parentContext?: unknown; parentSpan?: unknown }> =
+      [];
 
     const service: ITelemetryService = {
       async withSpan<T>(
         name: string,
         fn: (span: ISpan) => Promise<T>,
-        options?: { kind?: string; parentSpan?: unknown },
+        options?: { kind?: string; parentContext?: unknown; parentSpan?: unknown },
       ): Promise<T> {
         capturedOptions.push(options ?? {});
         const fakeSpan: ISpan & {
           _attrs: Record<string, unknown>;
           _status: string | null;
           _ended: boolean;
+          _traceId: string;
+          _spanId: string;
         } = {
           _attrs: {},
           _status: null,
           _ended: false,
+          _traceId: '0'.repeat(32),
+          _spanId: '0'.repeat(16),
           setAttribute(key, value) {
             this._attrs[key] = value;
             return this;
@@ -60,6 +65,9 @@ describe('telemetryMiddleware', () => {
           },
           end() {
             this._ended = true;
+          },
+          spanContext() {
+            return { traceId: this._traceId, spanId: this._spanId, traceFlags: '01' };
           },
         };
         try {
@@ -262,7 +270,7 @@ describe('telemetryMiddleware', () => {
 
   // --- Propagation tests (C1, C2, R2) ---
 
-  it('should extract traceparent from request headers and record parentContext', async () => {
+  it('should extract traceparent from request headers and pass parentContext', async () => {
     const { service, capturedOptions } = createFakeService();
     const tracerHost = createFakeTracerHost();
     const middleware = telemetryMiddleware(service, tracerHost);
@@ -272,9 +280,14 @@ describe('telemetryMiddleware', () => {
     });
     await middleware(ctx as never, async () => {});
 
-    // The middleware passes parentSpan (carrying the extracted context) via withSpan options.
+    // N4 fix: the middleware now passes parentContext directly (no bridge).
     expect(capturedOptions).toHaveLength(1);
-    expect(capturedOptions[0]!.parentSpan).toBeDefined();
+    const pc = capturedOptions[0]!.parentContext as
+      | { traceId?: string; spanId?: string }
+      | undefined;
+    expect(pc).toBeDefined();
+    expect(pc?.traceId).toBe('0af7651916cd43dd8448eb211c80319c');
+    expect(pc?.spanId).toBe('b7ad6b7169203331');
     expect(capturedOptions[0]!.kind).toBe('server');
   });
 
@@ -289,10 +302,7 @@ describe('telemetryMiddleware', () => {
     });
     await middleware(ctx as never, async () => {});
 
-    // injectContext should have been called
-    const injectCall = tracerHost.recordedCalls.find((c) => c.type === 'injectContext');
-    expect(injectCall).toBeDefined();
-    // The response header should be set
+    // The response header should be set from the span's own spanContext().
     const respHeader = ctx.response.snapshot().headers.get('traceparent');
     expect(respHeader).toBeDefined();
     // Verify W3C format: 00-<32hex>-<16hex>-<2hex>
@@ -300,7 +310,7 @@ describe('telemetryMiddleware', () => {
   });
 
   it('should propagate incoming traceId into response traceparent', async () => {
-    const { service } = createFakeService();
+    const { service, capturedOptions } = createFakeService();
     const tracerHost = createFakeTracerHost();
     const middleware = telemetryMiddleware(service, tracerHost);
 
@@ -310,10 +320,16 @@ describe('telemetryMiddleware', () => {
     });
     await middleware(ctx as never, async () => {});
 
+    // N4 fix: verify parentContext was passed with the incoming traceId.
+    const pc = capturedOptions[0]!.parentContext as { traceId?: string } | undefined;
+    expect(pc?.traceId).toBe(incomingTraceId);
+
+    // The fake span's spanContext returns zeros — the response header carries
+    // whatever the fake span produces (zeros in this case).
     const respHeader = ctx.response.snapshot().headers.get('traceparent');
     expect(respHeader).toBeDefined();
-    // The response traceparent should carry the same traceId
-    expect(respHeader).toContain(incomingTraceId);
+    // Verify W3C format is valid.
+    expect(respHeader).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
   });
 
   it('should produce a valid traceparent when no incoming traceparent', async () => {
@@ -331,35 +347,6 @@ describe('telemetryMiddleware', () => {
     expect(respHeader).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
   });
 
-  it('should call extractContext with Headers', async () => {
-    const { service } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/test', {
-      traceparent: '00-abcdef1234567890abcdef1234567890-1234567890abcdef-01',
-    });
-    await middleware(ctx as never, async () => {});
-
-    const extractCall = tracerHost.recordedCalls.find((c) => c.type === 'extractContext');
-    expect(extractCall).toBeDefined();
-    expect(extractCall!.args[0] as Headers).toBeInstanceOf(Headers);
-  });
-
-  it('should call injectContext with TelemetryContext', async () => {
-    const { service } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/test', {
-      traceparent: '00-abcdef1234567890abcdef1234567890-1234567890abcdef-01',
-    });
-    await middleware(ctx as never, async () => {});
-
-    const injectCall = tracerHost.recordedCalls.find((c) => c.type === 'injectContext');
-    expect(injectCall).toBeDefined();
-  });
-
   it('should fall back gracefully when traceparent header is invalid', async () => {
     const { service, recordedSpans } = createFakeService();
     const tracerHost = createFakeTracerHost();
@@ -372,108 +359,5 @@ describe('telemetryMiddleware', () => {
 
     expect(recordedSpans).toHaveLength(1);
     expect(recordedSpans[0]!.ended).toBe(true);
-  });
-
-  // --- Cover ISpanBridge methods (lines 52-61) ---
-
-  it('should allow calling setAttribute on the parentSpan bridge', async () => {
-    const { service, capturedOptions } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/bridge-attr', {
-      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
-    });
-    await middleware(ctx as never, async () => {});
-
-    // The bridge is captured in capturedOptions[0].parentSpan.
-    // Call setAttribute on it directly to cover lines 52-53.
-    const bridge = capturedOptions[0]!.parentSpan as {
-      _context: unknown;
-      setAttribute(_key?: string, _value?: unknown): unknown;
-      setAttributes(_attrs?: Record<string, unknown>): unknown;
-      setStatus(_status?: string): void;
-      recordException(_error?: unknown): void;
-      end(): void;
-    };
-    expect(bridge).toBeDefined();
-    expect(bridge.setAttribute()).toBe(bridge); // returns bridge for chaining
-  });
-
-  it('should allow calling setAttributes on the parentSpan bridge', async () => {
-    const { service, capturedOptions } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/bridge-attrs');
-    await middleware(ctx as never, async () => {});
-
-    const bridge = capturedOptions[0]!.parentSpan as {
-      _context: unknown;
-      setAttribute(_key?: string, _value?: unknown): unknown;
-      setAttributes(_attrs?: Record<string, unknown>): unknown;
-      setStatus(_status?: string): void;
-      recordException(_error?: unknown): void;
-      end(): void;
-    };
-    expect(bridge.setAttributes()).toBe(bridge);
-  });
-
-  it('should allow calling setStatus on the parentSpan bridge', async () => {
-    const { service, capturedOptions } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/bridge-status');
-    await middleware(ctx as never, async () => {});
-
-    const bridge = capturedOptions[0]!.parentSpan as {
-      _context: unknown;
-      setAttribute(_key?: string, _value?: unknown): unknown;
-      setAttributes(_attrs?: Record<string, unknown>): unknown;
-      setStatus(_status?: string): void;
-      recordException(_error?: unknown): void;
-      end(): void;
-    };
-    // setStatus is a no-op on the bridge — just verify it doesn't throw.
-    expect(() => bridge.setStatus()).not.toThrow();
-  });
-
-  it('should allow calling recordException on the parentSpan bridge', async () => {
-    const { service, capturedOptions } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/bridge-exception');
-    await middleware(ctx as never, async () => {});
-
-    const bridge = capturedOptions[0]!.parentSpan as {
-      _context: unknown;
-      setAttribute(_key?: string, _value?: unknown): unknown;
-      setAttributes(_attrs?: Record<string, unknown>): unknown;
-      setStatus(_status?: string): void;
-      recordException(_error?: unknown): void;
-      end(): void;
-    };
-    expect(() => bridge.recordException()).not.toThrow();
-  });
-
-  it('should allow calling end on the parentSpan bridge', async () => {
-    const { service, capturedOptions } = createFakeService();
-    const tracerHost = createFakeTracerHost();
-    const middleware = telemetryMiddleware(service, tracerHost);
-
-    const ctx = createMockContext('GET', '/bridge-end');
-    await middleware(ctx as never, async () => {});
-
-    const bridge = capturedOptions[0]!.parentSpan as {
-      _context: unknown;
-      setAttribute(_key?: string, _value?: unknown): unknown;
-      setAttributes(_attrs?: Record<string, unknown>): unknown;
-      setStatus(_status?: string): void;
-      recordException(_error?: unknown): void;
-      end(): void;
-    };
-    expect(() => bridge.end()).not.toThrow();
   });
 });

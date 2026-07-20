@@ -47,6 +47,15 @@ export interface SpanOptions {
   readonly attributes?: Readonly<Record<string, SpanAttributeValue>>;
   /** An optional parent span for manual parent-child linking. */
   readonly parentSpan?: ISpan;
+  /**
+   * Optional parent context for span parenting.
+   *
+   * When set, the real implementation uses this as the OTel parent context.
+   * Takes precedence over {@link SpanOptions.parentSpan} when both are set.
+   *
+   * @since 0.24.1
+   */
+  readonly parentContext?: TelemetryContext;
 }
 
 /**
@@ -123,6 +132,30 @@ export interface ISpan {
    * Ends the span. Must be called exactly once.
    */
   end(): void;
+
+  /**
+   * Returns the span's context (traceId, spanId, traceFlags).
+   *
+   * Used by the middleware to inject the span's own `traceparent` into the
+   * response header so downstream hops see this server span as the parent.
+   *
+   * @since 0.24.1
+   */
+  spanContext(): SpanContext;
+}
+
+/**
+ * The return type of {@link ISpan.spanContext}.
+ *
+ * @since 0.24.1
+ */
+export interface SpanContext {
+  /** 32-character lowercase hex trace ID. */
+  readonly traceId: string;
+  /** 16-character lowercase hex span ID. */
+  readonly spanId: string;
+  /** 2-character lowercase hex trace flags. */
+  readonly traceFlags: string;
 }
 
 /**
