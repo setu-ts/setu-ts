@@ -396,7 +396,7 @@ export async function loadOtelTracerProvider(
     consoleExporterCtor = (await loadConsoleExporter()) as ConsoleExporterCtor;
   }
 
-  // Build and return the TracerHost using the loaded modules
+  // Build and return the TracerHost using the loaded modules.
   const buildOpts: BuildTracerHostOptions = {
     sdkMod: sdkMod as OtelSdkModule,
     resourcesMod: resourcesMod as OtelResourcesModule,
