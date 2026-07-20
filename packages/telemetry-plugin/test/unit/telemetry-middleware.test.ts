@@ -21,20 +21,33 @@ describe('telemetryMiddleware', () => {
     ended: boolean;
   }
 
-  function createFakeService(): {
+  function createFakeService(numericTraceFlags = false): {
     service: ITelemetryService;
     recordedSpans: RecordedSpan[];
-    capturedOptions: Array<{ kind?: string; parentContext?: unknown; parentSpan?: unknown }>;
+    capturedOptions: Array<{ kind?: string; parentContext?: unknown }>;
   } {
     const recordedSpans: RecordedSpan[] = [];
-    const capturedOptions: Array<{ kind?: string; parentContext?: unknown; parentSpan?: unknown }> =
-      [];
+    const capturedOptions: Array<{ kind?: string; parentContext?: unknown }> = [];
+
+    /**
+     * Mirrors OtelSpan.spanContext() normalization: converts numeric traceFlags
+     * to a 2-hex lowercase string, so the middleware's response header is valid.
+     */
+    function normalizeTraceFlags(flags: unknown): string {
+      if (typeof flags === 'number') {
+        return flags.toString(16).padStart(2, '0');
+      }
+      if (typeof flags === 'string') {
+        return flags.toLowerCase().padStart(2, '0');
+      }
+      return '00';
+    }
 
     const service: ITelemetryService = {
       async withSpan<T>(
         name: string,
         fn: (span: ISpan) => Promise<T>,
-        options?: { kind?: string; parentContext?: unknown; parentSpan?: unknown },
+        options?: { kind?: string; parentContext?: unknown },
       ): Promise<T> {
         capturedOptions.push(options ?? {});
         const fakeSpan: ISpan & {
@@ -43,12 +56,14 @@ describe('telemetryMiddleware', () => {
           _ended: boolean;
           _traceId: string;
           _spanId: string;
+          _traceFlagsNum: number;
         } = {
           _attrs: {},
           _status: null,
           _ended: false,
           _traceId: '0'.repeat(32),
           _spanId: '0'.repeat(16),
+          _traceFlagsNum: numericTraceFlags ? 1 : 0,
           setAttribute(key, value) {
             this._attrs[key] = value;
             return this;
@@ -69,11 +84,26 @@ describe('telemetryMiddleware', () => {
             this._ended = true;
           },
           spanContext() {
+            if (numericTraceFlags) {
+              // Return normalized traceFlags to simulate OtelSpan.spanContext()
+              return {
+                traceId: this._traceId,
+                spanId: this._spanId,
+                traceFlags: normalizeTraceFlags(this._traceFlagsNum),
+              };
+            }
             return { traceId: this._traceId, spanId: this._spanId, traceFlags: '01' };
           },
         };
         try {
           return await fn(fakeSpan as ISpan);
+        } catch (error) {
+          // Mirror TelemetryService.withSpan: catch errors, set status, record exception.
+          fakeSpan.setStatus('error');
+          if (error instanceof Error) {
+            fakeSpan.recordException(error);
+          }
+          throw error;
         } finally {
           // Mirror TelemetryService.withSpan: own span.end() exactly once.
           fakeSpan.end();
@@ -435,5 +465,32 @@ describe('telemetryMiddleware', () => {
 
     expect(recordedSpans).toHaveLength(1);
     expect(recordedSpans[0]!.ended).toBe(true);
+  });
+
+  // --- F7 fix: numeric traceFlags normalization ---
+
+  /**
+   * F7 regression test: asserts that a numeric `traceFlags` value (e.g. `1`
+   * from real OTel `spanContext()`) is normalized to a 2-hex-string in the
+   * response `traceparent` header, matching the W3C regex.
+   *
+   * The existing tests use string-returning fakes (`traceFlags: '01'`) which
+   * mask the bug. This test uses `numericTraceFlags: true` to return
+   * `traceFlags: 1` (number) from the fake span.
+   */
+  it('should normalize numeric traceFlags to 2-hex string in response traceparent (F7 regression)', async () => {
+    const { service } = createFakeService(true); // numeric traceFlags
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/f7-regression');
+    await middleware(ctx as never, async () => {});
+
+    const respHeader = ctx.response.snapshot().headers.get('traceparent');
+    expect(respHeader).toBeDefined();
+
+    // W3C Trace Context regex: 2-char version, 32-char traceId, 16-char spanId, 2-char flags
+    const W3C_REGEX = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
+    expect(respHeader).toMatch(W3C_REGEX);
   });
 });

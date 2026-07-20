@@ -251,133 +251,197 @@ describe('TelemetryService', () => {
     });
   });
 
-  // N4: when both parentContext and parentSpan are set, parentContext takes precedence.
-  it('should prefer parentContext over parentSpan when both are set', async () => {
-    const fakeHost = createFakeTracerHost();
+  // A2: parentSpan removed from SpanOptions — these tests are deleted:
+  // - "should prefer parentContext over parentSpan when both are set"
+  // - "should skip parentContext when parentSpan bridge has no _context"
+  // - "should not set parentContext when only parentSpan is provided (F5)"
+
+  // F7 regression: OtelSpan.spanContext() normalizes numeric traceFlags to
+  // 2-hex string. This test verifies that a fake OTel span returning
+  // `traceFlags: 1` (number) gets normalized to `"01"` (string).
+  it('should normalize numeric traceFlags to 2-hex string in spanContext (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          spanContext() {
+            return { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: 1 };
+          },
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
     const service = new TelemetryService(fakeHost);
 
-    const bridgeSpan = {
-      setAttribute() {
-        return bridgeSpan;
-      },
-      setAttributes() {
-        return bridgeSpan;
-      },
-      setStatus() {
-        /* no-op */
-      },
-      recordException() {
-        /* no-op */
-      },
-      end() {
-        /* no-op */
-      },
-      spanContext() {
-        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
-      },
-    } as ISpan & { _context?: unknown };
-    bridgeSpan._context = { traceId: 'bridge-id', spanId: 'bridge-span' } as never;
-
-    await service.withSpan(
-      'both-contexts',
-      () => Promise.resolve(),
-      {
-        parentContext: {
-          _opaque: TELEMETRY_CONTEXT_OPAQUE,
-          traceId: 'direct-id',
-          spanId: 'direct-span',
-        },
-        parentSpan: bridgeSpan,
-      },
-    );
-
-    // parentContext should win; bridge's _context should NOT be used.
-    expect(fakeHost.recordedCalls).toHaveLength(1);
-    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
-    expect(callArgs?.parentContext).toEqual({
-      _opaque: TELEMETRY_CONTEXT_OPAQUE,
-      traceId: 'direct-id',
-      spanId: 'direct-span',
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('numeric-flags', async (span) => {
+      capturedCtx = span.spanContext() as never;
     });
+
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceFlags).toBe('01');
+    expect(typeof capturedCtx!.traceFlags).toBe('string');
   });
 
-  // N4 backward-compat: test the parentSpan bridge fallback path when _context is falsy.
-  it('should skip parentContext when parentSpan bridge has no _context', async () => {
-    const fakeHost = createFakeTracerHost();
+  // F7: normalizeTraceFlags fallback for null traceFlags.
+  it('should normalize null traceFlags to "00" in spanContext (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          spanContext() {
+            return { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: null };
+          },
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
     const service = new TelemetryService(fakeHost);
 
-    // Create a fake ISpan bridge WITHOUT _context.
-    const bridgeSpan = {
-      setAttribute() {
-        return bridgeSpan;
-      },
-      setAttributes() {
-        return bridgeSpan;
-      },
-      setStatus() {
-        /* no-op */
-      },
-      recordException() {
-        /* no-op */
-      },
-      end() {
-        /* no-op */
-      },
-      spanContext() {
-        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
-      },
-    } as ISpan & { _context?: unknown };
-    // Explicitly do NOT set _context.
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('null-flags', async (span) => {
+      capturedCtx = span.spanContext() as never;
+    });
 
-    await service.withSpan(
-      'bridge-no-context',
-      () => Promise.resolve(),
-      { parentSpan: bridgeSpan },
-    );
-
-    // The bridge's _context is undefined, so startSpanOptions.parentContext should NOT be set.
-    expect(fakeHost.recordedCalls).toHaveLength(1);
-    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
-    expect(callArgs?.parentContext).toBeUndefined();
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceFlags).toBe('00');
+    expect(typeof capturedCtx!.traceFlags).toBe('string');
   });
 
-  // F5: extractParentContextFromBridge deleted — parentSpan bridge no longer works.
-  // When only parentSpan is provided (no parentContext), startSpan receives NO parentContext.
-  it('should not set parentContext when only parentSpan is provided (F5)', async () => {
-    const fakeHost = createFakeTracerHost();
+  // F7: OtelSpan.spanContext() fallback when handle has no spanContext method.
+  it('should return empty-string spanContext when handle has no spanContext method (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          // No spanContext method — triggers the fallback branch.
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
     const service = new TelemetryService(fakeHost);
 
-    const bridgeSpan = {
-      setAttribute() {
-        return bridgeSpan;
-      },
-      setAttributes() {
-        return bridgeSpan;
-      },
-      setStatus() {
-        /* no-op */
-      },
-      recordException() {
-        /* no-op */
-      },
-      end() {
-        /* no-op */
-      },
-      spanContext() {
-        return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
-      },
-    } as ISpan;
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('no-spanContext-method', async (span) => {
+      capturedCtx = span.spanContext() as never;
+    });
 
-    // Only parentSpan is set — no parentContext, and the bridge is deleted.
-    await service.withSpan(
-      'parentSpan-only',
-      () => Promise.resolve(),
-      { parentSpan: bridgeSpan },
-    );
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceId).toBe('');
+    expect(capturedCtx!.spanId).toBe('');
+    expect(capturedCtx!.traceFlags).toBe('');
+  });
 
-    expect(fakeHost.recordedCalls).toHaveLength(1);
-    const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
-    // parentContext should be undefined since the bridge was removed.
-    expect(callArgs?.parentContext).toBeUndefined();
+  // F7: normalizeTraceFlags with undefined traceFlags.
+  it('should normalize undefined traceFlags to "00" in spanContext (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          spanContext() {
+            return { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: undefined };
+          },
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
+    const service = new TelemetryService(fakeHost);
+
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('undefined-flags', async (span) => {
+      capturedCtx = span.spanContext() as never;
+    });
+
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceFlags).toBe('00');
+    expect(typeof capturedCtx!.traceFlags).toBe('string');
   });
 });

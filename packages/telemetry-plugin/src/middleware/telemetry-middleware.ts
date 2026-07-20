@@ -18,6 +18,7 @@ import type {
 } from '@hono-enterprise/common';
 import type { TracerHost } from '../interfaces/index.ts';
 import { TELEMETRY_SPAN_KEY } from '../interfaces/index.ts';
+import { contextToTraceparent } from '../tracing/tracer.ts';
 
 /**
  * Creates the request-span middleware.
@@ -71,10 +72,9 @@ export function telemetryMiddleware(
             span.setStatus('ok');
           }
         } catch (error) {
-          span.setStatus('error');
-          if (error instanceof Error) {
-            span.recordException(error);
-          }
+          // A3 fix: withSpan owns error bookkeeping (setStatus + recordException).
+          // The middleware only re-throws; TelemetryService.withSpan catches and
+          // handles the error path exactly once.
           throw error;
         }
         // F1 fix: withSpan owns span.end() exactly once — no redundant end() here.
@@ -84,15 +84,15 @@ export function telemetryMiddleware(
       { kind: 'server', parentContext },
     );
 
-    // N2 fix: inject response traceparent from the span's own traceId/spanId/traceFlags.
-    // Per plan §3.5, noop skips injection (empty traceId/spanId).
-    // F3 fix: no redundant `: any` cast — use direct field access on typed SpanContext.
+    // A1 fix: reuse contextToTraceparent instead of hand-building the header.
+    // This avoids the duplication that let F7 in (numeric traceFlags never
+    // normalized to 2-hex string). OtelSpan.spanContext() already normalizes
+    // traceFlags to string, so contextToTraceparent receives a valid context.
     if (spanContext && spanContext.traceId && spanContext.spanId) {
-      const flags = spanContext.traceFlags ?? '01';
-      ctx.response.header(
-        'traceparent',
-        `00-${spanContext.traceId}-${spanContext.spanId}-${flags}`,
-      );
+      const traceparent = contextToTraceparent(spanContext as TelemetryContext);
+      if (traceparent) {
+        ctx.response.header('traceparent', traceparent);
+      }
     }
   };
 }

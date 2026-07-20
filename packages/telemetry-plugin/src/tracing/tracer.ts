@@ -17,6 +17,8 @@ let _otelApi: OtelApi | null = null;
  * Minimal interface for the @opentelemetry/api module — covers the methods
  * actually used by buildTracerHost's startSpan() parent-context path.
  *
+ * A5 fix: trimmed unused members (`getSpan`, `setGlobalTracerProvider`).
+ *
  * @internal
  */
 interface OtelApi {
@@ -25,8 +27,6 @@ interface OtelApi {
       ctx: { traceId: string; spanId: string; traceFlags: number; isRemote?: boolean },
     ): unknown;
     setSpan(context: unknown, span: unknown): unknown;
-    getSpan(context: unknown): unknown | undefined;
-    setGlobalTracerProvider(provider: unknown): void;
   };
   context: {
     active(): unknown;
@@ -47,13 +47,6 @@ function getOtelApi(): OtelApi | null {
 /** W3C traceparent regex: version-traceId-parentId-flags. */
 const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
 
-/**
- * Parses a W3C `traceparent` header into a `TelemetryContext`.
- *
- * Returns a context with `{ _opaque: TELEMETRY_CONTEXT_OPAQUE, traceId, spanId, traceFlags }`
- * when the header is valid and version `"00"`; otherwise returns a minimal context
- * (`{ _opaque }`) indicating no extractable parent.
- */
 /**
  * Parses a W3C `traceparent` header into a `TelemetryContext`.
  *
@@ -89,10 +82,6 @@ export function parseTraceparentToContext(
 /**
  * Extracts `traceparent` / `tracestate` from incoming headers and returns a
  * `TelemetryContext` suitable for span parenting.
- */
-/**
- * Extracts `traceparent` / `tracestate` from incoming headers and returns a
- * `TelemetryContext` suitable for span parenting.
  *
  * @internal
  */
@@ -106,13 +95,6 @@ export function extractContextFromHeaders(headers: Headers): TelemetryContext {
   return ctx;
 }
 
-/**
- * Serialises a `TelemetryContext` into a W3C `traceparent` header string.
- *
- * When the context carries `traceId` + `spanId` + `traceFlags` the output is
- * a valid header (`00-<traceId>-<spanId>-<flags>`).  Otherwise returns `null`
- * so callers can skip injection.
- */
 /**
  * Serialises a `TelemetryContext` into a W3C `traceparent` header string.
  *
@@ -398,7 +380,7 @@ export async function loadOtelTracerProvider(
   // Lazy-load resources
   const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
   // Lazy-load the OTel API (transitive dep of sdk-trace-base) for span parenting.
-  // F2 fix: typed import — no `as any`, no lint-ignore.
+  // F2 fix: typed import — properly cast to OtelApi interface.
   const apiMod = await import('npm:@opentelemetry/api@^1.9.0');
   setOtelApi(apiMod as OtelApi);
 

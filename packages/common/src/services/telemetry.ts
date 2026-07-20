@@ -45,13 +45,10 @@ export interface SpanOptions {
   readonly kind?: SpanKind;
   /** Initial attributes to set on the span. */
   readonly attributes?: Readonly<Record<string, SpanAttributeValue>>;
-  /** An optional parent span for manual parent-child linking. */
-  readonly parentSpan?: ISpan;
   /**
    * Optional parent context for span parenting.
    *
    * When set, the real implementation uses this as the OTel parent context.
-   * Takes precedence over {@link SpanOptions.parentSpan} when both are set.
    *
    * @since 0.24.1
    */

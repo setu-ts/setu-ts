@@ -32,6 +32,26 @@ interface SpanHandle {
 }
 
 /**
+ * Normalizes `traceFlags` to a 2-character lowercase hex string, honoring the
+ * `SpanContext.traceFlags: string` contract.
+ *
+ * OTel's `SpanContext.traceFlags` is a `number` (e.g. `1` for sampled). This
+ * function converts numeric values to the W3C-required 2-hex-string format
+ * (`"01"`) and pads short strings (`"1"` → `"01"`).
+ *
+ * @internal
+ */
+function normalizeTraceFlags(flags: unknown): string {
+  if (typeof flags === 'number') {
+    return flags.toString(16).padStart(2, '0');
+  }
+  if (typeof flags === 'string') {
+    return flags.toLowerCase().padStart(2, '0');
+  }
+  return '00';
+}
+
+/**
  * Maps framework `SpanKind` to the numeric OTel `SpanKind` values.
  *
  * @internal
@@ -90,7 +110,12 @@ class OtelSpan implements ISpan {
 
   spanContext(): SpanContext {
     if (typeof this.#span.spanContext === 'function') {
-      return this.#span.spanContext();
+      const raw = this.#span.spanContext();
+      return {
+        traceId: String(raw.traceId ?? ''),
+        spanId: String(raw.spanId ?? ''),
+        traceFlags: normalizeTraceFlags(raw.traceFlags),
+      };
     }
     // Fallback: return empty strings (not truthy all-zeros) so the
     // middleware's falsy check in telemetry-middleware.ts skips injection.
