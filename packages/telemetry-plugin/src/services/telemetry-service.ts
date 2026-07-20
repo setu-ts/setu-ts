@@ -12,6 +12,7 @@ import type {
   SpanKind,
   SpanOptions,
   SpanStatus,
+  TelemetryContext,
 } from '@hono-enterprise/common';
 import type { TracerHost } from '../interfaces/index.ts';
 
@@ -22,6 +23,7 @@ import type { TracerHost } from '../interfaces/index.ts';
  */
 interface SpanHandle {
   setAttribute(key: string, value: SpanAttributeValue): void;
+  setAttributes(attributes: Record<string, SpanAttributeValue>): void;
   setStatus(status: SpanStatus): void;
   recordException(error: Error): void;
   end(): void;
@@ -57,9 +59,17 @@ class OtelSpan implements ISpan {
     return this;
   }
 
+  /**
+   * Delegates to OTel's native batch `setAttributes` when available (E2 fix).
+   */
   setAttributes(attributes: Readonly<Record<string, SpanAttributeValue>>): this {
-    for (const [key, value] of Object.entries(attributes)) {
-      this.#span.setAttribute(key, value);
+    if (typeof this.#span.setAttributes === 'function') {
+      this.#span.setAttributes(attributes as Record<string, SpanAttributeValue>);
+    } else {
+      // Fallback: loop individual setAttribute calls.
+      for (const [key, value] of Object.entries(attributes)) {
+        this.#span.setAttribute(key, value);
+      }
     }
     return this;
   }
@@ -90,13 +100,14 @@ export class TelemetryService implements ITelemetryService {
   }
 
   async withSpan<T>(
-    _name: string,
+    name: string,
     fn: (span: ISpan) => Promise<T>,
     options?: SpanOptions,
   ): Promise<T> {
     const startSpanOptions: {
       kind?: number;
       attributes?: Record<string, unknown>;
+      parentContext?: TelemetryContext;
     } = {};
     if (options?.kind) {
       startSpanOptions.kind = SPAN_KIND_MAP[options.kind];
@@ -104,7 +115,16 @@ export class TelemetryService implements ITelemetryService {
     if (options?.attributes) {
       startSpanOptions.attributes = options.attributes;
     }
-    const span = this.#tracerHost.startSpan(_name, startSpanOptions) as SpanHandle;
+    // C3 fix: consume SpanOptions.parentSpan and wire it as parentContext.
+    if (options?.parentSpan) {
+      const ctx = (options.parentSpan as unknown as {
+        _context?: TelemetryContext;
+      })._context;
+      if (ctx) {
+        startSpanOptions.parentContext = ctx;
+      }
+    }
+    const span = this.#tracerHost.startSpan(name, startSpanOptions) as SpanHandle;
     const heSpan = new OtelSpan(span);
 
     try {
@@ -148,6 +168,9 @@ class NoopSpan implements ISpan {
   }
 }
 
+/** Shared singleton NoopSpan — E1 fix: allocate once, not per withSpan call. */
+const NOOP_SPAN: NoopSpan = new NoopSpan();
+
 /**
  * A telemetry service that does nothing — used when no exporter is configured.
  *
@@ -163,7 +186,6 @@ export class NoopTelemetryService implements ITelemetryService {
     fn: (span: ISpan) => Promise<T>,
     _options?: SpanOptions,
   ): Promise<T> {
-    const noopSpan = new NoopSpan();
-    return fn(noopSpan);
+    return fn(NOOP_SPAN);
   }
 }

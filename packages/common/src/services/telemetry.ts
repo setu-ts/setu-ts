@@ -64,11 +64,22 @@ export const TELEMETRY_CONTEXT_OPAQUE: unique symbol = Symbol.for(
  * In the real (OTel-backed) implementation this wraps the OTel `Context`.
  * In noop mode it is unused but still accepted for API parity.
  *
+ * Carries the W3C Trace Context fields extracted from incoming `traceparent`
+ * / `tracestate` headers so the real `TracerHost` can use them to parent spans.
+ *
  * @since 0.24.0
  */
 export interface TelemetryContext {
   /** Internal marker — consumers must not inspect this type. */
   readonly _opaque: typeof TELEMETRY_CONTEXT_OPAQUE;
+  /** 32-character lowercase hex trace ID (W3C format). */
+  readonly traceId?: string;
+  /** 16-character lowercase hex parent span ID (W3C format). */
+  readonly spanId?: string;
+  /** 2-character lowercase hex trace flags (W3C format). */
+  readonly traceFlags?: string;
+  /** Raw `tracestate` header value, if present. */
+  readonly tracestate?: string;
 }
 
 /**

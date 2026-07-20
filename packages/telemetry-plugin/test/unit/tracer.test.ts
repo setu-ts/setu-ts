@@ -126,7 +126,9 @@ describe('loadOtelTracerProvider', () => {
 describe('TracerHost seam (via fake)', () => {
   it('should call extractContext with Headers and return a TelemetryContext', () => {
     const fakeHost = createFakeTracerHost();
-    const headers = new Headers({ traceparent: '00-abc123-def456-01' });
+    const headers = new Headers({
+      traceparent: '00-abc123def456789012345678901234567-b7ad6b7169203331-01',
+    });
     const ctx = fakeHost.extractContext(headers);
     expect(ctx).toBeDefined();
     expect(ctx._opaque).toBe(TELEMETRY_CONTEXT_OPAQUE);
@@ -134,13 +136,72 @@ describe('TracerHost seam (via fake)', () => {
     expect(fakeHost.recordedCalls[0]!.type).toBe('extractContext');
   });
 
-  it('should call injectContext with a TelemetryContext and return headers record', () => {
+  it('should parse valid W3C traceparent header', () => {
+    const fakeHost = createFakeTracerHost();
+    const headers = new Headers({
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    });
+    const ctx = fakeHost.extractContext(headers);
+    expect(ctx.traceId).toBe('0af7651916cd43dd8448eb211c80319c');
+    expect(ctx.spanId).toBe('b7ad6b7169203331');
+    expect(ctx.traceFlags).toBe('01');
+  });
+
+  it('should return empty context for invalid traceparent', () => {
+    const fakeHost = createFakeTracerHost();
+    const headers = new Headers({ traceparent: 'invalid' });
+    const ctx = fakeHost.extractContext(headers);
+    expect(ctx.traceId).toBeUndefined();
+    expect(ctx.spanId).toBeUndefined();
+  });
+
+  it('should return empty context for missing traceparent', () => {
+    const fakeHost = createFakeTracerHost();
+    const ctx = fakeHost.extractContext(new Headers());
+    expect(ctx.traceId).toBeUndefined();
+    expect(ctx.spanId).toBeUndefined();
+  });
+
+  it('should call injectContext with a TelemetryContext and return valid traceparent header', () => {
+    const fakeHost = createFakeTracerHost();
+    const context: TelemetryContext = {
+      _opaque: TELEMETRY_CONTEXT_OPAQUE,
+      traceId: '0af7651916cd43dd8448eb211c80319c',
+      spanId: 'b7ad6b7169203331',
+      traceFlags: '01',
+    };
+    const result = fakeHost.injectContext(context);
+    expect(result.traceparent).toBe('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01');
+    expect(fakeHost.recordedCalls).toHaveLength(1);
+    expect(fakeHost.recordedCalls[0]!.type).toBe('injectContext');
+  });
+
+  it('should return empty object when injectContext has no traceId/spanId', () => {
     const fakeHost = createFakeTracerHost();
     const context: TelemetryContext = { _opaque: TELEMETRY_CONTEXT_OPAQUE };
     const result = fakeHost.injectContext(context);
     expect(result).toEqual({});
-    expect(fakeHost.recordedCalls).toHaveLength(1);
-    expect(fakeHost.recordedCalls[0]!.type).toBe('injectContext');
+  });
+
+  it('should round-trip a valid traceparent through extract+inject', () => {
+    const fakeHost = createFakeTracerHost();
+    const incomingHeader = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+    const headers = new Headers({ traceparent: incomingHeader });
+
+    // Extract
+    const ctx = fakeHost.extractContext(headers);
+    expect(ctx.traceId).toBe('0af7651916cd43dd8448eb211c80319c');
+    expect(ctx.spanId).toBe('b7ad6b7169203331');
+
+    // Inject (simulating response traceparent with same traceId but new spanId)
+    const responseCtx: TelemetryContext = {
+      _opaque: ctx._opaque,
+      traceId: ctx.traceId!,
+      spanId: 'fedcba0987654321',
+      traceFlags: ctx.traceFlags ?? '01',
+    };
+    const result = fakeHost.injectContext(responseCtx);
+    expect(result.traceparent).toBe('00-0af7651916cd43dd8448eb211c80319c-fedcba0987654321-01');
   });
 
   it('should call shutdown and return a resolved promise', async () => {
@@ -494,7 +555,7 @@ describe('buildTracerHost (via fake modules)', () => {
     expect(ctx._opaque).toBe(TELEMETRY_CONTEXT_OPAQUE);
   });
 
-  it('injectContext should return empty record', async () => {
+  it('injectContext should return empty record when no traceId/spanId', async () => {
     class FakeConsoleExporter {
       // no-op
     }
@@ -679,5 +740,52 @@ describe('buildTracerHost (via fake modules)', () => {
     host.startSpan('simple-span', { attributes: { foo: 'bar' } });
 
     expect(capturedHasKind).toBe(false);
+  });
+
+  it('startSpan should pass parentContext when provided', async () => {
+    let capturedParentContext: unknown = undefined;
+    const fakeSdkMod = {
+      ...createFakeSdkModule(),
+      BasicTracerProvider: class {
+        constructor(_config: {
+          resource: unknown;
+          spanProcessors: unknown[];
+          sampler: unknown;
+        }) {}
+        getTracer() {
+          return {
+            startSpan(_name: string, options?: Record<string, unknown>) {
+              capturedParentContext = options?.parentContext;
+              return {};
+            },
+          };
+        }
+        async forceFlush() {}
+        async shutdown() {}
+      } as OtelSdkModule['BasicTracerProvider'],
+    };
+
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const host = await buildTracerHost({
+      sdkMod: fakeSdkMod,
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    const mockContext: TelemetryContext = {
+      _opaque: TELEMETRY_CONTEXT_OPAQUE,
+      traceId: '0af7651916cd43dd8448eb211c80319c',
+      spanId: 'b7ad6b7169203331',
+      traceFlags: '01',
+    };
+    host.startSpan('parented-span', { parentContext: mockContext });
+
+    expect(capturedParentContext).toEqual(mockContext);
   });
 });

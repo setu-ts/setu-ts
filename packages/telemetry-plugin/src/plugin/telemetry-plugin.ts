@@ -8,8 +8,13 @@
  * @since 0.24.0
  */
 
-import type { IPlugin, ITelemetryService, MiddlewareFunction } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type {
+  IPlugin,
+  ITelemetryService,
+  MiddlewareFunction,
+  TelemetryContext,
+} from '@hono-enterprise/common';
+import { CAPABILITIES, TELEMETRY_CONTEXT_OPAQUE } from '@hono-enterprise/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
@@ -94,7 +99,10 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
 
       // Register middleware if enabled
       if (middlewareEnabled) {
-        const middleware: MiddlewareFunction = telemetryMiddleware(service);
+        // Pass tracerHost to middleware for context extraction/injection (C1/C2/R2).
+        // In noop mode, create a minimal TracerHost that still supports extractContext/injectContext.
+        const host = tracerHost ?? createNoopTracerHost();
+        const middleware: MiddlewareFunction = telemetryMiddleware(service, host);
         ctx.middleware.add(middleware, {
           priority: MIDDLEWARE_PRIORITY.TELEMETRY,
           name: 'telemetry-middleware',
@@ -102,6 +110,72 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
       }
     },
   };
+}
+
+/**
+ * Creates a minimal TracerHost for noop mode — supports extractContext/injectContext
+ * so the middleware can run even when the service is NoopTelemetryService.
+ *
+ * @internal
+ */
+function createNoopTracerHost(): TracerHost {
+  return {
+    startSpan(_name: string) {
+      return {
+        setAttribute: () => {},
+        setStatus: () => {},
+        recordException: () => {},
+        end: () => {},
+      };
+    },
+    extractContext(headers: Headers) {
+      return extractTraceparentContext(headers);
+    },
+    injectContext(context: TelemetryContext) {
+      return injectTraceparent(context);
+    },
+    shutdown: async () => {},
+    forceFlush: async () => {},
+  };
+}
+
+/**
+ * Extracts traceparent/tracestate from headers and returns a TelemetryContext.
+ *
+ * @internal
+ */
+function extractTraceparentContext(headers: Headers): TelemetryContext {
+  const header = headers.get('traceparent');
+  const tracestate = headers.get('tracestate');
+  const match = header?.match(
+    /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/,
+  );
+  if (!match || match[1] !== '00') {
+    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+  }
+  const result: TelemetryContext = {
+    _opaque: TELEMETRY_CONTEXT_OPAQUE,
+    traceId: match[2],
+    spanId: match[3],
+    traceFlags: match[4],
+  };
+  if (tracestate) {
+    return { ...result, tracestate };
+  }
+  return result;
+}
+
+/**
+ * Serialises a TelemetryContext into a W3C traceparent header.
+ *
+ * @internal
+ */
+function injectTraceparent(context: TelemetryContext): Record<string, string> {
+  if (!context.traceId || !context.spanId) {
+    return {};
+  }
+  const flags = context.traceFlags ?? '01';
+  return { traceparent: `00-${context.traceId}-${context.spanId}-${flags}` };
 }
 
 async function loadOtelTracerProvider(options: TelemetryPluginOptions): Promise<TracerHost> {

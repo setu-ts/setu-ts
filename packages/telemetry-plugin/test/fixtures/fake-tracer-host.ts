@@ -25,6 +25,11 @@ export interface RecordedSpan {
 
 /**
  * Creates a fake TracerHost that records all operations.
+ *
+ * The fake supports behavioral propagation testing:
+ * - `extractContext` parses W3C `traceparent` headers into a real `TelemetryContext`.
+ * - `injectContext` serialises a `TelemetryContext` into a valid W3C `traceparent` header.
+ * - `startSpan` records the `parentContext` option so tests can assert span parenting.
  */
 export function createFakeTracerHost(): FakeTracerHost {
   const recordedCalls: Array<{
@@ -40,7 +45,11 @@ export function createFakeTracerHost(): FakeTracerHost {
 
     startSpan(
       name: string,
-      options?: { kind?: number; attributes?: Record<string, unknown> },
+      options?: {
+        kind?: number;
+        attributes?: Record<string, unknown>;
+        parentContext?: TelemetryContext;
+      },
     ) {
       recordedCalls.push({ type: 'startSpan', args: [name, options] });
 
@@ -76,13 +85,34 @@ export function createFakeTracerHost(): FakeTracerHost {
       recordedSpans.push(span._recorded);
       return span;
     },
-    extractContext(_headers: Headers): TelemetryContext {
-      recordedCalls.push({ type: 'extractContext', args: [_headers] });
-      return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+    extractContext(headers: Headers): TelemetryContext {
+      recordedCalls.push({ type: 'extractContext', args: [headers] });
+      const traceparent = headers.get('traceparent');
+      const tracestate = headers.get('tracestate');
+      const match = traceparent?.match(
+        /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/,
+      );
+      if (!match || match[1] !== '00') {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      }
+      const result: TelemetryContext = {
+        _opaque: TELEMETRY_CONTEXT_OPAQUE,
+        traceId: match[2],
+        spanId: match[3],
+        traceFlags: match[4],
+      };
+      if (tracestate) {
+        return { ...result, tracestate };
+      }
+      return result;
     },
-    injectContext(_context: TelemetryContext) {
-      recordedCalls.push({ type: 'injectContext', args: [_context] });
-      return {};
+    injectContext(context: TelemetryContext) {
+      recordedCalls.push({ type: 'injectContext', args: [context] });
+      if (!context.traceId || !context.spanId) {
+        return {};
+      }
+      const flags = context.traceFlags ?? '01';
+      return { traceparent: `00-${context.traceId}-${context.spanId}-${flags}` };
     },
     shutdown(): Promise<void> {
       recordedCalls.push({ type: 'shutdown', args: [] });

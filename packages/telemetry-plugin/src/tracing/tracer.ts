@@ -10,6 +10,70 @@ import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@hono-enterpris
 import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 
+// --- W3C traceparent propagation helpers ---
+
+/** W3C traceparent regex: version-traceId-parentId-flags. */
+const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
+
+/**
+ * Parses a W3C `traceparent` header into a `TelemetryContext`.
+ *
+ * Returns a context with `{ _opaque: TELEMETRY_CONTEXT_OPAQUE, traceId, spanId, traceFlags }`
+ * when the header is valid and version `"00"`; otherwise returns a minimal context
+ * (`{ _opaque }`) indicating no extractable parent.
+ */
+function parseTraceparentToContext(
+  header: string | null,
+): TelemetryContext {
+  if (!header) {
+    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+  }
+  const m = TRACEPARENT_RE.exec(header);
+  if (!m) {
+    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+  }
+  const [, version, traceId, spanId, flags] = m;
+  // Only version "00" is defined by the W3C spec
+  if (version !== '00') {
+    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+  }
+  return {
+    _opaque: TELEMETRY_CONTEXT_OPAQUE,
+    traceId,
+    spanId,
+    traceFlags: flags,
+  };
+}
+
+/**
+ * Extracts `traceparent` / `tracestate` from incoming headers and returns a
+ * `TelemetryContext` suitable for span parenting.
+ */
+function extractContextFromHeaders(headers: Headers): TelemetryContext {
+  const traceparent = headers.get('traceparent');
+  const tracestate = headers.get('tracestate');
+  const ctx = parseTraceparentToContext(traceparent);
+  if (tracestate) {
+    return { ...ctx, tracestate };
+  }
+  return ctx;
+}
+
+/**
+ * Serialises a `TelemetryContext` into a W3C `traceparent` header string.
+ *
+ * When the context carries `traceId` + `spanId` + `traceFlags` the output is
+ * a valid header (`00-<traceId>-<spanId>-<flags>`).  Otherwise returns `null`
+ * so callers can skip injection.
+ */
+function contextToTraceparent(context: TelemetryContext): string | null {
+  if (!context.traceId || !context.spanId) {
+    return null;
+  }
+  const flags = context.traceFlags ?? '01';
+  return `00-${context.traceId}-${context.spanId}-${flags}`;
+}
+
 /**
  * Module handle returned by lazy-loading `npm:@opentelemetry/sdk-trace-base`.
  *
@@ -76,6 +140,13 @@ export interface BuildTracerHostOptions {
   otlpExporterCtor?: OtlpExporterCtor;
   /** Console span exporter constructor — required when `pluginOptions.exporter === 'console'`. */
   consoleExporterCtor?: ConsoleExporterCtor;
+  /**
+   * When `true`, skips re-validating `pluginOptions.exporter` / `pluginOptions.endpoint`
+   * because the caller (e.g. {@linkcode loadOtelTracerProvider}) already did so.
+   *
+   * @internal
+   */
+  validated?: boolean;
 }
 
 /**
@@ -118,8 +189,15 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
   const exporterKind = pluginOptions.exporter;
 
   if (exporterKind === 'otlp') {
-    // Early validation guarantees endpoint is set
-    const endpoint = pluginOptions.endpoint!;
+    const endpoint = opts.validated
+      ? pluginOptions.endpoint!
+      // buildTracerHost is sometimes called directly by tests with unvalidated options.
+      // When not pre-validated, re-check endpoint here.
+      : (pluginOptions.endpoint ?? (() => {
+        throw new Error(
+          "TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'",
+        );
+      })())!;
     const OTLPTraceExporterCtor = opts.otlpExporterCtor;
     if (!OTLPTraceExporterCtor) {
       throw new Error(
@@ -142,10 +220,13 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
       );
     }
     exporter = new ConsoleSpanExporter();
-  } else {
+  } else if (!opts.validated) {
     throw new Error(
       `TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`,
     );
+  } else {
+    // validated mode but no exporter — should not happen; treat as noop.
+    exporter = null;
   }
 
   // Build sampler
@@ -173,7 +254,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
       spanOptions?: {
         kind?: number;
         attributes?: Record<string, unknown>;
-        parentContext?: unknown;
+        parentContext?: TelemetryContext;
       },
     ) {
       const otelSpanOptions: Record<string, unknown> = {};
@@ -183,14 +264,20 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
       if (spanOptions?.kind !== undefined) {
         otelSpanOptions.kind = spanOptions.kind;
       }
+      // Wire parentContext so the OTel SDK can use it for span parenting.
+      if (spanOptions?.parentContext) {
+        otelSpanOptions.parentContext = spanOptions.parentContext;
+      }
       return tracer.startSpan(name, otelSpanOptions);
     },
-    extractContext(_headers: Headers): TelemetryContext {
-      // In real OTel mode, this would use the context module.
-      // For now we return a placeholder context.
-      return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+    extractContext(headers: Headers): TelemetryContext {
+      return extractContextFromHeaders(headers);
     },
-    injectContext(_context: unknown) {
+    injectContext(context: TelemetryContext): Record<string, string> {
+      const header = contextToTraceparent(context);
+      if (header) {
+        return { traceparent: header };
+      }
       return {};
     },
     shutdown: () => provider.shutdown(),
@@ -246,6 +333,7 @@ export async function loadOtelTracerProvider(
     sdkMod: sdkMod as OtelSdkModule,
     resourcesMod: resourcesMod as OtelResourcesModule,
     pluginOptions: options,
+    validated: true, // loadOtelTracerProvider already validated above
   };
   if (otlpExporterCtor) {
     buildOpts.otlpExporterCtor = otlpExporterCtor;
