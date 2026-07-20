@@ -1319,14 +1319,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/telemetry-plugin
 
-| Aspect               | Detail                                                                       |
-| -------------------- | ---------------------------------------------------------------------------- |
-| **Purpose**          | OpenTelemetry distributed tracing                                            |
-| **Responsibilities** | Tracer provider; span management; context propagation; instrumentation       |
-| **Dependencies**     | `common`, `kernel`, `runtime`                                                |
-| **Public API**       | `TelemetryPlugin()`; `ITelemetryService`                                     |
-| **Extension Points** | Custom exporters; custom instrumentations                                    |
-| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier) |
+| Aspect               | Detail                                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | OpenTelemetry distributed tracing                                                                                                                                                     |
+| **Responsibilities** | Tracer provider; span management; context propagation; request-span middleware                                                                                                        |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                         |
+| **Public API**       | `TelemetryPlugin()`; `telemetryMiddleware`; `TELEMETRY_SPAN_KEY`; `NoopTelemetryService`                                                                                              |
+| **Extension Points** | Custom exporters; injectable `tracerProviderFactory`                                                                                                                                  |
+| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier); noop default when no exporter; middleware priority 30; `TracerProviderFactory` injection seam for tests |
 
 #### @hono-enterprise/secrets-plugin
 

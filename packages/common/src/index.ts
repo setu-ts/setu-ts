@@ -173,3 +173,12 @@ export type {
   SchedulerBackoff,
   SchedulerJobHandler,
 } from './services/scheduler.ts';
+export type {
+  ISpan,
+  ITelemetryService,
+  SpanAttributeValue,
+  SpanKind,
+  SpanOptions,
+  SpanStatus,
+  TelemetryContext,
+} from './services/telemetry.ts';

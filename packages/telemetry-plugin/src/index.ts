@@ -1,10 +1,31 @@
 /**
  * @module
  *
- * OpenTelemetry distributed tracing plugin.
+ * OpenTelemetry distributed tracing plugin for Hono Enterprise.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * Provides `ITelemetryService` registration under `CAPABILITIES.TELEMETRY`,
+ * a request-span middleware at priority 30, and lazy-loaded OTel SDK support.
+ *
+ * @since 0.24.0
  */
-export {};
+
+export { TelemetryPlugin } from './plugin/telemetry-plugin.ts';
+export type {
+  SamplingConfig,
+  SpanExporterKind,
+  TelemetryPluginOptions,
+  TracerHost,
+} from './interfaces/index.ts';
+export { TELEMETRY_SPAN_KEY, telemetryMiddleware } from './plugin/telemetry-plugin.ts';
+export { NoopTelemetryService } from './services/telemetry-service.ts';
+
+// Re-export common types for convenience
+export type {
+  ISpan,
+  ITelemetryService,
+  SpanAttributeValue,
+  SpanKind,
+  SpanOptions,
+  SpanStatus,
+  TelemetryContext,
+} from '@hono-enterprise/common';
