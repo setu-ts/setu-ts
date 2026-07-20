@@ -54,18 +54,6 @@ describe('TelemetryPlugin', () => {
     expect(mock.middlewareAdded).toHaveLength(0);
   });
 
-  it('should accept instrumentations option without throwing', async () => {
-    const mock = createMockContext();
-    const plugin = TelemetryPlugin({
-      serviceName: 'test',
-      instrumentations: ['http', 'database'],
-    });
-    await plugin.register(mock.ctx);
-
-    // Should succeed — instrumentations is ignored
-    expect(mock.registeredTokens).toContain(CAPABILITIES.TELEMETRY);
-  });
-
   it('should take the loadOtelTracerProvider import path when exporter is console without tracerProviderFactory', async () => {
     const mock = createMockContext();
     const plugin = TelemetryPlugin({

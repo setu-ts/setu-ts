@@ -183,17 +183,23 @@ same PR.
 ### 3.4 `instrumentations` option — CUT (dead option)
 
 - **Decision:** The `instrumentations: ['http', 'database', 'queue']` option shown in PUBLIC_API.md
-  and ROADMAP.md is **not implemented** and **not accepted** by `TelemetryPlugin`. Passing it is a
-  no-op (ignored, not thrown — to avoid breaking copy-pasted examples), but it is removed from the
-  documented options. A JSDoc note on `TelemetryPluginOptions` points at the deferred M24b.
+  and ROADMAP.md is **not implemented** and **fully removed** from `TelemetryPluginOptions` — the
+  type carries **no** `instrumentations` field, so passing it is a **compile-time error**
+  (`deno
+  check`), not a silent no-op. (An early implementation kept it as an accepted-but-ignored
+  `@deprecated` field; that was removed — a field no code reads is dead surface, and a silent no-op
+  is a worse failure mode than a loud compile error. There is deliberately **no placeholder**, so
+  M24b defines the real option free of any published-shape back-compat constraint.)
 - **Why:** `@opentelemetry/instrumentation-http` instruments Node's `http` module; there is no
   Deno/Bun/CF-Workers equivalent in the OTel ecosystem that this plugin could load without a runtime
   branch (which would violate §4). An option the plugin cannot honestly consume on every runtime is
-  a dead option (CLAUDE.md "every option names its consumer"). Cutting it at plan time is the
-  prescribed fix, not "store it and ignore it".
-- **Test home:** `test/unit/telemetry-plugin.test.ts` — passing `instrumentations` does not throw
-  and does not change the registered service; the option is absent from the `TelemetryPluginOptions`
-  type (a `deno check`-level guarantee).
+  a dead option (CLAUDE.md "every option names its consumer"). Cutting it — from the type, not just
+  the behavior — is the prescribed fix, not "store it and ignore it". The real option is owned by
+  M24b (ROADMAP §Milestone 24b, deliverable "Public `instrumentations` option"), which defines a
+  per-instrumentation shape, not a bare `string[]`.
+- **Test home:** `test/unit/telemetry-plugin.test.ts` — the absence of `instrumentations` from the
+  `TelemetryPluginOptions` type is a `deno check`-level guarantee (no runtime test asserts a no-op,
+  because there is no accepted option to exercise).
 
 ### 3.5 Request-span middleware — priority 30, `traceparent` propagation, span on `ctx.state`
 
@@ -276,17 +282,17 @@ same PR.
 
 ### 4.3 Options — every option names its consumer
 
-| Option                                         | Consumer                                                                                                                                                                                                  | Behavior (per implementation)                                                                                       |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `TelemetryPluginOptions.serviceName`           | `loadOtelTracerProvider` → `resourceFromAttributes({ 'service.name': … })` (from `npm:@opentelemetry/resources@^2.9.0`) → `BasicTracerProvider({ resource })`; also the `getTracer(serviceName)` argument | Required for real exporter mode; ignored by noop (noop uses `'noop'`).                                              |
-| `TelemetryPluginOptions.serviceVersion`        | `loadOtelTracerProvider` → `resourceFromAttributes({ 'service.version': … })`                                                                                                                             | Optional; defaults to `'1.0.0'`.                                                                                    |
-| `TelemetryPluginOptions.exporter`              | `TelemetryPlugin.register`                                                                                                                                                                                | `'otlp'` → lazy OTLP HTTP exporter; `'console'` → lazy `ConsoleSpanExporter`; absent → noop.                        |
-| `TelemetryPluginOptions.endpoint`              | `OtlpExporterLoader`                                                                                                                                                                                      | OTLP HTTP endpoint URL; required when `exporter: 'otlp'` (throws if absent).                                        |
-| `TelemetryPluginOptions.headers`               | `OtlpExporterLoader`                                                                                                                                                                                      | Optional OTLP HTTP headers record.                                                                                  |
-| `TelemetryPluginOptions.sampling`              | `loadOtelTracerProvider`                                                                                                                                                                                  | `{ type: 'traceidratio'; ratio }`; default ratio `1.0`.                                                             |
-| `TelemetryPluginOptions.tracerProviderFactory` | `TelemetryPlugin.register`                                                                                                                                                                                | Injectable `() => Promise<TracerHost>`; bypasses the lazy import. Test seam + consumer-with-prebuilt-provider seam. |
-| `TelemetryPluginOptions.middleware`            | `TelemetryPlugin.register`                                                                                                                                                                                | `boolean` (default `true`); when `false`, the request-span middleware is not registered (manual-spans-only mode).   |
-| `TelemetryPluginOptions.instrumentations`      | (none — CUT)                                                                                                                                                                                              | Accepted but ignored; removed from the documented type. JSDoc points at M24b.                                       |
+| Option                                         | Consumer                                                                                                                                                                                                  | Behavior (per implementation)                                                                                                                   |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TelemetryPluginOptions.serviceName`           | `loadOtelTracerProvider` → `resourceFromAttributes({ 'service.name': … })` (from `npm:@opentelemetry/resources@^2.9.0`) → `BasicTracerProvider({ resource })`; also the `getTracer(serviceName)` argument | Required for real exporter mode; ignored by noop (noop uses `'noop'`).                                                                          |
+| `TelemetryPluginOptions.serviceVersion`        | `loadOtelTracerProvider` → `resourceFromAttributes({ 'service.version': … })`                                                                                                                             | Optional; defaults to `'1.0.0'`.                                                                                                                |
+| `TelemetryPluginOptions.exporter`              | `TelemetryPlugin.register`                                                                                                                                                                                | `'otlp'` → lazy OTLP HTTP exporter; `'console'` → lazy `ConsoleSpanExporter`; absent → noop.                                                    |
+| `TelemetryPluginOptions.endpoint`              | `OtlpExporterLoader`                                                                                                                                                                                      | OTLP HTTP endpoint URL; required when `exporter: 'otlp'` (throws if absent).                                                                    |
+| `TelemetryPluginOptions.headers`               | `OtlpExporterLoader`                                                                                                                                                                                      | Optional OTLP HTTP headers record.                                                                                                              |
+| `TelemetryPluginOptions.sampling`              | `loadOtelTracerProvider`                                                                                                                                                                                  | `{ type: 'traceidratio'; ratio }`; default ratio `1.0`.                                                                                         |
+| `TelemetryPluginOptions.tracerProviderFactory` | `TelemetryPlugin.register`                                                                                                                                                                                | Injectable `() => Promise<TracerHost>`; bypasses the lazy import. Test seam + consumer-with-prebuilt-provider seam.                             |
+| `TelemetryPluginOptions.middleware`            | `TelemetryPlugin.register`                                                                                                                                                                                | `boolean` (default `true`); when `false`, the request-span middleware is not registered (manual-spans-only mode).                               |
+| `TelemetryPluginOptions.instrumentations`      | (none — CUT from the type)                                                                                                                                                                                | Not a field on `TelemetryPluginOptions`; passing it is a `deno check` error. No placeholder — M24b defines the real per-instrumentation option. |
 
 ## 5. Implementation files
 
@@ -385,12 +391,20 @@ grep -rn "sdk-trace-node\|NodeTracerProvider\|addSpanProcessor\|describe.skipIf"
   symbol at all (§1) — writing `new TracerProvider(...)` is an undefined-is-not-a- constructor
   error. Mitigation: a reviewer grep for `sdk-trace-node|NodeTracerProvider` in
   `packages/telemetry-plugin` must be empty (§7).
-- **Context propagation across `await` in noop mode:** the `NoopTelemetryService` does not use the
-  OTel context manager, so a `withSpan` inside another `withSpan` in noop mode does not establish a
-  real parent/child link (the inner span's `parentSpan` option must be passed explicitly).
-  Mitigation: documented on `NoopTelemetryService`; the real service uses the OTel context module so
-  nesting works automatically. The request-span middleware always passes the extracted parent
-  explicitly.
+- **No implicit parent/child linking — parents must be passed explicitly (real mode too).** This
+  framework registers **no OTel `ContextManager`** (the only runtime-agnostic path to one,
+  `AsyncLocalStorageContextManager`, pulls `node:async_hooks` and would violate §4 runtime
+  independence — verified 2026-07-21 by import probe). Consequently `api.context.active()` is always
+  `ROOT_CONTEXT`, so a `withSpan` nested inside another `withSpan` does **not** auto-link — in noop
+  mode AND in real mode alike. Parenting works only when a parent is passed explicitly: OTel's
+  `Tracer.startSpan(name, options, context)` reads the parent from the 3rd `context` arg (via
+  `api.trace.getSpan(context)`), NOT from anything in `options`, so `loadOtelTracerProvider`'s
+  `startSpan` builds that context from `SpanOptions.parentContext` and passes it as the 3rd arg.
+  Mitigation: the request-span middleware always passes the extracted remote parent explicitly, so
+  the one propagation path the milestone ships (incoming `traceparent` → server span) is correctly
+  parented — verified end-to-end against the real OTel SDK (server span inherits the incoming
+  traceId + parentSpanId). Application code that wants a child span must pass `parentSpan` /
+  `parentContext` on `SpanOptions`; this is documented on `ITelemetryService.withSpan`.
 - **Coverage of the lazy-import error path:** the `loadOtelTracerProvider` rejection branch (package
   not installed) must be unit-covered. Mitigation: `test/unit/tracer.test.ts` drives it with a fake
   `tracerProviderFactory` whose `import()` rejects, asserting the clear error message — no guarded
@@ -411,7 +425,12 @@ splits (CLAUDE.md: "Work on **one package per milestone**"). Its entire scope is
 
 1. **Auto-instrumentation** (`@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
    kafkajs) — runtime-gated instrumentation packages loaded behind the same inject-or-lazy
-   `TracerHost` seam M24 establishes. This is the option `instrumentations` cut in §3.4.
+   `TracerHost` seam M24 establishes. **M24b also owns defining the public option that enables it:**
+   M24 removed `instrumentations` from the type entirely (§3.4) and ships no placeholder, so M24b
+   adds a NEW `TelemetryPluginOptions.instrumentations` field with a **per-instrumentation shape
+   (not a bare `string[]`)** — a public-API change (PUBLIC_API.md + the type). Unsupported-runtime
+   targets degrade to a documented no-op, never a throw (§4). See ROADMAP §Milestone 24b for the
+   full deliverable list.
 2. **`BatchSpanProcessor` with flush-on-interval** — **decided: in M24b, not "a follow-up".** M24
    uses `SimpleSpanProcessor` (synchronous export per span) for deterministic test behavior; M24b
    adds `BatchSpanProcessor` as a `TelemetryPluginOptions.spanProcessor` choice, since

@@ -59,25 +59,23 @@ export function telemetryMiddleware(
         span.setAttribute('http.url', request.url);
         span.setAttribute('http.route', request.path);
 
-        try {
-          await next();
+        // When next() throws, control propagates out of this callback to
+        // TelemetryService.withSpan, which owns the error path (setStatus
+        // 'error' + recordException + end) exactly once — so the status-code
+        // bookkeeping below is intentionally skipped on the throw path.
+        await next();
 
-          // After next(), set the status code from the response snapshot.
-          const snapshot = ctx.response.snapshot();
-          span.setAttribute('http.status_code', snapshot.status);
+        // After next(), set the status code from the response snapshot.
+        const snapshot = ctx.response.snapshot();
+        span.setAttribute('http.status_code', snapshot.status);
 
-          if (snapshot.status >= 400) {
-            span.setStatus('error');
-          } else {
-            span.setStatus('ok');
-          }
-        } catch (error) {
-          // A3 fix: withSpan owns error bookkeeping (setStatus + recordException).
-          // The middleware only re-throws; TelemetryService.withSpan catches and
-          // handles the error path exactly once.
-          throw error;
+        if (snapshot.status >= 400) {
+          span.setStatus('error');
+        } else {
+          span.setStatus('ok');
         }
-        // F1 fix: withSpan owns span.end() exactly once — no redundant end() here.
+
+        // withSpan owns span.end() exactly once — no redundant end() here.
         // Return the span's context for response header injection.
         return span.spanContext();
       },

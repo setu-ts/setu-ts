@@ -86,11 +86,4 @@ export interface TelemetryPluginOptions {
   tracerProviderFactory?: () => Promise<TracerHost>;
   /** Whether to register the request-span middleware (default: `true`). */
   middleware?: boolean;
-  /**
-   * Auto-instrumentation targets (e.g. `['http', 'database', 'queue']`).
-   *
-   * @deprecated Auto-instrumentation is deferred to Milestone 24b. This
-   *   option is accepted but ignored; passing it has no effect.
-   */
-  instrumentations?: string[];
 }

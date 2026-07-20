@@ -2532,8 +2532,9 @@ configured, so the plugin always registers a usable service with zero npm deps i
 An injectable `tracerProviderFactory` option lets tests (and consumers with a pre-built provider)
 bypass the lazy import entirely.
 
-> **Auto-instrumentation** (`instrumentations` option) is deferred to **M24b**. See ROADMAP.md
-> §Milestone 24b.
+> **Auto-instrumentation** is deferred to **M24b**. M24 ships manual spans + the request-span
+> middleware only and accepts **no** `instrumentations` option — M24b introduces the option (and its
+> shape) when it lands the runtime-gated instrumentation packages. See ROADMAP.md §Milestone 24b.
 
 ### Options
 
@@ -2615,6 +2616,30 @@ import type { ISpan } from '@hono-enterprise/common';
 
 const activeSpan = ctx.state.get(TELEMETRY_SPAN_KEY) as ISpan | undefined;
 ```
+
+### Contract Types
+
+The telemetry contract is framework-owned and exported from `@hono-enterprise/common` (zero
+dependencies — importable without the OTel SDK installed). The telemetry-plugin translates these to
+OTel types at its implementation seam.
+
+| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                             |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`.                                                  |
+| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                         |
+| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                    |
+| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                   |
+| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                   |
+| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                    |
+| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly (there is no implicit parent linking — see note below). |
+| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                        |
+| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                        |
+
+> **No implicit parent/child linking.** The framework registers no OTel `ContextManager` (the only
+> runtime-agnostic option depends on `node:async_hooks`), so a `withSpan` nested inside another does
+> not auto-parent. To create a child span, pass `parentContext` (or the extracted context) on
+> `SpanOptions`. The request-span middleware always passes the incoming `traceparent` as the parent
+> explicitly, so cross-process propagation (incoming header → server span) works out of the box.
 
 ---
 

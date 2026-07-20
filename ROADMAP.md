@@ -2503,8 +2503,9 @@ app.register(TelemetryPlugin({
 }));
 ```
 
-> **Note:** `instrumentations` option (e.g. `['http', 'database', 'queue']`) is **deferred to
-> Milestone 24b**. Passing it has no effect; see the M24b section below.
+> **Note:** Auto-instrumentation is **deferred to Milestone 24b**. M24 accepts **no**
+> `instrumentations` option — the option and its shape are defined by M24b when it lands the
+> instrumentation packages (M24 ships no placeholder). See the M24b section below.
 
 **Programmatic API:**
 
@@ -2560,19 +2561,37 @@ message brokers behind the same inject-or-lazy `TracerHost` seam that M24 establ
 
 ### Scope (telemetry-plugin ONLY)
 
-1. **Auto-instrumentation** — `@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
-   kafkajs loaded behind runtime-gated instrumentation packages using the same inject-or-lazy seam.
-2. **`BatchSpanProcessor`** — added as a `TelemetryPluginOptions.spanProcessor` choice alongside the
+1. **The public instrumentation option — defined fresh here.** M24 deliberately ships **no**
+   `instrumentations` option (no placeholder field), so M24b owns defining it from scratch with **no
+   back-compat constraint**. The shape must be **per-instrumentation configuration, not a bare
+   `string[]` of names** — OTel instrumentations take options (e.g. `http` needs ignore-path lists,
+   `ioredis` needs a db-statement flag), which a name-list cannot express. Add it as a NEW field on
+   `TelemetryPluginOptions` (e.g.
+   `instrumentations?: { http?: HttpInstrumentationOptions; ioredis?:
+   …; amqplib?: …; kafkajs?: … }`).
+   This is a **public-API change**: PUBLIC_API.md + the type are updated in M24b's PR, and the
+   deferral note M24 left in PUBLIC_API/ROADMAP is replaced with the real surface.
+2. **Auto-instrumentation** — `@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
+   kafkajs loaded behind runtime-gated instrumentation packages using the same inject-or-lazy seam
+   M24 established. **Runtime gating is mandatory:** an instrumentation whose target is unavailable
+   on the running runtime (e.g. `node:http` instrumentation on Deno/CF-Workers) must degrade to a
+   **documented no-op, never a throw**, and that degradation is unit-tested per §4 runtime
+   independence.
+3. **`BatchSpanProcessor`** — added as a `TelemetryPluginOptions.spanProcessor` choice alongside the
    `SimpleSpanProcessor` that M24 uses. Both processors are exported from the pinned
    `sdk-trace-base@^2.9.0`, so this adds no new dependency.
 
 **NOT in M24b:** Cross-package propagation over the message broker / queue (editing
-`messaging-plugin` and `queue-plugin`) belongs to a later cross-cutting milestone.
+`messaging-plugin` and `queue-plugin`) belongs to a later cross-cutting milestone. Note also that
+whatever option shape M24b lands becomes what the M35 SDK / M36 microservice-starter `telemetry:`
+config block maps onto — so M24b must treat the shape as a stable public contract, not a draft.
 
 ### Package: `@hono-enterprise/telemetry-plugin` (extends M24)
 
 **Implementation files (added to the M24 package):**
 
+- ⬜ `src/instrumentation/instrumentation-registry.ts` — reads the new `instrumentations` option and
+  builds the enabled set (the option→loader wiring; runtime-gated no-op for unsupported targets)
 - ⬜ `src/instrumentation/http-instrumentation.ts`
 - ⬜ `src/instrumentation/database-instrumentation.ts`
 - ⬜ `src/instrumentation/queue-instrumentation.ts`
@@ -2580,13 +2599,20 @@ message brokers behind the same inject-or-lazy `TracerHost` seam that M24 establ
 
 **Test files:**
 
+- ⬜ `test/unit/instrumentation-registry.test.ts` — option shape honored; unsupported-runtime target
+  degrades to no-op (not throw); each named instrumentation's options reach its loader
 - ⬜ `test/unit/http-instrumentation.test.ts`
 - ⬜ `test/unit/database-instrumentation.test.ts`
 - ⬜ `test/unit/span-processor-factory.test.ts`
 
 ### Deliverables
 
+- [ ] **Public `instrumentations` option** — new `TelemetryPluginOptions` field with a
+      per-instrumentation shape (NOT `string[]`), defined fresh (M24 shipped no placeholder), with
+      PUBLIC_API.md + ROADMAP deferral note replaced by the real surface
 - [ ] Auto-instrumentation packages with inject-or-lazy client seam
+- [ ] Runtime gating — unsupported-target instrumentation is a documented no-op, not a throw
+      (tested)
 - [ ] `BatchSpanProcessor` as configurable alternative to `SimpleSpanProcessor`
 - [ ] 90%+ per-file coverage on every new `src/` file
 - [ ] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
