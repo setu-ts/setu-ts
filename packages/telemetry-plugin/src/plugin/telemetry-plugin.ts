@@ -117,8 +117,13 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
  * so the middleware can run even when the service is NoopTelemetryService.
  *
  * @internal
+/**
+ * Creates a minimal TracerHost for noop mode — supports extractContext/injectContext
+ * so the middleware can run even when the service is NoopTelemetryService.
+ *
+ * Exported for test seam coverage of inner methods (startSpan, shutdown, forceFlush).
  */
-function createNoopTracerHost(): TracerHost {
+export function createNoopTracerHost(): TracerHost {
   return {
     startSpan(_name: string) {
       return {

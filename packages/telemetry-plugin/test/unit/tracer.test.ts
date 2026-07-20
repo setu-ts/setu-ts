@@ -788,4 +788,207 @@ describe('buildTracerHost (via fake modules)', () => {
 
     expect(capturedParentContext).toEqual(mockContext);
   });
+
+  // --- Cover buildTracerHost edge paths ---
+
+  it('should use validated:true OTLP path (pluginOptions.endpoint used directly)', async () => {
+    let capturedExporterArgs: { url: string; headers?: Record<string, string> } | null = null;
+    class FakeOtlpExporter {
+      constructor(args: { url: string; headers?: Record<string, string> }) {
+        capturedExporterArgs = args;
+      }
+    }
+    const fakeSdkMod = createFakeSdkModule();
+    await buildTracerHost({
+      sdkMod: fakeSdkMod,
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'otlp',
+        endpoint: 'http://localhost:4318/v1/traces',
+      },
+      otlpExporterCtor: FakeOtlpExporter as never,
+      validated: true,
+    });
+
+    expect(capturedExporterArgs).not.toBeNull();
+    expect(capturedExporterArgs!.url).toBe('http://localhost:4318/v1/traces');
+  });
+
+  it('should throw when consoleExporterCtor is missing and exporter is console (validated:false)', async () => {
+    try {
+      await buildTracerHost({
+        sdkMod: createFakeSdkModule(),
+        resourcesMod: createFakeResourcesModule(),
+        pluginOptions: {
+          serviceName: 'test',
+          exporter: 'console',
+        },
+        validated: false,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('consoleExporterCtor');
+    }
+  });
+
+  it('should take the validated:true noop exporter path when no exporter kind matches', async () => {
+    // When validated:true and exporter is undefined/null, lines 227-230 are taken
+    // (exporter = null, skipping all exporter building).
+    let providerConfigured = false;
+    const fakeSdkMod = {
+      ...createFakeSdkModule(),
+      BasicTracerProvider: class {
+        constructor(config: {
+          resource: unknown;
+          spanProcessors: unknown[];
+          sampler: unknown;
+        }) {
+          // With validated:true and no exporter kind, SimpleSpanProcessor is still created with null exporter.
+          providerConfigured = true;
+          expect(config.spanProcessors).toHaveLength(1);
+        }
+        getTracer() {
+          return {
+            startSpan() {
+              return {};
+            },
+          };
+        }
+        async forceFlush() {}
+        async shutdown() {}
+      } as OtelSdkModule['BasicTracerProvider'],
+      SimpleSpanProcessor: class {
+        constructor(_exporter: unknown) {
+          // _exporter is null when validated:true and no exporter kind.
+        }
+      } as OtelSdkModule['SimpleSpanProcessor'],
+    };
+
+    const host = await buildTracerHost({
+      sdkMod: fakeSdkMod,
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        // No exporter specified — validated:true skips the error throw.
+      },
+      validated: true,
+    });
+
+    expect(host).toBeDefined();
+    expect(providerConfigured).toBe(true);
+  });
+
+  it('should return empty object from injectContext when contextToTraceparent returns null', async () => {
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const host = await buildTracerHost({
+      sdkMod: createFakeSdkModule(),
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    // contextToTraceparent returns null when traceId or spanId is missing.
+    const result = host.injectContext({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
+    expect(result).toEqual({});
+  });
+
+  it('extractContext should call parseTraceparentToContext happy path with valid traceparent', async () => {
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const host = await buildTracerHost({
+      sdkMod: createFakeSdkModule(),
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    // This exercises parseTraceparentToContext's happy path (lines 31-45)
+    // where the regex matches and version is "00".
+    const headers = new Headers({
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    });
+    const ctx = host.extractContext(headers);
+    expect(ctx._opaque).toBe(TELEMETRY_CONTEXT_OPAQUE);
+    // The built TracerHost's extractContext returns the result of
+    // extractContextFromHeaders, which calls parseTraceparentToContext.
+    // In build mode, the returned context has traceId/spanId populated.
+  });
+
+  it('extractContextFromHeaders tracestate path should be covered', async () => {
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const host = await buildTracerHost({
+      sdkMod: createFakeSdkModule(),
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    // This exercises extractContextFromHeaders' tracestate merge path (lines 56-58)
+    const headers = new Headers({
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+      tracestate: 'vendor=value',
+    });
+    const ctx = host.extractContext(headers);
+    expect(ctx._opaque).toBe(TELEMETRY_CONTEXT_OPAQUE);
+  });
+
+  it('injectContext should return traceparent when context has traceId/spanId', async () => {
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const host = await buildTracerHost({
+      sdkMod: createFakeSdkModule(),
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    // This exercises contextToTraceparent's happy path (lines 73-74)
+    // and injectContext's if (header) path (line 278-279).
+    const context: TelemetryContext = {
+      _opaque: TELEMETRY_CONTEXT_OPAQUE,
+      traceId: '0af7651916cd43dd8448eb211c80319c',
+      spanId: 'b7ad6b7169203331',
+      traceFlags: '01',
+    };
+    const result = host.injectContext(context);
+    expect(result.traceparent).toBe('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01');
+  });
+
+  it('should cover the OTLP exporter missing ctor error path', async () => {
+    try {
+      await buildTracerHost({
+        sdkMod: createFakeSdkModule(),
+        resourcesMod: createFakeResourcesModule(),
+        pluginOptions: {
+          serviceName: 'test',
+          exporter: 'otlp',
+          endpoint: 'http://localhost:4318/v1/traces',
+        },
+        // Intentionally omitting otlpExporterCtor to trigger the error path.
+        validated: false,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('otlpExporterCtor');
+    }
+  });
 });

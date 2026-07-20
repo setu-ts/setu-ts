@@ -373,4 +373,107 @@ describe('telemetryMiddleware', () => {
     expect(recordedSpans).toHaveLength(1);
     expect(recordedSpans[0]!.ended).toBe(true);
   });
+
+  // --- Cover ISpanBridge methods (lines 52-61) ---
+
+  it('should allow calling setAttribute on the parentSpan bridge', async () => {
+    const { service, capturedOptions } = createFakeService();
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/bridge-attr', {
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    });
+    await middleware(ctx as never, async () => {});
+
+    // The bridge is captured in capturedOptions[0].parentSpan.
+    // Call setAttribute on it directly to cover lines 52-53.
+    const bridge = capturedOptions[0]!.parentSpan as {
+      _context: unknown;
+      setAttribute(_key?: string, _value?: unknown): unknown;
+      setAttributes(_attrs?: Record<string, unknown>): unknown;
+      setStatus(_status?: string): void;
+      recordException(_error?: unknown): void;
+      end(): void;
+    };
+    expect(bridge).toBeDefined();
+    expect(bridge.setAttribute()).toBe(bridge); // returns bridge for chaining
+  });
+
+  it('should allow calling setAttributes on the parentSpan bridge', async () => {
+    const { service, capturedOptions } = createFakeService();
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/bridge-attrs');
+    await middleware(ctx as never, async () => {});
+
+    const bridge = capturedOptions[0]!.parentSpan as {
+      _context: unknown;
+      setAttribute(_key?: string, _value?: unknown): unknown;
+      setAttributes(_attrs?: Record<string, unknown>): unknown;
+      setStatus(_status?: string): void;
+      recordException(_error?: unknown): void;
+      end(): void;
+    };
+    expect(bridge.setAttributes()).toBe(bridge);
+  });
+
+  it('should allow calling setStatus on the parentSpan bridge', async () => {
+    const { service, capturedOptions } = createFakeService();
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/bridge-status');
+    await middleware(ctx as never, async () => {});
+
+    const bridge = capturedOptions[0]!.parentSpan as {
+      _context: unknown;
+      setAttribute(_key?: string, _value?: unknown): unknown;
+      setAttributes(_attrs?: Record<string, unknown>): unknown;
+      setStatus(_status?: string): void;
+      recordException(_error?: unknown): void;
+      end(): void;
+    };
+    // setStatus is a no-op on the bridge — just verify it doesn't throw.
+    expect(() => bridge.setStatus()).not.toThrow();
+  });
+
+  it('should allow calling recordException on the parentSpan bridge', async () => {
+    const { service, capturedOptions } = createFakeService();
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/bridge-exception');
+    await middleware(ctx as never, async () => {});
+
+    const bridge = capturedOptions[0]!.parentSpan as {
+      _context: unknown;
+      setAttribute(_key?: string, _value?: unknown): unknown;
+      setAttributes(_attrs?: Record<string, unknown>): unknown;
+      setStatus(_status?: string): void;
+      recordException(_error?: unknown): void;
+      end(): void;
+    };
+    expect(() => bridge.recordException()).not.toThrow();
+  });
+
+  it('should allow calling end on the parentSpan bridge', async () => {
+    const { service, capturedOptions } = createFakeService();
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(service, tracerHost);
+
+    const ctx = createMockContext('GET', '/bridge-end');
+    await middleware(ctx as never, async () => {});
+
+    const bridge = capturedOptions[0]!.parentSpan as {
+      _context: unknown;
+      setAttribute(_key?: string, _value?: unknown): unknown;
+      setAttributes(_attrs?: Record<string, unknown>): unknown;
+      setStatus(_status?: string): void;
+      recordException(_error?: unknown): void;
+      end(): void;
+    };
+    expect(() => bridge.end()).not.toThrow();
+  });
 });
