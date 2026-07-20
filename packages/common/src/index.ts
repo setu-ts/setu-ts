@@ -182,3 +182,4 @@ export type {
   SpanStatus,
   TelemetryContext,
 } from './services/telemetry.ts';
+export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';

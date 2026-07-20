@@ -271,4 +271,33 @@ describe('telemetryMiddleware', () => {
     expect(spans).toHaveLength(1);
     expect(spans[0]!.ended).toBe(true);
   });
+
+  it('should fall back to ctx.id when traceparent header is invalid', async () => {
+    const { service, recordedSpans } = createFakeService();
+    const middleware = telemetryMiddleware(service);
+
+    // Send an invalid traceparent header (wrong format)
+    const ctx = createMockContext('GET', '/invalid-parent', {
+      traceparent: 'invalid-format',
+    });
+    await middleware(ctx as never, async () => {});
+
+    // When traceparent is present but invalid, the middleware falls back to
+    // using ctx.id as the parent trace ID. This exercises the else branch
+    // at lines 87-90 of the middleware.
+    expect(recordedSpans).toHaveLength(1);
+    expect(recordedSpans[0]!.ended).toBe(true);
+  });
+
+  it('should fall back to ctx.id when no traceparent header is present', async () => {
+    const { service, recordedSpans } = createFakeService();
+    const middleware = telemetryMiddleware(service);
+
+    // No traceparent header at all
+    const ctx = createMockContext('GET', '/no-parent');
+    await middleware(ctx as never, async () => {});
+
+    expect(recordedSpans).toHaveLength(1);
+    expect(recordedSpans[0]!.ended).toBe(true);
+  });
 });

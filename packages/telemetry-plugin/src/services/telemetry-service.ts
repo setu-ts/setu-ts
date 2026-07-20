@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await
 /**
  * Telemetry service implementations — real (OTel-backed) and noop.
  *
@@ -15,6 +14,18 @@ import type {
   SpanStatus,
 } from '@hono-enterprise/common';
 import type { TracerHost } from '../interfaces/index.ts';
+
+/**
+ * Internal span operations available on an OTel span or a fake for testing.
+ *
+ * @internal
+ */
+interface SpanHandle {
+  setAttribute(key: string, value: SpanAttributeValue): void;
+  setStatus(status: SpanStatus): void;
+  recordException(error: Error): void;
+  end(): void;
+}
 
 /**
  * Maps framework `SpanKind` to the numeric OTel `SpanKind` values.
@@ -35,39 +46,34 @@ const SPAN_KIND_MAP: Record<SpanKind, number> = {
  * @internal
  */
 class OtelSpan implements ISpan {
-  readonly #span: unknown;
+  readonly #span: SpanHandle;
 
-  constructor(span: unknown) {
+  constructor(span: SpanHandle) {
     this.#span = span;
   }
 
   setAttribute(key: string, value: SpanAttributeValue): this {
-    // deno-lint-ignore no-explicit-any
-    (this.#span as any).setAttribute(key, value);
+    this.#span.setAttribute(key, value);
     return this;
   }
 
   setAttributes(attributes: Readonly<Record<string, SpanAttributeValue>>): this {
     for (const [key, value] of Object.entries(attributes)) {
-      // deno-lint-ignore no-explicit-any
-      (this.#span as any).setAttribute(key, value);
+      this.#span.setAttribute(key, value);
     }
     return this;
   }
 
   setStatus(status: SpanStatus): void {
-    // deno-lint-ignore no-explicit-any
-    (this.#span as any).setStatus(status);
+    this.#span.setStatus(status);
   }
 
   recordException(error: Error): void {
-    // deno-lint-ignore no-explicit-any
-    (this.#span as any).recordException(error);
+    this.#span.recordException(error);
   }
 
   end(): void {
-    // deno-lint-ignore no-explicit-any
-    (this.#span as any).end();
+    this.#span.end();
   }
 }
 
@@ -88,12 +94,17 @@ export class TelemetryService implements ITelemetryService {
     fn: (span: ISpan) => Promise<T>,
     options?: SpanOptions,
   ): Promise<T> {
-    const kindNum = options?.kind ? SPAN_KIND_MAP[options.kind] : undefined;
-    // deno-lint-ignore no-explicit-any
-    const span = (this.#tracerHost as any).startSpan(_name, {
-      kind: kindNum,
-      attributes: options?.attributes,
-    });
+    const startSpanOptions: {
+      kind?: number;
+      attributes?: Record<string, unknown>;
+    } = {};
+    if (options?.kind) {
+      startSpanOptions.kind = SPAN_KIND_MAP[options.kind];
+    }
+    if (options?.attributes) {
+      startSpanOptions.attributes = options.attributes;
+    }
+    const span = this.#tracerHost.startSpan(_name, startSpanOptions) as SpanHandle;
     const heSpan = new OtelSpan(span);
 
     try {
@@ -146,6 +157,7 @@ class NoopSpan implements ISpan {
  * @since 0.24.0
  */
 export class NoopTelemetryService implements ITelemetryService {
+  // deno-lint-ignore require-await
   async withSpan<T>(
     _name: string,
     fn: (span: ISpan) => Promise<T>,

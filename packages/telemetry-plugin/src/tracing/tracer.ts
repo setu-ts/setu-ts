@@ -6,6 +6,7 @@
  */
 
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
+import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@hono-enterprise/common';
 import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 
@@ -23,6 +24,18 @@ export async function loadOtelTracerProvider(
   options: TelemetryPluginOptions,
 ): Promise<TracerHost> {
   const { serviceName = 'hono-app', serviceVersion = '1.0.0' } = options;
+
+  // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
+  if (options.exporter === 'otlp' && !options.endpoint) {
+    throw new Error(
+      `TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'`,
+    );
+  }
+  if (options.exporter && options.exporter !== 'otlp' && options.exporter !== 'console') {
+    throw new Error(
+      `TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`,
+    );
+  }
 
   // Lazy-load sdk-trace-base
   const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
@@ -47,19 +60,16 @@ export async function loadOtelTracerProvider(
   const exporterKind = options.exporter;
 
   if (exporterKind === 'otlp') {
-    if (!options.endpoint) {
-      throw new Error(
-        `TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'`,
-      );
-    }
+    // Early validation guarantees endpoint is set
+    const endpoint = options.endpoint!;
     // Verify the exporter package loads
-    await loadOtlpExporter(options.endpoint, options.headers);
+    await loadOtlpExporter(endpoint, options.headers);
     const OTLPTraceExporterCtor = await loadOtlpExporter(
-      options.endpoint,
+      endpoint,
       options.headers,
     );
     const exporterArgs: { url: string; headers?: Record<string, string> } = {
-      url: options.endpoint,
+      url: endpoint,
     };
     if (options.headers) {
       exporterArgs.headers = options.headers;
@@ -111,11 +121,10 @@ export async function loadOtelTracerProvider(
       }
       return tracer.startSpan(name, otelSpanOptions);
     },
-    extractContext(_headers: Headers) {
+    extractContext(_headers: Headers): TelemetryContext {
       // In real OTel mode, this would use the context module.
       // For now we return a placeholder context.
-      // deno-lint-ignore no-explicit-any
-      return { _opaque: Symbol.for('telemetry-context') } as any;
+      return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
     },
     injectContext(_context: unknown) {
       return {};

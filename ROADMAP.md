@@ -2484,9 +2484,12 @@ socket-based adapters (M41, formerly M39) structurally cannot. **Depends on M22.
 
 ---
 
-## Milestone 24: Telemetry Plugin — OpenTelemetry
+## Milestone 24: Telemetry Plugin — OpenTelemetry ✅ COMPLETE
 
-**Objective:** Provide distributed tracing.
+**Objective:** Provide OpenTelemetry distributed tracing via a plugin that registers
+`ITelemetryService` under `CAPABILITIES.TELEMETRY` (`'telemetry'`), exposing manual span creation
+(`withSpan`) plus a request-span middleware that wraps every inbound HTTP request in a server span
+with W3C `traceparent`/`tracestate` propagation.
 
 ### Package: `@hono-enterprise/telemetry-plugin`
 
@@ -2497,9 +2500,11 @@ app.register(TelemetryPlugin({
   serviceName: 'my-service',
   exporter: 'otlp',
   endpoint: config.get('OTLP_ENDPOINT'),
-  instrumentations: ['http', 'database', 'queue'],
 }));
 ```
+
+> **Note:** `instrumentations` option (e.g. `['http', 'database', 'queue']`) is **deferred to
+> Milestone 24b**. Passing it has no effect; see the M24b section below.
 
 **Programmatic API:**
 
@@ -2518,25 +2523,73 @@ await telemetry.withSpan('process-order', async (span) => {
 - `src/plugin/telemetry-plugin.ts`
 - `src/services/telemetry-service.ts`
 - `src/tracing/tracer.ts`
-- `src/instrumentation/http-instrumentation.ts`
-- `src/instrumentation/database-instrumentation.ts`
 - `src/exporters/otlp-exporter.ts`
 - `src/exporters/console-exporter.ts`
+- `src/middleware/telemetry-middleware.ts`
+- `src/interfaces/index.ts`
 - `src/index.ts`
 
 ### Tests
 
-- Span creation
-- Context propagation
-- Instrumentation
-- Exporters
+- Request-span middleware (W3C traceparent propagation)
+- `withSpan` returns callback value; `end()` called in `finally` even on throw
+- `recordException` sets status `'error'` and records error
+- `NoopTelemetryService` / `NoopSpan` are no-ops but callback runs
+- `loadOtelTracerProvider` lazy-import path (guarded real-import test)
+- Barrel exports
 
 ### Deliverables
 
-- [ ] TelemetryPlugin
-- [ ] Tracing service
-- [ ] Instrumentation
-- [ ] Full test coverage
+- [x] TelemetryPlugin factory registering `ITelemetryService` under `CAPABILITIES.TELEMETRY`
+- [x] `TelemetryService` (OTel-backed) + `NoopTelemetryService` (zero deps)
+- [x] Request-span middleware at priority 30 (W3C `traceparent` propagation)
+- [x] Lazy OTel SDK import via `npm:` specifiers (inject-or-lazy seam)
+- [x] `ConsoleSpanExporter` and `OTLPTraceExporter` loaders
+- [x] Full test coverage (90%+ per-file)
+- [ ] Auto-instrumentation (deferred to M24b)
+
+---
+
+## Milestone 24b: Telemetry Plugin — Auto-Instrumentation
+
+**Objective:** Add runtime-gated auto-instrumentation packages to
+`@hono-enterprise/telemetry-plugin`.
+
+This milestone extends M24 with automatic instrumentation of HTTP clients, database drivers, and
+message brokers behind the same inject-or-lazy `TracerHost` seam that M24 established.
+
+### Scope (telemetry-plugin ONLY)
+
+1. **Auto-instrumentation** — `@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
+   kafkajs loaded behind runtime-gated instrumentation packages using the same inject-or-lazy seam.
+2. **`BatchSpanProcessor`** — added as a `TelemetryPluginOptions.spanProcessor` choice alongside the
+   `SimpleSpanProcessor` that M24 uses. Both processors are exported from the pinned
+   `sdk-trace-base@^2.9.0`, so this adds no new dependency.
+
+**NOT in M24b:** Cross-package propagation over the message broker / queue (editing
+`messaging-plugin` and `queue-plugin`) belongs to a later cross-cutting milestone.
+
+### Package: `@hono-enterprise/telemetry-plugin` (extends M24)
+
+**Implementation files (added to the M24 package):**
+
+- ⬜ `src/instrumentation/http-instrumentation.ts`
+- ⬜ `src/instrumentation/database-instrumentation.ts`
+- ⬜ `src/instrumentation/queue-instrumentation.ts`
+- ⬜ `src/services/span-processor-factory.ts`
+
+**Test files:**
+
+- ⬜ `test/unit/http-instrumentation.test.ts`
+- ⬜ `test/unit/database-instrumentation.test.ts`
+- ⬜ `test/unit/span-processor-factory.test.ts`
+
+### Deliverables
+
+- [ ] Auto-instrumentation packages with inject-or-lazy client seam
+- [ ] `BatchSpanProcessor` as configurable alternative to `SimpleSpanProcessor`
+- [ ] 90%+ per-file coverage on every new `src/` file
+- [ ] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
 
 ---
 
@@ -3826,7 +3879,8 @@ app.register(MyPlugin({ option1: 'value' }));
 | 21        | ✅     | openapi-plugin       |
 | 22        | ✅     | kernel-on-hono       |
 | 23        | ✅     | runtime-serve-hono   |
-| 24        | ⬜     | telemetry-plugin     |
+| 24        | ✅     | telemetry-plugin     |
+| 24b       | ⬜     | telemetry-plugin     |
 | 25        | ⬜     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
 | 27        | ⬜     | resilience-plugin    |

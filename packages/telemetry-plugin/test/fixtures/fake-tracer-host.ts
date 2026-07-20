@@ -4,11 +4,12 @@
  * @module
  */
 import type { TracerHost } from '../../src/interfaces/index.ts';
-import type {
-  ISpan,
-  SpanAttributeValue,
-  SpanStatus,
-  TelemetryContext,
+import {
+  type ISpan,
+  type SpanAttributeValue,
+  type SpanStatus,
+  TELEMETRY_CONTEXT_OPAQUE,
+  type TelemetryContext,
 } from '@hono-enterprise/common';
 
 /**
@@ -21,8 +22,6 @@ export interface RecordedSpan {
   exceptions: Error[];
   ended: boolean;
 }
-
-const telemetryContextSymbol = Symbol.for('telemetry-context');
 
 /**
  * Creates a fake TracerHost that records all operations.
@@ -79,10 +78,9 @@ export function createFakeTracerHost(): FakeTracerHost {
     },
     extractContext(_headers: Headers): TelemetryContext {
       recordedCalls.push({ type: 'extractContext', args: [_headers] });
-      // deno-lint-ignore no-explicit-any
-      return { _opaque: telemetryContextSymbol } as any;
+      return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
     },
-    injectContext(_context: unknown) {
+    injectContext(_context: TelemetryContext) {
       recordedCalls.push({ type: 'injectContext', args: [_context] });
       return {};
     },

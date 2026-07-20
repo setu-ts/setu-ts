@@ -50,6 +50,15 @@ export interface SpanOptions {
 }
 
 /**
+ * Opaque marker symbol for {@link TelemetryContext}.
+ *
+ * @since 0.24.0
+ */
+export const TELEMETRY_CONTEXT_OPAQUE: unique symbol = Symbol.for(
+  'he.telemetry.context',
+);
+
+/**
  * Opaque handle representing the parent context for span creation.
  *
  * In the real (OTel-backed) implementation this wraps the OTel `Context`.
@@ -59,7 +68,7 @@ export interface SpanOptions {
  */
 export interface TelemetryContext {
   /** Internal marker — consumers must not inspect this type. */
-  readonly _opaque: unique symbol;
+  readonly _opaque: typeof TELEMETRY_CONTEXT_OPAQUE;
 }
 
 /**
