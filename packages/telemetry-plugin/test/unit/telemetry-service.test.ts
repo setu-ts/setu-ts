@@ -444,4 +444,148 @@ describe('TelemetryService', () => {
     expect(capturedCtx!.traceFlags).toBe('00');
     expect(typeof capturedCtx!.traceFlags).toBe('string');
   });
+
+  // F7: spanContext() fallback when traceId is undefined — triggers raw.traceId ?? ''.
+  it('should return empty string traceId when spanContext returns undefined traceId (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          spanContext() {
+            return { traceId: undefined, spanId: 'b'.repeat(16), traceFlags: 1 };
+          },
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
+    const service = new TelemetryService(fakeHost);
+
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('undefined-traceId', async (span) => {
+      capturedCtx = span.spanContext() as never;
+    });
+
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceId).toBe('');
+    expect(capturedCtx!.spanId).toBe('b'.repeat(16));
+    expect(capturedCtx!.traceFlags).toBe('01');
+  });
+
+  // F7: spanContext() fallback when spanId is undefined — triggers raw.spanId ?? ''.
+  it('should return empty string spanId when spanContext returns undefined spanId (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          spanContext() {
+            return { traceId: 'a'.repeat(32), spanId: undefined, traceFlags: 1 };
+          },
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
+    const service = new TelemetryService(fakeHost);
+
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('undefined-spanId', async (span) => {
+      capturedCtx = span.spanContext() as never;
+    });
+
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceId).toBe('a'.repeat(32));
+    expect(capturedCtx!.spanId).toBe('');
+    expect(capturedCtx!.traceFlags).toBe('01');
+  });
+
+  // F7: spanContext() fallback when both traceId and spanId are undefined — triggers both ?? '' branches.
+  it('should return empty strings for both traceId and spanId when spanContext returns both undefined (F7)', async () => {
+    const fakeHost = {
+      startSpan() {
+        return {
+          setAttribute(_key: string, _value: unknown) {
+            /* no-op */
+          },
+          setAttributes(_attrs: Record<string, unknown>) {
+            /* no-op */
+          },
+          setStatus(_status: string) {
+            /* no-op */
+          },
+          recordException(_error: Error) {
+            /* no-op */
+          },
+          end() {
+            /* no-op */
+          },
+          spanContext() {
+            return { traceId: undefined, spanId: undefined, traceFlags: 1 };
+          },
+        };
+      },
+      extractContext() {
+        return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
+      },
+      injectContext() {
+        return {};
+      },
+      shutdown: async () => {},
+      forceFlush: async () => {},
+    } as never;
+
+    const service = new TelemetryService(fakeHost);
+
+    let capturedCtx: { traceId: string; spanId: string; traceFlags: string } | undefined;
+    await service.withSpan('both-undefined', async (span) => {
+      capturedCtx = span.spanContext() as never;
+    });
+
+    expect(capturedCtx).toBeDefined();
+    expect(capturedCtx!.traceId).toBe('');
+    expect(capturedCtx!.spanId).toBe('');
+    expect(capturedCtx!.traceFlags).toBe('01');
+  });
 });
