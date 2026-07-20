@@ -225,9 +225,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   from `common`; `TracerHost` injectable seam) — complete (PR #49)
 - **Next milestone** — **Milestone 24b** (`packages/telemetry-plugin` — auto-instrumentation:
   runtime-gated `http`/fetch/ioredis/amqplib/kafkajs instrumentation behind the M24 `TracerHost`
-  seam; defines the public per-instrumentation `instrumentations` option (not a bare `string[]`) that
-  M24 shipped no placeholder for; adds `BatchSpanProcessor` as a `spanProcessor` choice — see ROADMAP
-  §Milestone 24b). Then **Milestone 25** (secrets plugin — secret management with KMS/Vault
+  seam; defines the public per-instrumentation `instrumentations` option (not a bare `string[]`)
+  that M24 shipped no placeholder for; adds `BatchSpanProcessor` as a `spanProcessor` choice — see
+  ROADMAP §Milestone 24b). Then **Milestone 25** (secrets plugin — secret management with KMS/Vault
   integration).
 
 ## Verification (run before declaring any work done)
