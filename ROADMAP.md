@@ -2623,6 +2623,54 @@ config block maps onto — so M24b must treat the shape as a stable public contr
 
 ---
 
+## Milestone 24c: Telemetry — OTel Collector Trace Fan-Out (config + docs)
+
+**Objective:** Provide the reference OpenTelemetry Collector configuration and operator guide for
+fanning a single OTLP trace stream out to **multiple observability backends simultaneously**
+(Datadog + New Relic + Azure Application Insights), so the telemetry plugin's app-side stays
+vendor-neutral (one `exporter: 'otlp'` endpoint) while routing lives in the collector.
+
+This milestone ships **no code package** — no `packages/*`, no `src/`, no new export or capability
+token. It is a deployment/config + documentation deliverable that extends the completed M24/M24b
+telemetry plugin, mirroring the sub-milestone convention (16b, 24b).
+
+### Scope
+
+1. A reference **collector config** (`docker/otel-collector/collector-config.yaml`): an OTLP/HTTP
+   receiver (`:4318`, the protocol the plugin emits via `@opentelemetry/exporter-trace-otlp-http`),
+   `memory_limiter` + `batch` processors, and three trace exporters — `datadog`, `otlphttp` (New
+   Relic OTLP), and `azuremonitor` — wired into one `traces` pipeline. Requires the **contrib**
+   collector distribution (`otelcol-contrib`); the `datadog` and `azuremonitor` exporters are not in
+   the core build. All vendor credentials are read from env (`${env:...}`), never committed.
+2. An operator **guide** (`docs/telemetry-collector-fanout.md`): the app-side wiring
+   (`TelemetryPlugin({ exporter: 'otlp', endpoint })`), the required env/secrets per vendor, how to
+   validate the config (`otelcol-contrib validate`), how to add/remove a backend, and the security
+   note on credential handling.
+
+### NOT in M24c
+
+- **Native in-app multi-exporter** (an `exporters: [...]` option on `TelemetryPlugin`) — a future
+  telemetry code milestone if ever wanted; the single-exporter seam is unchanged here.
+- **Runnable `docker-compose`, an example app, and Kubernetes manifests** — broader containerization
+  is owned by **M39 (Docker and Kubernetes)**, which references this collector config rather than
+  redefining it. The general docs site is owned by **M38 (Documentation)**, which links this guide.
+
+### Files
+
+- ⬜ `docker/otel-collector/collector-config.yaml`
+- ⬜ `docs/telemetry-collector-fanout.md`
+
+### Deliverables
+
+- [ ] Reference collector config: OTLP/HTTP receiver → Datadog + New Relic + Azure exporters
+      (contrib), env-driven credentials
+- [ ] Operator guide: app wiring, per-vendor env/secrets, config validation, add/remove-a-backend,
+      credential-security note
+- [ ] `deno fmt` clean; config validated with `otelcol-contrib validate`
+- [ ] ROADMAP progress row `24c` flipped ✅
+
+---
+
 ## Milestone 25: Secrets Plugin — Secret Management
 
 **Objective:** Provide secret management with KMS/Vault integration.
@@ -3930,6 +3978,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 23        | ✅     | runtime-serve-hono   |
 | 24        | ✅     | telemetry-plugin     |
 | 24b       | ✅     | telemetry-plugin     |
+| 24c       | ⬜     | telemetry-collector  |
 | 25        | ⬜     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
 | 27        | ⬜     | resilience-plugin    |
