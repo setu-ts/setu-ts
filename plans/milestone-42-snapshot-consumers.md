@@ -34,7 +34,9 @@ in M23, streaming is a single shared mapper change, not a per-adapter write path
     forwarding.
   - The cache-middleware `snapshot()` consumer learning to skip a streaming body (the ROADMAP §5
     guard).
-  - PUBLIC_API.md delta and two ROADMAP doc corrections.
+  - Updating every hand-rolled `IResponse` / `IRequestContext` test double across the workspace to
+    the new required shapes — a mandatory compile-break fix, enumerated in §6.1.
+  - PUBLIC_API.md delta and the ROADMAP doc corrections C2/C3/C5/C6 (§2).
 - **NOT this milestone:**
   - SSE framing, channels, heartbeats — **Milestone 43** (`sse-plugin`).
   - React Router SSR embed, request bridge, static assets — **Milestone 44**
@@ -68,12 +70,14 @@ in M23, streaming is a single shared mapper change, not a per-adapter write path
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                             | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                            | Doc deliverable (same PR)                                                                                              |
-| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| C1 | Scope/label mismatch: ROADMAP titles M42 "Streaming Response Body — `IResponse` Streaming Primitive"; the branch and this plan file use `snapshot-consumers`.                                                        | Scope follows the committed ROADMAP (authoritative for scope). The `snapshot-consumers` label is retained for the branch/file because it names a real sub-aspect (ROADMAP §5).                                                                                                                                                                                      | Note recorded here; no ROADMAP edit required. Branch renaming is out of scope for this plan-only pass (flagged in §9). |
-| C2 | ROADMAP M42 "Implementation Files" lists `packages/kernel/src/http/response.ts`; that path does not exist. The real file is `packages/kernel/src/context/response.ts`.                                               | Use the real path `packages/kernel/src/context/response.ts`.                                                                                                                                                                                                                                                                                                        | Fix the ROADMAP M42 implementation-files line to the real path.                                                        |
-| C3 | ROADMAP §3 lists only `IRequestContext.signal` as "populated by the HTTP adapter", but gives no vehicle from adapter to context. Verified from SOURCE that the adapter→handler→context path carries only `IRequest`. | Add an OPTIONAL `IRequest.signal?: AbortSignal` as the threading vehicle; `createRequestContext` populates the required `IRequestContext.signal` from `request.signal` (falling back to a non-aborting signal).                                                                                                                                                     | PUBLIC_API.md documents both fields; ROADMAP §3 gains a one-line note that the signal threads through `IRequest`.      |
-| C4 | Adding fields to already-exported interfaces could read as a breaking change (AI_GUIDELINES §9.1).                                                                                                                   | `IRequest.signal` is optional and `IResponse.snapshot()` widening is additive (new union member plus a new field), so no existing consumer breaks. `IRequestContext.signal` is required but its only constructor is the kernel-internal `createRequestContext`; handlers read it, they do not build it. Net effect is a backward-compatible minor-version addition. | PUBLIC_API.md delta (semver note).                                                                                     |
+| #  | Conflict                                                                                                                                                                                                             | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Doc deliverable (same PR)                                                                                                                                       |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | Scope/label mismatch: ROADMAP titles M42 "Streaming Response Body — `IResponse` Streaming Primitive"; the branch and this plan file use `snapshot-consumers`.                                                        | Scope follows the committed ROADMAP (authoritative for scope). The `snapshot-consumers` label is retained for the branch/file because it names a real sub-aspect (ROADMAP §5).                                                                                                                                                                                                                                                                                                                     | Note recorded here; no ROADMAP edit required. Branch renaming is out of scope for this plan-only pass (flagged in §9).                                          |
+| C2 | ROADMAP M42 "Implementation Files" lists `packages/kernel/src/http/response.ts`; that path does not exist. The real file is `packages/kernel/src/context/response.ts`.                                               | Use the real path `packages/kernel/src/context/response.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                       | Fix the ROADMAP M42 implementation-files line to the real path.                                                                                                 |
+| C3 | ROADMAP §3 lists only `IRequestContext.signal` as "populated by the HTTP adapter", but gives no vehicle from adapter to context. Verified from SOURCE that the adapter→handler→context path carries only `IRequest`. | Add an OPTIONAL `IRequest.signal?: AbortSignal` as the threading vehicle; `createRequestContext` populates the required `IRequestContext.signal` from `request.signal` (falling back to a non-aborting signal).                                                                                                                                                                                                                                                                                    | PUBLIC_API.md documents both fields; ROADMAP §3 gains a one-line note that the signal threads through `IRequest`.                                               |
+| C4 | Adding fields to already-exported interfaces could read as a breaking change (AI_GUIDELINES §9.1).                                                                                                                   | `IRequest.signal` is optional, so no existing PRODUCTION consumer breaks. But `IResponse.stream()` (new required method), the discriminated `snapshot()` shape (C5), and required `IRequestContext.signal` DO break every hand-rolled test double typed against those interfaces — a compile break, resolved by updating all doubles in the same PR (§6.1). Net effect on published `common` consumers is a backward-compatible minor-version addition; the break is confined to in-repo fixtures. | PUBLIC_API.md delta (semver note); fixture updates enumerated in §6.1.                                                                                          |
+| C5 | ROADMAP M42 contract addition #2 says "add a `streaming: boolean` marker to the snapshot" (a flat shape); a flat `{ body: …\|ReadableStream; streaming: boolean }` does not type-check at `encodePayload` (§3.1).    | Deliberate deviation: `snapshot()` returns a DISCRIMINATED union keyed on `streaming` (§3.1), preserving the observable `streaming` discriminant the ROADMAP describes while narrowing `body` with zero casts. A shape refinement, not a scope change.                                                                                                                                                                                                                                             | PUBLIC_API.md documents the union shape; one-line ROADMAP M42 note that the marker is realized as a discriminated union.                                        |
+| C6 | ROADMAP M42 "Implementation Files" lists `packages/kernel/src/pipeline/*` ("streaming-aware result handling; cache/snapshot guard") and a conditional `{node,deno,bun,workers}/*`; the fetch model needs neither.    | No `pipeline/*` file is edited (the stream rides in `ResponseBuilder.#body`, pumped lazily by the runtime — §3.1); the guard lives in `cache-plugin` (§3.4); the signal rides the shared mapper, so no per-adapter file changes.                                                                                                                                                                                                                                                                   | Fix the ROADMAP M42 implementation-files list: drop the `pipeline/*` line and the conditional per-adapter line (superseded by the single shared-mapper change). |
 
 ## 3. Design decisions
 
@@ -95,40 +99,90 @@ flowchart LR
   REQ -. ctx.signal aborts .-> HANDLER
 ```
 
-### 3.1 Stream body representation
+### 3.1 Stream body representation — `snapshot()` is a DISCRIMINATED union on `streaming`
 
 - **Decision:** `IResponse.stream(body: ReadableStream<Uint8Array>): HandlerResult` is a new
   terminal. `ResponseBuilder` stores the stream in its existing `#body` slot (widened to
   `Uint8Array | string | ReadableStream<Uint8Array> | null`), sets a new private
-  `#streaming = true`, and sets `#ended = true`. `snapshot()` returns the widened body plus
-  `streaming: boolean`.
-- **Why:** one body slot and one flag. The runtime hands the `ReadableStream` straight to
+  `#streaming = true`, and sets `#ended = true`. `snapshot()` returns a **discriminated union keyed
+  on `streaming`**, NOT a flat object with a widened `body` plus a separate `streaming: boolean`:
+
+  ```typescript
+  type ResponseSnapshot =
+    | {
+      readonly streaming: false;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: Uint8Array | string | null;
+    }
+    | {
+      readonly streaming: true;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: ReadableStream<Uint8Array>;
+    };
+  ```
+
+- **Why the union, not a flat `{ body: …|ReadableStream; streaming: boolean }`:** a flat shape does
+  NOT type-check at the one consumer that reads the body after guarding. `cacheMiddleware` does
+  `if (snapshot.streaming) return; … encodePayload(snapshot)`, and `encodePayload`'s parameter is
+  `body: Uint8Array | string | null` (verified, `cache-payload.ts:25`). Narrowing a flat
+  `streaming: boolean` to `false` does NOT narrow a separately-typed `body`, so
+  `encodePayload(snapshot)` would fail with TS2345 (`ReadableStream` not assignable); the only
+  workarounds are a banned cast or a widening of `encodePayload` to a `ReadableStream` branch it
+  must never take — both rejected. The discriminated union makes `if (snapshot.streaming)` narrow
+  `body` correctly on BOTH arms: the `false` arm's `body` is exactly `Uint8Array | string | null`
+  (assignable to `encodePayload` with no cast), and the `true` arm's `body` is exactly
+  `ReadableStream<Uint8Array>` (assignable to `new Response(body)` in the mapper with no cast). One
+  body slot, one discriminant, zero casts.
+- **Why one body slot and lazy pump:** the runtime hands the `ReadableStream` straight to
   `new Response(stream, { status, headers })`; the web fetch model pumps it lazily on every platform
   with no buffer-then-send and no "do not await" special-casing.
 - **Test home:** `packages/kernel/test/unit/response.test.ts` asserts `stream()` returns the
   `HandlerResult` brand, sets `ended`, that `snapshot().body` is the exact stream passed, and that
-  `snapshot().streaming === true`.
+  `snapshot().streaming === true`; the buffered regressions assert `snapshot().streaming === false`
+  and that `body` is the expected `Uint8Array | string | null`.
 
 ### 3.2 Signal threading vehicle
 
 - **Decision:** add an OPTIONAL `IRequest.signal?: AbortSignal`. `mapWebRequestToFrameworkRequest`
   sets `signal: request.signal` from the native `Request.signal`. `createRequestContext` populates
   the required `IRequestContext.signal` as `request.signal ?? NEVER_ABORT` where `NEVER_ABORT` is a
-  module-level `new AbortController().signal` in `request-context.ts`. `inject()` and test fakes
-  omit `signal` (it is optional), so they require no change to compile.
+  module-level `new AbortController().signal` in `request-context.ts`.
 - **Why:** verified from SOURCE that the adapter→handler→context path carries only `IRequest`, so
   `IRequest` is the only carrier that reaches `createRequestContext`. Putting the signal on
   `IRequest` (optional) avoids widening `IHttpAdapter` or the handler signature and keeps the change
-  backward-compatible. `IRequestContext.signal` stays required so every handler can rely on it.
+  backward-compatible. `IRequestContext.signal` stays required so every handler and streaming
+  producer can rely on it (M43 heartbeat cleanup / channel auto-remove depend on it being present).
+- **⚠ Compile-break scope — `IRequestContext.signal` is REQUIRED, which is NOT free.**
+  `IRequest.signal` is optional (adapters set it, `inject()`/fakes omit it — those genuinely need no
+  change). But `IRequestContext.signal` is REQUIRED, so **every hand-rolled `IRequestContext` object
+  literal in the test suite fails `deno task check` (TS2741) until it adds `signal`**. This is
+  compounded by §3.1: adding the required `IResponse.stream()` method and the discriminated
+  `snapshot()` shape breaks **every hand-rolled `IResponse` fake** the same way. The earlier draft's
+  claim that "test fakes … require no change to compile" was WRONG for these two required additions
+  and is corrected here — the fixture-update surface is enumerated as an explicit deliverable in
+  §6.1. The `??
+NEVER_ABORT` fallback and the `request.signal`-present path are BOTH exercised (see
+  §6.1) so the fallback branch is covered, not merely present.
+- **`NEVER_ABORT` honesty:** it is a real, never-aborted `AbortSignal` from a module-level
+  `AbortController` that is never `.abort()`-ed — so `ctx.signal` is always a live `AbortSignal`,
+  matching how the adapter path produces it. Fixtures that add `signal` MUST use a real
+  `new AbortController().signal` (never `{} as AbortSignal`), per the "test doubles must honor the
+  real contract" rule.
 - **Test home:** `packages/runtime/test/unit/fetch-mapping.test.ts` asserts the mapped request
   carries the native `request.signal`; the streaming integration test asserts aborting the request
-  aborts `ctx.signal` and stops the producer.
+  aborts `ctx.signal` and stops the producer; the kernel integration test asserts the `NEVER_ABORT`
+  fallback (a request with no `signal` still yields a present, non-aborted `ctx.signal`).
 
 ### 3.3 Streaming pass-through in `mapSnapshotToWebResponse`
 
-- **Decision:** widen the mapper parameter to the new snapshot shape. When `snapshot.streaming` is
-  true, return `new Response(snapshot.body, { status, headers })` directly with the `ReadableStream`
-  as the body. The buffered path for `Uint8Array | string | null` is unchanged.
+- **Decision:** widen the mapper parameter to the discriminated `ResponseSnapshot` union (§3.1).
+  When `snapshot.streaming` is true, `snapshot.body` is narrowed to `ReadableStream<Uint8Array>` and
+  the mapper returns `new Response(snapshot.body, { status, headers })` directly — no cast, because
+  `ReadableStream` is a valid `BodyInit`. On the `false` arm, `snapshot.body` narrows to
+  `Uint8Array | string | null` and the existing buffered path is unchanged (the current
+  `body as unknown as BlobPart` cast for `Uint8Array` stays as-is; it is unrelated to streaming).
 - **Why:** M23 deleted the per-adapter write path; the shared mapper is the single point every
   adapter funnels through. Passing the stream through unchanged is the one change ROADMAP §6 asks
   for.
@@ -140,10 +194,15 @@ flowchart LR
 
 - **Decision:** `cacheMiddleware` checks
   `if (snapshot.streaming) { ctx.response.header('X-Cache', 'MISS'); return; }` in its MISS path
-  before `encodePayload`. The metrics `http-collector` and the telemetry middleware read only
-  `snapshot.status` (verified), so they need no change and no stream is ever drained by them.
+  before `encodePayload`. Because `snapshot()` is the discriminated union (§3.1), this guard NARROWS
+  `snapshot` to the `streaming: false` arm for the rest of the function, so the subsequent
+  `encodePayload(snapshot)` type-checks against its `body: Uint8Array | string | null` parameter
+  with no cast and no widening of `encodePayload`. The metrics `http-collector` and the telemetry
+  middleware read only `snapshot.status` (verified), so they need no change and no stream is ever
+  drained by them.
 - **Why:** ROADMAP §5 — a live stream is not cacheable and must not be drained by an observer.
-  Without the guard, `encodePayload` would silently store a streaming response as a `null` body.
+  Without the guard, `encodePayload` would silently store a streaming response as a `null` body
+  (and, under a flat non-union snapshot, would not even compile — see §3.1).
 - **Test home:** `packages/cache-plugin/test/unit/cache-middleware.test.ts` asserts a streaming
   response is neither stored nor drained, and is marked MISS.
 
@@ -164,12 +223,12 @@ No NEW symbol is exported from any `src/index.ts`: `IResponse`, `IRequest`, `IRe
 `HandlerResult` are already re-exported from `packages/common/src/index.ts:38`. This milestone
 changes the SHAPE of already-exported interfaces. Each changed member and its reader:
 
-| Changed member                                       | Kind                  | Consumer / real code path that READS it                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IResponse.stream(body)`                             | method (new)          | Route handlers (M43 SSE, M44 SSR, app code) call it; `ResponseBuilder` implements it; the returned `HandlerResult` flows through the pipeline terminal.                                                                                                                                                                                                    |
-| `IResponse.snapshot()` widened body plus `streaming` | method (widened)      | `mapSnapshotToWebResponse` (`packages/runtime/src/adapters/shared/fetch-mapping.ts:71`) reads `streaming` to choose pass-through; `cacheMiddleware` (`packages/cache-plugin/src/middleware/cache-middleware.ts:115`) reads `streaming` to skip; metrics `http-collector` and telemetry middleware read only `.status`; `Application.inject` reads `.body`. |
-| `IRequest.signal?: AbortSignal`                      | field (new, optional) | `mapWebRequestToFrameworkRequest` produces it from the native `Request.signal`; `createRequestContext` reads it to populate `ctx.signal`.                                                                                                                                                                                                                  |
-| `IRequestContext.signal: AbortSignal`                | field (new, required) | Route handlers and streaming producers read it to stop on client disconnect (M43 heartbeat cleanup and channel auto-remove depend on it); `createRequestContext` is the sole producer.                                                                                                                                                                     |
+| Changed member                                                         | Kind                              | Consumer / real code path that READS it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IResponse.stream(body)`                                               | method (new, required)            | Route handlers (M43 SSE, M44 SSR, app code) call it; `ResponseBuilder` implements it; the returned `HandlerResult` flows through the pipeline terminal. As a NEW required interface method, every hand-rolled `IResponse` fake must add a `stream` method to compile — enumerated in §6.1.                                                                                                                                                                                                                              |
+| `IResponse.snapshot()` → discriminated `ResponseSnapshot` union (§3.1) | method (widened, breaking-shaped) | `mapSnapshotToWebResponse` (`packages/runtime/src/adapters/shared/fetch-mapping.ts:71`) branches on `streaming` for pass-through; `cacheMiddleware` (`packages/cache-plugin/src/middleware/cache-middleware.ts:115`) branches on `streaming` to skip; metrics `http-collector` and telemetry middleware read only `.status`; `Application.inject` reads `.body`. Every hand-rolled `IResponse` fake that implements `snapshot()` must return the new union shape (`streaming` discriminant added) — enumerated in §6.1. |
+| `IRequest.signal?: AbortSignal`                                        | field (new, optional)             | `mapWebRequestToFrameworkRequest` produces it from the native `Request.signal`; `createRequestContext` reads it to populate `ctx.signal`.                                                                                                                                                                                                                                                                                                                                                                               |
+| `IRequestContext.signal: AbortSignal`                                  | field (new, required)             | Route handlers and streaming producers read it to stop on client disconnect (M43 heartbeat cleanup and channel auto-remove depend on it); `createRequestContext` is the sole producer. As a NEW required field, every hand-rolled `IRequestContext` object literal must add `signal` to compile — enumerated in §6.1.                                                                                                                                                                                                   |
 
 ### 4.1 Options — every option names its consumer
 
@@ -214,6 +273,46 @@ mapper is the single change; `app.fetch(Request)` exercises the full
 `mapWebRequest → handler →
 mapSnapshotToWebResponse` path on the CI runtime.
 
+### 6.1 Cross-package fixture updates (mandatory compile-break scope)
+
+Three required-shape additions — `IResponse.stream()` (new method), the discriminated `snapshot()`
+union (§3.1), and `IRequestContext.signal` (new required field) — break every hand-rolled
+`IResponse` / `IRequestContext` test double that is typed against those interfaces. This is NOT
+optional cleanup: `deno task check` fails repo-wide until each is fixed, so these edits ship in THIS
+milestone's PR even though they live outside the five `src` files in §5. The earlier draft omitted
+this surface entirely; it is the single largest correction to the plan.
+
+**Per-double changes:**
+
+- Every `IResponse` fake gains a `stream(body: ReadableStream<Uint8Array>): HandlerResult` method (a
+  fixture may `throw new Error('not implemented')` if the test never calls it — a documented,
+  never-exercised throw is fine here; it is a test double, not `src`).
+- Every fake `snapshot()` returns the discriminated union: add `streaming: false` to the existing
+  `{ status, headers, body }` literal (buffered doubles) — no double needs a `streaming: true` arm
+  unless the test specifically drives streaming.
+- Every `IRequestContext` object literal gains `signal: new AbortController().signal` (a real,
+  non-aborted signal — never `{} as AbortSignal`, per the real-contract rule).
+
+**Candidate file surface (confirm the exact set by running `deno task check` — a file that casts its
+double `as any`/`as unknown as I…` may not break and must NOT be touched just to touch it):**
+
+| Package                | Files (test doubles)                                                                                                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `auth-plugin`          | `test/unit/auth-middleware.test.ts`, `test/unit/guards.test.ts`, `test/unit/rate-limit-middleware.test.ts`, `test/integration/auth-integration.test.ts`, `test/integration/auth-behavior-probe.test.ts`, `test/integration/refresh-rate-limit-integration.test.ts` |
+| `cache-plugin`         | `test/unit/cache-middleware.test.ts`, `test/unit/cache-key.test.ts`                                                                                                                                                                                                |
+| `decorator-plugin`     | `test/fixtures/fake-request-context.ts`                                                                                                                                                                                                                            |
+| `exceptions`           | `test/fixtures/fake-runtime.ts` (note: the `snapshot` field's inline type annotation at ~`:71` must also become the union)                                                                                                                                         |
+| `http-security-plugin` | `test/fixtures/fake-request-context.ts`                                                                                                                                                                                                                            |
+| `validation-plugin`    | `test/fixtures/fake-runtime.ts`                                                                                                                                                                                                                                    |
+| `logger-plugin`        | `test/unit/request-logger.test.ts`                                                                                                                                                                                                                                 |
+| `runtime`              | `test/unit/{node,deno,bun,cf}-http-adapter.test.ts`, `test/integration/{node,deno}-http-adapter.test.ts`, `test/unit/runtime-plugin.test.ts` (several cast `as any` and will NOT break — verify)                                                                   |
+| `telemetry-plugin`     | `test/unit/telemetry-middleware.test.ts`, `test/unit/telemetry-plugin.test.ts`                                                                                                                                                                                     |
+
+**Coverage guard:** these are `test/` fixtures, excluded from the 90% `src` measurement, so adding a
+never-called `stream()` to a fake does NOT lower any coverage number. But re-run the ANSI-stripped
+per-file table afterward per CLAUDE.md — a fixture edit can perturb which branches a test reaches in
+the `src` it drives.
+
 ## 7. Verification gates
 
 ```bash
@@ -247,6 +346,12 @@ must be empty (comments excepted). The changed packages use only web-standard AP
   through). The cache-middleware test pins the guard.
 - **`exactOptionalPropertyTypes`.** `IRequest.signal` is optional and only ever assigned a real
   `AbortSignal` (producers set it, they never assign `undefined`); `inject()` and fakes omit it.
+- **Fixture compile break is the largest scope item, not an afterthought.** The required additions
+  (`IResponse.stream()`, discriminated `snapshot()`, `IRequestContext.signal`) fail
+  `deno task check` across ~9 packages of hand-rolled doubles until fixed. Mitigation: §6.1
+  enumerates the surface and the per-double change; the implementer runs `deno task check` to
+  confirm the exact set (some `as any`-cast doubles will not break). Skipping this is not an option
+  — the gate is red until it is done, and it must ship in the same PR as the `common` change.
 - **Cloudflare Workers streaming limits.** Long-lived streams on Workers are subject to platform
   duration/streaming limits; that is a platform constraint owned by M43 (SSE), not by this
   primitive. Recorded here so M42 does not assume Node-style indefinite connections.
