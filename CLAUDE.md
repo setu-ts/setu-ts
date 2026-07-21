@@ -233,6 +233,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `spanProcessor: 'simple' | 'batch'` choice via `span-processor-factory` (both processors from the
   already-pinned `npm:@opentelemetry/sdk-trace-base@^2.9.0`, zero new deps); no `common` change, no
   new capability token) — complete (PR #50)
+- **Milestone 24c** (telemetry — OTel Collector **trace fan-out**: config + docs only, no code
+  package. A reference OpenTelemetry Collector config
+  (`docker/otel-collector/collector-config.yaml`) that receives one OTLP/HTTP trace stream from the
+  plugin (`exporter: 'otlp'`) and fans it out to Datadog + New Relic + Azure Application Insights
+  simultaneously — OTLP/HTTP receiver on `:4318`, `memory_limiter` + `batch`, and
+  `datadog`/`otlphttp`(New Relic)/`azuremonitor` exporters on one `traces` pipeline; credentials via
+  `${env:...}`; requires the `otelcol-contrib` distribution; validated with
+  `otelcol-contrib
+  validate`. Plus an operator guide (`docs/telemetry-collector-fanout.md`). M39
+  owns compose/k8s and references this config; M38 links the guide. No `common` change, no
+  capability token) — complete (PR #51)
 - **Next milestone** — **Milestone 25** (`packages/secrets-plugin` — SecretsPlugin registering
   `ISecretManager` under `CAPABILITIES.SECRETS`; providers for AWS KMS, GCP Secret Manager, Azure
   Key Vault, HashiCorp Vault, EnvProvider).

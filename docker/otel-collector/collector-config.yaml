@@ -1,0 +1,60 @@
+# OpenTelemetry Collector — trace fan-out reference config (Hono Enterprise, M24c)
+#
+# Receives ONE OTLP/HTTP trace stream from a Hono Enterprise app
+# (TelemetryPlugin({ exporter: 'otlp', endpoint: 'http://<this-collector>:4318/v1/traces' }))
+# and fans it out to Datadog + New Relic + Azure Application Insights simultaneously.
+#
+# REQUIRES the *contrib* distribution: `otelcol-contrib` (image:
+# otel/opentelemetry-collector-contrib). The `datadog` and `azuremonitor` exporters are NOT in the
+# core `otelcol` build. New Relic uses the generic `otlphttp` exporter (native OTLP ingest).
+#
+# All credentials are read from the environment (${env:...}) — NEVER commit real key material.
+# See docs/telemetry-collector-fanout.md for setup, required env vars, and validation.
+
+receivers:
+  # The plugin emits OTLP/HTTP on :4318. gRPC (:4317) is included for other producers.
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # memory_limiter MUST be first so the collector sheds load before OOM.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+exporters:
+  # Datadog — API key + site (e.g. datadoghq.com, datadoghq.eu, us3.datadoghq.com).
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+
+  # New Relic — OTLP native ingest. US: https://otlp.nr-data.net  EU: https://otlp.eu01.nr-data.net
+  # The `api-key` header carries the New Relic LICENSE key (not a user API key).
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+  # Azure Application Insights — full connection string
+  # (InstrumentationKey=...;IngestionEndpoint=...).
+  azuremonitor:
+    connection_string: ${env:APPLICATIONINSIGHTS_CONNECTION_STRING}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [datadog, otlphttp/newrelic, azuremonitor]
+  telemetry:
+    logs:
+      level: info
