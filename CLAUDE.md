@@ -244,9 +244,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   validate`. Plus an operator guide (`docs/telemetry-collector-fanout.md`). M39
   owns compose/k8s and references this config; M38 links the guide. No `common` change, no
   capability token) — complete (PR #51)
-- **Next milestone** — **Milestone 25** (`packages/secrets-plugin` — SecretsPlugin registering
-  `ISecretManager` under `CAPABILITIES.SECRETS`; providers for AWS KMS, GCP Secret Manager, Azure
-  Key Vault, HashiCorp Vault, EnvProvider).
+- **Milestone 42** (`packages/common` — `IResponse.stream(ReadableStream<Uint8Array>)`, widened
+  `snapshot()` returning a discriminated union `{ streaming: false, body: Uint8Array|string|null }`
+  / `{ streaming: true, body: ReadableStream<Uint8Array> }`; `IRequest.signal?: AbortSignal` and
+  `IRequestContext.signal: AbortSignal`; `packages/kernel` — `context/response.ts` streaming
+  implementation, `context/request-context.ts` signal threading; `packages/runtime` —
+  `adapters/shared/fetch-mapping.ts` streaming body pass-through (`mapSnapshotToWebResponse`) +
+  native `Request.signal` → `IRequestContext.signal`; `packages/cache-plugin` — streaming guard in
+  `cache-middleware.ts` (skip `encodePayload` when `streaming === true`, set `X-Cache: MISS`) —
+  complete (PR pending)
+- **Next milestone** — **Milestone 43** (`packages/sse-plugin` — Server-Sent Events plugin with
+  frame encoding, named channels, heartbeat, `Last-Event-ID`).
 
 ## Verification (run before declaring any work done)
 
