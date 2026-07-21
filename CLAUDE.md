@@ -232,7 +232,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   global singleton); a new optional `TracerHost.otelProvider` accessor; and a
   `spanProcessor: 'simple' | 'batch'` choice via `span-processor-factory` (both processors from the
   already-pinned `npm:@opentelemetry/sdk-trace-base@^2.9.0`, zero new deps); no `common` change, no
-  new capability token) — complete (PR pending)
+  new capability token) — complete (PR #50)
 - **Next milestone** — **Milestone 25** (`packages/secrets-plugin` — SecretsPlugin registering
   `ISecretManager` under `CAPABILITIES.SECRETS`; providers for AWS KMS, GCP Secret Manager, Azure
   Key Vault, HashiCorp Vault, EnvProvider).
