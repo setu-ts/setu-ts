@@ -10,6 +10,7 @@
 
 import type {
   IPlugin,
+  IRuntimeServices,
   ITelemetryService,
   MiddlewareFunction,
   TelemetryContext,
@@ -19,6 +20,7 @@ import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts'
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
 import { contextToTraceparent, extractContextFromHeaders } from '../tracing/tracer.ts';
+import { buildInstrumentationRegistry } from '../instrumentation/instrumentation-registry.ts';
 
 /**
  * Middleware priority for telemetry (inside metrics at 20, outside auth at 300).
@@ -74,6 +76,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
     async register(ctx) {
       let service: ITelemetryService;
       let tracerHost: TracerHost | undefined;
+      let instrumentationHandle: { shutdown(): Promise<void> } | null = null;
 
       if (options.exporter) {
         // Real OTel mode
@@ -84,14 +87,28 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
         }
         service = new TelemetryService(tracerHost);
 
-        // Register shutdown hook to flush pending spans
+        // Build instrumentation registry after the host is obtained.
+        // Only runs when all three conditions hold: instrumentations configured,
+        // real mode (exporter set), and host exposes otelProvider.
+        if (options.instrumentations && tracerHost.otelProvider) {
+          instrumentationHandle = buildInstrumentationRegistry(
+            options.instrumentations,
+            ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME!),
+            tracerHost.otelProvider,
+          );
+        }
+
+        // Register shutdown hook: disable instrumentations first, then shut down the provider.
         ctx.lifecycle.onShutdown(async () => {
+          if (instrumentationHandle) {
+            await instrumentationHandle.shutdown();
+          }
           if (tracerHost) {
             await tracerHost.shutdown();
           }
         });
       } else {
-        // Noop mode
+        // Noop mode — instrumentations are a no-op (no exporter = no provider).
         service = new NoopTelemetryService();
       }
 

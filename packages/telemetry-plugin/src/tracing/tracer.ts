@@ -9,6 +9,7 @@ import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts'
 import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@hono-enterprise/common';
 import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
+import { createSpanProcessor } from '../services/span-processor-factory.ts';
 
 // OTel API handle — populated by loadOtelTracerProvider when the SDK is loaded.
 let _otelApi: OtelApi | null = null;
@@ -137,6 +138,7 @@ export interface OtelSdkModule {
     shutdown(): Promise<void>;
   };
   SimpleSpanProcessor: new (exporter: unknown) => unknown;
+  BatchSpanProcessor: new (exporter: unknown, config?: Record<string, unknown>) => unknown;
   TraceIdRatioBasedSampler: new (ratio: number) => unknown;
   AlwaysOnSampler: new () => unknown;
 }
@@ -207,6 +209,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
   const {
     BasicTracerProvider,
     SimpleSpanProcessor,
+    BatchSpanProcessor,
     TraceIdRatioBasedSampler,
     AlwaysOnSampler,
   } = sdkMod;
@@ -278,10 +281,17 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
     sampler = new AlwaysOnSampler();
   }
 
+  // Build span processor via factory
+  const processor = createSpanProcessor(
+    pluginOptions.spanProcessor ?? 'simple',
+    exporter,
+    { SimpleSpanProcessor, BatchSpanProcessor } as never,
+  );
+
   // Build provider via constructor config (2.x API)
   const provider = new BasicTracerProvider({
     resource,
-    spanProcessors: [new SimpleSpanProcessor(exporter as never)],
+    spanProcessors: [processor as never],
     sampler: sampler as never,
   });
 
@@ -347,6 +357,9 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
     },
     shutdown: () => provider.shutdown(),
     forceFlush: () => provider.forceFlush(),
+    get otelProvider() {
+      return provider;
+    },
   };
 }
 

@@ -11,8 +11,12 @@
 
 export { TelemetryPlugin } from './plugin/telemetry-plugin.ts';
 export type {
+  InstrumentationConfig,
+  InstrumentationKind,
+  InstrumentationsConfig,
   SamplingConfig,
   SpanExporterKind,
+  SpanProcessorKind,
   TelemetryPluginOptions,
   TracerHost,
 } from './interfaces/index.ts';

@@ -264,6 +264,11 @@ describe('buildTracerHost (via fake modules)', () => {
           // no-op
         }
       } as OtelSdkModule['SimpleSpanProcessor'],
+      BatchSpanProcessor: class {
+        constructor(_exporter: unknown, _config?: Record<string, unknown>) {
+          // no-op
+        }
+      } as OtelSdkModule['BatchSpanProcessor'],
       TraceIdRatioBasedSampler: class {
         constructor(_ratio: number) {
           // no-op
@@ -990,5 +995,145 @@ describe('buildTracerHost (via fake modules)', () => {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toContain('otlpExporterCtor');
     }
+  });
+
+  // --- Milestone 24b: spanProcessor + otelProvider ---
+
+  it('should expose otelProvider on the returned TracerHost', async () => {
+    let capturedProvider: unknown = null;
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const fakeSdkMod = {
+      ...createFakeSdkModule(),
+      BasicTracerProvider: class {
+        constructor() {
+          capturedProvider = this;
+        }
+        getTracer() {
+          return {
+            startSpan() {
+              return {};
+            },
+          };
+        }
+        async forceFlush() {}
+        async shutdown() {}
+      } as OtelSdkModule['BasicTracerProvider'],
+    };
+
+    const host = await buildTracerHost({
+      sdkMod: fakeSdkMod,
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    expect(host.otelProvider).toBe(capturedProvider);
+  });
+
+  it('should call createSpanProcessor with spanProcessor option', async () => {
+    let capturedProcessorKind: string | undefined;
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const fakeSdkMod = {
+      ...createFakeSdkModule(),
+      BasicTracerProvider: class {
+        constructor(_config: {
+          resource: unknown;
+          spanProcessors: unknown[];
+          sampler: unknown;
+        }) {
+          // Processor is at index 0
+          capturedProcessorKind = (
+            _config.spanProcessors[0] as { kind?: string }
+          ).kind;
+        }
+        getTracer() {
+          return {
+            startSpan() {
+              return {};
+            },
+          };
+        }
+        async forceFlush() {}
+        async shutdown() {}
+      } as OtelSdkModule['BasicTracerProvider'],
+      SimpleSpanProcessor: class {
+        public kind = 'simple';
+        constructor(_exporter: unknown) {}
+      } as OtelSdkModule['SimpleSpanProcessor'],
+      BatchSpanProcessor: class {
+        public kind = 'batch';
+        constructor(_exporter: unknown) {}
+      } as OtelSdkModule['BatchSpanProcessor'],
+    };
+
+    await buildTracerHost({
+      sdkMod: fakeSdkMod,
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+        spanProcessor: 'batch',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    expect(capturedProcessorKind).toBe('batch');
+  });
+
+  it('should default to simple spanProcessor when not specified', async () => {
+    let capturedProcessorKind: string | undefined;
+    class FakeConsoleExporter {
+      // no-op
+    }
+    const fakeSdkMod = {
+      ...createFakeSdkModule(),
+      BasicTracerProvider: class {
+        constructor(_config: {
+          resource: unknown;
+          spanProcessors: unknown[];
+          sampler: unknown;
+        }) {
+          capturedProcessorKind = (
+            _config.spanProcessors[0] as { kind?: string }
+          ).kind;
+        }
+        getTracer() {
+          return {
+            startSpan() {
+              return {};
+            },
+          };
+        }
+        async forceFlush() {}
+        async shutdown() {}
+      } as OtelSdkModule['BasicTracerProvider'],
+      SimpleSpanProcessor: class {
+        public kind = 'simple';
+        constructor(_exporter: unknown) {}
+      } as OtelSdkModule['SimpleSpanProcessor'],
+      BatchSpanProcessor: class {
+        public kind = 'batch';
+        constructor(_exporter: unknown) {}
+      } as OtelSdkModule['BatchSpanProcessor'],
+    };
+
+    await buildTracerHost({
+      sdkMod: fakeSdkMod,
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+      },
+      consoleExporterCtor: FakeConsoleExporter as never,
+    });
+
+    expect(capturedProcessorKind).toBe('simple');
   });
 });

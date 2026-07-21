@@ -25,6 +25,25 @@ export const TELEMETRY_SPAN_KEY = '__he_telemetry_span';
 export type SpanExporterKind = 'otlp' | 'console';
 
 /**
+ * Which span processor to use.
+ *
+ * @since 0.24.1
+ */
+export type SpanProcessorKind = 'simple' | 'batch';
+
+/**
+ * The kind of instrumentation to enable.
+ *
+ * @since 0.24.1
+ */
+export type InstrumentationKind =
+  | 'http'
+  | 'fetch'
+  | 'ioredis'
+  | 'amqplib'
+  | 'kafkajs';
+
+/**
  * Sampling configuration.
  *
  * @since 0.24.0
@@ -62,6 +81,13 @@ export interface TracerHost {
   shutdown(): Promise<void>;
   /** Forces flush of pending spans. */
   forceFlush(): Promise<void>;
+  /**
+   * The underlying OTel TracerProvider; undefined for noop/custom hosts
+   * (instrumentations then no-op).
+   *
+   * @since 0.24.1
+   */
+  readonly otelProvider?: unknown;
 }
 
 /**
@@ -86,4 +112,58 @@ export interface TelemetryPluginOptions {
   tracerProviderFactory?: () => Promise<TracerHost>;
   /** Whether to register the request-span middleware (default: `true`). */
   middleware?: boolean;
+  /**
+   * Span processor to use (`'simple'` by default, `'batch'` as an option).
+   *
+   * @since 0.24.1
+   */
+  spanProcessor?: SpanProcessorKind;
+  /**
+   * Auto-instrumentation configuration.
+   *
+   * Each key enables one instrumentation on supported runtimes (Node only).
+   * Omitting a key leaves that instrumentation off.
+   *
+   * @since 0.24.1
+   */
+  instrumentations?: InstrumentationsConfig;
+}
+
+/**
+ * Per-instrumentation entry. Presence of the parent key enables; this configures or injects.
+ *
+ * @since 0.24.1
+ */
+export interface InstrumentationConfig {
+  /**
+   * An already-constructed OTel `Instrumentation` instance — the INJECT half of the
+   * inject-or-lazy seam. When set, the registry skips the lazy `npm:` import and uses
+   * this instance directly.
+   */
+  readonly instrumentation?: unknown;
+  /**
+   * Opaque config object forwarded VERBATIM to the OTel instrumentation constructor's
+   * `config` argument (the LAZY half). Framework-owned and untyped on purpose: OTel
+   * instrumentation config surfaces evolve independently and re-typing them here would
+   * fabricate field names and drift.
+   */
+  readonly config?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Configuration for auto-instrumentations.
+ *
+ * @since 0.24.1
+ */
+export interface InstrumentationsConfig {
+  /** node:http/https via @opentelemetry/instrumentation-http. Node-only; no-op elsewhere. */
+  readonly http?: true | InstrumentationConfig;
+  /** Node undici/fetch via @opentelemetry/instrumentation-undici. Node-only; no-op elsewhere. */
+  readonly fetch?: true | InstrumentationConfig;
+  /** ioredis via @opentelemetry/instrumentation-ioredis. Node-only; no-op elsewhere. */
+  readonly ioredis?: true | InstrumentationConfig;
+  /** amqplib via @opentelemetry/instrumentation-amqplib. Node-only; no-op elsewhere. */
+  readonly amqplib?: true | InstrumentationConfig;
+  /** kafkajs via @opentelemetry/instrumentation-kafkajs. Node-only; no-op elsewhere. */
+  readonly kafkajs?: true | InstrumentationConfig;
 }

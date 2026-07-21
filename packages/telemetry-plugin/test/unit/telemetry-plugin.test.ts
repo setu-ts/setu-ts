@@ -419,6 +419,92 @@ describe('createNoopTracerHost', () => {
     const ctx = host.extractContext(headers);
     expect((ctx as { tracestate?: string }).tracestate).toBe('vendor=value');
   });
+
+  it('should NOT expose otelProvider on the noop tracer host', () => {
+    const host = createNoopTracerHost();
+    expect((host as { otelProvider?: unknown }).otelProvider).toBeUndefined();
+  });
+});
+
+// --- Milestone 24b: instrumentations option ---
+
+describe('TelemetryPlugin with instrumentations (24b)', () => {
+  it('should not build instrumentation registry in noop mode (no exporter)', async () => {
+    const mock = createMockContext();
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      instrumentations: { http: true },
+    });
+    await plugin.register(mock.ctx);
+
+    // No shutdown hooks registered in noop mode — instrumentations are a no-op.
+    expect(mock.shutdownHooks).toHaveLength(0);
+  });
+
+  it('should not build instrumentation registry when otelProvider is absent (factory without otelProvider)', async () => {
+    const mock = createMockContext();
+    // Factory returns a host WITHOUT otelProvider — instrumentations should be a no-op.
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        // Explicitly omit otelProvider
+      }),
+      instrumentations: { http: true },
+    });
+    await plugin.register(mock.ctx);
+
+    expect(mock.registeredTokens).toContain(CAPABILITIES.TELEMETRY);
+    // Shutdown hook exists (for the provider), but instrumentation handle is null.
+    expect(mock.shutdownHooks).toHaveLength(1);
+  });
+
+  it('should call instrumentationHandle.shutdown() before tracerHost.shutdown() on onShutdown', async () => {
+    const mock = createMockContext();
+    const callOrder: string[] = [];
+
+    const fakeInstrumentationInstance = {
+      setTracerProvider: () => {},
+      enable: () => {},
+      disable() {
+        callOrder.push('instrumentation-disable');
+      },
+    };
+
+    const fakeProvider = { id: 'fake-provider' };
+
+    // The mock context's services.get must return a runtime when CAPABILITIES.RUNTIME is queried.
+    // Without this, buildInstrumentationRegistry throws because runtime is undefined.
+    mock.ctx.services.register(CAPABILITIES.RUNTIME!, {
+      platform: () => 'node' as never,
+    } as never);
+
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        otelProvider: fakeProvider,
+        shutdown: async () => {
+          callOrder.push('tracerHost-shutdown');
+        },
+      }),
+      instrumentations: {
+        http: {
+          instrumentation: fakeInstrumentationInstance as never,
+        },
+      },
+    });
+    await plugin.register(mock.ctx);
+
+    expect(mock.shutdownHooks).toHaveLength(1);
+    // Execute the shutdown hook.
+    await mock.shutdownHooks[0]!();
+
+    // Verify ordering: instrumentation disable BEFORE tracerHost shutdown.
+    expect(callOrder).toEqual(['instrumentation-disable', 'tracerHost-shutdown']);
+  });
 });
 
 /**
