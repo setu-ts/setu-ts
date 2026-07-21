@@ -2657,17 +2657,17 @@ telemetry plugin, mirroring the sub-milestone convention (16b, 24b).
 
 ### Files
 
-- ⬜ `docker/otel-collector/collector-config.yaml`
-- ⬜ `docs/telemetry-collector-fanout.md`
+- ✅ `docker/otel-collector/collector-config.yaml`
+- ✅ `docs/telemetry-collector-fanout.md`
 
 ### Deliverables
 
-- [ ] Reference collector config: OTLP/HTTP receiver → Datadog + New Relic + Azure exporters
+- [x] Reference collector config: OTLP/HTTP receiver → Datadog + New Relic + Azure exporters
       (contrib), env-driven credentials
-- [ ] Operator guide: app wiring, per-vendor env/secrets, config validation, add/remove-a-backend,
+- [x] Operator guide: app wiring, per-vendor env/secrets, config validation, add/remove-a-backend,
       credential-security note
-- [ ] `deno fmt` clean; config validated with `otelcol-contrib validate`
-- [ ] ROADMAP progress row `24c` flipped ✅
+- [x] `deno fmt` clean; config validated with `otelcol-contrib validate`
+- [x] ROADMAP progress row `24c` flipped ✅
 
 ---
 
@@ -3978,7 +3978,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 23        | ✅     | runtime-serve-hono   |
 | 24        | ✅     | telemetry-plugin     |
 | 24b       | ✅     | telemetry-plugin     |
-| 24c       | ⬜     | telemetry-collector  |
+| 24c       | ✅     | telemetry-collector  |
 | 25        | ⬜     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
 | 27        | ⬜     | resilience-plugin    |
