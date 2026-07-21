@@ -3678,6 +3678,25 @@ a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M4
 > is never loaded at runtime at all). At runtime the embed is web-standard (`Request`/`Response`),
 > so it runs wherever those do; only the build is Node-bound.
 
+> **Tracing (telemetry M24/M24b) expectations.** Because RR mounts as a kernel catch-all handler in
+> the normal pipeline, the telemetry request-span middleware (priority 30, runtime-agnostic) already
+> wraps every SSR request and emits one server span with W3C `traceparent` propagation — no M44 work
+> needed for request-level tracing. Known gaps the M44 plan should account for (do NOT silently
+> assume they work): (1) **No implicit span nesting across `await`** — the plugin registers no OTel
+> `ContextManager` (would pull `node:async_hooks`, breaking runtime independence), so spans from
+> auto-instrumentation and from loaders/actions are ROOTS, not children of the SSR request span; to
+> link a loader/action span, create it manually via `ITelemetryService` with an explicit
+> `parentContext`. If M44 wants loader/action spans nested under the request span, that is a design
+> decision the plan must own (candidate: read the active span off `ctx.state`/`loadContext` and pass
+> it as parent). (2) **Server-side only** — M24b auto-instrumentation (`fetch` via undici) traces
+> server-side `fetch()` in loaders/actions on **Node only** (no-op on Deno/Bun/CF-Workers); browser
+> RR navigation + hydration are NOT traced and need a separate browser OTel setup (out of scope).
+> (3) **Multi-backend export** (Datadog / New Relic / App Insights simultaneously) is NOT a
+> built-in: the plugin wires a single exporter. Fan-out is via an OTLP→OpenTelemetry-Collector
+> deployment, or an injected `tracerProviderFactory` host with multiple span processors — an
+> app/deploy concern, not an M44 concern, but noted so M44 does not assume multi-destination tracing
+> exists.
+
 ### Package: `@hono-enterprise/react-router-plugin`
 
 Registers an `ISsrService` under a new `CAPABILITIES.SSR = 'ssr'` token (added to `common`,
