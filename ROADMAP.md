@@ -2675,6 +2675,12 @@ telemetry plugin, mirroring the sub-milestone convention (16b, 24b).
 
 **Objective:** Provide secret management with KMS/Vault integration.
 
+> **Hono migration (M22/M23) impact.** CF Workers is now a real runtime target, so providers must
+> not assume Node: the cloud providers (AWS KMS / GCP / Azure / Vault) use fetch-based clients
+> injected or lazily imported per AI_GUIDELINES §12.2 (never a Node-only SDK as a hard dep), and
+> `EnvProvider` reads env through `IRuntimeServices`, not `process.env`, so it resolves Workers/Deno
+> env bindings too.
+
 ### Package: `@hono-enterprise/secrets-plugin`
 
 **Plugin Registration:**
@@ -2735,6 +2741,10 @@ await secrets.rotate('database/password', newPassword);
 ## Milestone 26: Audit Plugin — Audit Logging
 
 **Objective:** Provide audit trail logging.
+
+> **Hono migration (M22/M23) impact.** With CF Workers now supported, `FileAuditStorage` (writable
+> FS) is unavailable there and must be documented as a Node/Deno/Bun-only constraint;
+> `DatabaseAuditStorage` and `LogAuditStorage` are the runtime-portable defaults.
 
 ### Package: `@hono-enterprise/audit-plugin`
 
@@ -2864,6 +2874,13 @@ const result = await safeCall();
 
 **Objective:** Provide file storage abstraction.
 
+> **Hono migration (M22/M23) impact.** Two changes: (1) once M42 lands, large `get()` downloads
+> should stream via `IResponse.stream()` instead of buffering a whole `Uint8Array` — this milestone
+> is a named consumer of the M42 streaming primitive; (2) `LocalStorageProvider` (writable FS) is
+> unavailable on CF Workers, so S3/GCS (and R2 via the S3 API) are the Workers-portable providers,
+> and the upload middleware must account for the fetch model's buffered request body
+> (`shared/fetch-mapping.ts` pre-reads the body into an `ArrayBuffer`).
+
 ### Package: `@hono-enterprise/storage-plugin`
 
 **Plugin Registration:**
@@ -2940,6 +2957,11 @@ app.router.post('/upload', {
 
 **Objective:** Provide email capability.
 
+> **Hono migration (M22/M23) impact.** `SmtpProvider` needs a raw TCP socket, which CF Workers does
+> not provide — SMTP is a Node/Deno/Bun-only provider, and the HTTP-API providers (SES / SendGrid /
+> Mailgun) are the Workers-portable path. Clients are injected or lazily imported per AI_GUIDELINES
+> §12.2 (no Node-only mail SDK as a hard dep).
+
 ### Package: `@hono-enterprise/mail-plugin`
 
 **Plugin Registration:**
@@ -3008,6 +3030,10 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 ## Milestone 30: Notification Plugin — Multi-Channel
 
 **Objective:** Provide multi-channel notifications.
+
+> **Hono migration (M22/M23) impact.** All channels are HTTP-API based (Twilio / FCM / Slack) and
+> portable to CF Workers; the one exception is the email channel when it delegates to M29's
+> `SmtpProvider` (SMTP is not available on Workers — see M29).
 
 ### Package: `@hono-enterprise/notification-plugin`
 
@@ -3211,6 +3237,14 @@ const users = await userRepo.findAll(); // Scoped to current tenant
 
 **Objective:** Provide testing utilities.
 
+> **Hono migration (M22/M23) impact.** The app is now a web-standard `fetch(Request) => Response`
+> (M23), so `createTestApp` must expose a `fetch(Request)` test entry alongside `inject()` — the way
+> to exercise the Workers deploy path without a socket. `createTestContext` must honor the
+> post-migration contract: a monotonic `startTime` via `runtime.hrtime()` (never `Date.now()`), and
+> once M42 lands a `ctx.signal` `AbortSignal`; a mock that diverges hides the very bugs these
+> utilities exist to catch. Add a helper to assert streaming responses (read the `Response` body
+> incrementally).
+
 ### Package: `@hono-enterprise/testing`
 
 **Test Application Factory:**
@@ -3285,6 +3319,11 @@ const testApp = await createTestApp({
 ## Milestone 34: CLI — Plugin-Aware Generators
 
 **Objective:** Provide CLI with plugin-aware scaffolding.
+
+> **Hono migration (M22/M23) impact.** The `--runtime` flag must add `cloudflare-workers`,
+> generating the fetch entry (`export default { fetch: app.fetch }`, no `listen(port)`) plus a
+> `wrangler.toml`, since M23 made Workers a real target. Generated Node/Deno/Bun apps use the M23
+> Hono serve entry; the `new`/scaffold templates must not emit the deleted socket-adapter model.
 
 ### Package: `@hono-enterprise/cli`
 
@@ -3402,6 +3441,11 @@ packages via JSR's npm compatibility layer.
 
 **Objective:** Provide starter bundles for common use cases.
 
+> **Hono migration (M22/M23) impact.** Starters expose the M23 fetch entry so they deploy to CF
+> Workers (`export default`), not only a `port` socket. Each starter must document which of its
+> bundled plugins are Workers-portable — the full-stack starter pulls in Node-oriented pieces (local
+> Storage, SMTP Mail, timer-based Scheduler) that degrade or are unavailable on Workers.
+
 ### Packages: `@hono-enterprise/starter-*`
 
 **Starters:**
@@ -3440,6 +3484,10 @@ sensible defaults.
 
 **Objective:** Create example applications.
 
+> **Hono migration (M22/M23) impact.** Add a Cloudflare Workers deployment example (the capability
+> M23 delivered), and let streaming/SSE examples (M42/M43) demonstrate `IResponse.stream()`. The
+> existing `deno compile` binary example is unaffected.
+
 ### Examples
 
 1. **Minimal** — Single file, no plugins, just kernel
@@ -3461,6 +3509,12 @@ sensible defaults.
 ## Milestone 38: Documentation
 
 **Objective:** Generate comprehensive documentation.
+
+> **Hono migration (M22/M23) impact.** Docs must reflect the now-true design: Hono as the
+> routing/serve foundation, the web-standard `fetch` runtime model, a runtime/deploy matrix that
+> includes CF Workers, streaming & SSE (M42/M43), and a per-plugin "runs on Workers?" capability
+> note (file / SMTP / raw-socket features do not). The Fastify/NestJS migration guides should frame
+> the fetch-based request/response model.
 
 ### Documentation
 
@@ -3487,6 +3541,11 @@ sensible defaults.
 
 **Objective:** Containerization and orchestration.
 
+> **Hono migration (M22/M23) impact.** Docker/k8s targets the socket-serving runtimes (Node/Deno/Bun
+> `listen`); CF Workers (M23) deploys via `wrangler deploy`, not a container — add a Workers deploy
+> path rather than forcing it into the Docker/k8s model. (M24c's OTel Collector config is referenced
+> here per that milestone's note.)
+
 ### Docker
 
 - Dockerfiles for each example (`denoland/deno` base images)
@@ -3510,6 +3569,12 @@ sensible defaults.
 ## Milestone 40: Final Polish and Release
 
 **Objective:** Final integration, testing, and release.
+
+> **Hono migration (M22/M23) impact.** The release checklist must verify the claims M22/M23 made
+> real: benchmarks run on the Hono engine, the runtime-portability matrix (Deno/Node/Bun **+ CF
+> Workers**) validated end-to-end, and a Workers smoke test (`app.fetch(Request)`) added to the
+> compat suite. Confirm the comparison tables that advertise CF Workers are now backed by a working
+> deploy.
 
 ### Tasks
 
@@ -3578,6 +3643,23 @@ it.
 > deliberate `common` API addition — additive, minor-version — shipped with its PUBLIC_API.md delta
 > in the same PR.
 
+> **Reconciled with the Hono migration (M22/M23).** This section was first drafted against the
+> pre-M23 socket adapters; M23 deleted them (~1,030 LOC) and rebased the runtime on a web-standard
+> `fetch(Request) => Response` model where every platform funnels through one shared mapper,
+> `packages/runtime/src/adapters/shared/fetch-mapping.ts` (`mapSnapshotToWebResponse`). That makes
+> streaming **simpler**, and changes where the work lands:
+>
+> - The per-adapter "write headers, then pump to `res.write`/`res.end`" path no longer exists. In a
+>   fetch model, `IResponse.stream(rs)` is just the body of the web `Response`; Hono serve on Node
+>   (`@hono/node-server`), Deno, Bun, **and Cloudflare Workers** all pump a `ReadableStream` body
+>   natively without awaiting it. The streaming write logic is therefore **one change to the shared
+>   `fetch-mapping.ts` mapper**, not four per-adapter changes.
+> - Client-disconnect abort is now the native `Request.signal` the adapter already receives — the
+>   runtime forwards it to `IRequestContext.signal` instead of hand-wiring Node `req`
+>   `'close'`/`'aborted'` events.
+> - **Cloudflare Workers is now a real target** (added in M23) and must be in the streaming test
+>   matrix and deliverables.
+
 ### Packages: `@hono-enterprise/common`, `@hono-enterprise/kernel`, `@hono-enterprise/runtime`
 
 **Contract additions (`common`):**
@@ -3596,39 +3678,52 @@ it.
 
 **Kernel:**
 
-4. Thread a streaming `HandlerResult` through the pipeline without awaiting completion — the
-   response must begin flushing as chunks arrive, never buffer-then-send.
+4. Carry the stream reference through the pipeline terminal so `snapshot()` returns it (widened body
+   type) with `streaming: true`. Because the runtime maps that snapshot to a web `Response` whose
+   body is the lazy `ReadableStream`, chunks flush as they arrive with no buffer-then-send and no
+   "don't await" special-casing — the fetch model gives that for free (contrast the deleted socket
+   adapters, where the kernel had to avoid buffering manually).
 5. Response-caching middleware (M11) and any `snapshot()` consumer MUST skip streaming bodies
    (`streaming === true`): a live stream is not cacheable and must not be drained by an observer.
 
-**Runtime adapters:**
+**Runtime (post-M23 fetch model — one shared change, not per-adapter):**
 
-6. `NodeHttpAdapter` — write headers before the first chunk (`flushHeaders`), then pump the
-   `ReadableStream` to `res.write`/`res.end`; wire `req` close/abort to the context `AbortSignal`.
-7. `DenoHttpAdapter` / `BunHttpAdapter` — pass the `ReadableStream` straight through as the native
-   `Response` body; map the native request signal to the context `AbortSignal`.
+6. `shared/fetch-mapping.ts` `mapSnapshotToWebResponse` — when the snapshot is streaming, pass the
+   `ReadableStream` straight through as the web `Response` body instead of buffering it. Hono serve
+   on Node (`@hono/node-server`), Deno, Bun, and Cloudflare Workers each pump that body natively; no
+   per-adapter write path is written.
+7. Forward the adapter's native `Request.signal` to `IRequestContext.signal` so a client disconnect
+   aborts the producer. This is a web-standard signal on every platform (including Workers) — no
+   hand-wired Node `req` `'close'`/`'aborted'` events.
 
 **Implementation Files:**
 
 - `packages/common/src/http.ts` — `IResponse.stream`, widened `snapshot()`, `IRequestContext.signal`
 - `packages/kernel/src/pipeline/*` — streaming-aware result handling; cache/snapshot guard
 - `packages/kernel/src/http/response.ts` — `stream()` implementation + snapshot marker
-- `packages/runtime/src/adapters/{node,deno,bun}/*` — streaming write path + abort wiring
+- `packages/runtime/src/adapters/shared/fetch-mapping.ts` — streaming body pass-through in
+  `mapSnapshotToWebResponse`; native `Request.signal` → `IRequestContext.signal`
+- `packages/runtime/src/adapters/{node,deno,bun,workers}/*` — only if a platform needs the signal
+  forwarded at its serve boundary (no per-platform write logic)
 
 ### Tests
 
-- Round-trip a multi-chunk stream through each adapter; assert chunks arrive incrementally (not one
-  buffered blob) via a fake host that records `write` calls.
-- Abort propagation: closing the client aborts `ctx.signal` and the producer stops.
+- Round-trip a multi-chunk stream through each platform (Node/Deno/Bun net socket bind + Workers via
+  `app.fetch(Request)`); assert chunks arrive incrementally (a streamed `Response` body reader sees
+  chunks before the producer closes), not one buffered blob.
+- Abort propagation: aborting the request's native signal aborts `ctx.signal` and the producer
+  stops.
 - Snapshot/cache guard: a streaming response reports `streaming: true` and is NOT cached or drained
   by response-reading middleware (short-circuit-style assertion).
-- Buffered terminals (`json`/`text`/`send`) unchanged (regression).
+- Buffered terminals (`json`/`text`/`send`) unchanged (regression); `mapSnapshotToWebResponse`
+  buffered path unchanged for non-streaming snapshots.
 
 ### Deliverables
 
 - [ ] `IResponse.stream()` + widened `snapshot()` + `IRequestContext.signal` in `common`
 - [ ] Kernel streaming pipeline path + cache/snapshot guard
-- [ ] Node/Deno/Bun adapter streaming write path with abort wiring
+- [ ] Shared `fetch-mapping.ts` streaming pass-through + native `Request.signal` forwarding;
+      verified streaming on Node/Deno/Bun **and Cloudflare Workers**
 - [ ] PUBLIC_API.md updated for every new/changed `common` export
 - [ ] Full per-file coverage (incl. abort and disconnect branches via injected fakes)
 
@@ -3671,7 +3766,15 @@ app.router.get('/events', (ctx) => {
   terminated; comment/keep-alive frames (`: heartbeat`).
 - Named channels with broadcast (`publish`) and per-connection membership; auto-remove on abort.
 - `Last-Event-ID` request header exposed to the handler for resume logic.
-- Heartbeat timer over the streaming body; cleared on `ctx.signal` abort (no leaked timers).
+- Heartbeat timer over the streaming body; cleared on `ctx.signal` abort (no leaked timers). The
+  abort is M42's native `Request.signal`, which fires reliably on client disconnect across every
+  platform — the timer-cleanup and channel auto-remove paths depend on it.
+
+> **Cloudflare Workers caveat (from the M23 Workers target).** M23 made Workers a real runtime, so
+> SSE can be opened there via `app.fetch`, but long-lived `text/event-stream` responses on Workers
+> are subject to the platform's streaming/duration limits and are not equivalent to a Node
+> long-lived socket. The M43 plan should document this as a known constraint (not assume Node-style
+> indefinite connections); it is a platform limit, not an SSE-plugin defect.
 
 **Implementation Files:**
 
