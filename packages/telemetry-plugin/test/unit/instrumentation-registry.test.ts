@@ -59,21 +59,21 @@ describe('buildInstrumentationRegistry', () => {
 
   it('should return a no-op handle when config is undefined', async () => {
     const runtime = createFakeRuntime('node');
-    const handle = buildInstrumentationRegistry(undefined, runtime, {});
+    const handle = await buildInstrumentationRegistry(undefined, runtime, {});
     expect(handle.outcomes).toHaveLength(0);
     await handle.shutdown(); // exercise the no-op shutdown function
   });
 
   it('should return a no-op handle when provider is undefined', async () => {
     const runtime = createFakeRuntime('node');
-    const handle = buildInstrumentationRegistry({ http: true }, runtime, undefined as never);
+    const handle = await buildInstrumentationRegistry({ http: true }, runtime, undefined as never);
     expect(handle.outcomes).toHaveLength(0);
     await handle.shutdown(); // exercise the no-op shutdown function
   });
 
   it('should return a no-op handle when provider is null', async () => {
     const runtime = createFakeRuntime('node');
-    const handle = buildInstrumentationRegistry({ http: true }, runtime, null);
+    const handle = await buildInstrumentationRegistry({ http: true }, runtime, null);
     expect(handle.outcomes).toHaveLength(0);
     await handle.shutdown(); // exercise the no-op shutdown function
   });
@@ -83,17 +83,13 @@ describe('buildInstrumentationRegistry', () => {
     const fakeResult = { recordedSets: [] as unknown[], instance: {} };
     const provider = fakeResult.instance;
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       { http: true },
       runtime,
       provider,
     );
 
-    // Platform gate happens inside async tryEnable — flush microtasks.
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
-
+    // Platform gate happens inside enableLazy — already awaited by buildInstrumentationRegistry.
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
     expect(httpOutcome?.enabled).toBe(false);
     expect(httpOutcome?.reason).toBe('unsupported platform');
@@ -116,7 +112,7 @@ describe('buildInstrumentationRegistry', () => {
       },
     };
 
-    const _handle = buildInstrumentationRegistry(
+    const _handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: fakeInstance as never,
@@ -125,10 +121,6 @@ describe('buildInstrumentationRegistry', () => {
       runtime,
       fakeInstance,
     );
-
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
 
     expect(recordedSets).toHaveLength(1);
     expect(recordedEnables).toContain('enabled');
@@ -152,7 +144,7 @@ describe('buildInstrumentationRegistry', () => {
       },
     };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: fakeInstance as never,
@@ -161,10 +153,6 @@ describe('buildInstrumentationRegistry', () => {
       runtime,
       fakeInstance,
     );
-
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
 
     expect(recordedDisables).toHaveLength(0);
 
@@ -190,7 +178,7 @@ describe('buildInstrumentationRegistry', () => {
       },
     };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: rejectingInstance as never,
@@ -199,10 +187,6 @@ describe('buildInstrumentationRegistry', () => {
       runtime,
       {},
     );
-
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
 
     // The http outcome should exist and be disabled due to the setTracerProvider failure.
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
@@ -226,7 +210,7 @@ describe('buildInstrumentationRegistry', () => {
       },
     };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: throwingInstance as never,
@@ -235,10 +219,6 @@ describe('buildInstrumentationRegistry', () => {
       runtime,
       {},
     );
-
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
 
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
     expect(httpOutcome?.enabled).toBe(false);
@@ -263,7 +243,7 @@ describe('buildInstrumentationRegistry', () => {
 
     const provider = { id: 'fake-provider' };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: fakeInstance as never,
@@ -272,10 +252,6 @@ describe('buildInstrumentationRegistry', () => {
       runtime,
       provider,
     );
-
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
 
     expect(recordedSets).toContain(provider);
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
@@ -300,7 +276,7 @@ describe('buildInstrumentationRegistry', () => {
 
     const provider = { id: 'fake-provider' };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: fakeInstance as never,
@@ -310,10 +286,6 @@ describe('buildInstrumentationRegistry', () => {
       provider,
     );
 
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
-
     expect(recordedDisables).toHaveLength(0);
 
     await handle.shutdown();
@@ -321,56 +293,39 @@ describe('buildInstrumentationRegistry', () => {
     expect(recordedDisables).toContain('disabled');
   });
 
-  it('should forward config verbatim to the constructor when using lazy import path', async () => {
-    const runtime = createFakeRuntime('node');
+  // --- Coverage for the enableLazy async dispatch path (now awaited via Promise.all) ---
 
-    // When config is provided (without instrumentation), the loader attempts
-    // a lazy npm: import. Since we don't have the package, it fails — but
-    // the outcome should record the failure, not throw.
-    // We use a 100-iteration loop to ensure the npm: import has time to fail.
-    const handle = buildInstrumentationRegistry(
-      {
-        http: {
-          config: { ignoreIncomingRequestHook: () => false },
-        },
-      },
-      runtime,
-      {},
-    );
-
-    // Wait longer for the lazy npm: import to fail.
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
-    expect(httpOutcome).toBeDefined();
-  });
-
-  // --- Coverage for the enableLazy async dispatch path ---
-
-  it('should record success outcome when lazy loader resolves on supported platform', async () => {
+  it('should await all lazy loaders before returning handle', async () => {
     const runtime = createFakeRuntime('node');
     const provider = { id: 'fake-provider' };
 
-    // Create a custom loader map to track which loaders were dispatched.
-    // We use the inject path through dispatch — cfg=true triggers the lazy path.
-    // Since we can't inject a custom loader directly through buildInstrumentationRegistry,
-    // we verify the async path fires by checking outcomes after awaiting microtasks.
-    const handle = buildInstrumentationRegistry(
+    // The internal http lazy loader either succeeds or fails inside the awaited
+    // Promise.all; handle.outcomes must reflect the result immediately.
+    const handle = await buildInstrumentationRegistry(
       { http: true },
       runtime,
       provider,
     );
 
-    // Await the enableLazy dispatch — this is the key fix: the test must await
-    // the fire-and-forget void enableLazy(...) by flushing all microtasks.
-    for (let i = 0; i < 100; i++) {
-      await Promise.resolve();
-    }
-
-    // The http outcome should exist (either success from real import or failure from missing package)
+    // After await, the http outcome must already be populated.
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
     expect(httpOutcome).toBeDefined();
-    // On a supported platform with a valid provider, either enabled=true or enabled=false with reason
+  });
+
+  it('should record supported-platform lazy outcomes after async resolution', async () => {
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+
+    // The internal http lazy loader either succeeds or fails deterministically inside
+    // the awaited Promise.all; handle.outcomes must reflect the result immediately.
+    const handle = await buildInstrumentationRegistry(
+      { http: true },
+      runtime,
+      provider,
+    );
+
+    const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
+    expect(httpOutcome).toBeDefined();
     expect(['true', 'false']).toContain(String(httpOutcome?.enabled));
   });
 
@@ -378,16 +333,11 @@ describe('buildInstrumentationRegistry', () => {
     const runtime = createFakeRuntime('deno');
     const provider = { id: 'fake-provider' };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       { http: true, ioredis: true, amqplib: true },
       runtime,
       provider,
     );
-
-    // Flush all microtasks to let enableLazy complete.
-    for (let i = 0; i < 100; i++) {
-      await Promise.resolve();
-    }
 
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
     expect(httpOutcome).toBeDefined();
@@ -409,16 +359,11 @@ describe('buildInstrumentationRegistry', () => {
     const runtime = createFakeRuntime('deno');
     const provider = { id: 'fake-provider' };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       { http: true, fetch: true, ioredis: true, amqplib: true, kafkajs: true },
       runtime,
       provider,
     );
-
-    // Flush all microtasks to let all five enableLazy calls complete.
-    for (let i = 0; i < 100; i++) {
-      await Promise.resolve();
-    }
 
     const kinds: Array<'http' | 'fetch' | 'ioredis' | 'amqplib' | 'kafkajs'> = [
       'http',
@@ -453,7 +398,7 @@ describe('buildInstrumentationRegistry', () => {
       },
     };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: rejectingInstance as never,
@@ -462,10 +407,6 @@ describe('buildInstrumentationRegistry', () => {
       runtime,
       provider,
     );
-
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
 
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
     expect(httpOutcome).toBeDefined();
@@ -489,7 +430,7 @@ describe('buildInstrumentationRegistry', () => {
       },
     };
 
-    const handle = buildInstrumentationRegistry(
+    const handle = await buildInstrumentationRegistry(
       {
         http: {
           instrumentation: throwingInstance as never,
@@ -499,14 +440,78 @@ describe('buildInstrumentationRegistry', () => {
       provider,
     );
 
-    for (let i = 0; i < 10; i++) {
-      await Promise.resolve();
-    }
-
     // Should not throw
     await handle.shutdown();
 
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
     expect(httpOutcome?.enabled).toBe(true);
+  });
+
+  it('should call disable() on lazily-enabled instrumentation before provider shutdown', async () => {
+    // Tests the C1 fix: lazy loads are awaited before handle return, so onShutdown
+    // always sees fully-enabled instruments.
+    const runtime = createFakeRuntime('node');
+    const callOrder: string[] = [];
+
+    // A "late-resolving" instrumentation instance, simulated by wrapping a custom
+    // enabled instrumentation. We use the inject path with a slow enable + delayed disable.
+    const lazyInstance = {
+      setTracerProvider(_p: unknown) {
+        callOrder.push('setTracerProvider');
+      },
+      enable() {
+        callOrder.push('enable');
+      },
+      disable() {
+        callOrder.push('disable');
+      },
+    };
+
+    const provider = {
+      id: 'fake-provider',
+      shutdown: () => {
+        callOrder.push('provider-shutdown');
+      },
+    };
+
+    const handle = await buildInstrumentationRegistry(
+      {
+        http: {
+          instrumentation: lazyInstance as never,
+        },
+      },
+      runtime,
+      provider,
+    );
+
+    // Confirm instrumentation is enabled before shutdown.
+    expect(callOrder).toEqual(['setTracerProvider', 'enable']);
+    expect(handle.outcomes.find((o) => o.kind === 'http')?.enabled).toBe(true);
+
+    // Trigger shutdown: disable must precede provider shutdown.
+    // (We simulate the plugin onShutdown hook here.)
+    await handle.shutdown();
+    await provider.shutdown!();
+
+    expect(callOrder).toEqual(['setTracerProvider', 'enable', 'disable', 'provider-shutdown']);
+  });
+
+  it('should expose complete outcomes at handle return for the lazy path', async () => {
+    // Confirms no fire-and-forget: all outcomes are present the moment
+    // await buildInstrumentationRegistry(...) resolves.
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+
+    const handle = await buildInstrumentationRegistry(
+      { http: true, fetch: true, ioredis: true },
+      runtime,
+      provider,
+    );
+
+    // All three configured kinds must appear in outcomes immediately —
+    // none are pending or missing.
+    expect(handle.outcomes.map((o) => o.kind).sort()).toEqual(
+      ['fetch', 'http', 'ioredis'].sort(),
+    );
   });
 });

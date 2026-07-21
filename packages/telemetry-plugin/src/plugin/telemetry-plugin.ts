@@ -90,8 +90,10 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
         // Build instrumentation registry after the host is obtained.
         // Only runs when all three conditions hold: instrumentations configured,
         // real mode (exporter set), and host exposes otelProvider.
+        // Awaiting ensures all lazy loads complete BEFORE onShutdown is registered,
+        // eliminating the shutdown-ordering race for the lazy path.
         if (options.instrumentations && tracerHost.otelProvider) {
-          instrumentationHandle = buildInstrumentationRegistry(
+          instrumentationHandle = await buildInstrumentationRegistry(
             options.instrumentations,
             ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME!),
             tracerHost.otelProvider,

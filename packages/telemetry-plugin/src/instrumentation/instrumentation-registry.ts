@@ -47,17 +47,22 @@ export function isInstrumentationSupported(
  * When `provider` is `undefined`, the registry is a no-op (zero loaders called).
  * Any loader failure degrades to a documented no-op and NEVER throws.
  *
+ * **Async:** all lazy-load promises are collected and awaited (via `Promise.all`)
+ * before the handle is returned, so `outcomes` is complete and `enabledInstrumentations`
+ * is fully populated at return time.  This eliminates the shutdown-ordering race where
+ * `onShutdown` could fire while a lazy load was still in-flight.
+ *
  * @param config - The `instrumentations` option from plugin options.
  * @param runtime - Runtime services providing the platform gate.
  * @param provider - The OTel TracerProvider (from `TracerHost.otelProvider`); absent = no-op.
- * @returns An instrumentation handle.
+ * @returns An instrumentation handle (resolved after all lazy loads settle).
  * @since 0.24.1
  */
-export function buildInstrumentationRegistry(
+export async function buildInstrumentationRegistry(
   config: InstrumentationsConfig | undefined,
   runtime: IRuntimeServices,
   provider: unknown,
-): InstrumentationHandle {
+): Promise<InstrumentationHandle> {
   const outcomes: InstrumentationOutcome[] = [];
 
   // If no provider, the registry is a no-op (noop mode / custom factory without otelProvider).
@@ -132,7 +137,10 @@ export function buildInstrumentationRegistry(
     enableInjected(kind, instance);
   }
 
-  // Dispatch each configured key — inject path is synchronous, lazy path is fire-and-forget.
+  // Collect lazy-load promises so we can await them all before returning.
+  const lazyPromises: Promise<void>[] = [];
+
+  // Dispatch each configured key — inject path is synchronous, lazy path collects promises.
   function dispatch(
     kind: InstrumentationKind,
     cfg: true | InstrumentationConfig | undefined,
@@ -148,7 +156,7 @@ export function buildInstrumentationRegistry(
     } else {
       // cfg === true or cfg without instrumentation — async lazy load.
       const configArg = typeof cfg === 'object' ? cfg.config : undefined;
-      void enableLazy(kind, configArg, loader);
+      lazyPromises.push(enableLazy(kind, configArg, loader));
     }
   }
 
@@ -176,6 +184,11 @@ export function buildInstrumentationRegistry(
   if (kafkajsCfg !== undefined) {
     dispatch('kafkajs', kafkajsCfg, loadKafkaJsInstrumentation);
   }
+
+  // Await all lazy loads before returning — outcomes and enabledInstrumentations
+  // are now fully populated.  Since each enableLazy catches internally, Promise.all
+  // over the collected promises will never reject.
+  await Promise.all(lazyPromises);
 
   return {
     shutdown: (): Promise<void> => {

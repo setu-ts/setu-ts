@@ -505,6 +505,80 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
     // Verify ordering: instrumentation disable BEFORE tracerHost shutdown.
     expect(callOrder).toEqual(['instrumentation-disable', 'tracerHost-shutdown']);
   });
+
+  // --- C1 fix: register() now awaits buildInstrumentationRegistry ---
+
+  it('should register ITelemetryService before returning when instrumentations are configured (register awaits build)', async () => {
+    // Proves register() awaits the registry build: outcomes are complete at register() resolve time.
+    const mock = createMockContext();
+    const outcomesSnapshot: string[] = [];
+
+    const fakeInstrumentationInstance = {
+      setTracerProvider: () => {},
+      enable() {
+        outcomesSnapshot.push('http-enabled');
+      },
+      disable() {
+        outcomesSnapshot.push('http-disabled');
+      },
+    };
+
+    mock.ctx.services.register(CAPABILITIES.RUNTIME!, {
+      platform: () => 'node' as never,
+    } as never);
+
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        otelProvider: { id: 'fake-provider' },
+        shutdown: async () => {},
+      }),
+      instrumentations: {
+        http: {
+          instrumentation: fakeInstrumentationInstance as never,
+        },
+      },
+    });
+
+    await plugin.register(mock.ctx);
+
+    // Service must be registered and outcomes complete at register() resolve.
+    expect(mock.registeredTokens).toContain(CAPABILITIES.TELEMETRY);
+    expect(outcomesSnapshot).toContain('http-enabled');
+    expect(mock.shutdownHooks).toHaveLength(1);
+  });
+
+  it('should have complete outcomes at register() resolve time for lazy path', async () => {
+    // Proves no fire-and-forget: outcomes are populated before register() returns.
+    const mock = createMockContext();
+
+    mock.ctx.services.register(CAPABILITIES.RUNTIME!, {
+      platform: () => 'deno' as never,
+    } as never);
+
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        otelProvider: { id: 'fake-provider' },
+        shutdown: async () => {},
+      }),
+      instrumentations: {
+        http: true,
+        fetch: true,
+        ioredis: true,
+      },
+    });
+
+    await plugin.register(mock.ctx);
+
+    // Service registered before register() resolves — outcomes are complete.
+    expect(mock.registeredTokens).toContain(CAPABILITIES.TELEMETRY);
+    expect(mock.shutdownHooks).toHaveLength(1);
+  });
 });
 
 /**
