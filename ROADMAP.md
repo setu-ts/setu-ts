@@ -2567,10 +2567,11 @@ message brokers behind the same inject-or-lazy `TracerHost` seam that M24 establ
    `string[]` of names** — OTel instrumentations take options (e.g. `http` needs ignore-path lists,
    `ioredis` needs a db-statement flag), which a name-list cannot express. Add it as a NEW field on
    `TelemetryPluginOptions` (e.g.
-   `instrumentations?: { http?: HttpInstrumentationOptions; ioredis?:
-   …; amqplib?: …; kafkajs?: … }`).
-   This is a **public-API change**: PUBLIC_API.md + the type are updated in M24b's PR, and the
-   deferral note M24 left in PUBLIC_API/ROADMAP is replaced with the real surface.
+   `instrumentations?: { http?: …; fetch?: …; ioredis?:
+   …; amqplib?: …; kafkajs?: … }`; `fetch`
+   maps to `@opentelemetry/instrumentation-undici`). This is a **public-API change**:
+   PUBLIC_API.md + the type are updated in M24b's PR, and the deferral note M24 left in
+   PUBLIC_API/ROADMAP is replaced with the real surface.
 2. **Auto-instrumentation** — `@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
    kafkajs loaded behind runtime-gated instrumentation packages using the same inject-or-lazy seam
    M24 established. **Runtime gating is mandatory:** an instrumentation whose target is unavailable
@@ -2603,7 +2604,10 @@ config block maps onto — so M24b must treat the shape as a stable public contr
   degrades to no-op (not throw); each named instrumentation's options reach its loader
 - ✅ `test/unit/http-instrumentation.test.ts`
 - ✅ `test/unit/database-instrumentation.test.ts`
+- ✅ `test/unit/queue-instrumentation.test.ts`
 - ✅ `test/unit/span-processor-factory.test.ts`
+- ✅ `test/integration/instrumentation-real-import.test.ts` — guarded real `npm:` import of all five
+  instrumentation packages (proves the specifiers + export names resolve)
 
 ### Deliverables
 
