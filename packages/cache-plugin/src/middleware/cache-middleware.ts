@@ -114,6 +114,16 @@ export function cacheMiddleware(
     // Read the response snapshot after the handler wrote to ctx.response.
     const snapshot = ctx.response.snapshot();
 
+    // M42 streaming guard: a live stream is not cacheable and must not be
+    // drained by an observer. Because snapshot() is a discriminated union,
+    // this branch narrows snapshot to the `streaming: false` arm for the
+    // rest of the function, so encodePayload(type-checks against its
+    // `body: Uint8Array | string | null` parameter with no cast.
+    if (snapshot.streaming) {
+      ctx.response.header('X-Cache', 'MISS');
+      return;
+    }
+
     // Store only if cacheable and no Set-Cookie.
     if (
       cacheableStatuses.includes(snapshot.status) &&

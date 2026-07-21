@@ -142,5 +142,6 @@ export function createFakeContext(options?: {
     params: {},
     query: {},
     state: new Map(),
+    signal: new AbortController().signal,
   };
 }

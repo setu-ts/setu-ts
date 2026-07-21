@@ -114,10 +114,19 @@ export function createFakeResponse(): FakeResponseResult {
     redirect(_url: string, _status?: number): HandlerResult {
       return HANDLER_RESULT;
     },
+    stream(_body: ReadableStream<Uint8Array>): HandlerResult {
+      return HANDLER_RESULT;
+    },
     snapshot(): {
+      readonly streaming: false;
       readonly status: number;
       readonly headers: Headers;
       readonly body: Uint8Array | string | null;
+    } | {
+      readonly streaming: true;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: ReadableStream<Uint8Array>;
     } {
       const h = new Headers();
       for (const [k, v] of headers) {
@@ -129,6 +138,7 @@ export function createFakeResponse(): FakeResponseResult {
         }
       }
       return {
+        streaming: false,
         status: statuses.at(-1) ?? 200,
         headers: h,
         body: bodyValue as string | null,
@@ -237,6 +247,7 @@ export function createFakeContext(opts: FakeContextOptions = {}): FakeContextRes
     query: opts.query ?? {},
     state: new Map(),
     startTime: 0,
+    signal: new AbortController().signal,
   };
 
   return {

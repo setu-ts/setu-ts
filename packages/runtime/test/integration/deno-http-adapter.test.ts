@@ -46,7 +46,12 @@ describe('deno-http-adapter integration', () => {
     // deno-lint-ignore require-await
     adapter2.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers(), body: 'rebound' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'rebound',
+        }),
       } as any;
     });
     const handle2 = await adapter2.listen(port, '127.0.0.1');

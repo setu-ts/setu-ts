@@ -104,4 +104,58 @@ describe('ResponseBuilder', () => {
     expect(res.appendHeader('x-test', 'one').appendHeader('x-test', 'two')).toBe(res);
     expect(res.snapshot().headers.get('x-test')).toBe('one, one, two');
   });
+
+  // M42 — streaming response body
+  describe('M42 streaming', () => {
+    it('stream() returns HandlerResult brand and sets ended', () => {
+      const res = new ResponseBuilder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.close();
+        },
+      });
+      const result = res.stream(stream);
+      expect(result.__handlerResult).toBe(true);
+      expect(res.ended).toBe(true);
+    });
+
+    it('snapshot() returns the exact stream with streaming: true', () => {
+      const res = new ResponseBuilder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.close();
+        },
+      });
+      res.stream(stream);
+      const snap = res.snapshot();
+      expect(snap.streaming).toBe(true);
+      expect(snap.body).toBe(stream);
+    });
+
+    it('json/text/send/redirect still set streaming: false (regression)', () => {
+      const res1 = new ResponseBuilder();
+      res1.json({ ok: true });
+      expect(res1.snapshot().streaming).toBe(false);
+
+      const res2 = new ResponseBuilder();
+      res2.text('hello');
+      expect(res2.snapshot().streaming).toBe(false);
+
+      const res3 = new ResponseBuilder();
+      res3.send(new Uint8Array([1, 2]));
+      expect(res3.snapshot().streaming).toBe(false);
+
+      const res4 = new ResponseBuilder();
+      res4.redirect('http://example.com');
+      expect(res4.snapshot().streaming).toBe(false);
+    });
+
+    it('snapshot() buffered arm returns correct body type', () => {
+      const res = new ResponseBuilder();
+      res.json({ key: 'value' });
+      const snap = res.snapshot();
+      expect(snap.streaming).toBe(false);
+      expect(snap.body).toBe('{"key":"value"}');
+    });
+  });
 });

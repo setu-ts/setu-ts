@@ -105,7 +105,9 @@ describe('cacheMiddleware', () => {
           return hr;
         },
         redirect: () => hr,
+        stream: () => hr,
         snapshot: () => ({
+          streaming: false,
           status: responseStatus.at(-1) ?? 200,
           headers: (() => {
             const h = new Headers();
@@ -122,6 +124,7 @@ describe('cacheMiddleware', () => {
       query: {},
       state: new Map(),
       startTime: 0,
+      signal: new AbortController().signal,
     };
 
     return {
@@ -400,7 +403,9 @@ describe('cacheMiddleware', () => {
           text: () => hr,
           send: () => hr,
           redirect: () => hr,
+          stream: () => hr,
           snapshot: () => ({
+            streaming: false,
             status: 200,
             headers: new Headers(),
             body: null,
@@ -411,6 +416,7 @@ describe('cacheMiddleware', () => {
         query: {},
         state: new Map(),
         startTime: 0,
+        signal: new AbortController().signal,
       };
 
       const mw = cacheMiddleware({ store: 'cache.session' });

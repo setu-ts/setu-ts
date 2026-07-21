@@ -10,13 +10,33 @@ import type { HandlerResult, IResponse } from '@hono-enterprise/common';
 const HANDLER_RESULT: HandlerResult = { __handlerResult: true };
 
 /**
+ * Discriminated union representing the possible shapes of a response snapshot.
+ * When `streaming` is `false`, `body` is a buffered `Uint8Array | string | null`.
+ * When `streaming` is `true`, `body` is a live `ReadableStream<Uint8Array>`.
+ */
+export type ResponseSnapshot =
+  | {
+    readonly streaming: false;
+    readonly status: number;
+    readonly headers: Headers;
+    readonly body: Uint8Array | string | null;
+  }
+  | {
+    readonly streaming: true;
+    readonly status: number;
+    readonly headers: Headers;
+    readonly body: ReadableStream<Uint8Array>;
+  };
+
+/**
  * Default implementation of {@linkcode IResponse}. Configuration methods
  * chain; terminal methods mark the builder as ended and return the brand.
  */
 export class ResponseBuilder implements IResponse {
   #status = 200;
   readonly #headers = new Headers();
-  #body: Uint8Array | string | null = null;
+  #body: Uint8Array | string | ReadableStream<Uint8Array> | null = null;
+  #streaming = false;
   #ended = false;
 
   status(code: number): IResponse {
@@ -66,15 +86,42 @@ export class ResponseBuilder implements IResponse {
   }
 
   /**
+   * Sends a streaming response body.
+   *
+   * Accepts a web-standard {@linkcode ReadableStream} so that a handler can flush
+   * bytes progressively over a long-lived connection instead of buffering a
+   * whole body before send.
+   *
+   * @param body - A `ReadableStream` of `Uint8Array` chunks
+   * @returns The handler result
+   */
+  stream(body: ReadableStream<Uint8Array>): HandlerResult {
+    this.#body = body;
+    this.#streaming = true;
+    this.#ended = true;
+    return HANDLER_RESULT;
+  }
+
+  /**
    * Returns a snapshot of the current response state.
    *
-   * @returns The status code, headers, and body
+   * @returns The discriminated snapshot (status, headers, and either a buffered
+   *   body or a live stream, keyed on `streaming`)
    */
-  snapshot(): { status: number; headers: Headers; body: Uint8Array | string | null } {
+  snapshot(): ResponseSnapshot {
+    if (this.#streaming) {
+      return {
+        streaming: true,
+        status: this.#status,
+        headers: this.#headers,
+        body: this.#body as ReadableStream<Uint8Array>,
+      };
+    }
     return {
+      streaming: false,
       status: this.#status,
       headers: this.#headers,
-      body: this.#body,
+      body: this.#body as Uint8Array | string | null,
     };
   }
 

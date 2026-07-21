@@ -46,6 +46,17 @@ export interface IRequest {
    */
   user?: IPrincipal;
   /**
+   * An abort signal that fires when the underlying HTTP connection is
+   * severed (client disconnect, timeout). Populated by the HTTP adapter
+   * from the native `Request.signal`; optional because injected / test
+   * requests may not carry one.
+   *
+   * When absent, {@linkcode createRequestContext} falls back to a
+   * non-aborting sentinel so that producers reading
+   * {@linkcode IRequestContext.signal} always have a live signal to listen on.
+   */
+  signal?: AbortSignal;
+  /**
    * Reads and parses the body as JSON.
    *
    * @typeParam T - The expected body shape (validate before trusting)
@@ -139,18 +150,50 @@ export interface IResponse {
    */
   redirect(url: string, status?: number): HandlerResult;
   /**
+   * Sends a streaming response body.
+   *
+   * Accepts a web-standard {@linkcode ReadableStream} so that a handler can flush
+   * bytes progressively over a long-lived connection instead of buffering a
+   * whole body before send. This is the shared foundation for Server-Sent Events
+   * (Milestone 43), React SSR streaming (Milestone 44), large file downloads
+   * (storage-plugin, Milestone 28), and export / report responses.
+   *
+   * Because the runtime maps the response to a web-standard
+   * `new Response(streamBody, { status, headers })`, streaming is free on every
+   * platform (Node via Hono, Deno, Bun, Cloudflare Workers) with no buffer-then-send.
+   *
+   * @param body - A `ReadableStream` of `Uint8Array` chunks
+   * @returns The handler result
+   * @since 0.2.0
+   */
+  stream(body: ReadableStream<Uint8Array>): HandlerResult;
+  /**
    * Returns an immutable snapshot of the current response state (status,
    * headers, body). Enables middleware to inspect the response after
    * `next()` returns — required for transparent response caching.
    *
-   * @returns The status code, headers, and body bytes or string
+   * Returns a **discriminated union** keyed on `streaming`: when `false`,
+   * `body` is `Uint8Array | string | null` (buffered); when `true`,
+   * `body` is a `ReadableStream<Uint8Array>` (live stream). Middleware that
+   * reads the body (e.g. cache middleware) must check `streaming` first to
+   * avoid draining a live stream.
+   *
+   * @returns The status code, headers, and either a buffered body or a live stream
    * @since 0.1.0
    */
-  snapshot(): {
-    readonly status: number;
-    readonly headers: Headers;
-    readonly body: Uint8Array | string | null;
-  };
+  snapshot():
+    | {
+      readonly streaming: false;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: Uint8Array | string | null;
+    }
+    | {
+      readonly streaming: true;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: ReadableStream<Uint8Array>;
+    };
 }
 
 /**
@@ -176,6 +219,18 @@ export interface IRequestContext {
   readonly state: Map<string, unknown>;
   /** High-resolution timestamp captured when the context was created. */
   readonly startTime: number;
+  /**
+   * An abort signal that fires when the underlying HTTP connection is severed
+   * (client disconnect, timeout). Populated by {@linkcode createRequestContext}
+   * from the native `Request.signal`; falls back to a non-aborting sentinel so
+   * handlers always have a live signal to listen on.
+   *
+   * Used by streaming producers (SSE heartbeats, channel cleanup) to stop
+   * work on client disconnect and avoid leaking producers.
+   *
+   * @since 0.2.0
+   */
+  readonly signal: AbortSignal;
 }
 
 /**
@@ -272,3 +327,24 @@ export interface RouteDefinition {
   /** Validation and OpenAPI schemas. */
   readonly schema?: RouteSchema;
 }
+
+/**
+ * Discriminated union representing the possible shapes of an {@linkcode IResponse} snapshot.
+ * When `streaming` is `false`, `body` is a buffered `Uint8Array | string | null`.
+ * When `streaming` is `true`, `body` is a live `ReadableStream<Uint8Array>`.
+ *
+ * @since 0.2.0
+ */
+export type ResponseSnapshot =
+  | {
+    readonly streaming: false;
+    readonly status: number;
+    readonly headers: Headers;
+    readonly body: Uint8Array | string | null;
+  }
+  | {
+    readonly streaming: true;
+    readonly status: number;
+    readonly headers: Headers;
+    readonly body: ReadableStream<Uint8Array>;
+  };

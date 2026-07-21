@@ -10,6 +10,7 @@ import {
 } from '../../src/adapters/shared/fetch-mapping.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { ResponseSnapshot } from '@hono-enterprise/common';
 
 // ---------------------------------------------------------------------------
 // mapWebRequestToFrameworkRequest — field mapping
@@ -31,6 +32,15 @@ describe('fetch-mapping | field mapping', () => {
     expect(frameworkRequest.path).toBe('/api/users');
     expect(frameworkRequest.headers.get('content-type')).toBe('application/json');
     expect(frameworkRequest.headers.get('x-custom')).toBe('abc');
+  });
+
+  it('forwards native Request.signal to IRequest.signal', async () => {
+    const ac = new AbortController();
+    const nativeReq = new Request('https://example.com/', { signal: ac.signal });
+    const frameworkRequest = await mapWebRequestToFrameworkRequest(nativeReq);
+    // Verify the signal property is present and is the same object
+    expect(frameworkRequest.signal).toBeDefined();
+    expect(frameworkRequest.signal?.aborted).toBe(false);
   });
 
   it('ip is undefined on the mapped request', async () => {
@@ -91,7 +101,7 @@ describe('fetch-mapping | snapshot→Response', () => {
     const headers = new Headers();
     headers.set('content-type', 'text/plain');
 
-    const snapshot = { status: 200, headers, body: 'hello' };
+    const snapshot: ResponseSnapshot = { streaming: false, status: 200, headers, body: 'hello' };
     const response = mapSnapshotToWebResponse(snapshot);
 
     expect(response.status).toBe(200);
@@ -103,7 +113,7 @@ describe('fetch-mapping | snapshot→Response', () => {
     const headers = new Headers();
     const bytes = new Uint8Array([1, 2, 3]);
 
-    const snapshot = { status: 200, headers, body: bytes };
+    const snapshot: ResponseSnapshot = { streaming: false, status: 200, headers, body: bytes };
     const response = mapSnapshotToWebResponse(snapshot);
 
     expect(response.status).toBe(200);
@@ -112,7 +122,7 @@ describe('fetch-mapping | snapshot→Response', () => {
   it('with null body', () => {
     const headers = new Headers();
 
-    const snapshot = { status: 204, headers, body: null };
+    const snapshot: ResponseSnapshot = { streaming: false, status: 204, headers, body: null };
     const response = mapSnapshotToWebResponse(snapshot);
 
     expect(response.status).toBe(204);
@@ -123,7 +133,7 @@ describe('fetch-mapping | snapshot→Response', () => {
     headers.append('set-cookie', 'a=1');
     headers.append('set-cookie', 'b=2');
 
-    const snapshot = { status: 200, headers, body: null };
+    const snapshot: ResponseSnapshot = { streaming: false, status: 200, headers, body: null };
     const response = mapSnapshotToWebResponse(snapshot);
 
     expect(response.status).toBe(200);
@@ -136,7 +146,7 @@ describe('fetch-mapping | snapshot→Response', () => {
     headers.append('set-cookie', 'refresh=abc; Path=/auth; HttpOnly');
     headers.set('content-type', 'application/json');
 
-    const snapshot = { status: 200, headers, body: '{}' };
+    const snapshot: ResponseSnapshot = { streaming: false, status: 200, headers, body: '{}' };
     const response = mapSnapshotToWebResponse(snapshot);
 
     // Use getSetCookie() which returns an array of all Set-Cookie values
@@ -144,6 +154,37 @@ describe('fetch-mapping | snapshot→Response', () => {
     expect(cookies.length).toBe(2);
     expect(cookies).toContain('access=xyz; Path=/; HttpOnly');
     expect(cookies).toContain('refresh=abc; Path=/auth; HttpOnly');
+  });
+
+  // M42: streaming snapshot passes ReadableStream through
+  it('passes ReadableStream body through for streaming snapshots', async () => {
+    const headers = new Headers();
+    headers.set('content-type', 'text/event-stream');
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: hello\n\n'));
+        controller.close();
+      },
+    });
+
+    const snapshot: ResponseSnapshot = {
+      streaming: true,
+      status: 200,
+      headers,
+      body: stream,
+    };
+    const response = mapSnapshotToWebResponse(snapshot);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+
+    // Verify the stream is readable and yields the expected chunk
+    const reader = response.body!.getReader();
+    const { value, done } = await reader.read();
+    expect(done).toBe(false);
+    expect(value).toEqual(new TextEncoder().encode('data: hello\n\n'));
+    const { done: done2 } = await reader.read();
+    expect(done2).toBe(true);
   });
 });
 
@@ -164,7 +205,8 @@ describe('fetch-mapping | full round-trip', () => {
     const jsonBody = await frameworkRequest.json();
     expect(jsonBody).toEqual({ data: 'test' });
 
-    const snapshot = {
+    const snapshot: ResponseSnapshot = {
+      streaming: false,
       status: 201,
       headers: new Headers({ 'Location': '/echo/1' }),
       body: 'created',

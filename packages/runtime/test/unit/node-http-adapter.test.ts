@@ -67,7 +67,12 @@ describe('node-http-adapter | setHandler/fetch', () => {
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers({ 'x-test': 'ok' }), body: 'hello' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers({ 'x-test': 'ok' }),
+          body: 'hello',
+        }),
       } as any;
     });
 
@@ -96,7 +101,9 @@ describe('node-http-adapter | listen', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(8080, 'localhost');
@@ -114,7 +121,9 @@ describe('node-http-adapter | listen', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     await adapter.listen(8080);
@@ -135,7 +144,9 @@ describe('node-http-adapter | close', () => {
     const adapter = new NodeHttpAdapter(host);
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(8080);
@@ -156,7 +167,9 @@ describe('node-http-adapter | close', () => {
     const adapter = new NodeHttpAdapter(host);
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(8080);
@@ -178,7 +191,9 @@ describe('node-http-adapter | close with invalid handle', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     expect(() => adapter.close({} as any)).toThrow('Invalid server handle for NodeHttpAdapter');

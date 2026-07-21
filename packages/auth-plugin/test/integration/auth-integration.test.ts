@@ -125,6 +125,7 @@ function createRequestContext(
   const request = createRequest(authToken);
 
   let statusCode = 200;
+  const _abortCtrl = new AbortController();
   const resp: IResponse = {
     status: (code: number) => {
       statusCode = code;
@@ -136,7 +137,8 @@ function createRequestContext(
     text: (): HandlerResult => ({ __handlerResult: true }),
     send: (): HandlerResult => ({ __handlerResult: true }),
     redirect: (): HandlerResult => ({ __handlerResult: true }),
-    snapshot: () => ({ status: statusCode, headers: new Headers(), body: null }),
+    stream: (): HandlerResult => ({ __handlerResult: true }),
+    snapshot: () => ({ streaming: false, status: statusCode, headers: new Headers(), body: null }),
   };
 
   const services: IServiceRegistry = {
@@ -162,6 +164,7 @@ function createRequestContext(
     query: {},
     state: new Map(),
     startTime: 0,
+    signal: _abortCtrl.signal,
   };
 }
 

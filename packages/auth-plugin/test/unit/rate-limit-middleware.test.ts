@@ -64,7 +64,13 @@ function createContext(
     text: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
     send: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
     redirect: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    snapshot: () => ({ status: captured.status, headers: captured.headers, body: null }),
+    stream: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
+    snapshot: () => ({
+      streaming: false,
+      status: captured.status,
+      headers: captured.headers,
+      body: null,
+    }),
   };
 
   const services = {
@@ -78,6 +84,7 @@ function createContext(
     register: () => {},
   } as unknown as IServiceRegistry;
 
+  const _abortCtrl = new AbortController();
   const ctx: IRequestContext = {
     id: 'test',
     request,
@@ -87,6 +94,7 @@ function createContext(
     query: {},
     state: new Map(),
     startTime: 0,
+    signal: _abortCtrl.signal,
   };
 
   return { ctx, captured };
