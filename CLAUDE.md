@@ -223,12 +223,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   at priority 30 with W3C `traceparent` propagation; lazy OTel SDK import via `npm:` specifiers;
   `ConsoleSpanExporter` and `OTLPTraceExporter` loaders; `TELEMETRY_CONTEXT_OPAQUE` symbol exported
   from `common`; `TracerHost` injectable seam) — complete (PR #49)
-- **Next milestone** — **Milestone 24b** (`packages/telemetry-plugin` — auto-instrumentation:
-  runtime-gated `http`/fetch/ioredis/amqplib/kafkajs instrumentation behind the M24 `TracerHost`
-  seam; defines the public per-instrumentation `instrumentations` option (not a bare `string[]`)
-  that M24 shipped no placeholder for; adds `BatchSpanProcessor` as a `spanProcessor` choice — see
-  ROADMAP §Milestone 24b). Then **Milestone 25** (secrets plugin — secret management with KMS/Vault
-  integration).
+- **Milestone 24b** (`packages/telemetry-plugin` — auto-instrumentation added to the M24 plugin: a
+  public per-instrumentation `instrumentations` option
+  (`http`/`fetch`/`ioredis`/`amqplib`/`kafkajs`, each `true | InstrumentationConfig`, NOT a bare
+  `string[]`) loaded behind the M24 inject-or-lazy `TracerHost` seam via lazy
+  `npm:@opentelemetry/instrumentation-*` imports; runtime-gated (Node-only) with a documented no-op
+  — never a throw — on unsupported runtimes or absent packages; per-instance `setTracerProvider` (no
+  global singleton); a new optional `TracerHost.otelProvider` accessor; and a
+  `spanProcessor: 'simple' | 'batch'` choice via `span-processor-factory` (both processors from the
+  already-pinned `npm:@opentelemetry/sdk-trace-base@^2.9.0`, zero new deps); no `common` change, no
+  new capability token) — complete (PR #50)
+- **Next milestone** — **Milestone 25** (`packages/secrets-plugin` — SecretsPlugin registering
+  `ISecretManager` under `CAPABILITIES.SECRETS`; providers for AWS KMS, GCP Secret Manager, Azure
+  Key Vault, HashiCorp Vault, EnvProvider).
 
 ## Verification (run before declaring any work done)
 

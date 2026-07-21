@@ -2567,10 +2567,11 @@ message brokers behind the same inject-or-lazy `TracerHost` seam that M24 establ
    `string[]` of names** — OTel instrumentations take options (e.g. `http` needs ignore-path lists,
    `ioredis` needs a db-statement flag), which a name-list cannot express. Add it as a NEW field on
    `TelemetryPluginOptions` (e.g.
-   `instrumentations?: { http?: HttpInstrumentationOptions; ioredis?:
-   …; amqplib?: …; kafkajs?: … }`).
-   This is a **public-API change**: PUBLIC_API.md + the type are updated in M24b's PR, and the
-   deferral note M24 left in PUBLIC_API/ROADMAP is replaced with the real surface.
+   `instrumentations?: { http?: …; fetch?: …; ioredis?:
+   …; amqplib?: …; kafkajs?: … }`; `fetch`
+   maps to `@opentelemetry/instrumentation-undici`). This is a **public-API change**:
+   PUBLIC_API.md + the type are updated in M24b's PR, and the deferral note M24 left in
+   PUBLIC_API/ROADMAP is replaced with the real surface.
 2. **Auto-instrumentation** — `@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
    kafkajs loaded behind runtime-gated instrumentation packages using the same inject-or-lazy seam
    M24 established. **Runtime gating is mandatory:** an instrumentation whose target is unavailable
@@ -2590,32 +2591,35 @@ config block maps onto — so M24b must treat the shape as a stable public contr
 
 **Implementation files (added to the M24 package):**
 
-- ⬜ `src/instrumentation/instrumentation-registry.ts` — reads the new `instrumentations` option and
+- ✅ `src/instrumentation/instrumentation-registry.ts` — reads the new `instrumentations` option and
   builds the enabled set (the option→loader wiring; runtime-gated no-op for unsupported targets)
-- ⬜ `src/instrumentation/http-instrumentation.ts`
-- ⬜ `src/instrumentation/database-instrumentation.ts`
-- ⬜ `src/instrumentation/queue-instrumentation.ts`
-- ⬜ `src/services/span-processor-factory.ts`
+- ✅ `src/instrumentation/http-instrumentation.ts`
+- ✅ `src/instrumentation/database-instrumentation.ts`
+- ✅ `src/instrumentation/queue-instrumentation.ts`
+- ✅ `src/services/span-processor-factory.ts`
 
 **Test files:**
 
-- ⬜ `test/unit/instrumentation-registry.test.ts` — option shape honored; unsupported-runtime target
+- ✅ `test/unit/instrumentation-registry.test.ts` — option shape honored; unsupported-runtime target
   degrades to no-op (not throw); each named instrumentation's options reach its loader
-- ⬜ `test/unit/http-instrumentation.test.ts`
-- ⬜ `test/unit/database-instrumentation.test.ts`
-- ⬜ `test/unit/span-processor-factory.test.ts`
+- ✅ `test/unit/http-instrumentation.test.ts`
+- ✅ `test/unit/database-instrumentation.test.ts`
+- ✅ `test/unit/queue-instrumentation.test.ts`
+- ✅ `test/unit/span-processor-factory.test.ts`
+- ✅ `test/integration/instrumentation-real-import.test.ts` — guarded real `npm:` import of all five
+  instrumentation packages (proves the specifiers + export names resolve)
 
 ### Deliverables
 
-- [ ] **Public `instrumentations` option** — new `TelemetryPluginOptions` field with a
+- [x] **Public `instrumentations` option** — new `TelemetryPluginOptions` field with a
       per-instrumentation shape (NOT `string[]`), defined fresh (M24 shipped no placeholder), with
       PUBLIC_API.md + ROADMAP deferral note replaced by the real surface
-- [ ] Auto-instrumentation packages with inject-or-lazy client seam
-- [ ] Runtime gating — unsupported-target instrumentation is a documented no-op, not a throw
+- [x] Auto-instrumentation packages with inject-or-lazy client seam
+- [x] Runtime gating — unsupported-target instrumentation is a documented no-op, not a throw
       (tested)
-- [ ] `BatchSpanProcessor` as configurable alternative to `SimpleSpanProcessor`
-- [ ] 90%+ per-file coverage on every new `src/` file
-- [ ] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
+- [x] `BatchSpanProcessor` as configurable alternative to `SimpleSpanProcessor`
+- [x] 90%+ per-file coverage on every new `src/` file
+- [x] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
 
 ---
 
@@ -3674,6 +3678,25 @@ a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M4
 > is never loaded at runtime at all). At runtime the embed is web-standard (`Request`/`Response`),
 > so it runs wherever those do; only the build is Node-bound.
 
+> **Tracing (telemetry M24/M24b) expectations.** Because RR mounts as a kernel catch-all handler in
+> the normal pipeline, the telemetry request-span middleware (priority 30, runtime-agnostic) already
+> wraps every SSR request and emits one server span with W3C `traceparent` propagation — no M44 work
+> needed for request-level tracing. Known gaps the M44 plan should account for (do NOT silently
+> assume they work): (1) **No implicit span nesting across `await`** — the plugin registers no OTel
+> `ContextManager` (would pull `node:async_hooks`, breaking runtime independence), so spans from
+> auto-instrumentation and from loaders/actions are ROOTS, not children of the SSR request span; to
+> link a loader/action span, create it manually via `ITelemetryService` with an explicit
+> `parentContext`. If M44 wants loader/action spans nested under the request span, that is a design
+> decision the plan must own (candidate: read the active span off `ctx.state`/`loadContext` and pass
+> it as parent). (2) **Server-side only** — M24b auto-instrumentation (`fetch` via undici) traces
+> server-side `fetch()` in loaders/actions on **Node only** (no-op on Deno/Bun/CF-Workers); browser
+> RR navigation + hydration are NOT traced and need a separate browser OTel setup (out of scope).
+> (3) **Multi-backend export** (Datadog / New Relic / App Insights simultaneously) is NOT a
+> built-in: the plugin wires a single exporter. Fan-out is via an OTLP→OpenTelemetry-Collector
+> deployment, or an injected `tracerProviderFactory` host with multiple span processors — an
+> app/deploy concern, not an M44 concern, but noted so M44 does not assume multi-destination tracing
+> exists.
+
 ### Package: `@hono-enterprise/react-router-plugin`
 
 Registers an `ISsrService` under a new `CAPABILITIES.SSR = 'ssr'` token (added to `common`,
@@ -3906,7 +3929,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 22        | ✅     | kernel-on-hono       |
 | 23        | ✅     | runtime-serve-hono   |
 | 24        | ✅     | telemetry-plugin     |
-| 24b       | ⬜     | telemetry-plugin     |
+| 24b       | ✅     | telemetry-plugin     |
 | 25        | ⬜     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
 | 27        | ⬜     | resilience-plugin    |

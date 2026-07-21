@@ -2532,10 +2532,6 @@ configured, so the plugin always registers a usable service with zero npm deps i
 An injectable `tracerProviderFactory` option lets tests (and consumers with a pre-built provider)
 bypass the lazy import entirely.
 
-> **Auto-instrumentation** is deferred to **M24b**. M24 ships manual spans + the request-span
-> middleware only and accepts **no** `instrumentations` option — M24b introduces the option (and its
-> shape) when it lands the runtime-gated instrumentation packages. See ROADMAP.md §Milestone 24b.
-
 ### Options
 
 | Option                  | Type                                      | Required        | Description                                        |
@@ -2548,6 +2544,27 @@ bypass the lazy import entirely.
 | `sampling`              | `{ type: 'traceidratio'; ratio: number }` | No              | Sampling config (default ratio: 1.0)               |
 | `tracerProviderFactory` | `() => Promise<TracerHost>`               | No              | Injectable factory to bypass lazy import           |
 | `middleware`            | `boolean`                                 | No              | Register request-span middleware (default: `true`) |
+| `spanProcessor`         | `'simple' \| 'batch'`                     | No              | Span processor (`'simple'` by default)             |
+| `instrumentations`      | `InstrumentationsConfig`                  | No              | Auto-instrumentation config (runtime-gated no-op)  |
+
+### Auto-instrumentation
+
+Milestone 24b adds the `instrumentations` option — a per-kind map of `true | InstrumentationConfig`
+keys: `http`, `fetch`, `ioredis`, `amqplib`, `kafkajs`. Each key enables one auto-instrumentation.
+On non-Node runtimes (Deno, Bun, Cloudflare Workers) all instrumentations degrade to a **documented
+no-op** — they never throw. When `tracerProviderFactory` returns a host with a truthy
+`otelProvider`, the registry calls `setTracerProvider` + `enable()` on each loaded instrumentation
+instance; when `otelProvider` is absent, the registry returns a no-op handle immediately.
+
+Each instrumentation uses the **inject-or-lazy seam**: when `InstrumentationConfig.instrumentation`
+is set, the instance is used directly (inject path); otherwise the registry lazy-loads the OTel
+package via `npm:` dynamic import (lazy path). Any loader failure is caught and recorded as a
+failure outcome — the plugin **never throws** from instrumentation setup.
+
+### Span Processor
+
+The `spanProcessor` option selects between `'simple'` (default) and `'batch'` span processing. Both
+are exported from the pinned `@opentelemetry/sdk-trace-base@^2.9.0`.
 
 ### Registration
 

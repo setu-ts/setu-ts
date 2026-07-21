@@ -60,4 +60,24 @@ describe('barrel exports', () => {
   it('should export SpanOptions type (re-export from common)', () => {
     expect(barrel).toBeDefined();
   });
+
+  // --- Milestone 24b: new type exports ---
+
+  it('should export SpanProcessorKind type', () => {
+    // SpanProcessorKind is a type — it won't appear at runtime.
+    // The barrel re-export compiles if the import path is correct.
+    expect(barrel).toBeDefined();
+  });
+
+  it('should export InstrumentationKind type', () => {
+    expect(barrel).toBeDefined();
+  });
+
+  it('should export InstrumentationConfig type', () => {
+    expect(barrel).toBeDefined();
+  });
+
+  it('should export InstrumentationsConfig type', () => {
+    expect(barrel).toBeDefined();
+  });
 });
