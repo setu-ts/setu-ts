@@ -2590,32 +2590,32 @@ config block maps onto — so M24b must treat the shape as a stable public contr
 
 **Implementation files (added to the M24 package):**
 
-- ⬜ `src/instrumentation/instrumentation-registry.ts` — reads the new `instrumentations` option and
+- ✅ `src/instrumentation/instrumentation-registry.ts` — reads the new `instrumentations` option and
   builds the enabled set (the option→loader wiring; runtime-gated no-op for unsupported targets)
-- ⬜ `src/instrumentation/http-instrumentation.ts`
-- ⬜ `src/instrumentation/database-instrumentation.ts`
-- ⬜ `src/instrumentation/queue-instrumentation.ts`
-- ⬜ `src/services/span-processor-factory.ts`
+- ✅ `src/instrumentation/http-instrumentation.ts`
+- ✅ `src/instrumentation/database-instrumentation.ts`
+- ✅ `src/instrumentation/queue-instrumentation.ts`
+- ✅ `src/services/span-processor-factory.ts`
 
 **Test files:**
 
-- ⬜ `test/unit/instrumentation-registry.test.ts` — option shape honored; unsupported-runtime target
+- ✅ `test/unit/instrumentation-registry.test.ts` — option shape honored; unsupported-runtime target
   degrades to no-op (not throw); each named instrumentation's options reach its loader
-- ⬜ `test/unit/http-instrumentation.test.ts`
-- ⬜ `test/unit/database-instrumentation.test.ts`
-- ⬜ `test/unit/span-processor-factory.test.ts`
+- ✅ `test/unit/http-instrumentation.test.ts`
+- ✅ `test/unit/database-instrumentation.test.ts`
+- ✅ `test/unit/span-processor-factory.test.ts`
 
 ### Deliverables
 
-- [ ] **Public `instrumentations` option** — new `TelemetryPluginOptions` field with a
+- [x] **Public `instrumentations` option** — new `TelemetryPluginOptions` field with a
       per-instrumentation shape (NOT `string[]`), defined fresh (M24 shipped no placeholder), with
       PUBLIC_API.md + ROADMAP deferral note replaced by the real surface
-- [ ] Auto-instrumentation packages with inject-or-lazy client seam
-- [ ] Runtime gating — unsupported-target instrumentation is a documented no-op, not a throw
+- [x] Auto-instrumentation packages with inject-or-lazy client seam
+- [x] Runtime gating — unsupported-target instrumentation is a documented no-op, not a throw
       (tested)
-- [ ] `BatchSpanProcessor` as configurable alternative to `SimpleSpanProcessor`
-- [ ] 90%+ per-file coverage on every new `src/` file
-- [ ] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
+- [x] `BatchSpanProcessor` as configurable alternative to `SimpleSpanProcessor`
+- [x] 90%+ per-file coverage on every new `src/` file
+- [x] Documentation updates (PUBLIC_API.md, ARCHITECTURE.md, ROADMAP.md)
 
 ---
 
@@ -3906,7 +3906,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 22        | ✅     | kernel-on-hono       |
 | 23        | ✅     | runtime-serve-hono   |
 | 24        | ✅     | telemetry-plugin     |
-| 24b       | ⬜     | telemetry-plugin     |
+| 24b       | ✅     | telemetry-plugin     |
 | 25        | ⬜     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
 | 27        | ⬜     | resilience-plugin    |

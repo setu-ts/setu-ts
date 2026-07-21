@@ -9,6 +9,8 @@
  * @since 0.24.1
  */
 
+const defaultImport = (spec: string) => import(spec);
+
 /**
  * Constructs an amqplib instrumentation instance from a loaded module.
  *
@@ -33,8 +35,9 @@ export function createAmqplibInstrumentation(
  */
 export async function loadAmqplibInstrumentation(
   configArg: unknown | undefined,
+  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
 ): Promise<{ instance: unknown; specifier: string }> {
-  const mod = await import('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
+  const mod = await importFn('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
   const instance = createAmqplibInstrumentation(mod, configArg);
   return { instance, specifier: 'npm:@opentelemetry/instrumentation-amqplib@^0.67.0' };
 }
@@ -63,8 +66,9 @@ export function createKafkaJsInstrumentation(
  */
 export async function loadKafkaJsInstrumentation(
   configArg: unknown | undefined,
+  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
 ): Promise<{ instance: unknown; specifier: string }> {
-  const mod = await import('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
+  const mod = await importFn('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
   const instance = createKafkaJsInstrumentation(mod, configArg);
   return { instance, specifier: 'npm:@opentelemetry/instrumentation-kafkajs@^0.29.0' };
 }

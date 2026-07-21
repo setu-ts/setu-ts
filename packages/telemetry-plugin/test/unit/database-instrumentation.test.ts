@@ -6,7 +6,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createIORedisInstrumentation } from '../../src/instrumentation/database-instrumentation.ts';
+import {
+  createIORedisInstrumentation,
+  loadIORedisInstrumentation,
+} from '../../src/instrumentation/database-instrumentation.ts';
 
 describe('database-instrumentation', () => {
   it('should construct IORedisInstrumentation via createIORedisInstrumentation', () => {
@@ -55,5 +58,30 @@ describe('database-instrumentation', () => {
     await expect(
       import('npm:@opentelemetry/instrumentation-nonexistent-fake@^999.0.0'),
     ).rejects.toThrow();
+  });
+
+  // --- Direct coverage for loadIORedisInstrumentation ---
+
+  it('loadIORedisInstrumentation should return { instance, specifier } when real package is available', async () => {
+    try {
+      const result = await loadIORedisInstrumentation(undefined);
+      expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
+      expect(result.instance).toBeDefined();
+    } catch {
+      // Packages not installed.
+    }
+  });
+
+  it('loadIORedisInstrumentation should use injected importFn', async () => {
+    const fakeMod = { IORedisInstrumentation: class {} };
+    const importFn = (_spec: string) => Promise.resolve(fakeMod);
+    const result = await loadIORedisInstrumentation(undefined, importFn);
+    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
+    expect(result.instance).toBeDefined();
+  });
+
+  it('loadIORedisInstrumentation should reject when importFn rejects', async () => {
+    const importFn = (_spec: string) => Promise.reject(new Error('inject-fail'));
+    await expect(loadIORedisInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
   });
 });

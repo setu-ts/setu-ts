@@ -15,6 +15,8 @@ export interface LoadedInstrumentation {
   specifier: string;
 }
 
+const defaultImport = (spec: string) => import(spec);
+
 /**
  * Constructs an HTTP instrumentation instance from a loaded module.
  *
@@ -42,8 +44,9 @@ export function createHttpInstrumentation(
  */
 export async function loadHttpInstrumentation(
   configArg: unknown | undefined,
+  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
 ): Promise<LoadedInstrumentation> {
-  const mod = await import('npm:@opentelemetry/instrumentation-http@^0.220.0');
+  const mod = await importFn('npm:@opentelemetry/instrumentation-http@^0.220.0');
   const instance = createHttpInstrumentation(mod, configArg);
   return { instance, specifier: 'npm:@opentelemetry/instrumentation-http@^0.220.0' };
 }
@@ -75,8 +78,9 @@ export function createFetchInstrumentation(
  */
 export async function loadFetchInstrumentation(
   configArg: unknown | undefined,
+  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
 ): Promise<LoadedInstrumentation> {
-  const mod = await import('npm:@opentelemetry/instrumentation-undici@^0.30.0');
+  const mod = await importFn('npm:@opentelemetry/instrumentation-undici@^0.30.0');
   const instance = createFetchInstrumentation(mod, configArg);
   return { instance, specifier: 'npm:@opentelemetry/instrumentation-undici@^0.30.0' };
 }

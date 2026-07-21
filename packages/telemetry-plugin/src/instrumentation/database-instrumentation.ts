@@ -8,6 +8,8 @@
  * @since 0.24.1
  */
 
+const defaultImport = (spec: string) => import(spec);
+
 /**
  * Constructs an ioredis instrumentation instance from a loaded module.
  *
@@ -32,8 +34,9 @@ export function createIORedisInstrumentation(
  */
 export async function loadIORedisInstrumentation(
   configArg: unknown | undefined,
+  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
 ): Promise<{ instance: unknown; specifier: string }> {
-  const mod = await import('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
+  const mod = await importFn('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
   const instance = createIORedisInstrumentation(mod, configArg);
   return { instance, specifier: 'npm:@opentelemetry/instrumentation-ioredis@^0.68.0' };
 }
