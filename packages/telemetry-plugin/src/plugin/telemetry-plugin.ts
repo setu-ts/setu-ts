@@ -10,7 +10,6 @@
 
 import type {
   IPlugin,
-  IRuntimeServices,
   ITelemetryService,
   MiddlewareFunction,
   TelemetryContext,
@@ -95,7 +94,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
         if (options.instrumentations && tracerHost.otelProvider) {
           instrumentationHandle = await buildInstrumentationRegistry(
             options.instrumentations,
-            ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME!),
+            ctx.runtime,
             tracerHost.otelProvider,
           );
         }

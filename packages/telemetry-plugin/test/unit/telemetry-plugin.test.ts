@@ -474,12 +474,6 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
 
     const fakeProvider = { id: 'fake-provider' };
 
-    // The mock context's services.get must return a runtime when CAPABILITIES.RUNTIME is queried.
-    // Without this, buildInstrumentationRegistry throws because runtime is undefined.
-    mock.ctx.services.register(CAPABILITIES.RUNTIME!, {
-      platform: () => 'node' as never,
-    } as never);
-
     const plugin = TelemetryPlugin({
       serviceName: 'test',
       exporter: 'console',
@@ -523,10 +517,6 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
       },
     };
 
-    mock.ctx.services.register(CAPABILITIES.RUNTIME!, {
-      platform: () => 'node' as never,
-    } as never);
-
     const plugin = TelemetryPlugin({
       serviceName: 'test',
       exporter: 'console',
@@ -553,10 +543,6 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
   it('should have complete outcomes at register() resolve time for lazy path', async () => {
     // Proves no fire-and-forget: outcomes are populated before register() returns.
     const mock = createMockContext();
-
-    mock.ctx.services.register(CAPABILITIES.RUNTIME!, {
-      platform: () => 'deno' as never,
-    } as never);
 
     const plugin = TelemetryPlugin({
       serviceName: 'test',
