@@ -1475,6 +1475,79 @@ Omitting an option disables that behaviour (no timer created).
 
 ---
 
+## ReactRouterPlugin()
+
+Embeds **React Router v7 framework mode** as a first-party plugin so a Hono Enterprise application
+can serve a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
+framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
+assets are served over `runtime.fs?.readFile`.
+
+### Registration
+
+```typescript
+import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+
+app.register(ReactRouterPlugin({
+  serverBuildPath: './build/server/index.js',
+  assetsDir: './build/client/assets',
+  assetUrlPrefix: '/assets/',
+  basename: '/',
+  mode: 'production',
+}));
+```
+
+### Usage in Routes
+
+The plugin registers its own catch-all route internally — the consumer does **not** manually
+register SSR routes. The plugin owns all HTTP verbs at the configured `basename` pattern:
+
+```typescript
+import { CAPABILITIES, ISsrService } from '@hono-enterprise/common';
+
+// The plugin handles SSR automatically at the catch-all.
+// Custom routes below the catch-all take precedence via the kernel tie-break.
+app.router.get('/api/health', (ctx) => {
+  return ctx.response.json({ status: 'ok' });
+});
+```
+
+### Options
+
+| Option               | Type                                  | Default      | Description                                                                                             |
+| -------------------- | ------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`                              | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
+| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>` | omitted    | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
+| `assetsDir`          | `string`                              | omitted      | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
+| `assetUrlPrefix`     | `string`                              | `/assets/`   | URL prefix for the asset route.                                                                       |
+| `basename`           | `string`                              | `/`          | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.  |
+| `getLoadContext`     | `LoadContextFunction`                 | default      | Override the default `loadContext` bridge (`{ services, user }`).                                     |
+| `mode`               | `'production' \| 'development'`       | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+
+### Interface Reference
+
+- `ISsrService.render(ctx): Promise<HandlerResult>` — delegates the request to React Router and
+  writes back the result (streaming or buffered).
+- `ReactRouterPlugin(options)` — returns an `IPlugin` with async `register()` that mounts the SSR
+  catch-all, optional static-asset route, and a `react-router` health indicator.
+- `createStaticAssetHandler({ fs, assetsDir, assetUrlPrefix })` — returns a `RouteHandler` for
+  serving built client assets with immutable caching.
+
+### Notes
+
+- **Vite is never imported.** The consuming app runs `react-router dev` as a separate process and
+  feeds this plugin the production build. Vite is an app-level, build-time concern.
+- **`@react-router/node` is excluded.** Only core `react-router` (`createRequestHandler`) is lazy
+  imported. `@react-router/node`'s `installGlobals()` is unnecessary on web-standard runtimes.
+- **Static-asset serving uses `runtime.fs?.readFile`.** On edge platforms where `fs` is absent,
+  assets degrade to a 404. SSR document rendering still works.
+- **File-based routing (`flatRoutes`) is supported transparently.** It is baked into the compiled
+  `ServerBuild` by the React Router Vite plugin at build time — M44 serves it without any plugin
+  surface.
+- `@react-router/fs-routes` (if used) is an app-level `devDependency`, never imported by the
+  plugin.
+
+---
+
 ## CQRS
 
 Provides command/query separation with buses.
@@ -3742,7 +3815,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 | Export                        | Kind     | Purpose                                                                                                 |
 | ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (Server-Sent Events hub) |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework) |
 | `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names   |
 | `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                   |
 | `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                   |
@@ -3785,6 +3858,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                           |
 | Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
+| SSR                 | `ISsrService`                                                                                                                                                                                                                              |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                              |
 
 Contract notes:
@@ -3819,6 +3893,9 @@ Contract notes:
 - `CAPABILITIES.SSE` (`'sse'`) — the capability token under which the SsePlugin registers the
   `ISseService`. The service provides real-time, one-way server-to-client messaging over an SSE
   stream built on `IResponse.stream()`. Added in Milestone 43.
+- `CAPABILITIES.SSR` (`'ssr'`) — the capability token under which the React Router plugin registers the
+  `ISsrService`. The service provides server-side rendering by delegating to React Router's request
+  handler and writing back the result via `IResponse`. Added in Milestone 44.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
