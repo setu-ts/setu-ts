@@ -163,7 +163,9 @@ describe('SsePlugin registration', () => {
     if (healthIndicatorFn) {
       const result = await healthIndicatorFn();
       expect(result.status).toBe('up');
-      expect(result.data).toBeDefined();
+      // Assert the full documented shape (§3.9), not just that data exists:
+      // the indicator surfaces the live connection count (0 at registration).
+      expect(result.data).toEqual({ connections: 0 });
     }
 
     expect(onCloseHandler).not.toBeNull();
