@@ -7,8 +7,6 @@
 
 import type {
   HealthCheckResult,
-  IHealthApi,
-  ILifecycleApi,
   IPlugin,
   IPluginContext,
   ISsrService,
@@ -34,7 +32,15 @@ const DEFAULT_BASENAME = '/';
 const DEFAULT_MODE = 'production';
 
 /** All HTTP verbs for the catch-all. */
-const ALL_VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
+const ALL_VERBS = [
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+] as const;
 
 /**
  * Joins a prefix with `/*`, handling trailing slashes safely.
@@ -83,11 +89,19 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
 
       // Resolve the RR handler via the injectable seam.
       const mode = options.mode ?? DEFAULT_MODE;
-      const getLoadRequestHandler = options.loadRequestHandler ?? loadRequestHandler;
-      const handler = await getLoadRequestHandler(options.serverBuildPath, mode);
+      const getLoadRequestHandler = options.loadRequestHandler ??
+        loadRequestHandler;
+      const handler = await getLoadRequestHandler(
+        options.serverBuildPath,
+        mode,
+      );
 
       // Build and register the SSR service.
-      const ssrService = new SsrService(handler, options.getLoadContext, runtime);
+      const ssrService = new SsrService(
+        handler,
+        options.getLoadContext,
+        runtime,
+      );
       ctx.services.register<ISsrService>(CAPABILITIES.SSR, ssrService);
 
       // Register the SSR catch-all route for all 7 verbs.
@@ -127,7 +141,8 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
 
       // Register static-asset route (only when assetsDir is provided).
       if (options.assetsDir != null) {
-        const assetUrlPrefix = options.assetUrlPrefix ?? DEFAULT_ASSET_URL_PREFIX;
+        const assetUrlPrefix = options.assetUrlPrefix ??
+          DEFAULT_ASSET_URL_PREFIX;
 
         if (runtime.fs != null) {
           const assetRoutePattern = joinWildcard(assetUrlPrefix);

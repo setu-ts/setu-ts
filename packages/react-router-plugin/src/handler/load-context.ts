@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { IRequestContext, LoadContextFunction } from '../interfaces/index.ts';
+import type { IRequestContext } from '../interfaces/index.ts';
 
 /**
  * Creates the default `loadContext` function for React Router.

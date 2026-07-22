@@ -64,7 +64,9 @@ export function createStaticAssetHandler(options: {
     try {
       decodedPath = decodeURIComponent(ctx.request.path);
     } catch {
-      return ctx.response.status(400).send(new TextEncoder().encode('Bad Request'));
+      return ctx.response.status(400).send(
+        new TextEncoder().encode('Bad Request'),
+      );
     }
 
     // Strip the URL prefix to get the relative file path.
@@ -73,7 +75,7 @@ export function createStaticAssetHandler(options: {
       : decodedPath;
 
     if (relativePath === '' || relativePath === '/') {
-      return ctx.response.status(404).send(null);
+      return ctx.response.status(404).send();
     }
 
     const fullPath = `${assetsDir}/${relativePath}`;
@@ -87,7 +89,7 @@ export function createStaticAssetHandler(options: {
     try {
       bytes = await fs.readFile(fullPath);
     } catch {
-      return ctx.response.status(404).send(null);
+      return ctx.response.status(404).send();
     }
 
     return ctx.response

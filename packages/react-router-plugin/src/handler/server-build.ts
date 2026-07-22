@@ -56,7 +56,8 @@ export async function loadRequestHandler(
     );
   }
 
-  let createRequestHandler: (b: unknown, m?: string) => SsrRequestHandler;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let createRequestHandler: any;
   try {
     const rr = await import('npm:react-router');
     createRequestHandler = rr.createRequestHandler;

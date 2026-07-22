@@ -1513,15 +1513,15 @@ app.router.get('/api/health', (ctx) => {
 
 ### Options
 
-| Option               | Type                                  | Default      | Description                                                                                             |
-| -------------------- | ------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------- |
-| `serverBuildPath`    | `string`                              | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
-| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>` | omitted    | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
-| `assetsDir`          | `string`                              | omitted      | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
-| `assetUrlPrefix`     | `string`                              | `/assets/`   | URL prefix for the asset route.                                                                       |
-| `basename`           | `string`                              | `/`          | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.  |
-| `getLoadContext`     | `LoadContextFunction`                 | default      | Override the default `loadContext` bridge (`{ services, user }`).                                     |
-| `mode`               | `'production' \| 'development'`       | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+| Option               | Type                                              | Default        | Description                                                                                           |
+| -------------------- | ------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`                                          | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
+| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>` | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
+| `assetsDir`          | `string`                                          | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
+| `assetUrlPrefix`     | `string`                                          | `/assets/`     | URL prefix for the asset route.                                                                       |
+| `basename`           | `string`                                          | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
+| `getLoadContext`     | `LoadContextFunction`                             | default        | Override the default `loadContext` bridge (`{ services, user }`).                                     |
+| `mode`               | `'production' \| 'development'`                   | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
 
 ### Interface Reference
 
@@ -1543,8 +1543,7 @@ app.router.get('/api/health', (ctx) => {
 - **File-based routing (`flatRoutes`) is supported transparently.** It is baked into the compiled
   `ServerBuild` by the React Router Vite plugin at build time — M44 serves it without any plugin
   surface.
-- `@react-router/fs-routes` (if used) is an app-level `devDependency`, never imported by the
-  plugin.
+- `@react-router/fs-routes` (if used) is an app-level `devDependency`, never imported by the plugin.
 
 ---
 
@@ -3813,17 +3812,17 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                 |
-| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| Export                        | Kind     | Purpose                                                                                                                |
+| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework) |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names   |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                   |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                   |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                    |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                        |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                             |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                    |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                        |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                  |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                  |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                  |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                   |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                       |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                            |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                   |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                       |
 
 ### Types
 
@@ -3858,7 +3857,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                           |
 | Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
-| SSR                 | `ISsrService`                                                                                                                                                                                                                              |
+| SSR                 | `ISsrService`                                                                                                                                                                                                                            |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                              |
 
 Contract notes:
@@ -3893,9 +3892,9 @@ Contract notes:
 - `CAPABILITIES.SSE` (`'sse'`) — the capability token under which the SsePlugin registers the
   `ISseService`. The service provides real-time, one-way server-to-client messaging over an SSE
   stream built on `IResponse.stream()`. Added in Milestone 43.
-- `CAPABILITIES.SSR` (`'ssr'`) — the capability token under which the React Router plugin registers the
-  `ISsrService`. The service provides server-side rendering by delegating to React Router's request
-  handler and writing back the result via `IResponse`. Added in Milestone 44.
+- `CAPABILITIES.SSR` (`'ssr'`) — the capability token under which the React Router plugin registers
+  the `ISsrService`. The service provides server-side rendering by delegating to React Router's
+  request handler and writing back the result via `IResponse`. Added in Milestone 44.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these

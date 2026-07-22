@@ -5,8 +5,12 @@
  * @since 0.1.0
  */
 
-import type { HandlerResult, IRequestContext, IRuntimeServices, LoadContextFunction } from '@hono-enterprise/common';
-import type { SsrRequestHandler } from '../interfaces/index.ts';
+import type { HandlerResult, IRuntimeServices } from '@hono-enterprise/common';
+import type {
+  IRequestContext,
+  LoadContextFunction,
+  SsrRequestHandler,
+} from '../interfaces/index.ts';
 import { createDefaultLoadContext } from './load-context.ts';
 
 /**
@@ -26,7 +30,7 @@ export async function bridgeRequestToRR(
   ctx: IRequestContext,
   handler: SsrRequestHandler,
   getLoadContext: LoadContextFunction | undefined,
-  runtime: IRuntimeServices,
+  _runtime: IRuntimeServices,
 ): Promise<HandlerResult> {
   // Build the loadContext — default exposes services + user.
   const loadContext = (getLoadContext ?? createDefaultLoadContext)(ctx);
@@ -46,7 +50,8 @@ export async function bridgeRequestToRR(
 
   // Only attach body for methods that support it (never for GET/HEAD).
   if (requestBody !== undefined) {
-    requestInit.body = requestBody;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (requestInit as any).body = requestBody;
   }
 
   // Derive a web Request's signal from ctx.signal (always live).

@@ -36,7 +36,8 @@
     "./packages/starters/rest-starter",
     "./packages/starters/microservice-starter",
     "./packages/starters/full-stack-starter",
-    "./packages/sse-plugin"
+    "./packages/sse-plugin",
+    "./packages/react-router-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

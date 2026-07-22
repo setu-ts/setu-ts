@@ -5,9 +5,12 @@
  * @since 0.1.0
  */
 
-import type { HandlerResult, IRequestContext, IRuntimeServices, LoadContextFunction } from '@hono-enterprise/common';
-import type { ISsrService } from '@hono-enterprise/common';
-import type { SsrRequestHandler } from '../interfaces/index.ts';
+import type { HandlerResult, IRuntimeServices, ISsrService } from '@hono-enterprise/common';
+import type {
+  IRequestContext,
+  LoadContextFunction,
+  SsrRequestHandler,
+} from '../interfaces/index.ts';
 import { bridgeRequestToRR } from '../handler/request-bridge.ts';
 
 /**
@@ -47,6 +50,12 @@ export class SsrService implements ISsrService {
    * @since 0.1.0
    */
   async render(ctx: IRequestContext): Promise<HandlerResult> {
-    return bridgeRequestToRR(ctx, this.#handler, this.#getLoadContext, this.#runtime);
+    const result = await bridgeRequestToRR(
+      ctx,
+      this.#handler,
+      this.#getLoadContext,
+      this.#runtime,
+    );
+    return result;
   }
 }

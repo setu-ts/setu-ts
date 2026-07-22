@@ -5,7 +5,8 @@
  * @since 0.1.0
  */
 
-import type { HandlerResult, IRequestContext, IRuntimeServices } from '@hono-enterprise/common';
+import type { IRequestContext } from '@hono-enterprise/common';
+export type { IRequestContext } from '@hono-enterprise/common';
 
 /**
  * React Router request handler — the callable returned by
@@ -25,7 +26,9 @@ export type SsrRequestHandler = (
  *
  * @since 0.1.0
  */
-export type LoadContextFunction = (ctx: IRequestContext) => Record<string, unknown>;
+export type LoadContextFunction = (
+  ctx: IRequestContext,
+) => Record<string, unknown>;
 
 /**
  * Options for the React Router plugin.
