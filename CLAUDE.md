@@ -255,6 +255,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   complete (PR #53)
 - **Milestone 43** (`packages/sse-plugin` — Server-Sent Events plugin with frame encoding, named
   channels, heartbeat, `Last-Event-ID`) — complete (PR pending)
+- **Next milestone** — **Milestone 44** (`packages/react-router-plugin` — React SSR + file-based
+  routing by embedding React Router v7 framework mode as a plugin over a kernel catch-all handler;
+  built on M42 streaming SSR; the frontend is built with Vite on the Node/npm toolchain, outside the
+  Deno workspace).
 
 ## Verification (run before declaring any work done)
 
