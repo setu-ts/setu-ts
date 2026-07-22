@@ -254,7 +254,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `cache-middleware.ts` (skip `encodePayload` when `streaming === true`, set `X-Cache: MISS`) —
   complete (PR #53)
 - **Milestone 43** (`packages/sse-plugin` — Server-Sent Events plugin with frame encoding, named
-  channels, heartbeat, `Last-Event-ID`) — complete (PR pending)
+  channels, heartbeat, `Last-Event-ID`) — complete (PR #55)
 - **Next milestone** — **Milestone 44** (`packages/react-router-plugin` — React SSR + file-based
   routing by embedding React Router v7 framework mode as a plugin over a kernel catch-all handler;
   built on M42 streaming SSR; the frontend is built with Vite on the Node/npm toolchain, outside the
