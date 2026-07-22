@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-explicit-any
 /**
  * Integration tests for streaming responses — end-to-end via real server socket.
  *
@@ -15,7 +14,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@hono-enterprise/kernel';
 import { RuntimePlugin } from '@hono-enterprise/runtime';
 import { cacheMiddleware, CachePlugin } from '@hono-enterprise/cache-plugin';
-import type { IPluginContext, IRequestContext } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext, IRequestContext } from '@hono-enterprise/common';
 
 /** Bind a port, release it, return the port number. */
 function findFreePort(): number {
@@ -103,7 +102,7 @@ describe('streaming integration', () => {
         await chunkDelay;
         yielded++;
         // If aborted, break out immediately
-        if ((ctx as any).signal?.aborted) {
+        if (ctx.signal.aborted) {
           break;
         }
       }
@@ -173,10 +172,10 @@ describe('streaming integration', () => {
                   controller.close();
                 },
               });
-              return (_c as any).response.stream(stream);
+              return _c.response.stream(stream);
             });
           },
-        } as any,
+        } satisfies IPlugin,
       ],
     });
 
