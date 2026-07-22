@@ -32,14 +32,14 @@ export class SseService implements IService {
   readonly #runtime: IRuntimeServices;
 
   /**
-   * @param options - Plugin options (heartbeatMs, retryMs)
+   * @param options - Plugin options (heartbeatMs, retryMs); may be undefined
    * @param runtime - Runtime services (injected from plugin registration)
    * @since 0.1.0
    */
-  constructor(options?: SsePluginOptions, runtime?: IRuntimeServices) {
+  constructor(options: SsePluginOptions | undefined, runtime: IRuntimeServices) {
     this.#heartbeatMs = options?.heartbeatMs;
     this.#retryMs = options?.retryMs;
-    this.#runtime = runtime!;
+    this.#runtime = runtime;
   }
 
   /** Open a new SSE connection for the given request context. */
