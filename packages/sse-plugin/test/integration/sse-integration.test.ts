@@ -10,7 +10,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { createApplication } from '@hono-enterprise/kernel';
@@ -19,9 +19,6 @@ import type { ISseService, RouteHandler } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
 import { SsePlugin } from '../../src/index.ts';
-afterEach(() => {
-  // Ensure free port cleanup between tests.
-});
 
 /** Bind a port, release it, return the port number. */
 function findFreePort(): number {
@@ -205,9 +202,9 @@ describe('SSE Integration (real plugin end-to-end)', () => {
     await app.start({ port });
 
     try {
-      // Before any request: connectionCount should be 0.
-      // deno-lint-ignore no-explicit-any -- ISseService has connectionCount at runtime
-      expect((serviceRef as any)?.connectionCount ?? 0).toBe(0);
+      // Before any request: connectionCount should be 0. (serviceRef is
+      // closure-assigned, so TS cannot narrow it; assert its declared union.)
+      expect((serviceRef as ISseService | null)?.connectionCount ?? 0).toBe(0);
 
       const ac = new AbortController();
       setTimeout(() => ac.abort(), 200);
@@ -221,13 +218,11 @@ describe('SSE Integration (real plugin end-to-end)', () => {
       // assert that connectionCount === 1. This ensures SseService.open
       // actually registers the connection in the live set.
       await new Promise((r) => setTimeout(r, 50));
-      // deno-lint-ignore no-explicit-any -- ISseService.connectionCount available at runtime
-      expect((serviceRef as any)?.connectionCount ?? 0).toBe(1);
+      expect((serviceRef as ISseService | null)?.connectionCount ?? 0).toBe(1);
 
       // After the connection closes (~100ms) + buffer.
       await new Promise((r) => setTimeout(r, 150));
-      // deno-lint-ignore no-explicit-any
-      expect((serviceRef as any)?.connectionCount ?? 0).toBe(0);
+      expect((serviceRef as ISseService | null)?.connectionCount ?? 0).toBe(0);
     } finally {
       await app.stop();
     }

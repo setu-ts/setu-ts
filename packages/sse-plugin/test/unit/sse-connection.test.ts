@@ -449,9 +449,10 @@ describe('SseConnection', () => {
       expect(conn.isOpen).toBe(true);
 
       // Cancel the stream body reader WITHOUT aborting the signal.
+      // (streamBody is closure-assigned, so TS cannot narrow it; assert the
+      // concrete stream type rather than reaching for `any`.)
       if (streamBody) {
-        // deno-lint-ignore no-explicit-any -- ReadableStream exists at runtime
-        const reader = (streamBody as any).getReader();
+        const reader = (streamBody as ReadableStream<Uint8Array>).getReader();
         await reader.cancel('test cancel').catch(() => {});
         // Release lock to avoid hanging.
         reader.releaseLock();
@@ -500,8 +501,7 @@ describe('SseConnection', () => {
 
       // Now cancel the stream too — should NOT throw or increment onClosed again.
       if (streamBody) {
-        // deno-lint-ignore no-explicit-any -- ReadableStream exists at runtime
-        const reader = (streamBody as any).getReader();
+        const reader = (streamBody as ReadableStream<Uint8Array>).getReader();
         await reader.cancel('cancel after abort').catch(() => {});
         reader.releaseLock();
       }
