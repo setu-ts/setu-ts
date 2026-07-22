@@ -14,6 +14,7 @@ import type {
   IResponse,
   IRuntimeServices,
   IServiceRegistry,
+  ResponseSnapshot,
 } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
@@ -117,17 +118,7 @@ export function createFakeResponse(): FakeResponseResult {
     stream(_body: ReadableStream<Uint8Array>): HandlerResult {
       return HANDLER_RESULT;
     },
-    snapshot(): {
-      readonly streaming: false;
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: Uint8Array | string | null;
-    } | {
-      readonly streaming: true;
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: ReadableStream<Uint8Array>;
-    } {
+    snapshot(): ResponseSnapshot {
       const h = new Headers();
       for (const [k, v] of headers) {
         h.set(k, v);

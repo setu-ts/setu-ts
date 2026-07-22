@@ -11,6 +11,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
+  ResponseSnapshot,
 } from '@hono-enterprise/common';
 
 // ---------------------------------------------------------------------------
@@ -121,17 +122,7 @@ export function createFakeResponse(): FakeResponseResult {
     stream(_body: ReadableStream<Uint8Array>): HandlerResult {
       return HANDLER_RESULT;
     },
-    snapshot(): {
-      readonly streaming: false;
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: Uint8Array | string | null;
-    } | {
-      readonly streaming: true;
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: ReadableStream<Uint8Array>;
-    } {
+    snapshot(): ResponseSnapshot {
       return { streaming: false, status, headers, body };
     },
   };
