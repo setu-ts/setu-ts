@@ -103,7 +103,7 @@ describe('runtime-plugin | CF platform', () => {
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers(), body: null }),
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
       } as any;
     });
     // fetch should work
@@ -248,7 +248,7 @@ describe('runtime-plugin | fake adapter records calls', () => {
 
     // deno-lint-ignore require-await
     fakeAdapter.setHandler(async () => ({
-      snapshot: () => ({ status: 200, headers: new Headers(), body: 'test' }),
+      snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'test' }),
     }));
 
     expect(fakeAdapter.setHandlerCalledWith).not.toBeNull();

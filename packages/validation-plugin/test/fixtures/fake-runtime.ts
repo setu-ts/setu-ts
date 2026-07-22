@@ -11,6 +11,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
+  ResponseSnapshot,
 } from '@hono-enterprise/common';
 
 // ---------------------------------------------------------------------------
@@ -118,18 +119,17 @@ export function createFakeResponse(): FakeResponseResult {
     redirect(_url: string, _status?: number): HandlerResult {
       return HANDLER_RESULT;
     },
-    snapshot(): {
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: Uint8Array | string | null;
-    } {
-      return { status, headers, body };
+    stream(_body: ReadableStream<Uint8Array>): HandlerResult {
+      return HANDLER_RESULT;
+    },
+    snapshot(): ResponseSnapshot {
+      return { streaming: false, status, headers, body };
     },
   };
 
   return {
     response,
-    snapshot: () => ({ status, headers, body }),
+    snapshot: () => ({ streaming: false, status, headers, body }),
   };
 }
 
@@ -212,6 +212,7 @@ export function createFakeContext(opts: FakeContextOptions = {}): FakeContextRes
     query: opts.query ?? {},
     state: new Map(),
     startTime: 0,
+    signal: new AbortController().signal,
   };
 
   return { ctx, responseSnapshot, servicesMap };

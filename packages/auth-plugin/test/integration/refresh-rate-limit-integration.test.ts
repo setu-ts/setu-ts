@@ -114,6 +114,7 @@ function createRequestContext(
   };
 
   const captured = { status: 200, headers: new Headers() };
+  const _abortCtrl = new AbortController();
   const response: IResponse = {
     status: (code: number) => {
       captured.status = code;
@@ -128,7 +129,13 @@ function createRequestContext(
     text: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
     send: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
     redirect: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    snapshot: () => ({ status: captured.status, headers: captured.headers, body: null }),
+    stream: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
+    snapshot: () => ({
+      streaming: false,
+      status: captured.status,
+      headers: captured.headers,
+      body: null,
+    }),
   };
 
   const services = {
@@ -154,6 +161,7 @@ function createRequestContext(
     query: {},
     state: new Map(),
     startTime: 0,
+    signal: _abortCtrl.signal,
   };
 
   return { ctx, captured };

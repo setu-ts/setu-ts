@@ -3687,7 +3687,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                              |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore` |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                               |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`                                                                       |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`, `ResponseSnapshot`                                                   |
 | Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                           |
 | DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                           |
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                 |
@@ -3718,18 +3718,28 @@ Contract notes:
 - Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
-  terminal methods (`json`, `text`, `send`, `redirect`).
+  terminal methods (`json`, `text`, `send`, `redirect`, `stream`).
 - `IResponse` has two header setters with distinct semantics: `header(name, value)` **replaces** any
   existing value for `name` (`Headers.set`), while `appendHeader(name, value)` **adds** a value
   without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
   multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
   refresh cookies). Both chain (`return this`).
-- `IResponse.snapshot()` returns an immutable read of the built response —
-  `{ status: number; headers: Headers; body: Uint8Array | string | null }`. This is the read surface
-  that lets middleware capture a response after the handler runs (the CachePlugin's transparent
-  `cacheMiddleware` uses it) and that unblocks the deferred M39 HTTP server adapters. Added in
-  Milestone 11; `ResponseBuilder` (kernel) already implemented it, so no kernel runtime change was
-  required.
+- `IResponse.stream(body: ReadableStream<Uint8Array>): HandlerResult` — sends a streaming response
+  body. The runtime maps this to `new Response(streamBody, { status, headers })`; streaming is free
+  on every platform (Node via Hono, Deno, Bun, Cloudflare Workers) with no buffer-then-send. Added
+  in Milestone 42.
+- `IResponse.snapshot()` returns a **discriminated union** keyed on `streaming`: when `false`,
+  `body` is `Uint8Array | string | null` (buffered); when `true`, `body` is
+  `ReadableStream<Uint8Array>` (live stream). This allows middleware to safely inspect the response
+  without draining a live stream — middleware that reads the body must check `streaming` first.
+  Widened from the flat shape added in Milestone 11 to a discriminated union in Milestone 42.
+- `IRequest.signal?: AbortSignal` — an abort signal that fires when the underlying HTTP connection
+  is severed (client disconnect, timeout). Populated by the HTTP adapter from the native
+  `Request.signal`; optional because injected / test requests may not carry one. Added in
+  Milestone 42.
+- `IRequestContext.signal: AbortSignal` — required abort signal (always present). Populated by
+  `createRequestContext` from the native `Request.signal`; falls back to a non-aborting sentinel for
+  injected/test contexts so handlers always have a live signal to listen on. Added in Milestone 42.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these

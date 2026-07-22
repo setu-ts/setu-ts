@@ -61,7 +61,12 @@ describe('deno-http-adapter | setHandler/fetch', () => {
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers({ 'x-den': 'ok' }), body: 'deno' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers({ 'x-den': 'ok' }),
+          body: 'deno',
+        }),
       } as any;
     });
 
@@ -90,7 +95,9 @@ describe('deno-http-adapter | listen', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(3000, '0.0.0.0');
@@ -114,7 +121,9 @@ describe('deno-http-adapter | close', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(3000);
@@ -136,7 +145,9 @@ describe('deno-http-adapter | close', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(3000);

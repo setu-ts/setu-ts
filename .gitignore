@@ -24,6 +24,9 @@ node_modules/
 .idea/
 *.swp
 
+# Workspace-local scratch/temporary files (see .roo/rules/03-temp-files.md)
+.tmp/
+
 # Claude Code local state (worktree checkouts, personal settings). Nothing
 # under .claude/ is meant to be tracked today; if shared project config is
 # added later (e.g. .claude/settings.json), un-ignore it with a negation.

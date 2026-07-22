@@ -43,7 +43,9 @@ function createFakeResponse(): IResponse {
     text: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     send: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     redirect: () => ({ __handlerResult: true }) as unknown as HandlerResult,
+    stream: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     snapshot: () => ({
+      streaming: false,
       status: 200,
       headers: new Headers(),
       body: null,
@@ -117,6 +119,7 @@ export function createFakeRequestContext(options: FakeRequestOptions = {}): IReq
     query: options.query ?? {},
     state: new Map(),
     startTime: 0,
+    signal: new AbortController().signal,
   };
   return ctx;
 }

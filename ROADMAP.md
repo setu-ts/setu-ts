@@ -3699,12 +3699,13 @@ it.
 **Implementation Files:**
 
 - `packages/common/src/http.ts` — `IResponse.stream`, widened `snapshot()`, `IRequestContext.signal`
-- `packages/kernel/src/pipeline/*` — streaming-aware result handling; cache/snapshot guard
-- `packages/kernel/src/http/response.ts` — `stream()` implementation + snapshot marker
+- `packages/common/src/index.ts` — barrel re-exports for new surfaces
+- `packages/kernel/src/context/response.ts` — `stream()` implementation + snapshot marker
+- `packages/kernel/src/context/request-context.ts` — `signal` threading from `IRequest.signal`
 - `packages/runtime/src/adapters/shared/fetch-mapping.ts` — streaming body pass-through in
   `mapSnapshotToWebResponse`; native `Request.signal` → `IRequestContext.signal`
-- `packages/runtime/src/adapters/{node,deno,bun,workers}/*` — only if a platform needs the signal
-  forwarded at its serve boundary (no per-platform write logic)
+- `packages/cache-plugin/src/middleware/cache-middleware.ts` — M42 streaming guard (skip cache on
+  `snapshot().streaming === true`)
 
 ### Tests
 
@@ -3720,12 +3721,12 @@ it.
 
 ### Deliverables
 
-- [ ] `IResponse.stream()` + widened `snapshot()` + `IRequestContext.signal` in `common`
-- [ ] Kernel streaming pipeline path + cache/snapshot guard
-- [ ] Shared `fetch-mapping.ts` streaming pass-through + native `Request.signal` forwarding;
+- [x] `IResponse.stream()` + widened `snapshot()` + `IRequestContext.signal` in `common`
+- [x] Kernel streaming pipeline path + cache/snapshot guard
+- [x] Shared `fetch-mapping.ts` streaming pass-through + native `Request.signal` forwarding;
       verified streaming on Node/Deno/Bun **and Cloudflare Workers**
-- [ ] PUBLIC_API.md updated for every new/changed `common` export
-- [ ] Full per-file coverage (incl. abort and disconnect branches via injected fakes)
+- [x] PUBLIC_API.md updated for every new/changed `common` export
+- [x] Full per-file coverage (incl. abort and disconnect branches via injected fakes)
 
 ---
 
@@ -4099,6 +4100,6 @@ app.register(MyPlugin({ option1: 'value' }));
 | 39        | ⬜     | docker/kubernetes    |
 | 40        | ⬜     | final release        |
 | 41        | ✅     | http-adapters        |
-| 42        | ⬜     | streaming-response   |
+| 42        | ✅     | streaming-response   |
 | 43        | ⬜     | sse-plugin           |
 | 44        | ⬜     | react-router-plugin  |

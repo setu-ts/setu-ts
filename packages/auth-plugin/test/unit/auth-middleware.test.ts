@@ -29,6 +29,8 @@ function createContext(authService: IAuthService): {
     bytes: () => Promise.resolve(new Uint8Array()),
   };
 
+  const _abortController = new AbortController();
+
   const response: IResponse = {
     status: () => response,
     header: () => response,
@@ -37,7 +39,8 @@ function createContext(authService: IAuthService): {
     text: (): HandlerResult => ({ __handlerResult: true }),
     send: (): HandlerResult => ({ __handlerResult: true }),
     redirect: (): HandlerResult => ({ __handlerResult: true }),
-    snapshot: () => ({ status: 200, headers: new Headers(), body: null }),
+    stream: (): HandlerResult => ({ __handlerResult: true }),
+    snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
   };
 
   const services = {
@@ -60,6 +63,7 @@ function createContext(authService: IAuthService): {
     query: {},
     state: new Map(),
     startTime: 0,
+    signal: _abortController.signal,
   };
 
   return { ctx, request };

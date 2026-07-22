@@ -105,7 +105,9 @@ describe('cacheMiddleware', () => {
           return hr;
         },
         redirect: () => hr,
+        stream: () => hr,
         snapshot: () => ({
+          streaming: false,
           status: responseStatus.at(-1) ?? 200,
           headers: (() => {
             const h = new Headers();
@@ -122,6 +124,7 @@ describe('cacheMiddleware', () => {
       query: {},
       state: new Map(),
       startTime: 0,
+      signal: new AbortController().signal,
     };
 
     return {
@@ -400,7 +403,9 @@ describe('cacheMiddleware', () => {
           text: () => hr,
           send: () => hr,
           redirect: () => hr,
+          stream: () => hr,
           snapshot: () => ({
+            streaming: false,
             status: 200,
             headers: new Headers(),
             body: null,
@@ -411,6 +416,7 @@ describe('cacheMiddleware', () => {
         query: {},
         state: new Map(),
         startTime: 0,
+        signal: new AbortController().signal,
       };
 
       const mw = cacheMiddleware({ store: 'cache.session' });
@@ -418,6 +424,89 @@ describe('cacheMiddleware', () => {
 
       const getCall = altStore.calls.find((c) => c.method === 'get');
       expect(getCall).toBeDefined();
+    });
+  });
+
+  describe('streaming guard (M42)', () => {
+    it('skips caching and sets X-Cache: MISS when snapshot().streaming === true', async () => {
+      const { store, calls } = createFakeStore();
+      const nextCalled: boolean[] = [];
+      const responseHeaders = new Map<string, string>();
+
+      // Create a ReadableStream to use as the streaming body.
+      const streamBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]));
+          controller.close();
+        },
+      });
+
+      const hr: HandlerResult = { __handlerResult: true };
+      const serviceRegistry: IServiceRegistry = {
+        has: () => true,
+        get: <T>(): T => store as T,
+        getAll: () => [],
+        register: () => {},
+        registerFactory: () => {},
+        unregister: () => false,
+      };
+
+      const ctx: IRequestContext = {
+        id: 'test-req-stream',
+        request: {
+          method: 'GET' as IRequestContext['request']['method'],
+          url: 'http://localhost/stream',
+          path: '/stream',
+          headers: new Headers(),
+          json: async <T = unknown>() => ({} as T),
+          text: async () => '',
+          bytes: async () => new Uint8Array(0),
+        },
+        response: {
+          status: (_code: number) => ctx.response,
+          header: (name: string, value: string) => {
+            responseHeaders.set(name.toLowerCase(), value);
+            return ctx.response;
+          },
+          appendHeader: (name: string, value: string) => {
+            responseHeaders.set(name.toLowerCase(), value);
+            return ctx.response;
+          },
+          json: () => hr,
+          text: () => hr,
+          send: () => hr,
+          redirect: () => hr,
+          stream: () => hr,
+          snapshot: () => ({
+            streaming: true,
+            status: 200,
+            headers: new Headers(),
+            body: streamBody,
+          }),
+        },
+        services: serviceRegistry,
+        params: {},
+        query: {},
+        state: new Map(),
+        startTime: 0,
+        signal: new AbortController().signal,
+      };
+
+      const mw = cacheMiddleware();
+      await mw(ctx, async () => {
+        nextCalled.push(true);
+        // Handler writes nothing; streaming body is already baked into snapshot.
+      });
+
+      // next() must be called (handler runs).
+      expect(nextCalled.length).toBeGreaterThanOrEqual(1);
+
+      // X-Cache: MISS must be set.
+      expect(responseHeaders.get('x-cache')).toBe('MISS');
+
+      // store.set and encodePayload must NOT be called (streaming responses skip caching).
+      const setCalls = calls.filter((c) => c.method === 'set');
+      expect(setCalls.length).toBe(0);
     });
   });
 });

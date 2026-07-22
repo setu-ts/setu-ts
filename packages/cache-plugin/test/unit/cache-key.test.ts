@@ -48,8 +48,17 @@ function fakeContext(opts: { method: string; url: string }): IRequestContext {
     text: () => hr,
     send: () => hr,
     redirect: () => hr,
-    snapshot: () => ({ status: 200, headers: new Headers(), body: null }),
+    stream: () => hr,
+    snapshot: () =>
+      ({
+        streaming: false,
+        status: 200,
+        headers: new Headers(),
+        body: null,
+      }) as import('@hono-enterprise/common').ResponseSnapshot,
   };
+
+  const _abort = new AbortController();
 
   return {
     id: 'test-id',
@@ -75,5 +84,6 @@ function fakeContext(opts: { method: string; url: string }): IRequestContext {
     query: {},
     state: new Map(),
     startTime: 0,
+    signal: _abort.signal,
   };
 }

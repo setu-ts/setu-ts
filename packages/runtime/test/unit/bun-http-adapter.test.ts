@@ -61,7 +61,12 @@ describe('bun-http-adapter | setHandler/fetch', () => {
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
       return {
-        snapshot: () => ({ status: 200, headers: new Headers({ 'x-bun': 'ok' }), body: 'bun' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers({ 'x-bun': 'ok' }),
+          body: 'bun',
+        }),
       } as any;
     });
 
@@ -90,7 +95,9 @@ describe('bun-http-adapter | listen', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(9000, '127.0.0.1');
@@ -107,7 +114,9 @@ describe('bun-http-adapter | listen', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     await adapter.listen(9000);
@@ -128,7 +137,9 @@ describe('bun-http-adapter | close', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(9000);
@@ -149,7 +160,9 @@ describe('bun-http-adapter | close', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     const handle = await adapter.listen(9000);
@@ -170,7 +183,9 @@ describe('bun-http-adapter | close with invalid handle', () => {
 
     // deno-lint-ignore require-await
     adapter.setHandler(async (_request) => {
-      return { snapshot: () => ({ status: 200, headers: new Headers(), body: null }) } as any;
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
     });
 
     expect(() => adapter.close({} as any)).toThrow('Invalid server handle for BunHttpAdapter');

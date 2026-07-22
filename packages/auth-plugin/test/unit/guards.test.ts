@@ -51,7 +51,8 @@ function createFakeResponse(): {
       return { __handlerResult: true };
     },
     redirect: (): HandlerResult => ({ __handlerResult: true }),
-    snapshot: () => ({ status: statusCode, headers: new Headers(), body: null }),
+    stream: (): HandlerResult => ({ __handlerResult: true }),
+    snapshot: () => ({ streaming: false, status: statusCode, headers: new Headers(), body: null }),
   };
   return {
     response,
@@ -73,6 +74,7 @@ function createContext(opts: {
 }): { ctx: IRequestContext; response: ReturnType<typeof createFakeResponse> } {
   let statusCode = 200;
   let respBody: unknown = null;
+  const _abortCtrl = new AbortController();
   const resp: IResponse = {
     status: (code: number) => {
       statusCode = code;
@@ -93,7 +95,8 @@ function createContext(opts: {
       return { __handlerResult: true };
     },
     redirect: (): HandlerResult => ({ __handlerResult: true }),
-    snapshot: () => ({ status: statusCode, headers: new Headers(), body: null }),
+    stream: (): HandlerResult => ({ __handlerResult: true }),
+    snapshot: () => ({ streaming: false, status: statusCode, headers: new Headers(), body: null }),
   };
 
   const services = {
@@ -127,6 +130,7 @@ function createContext(opts: {
     query: {},
     state: new Map(),
     startTime: 0,
+    signal: _abortCtrl.signal,
   };
 
   return {

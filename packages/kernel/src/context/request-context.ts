@@ -11,6 +11,9 @@ import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';
 
+/** Opaque non-aborting sentinel — only used when the incoming request has no signal. */
+const NEVER_ABORT_CONTROLLER = new AbortController();
+
 /**
  * Internal result of {@linkcode createRequestContext}: the immutable
  * {@linkcode IRequestContext} plus a `setParams` mutator the kernel uses
@@ -53,6 +56,11 @@ export function createRequestContext(
   }
 
   let params: Record<string, string> = {};
+  // Populate signal from the request's optional AbortSignal; fall back to
+  // a never-aborting sentinel so that handlers reading ctx.signal always
+  // have a live signal they can call .addEventListener('abort', …) on.
+  const signal = request.signal ?? NEVER_ABORT_CONTROLLER.signal;
+
   const ctx: IRequestContext = {
     id: runtime.uuid(),
     request,
@@ -64,6 +72,7 @@ export function createRequestContext(
     query,
     state: new Map(),
     startTime: runtime.hrtime(),
+    signal,
   };
 
   return {

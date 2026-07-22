@@ -43,6 +43,7 @@ export type {
   IResponse,
   MiddlewareFunction,
   NextFunction,
+  ResponseSnapshot,
   RouteDefinition,
   RouteHandler,
   RouteSchema,
