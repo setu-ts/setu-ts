@@ -4101,5 +4101,5 @@ app.register(MyPlugin({ option1: 'value' }));
 | 40        | ⬜     | final release        |
 | 41        | ✅     | http-adapters        |
 | 42        | ✅     | streaming-response   |
-| 43        | ⬜     | sse-plugin           |
+| 43        | ✅     | sse-plugin           |
 | 44        | ⬜     | react-router-plugin  |

@@ -253,8 +253,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   native `Request.signal` → `IRequestContext.signal`; `packages/cache-plugin` — streaming guard in
   `cache-middleware.ts` (skip `encodePayload` when `streaming === true`, set `X-Cache: MISS`) —
   complete (PR #53)
-- **Next milestone** — **Milestone 43** (`packages/sse-plugin` — Server-Sent Events plugin with
-  frame encoding, named channels, heartbeat, `Last-Event-ID`).
+- **Milestone 43** (`packages/sse-plugin` — Server-Sent Events plugin with frame encoding, named
+  channels, heartbeat, `Last-Event-ID`) — complete (PR pending)
 
 ## Verification (run before declaring any work done)
 

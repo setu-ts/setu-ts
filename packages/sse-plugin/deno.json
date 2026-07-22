@@ -1,5 +1,10 @@
 {
   "name": "@hono-enterprise/sse-plugin",
   "version": "0.1.0",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "net": true
+    }
+  }
 }

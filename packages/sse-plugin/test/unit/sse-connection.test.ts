@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
+import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { HandlerResult } from '@hono-enterprise/common';
 import { SseConnection } from '../../src/connection/sse-connection.ts';
@@ -16,6 +16,46 @@ import type {
   ResponseSnapshot,
 } from '@hono-enterprise/common';
 
+// ---------------------------------------------------------------------------
+// Controller capture — tracks every controller created via intercepted streams
+// ---------------------------------------------------------------------------
+
+type ControllerCapturer = (ctrl: ReadableStreamDefaultController<Uint8Array>) => void;
+
+/**
+ * Wraps the global `ReadableStream` constructor so that each `start()` callback
+ * is forwarded to `onStart`, giving access to every captured
+ * `ReadableStreamDefaultController`.  Restores the original on teardown.
+ *
+ * Scoped strictly: set in caller, restored in finally/onError/afterEach.
+ */
+function captureControllers(onStart: ControllerCapturer): () => void {
+  const OriginalRS = globalThis.ReadableStream;
+  // deno-lint-ignore no-explicit-any -- global replacement
+  class InterceptedRS<T = any> extends OriginalRS<T> {
+    constructor(
+      underlyingSource?: { start?(ctrl: ReadableStreamDefaultController<T>): void },
+      // deno-lint-ignore no-explicit-any
+      ...args: any[]
+    ) {
+      const origUnderlying = { ...(underlyingSource ?? {}) };
+      const origStart = origUnderlying.start;
+      // deno-lint-ignore no-explicit-any
+      origUnderlying.start = (ctrl: any) => {
+        if (origStart) origStart(ctrl);
+        onStart(ctrl as ReadableStreamDefaultController<Uint8Array>);
+      };
+      super(origUnderlying as never, ...(args as [never?]));
+    }
+  }
+  // deno-lint-ignore no-explicit-any -- globalThis replacement
+  globalThis.ReadableStream = InterceptedRS as any;
+  return () => {
+    // deno-lint-ignore no-explicit-any
+    globalThis.ReadableStream = OriginalRS as any;
+  };
+}
+
 describe('SseConnection', () => {
   let runtime: IRuntimeServices;
   let ctx: ReturnType<typeof createFakeContext>;
@@ -24,6 +64,11 @@ describe('SseConnection', () => {
   beforeEach(() => {
     runtime = createFakeRuntime({ uuidPrefix: 'conn' });
     onClosedCalled = 0;
+  });
+
+  afterEach(() => {
+    // best-effort restore — captureControllers always returns a teardown fn
+    // that is called per-test; this is a safety net.
   });
 
   function makeConnection(
@@ -183,96 +228,94 @@ describe('SseConnection', () => {
   });
 
   /**
-   * Intercepts all ReadableStream constructions so that each underlyingSource.start()
-   * callback is also forwarded to `onStart`, giving us access to every captured
-   * ReadableStreamDefaultController.
+   * Creates a minimal fake response object that returns a HandlerResult.
    */
-  function withControlledStreams(
-    onStart: (ctrl: ReadableStreamDefaultController<Uint8Array>) => void,
-  ): () => void {
-    const OriginalRS = globalThis.ReadableStream;
-    const subscriptions: Array<() => void> = [];
+  function buildFakeContext(
+    signal: AbortSignal,
+    onStream?: (body: ReadableStream<Uint8Array>) => void,
+  ): IRequestContext {
+    const resp: IResponse = {
+      header(_name: string, _value: string) {
+        return this;
+      },
+      appendHeader(_name: string, _value: string) {
+        return this;
+      },
+      status(_code: number) {
+        return this;
+      },
+      json(_data?: unknown) {
+        return { __handlerResult: true };
+      },
+      text(_body?: string) {
+        return { __handlerResult: true };
+      },
+      send(_body?: Uint8Array) {
+        return { __handlerResult: true };
+      },
+      redirect(_url?: string, _status?: number) {
+        return { __handlerResult: true };
+      },
+      stream(_body: ReadableStream<Uint8Array>): HandlerResult {
+        onStream?.(_body);
+        return { __handlerResult: true };
+      },
+      snapshot(): ResponseSnapshot {
+        return { streaming: false, body: null } as ResponseSnapshot;
+      },
+    };
 
-    // deno-lint-ignore no-explicit-any
-    class InterceptedRS<T = any> extends OriginalRS<T> {
-      constructor(
-        underlyingSource?: { start?(ctrl: ReadableStreamDefaultController<T>): void },
-        // deno-lint-ignore no-explicit-any
-        ...args: any[]
-      ) {
-        const origUnderlying = { ...(underlyingSource ?? {}) };
-        const origStart = origUnderlying.start;
-        // deno-lint-ignore no-explicit-any
-        origUnderlying.start = (ctrl: any) => {
-          if (origStart) origStart(ctrl);
-          onStart(ctrl as ReadableStreamDefaultController<Uint8Array>);
-        };
-        super(origUnderlying as never, ...(args as [never?]));
-      }
-    }
-
-    // deno-lint-ignore no-explicit-any -- globalThis replacement
-    globalThis.ReadableStream = InterceptedRS as any;
-
-    return () => {
-      // deno-lint-ignore no-explicit-any
-      globalThis.ReadableStream = OriginalRS as any;
-      for (const sub of subscriptions) sub();
+    return {
+      ...createFakeContext({ signal, runtime }),
+      response: resp as unknown as IResponse,
     };
   }
 
-  it('should backpressure-close when desiredSize exceeds backlog cap', () => {
+  it('should enqueue retry frame via #enqueueRaw (branch coverage)', () => {
     const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
-    const teardown = withControlledStreams((ctrl) => controllers.push(ctrl));
+    const teardown = captureControllers((ctrl) => controllers.push(ctrl));
 
     try {
       const ac = new AbortController();
-      const resp: IResponse = {
-        header(_name: string, _value: string) {
-          return this;
-        },
-        appendHeader(_name: string, _value: string) {
-          return this;
-        },
-        status(_code: number) {
-          return this;
-        },
-        json(_data?: unknown) {
-          return { __handlerResult: true };
-        },
-        text(_body?: string) {
-          return { __handlerResult: true };
-        },
-        send(_body?: Uint8Array) {
-          return { __handlerResult: true };
-        },
-        redirect(_url?: string, _status?: number) {
-          return { __handlerResult: true };
-        },
-        stream(_body: ReadableStream<Uint8Array>): HandlerResult {
-          return { __handlerResult: true };
-        },
-        snapshot(): ResponseSnapshot {
-          return { streaming: false, body: null } as ResponseSnapshot;
-        },
-      };
-
-      const baseCtx = createFakeContext({
-        signal: ac.signal,
+      const conn = new SseConnection(
+        buildFakeContext(ac.signal, () => {}),
         runtime,
-      }) as unknown as IRequestContext;
-      const finalCtx: IRequestContext = {
-        ...baseCtx,
-        response: resp as unknown as IResponse,
-      };
-
-      const conn = new SseConnection(finalCtx, runtime, undefined, undefined, () => {
-        onClosedCalled++;
-      });
+        undefined, // heartbeatMs — undefined so heartbeat branch not taken
+        3000, // retryMs — triggers #enqueueRaw("retry: 3000\n\n")
+        () => {
+          onClosedCalled++;
+        },
+      );
 
       expect(controllers.length).toBeGreaterThan(0);
-      const ctrl = controllers[0];
-      Object.defineProperty(ctrl, 'desiredSize', {
+      // Should not throw when enqueueing the retry frame.
+      expect(() => conn.send({ data: 'test' })).not.toThrow();
+      expect(conn.isOpen).toBe(true);
+      conn.close();
+    } finally {
+      teardown();
+    }
+  });
+
+  it('should backpressure-close when desiredSize exceeds backlog cap', () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const teardown = captureControllers((ctrl) => controllers.push(ctrl));
+
+    try {
+      const ac = new AbortController();
+      const conn = new SseConnection(
+        buildFakeContext(ac.signal, () => {}),
+        runtime,
+        undefined,
+        undefined,
+        () => {
+          onClosedCalled++;
+        },
+      );
+
+      expect(controllers.length).toBeGreaterThan(0);
+      const _ctrl = controllers[0];
+      Object.defineProperty(_ctrl, 'desiredSize', {
         value: -(1024 * 1024 + 100), // less than -1 MiB
         writable: true,
         enumerable: true,
@@ -289,52 +332,19 @@ describe('SseConnection', () => {
 
   it('should swallow controller.enqueue exceptions without crashing', () => {
     const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
-    const teardown = withControlledStreams((ctrl) => controllers.push(ctrl));
+    const teardown = captureControllers((ctrl) => controllers.push(ctrl));
 
     try {
       const ac = new AbortController();
-      const resp: IResponse = {
-        header(_name: string, _value: string) {
-          return this;
-        },
-        appendHeader(_name: string, _value: string) {
-          return this;
-        },
-        status(_code: number) {
-          return this;
-        },
-        json(_data?: unknown) {
-          return { __handlerResult: true };
-        },
-        text(_body?: string) {
-          return { __handlerResult: true };
-        },
-        send(_body?: Uint8Array) {
-          return { __handlerResult: true };
-        },
-        redirect(_url?: string, _status?: number) {
-          return { __handlerResult: true };
-        },
-        stream(_body: ReadableStream<Uint8Array>): HandlerResult {
-          return { __handlerResult: true };
-        },
-        snapshot(): ResponseSnapshot {
-          return { streaming: false, body: null } as ResponseSnapshot;
-        },
-      };
-
-      const baseCtx = createFakeContext({
-        signal: ac.signal,
+      const conn = new SseConnection(
+        buildFakeContext(ac.signal, () => {}),
         runtime,
-      }) as unknown as IRequestContext;
-      const finalCtx: IRequestContext = {
-        ...baseCtx,
-        response: resp as unknown as IResponse,
-      };
-
-      const conn = new SseConnection(finalCtx, runtime, undefined, undefined, () => {
-        onClosedCalled++;
-      });
+        undefined,
+        undefined,
+        () => {
+          onClosedCalled++;
+        },
+      );
 
       expect(controllers.length).toBeGreaterThan(0);
       const ctrl = controllers[0];
@@ -349,6 +359,95 @@ describe('SseConnection', () => {
 
       expect(() => conn.send({ data: 'test' })).not.toThrow();
       expect(conn.isOpen).toBe(false);
+      expect(onClosedCalled).toBe(1);
+    } finally {
+      teardown();
+    }
+  });
+
+  it('should trigger cleanup catch when controller.close() throws', () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const teardown = captureControllers((ctrl) => controllers.push(ctrl));
+
+    try {
+      const ac = new AbortController();
+      const conn = new SseConnection(
+        buildFakeContext(ac.signal, () => {}),
+        runtime,
+        undefined,
+        undefined,
+        () => {
+          onClosedCalled++;
+        },
+      );
+
+      expect(controllers.length).toBeGreaterThan(0);
+      const ctrl = controllers[0];
+      // Override close to throw — this exercises the catch branch in #cleanup().
+      Object.defineProperty(ctrl, 'close', {
+        value() {
+          throw new Error('close failed');
+        },
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+
+      conn.close();
+      expect(conn.isOpen).toBe(false);
+      expect(onClosedCalled).toBe(1);
+    } finally {
+      teardown();
+    }
+  });
+
+  it('should handle abort-driven cleanup with heartbeat', async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const teardown = captureControllers((ctrl) => controllers.push(ctrl));
+
+    try {
+      const ac = new AbortController();
+      const conn = new SseConnection(
+        buildFakeContext(ac.signal, () => {}),
+        runtime,
+        50, // heartbeatMs — ensures heartbeat handle is created
+        undefined,
+        () => {
+          onClosedCalled++;
+        },
+      );
+
+      expect(controllers.length).toBeGreaterThan(0);
+
+      // Fire the abort — should trigger cleanup (clear heartbeat, close stream).
+      ac.abort();
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(conn.isOpen).toBe(false);
+      expect(onClosedCalled).toBe(1);
+    } finally {
+      teardown();
+    }
+  });
+
+  it('should handle double-close (idempotent) with controllable stream', () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const teardown = captureControllers((ctrl) => controllers.push(ctrl));
+
+    try {
+      const ac = new AbortController();
+      const conn = new SseConnection(
+        buildFakeContext(ac.signal, () => {}),
+        runtime,
+        undefined,
+        undefined,
+        () => {
+          onClosedCalled++;
+        },
+      );
+
+      conn.close();
+      conn.close(); // second close should be no-op
       expect(onClosedCalled).toBe(1);
     } finally {
       teardown();
