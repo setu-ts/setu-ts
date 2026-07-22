@@ -11,7 +11,7 @@ import type {
   IPluginContext,
   ISseService,
 } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+// IRuntimeServices type used via ctx.runtime (non-optional property)
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseService } from '../services/sse-service.ts';
@@ -45,7 +45,7 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
 
     register(ctx: IPluginContext): void | Promise<void> {
       // Resolve runtime services from the context (mirror sibling plugins).
-      const runtime = ctx.runtime as IRuntimeServices;
+      const runtime = ctx.runtime; // IRuntimeServices (non-optional); cast was redundant
 
       // Build and register the SSE service, threading the real runtime in.
       const sseService = new SseService(options, runtime);

@@ -205,7 +205,8 @@ describe('SSE Integration (real plugin end-to-end)', () => {
     await app.start({ port });
 
     try {
-      // deno-lint-ignore no-explicit-any
+      // Before any request: connectionCount should be 0.
+      // deno-lint-ignore no-explicit-any -- ISseService has connectionCount at runtime
       expect((serviceRef as any)?.connectionCount ?? 0).toBe(0);
 
       const ac = new AbortController();
@@ -216,8 +217,16 @@ describe('SSE Integration (real plugin end-to-end)', () => {
       });
       expect(response.status).toBe(200);
 
+      // A3: WHILE the connection is still open (before it closes at 100ms),
+      // assert that connectionCount === 1. This ensures SseService.open
+      // actually registers the connection in the live set.
+      await new Promise((r) => setTimeout(r, 50));
+      // deno-lint-ignore no-explicit-any -- ISseService.connectionCount available at runtime
+      expect((serviceRef as any)?.connectionCount ?? 0).toBe(1);
+
+      // After the connection closes (~100ms) + buffer.
       await new Promise((r) => setTimeout(r, 150));
-      // deno-lint-ignore no-explicit-any -- integration test race
+      // deno-lint-ignore no-explicit-any
       expect((serviceRef as any)?.connectionCount ?? 0).toBe(0);
     } finally {
       await app.stop();

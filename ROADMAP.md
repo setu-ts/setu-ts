@@ -3796,9 +3796,9 @@ app.router.get('/events', (ctx) => {
 
 ### Deliverables
 
-- [ ] `CAPABILITIES.SSE` + `ISseService` in `common` (PUBLIC_API.md updated)
-- [ ] SsePlugin, frame encoder, channel registry, heartbeat
-- [ ] Full per-file coverage
+- [x] `CAPABILITIES.SSE` + `ISseService` in `common` (PUBLIC_API.md updated)
+- [x] SsePlugin, frame encoder, channel registry, heartbeat
+- [x] Full per-file coverage
 
 ---
 

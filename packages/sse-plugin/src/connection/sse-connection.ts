@@ -50,18 +50,22 @@ export class SseConnection implements IConn {
     this.#onClosed = onClosed;
     this.#runtime = runtime;
 
-    // Build ReadableStream with ByteLengthQueuingStrategy highWaterMark, capturing
-    // controller via underlying source start().
+    // Build ReadableStream with byte-length backpressure strategy, capturing
+    // controller via underlying source start/cancel handlers.
     let captured: ReadableStreamDefaultController<Uint8Array> | null = null;
+    // deno-lint-ignore no-this-alias -- required for ReadableStream cancel() callback binding
+    const cancelBound = this;
     const stream = new ReadableStream<Uint8Array>(
       {
         start(controller) {
           captured = controller;
         },
+        cancel(reason) {
+          // Stream cancelled by consumer WITHOUT abort signal — run cleanup.
+          cancelBound.#handleStreamCancel(reason);
+        },
       },
-      {
-        size: () => SSE_HWM_BYTES,
-      },
+      new ByteLengthQueuingStrategy({ highWaterMark: SSE_HWM_BYTES }),
     );
     this.#controller = captured;
 
@@ -93,7 +97,7 @@ export class SseConnection implements IConn {
 
     // Initial retry frame: enqueue raw `retry: <ms>\n\n` as the very first bytes.
     if (retryMs !== undefined) {
-      this.#enqueueRaw(`retry: ${retryMs}\n\n`);
+      this.#enqueue(`retry: ${retryMs}\n\n`);
     }
   }
 
@@ -116,12 +120,6 @@ export class SseConnection implements IConn {
   /** Close the connection (idempotent). */
   close(): void {
     this.#cleanup();
-  }
-
-  /** Internal raw enqueue — writes a byte string directly. */
-  #enqueueRaw(frame: string): void {
-    if (!this.#isOpen || !this.#controller) return;
-    this.#doEnqueue(frame);
   }
 
   /** Internal enqueue with backpressure guard (§3.6). */
@@ -149,6 +147,11 @@ export class SseConnection implements IConn {
         this.#cleanup();
       }
     }
+  }
+
+  /** Called when the stream is cancelled by the consumer. */
+  #handleStreamCancel(_reason?: unknown): void {
+    this.#cleanup();
   }
 
   /** Idempotent cleanup (§3.3). */
