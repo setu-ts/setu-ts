@@ -1576,3 +1576,156 @@ describe('Application review fixes', () => {
     expect(shutdown).toBe(1);
   });
 });
+
+describe('unsatisfied consumed-capability startup diagnostic', () => {
+  it('warns at startup when a consumed capability has no provider', async () => {
+    const warned: { message: string; metadata?: Record<string, unknown> }[] = [];
+    const captureLogger: ILogger = {
+      level: 'warn',
+      fatal() {},
+      error() {},
+      warn(message, metadata) {
+        warned.push({ message, ...(metadata ? { metadata } : {}) });
+      },
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return captureLogger;
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'logger-provider',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, captureLogger);
+          },
+        },
+        {
+          name: 'needs-cache',
+          version: '1.0.0',
+          consumes: ['cache'],
+          register() {},
+        },
+      ],
+    });
+    await app.start();
+    expect(warned).toHaveLength(1);
+    expect(warned[0].message).toContain("Plugin 'needs-cache' consumes capability 'cache'");
+    expect(warned[0].message).toContain("services.get('cache') will fail at runtime");
+    expect(warned[0].metadata).toEqual({ plugin: 'needs-cache', capability: 'cache' });
+    await app.stop();
+  });
+
+  it('does not warn when the consumed capability is registered imperatively', async () => {
+    const warned: string[] = [];
+    const captureLogger: ILogger = {
+      level: 'warn',
+      fatal() {},
+      error() {},
+      warn(message) {
+        warned.push(message);
+      },
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return captureLogger;
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'logger-provider',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, captureLogger);
+          },
+        },
+        {
+          // Registers 'cache' at runtime WITHOUT declaring it in `provides`,
+          // so only the live registry — not the static provider index —
+          // reflects it. The consumer below must not be warned about.
+          name: 'imperative-cache',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.services.register('cache', { hit: true });
+          },
+        },
+        {
+          name: 'needs-cache',
+          version: '1.0.0',
+          consumes: ['cache'],
+          register() {},
+        },
+      ],
+    });
+    await app.start();
+    expect(warned).toEqual([]);
+    await app.stop();
+  });
+
+  it('degrades silently when a consumed capability is unmet and no logger is registered', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'needs-cache',
+          version: '1.0.0',
+          consumes: ['cache'],
+          register() {},
+        },
+      ],
+    });
+    // No logger capability — the diagnostic has no sanctioned channel and must
+    // not turn into a startup failure.
+    await app.start();
+    expect(app.services.has('cache')).toBe(false);
+    await app.stop();
+  });
+
+  it('a throwing logger cannot turn a consume warning into a startup failure', async () => {
+    const brokenLogger: ILogger = {
+      level: 'warn',
+      fatal() {},
+      error() {},
+      warn() {
+        throw new Error('logger is down');
+      },
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return brokenLogger;
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'broken-logger-provider',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, brokenLogger);
+          },
+        },
+        {
+          name: 'needs-cache',
+          version: '1.0.0',
+          consumes: ['cache'],
+          register() {},
+        },
+      ],
+    });
+    // start() must resolve despite logger.warn throwing.
+    await app.start();
+    await app.stop();
+  });
+});

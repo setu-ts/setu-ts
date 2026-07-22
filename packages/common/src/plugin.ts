@@ -478,7 +478,15 @@ export interface IPlugin {
   readonly optionalDependencies?: readonly CapabilityToken[];
   /** Capability tokens this plugin registers. */
   readonly provides?: readonly CapabilityToken[];
-  /** Capability tokens this plugin resolves at runtime. */
+  /**
+   * Capability tokens this plugin resolves lazily at runtime via
+   * `ctx.services.get`. Unlike {@linkcode IPlugin.dependencies}, these are not
+   * required before this plugin registers and impose no ordering; but if no
+   * registered plugin provides one, the kernel emits a soft `warn`-level
+   * startup diagnostic (through the logger capability when one is registered),
+   * because the deferred lookups would otherwise fail only later, at request
+   * time.
+   */
   readonly consumes?: readonly CapabilityToken[];
   /** Registration priority within the same dependency level; lower first. */
   readonly priority?: number;

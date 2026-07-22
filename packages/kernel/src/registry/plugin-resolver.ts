@@ -58,6 +58,52 @@ export function resolvePluginOrder(plugins: readonly IPlugin[]): readonly IPlugi
   return topologicalSort(plugins, dependenciesOf);
 }
 
+/**
+ * One plugin's declared `consumes` capability for which no provider exists.
+ * Used to build a soft startup diagnostic in the application.
+ *
+ * Unlike a missing {@linkcode IPlugin.dependencies} entry (which throws in
+ * {@linkcode resolvePluginOrder}), an unsatisfied `consumes` is not a
+ * resolve-time error: the plugin resolves the capability lazily at request
+ * time, so the failure would otherwise surface only later, as a runtime throw
+ * from `services.get`. Reporting it at startup names the consumer up front.
+ */
+export interface UnsatisfiedConsumer {
+  /** Name of the plugin that declares the consumed capability. */
+  readonly plugin: string;
+  /** The consumed capability token that no registered plugin provides. */
+  readonly capability: CapabilityToken;
+}
+
+/**
+ * Finds every `consumes` capability, across all plugins, that `isProvided`
+ * reports as absent.
+ *
+ * Pure by design: the caller supplies the provider check — in the kernel, the
+ * live service registry's `has` after all plugins have registered, so
+ * capabilities registered imperatively (not declared in `provides`) still
+ * count as satisfied and never produce a false warning.
+ *
+ * @param plugins - All registered plugins
+ * @param isProvided - Predicate: does a provider exist for this capability?
+ * @returns One entry per unsatisfied (plugin, capability) pair, in plugin then
+ * declaration order
+ */
+export function findUnsatisfiedConsumers(
+  plugins: readonly IPlugin[],
+  isProvided: (token: CapabilityToken) => boolean,
+): readonly UnsatisfiedConsumer[] {
+  const unsatisfied: UnsatisfiedConsumer[] = [];
+  for (const plugin of plugins) {
+    for (const capability of plugin.consumes ?? []) {
+      if (!isProvided(capability)) {
+        unsatisfied.push({ plugin: plugin.name, capability });
+      }
+    }
+  }
+  return unsatisfied;
+}
+
 function assertUniqueNames(plugins: readonly IPlugin[]): void {
   const seen = new Set<string>();
   for (const plugin of plugins) {
