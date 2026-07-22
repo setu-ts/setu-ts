@@ -35,7 +35,8 @@
     "./packages/sdk",
     "./packages/starters/rest-starter",
     "./packages/starters/microservice-starter",
-    "./packages/starters/full-stack-starter"
+    "./packages/starters/full-stack-starter",
+    "./packages/sse-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

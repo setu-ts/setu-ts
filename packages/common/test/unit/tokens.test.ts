@@ -51,4 +51,8 @@ describe('CAPABILITIES', () => {
   it('should expose the mandatory runtime capability', () => {
     expect(CAPABILITIES.RUNTIME).toBe('runtime');
   });
+
+  it('should include the SSE capability for Server-Sent Events', () => {
+    expect(CAPABILITIES.SSE).toBe('sse');
+  });
 });

@@ -1400,6 +1400,81 @@ interface IEventBus {
 
 ---
 
+## SsePlugin()
+
+Provides Server-Sent Events (SSE) for real-time, one-way server-to-client messaging over
+`text/event-stream`. Built on the Milestone 42 `IResponse.stream()` primitive and
+`IRequestContext.signal` abort lifecycle.
+
+### Registration
+
+```typescript
+import { SsePlugin } from '@hono-enterprise/sse-plugin';
+
+app.register(SsePlugin({
+  heartbeatMs: 15000,
+  retryMs: 3000,
+}));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ISseService } from '@hono-enterprise/common';
+
+app.router.get('/events', async (ctx) => {
+  const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+  const conn = sse.open(ctx);
+
+  // Send immediately after handler returns — the stream stays open
+  conn.send({ id: '1', data: 'hello' });
+
+  return conn.result;
+});
+
+// Broadcast to a named channel
+app.router.post('/broadcast', async (ctx) => {
+  const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+  sse.channel('updates').publish({ data: { msg: 'announcement' } });
+  return ctx.response.json({ ok: true });
+});
+```
+
+### Options
+
+| Option        | Type     | Default | Description                                           |
+| ------------- | -------- | ------- | ----------------------------------------------------- |
+| `heartbeatMs` | `number` | omitted | When set, sends `: heartbeat\n\n` at this interval.   |
+| `retryMs`     | `number` | omitted | When set, sends `retry: <ms>\n\n` as the first frame. |
+
+Omitting an option disables that behaviour (no timer created).
+
+### Interface Reference
+
+- `ISseService.open(ctx): ISseConnection` — opens a new SSE connection; sets headers, returns a
+  connection with `result` (`HandlerResult`) the handler must return.
+- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel.
+- `ISseService.connectionCount: number` — current open connections.
+- `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
+  `data:`, `retry:` + blank-line terminator).
+- `ISseConnection.comment(text)` — enqueue a comment frame (`: text\n\n`).
+- `ISseConnection.close()` — close the connection (idempotent).
+- `ISseConnection.lastEventId` — the value of the `Last-Event-ID` request header (for resume logic).
+- `SseChannel.publish(msg)` — broadcast to every open member, skipping closed ones.
+
+### Notes
+
+- Built entirely on web-standard `ReadableStream`; no platform-specific server socket APIs.
+- The plugin is in-memory only. Cross-process broadcast requires a future milestone bridging to the
+  messaging capability.
+- Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
+  plugin opens the stream the same way everywhere, but the platform may truncate the connection.
+- The `inject()` method discards streaming bodies; SSE integration tests must use a real socket
+  (`app.start({ port })` + `fetch()`).
+
+---
+
 ## CQRS
 
 Provides command/query separation with buses.
@@ -3665,17 +3740,17 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                               |
-| ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth                                               |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                 |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                 |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                  |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                      |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                           |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                  |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                      |
+| Export                        | Kind     | Purpose                                                                                                 |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (Server-Sent Events hub) |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names   |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                   |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                   |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                    |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                        |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                             |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                    |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                        |
 
 ### Types
 
@@ -3710,6 +3785,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                           |
 | Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
+| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                              |
 
 Contract notes:
 
@@ -3740,6 +3816,9 @@ Contract notes:
 - `IRequestContext.signal: AbortSignal` — required abort signal (always present). Populated by
   `createRequestContext` from the native `Request.signal`; falls back to a non-aborting sentinel for
   injected/test contexts so handlers always have a live signal to listen on. Added in Milestone 42.
+- `CAPABILITIES.SSE` (`'sse'`) — the capability token under which the SsePlugin registers the
+  `ISseService`. The service provides real-time, one-way server-to-client messaging over an SSE
+  stream built on `IResponse.stream()`. Added in Milestone 43.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
