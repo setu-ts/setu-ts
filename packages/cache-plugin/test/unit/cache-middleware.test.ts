@@ -432,7 +432,6 @@ describe('cacheMiddleware', () => {
       const { store, calls } = createFakeStore();
       const nextCalled: boolean[] = [];
       const responseHeaders = new Map<string, string>();
-      const responseBodyVal: Uint8Array | string | null = null;
 
       // Create a ReadableStream to use as the streaming body.
       const streamBody = new ReadableStream<Uint8Array>({
@@ -508,9 +507,6 @@ describe('cacheMiddleware', () => {
       // store.set and encodePayload must NOT be called (streaming responses skip caching).
       const setCalls = calls.filter((c) => c.method === 'set');
       expect(setCalls.length).toBe(0);
-
-      // No body should be recorded via terminal methods (send/text/json).
-      expect(responseBodyVal).toBeNull();
     });
   });
 });

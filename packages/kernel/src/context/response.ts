@@ -4,29 +4,10 @@
  *
  * @module
  */
-import type { HandlerResult, IResponse } from '@hono-enterprise/common';
+import type { HandlerResult, IResponse, ResponseSnapshot } from '@hono-enterprise/common';
 
 /** Opaque brand — only the kernel constructs values of this type. */
 const HANDLER_RESULT: HandlerResult = { __handlerResult: true };
-
-/**
- * Discriminated union representing the possible shapes of a response snapshot.
- * When `streaming` is `false`, `body` is a buffered `Uint8Array | string | null`.
- * When `streaming` is `true`, `body` is a live `ReadableStream<Uint8Array>`.
- */
-export type ResponseSnapshot =
-  | {
-    readonly streaming: false;
-    readonly status: number;
-    readonly headers: Headers;
-    readonly body: Uint8Array | string | null;
-  }
-  | {
-    readonly streaming: true;
-    readonly status: number;
-    readonly headers: Headers;
-    readonly body: ReadableStream<Uint8Array>;
-  };
 
 /**
  * Default implementation of {@linkcode IResponse}. Configuration methods

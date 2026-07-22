@@ -181,19 +181,7 @@ export interface IResponse {
    * @returns The status code, headers, and either a buffered body or a live stream
    * @since 0.1.0
    */
-  snapshot():
-    | {
-      readonly streaming: false;
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: Uint8Array | string | null;
-    }
-    | {
-      readonly streaming: true;
-      readonly status: number;
-      readonly headers: Headers;
-      readonly body: ReadableStream<Uint8Array>;
-    };
+  snapshot(): ResponseSnapshot;
 }
 
 /**

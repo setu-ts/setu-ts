@@ -38,9 +38,14 @@ describe('fetch-mapping | field mapping', () => {
     const ac = new AbortController();
     const nativeReq = new Request('https://example.com/', { signal: ac.signal });
     const frameworkRequest = await mapWebRequestToFrameworkRequest(nativeReq);
-    // Verify the signal property is present and is the same object
+    // Verify the signal property is present and is the same object (identity)
     expect(frameworkRequest.signal).toBeDefined();
+    expect(frameworkRequest.signal).toBe(nativeReq.signal);
     expect(frameworkRequest.signal?.aborted).toBe(false);
+
+    // Abort branch: aborting should propagate through identity
+    ac.abort();
+    expect(frameworkRequest.signal?.aborted).toBe(true);
   });
 
   it('ip is undefined on the mapped request', async () => {
