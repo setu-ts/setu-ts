@@ -97,6 +97,8 @@ export const CAPABILITIES = {
   DI_CONTAINER: 'di-container',
   /** HTTP server adapter — the runtime plugin registers its IHttpAdapter here. */
   HTTP_ADAPTER: 'http-adapter',
+  /** Server-Sent Events (SSE) hub for in-process real-time broadcasting. */
+  SSE: 'sse',
   /** Health indicator contributions (multi-provider). */
   HEALTH_INDICATOR: 'health-indicator',
   /** Metric registration contributions (multi-provider). */

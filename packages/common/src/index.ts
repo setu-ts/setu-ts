@@ -185,3 +185,6 @@ export type {
   TelemetryContext,
 } from './services/telemetry.ts';
 export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';
+
+// SSE contracts
+export type { ISseConnection, ISseService, SseChannel, SseMessage } from './services/sse.ts';
