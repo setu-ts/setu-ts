@@ -11,6 +11,7 @@ import type {
   IPluginContext,
   ISseService,
 } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseService } from '../services/sse-service.ts';
@@ -43,8 +44,11 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void | Promise<void> {
-      // Build and register the SSE service.
-      const sseService = new SseService(options);
+      // Resolve runtime services from the context (mirror sibling plugins).
+      const runtime = ctx.runtime as IRuntimeServices;
+
+      // Build and register the SSE service, threading the real runtime in.
+      const sseService = new SseService(options, runtime);
       ctx.services.register<ISseService>(CAPABILITIES.SSE, sseService);
 
       // Register health indicator (§3.9).
