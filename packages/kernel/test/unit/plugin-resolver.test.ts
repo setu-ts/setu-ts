@@ -2,7 +2,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IPlugin } from '@hono-enterprise/common';
-import { resolvePluginOrder } from '../../src/registry/plugin-resolver.ts';
+import {
+  findUnsatisfiedConsumers,
+  resolvePluginOrder,
+} from '../../src/registry/plugin-resolver.ts';
 
 function plugin(
   name: string,
@@ -10,6 +13,7 @@ function plugin(
     dependencies?: string[];
     optionalDependencies?: string[];
     provides?: string[];
+    consumes?: string[];
     priority?: number;
   } = {},
 ): IPlugin {
@@ -21,6 +25,7 @@ function plugin(
       ? { optionalDependencies: options.optionalDependencies }
       : {}),
     ...(options.provides !== undefined ? { provides: options.provides } : {}),
+    ...(options.consumes !== undefined ? { consumes: options.consumes } : {}),
     ...(options.priority !== undefined ? { priority: options.priority } : {}),
     register: () => {},
   } as IPlugin;
@@ -113,5 +118,39 @@ describe('resolvePluginOrder', () => {
     expect(() => resolvePluginOrder([a, b])).toThrow(
       "Capability 'shared' is provided by both",
     );
+  });
+});
+
+describe('findUnsatisfiedConsumers', () => {
+  it('returns nothing when no plugin declares consumes', () => {
+    const plugins = [plugin('a'), plugin('b', { provides: ['x'] })];
+    expect(findUnsatisfiedConsumers(plugins, () => false)).toEqual([]);
+  });
+
+  it('returns nothing when every consumed capability is provided', () => {
+    const plugins = [plugin('a', { consumes: ['x', 'y'] })];
+    const provided = new Set(['x', 'y']);
+    expect(findUnsatisfiedConsumers(plugins, (t) => provided.has(t))).toEqual([]);
+  });
+
+  it('reports each consumed capability with no provider', () => {
+    const plugins = [
+      plugin('a', { consumes: ['present', 'missing'] }),
+      plugin('b', { consumes: ['also-missing'] }),
+    ];
+    const provided = new Set(['present']);
+    expect(findUnsatisfiedConsumers(plugins, (t) => provided.has(t))).toEqual([
+      { plugin: 'a', capability: 'missing' },
+      { plugin: 'b', capability: 'also-missing' },
+    ]);
+  });
+
+  it('preserves plugin then declaration order', () => {
+    const plugins = [plugin('a', { consumes: ['m1', 'm2'] }), plugin('b', { consumes: ['m3'] })];
+    expect(findUnsatisfiedConsumers(plugins, () => false)).toEqual([
+      { plugin: 'a', capability: 'm1' },
+      { plugin: 'a', capability: 'm2' },
+      { plugin: 'b', capability: 'm3' },
+    ]);
   });
 });

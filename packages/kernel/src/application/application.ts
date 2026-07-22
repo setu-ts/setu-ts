@@ -29,7 +29,7 @@ import type { IRequest } from '@hono-enterprise/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
-import { resolvePluginOrder } from '../registry/plugin-resolver.ts';
+import { findUnsatisfiedConsumers, resolvePluginOrder } from '../registry/plugin-resolver.ts';
 import { ServiceRegistry } from '../registry/service-registry.ts';
 import { Router } from '../router/router.ts';
 import { isPathDecodable } from '../router/route-matcher.ts';
@@ -284,6 +284,12 @@ class Application implements IKernelApplication {
 
     // 5. Run init hooks
     await this.#lifecycle.runInit();
+
+    // 5b. Warn about consumed capabilities that no plugin provides. Checked
+    //     here — after all plugins have registered and run their init hooks —
+    //     so the live registry reflects every capability, including any
+    //     registered imperatively rather than declared in `provides`.
+    this.#warnUnsatisfiedConsumers();
 
     // 6. Compile the middleware pipeline
     this.#pipeline.compile();
@@ -552,6 +558,47 @@ class Application implements IKernelApplication {
         error: err.message,
         stack: err.stack,
       });
+    } catch {
+      // The logger itself failed or none is resolvable — no safe channel
+      // remains without violating the no-console rule; degrade silently.
+    }
+  }
+
+  /**
+   * Emits a soft `warn`-level diagnostic for each capability a plugin declares
+   * in `consumes` that no registered plugin provides. Unlike a missing
+   * `dependencies` entry (which fails plugin resolution), an unsatisfied
+   * `consumes` does not stop startup — the plugin resolves the capability
+   * lazily at request time — but the deferred `services.get` would then throw
+   * per request, so surfacing it once at startup, naming the consumer, is the
+   * friendlier failure mode.
+   *
+   * Reported through {@linkcode CAPABILITIES.LOGGER} when a logger is
+   * registered — the sanctioned framework logging channel (AI_GUIDELINES §11.6
+   * forbids `console` here). The emission is guarded so a missing or
+   * itself-broken logger degrades silently rather than turning an advisory
+   * warning into a startup failure.
+   */
+  #warnUnsatisfiedConsumers(): void {
+    const unsatisfied = findUnsatisfiedConsumers(
+      this.#plugins,
+      (token) => this.#registry.has(token),
+    );
+    if (unsatisfied.length === 0) {
+      return;
+    }
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      for (const { plugin, capability } of unsatisfied) {
+        logger.warn(
+          `Plugin '${plugin}' consumes capability '${capability}', but no registered plugin provides it. ` +
+            `Calls to services.get('${capability}') will fail at runtime — register a plugin that provides it.`,
+          { plugin, capability },
+        );
+      }
     } catch {
       // The logger itself failed or none is resolvable — no safe channel
       // remains without violating the no-console rule; degrade silently.
