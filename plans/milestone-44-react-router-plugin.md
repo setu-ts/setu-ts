@@ -35,7 +35,11 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
     app-level, build-time concern (AI_GUIDELINES §12.2), never imported by the plugin.
   - Browser-side OpenTelemetry / hydration tracing — needs a separate browser OTel setup.
   - Multi-backend trace fan-out — owned by M24c (OTel Collector) / deploy config.
-  - File-based route discovery — React Router owns this entirely; the plugin never scans routes.
+  - File-based route _discovery_ — React Router owns this at build time; the plugin never scans
+    routes. NOTE: file-based/flat routing (`flatRoutes` from `@react-router/fs-routes`) itself IS
+    supported — it is baked into the compiled `ServerBuild` and serves transparently through the
+    handler M44 runs (§3.9). Out of scope is the plugin _implementing_ discovery, not flat routes
+    working.
   - Extracting static-asset serving into a shared static middleware — flagged future (this is the
     only static handler in the tree); see §9.
 
@@ -75,9 +79,12 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
 ### 3.1 Catch-all mounting — register all 7 verbs at `basename + '/*'`
 
 - **Decision:** `register()` registers the SSR handler (resolving `ISsrService` under
-  `CAPABILITIES.SSR`) as the route handler for **all seven HTTP verbs** at `${basename}/*`
-  (`basename` defaults to `/`, so `/*`). React Router internally returns 404/405 for unmatched
-  routes/methods, so owning the full frontend namespace is correct and matches a true catch-all.
+  `CAPABILITIES.SSR`) as the route handler for **all seven HTTP verbs** at the catch-all pattern.
+  The pattern is built by a single internal `joinWildcard(prefix)` helper —
+  `` `${prefix.replace(/\/+$/, '')}/*` `` — so a `prefix` with a trailing slash does NOT produce a
+  doubled slash: `basename` default `/` → `/*` (not `//*`), and a `basename` of `/app/` → `/app/*`.
+  React Router internally returns 404/405 for unmatched routes/methods, so owning the full frontend
+  namespace is correct and matches a true catch-all.
 - **Why:** React Router framework-mode loaders run on `GET`/`HEAD` and actions run on
   `POST`/`PUT`/`PATCH`/`DELETE` (resource routes); restricting verbs would silently break actions.
   Precedence is correct for free: app API routes (e.g. `/api/users` = 2 statics) beat the catch-all
@@ -94,11 +101,13 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
 - **Decision:** `register()` is `async`. The RR handler is obtained from an injectable
   `options.loadRequestHandler(serverBuildPath, mode)`; the **default** implementation lives in
   `src/handler/server-build.ts` and does the real `await import(options.serverBuildPath)` (the RR
-  `ServerBuild`, default export) + `await import('react-router')` (`createRequestHandler`), then
-  returns `(request, loadContext) => Promise<Response>`. Tests inject a recording fake, so the
-  bridge / load-context / asset logic hits 90%+ without the real dep. This mirrors the codebase
-  inject-or- lazy pattern (AI_GUIDELINES §12.2). If a real `import()` cannot resolve, the seam
-  throws a clear error naming the missing specifier.
+  `ServerBuild`, default export) + `await import('npm:react-router')` (`createRequestHandler`), then
+  returns `(request, loadContext) => Promise<Response>`. **The core specifier is the JSR/Deno form
+  `npm:react-router` everywhere** (§1, §3.3, §6 all use it; no bare `react-router` and no import-map
+  entry in `deno.json`). Tests inject a recording fake, so the bridge / load-context / asset logic
+  hits 90%+ without the real dep. This mirrors the codebase inject-or- lazy pattern (AI_GUIDELINES
+  §12.2). If a real `import()` cannot resolve, the seam throws a clear error naming the missing
+  specifier.
 - **Why:** React Router and the server build must never be hard dependencies of a JSR package. The
   injectable seam is also the "extract decidable logic" escape the project's coverage rules require.
 - **Test home:** `server-build.test.ts` unit-tests the pure
@@ -120,19 +129,30 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
 ### 3.4 Request bridge — buffered body in, streaming-or-buffered body out, abort wired
 
 - **Decision:** `request-bridge.ts` builds a web `Request` from `ctx.request` (`method`, `url`, the
-  web `headers`, body buffered via `ctx.request.bytes()`), passes it (with the constructed request's
-  own `signal` derived from `ctx.signal`) and the `loadContext` to the RR handler, then maps the
-  returned web `Response` back onto `ctx.response`: `status()` from `response.status`; each header
-  copied with `header()` except multi-value headers (`getSetCookie()` / multiple values) which use
-  `appendHeader()`; body is `ctx.response.stream(response.body)` when `response.body` is a
+  web `headers`), passes it (with the constructed request's own `signal` derived from `ctx.signal`)
+  and the `loadContext` to the RR handler, then maps the returned web `Response` back onto
+  `ctx.response`: `status()` from `response.status`; each header copied with `header()` while
+  `response.headers.getSetCookie()` values are each emitted with `appendHeader()` (the only true
+  multi-value case a web `Headers` preserves — non-`Set-Cookie` duplicates are already comma-joined
+  on read); body is `ctx.response.stream(response.body)` when `response.body` is a
   `ReadableStream<Uint8Array>`, else buffered via `response.arrayBuffer()` →
   `ctx.response.send(bytes)`. It returns the `HandlerResult` for the route handler.
+- **The request body is attached ONLY for methods that carry one.** A web `Request` throws
+  `TypeError` when constructed with `method` `GET`/`HEAD` and a non-null `body` — and SSR document
+  loads are `GET`, the primary path. The bridge therefore buffers `ctx.request.bytes()` into the
+  `RequestInit` `body` **only when `ctx.request.method` is not `GET` or `HEAD`**; for `GET`/`HEAD`
+  the `body` key is omitted entirely (never set to `undefined` or an empty `Uint8Array`, both of
+  which still throw / mis-signal). RR loaders (`GET`) receive no body; RR actions
+  (`POST`/`PUT`/`PATCH`/`DELETE`) receive the buffered body.
 - **Why:** This is the one place kernel types meet web types; centralizing it keeps the route
-  handler one line and makes the streaming/buffered + multi-header branches unit-testable.
-  `ctx.signal` propagation lets RR abort long loaders on client disconnect.
-- **Test home:** `request-bridge.test.ts` drives an injected fake handler returning (a) a buffered
-  HTML `Response` and (b) a streaming `Response`, asserting the `snapshot()` `streaming` flag,
-  status, headers, and `Set-Cookie` via `appendHeader`.
+  handler one line and makes the GET-no-body / action-with-body, streaming/buffered, and
+  `Set-Cookie` branches unit-testable. `ctx.signal` propagation lets RR abort long loaders on client
+  disconnect.
+- **Test home:** `request-bridge.test.ts` drives an injected fake handler with (a) a `GET` request —
+  asserts the constructed `Request` has NO body and does not throw — (b) a `POST` request — asserts
+  the buffered body reaches the handler — (c) a buffered HTML `Response`, and (d) a streaming
+  `Response`, asserting the `snapshot()` `streaming` flag, status, headers, and `Set-Cookie` via
+  `appendHeader`.
 
 ### 3.5 `loadContext` bridge — default exposes `services` + `user`
 
@@ -149,7 +169,8 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
 
 - **Decision:** `static-assets.ts` exports
   `createStaticAssetHandler({ fs, assetsDir, assetUrlPrefix })` returning a `RouteHandler`
-  registered at `${assetUrlPrefix}/*` (`assetUrlPrefix` default `/assets/`). The handler maps the
+  registered at `joinWildcard(assetUrlPrefix)` (the same trailing-slash-safe helper from §3.1;
+  `assetUrlPrefix` default `/assets/` → route `/assets/*`, NOT `/assets//*`). The handler maps the
   request path to `assetsDir + decodedPath`, reads it via the injected `IFileSystem.readFile`, sets
   `Content-Type` from a small internal `CONTENT_TYPES` map (`.js`/`.mjs` → `text/javascript`, `.css`
   → `text/css`, `.html` → `text/html`, `.json` → `application/json`, `.svg` → `image/svg+xml`,
@@ -176,6 +197,66 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
 - **Test home:** Documented non-behavior; `react-router-integration.test.ts` confirms the request
   still flows through the pipeline (the middleware wraps it) end-to-end.
 
+### 3.8 Health indicator — readiness only; NO `onClose` (the handler is stateless)
+
+- **Decision:** After `register()` has awaited `loadRequestHandler` and constructed the
+  `SsrService`, the plugin registers ONE health indicator named `react-router` via
+  `ctx.health.register(...)` (surface confirmed at `packages/common/src/plugin.ts:419`,
+  `IPluginContext.health: IHealthApi`; precedent `sse-plugin.ts:54`). It reports `status: 'up'` with
+  detail `{ mode, serverBuildPath }` once the handler is loaded — a genuine readiness signal, not a
+  constant, because `register()` only reaches the `health.register` call after the (awaited) handler
+  load succeeds; a failed load throws out of `register()` and the app never starts.
+- **The plugin registers NO `ctx.lifecycle.onClose` hook.** React Router's
+  `createRequestHandler(build, mode)` returns a **stateless** request function that owns no socket,
+  pool, timer, or subscription — there is nothing to release on shutdown. Registering an empty
+  `onClose` would be dead surface (a hook whose body no code path needs), which the project's
+  dead-symbol rule forbids. If a future change gives the plugin a closeable resource (e.g. a warmed
+  asset cache), the `onClose` is added THEN, with that resource as its documented consumer.
+- **Why:** Both behaviors now have an explicit design home, so neither the health assertion nor the
+  absence of `onClose` is improvised at implementation time (the M10 miss: tests asserting
+  health/lifecycle behavior no design decision specified).
+- **Test home:** `react-router-plugin.test.ts` asserts the `react-router` indicator is registered
+  and returns `status: 'up'` with the `mode`/`serverBuildPath` detail after `register()`, and
+  asserts NO `onClose` hook is registered (the injected fake `ILifecycleApi` records zero `onClose`
+  calls).
+
+### 3.9 File-based routing (`flatRoutes`) — supported transparently; NO plugin code
+
+- **Decision:** File-based / flat routing conventions (`flatRoutes()` from
+  `@react-router/fs-routes`, configured in the app's `app/routes.ts`) are a **fully supported** M44
+  use case — and they require **zero plugin code**. `flatRoutes` is a **build-time** framework
+  config: the React Router Vite plugin consumes `app/routes.ts` and bakes the discovered route tree
+  into the compiled `ServerBuild`. M44 loads that `ServerBuild` and runs
+  `createRequestHandler(build, mode)`, which the React Router docs confirm serves file-based routes
+  "without requiring manual `createRequestHandler` modifications." So whichever convention produced
+  the build — config routes, `flatRoutes()`, or a custom `RouteConfig` — is already resolved inside
+  the handler M44 invokes; the plugin is **convention-agnostic by construction**.
+- **This is NOT the same as "file-based routing is out of scope."** What is out of scope is the
+  plugin _implementing route discovery_ (scanning `app/routes/` itself) — React Router owns that at
+  build time (§0, §9). The runtime _result_ (flat routes serving correctly) is in scope and is the
+  point of the embed. The §0/§9 "out of scope" bullets are worded to make this distinction explicit
+  so `flatRoutes` is never mistaken for unsupported.
+- **`basename` must agree with the RR build's `basename`.** `flatRoutes` paths are relative to the
+  app root; M44 mounts its catch-all at `joinWildcard(options.basename)` (§3.1). For nested routes,
+  links, and loader/action URLs to resolve, `options.basename` MUST equal the `basename` configured
+  in the app's `react-router.config.ts`. This is a configuration contract, not plugin logic — the
+  plugin cannot read the build's `basename` — so it is stated as a documented requirement, not a
+  runtime check.
+- **`@react-router/fs-routes` is an app-level, build-time `devDependency`** (like Vite itself,
+  AI_GUIDELINES §12.2). It is NEVER imported by the plugin and NEVER appears in the JSR-published
+  package's dependency graph — only `npm:react-router` (core, lazy) is (§3.2, §3.3, C2).
+- **Why:** `flatRoutes` was an explicit requirement; verifying it against the current React Router
+  docs (`reactrouter.com/how-to/file-route-conventions`) confirms it needs no plugin surface, so the
+  correct deliverable is a clear scope statement + an app-side enablement example, not code.
+- **Doc deliverable (same PR):** the PUBLIC_API.md `@hono-enterprise/react-router-plugin` section
+  includes a short "File-based routing" note with the app-side setup —
+  `npm i -D @react-router/fs-routes` and the `app/routes.ts` snippet
+  (`export default flatRoutes() satisfies RouteConfig;`) — plus the `basename`-alignment
+  requirement.
+- **Test home:** No plugin unit test (there is no plugin code to cover). The integration test's
+  injected fake `SsrRequestHandler` already stands in for a compiled build regardless of the
+  convention that produced it, so it exercises the exact code path a real `flatRoutes` build hits.
+
 ## 4. Exported surface — every symbol names its consumer
 
 | Exported symbol               | Kind                             | Consumer / real code path that READS it                                                                                        |
@@ -190,55 +271,66 @@ the plugin reimplements none of that. The SSR write-back streams through the Mil
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                                       | Consumer                                  | Behavior (per implementation)                                                                                                         |
-| ---------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `serverBuildPath: string` (required)                                         | default `loadRequestHandler`              | Lazy `await import()` target for the RR `ServerBuild` (default export).                                                               |
-| `loadRequestHandler?: (serverBuildPath, mode) => Promise<SsrRequestHandler>` | `register()`                              | Injectable lazy-import seam; default = real importer in `server-build.ts`. When provided, `register()` still awaits it (stays async). |
-| `assetsDir?: string`                                                         | `createStaticAssetHandler`                | Filesystem root of the built client bundle; when omitted, asset serving is disabled (no asset route registered).                      |
-| `assetUrlPrefix?: string` (default `/assets/`)                               | `register()` + `createStaticAssetHandler` | URL prefix the asset route mounts at; maps `${prefix}/*` → `assetsDir + path`.                                                        |
-| `basename?: string` (default `/`)                                            | `register()`                              | Mount prefix for the SSR catch-all (`${basename}/*`).                                                                                 |
-| `getLoadContext?: LoadContextFunction`                                       | `request-bridge.ts`                       | Builds the RR `loadContext` from `ctx`; default exposes `services` + `user`.                                                          |
-| `mode?: 'production' \| 'development'` (default `production`)                | default `loadRequestHandler`              | Passed to `createRequestHandler(build, mode)`.                                                                                        |
+| Option                                                                       | Consumer                                  | Behavior (per implementation)                                                                                                                                                                       |
+| ---------------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serverBuildPath: string` (required)                                         | default `loadRequestHandler`              | Lazy `await import()` target for the RR `ServerBuild` (default export).                                                                                                                             |
+| `loadRequestHandler?: (serverBuildPath, mode) => Promise<SsrRequestHandler>` | `register()`                              | Injectable lazy-import seam; default = real importer in `server-build.ts`. When provided, `register()` still awaits it (stays async).                                                               |
+| `assetsDir?: string`                                                         | `createStaticAssetHandler`                | Filesystem root of the built client bundle; when omitted, asset serving is disabled (no asset route registered).                                                                                    |
+| `assetUrlPrefix?: string` (default `/assets/`)                               | `register()` + `createStaticAssetHandler` | URL prefix the asset route mounts at; route = `joinWildcard(prefix)` (trailing-slash-safe, §3.1); maps `${prefix}/*` → `assetsDir + path`.                                                          |
+| `basename?: string` (default `/`)                                            | `register()`                              | Mount prefix for the SSR catch-all; route = `joinWildcard(basename)` (default `/` → `/*`, §3.1). MUST match the app's `react-router.config.ts` `basename` for flat/nested routes to resolve (§3.9). |
+| `getLoadContext?: LoadContextFunction`                                       | `request-bridge.ts`                       | Builds the RR `loadContext` from `ctx`; default exposes `services` + `user`.                                                                                                                        |
+| `mode?: 'production' \| 'development'` (default `production`)                | default `loadRequestHandler`              | Passed to `createRequestHandler(build, mode)`.                                                                                                                                                      |
 
 (`Cache-Control` max-age is a constant — `31536000` immutable — not an option, to avoid dead
 surface.)
 
 ## 5. Implementation files
 
-| File                                                             | Purpose                                                                                                                                                                                                                      |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/src/tokens.ts`                                  | Add `CAPABILITIES.SSR = 'ssr'` (alongside `SSE`).                                                                                                                                                                            |
-| `packages/common/src/services/ssr.ts`                            | NEW contract module: `ISsrService` with `render(ctx: IRequestContext): Promise<HandlerResult>`.                                                                                                                              |
-| `packages/common/src/index.ts`                                   | Export `ISsrService` (type) from `./services/ssr.ts` (token rides with the existing `CAPABILITIES` export).                                                                                                                  |
-| `packages/react-router-plugin/deno.json`                         | NEW package config (`@hono-enterprise/react-router-plugin`, `exports: ./src/index.ts`, `test.permissions.net: true` for the real-socket integration test).                                                                   |
-| `packages/react-router-plugin/src/index.ts`                      | Barrel: `ReactRouterPlugin`, `SsrService`, `createStaticAssetHandler`, type exports, re-export `ISsrService` + `CAPABILITIES` from common.                                                                                   |
-| `packages/react-router-plugin/src/interfaces/index.ts`           | `ReactRouterPluginOptions`, `LoadContextFunction`, `SsrRequestHandler`.                                                                                                                                                      |
-| `packages/react-router-plugin/src/plugin/react-router-plugin.ts` | Async `register()`: await `loadRequestHandler`, build `SsrService`, register it under `CAPABILITIES.SSR`, register catch-all (all 7 verbs at `${basename}/*`) + asset route, register health indicator + `onClose` shutdown. |
-| `packages/react-router-plugin/src/handler/request-bridge.ts`     | `IRequestContext` → web `Request` (method/url/headers/buffered body/abort) and web `Response` → `IResponse` (status/headers/stream-or-buffer) → `HandlerResult`.                                                             |
-| `packages/react-router-plugin/src/handler/load-context.ts`       | Default `createLoadContext(ctx)` + `LoadContextFunction`.                                                                                                                                                                    |
-| `packages/react-router-plugin/src/handler/server-build.ts`       | Default `loadRequestHandler(serverBuildPath, mode)` (real lazy imports) + pure `assembleHandler(build, createRequestHandler, mode)` seam.                                                                                    |
-| `packages/react-router-plugin/src/assets/static-assets.ts`       | `createStaticAssetHandler({fs, assetsDir, assetUrlPrefix})` → `RouteHandler`; `CONTENT_TYPES` map; immutable `Cache-Control`; 404 on missing/absent-fs.                                                                      |
-| `packages/react-router-plugin/src/services/ssr-service.ts`       | `SsrService implements ISsrService`: holds the resolved handler + `getLoadContext`; `render(ctx)` = bridge → handler → write-back → `HandlerResult`.                                                                         |
+| File                                                             | Purpose                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/tokens.ts`                                  | Add `CAPABILITIES.SSR = 'ssr'` (alongside `SSE`).                                                                                                                                                                                                                                                                                                                                        |
+| `packages/common/src/services/ssr.ts`                            | NEW contract module: `ISsrService` with `render(ctx: IRequestContext): Promise<HandlerResult>`.                                                                                                                                                                                                                                                                                          |
+| `packages/common/src/index.ts`                                   | Export `ISsrService` (type) from `./services/ssr.ts` (token rides with the existing `CAPABILITIES` export).                                                                                                                                                                                                                                                                              |
+| `packages/react-router-plugin/deno.json`                         | NEW package config (`@hono-enterprise/react-router-plugin`, `exports: ./src/index.ts`, `test.permissions.net: true` for the real-socket integration test).                                                                                                                                                                                                                               |
+| `packages/react-router-plugin/src/index.ts`                      | Barrel: `ReactRouterPlugin`, `SsrService`, `createStaticAssetHandler`, type exports, re-export `ISsrService` + `CAPABILITIES` from common.                                                                                                                                                                                                                                               |
+| `packages/react-router-plugin/src/interfaces/index.ts`           | `ReactRouterPluginOptions`, `LoadContextFunction`, `SsrRequestHandler`.                                                                                                                                                                                                                                                                                                                  |
+| `packages/react-router-plugin/src/plugin/react-router-plugin.ts` | Async `register()`: await `loadRequestHandler`, build `SsrService`, register it under `CAPABILITIES.SSR`, register catch-all (all 7 verbs at `joinWildcard(basename)`) + asset route at `joinWildcard(assetUrlPrefix)`, register the `react-router` health indicator (§3.8). Holds the internal `joinWildcard(prefix)` helper. Registers NO `onClose` (§3.8 — the handler is stateless). |
+| `packages/react-router-plugin/src/handler/request-bridge.ts`     | `IRequestContext` → web `Request` (method/url/headers/buffered body/abort) and web `Response` → `IResponse` (status/headers/stream-or-buffer) → `HandlerResult`.                                                                                                                                                                                                                         |
+| `packages/react-router-plugin/src/handler/load-context.ts`       | Default `createLoadContext(ctx)` + `LoadContextFunction`.                                                                                                                                                                                                                                                                                                                                |
+| `packages/react-router-plugin/src/handler/server-build.ts`       | Default `loadRequestHandler(serverBuildPath, mode)` (real lazy imports) + pure `assembleHandler(build, createRequestHandler, mode)` seam.                                                                                                                                                                                                                                                |
+| `packages/react-router-plugin/src/assets/static-assets.ts`       | `createStaticAssetHandler({fs, assetsDir, assetUrlPrefix})` → `RouteHandler`; `CONTENT_TYPES` map; immutable `Cache-Control`; 404 on missing/absent-fs.                                                                                                                                                                                                                                  |
+| `packages/react-router-plugin/src/services/ssr-service.ts`       | `SsrService implements ISsrService`: holds the resolved handler + `getLoadContext`; `render(ctx)` = bridge → handler → write-back → `HandlerResult`.                                                                                                                                                                                                                                     |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                           | src covered                                                  | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                    |
-| --------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/request-bridge.test.ts`                  | `src/handler/request-bridge.ts`                              | Built `Request` carries `ctx.request.method`/`url`/headers/body (`ctx.request.bytes()`); `ctx.signal` threaded; buffered `Response` → `snapshot().streaming === false` + status/headers copied; streaming `Response` → `snapshot().streaming === true`; `Set-Cookie` emitted via `appendHeader`. Driven by an injected fake `SsrRequestHandler`.                                    |
-| `test/unit/load-context.test.ts`                    | `src/handler/load-context.ts`                                | Default `createLoadContext(ctx)` returns `{services, user}` with `user` PRESENT and ABSENT (omitted, not `undefined`); a custom `LoadContextFunction` overrides it.                                                                                                                                                                                                                 |
-| `test/unit/server-build.test.ts`                    | `src/handler/server-build.ts`                                | Pure `assembleHandler(build, createRequestHandler, mode)` returns a handler that calls `createRequestHandler(build, mode)` and forwards `(request, loadContext)`; clear error path when the importer rejects (injected fake importers).                                                                                                                                             |
-| `test/unit/static-assets.test.ts`                   | `src/assets/static-assets.ts`                                | Content-type per extension from `CONTENT_TYPES`; `Cache-Control: public, max-age=31536000, immutable`; 200 + body for a hit; 404 for a missing file (fake `readFile` rejects); 404 when `fs` is absent (runtime with `fs === undefined`).                                                                                                                                           |
-| `test/unit/ssr-service.test.ts`                     | `src/services/ssr-service.ts`                                | `SsrService.render(ctx)` composes bridge → injected fake handler → write-back and returns a `HandlerResult`; service is the value registered under `CAPABILITIES.SSR`.                                                                                                                                                                                                              |
-| `test/unit/react-router-plugin.test.ts`             | `src/plugin/react-router-plugin.ts`                          | Plugin shape (`name`, `version`, `provides: [CAPABILITIES.SSR]`, `priority`); async `register()` (awaited) registers `ISsrService` under `CAPABILITIES.SSR`; registers catch-all for **all 7 verbs** at `${basename}/*`; registers the asset route at `${assetUrlPrefix}/*` only when `assetsDir` is set; registers health + `onClose`. Uses an injected `loadRequestHandler` fake. |
-| `test/unit/barrel-exports.test.ts`                  | `src/index.ts` (+ `src/interfaces/index.ts` type re-exports) | Every planned export is present and re-exports resolve; mirrors the sibling `barrel-exports.test.ts`.                                                                                                                                                                                                                                                                               |
-| `test/fixtures/fake-runtime.ts`                     | —                                                            | Fake `IRuntimeServices` with an injectable `fs` (in-memory `readFile` map) for asset/service tests.                                                                                                                                                                                                                                                                                 |
-| `test/fixtures/fake-handler.ts`                     | —                                                            | Recording fake `SsrRequestHandler`: returns a configured web `Response` (buffered or streaming) and records the `request` + `loadContext` it received.                                                                                                                                                                                                                              |
-| `test/integration/react-router-integration.test.ts` | end-to-end (streaming + precedence)                          | `RuntimePlugin()` + `ReactRouterPlugin({loadRequestHandler: fake})`, `app.start({port})` + real `fetch()` (NOT `inject()` — it discards streaming bodies): streamed SSR document round-trips over a real socket; an app `/api/health` route is NOT shadowed by the catch-all (precedence).                                                                                          |
-| `test/integration/server-build-real-import.test.ts` | `src/handler/server-build.ts` (real path)                    | Guarded `await import('npm:react-router')`; skipped when absent; asserts `createRequestHandler` exists and the default `loadRequestHandler` resolves with a tiny synthetic `ServerBuild` (the real import is the point; a full RR app is out of scope).                                                                                                                             |
+| Test file                                           | src covered                                                  | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/request-bridge.test.ts`                  | `src/handler/request-bridge.ts`                              | A `GET` request builds a `Request` with NO body and does not throw; a `POST` request forwards the buffered `ctx.request.bytes()` body to the handler; built `Request` carries `ctx.request.method`/`url`/headers; `ctx.signal` threaded; buffered `Response` → `snapshot().streaming === false` + status/headers copied; streaming `Response` → `snapshot().streaming === true`; `Set-Cookie` (via `getSetCookie()`) emitted with `appendHeader`. Driven by an injected fake `SsrRequestHandler`.                                                          |
+| `test/unit/load-context.test.ts`                    | `src/handler/load-context.ts`                                | Default `createLoadContext(ctx)` returns `{services, user}` with `user` PRESENT and ABSENT (omitted, not `undefined`); a custom `LoadContextFunction` overrides it.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `test/unit/server-build.test.ts`                    | `src/handler/server-build.ts`                                | Pure `assembleHandler(build, createRequestHandler, mode)` returns a handler that calls `createRequestHandler(build, mode)` and forwards `(request, loadContext)`; clear error path when the importer rejects (injected fake importers).                                                                                                                                                                                                                                                                                                                    |
+| `test/unit/static-assets.test.ts`                   | `src/assets/static-assets.ts`                                | Content-type per extension from `CONTENT_TYPES`; `Cache-Control: public, max-age=31536000, immutable`; 200 + body for a hit; 404 for a missing file (fake `readFile` rejects); 404 when `fs` is absent (runtime with `fs === undefined`).                                                                                                                                                                                                                                                                                                                  |
+| `test/unit/ssr-service.test.ts`                     | `src/services/ssr-service.ts`                                | `SsrService.render(ctx)` composes bridge → injected fake handler → write-back and returns a `HandlerResult`; service is the value registered under `CAPABILITIES.SSR`.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `test/unit/react-router-plugin.test.ts`             | `src/plugin/react-router-plugin.ts`                          | Plugin shape (`name`, `version`, `provides: [CAPABILITIES.SSR]`, `priority`); async `register()` (awaited) registers `ISsrService` under `CAPABILITIES.SSR`; registers catch-all for **all 7 verbs** at `/*` (and `/app/*` for `basename: '/app/'`, proving no doubled slash); registers the asset route at `/assets/*` only when `assetsDir` is set; registers the `react-router` health indicator returning `status: 'up'` (§3.8); asserts NO `onClose` hook is registered. Uses injected `loadRequestHandler`, `IHealthApi`, and `ILifecycleApi` fakes. |
+| `test/unit/barrel-exports.test.ts`                  | `src/index.ts` (+ `src/interfaces/index.ts` type re-exports) | Every planned export is present and re-exports resolve; mirrors the sibling `barrel-exports.test.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `test/fixtures/fake-runtime.ts`                     | —                                                            | Fake `IRuntimeServices` with an injectable `fs` (in-memory `readFile` map) for asset/service tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `test/fixtures/fake-handler.ts`                     | —                                                            | Recording fake `SsrRequestHandler`: returns a configured web `Response` (buffered or streaming) and records the `request` + `loadContext` it received.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `test/integration/react-router-integration.test.ts` | end-to-end (streaming + precedence)                          | `RuntimePlugin()` + `ReactRouterPlugin({loadRequestHandler: fake})`, `app.start({port})` + real `fetch()` (NOT `inject()` — it discards streaming bodies): streamed SSR document round-trips over a real socket; an app `/api/health` route is NOT shadowed by the catch-all (precedence).                                                                                                                                                                                                                                                                 |
+| `test/integration/server-build-real-import.test.ts` | `src/handler/server-build.ts` (real path)                    | Guarded `await import('npm:react-router')`; skipped when absent; asserts `createRequestHandler` exists and the default `loadRequestHandler` resolves with a tiny synthetic `ServerBuild` (the real import is the point; a full RR app is out of scope).                                                                                                                                                                                                                                                                                                    |
 
 The `common` additions (`tokens.ts`, `services/ssr.ts`, `index.ts`) are type/constant-only;
 `services/ssr.ts` is a pure interface module like `services/sse.ts` and needs no new runtime test.
 The existing `common` token-grammar tests already cover `'ssr'`.
+
+**`server-build.ts` per-file coverage depends on the real-import test actually running.** The pure
+`assembleHandler(build, createRequestHandler, mode)` seam is fully unit-tested WITHOUT the dep, but
+the default `loadRequestHandler`'s two `await import()` I/O lines only execute in
+`server-build-real-import.test.ts`. `npm:react-router` MUST be resolvable in the dev/CI environment
+so that test runs (not skips) — it is the only path that exercises those lines, and the file will
+not clear the 90% function/line bar on `assembleHandler` alone. This is a hard requirement, not a
+"skipped when absent" fallback: the plugin adds `react-router` to the package's dev/test dependency
+surface (dev-only; never a JSR runtime dependency — it stays a lazy `npm:` import, AI_GUIDELINES
+§12.2). The `await import(serverBuildPath)` line (app-provided path) is driven by the synthetic
+`ServerBuild` fixture the same test constructs.
 
 ## 7. Verification gates
 
@@ -282,6 +374,13 @@ export.
 - Multi-backend trace fan-out — M24c (OTel Collector) / deploy config.
 - Nested loader/action spans under the SSR request span — deferred (no OTel `ContextManager`);
   request span comes free from M24's middleware (§3.7).
-- File-based route discovery — React Router owns it entirely.
+- File-based route _discovery_ (scanning `app/routes/`) — React Router owns it at build time. The
+  runtime result of file-based/flat routing (`flatRoutes`) IS in scope and serves transparently
+  (§3.9); only the discovery implementation is excluded.
 - Extracting static-asset serving into a shared static middleware — flagged future (only static
   handler in the tree today).
+- A prescribed app-side code structure (feature/service/lib/model layering, flat-route layout
+  groups, etc.) — the plugin stays convention-agnostic (§3.9). Standardizing the app layout is
+  deferred to a separate `packages/starters/full-stack-starter` milestone that adapts the B2BAdmin
+  skeleton and rewires its cross-cutting `lib/` (session/CSRF/SSE/telemetry/secrets/HTTP) to consume
+  the existing plugins through the M44 `loadContext` DI bridge instead of re-implementing them.
