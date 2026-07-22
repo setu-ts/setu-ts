@@ -31,28 +31,30 @@ type ControllerCapturer = (ctrl: ReadableStreamDefaultController<Uint8Array>) =>
  */
 function captureControllers(onStart: ControllerCapturer): () => void {
   const OriginalRS = globalThis.ReadableStream;
-  // deno-lint-ignore no-explicit-any -- global replacement
-  class InterceptedRS<T = any> extends OriginalRS<T> {
+  // The SseConnection only ever constructs `ReadableStream<Uint8Array>`, so this
+  // interceptor is fixed to that element type — no generic, no `any`.
+  class InterceptedRS extends OriginalRS<Uint8Array> {
     constructor(
-      underlyingSource?: { start?(ctrl: ReadableStreamDefaultController<T>): void },
-      // deno-lint-ignore no-explicit-any
-      ...args: any[]
+      underlyingSource?: UnderlyingSource<Uint8Array>,
+      strategy?: QueuingStrategy<Uint8Array>,
     ) {
-      const origUnderlying = { ...(underlyingSource ?? {}) };
-      const origStart = origUnderlying.start;
-      // deno-lint-ignore no-explicit-any
-      origUnderlying.start = (ctrl: any) => {
-        if (origStart) origStart(ctrl);
+      const patched: UnderlyingSource<Uint8Array> = { ...(underlyingSource ?? {}) };
+      const origStart = patched.start;
+      patched.start = (ctrl) => {
+        origStart?.(ctrl);
+        // The SseConnection uses a default (non-byte) source, so `ctrl` is the
+        // default-controller member of the union — narrow to it (typed, no `any`).
         onStart(ctrl as ReadableStreamDefaultController<Uint8Array>);
       };
-      super(origUnderlying as never, ...(args as [never?]));
+      super(patched, strategy);
     }
   }
-  // deno-lint-ignore no-explicit-any -- globalThis replacement
-  globalThis.ReadableStream = InterceptedRS as any;
+  // Single honest, typed assertion: InterceptedRS omits the `UnderlyingByteSource`
+  // constructor overload, so it is not structurally identical to the global ctor,
+  // but it is a runtime-compatible stand-in.
+  globalThis.ReadableStream = InterceptedRS as typeof globalThis.ReadableStream;
   return () => {
-    // deno-lint-ignore no-explicit-any
-    globalThis.ReadableStream = OriginalRS as any;
+    globalThis.ReadableStream = OriginalRS;
   };
 }
 
