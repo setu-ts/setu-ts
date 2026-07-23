@@ -74,6 +74,50 @@ describe('createStorage', () => {
     expect(storage instanceof FileAuditStorage).toBe(true);
   });
 
+  it('file type with custom path sets options', () => {
+    const fakeFs = {
+      readFile: () => Promise.resolve(new TextEncoder().encode('')),
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ isFile: false, isDirectory: false, size: 0 }),
+      readdir: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const ctx = {
+      ...fakeContext,
+      runtime: { ...fakeContext.runtime, fs: fakeFs },
+    } as unknown as IPluginContext;
+    const storage = createStorage('file', { path: './custom-audit.log' }, ctx);
+    expect(storage instanceof FileAuditStorage).toBe(true);
+    // The path option should have been passed through (internal check via storage.path)
+    expect((storage as { path?: string }).path).toBe('./custom-audit.log');
+  });
+
+  it('log type with level option sets log level', async () => {
+    const fakeLogger = {
+      level: 'info' as const,
+      fatal: () => {},
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      child: () => fakeLogger,
+    };
+    const storage = createStorage('log', { logger: fakeLogger, level: 'warn' }, fakeContext);
+    expect(storage instanceof LogAuditStorage).toBe(true);
+    // setLogLevel was called internally; verify by appending
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+    // The internal _level should be 'warn'
+    expect((storage as { _level?: string })._level).toBe('warn');
+  });
+
   it('unknown type throws', () => {
     // biome-ignore lint/suspicious/noExplicitAny: testing unknown storage type
     expect(() => createStorage('bogus' as never, {}, fakeContext)).toThrow();

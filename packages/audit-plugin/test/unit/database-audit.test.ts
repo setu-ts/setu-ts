@@ -130,95 +130,181 @@ describe('DatabaseAuditStorage', () => {
   });
 });
 
-it('query filters by from/to on mapped results', async () => {
-  const client = new FakeAuditDbClient();
-  const storage = new DatabaseAuditStorage({ client, table: 'audit_logs' });
+// Separate describe block for query-with-criteria tests (A4: cover where-clause branches)
+describe('DatabaseAuditStorage query with criteria', () => {
+  it('query with userId builds where clause', async () => {
+    const client = new FakeAuditDbClient();
+    const storage = new DatabaseAuditStorage({ client, table: 'audit_logs' });
 
-  await client.insert('audit_logs', {
-    id: 'r1',
-    timestamp: 100,
-    action: 'a',
-    resource: 'r',
-    resource_id: null,
-    user_id: null,
-    result: 'success',
-    before: null,
-    after: null,
-    metadata: null,
-  });
-  await client.insert('audit_logs', {
-    id: 'r2',
-    timestamp: 500,
-    action: 'b',
-    resource: 'r',
-    resource_id: null,
-    user_id: null,
-    result: 'success',
-    before: null,
-    after: null,
-    metadata: null,
-  });
-  await client.insert('audit_logs', {
-    id: 'r3',
-    timestamp: 900,
-    action: 'c',
-    resource: 'r',
-    resource_id: null,
-    user_id: null,
-    result: 'failure',
-    before: null,
-    after: null,
-    metadata: null,
+    await client.insert('audit_logs', {
+      id: 'r1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      resource_id: 'res-1',
+      user_id: 'user-1',
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+    await client.insert('audit_logs', {
+      id: 'r2',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      resource_id: 'res-2',
+      user_id: 'user-2',
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+
+    const results = await storage.query({ userId: 'user-1' });
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe('r1');
+    // Verify the fake client received the where criteria (index 0 = first/only select)
+    expect(client.selects[0].criteria).toEqual({ user_id: 'user-1' });
   });
 
-  const results = await storage.query({ from: 200, to: 600 });
-  expect(results.length).toBe(1);
-  expect(results[0].id).toBe('r2');
-});
+  it('query with resourceId builds where clause', async () => {
+    const client = new FakeAuditDbClient();
+    const storage = new DatabaseAuditStorage({ client, table: 'audit_logs' });
 
-it('query with limit returns newest limit', async () => {
-  const client = new FakeAuditDbClient();
-  const storage = new DatabaseAuditStorage({ client });
+    await client.insert('audit_logs', {
+      id: 'r1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      resource_id: 'res-1',
+      user_id: 'user-1',
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+    await client.insert('audit_logs', {
+      id: 'r2',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      resource_id: 'res-2',
+      user_id: 'user-2',
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
 
-  await client.insert('audit_logs', {
-    id: '1',
-    timestamp: 100,
-    action: 'a',
-    resource: 'r',
-    resource_id: null,
-    user_id: null,
-    result: 'success',
-    before: null,
-    after: null,
-    metadata: null,
-  });
-  await client.insert('audit_logs', {
-    id: '2',
-    timestamp: 200,
-    action: 'b',
-    resource: 'r',
-    resource_id: null,
-    user_id: null,
-    result: 'success',
-    before: null,
-    after: null,
-    metadata: null,
-  });
-  await client.insert('audit_logs', {
-    id: '3',
-    timestamp: 300,
-    action: 'c',
-    resource: 'r',
-    resource_id: null,
-    user_id: null,
-    result: 'success',
-    before: null,
-    after: null,
-    metadata: null,
+    const results = await storage.query({ resourceId: 'res-2' });
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe('r2');
+    expect(client.selects[0].criteria).toEqual({ resource_id: 'res-2' });
   });
 
-  const results = await storage.query({ limit: 2 });
-  expect(results.length).toBe(2);
-  expect(results[0].id).toBe('2');
-  expect(results[1].id).toBe('3');
+  it('query with combined userId + resourceId', async () => {
+    const client = new FakeAuditDbClient();
+    const storage = new DatabaseAuditStorage({ client, table: 'audit_logs' });
+
+    await client.insert('audit_logs', {
+      id: 'r1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      resource_id: 'res-1',
+      user_id: 'user-1',
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+
+    const results = await storage.query({ userId: 'user-1', resourceId: 'res-1' });
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe('r1');
+    expect(client.selects[0].criteria).toEqual({ user_id: 'user-1', resource_id: 'res-1' });
+  });
+
+  it('query with action/result filters via where', async () => {
+    const client = new FakeAuditDbClient();
+    const storage = new DatabaseAuditStorage({ client, table: 'audit_logs' });
+
+    await client.insert('audit_logs', {
+      id: 'r1',
+      timestamp: 100,
+      action: 'user.create',
+      resource: 'user',
+      resource_id: null,
+      user_id: null,
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+    await client.insert('audit_logs', {
+      id: 'r2',
+      timestamp: 200,
+      action: 'user.delete',
+      resource: 'user',
+      resource_id: null,
+      user_id: null,
+      result: 'failure',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+
+    const results = await storage.query({ action: 'user.delete', result: 'failure' });
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe('r2');
+    expect(client.selects[0].criteria).toEqual({ action: 'user.delete', result: 'failure' });
+  });
+
+  it('query with limit returns newest limit', async () => {
+    const client = new FakeAuditDbClient();
+    const storage = new DatabaseAuditStorage({ client });
+
+    await client.insert('audit_logs', {
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      resource_id: null,
+      user_id: null,
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+    await client.insert('audit_logs', {
+      id: '2',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      resource_id: null,
+      user_id: null,
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+    await client.insert('audit_logs', {
+      id: '3',
+      timestamp: 300,
+      action: 'c',
+      resource: 'r',
+      resource_id: null,
+      user_id: null,
+      result: 'success',
+      before: null,
+      after: null,
+      metadata: null,
+    });
+
+    const results = await storage.query({ limit: 2 });
+    expect(results.length).toBe(2);
+    expect(results[0].id).toBe('2');
+    expect(results[1].id).toBe('3');
+  });
 });

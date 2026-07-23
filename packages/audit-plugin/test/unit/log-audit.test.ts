@@ -84,4 +84,33 @@ describe('LogAuditStorage', () => {
     const results = await storage.query();
     expect(results).toEqual([]);
   });
+
+  it('setLogLevel changes emission level', async () => {
+    const { logger, records } = makeFakeLogger();
+    const storage = new LogAuditStorage({ logger });
+    expect(storage.isReady()).toBe(true);
+
+    // Initially defaults to 'info'
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+    expect(records.length).toBe(1);
+    expect(records[0].level).toBe('info');
+
+    // Change level via setLogLevel
+    storage.setLogLevel('error');
+    await storage.append({
+      id: '2',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      result: 'failure',
+    });
+    expect(records.length).toBe(2);
+    expect(records[1].level).toBe('error');
+  });
 });

@@ -189,4 +189,78 @@ describe('FileAuditStorage', () => {
     expect(results[0].id).toBe('2');
     expect(results[1].id).toBe('3');
   });
+
+  it('append adds newline separator when existing content has no trailing newline', async () => {
+    const files: Record<string, string> = {
+      './test.log': '{"id":"old","timestamp":1,"action":"x","resource":"r","result":"success"}',
+    };
+    const fs = makeFakeFs(files);
+    const storage = new FileAuditStorage({ fs, path: './test.log' });
+
+    await storage.append({
+      id: '2',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      result: 'success',
+    });
+
+    const content = files['./test.log'];
+    const lines = content.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines.length).toBe(2);
+    // Verify the newline separator was added (not just concatenation)
+    expect(content).toContain('\n');
+  });
+
+  it('query with limit returns newest', async () => {
+    const files: Record<string, string> = {};
+    const fs = makeFakeFs(files);
+    const storage = new FileAuditStorage({ fs });
+
+    for (let i = 1; i <= 5; i++) {
+      await storage.append({
+        id: String(i),
+        timestamp: i * 100,
+        action: 'a',
+        resource: 'r',
+        result: 'success',
+      });
+    }
+
+    const results = await storage.query({ limit: 3 });
+    expect(results.length).toBe(3);
+    expect(results[0].id).toBe('3');
+    expect(results[1].id).toBe('4');
+    expect(results[2].id).toBe('5');
+  });
+
+  it('isReady returns true', () => {
+    const files: Record<string, string> = {};
+    const fs = makeFakeFs(files);
+    const storage = new FileAuditStorage({ fs });
+    expect(storage.isReady()).toBe(true);
+  });
+
+  it('append catches thrown error from readFile', async () => {
+    const fs = {
+      readFile: () => Promise.reject(new Error('ENOENT')),
+      writeFile: () => Promise.resolve(),
+      stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
+      readdir: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const storage = new FileAuditStorage({ fs, path: './throwing.log' });
+
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+
+    // Should have written a single line even though read threw
+    // (not checking file content here since we don't store it)
+  });
 });

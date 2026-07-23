@@ -5,14 +5,10 @@
   "test": {
     "permissions": {
       "read": true,
+      "write": true,
       "import": true,
       "env": true,
       "sys": ["hostname"]
-    }
-  },
-  "lint": {
-    "rules": {
-      "exclude": ["require-await"]
     }
   }
 }
