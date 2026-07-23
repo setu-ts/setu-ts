@@ -1506,7 +1506,7 @@ import { CAPABILITIES, ISsrService } from '@hono-enterprise/common';
 
 // The plugin handles SSR automatically at the catch-all.
 // Custom routes take precedence based on static segment count:
-// a custom route with MORE static segments wins over /* (e.g. /api/:id has 2, beats 1).
+// a custom route with MORE static segments wins over /* (e.g. /api/users/:id has 2, beats 1).
 // Single-segment routes (e.g. /login, /health) registered AFTER ReactRouterPlugin
 // tie with /* (both have 1 static segment) and are silently shadowed by SSR.
 // Register single-segment routes BEFORE ReactRouterPlugin or use more-static routes.
@@ -1517,15 +1517,15 @@ app.router.get('/api/health', (ctx) => {
 
 ### Options
 
-| Option               | Type                                              | Default        | Description                                                                                           |
-| -------------------- | ------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
-| `serverBuildPath`    | `string`                                          | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
-| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>` | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
-| `assetsDir`          | `string`                                          | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
-| `assetUrlPrefix`     | `string`                                          | `/assets/`     | URL prefix for the asset route.                                                                       |
-| `basename`           | `string`                                          | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
-| `getLoadContext`     | `LoadContextFunction`                             | default        | Override the default `loadContext` bridge (`{ services, user }`).                                     |
-| `mode`               | `'production' \| 'development'`                   | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+| Option               | Type                                                | Default        | Description                                                                                           |
+| -------------------- | --------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`                                            | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
+| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>`   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
+| `assetsDir`          | `string`                                            | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
+| `assetUrlPrefix`     | `string`                                            | `/assets/`     | URL prefix for the asset route.                                                                       |
+| `basename`           | `string`                                            | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
+| `getLoadContext`     | `(ctx: IRequestContext) => Record<string, unknown>` | default        | Override the default `loadContext` bridge (`{ services, user }`).                                     |
+| `mode`               | `'production' \| 'development'`                     | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
 
 ### Interface Reference
 
