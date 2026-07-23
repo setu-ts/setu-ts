@@ -2398,6 +2398,101 @@ timers and disconnects the Redis lock on shutdown.
 
 ---
 
+## Resilience
+
+Composes four pure, in-process resilience patterns — circuit breaker, retry with backoff, timeout,
+and bulkhead — around an arbitrary `() => Promise<T>`. Zero external dependencies.
+
+Registers `IResilienceService` under `CAPABILITIES.RESILIENCE` (`'resilience'`).
+
+The service is stateless at the plugin level: it holds no timers, connections, or global state, so
+it registers **no health indicator and no `onClose` hook**. `wrap` builds the pattern chain once and
+returns a hardened callable; the circuit-breaker and bulkhead state persist across every invocation
+of that callable and are garbage-collected with it. Resilience protects an arbitrary async function
+— it is not HTTP middleware and does not itself retry HTTP requests, talk to Redis, or persist
+breaker state across instances.
+
+### Exports
+
+- **`ResiliencePlugin`** — Plugin factory registering the resilience service
+- **`ResiliencePluginOptions`** — Plugin configuration: `defaultCircuitBreaker?`, `defaultRetry?`,
+  `defaultBulkhead?`, each consumed when a `wrap` sets the matching field to `true`
+- **`TimeoutError`** — Thrown when a call exceeds its per-attempt timeout deadline
+- **`BulkheadFullError`** — Thrown when a bulkhead sheds a call (concurrency saturated, queue full)
+- **`CircuitOpenError`** — Thrown when an open circuit breaker fails fast without invoking the call
+- **`IResilienceService`** — Resilience service interface (re-exported from
+  `@hono-enterprise/common`)
+- **`WrapOptions`** — Pattern-selection options for `wrap` (re-exported)
+- **`CircuitBreakerPolicy`** — `threshold`, `timeout` (rolling failure window ms), `resetTimeout`
+  (re-exported)
+- **`RetryPolicy`** — `limit`, `delay`, `backoff` (re-exported)
+- **`BulkheadPolicy`** — `maxConcurrent`, `maxQueue?` (re-exported)
+- **`BackoffStrategy`** — `'fixed' | 'exponential'` (re-exported)
+
+### Registration
+
+```typescript
+import { ResiliencePlugin } from '@hono-enterprise/resilience-plugin';
+
+app.register(ResiliencePlugin({
+  defaultCircuitBreaker: { threshold: 5, timeout: 10_000, resetTimeout: 30_000 },
+  defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },
+  defaultBulkhead: { maxConcurrent: 10, maxQueue: 20 },
+}));
+```
+
+### Programmatic API
+
+```typescript
+import type { IResilienceService } from '@hono-enterprise/common';
+import { CircuitOpenError, TimeoutError } from '@hono-enterprise/resilience-plugin';
+
+const resilience = ctx.services.get<IResilienceService>('resilience');
+
+// `true` uses the plugin default; a policy object overrides per-wrap.
+const guarded = resilience.wrap(() => externalApi.fetchRates(), {
+  bulkhead: true,
+  circuitBreaker: true,
+  retry: { limit: 3, delay: 100, backoff: 'exponential' },
+  timeout: 2000,
+});
+
+try {
+  const rates = await guarded();
+} catch (error) {
+  if (error instanceof CircuitOpenError) { /* fail-fast: dependency is down */ }
+  if (error instanceof TimeoutError) { /* attempt exceeded the 2000ms deadline */ }
+}
+```
+
+The `wrap` signature and its options:
+
+```typescript
+interface IResilienceService {
+  wrap<T>(fn: () => Promise<T>, options?: WrapOptions): () => Promise<T>;
+}
+
+interface WrapOptions {
+  readonly circuitBreaker?: boolean | CircuitBreakerPolicy;
+  readonly retry?: boolean | RetryPolicy;
+  readonly timeout?: number;
+  readonly bulkhead?: boolean | BulkheadPolicy;
+}
+```
+
+When multiple patterns are enabled they compose in one fixed order, outermost to innermost:
+**bulkhead → circuit breaker → retry → timeout → fn**. A queue-full bulkhead never touches the
+breaker, retry, or `fn`; an open breaker fails fast before any retry attempt; each retry attempt
+gets its own timeout. A field set to `true` with no matching `default*` policy configured throws at
+`wrap` time.
+
+Because the protected-call signature carries no `AbortSignal`, a timeout rejects the caller's await
+with `TimeoutError` but does **not** cancel the underlying operation — it runs to completion in the
+background. Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across
+instances.
+
+---
+
 ## HttpClient
 
 Provides an HTTP client for external API calls.
@@ -4052,7 +4147,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                      |
 | Secrets             | `ISecretManager`                                                                                                                                                                                                                         |
 | Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                             |
-| Resilience          | `ICircuitBreaker`, `CircuitState`                                                                                                                                                                                                        |
+| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`                                                                                       |
 | Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                           |
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                 |
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |

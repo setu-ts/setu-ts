@@ -149,7 +149,16 @@ export type {
 } from './services/queue.ts';
 export type { ISecretManager } from './services/secrets.ts';
 export type { AuditEntry, IAuditLogger } from './services/audit.ts';
-export type { CircuitState, ICircuitBreaker } from './services/resilience.ts';
+export type {
+  BackoffStrategy,
+  BulkheadPolicy,
+  CircuitBreakerPolicy,
+  CircuitState,
+  ICircuitBreaker,
+  IResilienceService,
+  RetryPolicy,
+  WrapOptions,
+} from './services/resilience.ts';
 export type { IStorage, SignedUrlOptions } from './services/storage.ts';
 export type { IMailer, MailMessage } from './services/mail.ts';
 export type { INotifier, NotificationMessage } from './services/notification.ts';

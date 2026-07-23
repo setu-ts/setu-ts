@@ -289,9 +289,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   an `audit` health indicator and an `onClose` that drains the file write-chain; no `common` change,
   no new capability token — the contract and `AUDIT: 'audit'` token were committed in M1) — complete
   (PR #58)
-- **Next milestone** — **Milestone 27** (`packages/resilience-plugin`), the lowest-numbered pending
-  milestone (M26 audit-plugin landed on `feat/26-audit-plugin`); resumes the main plugin sequence
-  (M27–M40) unless reprioritized.
+- **Milestone 27** (`packages/resilience-plugin` — ResiliencePlugin registering an
+  `IResilienceService` under `CAPABILITIES.RESILIENCE`; a zero-dependency `ResilienceService.wrap`
+  composing four pure in-process patterns — circuit breaker, retry with backoff, timeout, and
+  bulkhead — around an arbitrary `() => Promise<T>`, built once per `wrap` into a state-preserving
+  closure in the fixed order bulkhead → circuitBreaker → retry → timeout → fn; internal
+  `CircuitBreaker` (implements the committed `ICircuitBreaker`, monotonic `hrtime()` rolling failure
+  window + open→half-open cooldown), `runWithRetry`/`computeBackoffMs`, `runWithTimeout` (race with
+  `finally` timer cleanup, documented non-cancellation), and `Bulkhead` (bounded FIFO queue);
+  exported `TimeoutError`/`BulkheadFullError`/`CircuitOpenError` for consumer `instanceof`; per-wrap
+  `default*` policy resolution where `true` consumes the matching plugin default and a `true` with
+  no default throws; no health indicator, no `onClose`. Added the missing service contract to
+  `common`: `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`,
+  `BulkheadPolicy`, `BackoffStrategy` (distinct names from the scheduler's
+  `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
+  row + ROADMAP examples in the same PR) — complete (PR #59)
+- **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
+  sequence (M28–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

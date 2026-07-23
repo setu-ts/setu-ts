@@ -18,6 +18,16 @@ import type {
   SpanOptions,
   SpanStatus,
 } from '../../src/index.ts';
+import type {
+  BackoffStrategy,
+  BulkheadPolicy,
+  CircuitBreakerPolicy,
+  CircuitState,
+  ICircuitBreaker,
+  IResilienceService,
+  RetryPolicy,
+  WrapOptions,
+} from '../../src/index.ts';
 
 describe('@hono-enterprise/common barrel', () => {
   it('should export the capability token constants', () => {
@@ -83,5 +93,30 @@ describe('@hono-enterprise/common barrel', () => {
     expect(_opts.kind).toBe('server');
     expect(_span).toBeDefined();
     expect(_service).toBeDefined();
+  });
+
+  it('should export resilience types and the RESILIENCE token', () => {
+    // Compile-time verification that resilience types resolve from the barrel.
+    const _backoff: BackoffStrategy = 'exponential';
+    const _cb: CircuitBreakerPolicy = { threshold: 5, timeout: 1000, resetTimeout: 5000 };
+    const _retry: RetryPolicy = { limit: 3, delay: 100, backoff: 'fixed' };
+    const _bulkhead: BulkheadPolicy = { maxConcurrent: 10 };
+    const _opts: WrapOptions = { circuitBreaker: true, retry: _retry, timeout: 2000 };
+    const _service: IResilienceService = {
+      wrap: <T>(fn: () => Promise<T>): () => Promise<T> => fn,
+    };
+    const _state: CircuitState = 'half-open';
+    const _breaker: ICircuitBreaker = {
+      state: _state,
+      execute: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+    };
+    expect(_backoff).toBe('exponential');
+    expect(_cb.threshold).toBe(5);
+    expect(_retry.limit).toBe(3);
+    expect(_bulkhead.maxConcurrent).toBe(10);
+    expect(_opts.timeout).toBe(2000);
+    expect(_service).toBeDefined();
+    expect(_breaker.state).toBe('half-open');
+    expect(CAPABILITIES.RESILIENCE).toBe('resilience');
   });
 });
