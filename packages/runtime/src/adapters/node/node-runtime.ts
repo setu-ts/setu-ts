@@ -29,6 +29,7 @@ import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 /** File-system operations needed by the Node adapter. */
 export interface NodeFsOperations {
   readFile(path: string): Promise<Uint8Array | Buffer>;
+  realpath(path: string): Promise<string>;
   writeFile(path: string, data: Uint8Array | Buffer): Promise<void>;
   stat(path: string): Promise<StatsLike>;
   readdir(path: string): Promise<string[]>;
@@ -76,6 +77,8 @@ export interface NodeHost {
   exit: (code?: number) => never;
   /** Read file as bytes. */
   readFile: (path: string) => Promise<Uint8Array>;
+  /** Resolve a path to its canonical absolute form, following symlinks. */
+  realPath: (path: string) => Promise<string>;
   /** Write bytes to a file. */
   writeFile: (path: string, data: Uint8Array) => Promise<void>;
   /** Get file/directory info. */
@@ -116,6 +119,7 @@ export function buildNodeHost(
     env: mods.proc.env,
     exit: (code?: number) => mods.proc.exit(code),
     readFile: (path: string) => mods.fs.readFile(path) as Promise<Uint8Array>,
+    realPath: (path: string) => mods.fs.realpath(path),
     writeFile: (path: string, data: Uint8Array) => mods.fs.writeFile(path, data) as Promise<void>,
     stat: (path: string): Promise<NodeFsInfo> =>
       mods.fs.stat(path).then((st: StatsLike) => ({
@@ -151,6 +155,7 @@ export function createNodeRuntimeServices(
 ): IRuntimeServices {
   const fsImpl: IFileSystem = {
     readFile: host.readFile,
+    realPath: host.realPath,
     writeFile: host.writeFile,
     stat: host.stat,
     readdir: host.readdir,

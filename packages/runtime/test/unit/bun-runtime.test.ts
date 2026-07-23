@@ -16,6 +16,7 @@ function createFakeBunHost(overrides: Partial<BunHost> = {}): BunHost {
       throw new Error(`Bun.exit(${code ?? 0})`);
     },
     readFile: (path: string) => files.get(path) ?? null,
+    realPath: (path: string) => (files.has(path) || dirs.has(path) ? path : null),
     writeFile: (path: string, data: Uint8Array) => {
       files.set(path, data);
     },
@@ -106,6 +107,14 @@ describe('createBunRuntimeServices', () => {
     const services = createBunRuntimeServices(createFakeBunHost());
     const fs = services.fs!;
     await expect(fs.readFile('/missing.txt')).rejects.toThrow('ENOENT');
+  });
+
+  it('fs.realPath resolves an existing path and rejects a missing one', async () => {
+    const services = createBunRuntimeServices(createFakeBunHost());
+    const fs = services.fs!;
+    await fs.writeFile('/real.txt', new Uint8Array([1]));
+    expect(await fs.realPath!('/real.txt')).toBe('/real.txt');
+    await expect(fs.realPath!('/missing.txt')).rejects.toThrow('ENOENT');
   });
 
   it('fs.stat returns file info', async () => {

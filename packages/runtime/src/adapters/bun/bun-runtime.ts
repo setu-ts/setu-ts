@@ -27,6 +27,8 @@ export interface BunHost {
   exit: (code?: number) => never;
   /** Read file as bytes. */
   readFile: (path: string) => Uint8Array | null;
+  /** Resolve a path to its canonical absolute form (null when it cannot be resolved). */
+  realPath: (path: string) => string | null;
   /** Write bytes to a file. */
   writeFile: (path: string, data: Uint8Array) => void;
   /** Get file/directory info. */
@@ -63,6 +65,15 @@ export function createBunRuntimeServices(
         return Promise.reject(new Error(`ENOENT: no such file or directory, read '${path}'`));
       }
       return Promise.resolve(data);
+    },
+    realPath: (path: string) => {
+      const resolved = host.realPath(path);
+      if (resolved === null) {
+        return Promise.reject(
+          new Error(`ENOENT: no such file or directory, realpath '${path}'`),
+        );
+      }
+      return Promise.resolve(resolved);
     },
     writeFile: (path: string, data: Uint8Array) => {
       host.writeFile(path, data);

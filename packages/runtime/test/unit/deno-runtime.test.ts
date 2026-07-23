@@ -24,6 +24,12 @@ function createFakeDenoHost(overrides: Partial<DenoHost> = {}): DenoHost {
       }
       return Promise.resolve(data);
     },
+    realPath: (path: string) => {
+      if (files.has(path) || dirs.has(path)) {
+        return Promise.resolve(path);
+      }
+      return Promise.reject(new Error(`ENOENT: ${path}`));
+    },
     writeFile: (path: string, data: Uint8Array) => {
       files.set(path, data);
       return Promise.resolve();
@@ -116,6 +122,14 @@ describe('createDenoRuntimeServices', () => {
     const services = createDenoRuntimeServices(createFakeDenoHost());
     const fs = services.fs!;
     await expect(fs.readFile('/missing.txt')).rejects.toThrow('ENOENT');
+  });
+
+  it('fs.realPath resolves an existing path and rejects a missing one', async () => {
+    const services = createDenoRuntimeServices(createFakeDenoHost());
+    const fs = services.fs!;
+    await fs.writeFile('/real.txt', new Uint8Array([1]));
+    expect(await fs.realPath!('/real.txt')).toBe('/real.txt');
+    await expect(fs.realPath!('/missing.txt')).rejects.toThrow('ENOENT');
   });
 
   it('fs.stat returns file info', async () => {
@@ -215,6 +229,7 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
         throw new Error('exit');
       },
       readFile: () => Promise.resolve(new Uint8Array()),
+      realPath: (path: string) => Promise.resolve(path),
       writeFile: () => Promise.resolve(),
       stat: () =>
         Promise.resolve({

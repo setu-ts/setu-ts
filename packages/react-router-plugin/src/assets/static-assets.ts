@@ -82,18 +82,32 @@ export function createStaticAssetHandler(options: {
     // the attacker-controlled vector (the URL). Combined with prepending
     // `assetsDir` below, this keeps every resolved path lexically inside the
     // assets root.
-    //
-    // NOTE: containment is LEXICAL only. Symlinks INSIDE `assetsDir` are
-    // followed (assets are the app's own trusted build output, not
-    // request-controlled). Canonical, symlink-safe containment would require a
-    // `realPath`/`lstat` on `IFileSystem` — the contract exposes neither, and a
-    // runtime-specific API (`Deno.realPathSync`) is not permitted here
-    // (AI_GUIDELINES: no runtime-specific APIs outside `packages/runtime`).
     if (relativePath.includes('..')) {
       return ctx.response.status(404).send();
     }
 
     const fullPath = `${assetsDir}/${relativePath}`;
+
+    // Symlink-safe containment: when the runtime can canonicalize paths
+    // (`fs.realPath`, present on the real Node/Deno/Bun adapters), resolve both
+    // the assets root and the target and confirm the target stays inside the
+    // root. This defeats a symlink INSIDE `assetsDir` that points outside it.
+    // When `realPath` is absent (edge runtimes, minimal fakes), containment
+    // degrades to the lexical `..` guard above.
+    if (fs.realPath) {
+      let realBase: string;
+      let realTarget: string;
+      try {
+        realBase = await fs.realPath(assetsDir);
+        realTarget = await fs.realPath(fullPath);
+      } catch {
+        // Unresolvable (missing file / broken symlink) → treat as not found.
+        return ctx.response.status(404).send();
+      }
+      if (realTarget !== realBase && !realTarget.startsWith(`${realBase}/`)) {
+        return ctx.response.status(404).send();
+      }
+    }
 
     // Determine content type from extension.
     const ext = extractExtension(fullPath);

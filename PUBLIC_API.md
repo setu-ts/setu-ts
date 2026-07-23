@@ -227,6 +227,12 @@ interface IRuntimeServices {
 }
 ```
 
+`IFileSystem` provides `readFile`/`writeFile`/`stat`/`readdir`/`mkdir`/`rm`, plus an **optional**
+`realPath(path): Promise<string>` that canonicalizes a path following symlinks. `realPath` is
+implemented by the Node/Deno/Bun runtime adapters and absent on runtimes that cannot canonicalize;
+callers must degrade gracefully when it is not present (e.g. the React Router plugin's static-asset
+handler uses it for symlink-safe containment when available, falling back to lexical containment).
+
 ---
 
 ## LoggerPlugin()
@@ -1534,11 +1540,12 @@ app.router.get('/api/health', (ctx) => {
 - `ReactRouterPlugin(options)` — returns an `IPlugin` with async `register()` that mounts the SSR
   catch-all, optional static-asset route, and a `react-router` health indicator.
 - `createStaticAssetHandler({ fs, assetsDir, assetUrlPrefix })` — returns a `RouteHandler` for
-  serving built client assets with immutable caching. Traversal containment is **lexical**: request
-  paths containing `..` are rejected and every path is resolved under `assetsDir`. Symlinks inside
-  `assetsDir` are followed (assets are the app's own trusted build output); canonical symlink-safe
-  containment is intentionally not performed, as `IFileSystem` exposes no `realPath`/`lstat` and a
-  runtime-specific API is not permitted outside `packages/runtime`.
+  serving built client assets with immutable caching. Traversal containment: request paths
+  containing `..` are rejected and every path is resolved under `assetsDir`; additionally, when the
+  runtime provides `IFileSystem.realPath` (the Node/Deno/Bun adapters do), both the assets root and
+  the target are canonicalized and the target must stay inside the root — so a symlink inside
+  `assetsDir` pointing outside it is **not** served (404). When `realPath` is absent (edge
+  runtimes), containment degrades to the lexical `..` guard.
 - `assembleHandler(build, createRequestHandler, mode): SsrRequestHandler` — assembles an RR request
   handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
   unit-testable without I/O.

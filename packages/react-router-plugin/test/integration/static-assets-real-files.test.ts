@@ -1,12 +1,11 @@
 /**
  * Real-file tests for the static-asset handler — serve real files from disk and
- * assert content-type, caching, missing-file 404, and lexical `..` traversal
- * rejection over the actual filesystem (via `Deno` I/O in the test only; the
- * handler itself reads through the injected `IFileSystem`).
+ * assert content-type, caching, missing-file 404, lexical `..` rejection, and
+ * (via a real `IFileSystem.realPath`) symlink-safe containment: a symlink inside
+ * the assets root pointing OUTSIDE it is not served.
  *
- * Containment is lexical only (see `static-assets.ts`): symlinks inside the
- * assets root are followed, so there is deliberately no symlink-escape test —
- * the handler does not claim that guarantee.
+ * The injected `IFileSystem` here wraps `Deno` I/O (test-only); the handler
+ * reads and canonicalizes exclusively through that interface.
  *
  * @module
  */
@@ -115,13 +114,17 @@ describe('static-assets — real files', () => {
     } as never;
   }
 
-  it('serves a real .js file from disk with the correct content-type', async () => {
-    const fs: IFileSystem = {
-      readFile: async (p: string) => {
-        const bytes = await Deno.readFile(p);
-        return bytes;
-      },
+  // Real filesystem-backed IFileSystem: reads and canonicalizes via Deno.
+  // Both throw for missing paths, which the handler maps to 404.
+  function makeRealFs(): IFileSystem {
+    return {
+      readFile: (p: string) => Deno.readFile(p),
+      realPath: (p: string) => Deno.realPath(p),
     } as unknown as IFileSystem;
+  }
+
+  it('serves a real .js file from disk with the correct content-type', async () => {
+    const fs = makeRealFs();
 
     const handler = createStaticAssetHandler({
       fs,
@@ -143,19 +146,7 @@ describe('static-assets — real files', () => {
   });
 
   it('returns 404 for a missing real file (fs.readFile rejects)', async () => {
-    const fs: IFileSystem = {
-      readFile: async (p: string) => {
-        try {
-          const bytes = await Deno.readFile(p);
-          return bytes;
-        } catch (e) {
-          if (e instanceof Deno.errors.NotFound) {
-            throw new Error('ENOENT');
-          }
-          throw e;
-        }
-      },
-    } as unknown as IFileSystem;
+    const fs = makeRealFs();
 
     const handler = createStaticAssetHandler({
       fs,
@@ -172,12 +163,7 @@ describe('static-assets — real files', () => {
   });
 
   it('returns 404 for a path containing .. traversal', async () => {
-    const fs: IFileSystem = {
-      readFile: async (p: string) => {
-        const bytes = await Deno.readFile(p);
-        return bytes;
-      },
-    } as unknown as IFileSystem;
+    const fs = makeRealFs();
 
     const handler = createStaticAssetHandler({
       fs,
@@ -194,12 +180,7 @@ describe('static-assets — real files', () => {
   });
 
   it('returns 200 for a .css file served via real filesystem', async () => {
-    const fs: IFileSystem = {
-      readFile: async (p: string) => {
-        const bytes = await Deno.readFile(p);
-        return bytes;
-      },
-    } as unknown as IFileSystem;
+    const fs = makeRealFs();
 
     const handler = createStaticAssetHandler({
       fs,
@@ -220,12 +201,7 @@ describe('static-assets — real files', () => {
     // Write a file with no dot in its name.
     await Deno.writeTextFile(`${assetsDir}/Makefile`, 'all: build');
 
-    const fs: IFileSystem = {
-      readFile: async (p: string) => {
-        const bytes = await Deno.readFile(p);
-        return bytes;
-      },
-    } as unknown as IFileSystem;
+    const fs = makeRealFs();
 
     const handler = createStaticAssetHandler({
       fs,
@@ -240,5 +216,31 @@ describe('static-assets — real files', () => {
 
     expect(mockResp.status).toBe(200);
     expect(mockResp.headers.get('Content-Type')).toBe('application/octet-stream');
+  });
+
+  it('returns 404 for a symlink inside assets that points to a file OUTSIDE (realPath containment)', async () => {
+    // A secret file outside the assets root, and a symlink inside it that
+    // targets that secret. Lexical `..` checks cannot catch this; realPath can.
+    const outsideDir = `${tmpDir}/outside`;
+    await Deno.mkdir(outsideDir);
+    await Deno.writeTextFile(`${outsideDir}/secret.txt`, 'leaked');
+    await Deno.symlink(`${outsideDir}/secret.txt`, `${assetsDir}/leaked.txt`);
+
+    const fs = makeRealFs();
+    const handler = createStaticAssetHandler({
+      fs,
+      assetsDir,
+      assetUrlPrefix: '/assets/',
+    });
+
+    const mockResp = buildMockResponse();
+    const ctx = buildMockCtx('/assets/leaked.txt', mockResp);
+
+    await handler(ctx);
+
+    // Containment check resolves the symlink target outside assetsDir → 404,
+    // and the secret is never read/sent.
+    expect(mockResp.status).toBe(404);
+    expect(mockResp.sentBody).toBeNull();
   });
 });
