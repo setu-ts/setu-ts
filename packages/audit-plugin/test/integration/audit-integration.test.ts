@@ -135,4 +135,37 @@ describe('AuditPlugin integration (real kernel)', () => {
       await Deno.remove(dir, { recursive: true });
     }
   });
+
+  it('file backend creates a missing parent directory on the real filesystem', async () => {
+    const dir = await Deno.makeTempDir({ prefix: 'audit-plugin-mkdir-' });
+    // A path whose parent directories do NOT exist yet.
+    const nestedPath = `${dir}/nested/deeper/audit.log`;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuditPlugin({ storage: 'file', options: { path: nestedPath } }),
+      ],
+    });
+    try {
+      await app.start();
+      const logger = app.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
+
+      await logger.log({ action: 'dir.create', resource: 'fs', result: 'success' });
+
+      // The previously-absent parent directories and the file now exist on the
+      // real Deno filesystem — the write did not fail with ENOENT.
+      const fileStat = await Deno.stat(nestedPath);
+      expect(fileStat.isFile).toBe(true);
+      const dirStat = await Deno.stat(`${dir}/nested/deeper`);
+      expect(dirStat.isDirectory).toBe(true);
+
+      const content = await Deno.readTextFile(nestedPath);
+      const lines = content.split('\n').filter((l) => l.trim().length > 0);
+      expect(lines.length).toBe(1);
+      expect(JSON.parse(lines[0]).action).toBe('dir.create');
+    } finally {
+      await app.stop();
+      await Deno.remove(dir, { recursive: true });
+    }
+  });
 });

@@ -91,7 +91,8 @@ AuditPlugin({ storage: 'file', options: { path: './audit.log' } });
 - `file` requires a writable `runtime.fs`; it throws at registration on runtimes without one
   (Workers/edge). The committed `IFileSystem` has no native append, so writes are read-modify-write
   and concurrent appends are serialized; on shutdown the plugin's `onClose` drains any in-flight
-  write.
+  write. The target file's parent directory is created recursively on first write, so a configured
+  `path` in a not-yet-existing directory (e.g. `./var/log/audit.log`) does not fail with `ENOENT`.
 - `database` is inject-only — there is no canonical SQL driver to lazy-load. Equality filters
   (`action`/`resource`/`result`/`userId`/`resourceId`) are delegated to the client's `select` WHERE;
   time-range (`from`/`to`), ordering, and `limit` are applied in-process.

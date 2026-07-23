@@ -11,6 +11,18 @@ import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../interfaces/
 import { freezeAuditRecord, matchAuditQuery, orderAndLimit } from './audit-record.ts';
 
 /**
+ * Lexical parent directory of a path, or `undefined` when the path has no
+ * directory component (a bare filename) or resolves to a filesystem root.
+ * `IFileSystem` exposes no `dirname`, so this is computed here; it handles both
+ * `/` and `\` separators for cross-runtime paths.
+ */
+function parentDir(path: string): string | undefined {
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  if (idx <= 0) return undefined;
+  return path.slice(0, idx);
+}
+
+/**
  * File-backed audit storage. Writes JSONL to `path` via `runtime.fs`.
  *
  * At construction, when `fs` is absent, throws the documented error. Uses
@@ -20,6 +32,7 @@ export class FileAuditStorage implements IAuditStorage {
   private readonly fs: IFileSystem;
   private readonly path: string;
   private _lock: Promise<void> = Promise.resolve();
+  private _dirEnsured = false;
 
   /**
    * @param options.fs - The `IFileSystem` from runtime (required, throws absent).
@@ -45,7 +58,23 @@ export class FileAuditStorage implements IAuditStorage {
     await next; // still propagates THIS append's error to its caller
   }
 
+  /**
+   * Creates the target file's parent directory (recursively) on first write, so
+   * a configured `path` in a not-yet-existing directory does not fail with
+   * ENOENT. Idempotent: runs once per instance (guarded by `_dirEnsured`), and
+   * is serialized by the `_lock` chain so there is no race on the flag.
+   */
+  private async ensureDir(): Promise<void> {
+    if (this._dirEnsured) return;
+    const dir = parentDir(this.path);
+    if (dir !== undefined) {
+      await this.fs.mkdir(dir, { recursive: true });
+    }
+    this._dirEnsured = true;
+  }
+
   private async readModifyWrite(entry: StoredAuditEntry): Promise<void> {
+    await this.ensureDir();
     let content = '';
     try {
       const buf = await this.fs.readFile(this.path);

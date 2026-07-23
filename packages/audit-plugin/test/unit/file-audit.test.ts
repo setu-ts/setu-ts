@@ -255,6 +255,104 @@ describe('FileAuditStorage', () => {
     expect(JSON.parse(lines[0]).id).toBe('1');
   });
 
+  function makeRecordingFs(
+    files: Record<string, string>,
+    mkdirCalls: Array<{ path: string; recursive: boolean }>,
+  ): IFileSystem {
+    return {
+      readFile: (path: string) => Promise.resolve(new TextEncoder().encode(files[path] ?? '')),
+      writeFile: (path: string, data: Uint8Array) => {
+        files[path] = new TextDecoder().decode(data);
+        return Promise.resolve();
+      },
+      stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
+      readdir: () => Promise.resolve([]),
+      mkdir: (path: string, options?: { recursive?: boolean }) => {
+        mkdirCalls.push({ path, recursive: options?.recursive ?? false });
+        return Promise.resolve();
+      },
+      rm: () => Promise.resolve(),
+    };
+  }
+
+  it('creates the parent directory recursively on first write', async () => {
+    const files: Record<string, string> = {};
+    const mkdirCalls: Array<{ path: string; recursive: boolean }> = [];
+    const fs = makeRecordingFs(files, mkdirCalls);
+    const storage = new FileAuditStorage({ fs, path: './logs/nested/audit.log' });
+
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+
+    expect(mkdirCalls).toEqual([{ path: './logs/nested', recursive: true }]);
+    expect(files['./logs/nested/audit.log']).toBeDefined();
+  });
+
+  it('does not mkdir for a bare filename (no directory component)', async () => {
+    const files: Record<string, string> = {};
+    const mkdirCalls: Array<{ path: string; recursive: boolean }> = [];
+    const fs = makeRecordingFs(files, mkdirCalls);
+    const storage = new FileAuditStorage({ fs, path: 'audit.log' });
+
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+
+    expect(mkdirCalls.length).toBe(0);
+    expect(files['audit.log']).toBeDefined();
+  });
+
+  it('does not mkdir a filesystem root (leading-separator path)', async () => {
+    const files: Record<string, string> = {};
+    const mkdirCalls: Array<{ path: string; recursive: boolean }> = [];
+    const fs = makeRecordingFs(files, mkdirCalls);
+    const storage = new FileAuditStorage({ fs, path: '/audit.log' });
+
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+
+    expect(mkdirCalls.length).toBe(0);
+    expect(files['/audit.log']).toBeDefined();
+  });
+
+  it('creates the parent directory only once across multiple appends', async () => {
+    const files: Record<string, string> = {};
+    const mkdirCalls: Array<{ path: string; recursive: boolean }> = [];
+    const fs = makeRecordingFs(files, mkdirCalls);
+    const storage = new FileAuditStorage({ fs, path: './logs/audit.log' });
+
+    await storage.append({
+      id: '1',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+    await storage.append({
+      id: '2',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      result: 'failure',
+    });
+
+    expect(mkdirCalls.length).toBe(1);
+  });
+
   it('append writes entry even when readFile throws ENOENT', async () => {
     const files: Record<string, string> = {};
     const fs = {

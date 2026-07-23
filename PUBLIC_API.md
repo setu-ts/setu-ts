@@ -1740,7 +1740,8 @@ not part of the public capability this milestone.
   records through the logging backend, not this object.
 - The `'file'` backend uses read-modify-write over `runtime.fs` (the committed `IFileSystem` has no
   native append) and serializes concurrent appends; on shutdown the plugin's `onClose` drains any
-  in-flight write.
+  in-flight write. The target file's parent directory is created recursively on first write, so a
+  `path` in a not-yet-existing directory does not fail with `ENOENT`.
 - The `'database'` backend delegates equality filtering (`action`/`resource`/`result`/`userId`/
   `resourceId`) to the injected client's `select` WHERE; time-range (`from`/`to`), ordering, and
   `limit` are applied in-process.
