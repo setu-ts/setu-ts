@@ -95,6 +95,11 @@ describe('MemoryAuditStorage', () => {
     expect(results.length).toBe(0);
   });
 
+  it('close() resolves (no-op)', async () => {
+    const storage = new MemoryAuditStorage();
+    await expect(storage.close()).resolves.toBeUndefined();
+  });
+
   it('query with from/to filters by timestamp range', async () => {
     const storage = new MemoryAuditStorage();
     await storage.append({

@@ -5,7 +5,7 @@
  * @module
  */
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
-import { matchAuditQuery } from './audit-record.ts';
+import { matchAuditQuery, orderAndLimit } from './audit-record.ts';
 
 /**
  * In-memory audit storage backed by an array. Stores already-frozen records;
@@ -23,25 +23,21 @@ export class MemoryAuditStorage implements IAuditStorage {
   }
 
   /**
-   * Filters entries via {@linkcode matchAuditQuery}, orders ascending by
-   * timestamp, applies `limit` (newest).
+   * Filters entries via {@linkcode matchAuditQuery}, then orders ascending by
+   * timestamp and applies `limit` (newest) via {@linkcode orderAndLimit}.
    */
   query(criteria?: AuditQuery): Promise<StoredAuditEntry[]> {
     const matches = this.entries.filter((e) => !criteria || matchAuditQuery(e, criteria));
-    matches.sort(
-      (a, b) => a.timestamp - b.timestamp || this.entries.indexOf(a) - this.entries.indexOf(b),
-    );
-    if (criteria?.limit === 0) {
-      return Promise.resolve([]);
-    }
-    if (criteria?.limit !== undefined && criteria.limit > 0 && criteria.limit < matches.length) {
-      return Promise.resolve(matches.slice(matches.length - criteria.limit));
-    }
-    return Promise.resolve(matches);
+    return Promise.resolve(orderAndLimit(matches, criteria?.limit));
   }
 
   /** Always ready — in-memory storage has no external dependency. */
   isReady(): boolean {
     return true;
+  }
+
+  /** No buffered state — appends complete synchronously. */
+  close(): Promise<void> {
+    return Promise.resolve();
   }
 }

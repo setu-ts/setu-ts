@@ -65,6 +65,13 @@ export interface IAuditStorage {
   query(criteria?: AuditQuery): Promise<StoredAuditEntry[]>;
   /** Whether the storage is ready to accept writes. */
   isReady(): boolean;
+  /**
+   * Drains any in-flight writes on shutdown. Backends that complete each
+   * `append` before its promise resolves (memory/log/database) are no-ops;
+   * `FileAuditStorage` awaits its serialized write chain so a fire-and-forget
+   * `log()` in flight at shutdown is not lost.
+   */
+  close(): Promise<void>;
 }
 
 // ── Structural client interface (database backend) ──────────────────────────

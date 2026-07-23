@@ -241,6 +241,20 @@ describe('FileAuditStorage', () => {
     expect(storage.isReady()).toBe(true);
   });
 
+  it('close() awaits the in-flight write chain', async () => {
+    const files: Record<string, string> = {};
+    const fs = makeFakeFs(files);
+    const storage = new FileAuditStorage({ fs });
+
+    // Fire-and-forget append (not awaited), then close() must drain it.
+    void storage.append({ id: '1', timestamp: 100, action: 'a', resource: 'r', result: 'success' });
+    await storage.close();
+
+    const lines = files['./audit.log']!.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines.length).toBe(1);
+    expect(JSON.parse(lines[0]).id).toBe('1');
+  });
+
   it('append writes entry even when readFile throws ENOENT', async () => {
     const files: Record<string, string> = {};
     const fs = {

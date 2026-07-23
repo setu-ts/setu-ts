@@ -277,9 +277,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Bun runtime adapters (degrades to lexical `..` containment when absent); a `react-router` health
   indicator and no `onClose` (stateless handler); `flatRoutes`/file-based routing supported
   transparently via the compiled build — complete (PR #57)
-- **Next milestone** — **Milestone 26** (`packages/audit-plugin`), the lowest-numbered pending
-  milestone (M25 secrets-plugin landed via PR #56); resumes the main plugin sequence (M26–M40)
-  unless reprioritized.
+- **Milestone 26** (`packages/audit-plugin` — AuditPlugin registering an `IAuditLogger` under
+  `CAPABILITIES.AUDIT`, backed by a pluggable internal `IAuditStorage` port; `AuditService.log()`
+  stamps each `AuditEntry` with an internal `id` (`runtime.uuid()`) + wall-clock `timestamp`
+  (`runtime.now()`) and deep-freezes it (immutability, including nested
+  `before`/`after`/`metadata`); four storage backends — `MemoryAuditStorage` (zero-dependency
+  default, non-durable, every runtime incl. Workers), `LogAuditStorage` (routes to the resolved
+  `ILogger`; `query()` returns `[]`), `DatabaseAuditStorage` (inject-only via a structural
+  `IAuditDbClient` — never the `database` token), and `FileAuditStorage` (JSONL read-modify-write
+  over `runtime.fs`, Node/Deno/Bun only); shared `orderAndLimit`/`matchAuditQuery` query transforms;
+  an `audit` health indicator and an `onClose` that drains the file write-chain; no `common` change,
+  no new capability token — the contract and `AUDIT: 'audit'` token were committed in M1) — complete
+  (PR pending)
+- **Next milestone** — **Milestone 27** (`packages/resilience-plugin`), the lowest-numbered pending
+  milestone (M26 audit-plugin landed on `feat/26-audit-plugin`); resumes the main plugin sequence
+  (M27–M40) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

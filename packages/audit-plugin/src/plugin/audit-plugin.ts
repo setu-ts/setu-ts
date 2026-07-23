@@ -137,9 +137,7 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
           status: storage.isReady() ? 'up' : 'down',
         }));
 
-      ctx.lifecycle.onClose(() => {
-        // No-op for most backends; file could flush buffers if needed.
-      });
+      ctx.lifecycle.onClose(() => storage.close());
     },
   };
 }

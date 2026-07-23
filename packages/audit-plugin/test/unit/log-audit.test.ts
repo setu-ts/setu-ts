@@ -85,6 +85,11 @@ describe('LogAuditStorage', () => {
     expect(results).toEqual([]);
   });
 
+  it('close() resolves (no-op)', async () => {
+    const storage = new LogAuditStorage();
+    await expect(storage.close()).resolves.toBeUndefined();
+  });
+
   it('setLogLevel changes emission level', async () => {
     const { logger, records } = makeFakeLogger();
     const storage = new LogAuditStorage({ logger });

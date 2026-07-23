@@ -111,6 +111,24 @@ export function toAuditRow(record: StoredAuditEntry): Record<string, unknown> {
 }
 
 /**
+ * Orders entries ascending by `timestamp` (stable — equal timestamps keep their
+ * input order) and applies the query `limit` by returning the newest `limit`
+ * records, still ascending. `limit <= 0` returns none; an omitted or
+ * out-of-range `limit` returns all. Shared by every in-process backend so the
+ * ordering/limit contract has one implementation.
+ *
+ * @param entries - Already-filtered entries in insertion order
+ * @param limit - Optional cap from {@linkcode AuditQuery.limit}
+ * @returns A new array; the input is not mutated
+ */
+export function orderAndLimit(entries: StoredAuditEntry[], limit?: number): StoredAuditEntry[] {
+  const ordered = [...entries].sort((a, b) => a.timestamp - b.timestamp);
+  if (limit === undefined || limit >= ordered.length) return ordered;
+  if (limit <= 0) return [];
+  return ordered.slice(ordered.length - limit);
+}
+
+/**
  * Deserializes a flat row back into a {@linkcode StoredAuditEntry}, applying
  * {@linkcode freezeAuditRecord} so the returned record is immutable.
  */

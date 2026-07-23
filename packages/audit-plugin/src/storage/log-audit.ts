@@ -60,4 +60,9 @@ export class LogAuditStorage implements IAuditStorage {
   isReady(): boolean {
     return this._logger !== null;
   }
+
+  /** The logger owns its own flush lifecycle; nothing to drain here. */
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
 }

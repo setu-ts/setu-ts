@@ -8,9 +8,52 @@ import {
   freezeAuditRecord,
   fromAuditRow,
   matchAuditQuery,
+  orderAndLimit,
   toAuditRow,
 } from '../../src/storage/audit-record.ts';
 import type { AuditQuery, StoredAuditEntry } from '../../src/interfaces/index.ts';
+
+function entry(id: string, timestamp: number): StoredAuditEntry {
+  return { id, timestamp, action: 'a', resource: 'r', result: 'success' };
+}
+
+describe('orderAndLimit', () => {
+  it('orders ascending by timestamp', () => {
+    const out = orderAndLimit([entry('c', 300), entry('a', 100), entry('b', 200)]);
+    expect(out.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('is stable for equal timestamps (preserves input order)', () => {
+    const out = orderAndLimit([entry('x', 100), entry('y', 100), entry('z', 100)]);
+    expect(out.map((e) => e.id)).toEqual(['x', 'y', 'z']);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [entry('c', 300), entry('a', 100)];
+    orderAndLimit(input);
+    expect(input.map((e) => e.id)).toEqual(['c', 'a']);
+  });
+
+  it('returns all when limit is undefined', () => {
+    const out = orderAndLimit([entry('a', 100), entry('b', 200)]);
+    expect(out.length).toBe(2);
+  });
+
+  it('returns all when limit >= length', () => {
+    const out = orderAndLimit([entry('a', 100), entry('b', 200)], 5);
+    expect(out.map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('returns none when limit <= 0', () => {
+    expect(orderAndLimit([entry('a', 100)], 0)).toEqual([]);
+    expect(orderAndLimit([entry('a', 100)], -3)).toEqual([]);
+  });
+
+  it('returns the newest `limit` records, still ascending', () => {
+    const out = orderAndLimit([entry('a', 100), entry('b', 200), entry('c', 300)], 2);
+    expect(out.map((e) => e.id)).toEqual(['b', 'c']);
+  });
+});
 
 describe('freezeAuditRecord', () => {
   it('deep-freezes nested objects — mutating before throws', () => {

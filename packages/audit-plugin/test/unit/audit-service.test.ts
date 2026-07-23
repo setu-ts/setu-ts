@@ -44,6 +44,9 @@ describe('AuditService', () => {
       isReady() {
         return true;
       },
+      close() {
+        return Promise.resolve();
+      },
     };
     return { storage, appends };
   }
@@ -94,6 +97,9 @@ describe('AuditService', () => {
       },
       query(): Promise<StoredAuditEntry[]> {
         return Promise.resolve([]);
+      },
+      close() {
+        return Promise.resolve();
       },
       isReady() {
         return true;

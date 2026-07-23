@@ -4,17 +4,13 @@
  *
  * @module
  */
-import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
-import { fromAuditRow, toAuditRow } from './audit-record.ts';
-
-/**
- * Structural shape of an injected database client facade. The DB backend is
- * inject-only — it never touches the `database` capability token.
- */
-export interface IAuditDbClient {
-  insert(table: string, row: Record<string, unknown>): Promise<void>;
-  select(table: string, criteria?: Record<string, unknown>): Promise<Record<string, unknown>[]>;
-}
+import type {
+  AuditQuery,
+  IAuditDbClient,
+  IAuditStorage,
+  StoredAuditEntry,
+} from '../interfaces/index.ts';
+import { fromAuditRow, orderAndLimit, toAuditRow } from './audit-record.ts';
 
 /**
  * Database-backed audit storage. Requires an injected {@linkcode IAuditDbClient}
@@ -60,7 +56,8 @@ export class DatabaseAuditStorage implements IAuditStorage {
 
     const results: StoredAuditEntry[] = rows.map(fromAuditRow);
 
-    // Apply from/to filter on mapped results.
+    // Apply from/to filter on mapped results (equality filters are delegated to
+    // the client's WHERE above); ordering/limit via the shared helper.
     const filtered: StoredAuditEntry[] = [];
     for (const r of results) {
       if (criteria?.from !== undefined && r.timestamp < criteria.from) continue;
@@ -68,17 +65,16 @@ export class DatabaseAuditStorage implements IAuditStorage {
       filtered.push(r);
     }
 
-    filtered.sort((a, b) => a.timestamp - b.timestamp);
-
-    if (criteria?.limit !== undefined && criteria.limit > 0 && filtered.length > criteria.limit) {
-      return filtered.slice(filtered.length - criteria.limit);
-    }
-
-    return filtered;
+    return orderAndLimit(filtered, criteria?.limit);
   }
 
   /** Database storage is always ready once constructed. */
   isReady(): boolean {
     return true;
+  }
+
+  /** The injected client owns the connection lifecycle; nothing to drain here. */
+  close(): Promise<void> {
+    return Promise.resolve();
   }
 }

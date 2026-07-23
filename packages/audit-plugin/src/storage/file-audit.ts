@@ -8,7 +8,7 @@
  */
 import type { IFileSystem } from '@hono-enterprise/common';
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
-import { freezeAuditRecord, matchAuditQuery } from './audit-record.ts';
+import { freezeAuditRecord, matchAuditQuery, orderAndLimit } from './audit-record.ts';
 
 /**
  * File-backed audit storage. Writes JSONL to `path` via `runtime.fs`.
@@ -81,17 +81,16 @@ export class FileAuditStorage implements IAuditStorage {
     }
 
     const filtered = entries.filter((e) => !criteria || matchAuditQuery(e, criteria));
-    filtered.sort((a, b) => a.timestamp - b.timestamp);
-
-    if (criteria?.limit !== undefined && criteria.limit > 0 && criteria.limit < filtered.length) {
-      return filtered.slice(filtered.length - criteria.limit);
-    }
-
-    return filtered;
+    return orderAndLimit(filtered, criteria?.limit);
   }
 
   /** File storage is always ready once constructed (we don't probe the FS). */
   isReady(): boolean {
     return true;
+  }
+
+  /** Awaits the serialized write chain so no in-flight append is lost on close. */
+  close(): Promise<void> {
+    return this._lock;
   }
 }

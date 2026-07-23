@@ -85,6 +85,12 @@ describe('DatabaseAuditStorage', () => {
     expect(storage.isReady()).toBe(true);
   });
 
+  it('close() resolves (no-op — client owns the connection)', async () => {
+    const client = new FakeAuditDbClient();
+    const storage = new DatabaseAuditStorage({ client });
+    await expect(storage.close()).resolves.toBeUndefined();
+  });
+
   it('query filters by from/to on mapped results', async () => {
     const client = new FakeAuditDbClient();
     const storage = new DatabaseAuditStorage({ client, table: 'audit_logs' });
