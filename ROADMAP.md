@@ -2826,6 +2826,10 @@ app.register(ResiliencePlugin({
     delay: 1000,
     backoff: 'exponential',
   },
+  defaultBulkhead: {
+    maxConcurrent: 10,
+    maxQueue: 20,
+  },
 }));
 ```
 
@@ -2838,6 +2842,7 @@ const resilience = ctx.services.get<IResilienceService>('resilience');
 const safeCall = resilience.wrap(async () => {
   return await externalApi.call();
 }, {
+  bulkhead: true,
   circuitBreaker: true,
   retry: true,
   timeout: 5000,
@@ -2845,6 +2850,9 @@ const safeCall = resilience.wrap(async () => {
 
 const result = await safeCall();
 ```
+
+`bulkhead`, `circuitBreaker`, and `retry` each accept `true` (use the matching `default*` policy) or
+an inline policy object; a `true` with no configured default throws at `wrap` time.
 
 **Implementation Files:**
 
@@ -2866,9 +2874,9 @@ const result = await safeCall();
 
 ### Deliverables
 
-- [ ] ResiliencePlugin
-- [ ] Circuit breaker, retry, timeout, bulkhead
-- [ ] Full test coverage
+- [x] ResiliencePlugin
+- [x] Circuit breaker, retry, timeout, bulkhead
+- [x] Full test coverage
 
 ---
 
@@ -4105,7 +4113,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 24c       | ✅     | telemetry-collector  |
 | 25        | ✅     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
-| 27        | ⬜     | resilience-plugin    |
+| 27        | ✅     | resilience-plugin    |
 | 28        | ⬜     | storage-plugin       |
 | 29        | ⬜     | mail-plugin          |
 | 30        | ⬜     | notification-plugin  |

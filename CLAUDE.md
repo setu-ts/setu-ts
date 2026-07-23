@@ -277,9 +277,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Bun runtime adapters (degrades to lexical `..` containment when absent); a `react-router` health
   indicator and no `onClose` (stateless handler); `flatRoutes`/file-based routing supported
   transparently via the compiled build — complete (PR #57)
-- **Next milestone** — **Milestone 26** (`packages/audit-plugin`), the lowest-numbered pending
-  milestone (M25 secrets-plugin landed via PR #56); resumes the main plugin sequence (M26–M40)
-  unless reprioritized.
+- **Milestone 27** (`packages/resilience-plugin` — ResiliencePlugin registering an
+  `IResilienceService` under `CAPABILITIES.RESILIENCE`; a zero-dependency `ResilienceService.wrap`
+  composing four pure in-process patterns — circuit breaker, retry with backoff, timeout, and
+  bulkhead — around an arbitrary `() => Promise<T>`, built once per `wrap` into a state-preserving
+  closure in the fixed order bulkhead → circuitBreaker → retry → timeout → fn; internal
+  `CircuitBreaker` (implements the committed `ICircuitBreaker`, monotonic `hrtime()` rolling failure
+  window + open→half-open cooldown), `runWithRetry`/`computeBackoffMs`, `runWithTimeout` (race with
+  `finally` timer cleanup, documented non-cancellation), and `Bulkhead` (bounded FIFO queue);
+  exported `TimeoutError`/`BulkheadFullError`/`CircuitOpenError` for consumer `instanceof`; per-wrap
+  `default*` policy resolution where `true` consumes the matching plugin default and a `true` with
+  no default throws; no health indicator, no `onClose`. Added the missing service contract to
+  `common`: `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`,
+  `BulkheadPolicy`, `BackoffStrategy` (distinct names from the scheduler's
+  `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
+  row + ROADMAP examples in the same PR) — complete (PR pending)
+- **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
+  sequence (M26 audit-plugin proceeds in parallel on its own branch, M28–M40 follow) unless
+  reprioritized.
 
 ## Verification (run before declaring any work done)
 
