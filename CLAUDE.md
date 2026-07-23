@@ -288,7 +288,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   over `runtime.fs`, Node/Deno/Bun only); shared `orderAndLimit`/`matchAuditQuery` query transforms;
   an `audit` health indicator and an `onClose` that drains the file write-chain; no `common` change,
   no new capability token — the contract and `AUDIT: 'audit'` token were committed in M1) — complete
-  (PR pending)
+  (PR #58)
 - **Next milestone** — **Milestone 27** (`packages/resilience-plugin`), the lowest-numbered pending
   milestone (M26 audit-plugin landed on `feat/26-audit-plugin`); resumes the main plugin sequence
   (M27–M40) unless reprioritized.
