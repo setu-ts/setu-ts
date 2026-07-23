@@ -1656,6 +1656,98 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ---
 
+## AuditPlugin()
+
+Provides an immutable audit trail: registers an `IAuditLogger` under `CAPABILITIES.AUDIT`, backed by
+a pluggable storage backend. `log()` stamps each entry with an internally assigned `id`
+(`runtime.uuid()`) and wall-clock `timestamp` (`runtime.now()`), deep-freezes the record
+(immutability), then appends it to storage. The default backend is `'memory'` (zero-dependency, runs
+on every runtime including Cloudflare Workers) — **non-durable**, so production should select
+`'log'`, `'database'`, or `'file'`. No database driver is a hard dependency: the `'database'`
+backend takes an injected client facade (`IAuditDbClient`), never the `database` capability token.
+
+### Registration
+
+```typescript
+import { AuditPlugin } from '@hono-enterprise/audit-plugin';
+
+// In-memory (default — non-durable)
+app.register(AuditPlugin());
+
+// Route records through the resolved logger
+app.register(AuditPlugin({ storage: 'log', options: { level: 'info' } }));
+
+// Persist to a database via an injected client (inject-only)
+app.register(
+  AuditPlugin({ storage: 'database', options: { client: myDbClient, table: 'audit_logs' } }),
+);
+
+// Append JSONL to a file (Node/Deno/Bun only — requires runtime.fs)
+app.register(AuditPlugin({ storage: 'file', options: { path: './audit.log' } }));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IAuditLogger } from '@hono-enterprise/common';
+
+const audit = ctx.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
+await audit.log({
+  action: 'user.delete',
+  resource: 'user',
+  resourceId: '123',
+  userId: ctx.request.user?.id,
+  result: 'success',
+  before: { active: true },
+  after: { active: false },
+});
+```
+
+`IAuditLogger` is write-only (like `ILogger`); `AuditEntry` is the write shape and carries no
+`id`/`timestamp`. Stored records add both internally and are immutable once written. Retrieval is
+not part of the public capability this milestone.
+
+### Options
+
+| Option           | Backend    | Description                                                                                    |
+| ---------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| `storage`        | —          | `'memory'` (default), `'log'`, `'database'`, `'file'`. Unknown values throw at registration.   |
+| `options.level`  | `log`      | Logger method to emit at: `'info'` (default), `'warn'`, or `'error'`.                          |
+| `options.logger` | `log`      | Injected `ILogger` overriding `ctx.logger` (throws at registration when neither is present).   |
+| `options.client` | `database` | Injected `IAuditDbClient`; required for `'database'` (throws when absent).                     |
+| `options.table`  | `database` | Table name for `insert`/`select`; default `'audit_logs'`.                                      |
+| `options.path`   | `file`     | JSONL file path; default `'./audit.log'` (throws at registration when `runtime.fs` is absent). |
+
+### Exports
+
+- `AuditPlugin(options?)` — plugin factory.
+- `AuditService` — the `IAuditLogger` implementation (stamps `id`/`timestamp`, deep-freezes,
+  delegates to storage).
+- `MemoryAuditStorage`, `LogAuditStorage`, `DatabaseAuditStorage`, `FileAuditStorage` — storage
+  backend classes (exported for direct construction/injection).
+- `AuditPluginOptions`, `AuditStorageType`, `AuditStorageOptions` — option types.
+- `IAuditDbClient` — structural database client facade for the `'database'` backend
+  (`insert(table, row)` / `select(table, criteria?)`).
+- `IAuditLogger`, `AuditEntry` — re-exported from `@hono-enterprise/common`.
+
+### Notes
+
+- The `'memory'` backend is **non-durable** (in-process array, lost on restart). It is the
+  zero-dependency default so audit works on every runtime out of the box; select a durable backend
+  for production.
+- The `'log'` backend's `query()` returns `[]` — the log sink is the durable trail; read audit
+  records through the logging backend, not this object.
+- The `'file'` backend uses read-modify-write over `runtime.fs` (the committed `IFileSystem` has no
+  native append) and serializes concurrent appends; on shutdown the plugin's `onClose` drains any
+  in-flight write. The target file's parent directory is created recursively on first write, so a
+  `path` in a not-yet-existing directory does not fail with `ENOENT`.
+- The `'database'` backend delegates equality filtering (`action`/`resource`/`result`/`userId`/
+  `resourceId`) to the injected client's `select` WHERE; time-range (`from`/`to`), ordering, and
+  `limit` are applied in-process.
+
+---
+
 ## CQRS
 
 Provides command/query separation with buses.

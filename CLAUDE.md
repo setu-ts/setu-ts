@@ -277,6 +277,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Bun runtime adapters (degrades to lexical `..` containment when absent); a `react-router` health
   indicator and no `onClose` (stateless handler); `flatRoutes`/file-based routing supported
   transparently via the compiled build — complete (PR #57)
+- **Milestone 26** (`packages/audit-plugin` — AuditPlugin registering an `IAuditLogger` under
+  `CAPABILITIES.AUDIT`, backed by a pluggable internal `IAuditStorage` port; `AuditService.log()`
+  stamps each `AuditEntry` with an internal `id` (`runtime.uuid()`) + wall-clock `timestamp`
+  (`runtime.now()`) and deep-freezes it (immutability, including nested
+  `before`/`after`/`metadata`); four storage backends — `MemoryAuditStorage` (zero-dependency
+  default, non-durable, every runtime incl. Workers), `LogAuditStorage` (routes to the resolved
+  `ILogger`; `query()` returns `[]`), `DatabaseAuditStorage` (inject-only via a structural
+  `IAuditDbClient` — never the `database` token), and `FileAuditStorage` (JSONL read-modify-write
+  over `runtime.fs`, Node/Deno/Bun only); shared `orderAndLimit`/`matchAuditQuery` query transforms;
+  an `audit` health indicator and an `onClose` that drains the file write-chain; no `common` change,
+  no new capability token — the contract and `AUDIT: 'audit'` token were committed in M1) — complete
+  (PR #58)
 - **Milestone 27** (`packages/resilience-plugin` — ResiliencePlugin registering an
   `IResilienceService` under `CAPABILITIES.RESILIENCE`; a zero-dependency `ResilienceService.wrap`
   composing four pure in-process patterns — circuit breaker, retry with backoff, timeout, and
@@ -293,8 +305,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
   row + ROADMAP examples in the same PR) — complete (PR pending)
 - **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
-  sequence (M26 audit-plugin proceeds in parallel on its own branch, M28–M40 follow) unless
-  reprioritized.
+  sequence (M28–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

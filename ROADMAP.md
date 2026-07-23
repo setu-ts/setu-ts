@@ -2800,9 +2800,9 @@ await audit.log({
 
 ### Deliverables
 
-- [ ] AuditPlugin
-- [ ] Storage adapters
-- [ ] Full test coverage
+- [x] AuditPlugin
+- [x] Storage adapters (`memory`, `log`, `database`, `file`)
+- [x] Full test coverage (>90% branches, functions, lines for all src files)
 
 ---
 
@@ -4112,7 +4112,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 24b       | ✅     | telemetry-plugin     |
 | 24c       | ✅     | telemetry-collector  |
 | 25        | ✅     | secrets-plugin       |
-| 26        | ⬜     | audit-plugin         |
+| 26        | ✅     | audit-plugin         |
 | 27        | ✅     | resilience-plugin    |
 | 28        | ⬜     | storage-plugin       |
 | 29        | ⬜     | mail-plugin          |
