@@ -303,7 +303,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `common`: `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`,
   `BulkheadPolicy`, `BackoffStrategy` (distinct names from the scheduler's
   `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
-  row + ROADMAP examples in the same PR) — complete (PR pending)
+  row + ROADMAP examples in the same PR) — complete (PR #59)
 - **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
   sequence (M28–M40 follow) unless reprioritized.
 
