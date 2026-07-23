@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { HandlerResult, IRuntimeServices } from '@hono-enterprise/common';
+import type { HandlerResult } from '@hono-enterprise/common';
 import type {
   IRequestContext,
   LoadContextFunction,
@@ -22,7 +22,6 @@ import { createDefaultLoadContext } from './load-context.ts';
  * @param ctx - The kernel request context
  * @param handler - The React Router request handler
  * @param getLoadContext - Optional custom loadContext builder
- * @param runtime - (Optional, unused) Retained for backward compatibility with tests
  * @returns The `HandlerResult` produced by writing the response back
  * @since 0.1.0
  */
@@ -30,36 +29,24 @@ export async function bridgeRequestToRR(
   ctx: IRequestContext,
   handler: SsrRequestHandler,
   getLoadContext: LoadContextFunction | undefined,
-  _runtime?: IRuntimeServices,
 ): Promise<HandlerResult> {
   // Build the loadContext — default exposes services + user.
   const loadContext = (getLoadContext ?? createDefaultLoadContext)(ctx);
 
-  // Buffer the body only for methods that carry one (not GET/HEAD).
-  let requestBody: Uint8Array | undefined;
+  // Buffer the body only for methods that carry one. A web `Request` throws
+  // when constructed with a GET/HEAD method and a non-null body, so the body
+  // key is omitted entirely for those methods (SSR document loads are GET).
   const method = ctx.request.method.toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    requestBody = await ctx.request.bytes();
-  }
-
-  // Build web Request from kernel request + its signal.
-  // deno-lint-ignore no-explicit-any
-  const requestInit: any = {
-    method: ctx.request.method,
-    headers: ctx.request.headers,
-  };
-
-  // Only attach body for methods that support it (never for GET/HEAD).
-  if (requestBody !== undefined) {
-    requestInit.body = requestBody;
-  }
-
-  // Derive a web Request's signal from ctx.signal (always live).
-  const signal = ctx.signal;
+  const body = method === 'GET' || method === 'HEAD' ? undefined : await ctx.request.bytes();
 
   const webRequest = new Request(ctx.request.url, {
-    ...requestInit,
-    signal,
+    method: ctx.request.method,
+    headers: ctx.request.headers,
+    // ctx.signal is always live (M42) — lets RR abort loaders on disconnect.
+    signal: ctx.signal,
+    // Cast to the web `BodyInit`: a `Uint8Array` is a valid body, but its
+    // `ArrayBufferLike` generic does not line up with `BufferSource` directly.
+    ...(body !== undefined ? { body: body as BodyInit } : {}),
   });
 
   // Invoke RR handler.

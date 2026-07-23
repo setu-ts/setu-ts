@@ -42,36 +42,6 @@ const CONTENT_TYPES: Record<string, string> = {
 const CACHE_CONTROL_IMMUTABLE = 'public, max-age=31536000, immutable';
 
 /**
- * Checks whether `resolvedPath` is safely within `baseDir`.
- *
- * Uses Deno real-path resolution when available (deno runtime),
- * otherwise falls back to string prefix containment after normalisation.
- *
- * @param baseDir - The base directory (e.g. assetsDir)
- * @param resolvedPath - The path to check
- * @returns True if `resolvedPath` is within `baseDir`
- */
-function isWithin(baseDir: string, resolvedPath: string): boolean {
-  // Use Deno's real-path if available for canonical resolution.
-  if (typeof Deno?.realPath === 'function') {
-    try {
-      const realBase = Deno.realPathSync?.(baseDir);
-      const realTarget = Deno.realPathSync?.(resolvedPath);
-      if (realBase && realTarget) {
-        return realTarget.startsWith(realBase + '/') || realTarget === realBase;
-      }
-    } catch {
-      // Fall through to string containment.
-    }
-  }
-
-  // Fallback: normalise and check prefix containment.
-  const normalisedBase = baseDir.replace(/\/+$/, '');
-  const normalisedTarget = resolvedPath.replace(/\/+$/, '');
-  return normalisedTarget.startsWith(normalisedBase + '/');
-}
-
-/**
  * Creates a static-asset `RouteHandler` that serves files from a directory
  * using the injected `IFileSystem`.
  *
@@ -108,17 +78,15 @@ export function createStaticAssetHandler(options: {
       return ctx.response.status(404).send();
     }
 
-    // Reject `..` segments in the decoded path to prevent traversal.
+    // Reject `..` segments in the decoded path to prevent traversal. Combined
+    // with prepending `assetsDir` below, this keeps every resolved path inside
+    // the assets root without reaching for a runtime-specific realpath API
+    // (which is unavailable outside `packages/runtime`).
     if (relativePath.includes('..')) {
       return ctx.response.status(404).send();
     }
 
     const fullPath = `${assetsDir}/${relativePath}`;
-
-    // Resolve against assetsDir for traversal containment check.
-    if (!isWithin(assetsDir, fullPath)) {
-      return ctx.response.status(404).send();
-    }
 
     // Determine content type from extension.
     const ext = extractExtension(fullPath);

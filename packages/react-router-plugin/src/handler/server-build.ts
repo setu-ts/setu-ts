@@ -21,8 +21,7 @@ import type { SsrRequestHandler } from '../interfaces/index.ts';
  */
 export function assembleHandler(
   build: unknown,
-  // deno-lint-ignore no-explicit-any
-  createRequestHandler: any,
+  createRequestHandler: (build: unknown, mode: string) => unknown,
   mode: string,
 ): SsrRequestHandler {
   return createRequestHandler(build, mode) as SsrRequestHandler;
@@ -62,13 +61,12 @@ export async function loadRequestHandler(
   // Unwrap the default export (ESM `default` or CJS spread).
   const build = (buildMod as Record<string, unknown>)?.default ?? buildMod;
 
-  // deno-lint-ignore no-explicit-any
-  let createRequestHandler: any;
+  let createRequestHandler: (build: unknown, mode: string) => unknown;
   try {
     const rr = options?.rrImportHook
       ? await options.rrImportHook()
       : await import('npm:react-router@7');
-    createRequestHandler = rr.createRequestHandler;
+    createRequestHandler = rr.createRequestHandler as (build: unknown, mode: string) => unknown;
   } catch (err) {
     throw new Error(
       `Failed to import 'npm:react-router@7'. Ensure it is available in the ` +

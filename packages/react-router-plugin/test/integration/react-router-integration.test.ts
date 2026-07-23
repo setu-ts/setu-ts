@@ -1,41 +1,142 @@
 /**
- * Integration test — real socket round-trip for streaming SSR body, and
- * route-precedence assertion (app API route NOT shadowed by catch-all).
+ * Integration tests for the React Router plugin.
  *
- * Uses a real `fetch()` over a socket (NOT `inject()`, which discards streaming bodies).
+ * The first two cases are REAL socket round-trips: `createApplication` +
+ * `RuntimePlugin()` + `ReactRouterPlugin()`, `app.start({ port })` and a real
+ * `fetch()` (NOT `inject()`, which discards streaming bodies). They cover
+ * (1) a streaming SSR document flushed over the socket through the catch-all,
+ * and (2) route precedence — a 2-static app route (`/api/health`) is NOT
+ * shadowed by the plugin's 1-static catch-all (`/*`). The remaining mock-ctx
+ * cases assert the 7-verb catch-all + asset-route wiring without a socket.
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { createApplication } from '@hono-enterprise/kernel';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
 import type { IPluginContext, RouteHandler } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
-import { createFakeHandler } from '../fixtures/fake-handler.ts';
+import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 
 type RouterMethod = (p: string, h: RouteHandler) => void;
 
-describe('react-router integration', () => {
-  it('streamed SSR document round-trips via fake handler', async () => {
-    const fakeResponse = new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(
-            new TextEncoder().encode('<html><body>SSR</body></html>'),
-          );
-          controller.close();
-        },
-      }),
-      { status: 200, headers: { 'Content-Type': 'text/html' } },
-    );
+/** Bind an ephemeral port, release it, return the number. */
+function findFreePort(): number {
+  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
+  const { port } = listener.addr as Deno.NetAddr;
+  listener.close();
+  return port;
+}
 
-    const { handler, state } = createFakeHandler({ response: fakeResponse });
+/** Read a whole `ReadableStream<Uint8Array>` body to a string. */
+async function readAll(body: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let out = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return out;
+}
 
-    // Verify the fake handler records calls correctly.
-    await handler(new Request('http://localhost/'), {});
-    expect(state.receivedRequests.length).toBe(1);
-    expect(state.receivedContexts.length).toBe(1);
+/** A fake `loadRequestHandler` that always resolves to `handler`. */
+function fakeLoader(
+  handler: SsrRequestHandler,
+): (path: string, mode: string) => Promise<SsrRequestHandler> {
+  return (_path, _mode) => Promise.resolve(handler);
+}
+
+describe('react-router integration (real socket)', () => {
+  it('streams an SSR document over the socket through the catch-all', async () => {
+    const port = findFreePort();
+
+    const handler: SsrRequestHandler = (_request, _loadContext) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('<html><body>SSR</body></html>'),
+              );
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        ),
+      );
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ReactRouterPlugin({
+          serverBuildPath: './build/server',
+          loadRequestHandler: fakeLoader(handler),
+        }),
+      ],
+    });
+
+    await app.start({ port });
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/some/page`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/html');
+      if (!response.body) throw new Error('expected a streaming body');
+      const body = await readAll(response.body);
+      expect(body).toContain('<body>SSR</body>');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('does NOT shadow a 2-static app route (/api/health) with the catch-all', async () => {
+    const port = findFreePort();
+
+    const handler: SsrRequestHandler = (_request, _loadContext) =>
+      Promise.resolve(
+        new Response('<html>SSR</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      );
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ReactRouterPlugin({
+          serverBuildPath: './build/server',
+          loadRequestHandler: fakeLoader(handler),
+        }),
+      ],
+    });
+
+    // Registered AFTER the plugin — 2 statics still beat the 1-static catch-all.
+    app.router.get('/api/health', (ctx) => ctx.response.json({ ok: true }));
+
+    await app.start({ port });
+
+    try {
+      const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+      expect(health.status).toBe(200);
+      expect(health.headers.get('content-type')).toContain('application/json');
+      expect(await health.json()).toEqual({ ok: true });
+
+      // A non-API path still resolves to the SSR catch-all.
+      const page = await fetch(`http://127.0.0.1:${port}/dashboard`);
+      expect(page.headers.get('content-type')).toContain('text/html');
+      expect(await page.text()).toContain('SSR');
+    } finally {
+      await app.stop();
+    }
   });
 
   it('plugin registers all 7 verbs at catch-all and asset route only when assetsDir set', async () => {
@@ -114,7 +215,7 @@ describe('react-router integration', () => {
 
     await plugin.register(mockCtx as never);
 
-    // Catch-all at /* should be registered for all 7 verbs + /assets/* GET = 8 total wildcard routes.
+    // Catch-all at /* for all 7 verbs + /assets/* GET = 8 total wildcard routes.
     const catchAllRoutes = routesRegistered.filter((r) => r.includes('/*'));
     expect(catchAllRoutes.length).toBe(8);
 
@@ -219,7 +320,7 @@ describe('react-router integration', () => {
           return fn;
         },
       },
-      onClose(_fn: () => void) {},
+      lifecycle: { onClose(_fn: () => void) {} },
       runtime: {
         platform: () => 'deno' as const,
         version: () => '2',

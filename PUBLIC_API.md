@@ -1544,10 +1544,9 @@ app.router.get('/api/health', (ctx) => {
   `{ rrImportHook?: () => Promise<Record<string, unknown>> }` — a test-seam that replaces the
   `npm:react-router@7` import. **Since 0.1.0** this parameter is optional and backward-compatible;
   callers may invoke it with only two arguments.
-- `bridgeRequestToRR(ctx, handler, getLoadContext?, runtime?): Promise<HandlerResult>` — bridges a
-  kernel `IRequestContext` into a web `Request`, invokes the RR handler, and maps the resulting
-  `Response` back onto `ctx.response`. The optional `runtime` parameter (`IRuntimeServices`) was
-  previously required but is now unused; accept `undefined` or omit it for tests.
+- `bridgeRequestToRR(ctx, handler, getLoadContext?): Promise<HandlerResult>` — bridges a kernel
+  `IRequestContext` into a web `Request` (omitting the body for GET/HEAD), invokes the RR handler,
+  and maps the resulting `Response` back onto `ctx.response`.
 - `class SsrService implements ISsrService` — holds a resolved RR request handler and optional
   `getLoadContext`; its `render(ctx)` method delegates to `bridgeRequestToRR` and returns the
   `HandlerResult`.

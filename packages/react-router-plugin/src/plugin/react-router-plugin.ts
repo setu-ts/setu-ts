@@ -97,45 +97,37 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       );
 
       // Build and register the SSR service.
-      const ssrService = new SsrService(
-        handler,
-        options.getLoadContext,
-        runtime,
-      );
+      const ssrService = new SsrService(handler, options.getLoadContext);
       ctx.services.register<ISsrService>(CAPABILITIES.SSR, ssrService);
 
-      // Register the SSR catch-all route for all 7 verbs.
+      // Register the SSR catch-all route for all 7 verbs. The route handler is
+      // built once (hoisted) and captures the service — no per-request lookup.
       const basename = options.basename ?? DEFAULT_BASENAME;
       const catchAllPattern = joinWildcard(basename);
+      const renderRoute: RouteHandler = (routeCtx) => ssrService.render(routeCtx);
 
       for (const verb of ALL_VERBS) {
-        // deno-lint-ignore require-await
-        const handler: RouteHandler = async (routeCtx) => {
-          const ssr = ctx.services.get<ISsrService>(CAPABILITIES.SSR);
-          return ssr.render(routeCtx);
-        };
-
         switch (verb) {
           case 'GET':
-            ctx.router.get(catchAllPattern, handler);
+            ctx.router.get(catchAllPattern, renderRoute);
             break;
           case 'POST':
-            ctx.router.post(catchAllPattern, handler);
+            ctx.router.post(catchAllPattern, renderRoute);
             break;
           case 'PUT':
-            ctx.router.put(catchAllPattern, handler);
+            ctx.router.put(catchAllPattern, renderRoute);
             break;
           case 'PATCH':
-            ctx.router.patch(catchAllPattern, handler);
+            ctx.router.patch(catchAllPattern, renderRoute);
             break;
           case 'DELETE':
-            ctx.router.delete(catchAllPattern, handler);
+            ctx.router.delete(catchAllPattern, renderRoute);
             break;
           case 'HEAD':
-            ctx.router.head(catchAllPattern, handler);
+            ctx.router.head(catchAllPattern, renderRoute);
             break;
           case 'OPTIONS':
-            ctx.router.options(catchAllPattern, handler);
+            ctx.router.options(catchAllPattern, renderRoute);
             break;
         }
       }

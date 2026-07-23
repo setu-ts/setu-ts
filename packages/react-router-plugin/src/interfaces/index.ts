@@ -44,7 +44,7 @@ export interface ReactRouterPluginOptions {
 
   /**
    * Injectable seam for lazy loading the RR handler. When omitted, the default
-   * performs `await import(serverBuildPath)` + `await import('npm:react-router')`.
+   * performs `await import(serverBuildPath)` + `await import('npm:react-router@7')`.
    * @since 0.1.0
    */
   readonly loadRequestHandler?: (

@@ -5,39 +5,12 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type {
-  HandlerResult,
-  IFileSystem,
-  IRuntimeServices,
-  ISsrService,
-} from '@hono-enterprise/common';
+import type { HandlerResult, ISsrService } from '@hono-enterprise/common';
 import type { LoadContextFunction, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
 describe('ssr-service', () => {
-  function makeFakeRuntime(): IRuntimeServices {
-    return {
-      platform: () => 'deno' as const,
-      version: () => '2.0',
-      hostname: () => 'localhost',
-      uuid: () => 'id',
-      randomBytes: (n: number) => new Uint8Array(n),
-      subtle: crypto.subtle,
-      now: () => 0,
-      hrtime: () => 0,
-      setTimeout: () => 0 as never,
-      clearTimeout: () => {},
-      setInterval: () => 0 as never,
-      clearInterval: () => {},
-      env: {},
-      exit: () => {
-        throw new Error('exit');
-      },
-      fs: undefined as unknown as IFileSystem,
-    } as unknown as IRuntimeServices;
-  }
-
   function buildMockCtx() {
     const controller = new AbortController();
     let body: Uint8Array | undefined;
@@ -113,7 +86,7 @@ describe('ssr-service', () => {
     });
     // deno-lint-ignore require-await
     const fakeHandler: SsrRequestHandler = async () => fakeResponse;
-    const service = new SsrService(fakeHandler, undefined, makeFakeRuntime());
+    const service = new SsrService(fakeHandler, undefined);
     const ctx = buildMockCtx();
 
     const result = await service.render(ctx);
@@ -131,7 +104,7 @@ describe('ssr-service', () => {
       return new Response('ok');
     };
 
-    const service = new SsrService(fakeHandler, loadCtx, makeFakeRuntime());
+    const service = new SsrService(fakeHandler, loadCtx);
     const mockCtx = buildMockCtx();
 
     await service.render(mockCtx);
@@ -145,7 +118,6 @@ describe('ssr-service', () => {
       // deno-lint-ignore require-await
       async () => new Response('ok'),
       undefined,
-      makeFakeRuntime(),
     );
 
     expect(typeof service.render).toBe('function');

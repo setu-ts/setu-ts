@@ -266,8 +266,8 @@ describe('static-assets', () => {
       assetUrlPrefix: '/assets/',
     });
     const mockResp = buildMockResponse();
-    // Requests with '../' substring are caught by the string containment check
-    // before isWithin runs — this verifies that early-exit path.
+    // Requests containing `..` are rejected by the traversal guard before any
+    // filesystem read — this verifies that early-exit path.
     const ctx = buildMockCtx('/assets/../../../etc/hostname', mockResp);
 
     await handler(ctx);

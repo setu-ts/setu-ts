@@ -9,32 +9,11 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult, IRuntimeServices } from '@hono-enterprise/common';
+import type { HandlerResult } from '@hono-enterprise/common';
 import type { LoadContextFunction, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
 
 describe('request-bridge', () => {
-  function makeRuntime(): IRuntimeServices {
-    return {
-      platform: () => 'deno' as const,
-      version: () => '2',
-      hostname: () => 'localhost',
-      uuid: () => 'id',
-      randomBytes: (_n: number) => new Uint8Array(_n),
-      subtle: crypto.subtle,
-      now: () => 0,
-      hrtime: () => 0,
-      setTimeout: () => 0 as never,
-      clearTimeout: () => {},
-      setInterval: () => 0 as never,
-      clearInterval: () => {},
-      env: {},
-      exit: () => {
-        throw new Error('exit');
-      },
-    };
-  }
-
   // Build a minimal IRequestContext mock capturing response state.
   function buildCtx(overrides?: { method?: string; body?: Uint8Array }): {
     ctx: Parameters<typeof bridgeRequestToRR>[0];
@@ -146,7 +125,7 @@ describe('request-bridge', () => {
     };
 
     const { ctx } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
+    await bridgeRequestToRR(ctx, handler, undefined);
 
     expect(receivedMethod).toBe('GET');
     expect(hasBody).toBe(false);
@@ -162,7 +141,7 @@ describe('request-bridge', () => {
     };
 
     const { ctx } = buildCtx({ method: 'POST', body: postBody });
-    await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
+    await bridgeRequestToRR(ctx, handler, undefined);
 
     expect(receivedBody).toBe(JSON.stringify({ key: 'val' }));
   });
@@ -177,7 +156,7 @@ describe('request-bridge', () => {
       );
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
+    await bridgeRequestToRR(ctx, handler, undefined);
 
     expect(respState.status).toBe(200);
   });
@@ -199,7 +178,7 @@ describe('request-bridge', () => {
       );
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
+    await bridgeRequestToRR(ctx, handler, undefined);
 
     expect(respState.streamed).toBe(true);
   });
@@ -214,7 +193,7 @@ describe('request-bridge', () => {
     };
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
+    await bridgeRequestToRR(ctx, handler, undefined);
 
     expect(respState.setCookies).toContain('session=abc; HttpOnly');
     expect(respState.setCookies).toContain('token=xyz; Secure');
@@ -236,7 +215,7 @@ describe('request-bridge', () => {
     ctx.request.headers.set('Content-Type', 'application/json');
     (ctx.request as { url: string }).url = 'http://localhost/foo?bar=1';
 
-    await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
+    await bridgeRequestToRR(ctx, handler, undefined);
 
     expect(receivedMethod).toBe('POST');
     expect(receivedUrl).toBe('http://localhost/foo?bar=1');

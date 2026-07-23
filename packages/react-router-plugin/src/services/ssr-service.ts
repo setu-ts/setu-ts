@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { HandlerResult, IRuntimeServices, ISsrService } from '@hono-enterprise/common';
+import type { HandlerResult, ISsrService } from '@hono-enterprise/common';
 import type {
   IRequestContext,
   LoadContextFunction,
@@ -28,13 +28,11 @@ export class SsrService implements ISsrService {
   /**
    * @param handler - The resolved RR request handler
    * @param getLoadContext - Optional custom loadContext builder
-   * @param runtime - Runtime services (accepted for structural compatibility; unused)
    * @since 0.1.0
    */
   constructor(
     handler: SsrRequestHandler,
     getLoadContext: LoadContextFunction | undefined,
-    _runtime?: IRuntimeServices,
   ) {
     this.#handler = handler;
     this.#getLoadContext = getLoadContext;
