@@ -47,6 +47,7 @@ export function assembleHandler(
  *
  * @param serverBuildPath - Path to the RR Vite server build (app-provided)
  * @param mode - `'production'` or `'development'`
+ * @param options - Optional override for the react-router import seam
  * @returns A promise resolving to the request handler
  * @throws {Error} When either import fails, with a message naming the missing specifier
  * @since 0.1.0
@@ -54,6 +55,7 @@ export function assembleHandler(
 export async function loadRequestHandler(
   serverBuildPath: string,
   mode: string,
+  options?: { rrImportHook?: () => Promise<Record<string, unknown>> },
 ): Promise<SsrRequestHandler> {
   let buildMod: unknown;
   try {
@@ -73,7 +75,9 @@ export async function loadRequestHandler(
   // deno-lint-ignore no-explicit-any
   let createRequestHandler: any;
   try {
-    const rr = await import('npm:react-router@7');
+    const rr = options?.rrImportHook
+      ? await options.rrImportHook()
+      : await import('npm:react-router@7');
     createRequestHandler = rr.createRequestHandler;
   } catch (err) {
     throw new Error(

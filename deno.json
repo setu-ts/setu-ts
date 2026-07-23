@@ -42,8 +42,8 @@
   "tasks": {
     "check": "deno check packages",
     "check:plan": "deno run --allow-read scripts/plan-lint.ts",
-    "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname packages",
-    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
+    "test": "deno test -P --allow-read --allow-write --allow-import --allow-env --allow-sys=hostname packages",
+    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-write --allow-import --allow-env --allow-sys=hostname packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
     "audit": "deno audit --level=high",
     "lint": "deno lint",
     "fmt": "deno fmt",
