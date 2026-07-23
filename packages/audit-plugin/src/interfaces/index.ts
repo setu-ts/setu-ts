@@ -8,7 +8,6 @@
  * @module
  */
 import type { ILogger } from '@hono-enterprise/common';
-// Re-exported type used by StoredAuditEntry's base — suppressed to avoid unused-var lint.
 
 /**
  * A stored audit record extends {@linkcode AuditEntry} with an internally

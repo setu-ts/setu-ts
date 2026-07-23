@@ -12,7 +12,7 @@ import type { AuditQuery, StoredAuditEntry } from '../interfaces/index.ts';
 function deepFreeze<T extends Record<string | number, unknown>>(obj: T): T {
   for (const key of Object.keys(obj)) {
     const value = obj[key];
-    if (value != null && (typeof value === 'object' || Array.isArray(value))) {
+    if (value != null && typeof value === 'object') {
       if (Array.isArray(value)) {
         for (let i = 0; i < value.length; i++) {
           const item = value[i];
