@@ -109,6 +109,7 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       const catchAllPattern = joinWildcard(basename);
 
       for (const verb of ALL_VERBS) {
+        // deno-lint-ignore require-await
         const handler: RouteHandler = async (routeCtx) => {
           const ssr = ctx.services.get<ISsrService>(CAPABILITIES.SSR);
           return ssr.render(routeCtx);

@@ -9,13 +9,12 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult } from '@hono-enterprise/common';
+import type { HandlerResult, IRuntimeServices } from '@hono-enterprise/common';
 import type { LoadContextFunction, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
 
 describe('request-bridge', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function makeRuntime(): any {
+  function makeRuntime(): IRuntimeServices {
     return {
       platform: () => 'deno' as const,
       version: () => '2',
@@ -33,7 +32,6 @@ describe('request-bridge', () => {
       exit: () => {
         throw new Error('exit');
       },
-      fs: undefined,
     };
   }
 
@@ -76,9 +74,9 @@ describe('request-bridge', () => {
           url: 'http://localhost/',
           path: '/',
           headers: new Headers(),
-          json: async () => ({}),
-          text: async () => '',
-          bytes: async () => overrides?.body ?? new Uint8Array(),
+          json: (): Promise<Record<string, unknown>> => Promise.resolve({}),
+          text: (): Promise<string> => Promise.resolve(''),
+          bytes: (): Promise<Uint8Array> => Promise.resolve(overrides?.body ?? new Uint8Array()),
         },
         response: {
           status(c: number) {
@@ -130,10 +128,10 @@ describe('request-bridge', () => {
     let receivedMethod = '';
     let hasBody = false;
 
-    const handler: SsrRequestHandler = async (_req) => {
+    const handler: SsrRequestHandler = (_req) => {
       receivedMethod = _req.method;
       hasBody = _req.body !== null;
-      return new Response('<html></html>');
+      return Promise.resolve(new Response('<html></html>'));
     };
 
     const { ctx } = buildCtx({ method: 'GET' });
@@ -159,11 +157,13 @@ describe('request-bridge', () => {
   });
 
   it('buffered Response maps correctly (status captured)', async () => {
-    const handler: SsrRequestHandler = async () =>
-      new Response('<html>SSR</html>', {
-        status: 200,
-        headers: { 'Content-Type': 'text/html' },
-      });
+    const handler: SsrRequestHandler = () =>
+      Promise.resolve(
+        new Response('<html>SSR</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      );
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
     await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
@@ -179,11 +179,13 @@ describe('request-bridge', () => {
       },
     });
 
-    const handler: SsrRequestHandler = async () =>
-      new Response(stream, {
-        status: 200,
-        headers: { 'Content-Type': 'text/plain' },
-      });
+    const handler: SsrRequestHandler = () =>
+      Promise.resolve(
+        new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
     await bridgeRequestToRR(ctx, handler, undefined, makeRuntime());
@@ -192,12 +194,12 @@ describe('request-bridge', () => {
   });
 
   it('Set-Cookie headers are emitted via appendHeader', async () => {
-    const handler: SsrRequestHandler = async (_req) => {
+    const handler: SsrRequestHandler = (_req) => {
       // handler receives request; we do not assert on it here
       const resp = new Response('<html>ok</html>');
       resp.headers.append('Set-Cookie', 'session=abc; HttpOnly');
       resp.headers.append('Set-Cookie', 'token=xyz; Secure');
-      return resp;
+      return Promise.resolve(resp);
     };
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
@@ -212,11 +214,11 @@ describe('request-bridge', () => {
     let receivedUrl = '';
     let receivedContentType = '';
 
-    const handler: SsrRequestHandler = async (_req) => {
+    const handler: SsrRequestHandler = (_req) => {
       receivedMethod = _req.method;
       receivedUrl = _req.url;
       receivedContentType = _req.headers.get('Content-Type') ?? '';
-      return new Response('ok');
+      return Promise.resolve(new Response('ok'));
     };
 
     const { ctx } = buildCtx({ method: 'POST' });
@@ -233,9 +235,9 @@ describe('request-bridge', () => {
   it('custom LoadContextFunction is passed through', async () => {
     let capturedContext: unknown = null;
 
-    const handler: SsrRequestHandler = async (_req, ctx) => {
+    const handler: SsrRequestHandler = (_req, ctx) => {
       capturedContext = ctx;
-      return new Response('ok');
+      return Promise.resolve(new Response('ok'));
     };
 
     const customLc: LoadContextFunction = (_c: unknown) => ({ custom: 'http://localhost/' });

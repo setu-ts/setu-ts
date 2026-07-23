@@ -60,6 +60,7 @@ describe('barrel exports', () => {
     const _lc: LoadContextFunction = (_ctx: unknown) => ({});
     void _lc;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // deno-lint-ignore require-await
     const _handler: SsrRequestHandler = async (_r: Request, _c: unknown) => new Response('ok');
     void _handler;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

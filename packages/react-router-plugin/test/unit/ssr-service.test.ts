@@ -1,27 +1,28 @@
 /**
- * Tests for SsrService.
+ * Tests for SsrService — render() delegates to bridge, write-back, custom loadContext.
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult, IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type {
+  HandlerResult,
+  IFileSystem,
+  IRuntimeServices,
+  ISsrService,
+} from '@hono-enterprise/common';
 import type { LoadContextFunction, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
 describe('ssr-service', () => {
-  function makeFakeHandler(response: Response): SsrRequestHandler {
-    return async () => response;
-  }
-
   function makeFakeRuntime(): IRuntimeServices {
     return {
       platform: () => 'deno' as const,
       version: () => '2.0',
       hostname: () => 'localhost',
       uuid: () => 'id',
-      randomBytes: (n) => new Uint8Array(n),
+      randomBytes: (n: number) => new Uint8Array(n),
       subtle: crypto.subtle,
       now: () => 0,
       hrtime: () => 0,
@@ -34,11 +35,10 @@ describe('ssr-service', () => {
         throw new Error('exit');
       },
       fs: undefined as unknown as IFileSystem,
-    } as IRuntimeServices;
+    } as unknown as IRuntimeServices;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function buildMockCtx(): any {
+  function buildMockCtx() {
     const controller = new AbortController();
     let body: Uint8Array | undefined;
     let stream: ReadableStream<Uint8Array> | undefined;
@@ -87,9 +87,9 @@ describe('ssr-service', () => {
       set user(_v) {
         // noop
       },
-      json: async () => ({}),
-      text: async () => '',
-      bytes: async () => new Uint8Array(),
+      json: () => ({}),
+      text: () => '',
+      bytes: () => new Uint8Array(),
       signal: controller.signal,
     };
 
@@ -103,7 +103,7 @@ describe('ssr-service', () => {
       state: new Map(),
       startTime: 0,
       signal: controller.signal,
-    };
+    } as never;
   }
 
   it('render composes bridge → handler → write-back and returns HandlerResult', async () => {
@@ -111,7 +111,8 @@ describe('ssr-service', () => {
       status: 200,
       headers: { 'Content-Type': 'text/html' },
     });
-    const fakeHandler = makeFakeHandler(fakeResponse);
+    // deno-lint-ignore require-await
+    const fakeHandler: SsrRequestHandler = async () => fakeResponse;
     const service = new SsrService(fakeHandler, undefined, makeFakeRuntime());
     const ctx = buildMockCtx();
 
@@ -124,10 +125,8 @@ describe('ssr-service', () => {
     const loadCtx: LoadContextFunction = (_c: unknown) => ({ custom: 'http://localhost/' });
     let capturedContext: unknown = null;
 
-    const fakeHandler: SsrRequestHandler = async (
-      _req: Request,
-      ctx: unknown,
-    ) => {
+    // deno-lint-ignore require-await
+    const fakeHandler: SsrRequestHandler = async (_req: Request, ctx: unknown) => {
       capturedContext = ctx;
       return new Response('ok');
     };
@@ -143,6 +142,7 @@ describe('ssr-service', () => {
   it('service is the value registered under CAPABILITIES.SSR (structural check)', () => {
     // Verify the interface matches what CAPABILITIES.SSR would resolve to.
     const service = new SsrService(
+      // deno-lint-ignore require-await
       async () => new Response('ok'),
       undefined,
       makeFakeRuntime(),
@@ -150,5 +150,7 @@ describe('ssr-service', () => {
 
     expect(typeof service.render).toBe('function');
     expect(CAPABILITIES.SSR).toBe('ssr');
+    // Structural compatibility with ISsrService
+    void (service as ISsrService);
   });
 });

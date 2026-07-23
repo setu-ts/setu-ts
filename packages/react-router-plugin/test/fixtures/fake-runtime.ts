@@ -19,7 +19,7 @@ export function createFakeFileSystem(
 ): IFileSystem {
   void _fileMap;
   return {
-    async readFile(_path: string): Promise<Uint8Array> {
+    readFile(_path: string): Promise<Uint8Array> {
       throw new Error('not implemented');
     },
     writeFile(_path: string, _data: Uint8Array): Promise<void> {

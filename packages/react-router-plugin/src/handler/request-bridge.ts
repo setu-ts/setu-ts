@@ -22,7 +22,7 @@ import { createDefaultLoadContext } from './load-context.ts';
  * @param ctx - The kernel request context
  * @param handler - The React Router request handler
  * @param getLoadContext - Optional custom loadContext builder
- * @param runtime - Runtime services (for abort signal threading)
+ * @param runtime - Runtime services (unused; kept for future abort-signal threading)
  * @returns The `HandlerResult` produced by writing the response back
  * @since 0.1.0
  */
@@ -43,15 +43,15 @@ export async function bridgeRequestToRR(
   }
 
   // Build web Request from kernel request + its signal.
-  const requestInit: RequestInit = {
+  // deno-lint-ignore no-explicit-any
+  const requestInit: any = {
     method: ctx.request.method,
     headers: ctx.request.headers,
   };
 
   // Only attach body for methods that support it (never for GET/HEAD).
   if (requestBody !== undefined) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (requestInit as any).body = requestBody;
+    requestInit.body = requestBody;
   }
 
   // Derive a web Request's signal from ctx.signal (always live).

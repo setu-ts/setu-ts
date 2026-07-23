@@ -8,6 +8,16 @@
 import type { SsrRequestHandler } from '../interfaces/index.ts';
 
 /**
+ * Creates a fake RR handler for testing.
+ *
+ * @param response - The response to return
+ * @returns A fake handler function
+ */
+export function createFakeHandler(response: Response): SsrRequestHandler {
+  return () => Promise.resolve(response);
+}
+
+/**
  * Pure function that assembles an RR request handler from a pre-loaded build
  * and the `createRequestHandler` factory.
  *
@@ -21,18 +31,19 @@ import type { SsrRequestHandler } from '../interfaces/index.ts';
  */
 export function assembleHandler(
   build: unknown,
-  createRequestHandler: (build: unknown, mode?: string) => SsrRequestHandler,
+  // deno-lint-ignore no-explicit-any
+  createRequestHandler: any,
   mode: string,
 ): SsrRequestHandler {
-  return createRequestHandler(build, mode);
+  return createRequestHandler(build, mode) as SsrRequestHandler;
 }
 
 /**
  * Default implementation of `loadRequestHandler`.
  *
  * Lazily imports the app-provided server build (`import(serverBuildPath)`) and
- * the core `react-router` package (`import('npm:react-router')`), then returns
- * a callable request handler.
+ * the core `react-router` package (`import('npm:react-router@7')`), unwraps
+ * the `ServerBuild` (default export), then returns a callable request handler.
  *
  * @param serverBuildPath - Path to the RR Vite server build (app-provided)
  * @param mode - `'production'` or `'development'`
@@ -44,10 +55,10 @@ export async function loadRequestHandler(
   serverBuildPath: string,
   mode: string,
 ): Promise<SsrRequestHandler> {
-  let build: unknown;
+  let buildMod: unknown;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    build = await import(/* @vite-ignore */ serverBuildPath);
+    // Vite ESM build: { default: ServerBuild, routes: {}, ... }
+    buildMod = await import(/* @vite-ignore */ serverBuildPath);
   } catch (err) {
     throw new Error(
       `Failed to load React Router server build from "${serverBuildPath}". ` +
@@ -56,14 +67,17 @@ export async function loadRequestHandler(
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // Unwrap the default export (ESM `default` or CJS spread).
+  const build = (buildMod as Record<string, unknown>)?.default ?? buildMod;
+
+  // deno-lint-ignore no-explicit-any
   let createRequestHandler: any;
   try {
-    const rr = await import('npm:react-router');
+    const rr = await import('npm:react-router@7');
     createRequestHandler = rr.createRequestHandler;
   } catch (err) {
     throw new Error(
-      `Failed to import 'npm:react-router'. Ensure it is available in the ` +
+      `Failed to import 'npm:react-router@7'. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
     );
   }

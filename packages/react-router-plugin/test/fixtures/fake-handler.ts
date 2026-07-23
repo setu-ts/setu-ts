@@ -48,6 +48,7 @@ export function createFakeHandler(options?: FakeHandlerOptions): {
     headers: { 'Content-Type': 'text/html' },
   });
 
+  // deno-lint-ignore require-await
   const handler: SsrRequestHandler = async (request, loadContext) => {
     state.receivedRequests.push(request);
     state.receivedContexts.push(loadContext);
@@ -73,6 +74,7 @@ export function createStreamingFakeHandler(): SsrRequestHandler {
     },
   });
 
+  // deno-lint-ignore require-await
   return async () =>
     new Response(stream, {
       status: 200,

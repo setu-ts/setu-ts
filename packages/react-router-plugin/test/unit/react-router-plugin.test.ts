@@ -4,21 +4,18 @@
  *
  * @module
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISsrService } from '@hono-enterprise/common';
+// deno-lint-ignore no-explicit-any
+type Any = any;
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
 
 describe('react-router-plugin', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function buildFakeCtx(): any {
+  function buildFakeCtx(): Any {
     const controller = new AbortController();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    // No longer needed - services use a direct Map
     const onCloseCalls: string[] = [];
     const routes = new Map<string, string[]>();
 
@@ -50,6 +47,8 @@ describe('react-router-plugin', () => {
       },
     };
 
+    const handlerResult = { __handlerResult: true };
+
     return {
       id: 'r1',
       request: {
@@ -57,9 +56,9 @@ describe('react-router-plugin', () => {
         url: 'http://localhost/',
         path: '/',
         headers: new Headers(),
-        json: async () => ({}),
-        text: async () => '',
-        bytes: async () => new Uint8Array(),
+        json: () => ({}),
+        text: () => '',
+        bytes: () => new Uint8Array(),
       },
       response: {
         status(_c?: number) {
@@ -72,25 +71,24 @@ describe('react-router-plugin', () => {
           return this;
         },
         send(_b?: unknown) {
-          return { __handlerResult: true };
+          return handlerResult;
         },
         json() {
-          return { __handlerResult: true };
+          return handlerResult;
         },
         text() {
-          return { __handlerResult: true };
+          return handlerResult;
         },
         redirect() {
-          return { __handlerResult: true };
+          return handlerResult;
         },
         stream() {
-          return { __handlerResult: true };
+          return handlerResult;
         },
         snapshot() {
           return { streaming: false, body: null };
         },
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       services: {
         _store: new Map<string, unknown>(),
         register(token: string, svc: unknown) {
@@ -99,7 +97,7 @@ describe('react-router-plugin', () => {
         get<T>(token: string): T {
           return this._store.get(token) as T;
         },
-      } as any,
+      },
       params: {},
       query: {},
       state: new Map(),
@@ -124,18 +122,14 @@ describe('react-router-plugin', () => {
         exit: () => {
           throw new Error('exit');
         },
-        fs: { readFile: async () => new TextEncoder().encode('asset') },
+        fs: { readFile: () => Promise.resolve(new TextEncoder().encode('asset')) },
       },
       router: routerApi,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      _health: {} as any,
       health: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        register(name: string, fn: any) {
-          (this as any)._results.set(name, fn);
+        // deno-lint-ignore ban-types
+        register(_name: string, _fn: Function) {
+          // noop for tests
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        _results: new Map<string, any>() as any,
       },
       lifecycle: {
         onClose(cb: () => void) {
@@ -143,6 +137,16 @@ describe('react-router-plugin', () => {
           cb();
         },
       },
+    };
+  }
+
+  function makeLoadRequestHandler(response: Response) {
+    // deno-lint-ignore require-await
+    return async (_path: string, _mode: string): Promise<SsrRequestHandler> => {
+      void _path;
+      void _mode;
+      // deno-lint-ignore require-await
+      return async () => response;
     };
   }
 
@@ -156,33 +160,29 @@ describe('react-router-plugin', () => {
   });
 
   it('async register() awaits loadRequestHandler and registers ISsrService', async () => {
-    const fakeHandler = async () => new Response('<html>ok</html>');
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
-      loadRequestHandler: (_path: string, _mode: string) => Promise.resolve(fakeHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('<html>ok</html>')),
     });
 
     const fakeCtx = buildFakeCtx();
 
     await plugin.register(fakeCtx);
 
-    const ssrService = (fakeCtx.services as unknown as { get<T>(token: string): T }).get<
-      ISsrService
-    >(CAPABILITIES.SSR);
+    const ssrService = fakeCtx.services.get(CAPABILITIES.SSR);
     expect(ssrService).toBeDefined();
     expect(typeof ssrService.render).toBe('function');
     expect(ssrService).toBeInstanceOf(SsrService);
   });
 
   it('registers catch-all for all 7 verbs at /* (default basename)', async () => {
+    const routes = new Map<string, string[]>();
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
-      loadRequestHandler: (_path: string, _mode: string) =>
-        Promise.resolve(new Response('ok') as unknown as SsrRequestHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('ok')),
     });
 
     const fakeCtx = buildFakeCtx();
-    const routes = new Map<string, string[]>();
     fakeCtx.router = {
       get(p: string, _h: unknown) {
         addRoute(routes, p, 'GET');
@@ -229,8 +229,7 @@ describe('react-router-plugin', () => {
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
       basename: '/app/',
-      loadRequestHandler: (_path: string, _mode: string) =>
-        Promise.resolve(new Response('ok') as unknown as SsrRequestHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('ok')),
     });
 
     const fakeCtx = buildFakeCtx();
@@ -273,8 +272,7 @@ describe('react-router-plugin', () => {
     const withAssets = ReactRouterPlugin({
       serverBuildPath: './build/server',
       assetsDir: './build/client',
-      loadRequestHandler: (_path: string, _mode: string) =>
-        Promise.resolve(new Response('ok') as unknown as SsrRequestHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('ok')),
     });
 
     const ctxWith = buildFakeCtx();
@@ -311,8 +309,7 @@ describe('react-router-plugin', () => {
     const routesWithout = new Map<string, string[]>();
     const noAssets = ReactRouterPlugin({
       serverBuildPath: './build/server',
-      loadRequestHandler: (_path: string, _mode: string) =>
-        Promise.resolve(new Response('ok') as unknown as SsrRequestHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('ok')),
     });
     const ctxNo = buildFakeCtx();
     ctxNo.router = {
@@ -347,18 +344,22 @@ describe('react-router-plugin', () => {
   });
 
   it('registers react-router health indicator returning status up', async () => {
+    const healthResults = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
     const fakeCtx = buildFakeCtx();
+    fakeCtx.health = {
+      // deno-lint-ignore ban-types
+      register(name: string, fn: Function) {
+        healthResults.set(name, fn as () => Promise<{ status: string; data?: unknown }>);
+      },
+    };
+
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
       mode: 'production',
-      loadRequestHandler: (_path: string, _mode: string) =>
-        Promise.resolve(new Response('ok') as unknown as SsrRequestHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('ok')),
     });
     await plugin.register(fakeCtx);
 
-    const healthResults = (
-      fakeCtx.health as { _results: Map<string, () => Promise<{ status: string; data?: unknown }>> }
-    )._results;
     const indicatorFn = healthResults.get('react-router');
     expect(indicatorFn).toBeDefined();
     const result = await indicatorFn!();
@@ -370,9 +371,8 @@ describe('react-router-plugin', () => {
   });
 
   it('asserts NO onClose hook is registered', async () => {
-    const fakeCtx = buildFakeCtx();
     const onCloseTracker: string[] = [];
-    fakeCtx._lifecycle = { _calls: onCloseTracker };
+    const fakeCtx = buildFakeCtx();
     fakeCtx.lifecycle = {
       onClose(cb: () => void) {
         onCloseTracker.push('invoked');
@@ -382,8 +382,7 @@ describe('react-router-plugin', () => {
 
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
-      loadRequestHandler: (_path: string, _mode: string) =>
-        Promise.resolve(new Response('ok') as unknown as SsrRequestHandler),
+      loadRequestHandler: makeLoadRequestHandler(new Response('ok')),
     });
     await plugin.register(fakeCtx);
 
