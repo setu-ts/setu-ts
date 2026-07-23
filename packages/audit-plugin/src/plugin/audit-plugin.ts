@@ -125,7 +125,7 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
     provides: [CAPABILITIES.AUDIT],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    async register(ctx: IPluginContext): Promise<void> {
+    register(ctx: IPluginContext): void {
       const storage = createStorage(storageType, backendOptions, ctx);
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
       const service = new AuditService(storage, runtime);
@@ -137,7 +137,7 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
           status: storage.isReady() ? 'up' : 'down',
         }));
 
-      ctx.lifecycle.onClose(async () => {
+      ctx.lifecycle.onClose(() => {
         // No-op for most backends; file could flush buffers if needed.
       });
     },

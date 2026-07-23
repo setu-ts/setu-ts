@@ -60,6 +60,62 @@ describe('freezeAuditRecord', () => {
     expect(frozen.id).toBe('1');
     expect(frozen.before).toBeUndefined();
   });
+
+  it('deep-freezes two-level-deep nested objects — mutating inner throws', () => {
+    const entry: StoredAuditEntry = {
+      id: '2',
+      timestamp: 2000,
+      action: 'user.update',
+      resource: 'user',
+      resourceId: 'abc',
+      userId: 'u2',
+      result: 'success',
+      metadata: { request: { ip: '127.0.0.1', headers: { host: 'localhost' } } },
+    };
+    const frozen = freezeAuditRecord(entry);
+
+    // Top-level metadata is frozen.
+    expect(() => {
+      // biome-ignore lint/perf/noMutation: testing immutability
+      (frozen.metadata as Record<string, unknown>).other = 'x';
+    }).toThrow();
+
+    // Two-level deep mutation should also be blocked.
+    expect(() => {
+      // biome-ignore lint/perf/noMutation: testing immutability
+      (frozen.metadata as Record<string, unknown>).request = { ip: 'spoofed' };
+    }).toThrow();
+
+    // And even deeper level.
+    expect(() => {
+      const req = (frozen.metadata as Record<string, unknown>).request as Record<string, unknown>;
+      // biome-ignore lint/perf/noMutation: testing immutability
+      req.ip = 'spoofed';
+    }).toThrow();
+  });
+
+  it('freezing preserves original unmodified', () => {
+    const entry: StoredAuditEntry = {
+      id: '3',
+      timestamp: 3000,
+      action: 'x',
+      resource: 'y',
+      result: 'success',
+      before: { a: { b: 1 } },
+    };
+
+    const frozen = freezeAuditRecord(entry);
+
+    // The returned record is frozen at depth.
+    expect(() => {
+      // biome-ignore lint/perf/noMutation: testing immutability
+      (frozen.before as Record<string, Record<string, unknown>>).a.b = 999;
+    }).toThrow();
+
+    // structuredClone ensures the original is untouched.
+    const origBefore = entry.before as Record<string, Record<string, number>>;
+    expect(origBefore.a.b).toBe(1);
+  });
 });
 
 describe('matchAuditQuery', () => {

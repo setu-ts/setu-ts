@@ -34,11 +34,16 @@ describe('AuditService', () => {
   } {
     const appends: StoredAuditEntry[] = [];
     const storage: IAuditStorage = {
-      append: async (entry: StoredAuditEntry) => {
+      append(entry: StoredAuditEntry): Promise<void> {
         appends.push(entry);
+        return Promise.resolve();
       },
-      query: async (_criteria?: AuditQuery) => appends,
-      isReady: () => true,
+      query(_criteria?: AuditQuery): Promise<StoredAuditEntry[]> {
+        return Promise.resolve(appends);
+      },
+      isReady() {
+        return true;
+      },
     };
     return { storage, appends };
   }
@@ -84,11 +89,15 @@ describe('AuditService', () => {
 
   it('propagates storage rejection', async () => {
     const storage: IAuditStorage = {
-      append: async () => {
+      append(): Promise<void> {
         throw new Error('storage down');
       },
-      query: async () => [],
-      isReady: () => true,
+      query(): Promise<StoredAuditEntry[]> {
+        return Promise.resolve([]);
+      },
+      isReady() {
+        return true;
+      },
     };
     const service = new AuditService(storage, fakeRuntime);
 

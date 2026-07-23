@@ -19,6 +19,7 @@ import { freezeAuditRecord, matchAuditQuery } from './audit-record.ts';
 export class FileAuditStorage implements IAuditStorage {
   private readonly fs: IFileSystem;
   private readonly path: string;
+  private _lock: Promise<void> = Promise.resolve();
 
   /**
    * @param options.fs - The `IFileSystem` from runtime (required, throws absent).
@@ -32,8 +33,18 @@ export class FileAuditStorage implements IAuditStorage {
     this.path = options.path ?? './audit.log';
   }
 
-  /** Read-modify-write: read, append, write. */
+  /**
+   * Read-modify-write with serialized in-process appends via `_lock`.
+   * Cross-process file contention is inherent to the OS file and not solved here.
+   */
   async append(entry: StoredAuditEntry): Promise<void> {
+    const entryCopy = structuredClone(entry);
+    // Queue this append behind any in-flight operation, then await it.
+    this._lock = this._lock.then(() => this.readModifyWrite(entryCopy));
+    await this._lock;
+  }
+
+  private async readModifyWrite(entry: StoredAuditEntry): Promise<void> {
     let content = '';
     try {
       const buf = await this.fs.readFile(this.path);
@@ -58,8 +69,15 @@ export class FileAuditStorage implements IAuditStorage {
       return [];
     }
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
-    const entries: StoredAuditEntry[] = lines
-      .map((line) => freezeAuditRecord(JSON.parse(line)));
+    // Guard per-line JSON parse so one malformed line doesn't break query().
+    const entries: StoredAuditEntry[] = [];
+    for (const line of lines) {
+      try {
+        entries.push(freezeAuditRecord(JSON.parse(line)));
+      } catch {
+        // Skip malformed lines silently.
+      }
+    }
 
     const filtered = entries.filter((e) => !criteria || matchAuditQuery(e, criteria));
     filtered.sort((a, b) => a.timestamp - b.timestamp);

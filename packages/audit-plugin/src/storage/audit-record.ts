@@ -7,6 +7,30 @@
 import type { AuditQuery, StoredAuditEntry } from '../interfaces/index.ts';
 
 /**
+ * Recursively freezes any plain object or array, returning it for chaining.
+ */
+function deepFreeze<T extends Record<string | number, unknown>>(obj: T): T {
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+    if (value != null && (typeof value === 'object' || Array.isArray(value))) {
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const item = value[i];
+          if (item != null && typeof item === 'object') {
+            deepFreeze(item as Record<string | number, unknown>);
+          }
+        }
+      } else {
+        deepFreeze(value as Record<string | number, unknown>);
+      }
+      // Assign through `as` to satisfy the readonly constraint from Object.freeze chain.
+      (obj as Record<keyof T, unknown>)[key as keyof T] = Object.freeze(value);
+    }
+  }
+  return Object.freeze(obj);
+}
+
+/**
  * Deep-freezes an audit record (including nested `before`/`after`/`metadata`).
  * Throws on mutation in strict mode.
  *
@@ -26,10 +50,10 @@ export function freezeAuditRecord(record: StoredAuditEntry): StoredAuditEntry {
     id: record.id,
     timestamp: record.timestamp,
   };
-  // Deep-freeze the base and nested objects.
-  if (copy.before) Object.freeze(copy.before);
-  if (copy.after) Object.freeze(copy.after);
-  if (copy.metadata) Object.freeze(copy.metadata);
+  // Deep-freeze the base and nested objects recursively.
+  if (copy.before) deepFreeze(copy.before);
+  if (copy.after) deepFreeze(copy.after);
+  if (copy.metadata) deepFreeze(copy.metadata);
   Object.freeze(copy);
   return copy;
 }

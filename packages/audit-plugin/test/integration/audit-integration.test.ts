@@ -95,7 +95,7 @@ describe('AuditPlugin integration (real kernel)', () => {
     const fileApp = createApplication({
       plugins: [
         RuntimePlugin(),
-        AuditPlugin({ storage: 'file', options: { path: './integration-test.log' } }),
+        AuditPlugin({ storage: 'file', options: { path: '.tmp/audit-integration-test.log' } }),
       ],
     });
     await fileApp.start();
@@ -107,7 +107,18 @@ describe('AuditPlugin integration (real kernel)', () => {
     await logger.log({
       action: 'file.append',
       resource: 'log',
+      resourceId: 'log1',
+      userId: 'admin',
       result: 'success',
+    });
+
+    // Second log to prove the storage persisted multiple entries.
+    await logger.log({
+      action: 'file.update',
+      resource: 'log',
+      resourceId: 'log2',
+      userId: 'admin',
+      result: 'failure',
     });
 
     await fileApp.stop();

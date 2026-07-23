@@ -59,7 +59,6 @@ export class DatabaseAuditStorage implements IAuditStorage {
     );
 
     const results: StoredAuditEntry[] = rows.map(fromAuditRow);
-    results.sort((a, b) => a.timestamp - b.timestamp);
 
     // Apply from/to filter on mapped results.
     const filtered: StoredAuditEntry[] = [];

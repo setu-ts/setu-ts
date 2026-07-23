@@ -169,7 +169,7 @@ describe('FileAuditStorage', () => {
     expect(results[0].id).toBe('2');
   });
 
-  it('query with limit returns newest', async () => {
+  it('query with 2-of-3 limit returns newest two', async () => {
     const files: Record<string, string> = {};
     const fs = makeFakeFs(files);
     const storage = new FileAuditStorage({ fs });
@@ -212,7 +212,7 @@ describe('FileAuditStorage', () => {
     expect(content).toContain('\n');
   });
 
-  it('query with limit returns newest', async () => {
+  it('query with limit 3-of-5 returns last three', async () => {
     const files: Record<string, string> = {};
     const fs = makeFakeFs(files);
     const storage = new FileAuditStorage({ fs });
@@ -241,10 +241,14 @@ describe('FileAuditStorage', () => {
     expect(storage.isReady()).toBe(true);
   });
 
-  it('append catches thrown error from readFile', async () => {
+  it('append writes entry even when readFile throws ENOENT', async () => {
+    const files: Record<string, string> = {};
     const fs = {
       readFile: () => Promise.reject(new Error('ENOENT')),
-      writeFile: () => Promise.resolve(),
+      writeFile: (_path: string, data: Uint8Array) => {
+        files[_path] = new TextDecoder().decode(data);
+        return Promise.resolve();
+      },
       stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
       readdir: () => Promise.resolve([]),
       mkdir: () => Promise.resolve(),
@@ -260,7 +264,30 @@ describe('FileAuditStorage', () => {
       result: 'success',
     });
 
-    // Should have written a single line even though read threw
-    // (not checking file content here since we don't store it)
+    // Verify the file was written despite the initial read throwing.
+    expect(files['./throwing.log']).toBeDefined();
+    const lines = files['./throwing.log']!.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines.length).toBe(1);
+    expect(JSON.parse(lines[0]).id).toBe('1');
+  });
+
+  it('concurrent appends serialize and persist both entries', async () => {
+    const files: Record<string, string> = {};
+    const fs = makeFakeFs(files);
+    const storage = new FileAuditStorage({ fs });
+
+    // Fire two concurrent appends.
+    const [p1, p2] = await Promise.all([
+      storage.append({ id: 'a', timestamp: 100, action: 'x', resource: 'r', result: 'success' }),
+      storage.append({ id: 'b', timestamp: 200, action: 'y', resource: 'r', result: 'failure' }),
+    ]);
+    await Promise.all([p1, p2]);
+
+    // Both entries should be persisted in serialized order.
+    const content = files['./audit.log'];
+    const lines = content!.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines.length).toBe(2);
+    expect(JSON.parse(lines[0]).id).toBe('a');
+    expect(JSON.parse(lines[1]).id).toBe('b');
   });
 });
