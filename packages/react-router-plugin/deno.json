@@ -1,0 +1,11 @@
+{
+  "name": "@hono-enterprise/react-router-plugin",
+  "version": "0.1.0",
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "net": true,
+      "write": true
+    }
+  }
+}

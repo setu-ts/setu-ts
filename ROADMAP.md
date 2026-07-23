@@ -3468,16 +3468,34 @@ packages via JSR's npm compatibility layer.
    Includes: REST Starter + Messaging, Queue, Telemetry, Resilience
 
 3. **Full-Stack Starter** Includes: Microservice Starter + Cache, Events, CQRS, Scheduler, Storage,
-   Mail, Notifications, FeatureFlags, MultiTenancy, Secrets, Audit
+   Mail, Notifications, FeatureFlags, MultiTenancy, Secrets, Audit, **ReactRouter (M44)**
 
 **Implementation:** Each starter is a thin package that registers the appropriate plugins with
 sensible defaults.
+
+> **Full-Stack Starter — standard React Router app structure (from M44).** M44's
+> `react-router-plugin` is deliberately convention-agnostic (it only mounts the RR handler, bridges
+> DI via `loadContext`, and serves assets). The **standard app-side code structure** — the
+> `feature → service → lib → model` layering, `flatRoutes` `_app`/`_auth` layout groups, `~/*`
+> alias, per-feature Zod schemas, `.server.ts` convention — is owned by THIS milestone's Full-Stack
+> Starter, NOT by the plugin. Adapt the reference skeleton from the user's `B2BAdmin` project
+> (`/home/dkpaul91/Projects/B2BAdmin`, a standalone RR7 framework-mode app). **Critical rule when
+> adapting:** B2BAdmin re-implements cross-cutting concerns in-frontend (SSE, session/auth, CSRF,
+> telemetry, secrets/config, HTTP client) that this framework already ships as plugins — SSE (M43),
+> Auth (M16), HTTP-Security/CSRF (M17), Telemetry (M24), Secrets/Config, etc. KEEP B2BAdmin's
+> layering but REWIRE those `lib/` modules to consume the plugins through the M44 `loadContext`
+> bridge (`context.services.get(CAPABILITIES.X)`) instead of duplicating them; keep only
+> app-specific glue in `app/lib`. A worthwhile validation is migrating B2BAdmin itself off
+> `@react-router/serve` onto the M44 plugin. See the M44 plan §9 (archived under
+> `plans/archive/milestone-44-react-router-plugin.md` once M44 merges).
 
 ### Deliverables
 
 - [ ] REST starter
 - [ ] Microservice starter
-- [ ] Full-stack starter
+- [ ] Full-stack starter (plugin bundle)
+- [ ] Full-stack starter — standard React Router app structure (M44 `loadContext`-based; adapts the
+      B2BAdmin skeleton, delegates cross-cutting concerns to plugins — see note above)
 - [ ] Documentation
 
 ---
@@ -4104,4 +4122,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 41        | ✅     | http-adapters        |
 | 42        | ✅     | streaming-response   |
 | 43        | ✅     | sse-plugin           |
-| 44        | ⬜     | react-router-plugin  |
+| 44        | ✅     | react-router-plugin  |

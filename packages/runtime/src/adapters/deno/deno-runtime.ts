@@ -27,6 +27,8 @@ export interface DenoHost {
   exit(code?: number): never;
   /** Read file as bytes. */
   readFile(path: string): Promise<Uint8Array>;
+  /** Resolve a path to its canonical absolute form, following symlinks. */
+  realPath(path: string): Promise<string>;
   /** Write bytes to a file. */
   writeFile(path: string, data: Uint8Array): Promise<void>;
   /** Get file/directory info. */
@@ -63,6 +65,7 @@ export function createDenoRuntimeServices(
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => host.readFile(path),
+    realPath: (path: string) => host.realPath(path),
     writeFile: (path: string, data: Uint8Array) => host.writeFile(path, data),
     stat: (path: string) =>
       host.stat(path).then((info) => ({

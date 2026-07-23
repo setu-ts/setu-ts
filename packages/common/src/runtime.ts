@@ -55,6 +55,18 @@ export interface IFileSystem {
    */
   readFile(path: string): Promise<Uint8Array>;
   /**
+   * Resolves a path to its canonical absolute form, following symlinks.
+   *
+   * Optional: absent on runtimes/adapters that cannot canonicalize paths.
+   * Callers MUST degrade gracefully when it is not provided (e.g. fall back to
+   * lexical containment) — see the static-asset handler in the React Router
+   * plugin, which uses it for symlink-safe containment when available.
+   *
+   * @param path - File path
+   * @returns The canonical absolute path
+   */
+  realPath?(path: string): Promise<string>;
+  /**
    * Writes a file, creating it if absent.
    *
    * @param path - File path

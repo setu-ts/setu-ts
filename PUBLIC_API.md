@@ -227,6 +227,12 @@ interface IRuntimeServices {
 }
 ```
 
+`IFileSystem` provides `readFile`/`writeFile`/`stat`/`readdir`/`mkdir`/`rm`, plus an **optional**
+`realPath(path): Promise<string>` that canonicalizes a path following symlinks. `realPath` is
+implemented by the Node/Deno/Bun runtime adapters and absent on runtimes that cannot canonicalize;
+callers must degrade gracefully when it is not present (e.g. the React Router plugin's static-asset
+handler uses it for symlink-safe containment when available, falling back to lexical containment).
+
 ---
 
 ## LoggerPlugin()
@@ -1472,6 +1478,102 @@ Omitting an option disables that behaviour (no timer created).
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
 - The `inject()` method discards streaming bodies; SSE integration tests must use a real socket
   (`app.start({ port })` + `fetch()`).
+
+---
+
+## ReactRouterPlugin()
+
+Embeds **React Router v7 framework mode** as a first-party plugin so a Hono Enterprise application
+can serve a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
+framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
+assets are served over `runtime.fs?.readFile`.
+
+### Registration
+
+```typescript
+import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+
+app.register(ReactRouterPlugin({
+  serverBuildPath: './build/server/index.js',
+  assetsDir: './build/client/assets',
+  assetUrlPrefix: '/assets/',
+  basename: '/',
+  mode: 'production',
+}));
+```
+
+### Usage in Routes
+
+The plugin registers its own catch-all route internally — the consumer does **not** manually
+register SSR routes. The plugin owns all HTTP verbs at the configured `basename` pattern:
+
+```typescript
+import { CAPABILITIES, ISsrService } from '@hono-enterprise/common';
+
+// The plugin handles SSR automatically at the catch-all.
+// Custom routes take precedence based on static segment count:
+// a custom route with MORE static segments wins over /* (e.g. /api/users/:id has 2, beats 1).
+// Single-segment routes (e.g. /login, /health) registered AFTER ReactRouterPlugin
+// tie with /* (both have 1 static segment) and are silently shadowed by SSR.
+// Register single-segment routes BEFORE ReactRouterPlugin or use more-static routes.
+app.router.get('/api/health', (ctx) => {
+  return ctx.response.json({ status: 'ok' });
+});
+```
+
+### Options
+
+| Option               | Type                                                | Default        | Description                                                                                           |
+| -------------------- | --------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`                                            | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
+| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>`   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
+| `assetsDir`          | `string`                                            | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
+| `assetUrlPrefix`     | `string`                                            | `/assets/`     | URL prefix for the asset route.                                                                       |
+| `basename`           | `string`                                            | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
+| `getLoadContext`     | `(ctx: IRequestContext) => Record<string, unknown>` | default        | Override the default `loadContext` bridge (`{ services, user }`).                                     |
+| `mode`               | `'production' \| 'development'`                     | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+
+### Interface Reference
+
+- `ISsrService.render(ctx): Promise<HandlerResult>` — delegates the request to React Router and
+  writes back the result (streaming or buffered).
+- `ReactRouterPlugin(options)` — returns an `IPlugin` with async `register()` that mounts the SSR
+  catch-all, optional static-asset route, and a `react-router` health indicator.
+- `createStaticAssetHandler({ fs, assetsDir, assetUrlPrefix })` — returns a `RouteHandler` for
+  serving built client assets with immutable caching. Traversal containment: request paths
+  containing `..` are rejected and every path is resolved under `assetsDir`; additionally, when the
+  runtime provides `IFileSystem.realPath` (the Node/Deno/Bun adapters do), both the assets root and
+  the target are canonicalized and the target must stay inside the root — so a symlink inside
+  `assetsDir` pointing outside it is **not** served (404). When `realPath` is absent (edge
+  runtimes), containment degrades to the lexical `..` guard.
+- `assembleHandler(build, createRequestHandler, mode): SsrRequestHandler` — assembles an RR request
+  handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
+  unit-testable without I/O.
+- `loadRequestHandler(serverBuildPath, mode, options?): Promise<SsrRequestHandler>` — lazily imports
+  the app-provided server build and `npm:react-router@7`, unwraps the `ServerBuild` (default
+  export), and returns a callable `SsrRequestHandler`. The optional `options` parameter accepts
+  `{ rrImportHook?: () => Promise<Record<string, unknown>> }` — a test-seam that replaces the
+  `npm:react-router@7` import. **Since 0.1.0** this parameter is optional and backward-compatible;
+  callers may invoke it with only two arguments.
+- `bridgeRequestToRR(ctx, handler, getLoadContext?): Promise<HandlerResult>` — bridges a kernel
+  `IRequestContext` into a web `Request` (omitting the body for GET/HEAD), invokes the RR handler,
+  and maps the resulting `Response` back onto `ctx.response`.
+- `class SsrService implements ISsrService` — holds a resolved RR request handler and optional
+  `getLoadContext`; its `render(ctx)` method delegates to `bridgeRequestToRR` and returns the
+  `HandlerResult`.
+
+### Notes
+
+- **Vite is never imported.** The consuming app runs `react-router dev` as a separate process and
+  feeds this plugin the production build. Vite is an app-level, build-time concern.
+- **`@react-router/node` is excluded.** Only core `react-router` (`createRequestHandler`) is lazy
+  imported. `@react-router/node`'s `installGlobals()` is unnecessary on web-standard runtimes.
+- **Static-asset serving uses `runtime.fs?.readFile`.** On edge platforms where `fs` is absent,
+  assets degrade to a 404. SSR document rendering still works.
+- **File-based routing (`flatRoutes`) is supported transparently.** It is baked into the compiled
+  `ServerBuild` by the React Router Vite plugin at build time — M44 serves it without any plugin
+  surface.
+- `@react-router/fs-routes` (if used) is an app-level `devDependency`, never imported by the plugin.
 
 ---
 
@@ -3819,17 +3921,17 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                 |
-| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (Server-Sent Events hub) |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names   |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                   |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                   |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                    |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                        |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                             |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                    |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                        |
+| Export                        | Kind     | Purpose                                                                                                                |
+| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework) |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                  |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                  |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                  |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                   |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                       |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                            |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                   |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                       |
 
 ### Types
 
@@ -3864,6 +3966,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                           |
 | Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
+| SSR                 | `ISsrService`                                                                                                                                                                                                                            |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                              |
 
 Contract notes:
@@ -3898,6 +4001,9 @@ Contract notes:
 - `CAPABILITIES.SSE` (`'sse'`) — the capability token under which the SsePlugin registers the
   `ISseService`. The service provides real-time, one-way server-to-client messaging over an SSE
   stream built on `IResponse.stream()`. Added in Milestone 43.
+- `CAPABILITIES.SSR` (`'ssr'`) — the capability token under which the React Router plugin registers
+  the `ISsrService`. The service provides server-side rendering by delegating to React Router's
+  request handler and writing back the result via `IResponse`. Added in Milestone 44.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these

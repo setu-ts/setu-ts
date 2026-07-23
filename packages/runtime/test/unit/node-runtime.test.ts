@@ -25,6 +25,12 @@ function createFakeNodeModules(
       }
       return Promise.resolve(data);
     },
+    realpath: (path: string) => {
+      if (files.has(path)) {
+        return Promise.resolve(path);
+      }
+      return Promise.reject(new Error(`ENOENT: ${path}`));
+    },
     writeFile: (path: string, data: Uint8Array) => {
       files.set(path, data);
       return Promise.resolve();
@@ -118,6 +124,13 @@ describe('buildNodeHost', () => {
     expect(Array.from(data)).toEqual([10, 20, 30]);
   });
 
+  it('realPath delegates to fs.realpath', async () => {
+    const mods = createFakeNodeModules();
+    const host = buildNodeHost(mods);
+    await host.writeFile('/realpath-test.txt', new Uint8Array([1]));
+    expect(await host.realPath('/realpath-test.txt')).toBe('/realpath-test.txt');
+  });
+
   it('writeFile delegates to fs.writeFile', async () => {
     const mods = createFakeNodeModules();
     const host = buildNodeHost(mods);
@@ -191,6 +204,12 @@ function createFakeNodeHost(overrides: Partial<NodeHost> = {}): NodeHost {
       }
       return Promise.resolve(data);
     },
+    realPath: (path: string) => {
+      if (files.has(path) || dirs.has(path)) {
+        return Promise.resolve(path);
+      }
+      return Promise.reject(new Error(`ENOENT: ${path}`));
+    },
     writeFile: (path: string, data: Uint8Array) => {
       files.set(path, data);
       return Promise.resolve();
@@ -243,6 +262,14 @@ describe('createNodeRuntimeServices', () => {
   it('returns platform "node"', () => {
     const services = createNodeRuntimeServices(createFakeNodeHost());
     expect(services.platform()).toBe('node');
+  });
+
+  it('fs.realPath resolves an existing path and rejects a missing one', async () => {
+    const services = createNodeRuntimeServices(createFakeNodeHost());
+    const fs = services.fs!;
+    await fs.writeFile('/real.txt', new Uint8Array([1]));
+    expect(await fs.realPath!('/real.txt')).toBe('/real.txt');
+    await expect(fs.realPath!('/missing.txt')).rejects.toThrow('ENOENT');
   });
 
   it('returns the Node version', () => {
