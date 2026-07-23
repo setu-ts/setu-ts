@@ -2706,11 +2706,13 @@ await secrets.rotate('database/password', newPassword);
 
 **Providers:**
 
-- `AwsKmsProvider`
+- `AwsKmsProvider` — retrieves named secrets from AWS Secrets Manager, whose values are encrypted
+  with AWS KMS. (KMS alone encrypts/decrypts and cannot store/retrieve a named secret by path, which
+  `get`/`rotate` require, so the provider goes through Secrets Manager.)
 - `GcpSecretManagerProvider`
 - `AzureKeyVaultProvider`
-- `HashiCorpVaultProvider`
-- `EnvProvider` — From environment variables
+- `HashiCorpVaultProvider` — KV v2 over `fetch` (zero-dependency, Workers-compatible)
+- `EnvProvider` — From environment variables (default provider; reads `IRuntimeServices.env`)
 
 **Implementation Files:**
 
@@ -2732,9 +2734,9 @@ await secrets.rotate('database/password', newPassword);
 
 ### Deliverables
 
-- [ ] SecretsPlugin
-- [ ] All providers
-- [ ] Full test coverage
+- [x] SecretsPlugin
+- [x] All providers
+- [x] Full test coverage (per-file 90% bar: branch/function/line for every src file)
 
 ---
 
@@ -4083,7 +4085,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 24        | ✅     | telemetry-plugin     |
 | 24b       | ✅     | telemetry-plugin     |
 | 24c       | ✅     | telemetry-collector  |
-| 25        | ⬜     | secrets-plugin       |
+| 25        | ✅     | secrets-plugin       |
 | 26        | ⬜     | audit-plugin         |
 | 27        | ⬜     | resilience-plugin    |
 | 28        | ⬜     | storage-plugin       |

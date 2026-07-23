@@ -244,6 +244,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   validate`. Plus an operator guide (`docs/telemetry-collector-fanout.md`). M39
   owns compose/k8s and references this config; M38 links the guide. No `common` change, no
   capability token) — complete (PR #51)
+- **Milestone 25** (`packages/secrets-plugin` — SecretsPlugin registering an `ISecretManager` under
+  `CAPABILITIES.SECRETS`; `SecretsService` wrapping an internal `SecretProvider` port with a
+  monotonic-clock read-through cache (`cacheTtl`, `0` disables); five providers — `EnvProvider`
+  (default, reads `IRuntimeServices.env`, read-only `set`/`rotate` throw), `AwsKmsProvider` (AWS
+  Secrets Manager, KMS-backed), `GcpSecretManagerProvider`, `AzureKeyVaultProvider`, and
+  `HashiCorpVaultProvider` (KV v2 over `fetch`, zero-dep); cloud providers use the inject-or-lazy
+  client pattern via an `adapt(module)`/`load(module)` seam (pure adapter unit-tested with a fake
+  SDK module, one-line `import('npm:…')` behind a guarded real-import test); structural client
+  facades `IAwsSecretsClient`/`IGcpSecretsClient`/`IAzureSecretsClient`/`IVaultHttp` exported for
+  injection; no `common` change — the contract and token were committed earlier) — complete (PR #56)
 - **Milestone 42** (`packages/common` — `IResponse.stream(ReadableStream<Uint8Array>)`, widened
   `snapshot()` returning a discriminated union `{ streaming: false, body: Uint8Array|string|null }`
   / `{ streaming: true, body: ReadableStream<Uint8Array> }`; `IRequest.signal?: AbortSignal` and
