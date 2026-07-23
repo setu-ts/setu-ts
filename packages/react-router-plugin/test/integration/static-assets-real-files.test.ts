@@ -218,6 +218,25 @@ describe('static-assets — real files', () => {
     expect(mockResp.headers.get('Content-Type')).toBe('application/octet-stream');
   });
 
+  it('serves the same handler twice — second request reuses the cached canonical root', async () => {
+    const fs = makeRealFs();
+    const handler = createStaticAssetHandler({
+      fs,
+      assetsDir,
+      assetUrlPrefix: '/assets/',
+    });
+
+    const first = buildMockResponse();
+    await handler(buildMockCtx('/assets/app.js', first));
+    expect(first.status).toBe(200);
+
+    // Second request through the SAME handler: exercises the cached-realBase path.
+    const second = buildMockResponse();
+    await handler(buildMockCtx('/assets/style.css', second));
+    expect(second.status).toBe(200);
+    expect(second.headers.get('Content-Type')).toBe('text/css');
+  });
+
   it('returns 404 for a symlink inside assets that points to a file OUTSIDE (realPath containment)', async () => {
     // A secret file outside the assets root, and a symlink inside it that
     // targets that secret. Lexical `..` checks cannot catch this; realPath can.

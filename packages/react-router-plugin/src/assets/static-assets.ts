@@ -58,6 +58,10 @@ export function createStaticAssetHandler(options: {
 }): RouteHandler {
   const { fs, assetsDir, assetUrlPrefix } = options;
 
+  // The canonical assets root is invariant for the handler's lifetime; resolve
+  // it once (lazily, since `realPath` is async) instead of on every request.
+  let assetsRealPath: string | undefined;
+
   return async (ctx) => {
     // Decode the URL path to get the file system path.
     let decodedPath: string;
@@ -98,7 +102,7 @@ export function createStaticAssetHandler(options: {
       let realBase: string;
       let realTarget: string;
       try {
-        realBase = await fs.realPath(assetsDir);
+        realBase = assetsRealPath ??= await fs.realPath(assetsDir);
         realTarget = await fs.realPath(fullPath);
       } catch {
         // Unresolvable (missing file / broken symlink) → treat as not found.
