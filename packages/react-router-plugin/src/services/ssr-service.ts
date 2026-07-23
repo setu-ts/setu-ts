@@ -24,22 +24,20 @@ import { bridgeRequestToRR } from '../handler/request-bridge.ts';
 export class SsrService implements ISsrService {
   readonly #handler: SsrRequestHandler;
   readonly #getLoadContext: LoadContextFunction | undefined;
-  readonly #runtime: IRuntimeServices;
 
   /**
    * @param handler - The resolved RR request handler
    * @param getLoadContext - Optional custom loadContext builder
-   * @param runtime - Runtime services (for abort signal and fs)
+   * @param runtime - Runtime services (accepted for structural compatibility; unused)
    * @since 0.1.0
    */
   constructor(
     handler: SsrRequestHandler,
     getLoadContext: LoadContextFunction | undefined,
-    runtime: IRuntimeServices,
+    _runtime?: IRuntimeServices,
   ) {
     this.#handler = handler;
     this.#getLoadContext = getLoadContext;
-    this.#runtime = runtime;
   }
 
   /**
@@ -54,7 +52,6 @@ export class SsrService implements ISsrService {
       ctx,
       this.#handler,
       this.#getLoadContext,
-      this.#runtime,
     );
     return result;
   }

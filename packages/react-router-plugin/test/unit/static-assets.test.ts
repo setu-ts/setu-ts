@@ -239,7 +239,7 @@ describe('static-assets', () => {
     expect(mockResp.status).toBe(404);
   });
 
-  it('returns 404 for path containing .. traversal', async () => {
+  it('returns 404 for path containing .. traversal (string check)', async () => {
     const fs = {
       readFile: () => Promise.resolve(new TextEncoder().encode('ok')),
     } as unknown as IFileSystem;
@@ -256,17 +256,9 @@ describe('static-assets', () => {
     expect(mockResp.status).toBe(404);
   });
 
-  it('returns 404 when resolved path escapes assetsDir', async () => {
-    const fileMap: Record<string, Uint8Array> = {};
+  it('returns 404 for path with multiple .. traversal (string containment check)', async () => {
     const fs = {
-      readFile: (p: string) => {
-        if (p.startsWith('/tmp')) {
-          return fileMap[p] ?? (() => {
-            throw new Error('ENOENT');
-          })();
-        }
-        return new TextEncoder().encode('test');
-      },
+      readFile: () => Promise.resolve(new TextEncoder().encode('ok')),
     } as unknown as IFileSystem;
     const handler = createStaticAssetHandler({
       fs,
@@ -274,9 +266,8 @@ describe('static-assets', () => {
       assetUrlPrefix: '/assets/',
     });
     const mockResp = buildMockResponse();
-    // /assets/tmp/evil.js resolves to /assets/tmp/evil.js which is NOT under /assets via
-    // isWithin if we fake the file map differently — actually just test direct traversal
-    // by requesting a path that maps outside assetsDir via isWithin logic
+    // Requests with '../' substring are caught by the string containment check
+    // before isWithin runs — this verifies that early-exit path.
     const ctx = buildMockCtx('/assets/../../../etc/hostname', mockResp);
 
     await handler(ctx);
@@ -284,7 +275,7 @@ describe('static-assets', () => {
     expect(mockResp.status).toBe(404);
   });
 
-  it('isWithin uses real path resolution when Deno.realPathSync is available', async () => {
+  it('serves known file when fs returns content', async () => {
     const fileMap: Record<string, Uint8Array> = {};
     fileMap['/assets/test.html'] = new TextEncoder().encode('<html></html>');
     const fs = {

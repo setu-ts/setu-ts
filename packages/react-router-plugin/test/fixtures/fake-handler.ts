@@ -81,3 +81,14 @@ export function createStreamingFakeHandler(): SsrRequestHandler {
       headers: { 'Content-Type': 'text/html' },
     });
 }
+
+/**
+ * Creates a simple fake RR handler that always returns the given response.
+ *
+ * @param response - The response to return
+ * @returns A fake handler function
+ * @since 0.1.0
+ */
+export function createSimpleFakeHandler(response: Response): SsrRequestHandler {
+  return () => Promise.resolve(response);
+}

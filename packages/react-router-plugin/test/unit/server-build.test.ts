@@ -6,11 +6,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
-import {
-  assembleHandler,
-  createFakeHandler,
-  loadRequestHandler,
-} from '../../src/handler/server-build.ts';
+import { assembleHandler, loadRequestHandler } from '../../src/handler/server-build.ts';
+import { createSimpleFakeHandler } from '../fixtures/fake-handler.ts';
 
 describe('server-build', () => {
   it('assembleHandler returns a handler that calls createRequestHandler(build, mode)', () => {
@@ -94,9 +91,9 @@ describe('server-build', () => {
     }
   });
 
-  it('createFakeHandler returns a handler that always resolves with the given response', async () => {
+  it('createSimpleFakeHandler returns a handler that always resolves with the given response', async () => {
     const expectedResponse = new Response('fixed', { status: 418 });
-    const handler = createFakeHandler(expectedResponse);
+    const handler = createSimpleFakeHandler(expectedResponse);
     const request = new Request('http://localhost/test');
     const result = await handler(request, {});
 

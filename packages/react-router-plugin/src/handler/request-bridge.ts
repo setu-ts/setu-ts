@@ -22,7 +22,7 @@ import { createDefaultLoadContext } from './load-context.ts';
  * @param ctx - The kernel request context
  * @param handler - The React Router request handler
  * @param getLoadContext - Optional custom loadContext builder
- * @param runtime - Runtime services (unused; kept for future abort-signal threading)
+ * @param runtime - (Optional, unused) Retained for backward compatibility with tests
  * @returns The `HandlerResult` produced by writing the response back
  * @since 0.1.0
  */
@@ -30,7 +30,7 @@ export async function bridgeRequestToRR(
   ctx: IRequestContext,
   handler: SsrRequestHandler,
   getLoadContext: LoadContextFunction | undefined,
-  _runtime: IRuntimeServices,
+  _runtime?: IRuntimeServices,
 ): Promise<HandlerResult> {
   // Build the loadContext — default exposes services + user.
   const loadContext = (getLoadContext ?? createDefaultLoadContext)(ctx);
@@ -86,13 +86,14 @@ async function writeRRResponseToContext(
 ): Promise<HandlerResult> {
   ctx.response.status(response.status);
 
-  // Copy all headers. Set-Cookie uses appendHeader for multi-value.
+  // Copy all headers. Set-Cookie uses appendHeader for multi-value;
+  // other headers also use appendHeader so repeated header values survive.
   for (const [key, value] of response.headers.entries()) {
     if (key.toLowerCase() === 'set-cookie') {
       // Multiple Set-Cookie values are already combined with `, ` by Headers.entries().
-      // Use getSetCookie() for individual cookies.
+      // Use getSetCookie() for individual cookies below.
     } else {
-      ctx.response.header(key, value);
+      ctx.response.appendHeader(key, value);
     }
   }
 

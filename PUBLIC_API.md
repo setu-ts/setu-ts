@@ -1505,7 +1505,11 @@ register SSR routes. The plugin owns all HTTP verbs at the configured `basename`
 import { CAPABILITIES, ISsrService } from '@hono-enterprise/common';
 
 // The plugin handles SSR automatically at the catch-all.
-// Custom routes below the catch-all take precedence via the kernel tie-break.
+// Custom routes take precedence based on static segment count:
+// a custom route with MORE static segments wins over /* (e.g. /api/:id has 2, beats 1).
+// Single-segment routes (e.g. /login, /health) registered AFTER ReactRouterPlugin
+// tie with /* (both have 1 static segment) and are silently shadowed by SSR.
+// Register single-segment routes BEFORE ReactRouterPlugin or use more-static routes.
 app.router.get('/api/health', (ctx) => {
   return ctx.response.json({ status: 'ok' });
 });
@@ -1531,6 +1535,22 @@ app.router.get('/api/health', (ctx) => {
   catch-all, optional static-asset route, and a `react-router` health indicator.
 - `createStaticAssetHandler({ fs, assetsDir, assetUrlPrefix })` — returns a `RouteHandler` for
   serving built client assets with immutable caching.
+- `assembleHandler(build, createRequestHandler, mode): SsrRequestHandler` — assembles an RR request
+  handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
+  unit-testable without I/O.
+- `loadRequestHandler(serverBuildPath, mode, options?): Promise<SsrRequestHandler>` — lazily imports
+  the app-provided server build and `npm:react-router@7`, unwraps the `ServerBuild` (default
+  export), and returns a callable `SsrRequestHandler`. The optional `options` parameter accepts
+  `{ rrImportHook?: () => Promise<Record<string, unknown>> }` — a test-seam that replaces the
+  `npm:react-router@7` import. **Since 0.1.0** this parameter is optional and backward-compatible;
+  callers may invoke it with only two arguments.
+- `bridgeRequestToRR(ctx, handler, getLoadContext?, runtime?): Promise<HandlerResult>` — bridges a
+  kernel `IRequestContext` into a web `Request`, invokes the RR handler, and maps the resulting
+  `Response` back onto `ctx.response`. The optional `runtime` parameter (`IRuntimeServices`) was
+  previously required but is now unused; accept `undefined` or omit it for tests.
+- `class SsrService implements ISsrService` — holds a resolved RR request handler and optional
+  `getLoadContext`; its `render(ctx)` method delegates to `bridgeRequestToRR` and returns the
+  `HandlerResult`.
 
 ### Notes
 

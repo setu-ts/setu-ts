@@ -8,16 +8,6 @@
 import type { SsrRequestHandler } from '../interfaces/index.ts';
 
 /**
- * Creates a fake RR handler for testing.
- *
- * @param response - The response to return
- * @returns A fake handler function
- */
-export function createFakeHandler(response: Response): SsrRequestHandler {
-  return () => Promise.resolve(response);
-}
-
-/**
  * Pure function that assembles an RR request handler from a pre-loaded build
  * and the `createRequestHandler` factory.
  *
