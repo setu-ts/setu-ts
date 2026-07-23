@@ -39,9 +39,10 @@ export class FileAuditStorage implements IAuditStorage {
    */
   async append(entry: StoredAuditEntry): Promise<void> {
     const entryCopy = structuredClone(entry);
-    // Queue this append behind any in-flight operation, then await it.
-    this._lock = this._lock.then(() => this.readModifyWrite(entryCopy));
-    await this._lock;
+    const next = this._lock.then(() => this.readModifyWrite(entryCopy));
+    // The chain always resets to fulfilled so a single failure never bricks future writes:
+    this._lock = next.then(() => undefined, () => undefined);
+    await next; // still propagates THIS append's error to its caller
   }
 
   private async readModifyWrite(entry: StoredAuditEntry): Promise<void> {

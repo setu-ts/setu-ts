@@ -116,6 +116,55 @@ describe('freezeAuditRecord', () => {
     const origBefore = entry.before as Record<string, Record<string, number>>;
     expect(origBefore.a.b).toBe(1);
   });
+
+  it('freezes arrays — mutating nested array element blocks', () => {
+    const entry: StoredAuditEntry = {
+      id: '4',
+      timestamp: 4000,
+      action: 'bulk.update',
+      resource: 'items',
+      result: 'success',
+      metadata: { tags: ['x', { n: 1 }] },
+    };
+    const frozen = freezeAuditRecord(entry);
+
+    // The top-level metadata is frozen.
+    expect(() => {
+      // biome-ignore lint/perf/noMutation: testing immutability
+      (frozen.metadata as Record<string, unknown>).tags = ['changed'];
+    }).toThrow();
+
+    // The array inside metadata is also frozen at depth.
+    const tags = (frozen.metadata as Record<string, unknown[]>)
+      .tags as Array<string | Record<string, number>>;
+    expect(tags).toHaveLength(2);
+
+    // Mutating a nested object inside the array should block.
+    expect(() => {
+      // biome-ignore lint/perf/noMutation: testing immutability
+      (tags[1] as Record<string, number>).n = 999;
+    }).toThrow();
+  });
+
+  it('handles an array in `before` field', () => {
+    const entry = {
+      id: '5',
+      timestamp: 5000,
+      action: 'batch.delete',
+      resource: 'records',
+      result: 'success',
+      before: [{ id: 'r1' }, { id: 'r2' }] as unknown as Readonly<Record<string, unknown>>,
+    };
+    const frozen = freezeAuditRecord(entry as StoredAuditEntry);
+
+    // The array inside before is frozen.
+    const beforeArr = frozen.before as unknown as Record<string, unknown>[];
+    expect(beforeArr).toHaveLength(2);
+    expect(() => {
+      // biome-ignore lint/perf/noMutation: testing immutability
+      (beforeArr[0] as Record<string, unknown>).id = 'tampered';
+    }).toThrow();
+  });
 });
 
 describe('matchAuditQuery', () => {

@@ -121,6 +121,12 @@ describe('AuditPlugin integration (real kernel)', () => {
       result: 'failure',
     });
 
+    // Read the file back to confirm both entries persisted.
+    const filePath = '.tmp/audit-integration-test.log';
+    const content = await Deno.readTextFile(filePath);
+    const lines = content.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+
     await fileApp.stop();
   });
 });

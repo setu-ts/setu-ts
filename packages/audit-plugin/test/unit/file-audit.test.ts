@@ -277,11 +277,10 @@ describe('FileAuditStorage', () => {
     const storage = new FileAuditStorage({ fs });
 
     // Fire two concurrent appends.
-    const [p1, p2] = await Promise.all([
+    await Promise.all([
       storage.append({ id: 'a', timestamp: 100, action: 'x', resource: 'r', result: 'success' }),
       storage.append({ id: 'b', timestamp: 200, action: 'y', resource: 'r', result: 'failure' }),
     ]);
-    await Promise.all([p1, p2]);
 
     // Both entries should be persisted in serialized order.
     const content = files['./audit.log'];
@@ -289,5 +288,56 @@ describe('FileAuditStorage', () => {
     expect(lines.length).toBe(2);
     expect(JSON.parse(lines[0]).id).toBe('a');
     expect(JSON.parse(lines[1]).id).toBe('b');
+  });
+
+  it('recover from transient write error — chain resets after one rejection', async () => {
+    const files: Record<string, string> = {};
+    let callCount = 0;
+    const fs: IFileSystem = {
+      readFile: (path: string) => {
+        const content = files[path] ?? '';
+        return Promise.resolve(new TextEncoder().encode(content));
+      },
+      writeFile: (_path: string, data: Uint8Array) => {
+        callCount++;
+        if (callCount === 1) {
+          // First write fails with a transient error.
+          return Promise.reject(new Error('EIO'));
+        }
+        // Subsequent writes succeed.
+        files[_path] = new TextDecoder().decode(data);
+        return Promise.resolve();
+      },
+      stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
+      readdir: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const storage = new FileAuditStorage({ fs });
+
+    // Append A should reject because writeFile throws on first call.
+    const appendA = storage.append({
+      id: 'A',
+      timestamp: 100,
+      action: 'a',
+      resource: 'r',
+      result: 'success',
+    });
+    await expect(appendA).rejects.toThrow('EIO');
+
+    // Append B should succeed and the chain must have recovered.
+    await storage.append({
+      id: 'B',
+      timestamp: 200,
+      action: 'b',
+      resource: 'r',
+      result: 'failure',
+    });
+
+    // Read back and confirm B persisted.
+    const content = files['./audit.log'];
+    const lines = content!.split('\n').filter((l) => l.trim().length > 0);
+    expect(lines.length).toBe(1);
+    expect(JSON.parse(lines[0]).id).toBe('B');
   });
 });
