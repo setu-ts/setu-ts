@@ -1475,6 +1475,85 @@ Omitting an option disables that behaviour (no timer created).
 
 ---
 
+## SecretsPlugin()
+
+Provides secret management: registers an `ISecretManager` under `CAPABILITIES.SECRETS`, backed by a
+pluggable provider with a monotonic-clock read-through cache. The default provider is `'env'`
+(zero-dependency, every runtime). No cloud SDK is a hard dependency — each cloud provider accepts an
+injected client facade or lazily imports its SDK (AI_GUIDELINES §12.2). Secret values are never
+logged.
+
+### Registration
+
+```typescript
+import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
+
+// Environment variables (default provider)
+app.register(SecretsPlugin());
+
+// HashiCorp Vault (KV v2, over fetch — zero dependency)
+app.register(SecretsPlugin({
+  provider: 'vault',
+  options: { address: 'https://vault.example.com', token: vaultToken, mount: 'secret' },
+}));
+
+// AWS Secrets Manager (KMS-backed)
+app.register(SecretsPlugin({ provider: 'aws-kms', options: { region: 'us-east-1' } }));
+```
+
+> `provider: 'aws-kms'` retrieves named secrets from AWS Secrets Manager, which encrypts values with
+> AWS KMS. KMS alone cannot store/retrieve named secrets by path, so `get`/`rotate` go through
+> Secrets Manager.
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ISecretManager } from '@hono-enterprise/common';
+
+const secrets = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+const dbPassword = await secrets.get('database/password'); // env: DATABASE_PASSWORD
+const exists = await secrets.has('database/password');
+await secrets.rotate('database/password', newPassword); // throws for the env provider
+```
+
+### Options
+
+| Option                                               | Provider                | Description                                                    |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`. |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.        |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                       |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).            |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                             |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                 |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).      |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).      |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`). |
+
+### Exports
+
+- `SecretsPlugin(options?)` — plugin factory.
+- `SecretsService` — the `ISecretManager` implementation (provider + read cache).
+- `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
+  `HashiCorpVaultProvider` — provider classes.
+- `SecretsServiceOptions`, `SecretsPluginOptions`, `SecretsProviderType`, `SecretsProviderOptions`,
+  `AwsKmsProviderOptions`, `GcpSecretManagerProviderOptions`, `AzureKeyVaultProviderOptions`,
+  `HashiCorpVaultProviderOptions` — option types.
+- `IAwsSecretsClient`, `IGcpSecretsClient`, `IAzureSecretsClient`, `IVaultHttp` — structural
+  injection types.
+- `ISecretManager` — re-exported from `@hono-enterprise/common` (`get` / `has` / `rotate`).
+
+### Notes
+
+- `EnvProvider` is read-only: `rotate()` and provider `set` throw, since environment variables
+  cannot be mutated at runtime. It reads env through `IRuntimeServices.env`, resolving Workers/Deno
+  bindings.
+- Secret names use provider-specific path syntax; `EnvProvider` maps a name to an env key by
+  uppercasing and replacing `/`, `-`, `.` with `_` (e.g. `database/password` → `DATABASE_PASSWORD`).
+
+---
+
 ## CQRS
 
 Provides command/query separation with buses.
