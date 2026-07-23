@@ -262,8 +262,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   imports `npm:react-router@7` + the app-provided `ServerBuild`); `IRequestContext` ↔ web
   `Request`/`Response` bridge streaming through M42 `IResponse.stream()`, GET/HEAD bodies omitted;
   default `loadContext` exposing `{ services, user }`; catch-all mounted on all 7 verbs at
-  `joinWildcard(basename)`; static-asset serving over `runtime.fs?.readFile`; a `react-router`
-  health indicator and no `onClose` (stateless handler); `flatRoutes`/file-based routing supported
+  `joinWildcard(basename)`; static-asset serving over `runtime.fs?.readFile` with symlink-safe
+  containment via a new **optional `IFileSystem.realPath`** (`common`) implemented in the Node/Deno/
+  Bun runtime adapters (degrades to lexical `..` containment when absent); a `react-router` health
+  indicator and no `onClose` (stateless handler); `flatRoutes`/file-based routing supported
   transparently via the compiled build — complete (PR pending)
 - **Next milestone** — **Milestone 25** (`packages/secrets-plugin`), the lowest-numbered pending
   milestone; resumes the main plugin sequence (M25–M40) unless reprioritized.
