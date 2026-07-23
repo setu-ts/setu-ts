@@ -253,8 +253,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   client pattern via an `adapt(module)`/`load(module)` seam (pure adapter unit-tested with a fake
   SDK module, one-line `import('npm:…')` behind a guarded real-import test); structural client
   facades `IAwsSecretsClient`/`IGcpSecretsClient`/`IAzureSecretsClient`/`IVaultHttp` exported for
-  injection; no `common` change — the contract and token were committed earlier) — complete (PR
-  pending)
+  injection; no `common` change — the contract and token were committed earlier) — complete (PR #56)
 - **Milestone 42** (`packages/common` — `IResponse.stream(ReadableStream<Uint8Array>)`, widened
   `snapshot()` returning a discriminated union `{ streaming: false, body: Uint8Array|string|null }`
   / `{ streaming: true, body: ReadableStream<Uint8Array> }`; `IRequest.signal?: AbortSignal` and
