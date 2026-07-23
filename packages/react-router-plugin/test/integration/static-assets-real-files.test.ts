@@ -1,6 +1,12 @@
 /**
- * Real-file tests for static-asset handler — exercise `Deno.realPathSync`
- * containment branch via actual disk I/O.
+ * Real-file tests for the static-asset handler — serve real files from disk and
+ * assert content-type, caching, missing-file 404, and lexical `..` traversal
+ * rejection over the actual filesystem (via `Deno` I/O in the test only; the
+ * handler itself reads through the injected `IFileSystem`).
+ *
+ * Containment is lexical only (see `static-assets.ts`): symlinks inside the
+ * assets root are followed, so there is deliberately no symlink-escape test —
+ * the handler does not claim that guarantee.
  *
  * @module
  */
@@ -109,7 +115,7 @@ describe('static-assets — real files', () => {
     } as never;
   }
 
-  it('serves a real .js file — exercises Deno.realPathSync containment branch', async () => {
+  it('serves a real .js file from disk with the correct content-type', async () => {
     const fs: IFileSystem = {
       readFile: async (p: string) => {
         const bytes = await Deno.readFile(p);
@@ -210,40 +216,7 @@ describe('static-assets — real files', () => {
     expect(mockResp.headers.get('Content-Type')).toBe('text/css');
   });
 
-  it('returns 404 when resolved path escapes assetsDir via real-path containment check', async () => {
-    // Create an outside dir + symlink inside assets that points outside.
-    const outsideDir = `${tmpDir}/outside`;
-    await Deno.mkdir(outsideDir);
-    await Deno.writeTextFile(`${outsideDir}/secret.txt`, 'leaked');
-
-    const linkPath = `${assetsDir}/leaked.txt`;
-    await Deno.symlink(outsideDir, linkPath);
-
-    const fs: IFileSystem = {
-      readFile: async (p: string) => {
-        const bytes = await Deno.readFile(p);
-        return bytes;
-      },
-    } as unknown as IFileSystem;
-
-    const handler = createStaticAssetHandler({
-      fs,
-      assetsDir,
-      assetUrlPrefix: '/assets/',
-    });
-
-    const mockResp = buildMockResponse();
-    // Request /assets/leaked.txt → fullPath = assetsDir/leaked.txt → resolves to outsideDir via symlink
-    // isWithin checks realTarget.startsWith(realBase + '/') which will be FALSE since
-    // outsideDir is NOT under assetsDir. Covers lines 119-121.
-    const ctx = buildMockCtx('/assets/leaked.txt', mockResp);
-
-    await handler(ctx);
-
-    expect(mockResp.status).toBe(404);
-  });
-
-  it('serves a file with no extension — exercises extractExtension line 151', async () => {
+  it('serves a file with no extension as application/octet-stream', async () => {
     // Write a file with no dot in its name.
     await Deno.writeTextFile(`${assetsDir}/Makefile`, 'all: build');
 

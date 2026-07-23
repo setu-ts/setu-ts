@@ -1534,7 +1534,11 @@ app.router.get('/api/health', (ctx) => {
 - `ReactRouterPlugin(options)` — returns an `IPlugin` with async `register()` that mounts the SSR
   catch-all, optional static-asset route, and a `react-router` health indicator.
 - `createStaticAssetHandler({ fs, assetsDir, assetUrlPrefix })` — returns a `RouteHandler` for
-  serving built client assets with immutable caching.
+  serving built client assets with immutable caching. Traversal containment is **lexical**: request
+  paths containing `..` are rejected and every path is resolved under `assetsDir`. Symlinks inside
+  `assetsDir` are followed (assets are the app's own trusted build output); canonical symlink-safe
+  containment is intentionally not performed, as `IFileSystem` exposes no `realPath`/`lstat` and a
+  runtime-specific API is not permitted outside `packages/runtime`.
 - `assembleHandler(build, createRequestHandler, mode): SsrRequestHandler` — assembles an RR request
   handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
   unit-testable without I/O.

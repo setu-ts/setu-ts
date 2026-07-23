@@ -78,10 +78,17 @@ export function createStaticAssetHandler(options: {
       return ctx.response.status(404).send();
     }
 
-    // Reject `..` segments in the decoded path to prevent traversal. Combined
-    // with prepending `assetsDir` below, this keeps every resolved path inside
-    // the assets root without reaching for a runtime-specific realpath API
-    // (which is unavailable outside `packages/runtime`).
+    // Reject `..` segments in the decoded request path to block traversal from
+    // the attacker-controlled vector (the URL). Combined with prepending
+    // `assetsDir` below, this keeps every resolved path lexically inside the
+    // assets root.
+    //
+    // NOTE: containment is LEXICAL only. Symlinks INSIDE `assetsDir` are
+    // followed (assets are the app's own trusted build output, not
+    // request-controlled). Canonical, symlink-safe containment would require a
+    // `realPath`/`lstat` on `IFileSystem` — the contract exposes neither, and a
+    // runtime-specific API (`Deno.realPathSync`) is not permitted here
+    // (AI_GUIDELINES: no runtime-specific APIs outside `packages/runtime`).
     if (relativePath.includes('..')) {
       return ctx.response.status(404).send();
     }
