@@ -92,41 +92,47 @@ describe('AuditPlugin integration (real kernel)', () => {
   });
 
   it('resolves IAuditLogger with file storage backend', async () => {
+    // Use a self-created temp directory so the test does not depend on any
+    // pre-existing directory (a fixed relative path fails on a clean checkout).
+    const dir = await Deno.makeTempDir({ prefix: 'audit-plugin-test-' });
+    const filePath = `${dir}/audit.log`;
     const fileApp = createApplication({
       plugins: [
         RuntimePlugin(),
-        AuditPlugin({ storage: 'file', options: { path: '.tmp/audit-integration-test.log' } }),
+        AuditPlugin({ storage: 'file', options: { path: filePath } }),
       ],
     });
-    await fileApp.start();
+    try {
+      await fileApp.start();
 
-    expect(fileApp.services.has(CAPABILITIES.AUDIT)).toBe(true);
-    const logger = fileApp.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
-    expect(typeof logger.log).toBe('function');
+      expect(fileApp.services.has(CAPABILITIES.AUDIT)).toBe(true);
+      const logger = fileApp.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
+      expect(typeof logger.log).toBe('function');
 
-    await logger.log({
-      action: 'file.append',
-      resource: 'log',
-      resourceId: 'log1',
-      userId: 'admin',
-      result: 'success',
-    });
+      await logger.log({
+        action: 'file.append',
+        resource: 'log',
+        resourceId: 'log1',
+        userId: 'admin',
+        result: 'success',
+      });
 
-    // Second log to prove the storage persisted multiple entries.
-    await logger.log({
-      action: 'file.update',
-      resource: 'log',
-      resourceId: 'log2',
-      userId: 'admin',
-      result: 'failure',
-    });
+      // Second log to prove the storage persisted multiple entries.
+      await logger.log({
+        action: 'file.update',
+        resource: 'log',
+        resourceId: 'log2',
+        userId: 'admin',
+        result: 'failure',
+      });
 
-    // Read the file back to confirm both entries persisted.
-    const filePath = '.tmp/audit-integration-test.log';
-    const content = await Deno.readTextFile(filePath);
-    const lines = content.split('\n').filter((l) => l.trim().length > 0);
-    expect(lines.length).toBeGreaterThanOrEqual(2);
-
-    await fileApp.stop();
+      // Read the file back to confirm both entries persisted.
+      const content = await Deno.readTextFile(filePath);
+      const lines = content.split('\n').filter((l) => l.trim().length > 0);
+      expect(lines.length).toBe(2);
+    } finally {
+      await fileApp.stop();
+      await Deno.remove(dir, { recursive: true });
+    }
   });
 });
