@@ -255,10 +255,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   complete (PR #53)
 - **Milestone 43** (`packages/sse-plugin` — Server-Sent Events plugin with frame encoding, named
   channels, heartbeat, `Last-Event-ID`) — complete (PR #55)
-- **Next milestone** — **Milestone 44** (`packages/react-router-plugin` — React SSR + file-based
-  routing by embedding React Router v7 framework mode as a plugin over a kernel catch-all handler;
-  built on M42 streaming SSR; the frontend is built with Vite on the Node/npm toolchain, outside the
-  Deno workspace).
+- **Milestone 44** (`packages/react-router-plugin` — React SSR + file-based routing by embedding
+  React Router v7 framework mode as a plugin over a kernel catch-all handler; `ReactRouterPlugin`
+  registering `SsrService` under `CAPABILITIES.SSR` (new `ISsrService` contract + `SSR: 'ssr'` token
+  in `common`); async `register()` with an injectable `loadRequestHandler` seam (default lazily
+  imports `npm:react-router@7` + the app-provided `ServerBuild`); `IRequestContext` ↔ web
+  `Request`/`Response` bridge streaming through M42 `IResponse.stream()`, GET/HEAD bodies omitted;
+  default `loadContext` exposing `{ services, user }`; catch-all mounted on all 7 verbs at
+  `joinWildcard(basename)`; static-asset serving over `runtime.fs?.readFile`; a `react-router`
+  health indicator and no `onClose` (stateless handler); `flatRoutes`/file-based routing supported
+  transparently via the compiled build — complete (PR pending)
+- **Next milestone** — **Milestone 25** (`packages/secrets-plugin`), the lowest-numbered pending
+  milestone; resumes the main plugin sequence (M25–M40) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
