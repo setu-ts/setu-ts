@@ -137,7 +137,8 @@ describe('adaptAzureModule', () => {
                     store.set(key, data);
                     return Promise.resolve({ _hasSas: canSign });
                   },
-                  download() {
+                  // deno-lint-ignore require-await
+                  async download() {
                     const data = store.get(key);
                     if (data === undefined) {
                       return {
@@ -205,7 +206,7 @@ describe('adaptAzureModule', () => {
     expect(store().get('mycontainer/test.bin')).toEqual(new Uint8Array([11, 22, 33]));
   });
 
-  it('download returns deleted when absent', () => {
+  it('download returns deleted when absent', async () => {
     const { mod } = buildFakeAzure();
     const facade = adaptAzureModule(mod, {
       containerName: 'mycontainer',
@@ -216,7 +217,7 @@ describe('adaptAzureModule', () => {
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'missing.bin',
     );
-    const result = blob.download();
+    const result = await blob.download();
     expect(result.deleted).toBe(true);
   });
 
@@ -227,7 +228,7 @@ describe('adaptAzureModule', () => {
     expect(isAzureNotFound(error)).toBe(false);
   });
 
-  it('download throws 404 error → adapted blob returns deleted:true', () => {
+  it('download throws 404 error → adapted blob returns deleted:true', async () => {
     const { mod } = buildFakeAzure();
     const facade = adaptAzureModule(mod, {
       containerName: 'mycontainer',
@@ -238,12 +239,12 @@ describe('adaptAzureModule', () => {
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'missing.bin',
     );
-    const result = blob.download();
+    const result = await blob.download();
     expect(result.deleted).toBe(true);
     expect(result.contentLength).toBe(0);
   });
 
-  it('download error recovery with 404 statusCode in adaptAzureModule', () => {
+  it('download error recovery with 404 statusCode in adaptAzureModule', async () => {
     // Build a fake where download() throws an object with statusCode: 404
     const store = new Map<string, Uint8Array>();
     const fakeMod = {
@@ -257,7 +258,8 @@ describe('adaptAzureModule', () => {
                   store.set(`${name}/${blobName}`, _data);
                   return Promise.resolve();
                 },
-                download(): never {
+                // deno-lint-ignore require-await
+                async download() {
                   throw { statusCode: 404 };
                 },
                 delete() {
@@ -293,7 +295,7 @@ describe('adaptAzureModule', () => {
     // deno-lint-ignore no-explicit-any
     const blob = ((adapterResult as any).getContainerClient('errRecover') as any)
       .getBlockBlobClient('gone.bin');
-    const downloadResult = blob.download();
+    const downloadResult = await blob.download();
     expect(downloadResult.deleted).toBe(true);
     expect(downloadResult.contentLength).toBe(0);
   });
@@ -372,11 +374,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {},
           exists() {
             return false;
@@ -422,11 +427,14 @@ describe('AzureBlobProvider', () => {
             putCalled = true;
             return Promise.resolve();
           },
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -447,11 +455,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: false,
-            readableStreamBody: makeReadable([new Uint8Array([99])]),
-            contentLength: 1,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: false,
+              readableStreamBody: makeReadable([new Uint8Array([99])]),
+              contentLength: 1,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -472,11 +483,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve(false);
           },
@@ -497,11 +511,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -524,11 +541,14 @@ describe('AzureBlobProvider', () => {
           uploadData: () => {
             return Promise.resolve();
           },
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -551,11 +571,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: false,
-            readableStreamBody: makeReadable([new Uint8Array([42])]),
-            contentLength: 1,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: false,
+              readableStreamBody: makeReadable([new Uint8Array([42])]),
+              contentLength: 1,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -608,11 +631,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -633,7 +659,8 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => {
+          // deno-lint-ignore require-await
+          async download() {
             throw { statusCode: 404 };
           },
           delete() {
@@ -656,11 +683,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -681,7 +711,8 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => {
+          // deno-lint-ignore require-await
+          async download() {
             throw { statusCode: 404 };
           },
           delete() {
@@ -704,7 +735,8 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => {
+          // deno-lint-ignore require-await
+          async download() {
             throw new Error('network error');
           },
           delete() {
@@ -726,11 +758,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },
@@ -753,11 +788,14 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          download: () => ({
-            deleted: true,
-            readableStreamBody: null as unknown as NodeJS.ReadableStream,
-            contentLength: 0,
-          }),
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: true,
+              readableStreamBody: null as unknown as NodeJS.ReadableStream,
+              contentLength: 0,
+            };
+          },
           delete() {
             return Promise.resolve();
           },

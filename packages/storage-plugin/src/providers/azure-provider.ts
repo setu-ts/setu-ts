@@ -53,11 +53,11 @@ export interface AzureContainer {
 /** Shape of an Azure block blob handle. */
 export interface AzureBlob {
   uploadData(data: Uint8Array, options?: Record<string, unknown>): Promise<unknown>;
-  download(offset?: number, length?: number): {
+  download(offset?: number, length?: number): Promise<{
     deleted: boolean;
     readableStreamBody: NodeJS.ReadableStream;
     contentLength: number;
-  };
+  }>;
   delete(options?: Record<string, unknown>): Promise<void>;
   exists(): Promise<boolean>;
 }
@@ -186,17 +186,17 @@ export function adaptAzureModule(
                 uploadData: (d: Uint8Array, o?: Record<string, unknown>) => Promise<void>;
               }).uploadData(data, opts);
             },
-            download(offset?: number, length?: number) {
+            async download(offset?: number, length?: number) {
               try {
-                return (blob as {
+                return await (blob as {
                   download: (
                     o?: number,
                     l?: number,
-                  ) => {
+                  ) => Promise<{
                     deleted: boolean;
                     readableStreamBody: NodeJS.ReadableStream;
                     contentLength: number;
-                  };
+                  }>;
                 }).download(offset, length);
               } catch (error) {
                 if (isAzureNotFound(error)) {
@@ -368,7 +368,7 @@ export class AzureBlobProvider implements StorageProvider {
   async get(path: string): Promise<Uint8Array | null> {
     this.#assertConnected();
     try {
-      const result = this.#getBlockBlob(path).download();
+      const result = await this.#getBlockBlob(path).download();
       if (result.deleted) return null;
       // Adapt Node Readable to Uint8Array via async iteration.
       const chunks: Uint8Array[] = [];
@@ -428,11 +428,11 @@ export class AzureBlobProvider implements StorageProvider {
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
-  getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+  async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     try {
-      const result = this.#getBlockBlob(path).download();
-      if (result.deleted) return Promise.resolve(null);
+      const result = await this.#getBlockBlob(path).download();
+      if (result.deleted) return null;
       const readable = result.readableStreamBody as AsyncIterable<Uint8Array>;
       return Promise.resolve(
         new ReadableStream({
@@ -447,7 +447,7 @@ export class AzureBlobProvider implements StorageProvider {
         }),
       );
     } catch (error) {
-      if (isAzureNotFound(error)) return Promise.resolve(null);
+      if (isAzureNotFound(error)) return null;
       throw error;
     }
   }

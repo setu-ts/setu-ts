@@ -24,6 +24,18 @@ export interface GcsBucket {
 }
 
 /** Shape of a GCS file handle. */
+/**
+ * Pinned @google-cloud/storage@7.x is dual-mode: every op supports both a Promise-returning
+ * overload (no trailing callback) and a callback-style overload `(err, result) => void`.
+ * Evidence from `@google-cloud/storage@7.21.0` type declarations (`file.d.ts`):
+ *   - `download(): Promise<DownloadResponse>` / `download(cb)` / `download(opts, cb)`
+ *   - `save(data): Promise<void>` / `save(data, cb)` / `save(data, opts, cb)`
+ *   - `delete(): Promise<[Response]>` / `delete(opts, cb)` / `delete(cb)`
+ *   - `getMetadata(): Promise<MetadataResponse<K>>` / `getMetadata(opts, cb)` / `getMetadata(cb)`
+ *   - `getSignedUrl(cfg): Promise<GetSignedUrlResponse>` / `getSignedUrl(cfg, cb)`
+ * The callback→Promise bridges below are safe (and the callback-style is what the provider
+ * methods use for `put`).
+ */
 export interface GcsFile {
   getMetadata(): Promise<[Record<string, unknown>]>;
   download(): Promise<{ body: Uint8Array | NodeJS.ReadableStream }>;

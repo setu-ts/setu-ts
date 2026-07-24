@@ -113,8 +113,7 @@ export class LocalStorageProvider implements StorageProvider {
     if (slashIdx > 0) {
       const parentDir = resolved.slice(0, slashIdx);
       try {
-        // deno-lint-ignore no-explicit-any
-        await (this.#fs! as any).mkdir(parentDir, { recursive: true });
+        await this.#fs!.mkdir(parentDir, { recursive: true });
       } catch {
         // mkdir with recursive=true can fail if parent is root or doesn't exist — ignore.
       }
