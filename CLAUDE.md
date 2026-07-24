@@ -279,7 +279,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   React Router v7 framework mode as a plugin over a kernel catch-all handler; `ReactRouterPlugin`
   registering `SsrService` under `CAPABILITIES.SSR` (new `ISsrService` contract + `SSR: 'ssr'` token
   in `common`); async `register()` with an injectable `loadRequestHandler` seam (default lazily
-  imports `npm:react-router@7` + the app-provided `ServerBuild`); `IRequestContext` ↔ web
+  imports `npm:react-router@8` + the app-provided `ServerBuild`); `IRequestContext` ↔ web
   `Request`/`Response` bridge streaming through M42 `IResponse.stream()`, GET/HEAD bodies omitted;
   default `loadContext` exposing `{ services, user }`; catch-all mounted on all 7 verbs at
   `joinWildcard(basename)`; static-asset serving over `runtime.fs?.readFile` with symlink-safe
