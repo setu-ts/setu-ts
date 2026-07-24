@@ -149,7 +149,8 @@ describe('GcsProvider', () => {
 
   it('not-connected operations reject', async () => {
     const provider = new GcsProvider({ bucket: 'b' });
-    await expect(provider.put('k', new Uint8Array())).rejects.toThrow('not connected');
+    // put() throws synchronously when not connected (assertConnected fires before Promise creation)
+    expect(() => provider.put('k', new Uint8Array())).toThrow('not connected');
   });
 
   it('loadGcsModule enters the real import path', async () => {

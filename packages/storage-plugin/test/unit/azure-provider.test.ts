@@ -201,13 +201,13 @@ describe('adaptAzureModule', () => {
   });
 
   it('getSignedUrl throws when cannot sign', async () => {
+    // When accountName is provided without accountKey and no connectionString,
+    // adaptAzureModule throws at construction time.
     const { mod } = buildFakeAzure();
-    // deno-lint-ignore no-explicit-any
-    const facade = adaptAzureModule(mod, {
+    await expect(() => adaptAzureModule(mod, {
       containerName: 'mycontainer',
       accountName: 'fakeaccount',
-    }) as any;
-    await expect(facade.getSignedUrl('blob.txt', 3600)).rejects.toThrow('account key');
+    })).toThrow('accountName + options.accountKey');
   });
 
   it('getSignedUrl returns URL when signed', async () => {
