@@ -870,4 +870,226 @@ describe('GcsProvider', () => {
     }).file('cb-meta');
     await expect(fileHandle.getMetadata()).rejects.toThrow('metadata error');
   });
+
+  // ── isGcsNotFound branch: non-Error input ─
+
+  it('isGcsNotFound returns false when error is not an Error instance', async () => {
+    // Access internal detector via provider's get() which uses it internally.
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, cb: (err: Error | null) => void) => cb(null),
+          download: () => Promise.reject('string-error'),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on() {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    // 'string-error' is NOT instanceof Error → isGcsNotFound returns false → re-thrown
+    let threw = false;
+    try {
+      await provider.get('non-error');
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+  });
+
+  // ── adaptGcsModule callback success paths: getMetadata resolve, download resolve, createReadStream ─
+
+  it('adaptGcsModule getMetadata() resolves successfully when callback receives no error', async () => {
+    const result = buildCallbackGcs();
+    const facade = adaptGcsModule(result.mod, { bucket: 'cb-bucket' });
+    const fileHandle = (facade.bucket() as unknown as {
+      file: (n: string) => { getMetadata: () => Promise<[Record<string, unknown>]> };
+    }).file('default-data');
+    const meta = await fileHandle.getMetadata();
+    expect(meta).toEqual([{ size: 1 }]);
+  });
+
+  it('adaptGcsModule createReadStream() is reachable from adapted file handle', () => {
+    const result = buildCallbackGcs();
+    const facade = adaptGcsModule(result.mod, { bucket: 'cb-bucket' });
+    const fileHandle = (facade.bucket() as unknown as {
+      file: (n: string) => { createReadStream: () => NodeJS.ReadableStream };
+    }).file('default-data');
+    const stream = fileHandle.createReadStream();
+    expect(stream).toBeDefined();
+    expect(typeof stream.on).toBe('function');
+  });
+
+  // ── GcsProvider.connect() early-return when already connected ─
+
+  it('connect returns immediately when already connected (early-return branch)', async () => {
+    const fakeClient = { bucket: () => ({}) } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+    // Second connect should hit the early-return branch: if (this.#client !== null) return;
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+  });
+
+  // ── Branches that need explicit coverage: projectId option, nullish coalesce,
+  //    getStream non-Not Found catch re-throw, and adaptGcsModule callback branches. ─
+
+  it('adaptGcsModule passes projectId through to Storage config when defined', () => {
+    let capturedConfig: { projectId?: string } | undefined;
+    const mod = {
+      Storage: class {
+        constructor(config: { projectId?: string }) {
+          capturedConfig = config;
+        }
+        bucket(_n: unknown) {
+          return {
+            file(_name: string) {
+              return {
+                getMetadata() {
+                  return Promise.resolve([{}]);
+                },
+                download() {
+                  return Promise.resolve({ body: new Uint8Array([]) });
+                },
+                save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                  cb(null);
+                },
+                delete(cb: (e: Error | null) => void) {
+                  cb(null);
+                },
+                getSignedUrl(
+                  _c: { action: string; expires: number },
+                  cb: (e: Error | null, u?: string) => void,
+                ) {
+                  cb(null, 'https://x');
+                },
+                createReadStream() {
+                  return { on() {} };
+                },
+              };
+            },
+          };
+        }
+      },
+    } as unknown as import('../../src/providers/gcs-provider.ts').GcsSdkModule;
+    adaptGcsModule(mod, { bucket: 'b', projectId: 'my-project' });
+    expect(capturedConfig?.projectId).toBe('my-project');
+  });
+
+  it('adaptGcsModule omits projectId from Storage config when undefined', () => {
+    let capturedConfig: { projectId?: string } | undefined;
+    const mod = {
+      Storage: class {
+        constructor(config: { projectId?: string }) {
+          capturedConfig = config;
+        }
+        bucket(_n: unknown) {
+          return {
+            file(_name: string) {
+              return {
+                getMetadata() {
+                  return Promise.resolve([{}]);
+                },
+                download() {
+                  return Promise.resolve({ body: new Uint8Array([]) });
+                },
+                save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                  cb(null);
+                },
+                delete(cb: (e: Error | null) => void) {
+                  cb(null);
+                },
+                getSignedUrl(
+                  _c: { action: string; expires: number },
+                  cb: (e: Error | null, u?: string) => void,
+                ) {
+                  cb(null, 'https://x');
+                },
+                createReadStream() {
+                  return { on() {} };
+                },
+              };
+            },
+          };
+        }
+      },
+    } as unknown as import('../../src/providers/gcs-provider.ts').GcsSdkModule;
+    adaptGcsModule(mod, { bucket: 'b' });
+    expect(capturedConfig?.projectId).toBeUndefined();
+  });
+
+  it('adaptGcsModule bucket(_name) uses bucketName from options when _name is undefined/null', () => {
+    let capturedBucketName: string | undefined;
+    const mod = {
+      Storage: class {
+        constructor(_cfg: { projectId?: string }) {}
+        bucket(name: string) {
+          capturedBucketName = name;
+          return {
+            file(_n: string) {
+              return {
+                getMetadata() {
+                  return Promise.resolve([{}]);
+                },
+                download() {
+                  return Promise.resolve({ body: new Uint8Array([]) });
+                },
+                save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                  cb(null);
+                },
+                delete(cb: (e: Error | null) => void) {
+                  cb(null);
+                },
+                getSignedUrl(
+                  _c: { action: string; expires: number },
+                  cb: (e: Error | null, u?: string) => void,
+                ) {
+                  cb(null, 'https://x');
+                },
+                createReadStream() {
+                  return { on() {} };
+                },
+              };
+            },
+          };
+        }
+      },
+    } as unknown as import('../../src/providers/gcs-provider.ts').GcsSdkModule;
+    const facade = adaptGcsModule(mod, { bucket: 'opts-bucket' });
+    // Calling bucket() with no argument should fall through to _name ?? bucketName
+    (facade as unknown as { bucket(n?: string): { file(n: string): unknown } }).bucket();
+    expect(capturedBucketName).toBe('opts-bucket');
+    // Calling bucket(undefined) should do the same
+    (facade as unknown as { bucket(n?: string): { file(n: string): unknown } }).bucket(undefined);
+    expect(capturedBucketName).toBe('opts-bucket');
+    // Calling bucket(null) should do the same
+    (facade as unknown as { bucket(n?: string): { file(n: string): unknown } }).bucket(
+      null as unknown as string,
+    );
+    expect(capturedBucketName).toBe('opts-bucket');
+  });
+
+  it('getStream throws non-NotFound error through catch', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => {
+          throw new Error('ConnectionError');
+        },
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    let threw = false;
+    try {
+      await provider.getStream('throw-file');
+    } catch (e) {
+      threw = true;
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).message).toBe('ConnectionError');
+    }
+    expect(threw).toBe(true);
+  });
 });
