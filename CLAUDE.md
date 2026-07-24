@@ -323,7 +323,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   plus `getUploadedFile()` helper; optional `IStorage.getStream?` for zero-copy streaming downloads
   wired through M42 `IResponse.stream()`; per-provider `getSignedUrl` semantics (Memory → synthetic
   URL, Local → throws, S3/GCS/Azure → real presigned/SAS URLs); `storage` health indicator;
-  `onClose` disconnect; full public API doc corrections in same PR) — complete (PR pending)
+  `onClose` disconnect; full public API doc corrections in same PR) — complete (PR #63)
 - **Milestone 29** (`packages/mail-plugin` — MailPlugin registering an `IMailer` under
   `CAPABILITIES.MAIL`, backed by a pluggable internal `MailProvider` port; four backends —
   `LogProvider` (zero-dependency default, records/logs each message, every runtime incl. Workers),
