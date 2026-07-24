@@ -64,4 +64,20 @@ export interface IStorage {
    * @returns The signed URL
    */
   getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>;
+  /**
+   * Retrieves an object as a streaming body for zero-copy downloads.
+   *
+   * Providers that support native streaming (S3, GCS, Azure) return a live
+   * stream; others fall back to buffering the entire object into a one-chunk
+   * stream via {@linkcode get}.
+   *
+   * When omitted on the provider, the service wraps {@linkcode get} in a
+   * one-chunk `ReadableStream`.  Absent objects throw (mirroring {@linkcode get}).
+   *
+   * @param path - Object path/key
+   * @returns A `ReadableStream` of object bytes
+   * @throws {Error} If the object does not exist
+   * @since 0.2.0
+   */
+  getStream?(path: string): Promise<ReadableStream<Uint8Array>>;
 }

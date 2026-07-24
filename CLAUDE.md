@@ -314,6 +314,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `BulkheadPolicy`, `BackoffStrategy` (distinct names from the scheduler's
   `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
   row + ROADMAP examples in the same PR) — complete (PR #59)
+- **Milestone 28** (`packages/storage-plugin` — StoragePlugin registering `IStorage` under
+  `CAPABILITIES.STORAGE`; five pluggable providers — `MemoryProvider` (zero-dep default),
+  `LocalStorageProvider` (over `runtime.fs`), `S3Provider`, `GcsProvider`, and `AzureBlobProvider`
+  (inject-or-lazy `npm:@azure/storage-blob@^12`); `'b2'` (Backblaze B2) as a first-class provider
+  type reusing `S3Provider` over B2's S3-compatible endpoint; a zero-dependency multipart parser and
+  an upload middleware factory `createUploadMiddleware` that exposes parsed files via `ctx.state`
+  plus `getUploadedFile()` helper; optional `IStorage.getStream?` for zero-copy streaming downloads
+  wired through M42 `IResponse.stream()`; per-provider `getSignedUrl` semantics (Memory → synthetic
+  URL, Local → throws, S3/GCS/Azure → real presigned/SAS URLs); `storage` health indicator;
+  `onClose` disconnect; full public API doc corrections in same PR) — complete (PR #63)
 - **Milestone 29** (`packages/mail-plugin` — MailPlugin registering an `IMailer` under
   `CAPABILITIES.MAIL`, backed by a pluggable internal `MailProvider` port; four backends —
   `LogProvider` (zero-dependency default, records/logs each message, every runtime incl. Workers),
@@ -329,8 +339,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMailer`/`MailMessage` contract and `MAIL: 'mail'` token were committed in M1; corrected the
   PUBLIC_API Mail `sendTemplate` example (subject is required) in the same PR; developed out of
   order in an isolated worktree off `main`, in parallel with M28) — complete (PR #61)
-- **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
-  sequence (M28, M30–M40 follow) unless reprioritized.
+- **Next milestone** — **Milestone 30** (`packages/notification-plugin`); resumes the main plugin
+  sequence (M30–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

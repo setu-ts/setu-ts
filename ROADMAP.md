@@ -4151,7 +4151,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 25        | ✅     | secrets-plugin       |
 | 26        | ✅     | audit-plugin         |
 | 27        | ✅     | resilience-plugin    |
-| 28        | ⬜     | storage-plugin       |
+| 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
 | 30        | ⬜     | notification-plugin  |
 | 31        | ⬜     | feature-flags-plugin |
