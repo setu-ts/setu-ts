@@ -1952,6 +1952,65 @@ app.register({
 });
 ```
 
+### Request-Reply (RPC)
+
+Beyond fire-and-forget `publish`/`subscribe`, the broker supports **brokered request-reply**: a
+caller sends a request and awaits a single correlated reply. A responder registered with `respond`
+returns the reply value; correlation, the reply channel, and timeout are handled internally.
+
+```typescript
+// Responder side — its resolved value is returned to the caller.
+const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+await broker.respond<{ userId: string }, { name: string }>('user.lookup', async (req) => {
+  const user = await users.findById(req.userId);
+  return { name: user.name };
+});
+
+// Caller side — resolves with the responder's reply.
+const reply = await broker.request<{ userId: string }, { name: string }>(
+  'user.lookup',
+  { userId: '42' },
+  { timeoutMs: 3000 }, // defaults to 5000 when omitted
+);
+```
+
+Signatures (on `IMessageBroker`, from `@hono-enterprise/common`):
+
+```typescript
+interface RequestOptions {
+  /** Reply wait budget in ms. @defaultValue 5000 */
+  readonly timeoutMs?: number;
+}
+
+type RequestHandler<TReq = unknown, TRes = unknown> = (
+  message: TReq,
+  metadata: MessageMetadata,
+) => TRes | Promise<TRes>;
+
+request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes>;
+respond<TReq, TRes>(
+  topic: string,
+  handler: RequestHandler<TReq, TRes>,
+  options?: SubscribeOptions,
+): Promise<ISubscription>;
+```
+
+Pass `options.queue` to `respond` to load-balance requests across competing responders.
+
+`request` rejects with one of three exported error classes (import from
+`@hono-enterprise/messaging-plugin` for `instanceof` handling):
+
+| Error                        | Thrown when                                                       |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                              |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message. |
+| `MessagingNotSupportedError` | The broker cannot support request-reply (Kafka — see below).      |
+
+> **Broker support.** Request-reply is available on the **in-memory, Redis Streams, RabbitMQ, and
+> NATS** brokers. The **Kafka** broker's consumer-group / auto-commit model makes per-caller reply
+> correlation an anti-pattern, so `KafkaBroker.request`/`respond` return a promise **rejected** with
+> `MessagingNotSupportedError`; use a reply-capable broker for RPC.
+
 ### Multiple Broker Instances
 
 ```typescript
@@ -4142,7 +4201,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                            |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                            |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                         |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`                                                                                                                                            |
+| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                            |
 | Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                            |
 | Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                      |
 | Secrets             | `ISecretManager`                                                                                                                                                                                                                         |

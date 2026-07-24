@@ -64,6 +64,9 @@ export { KafkaBroker } from './brokers/kafka-broker.ts';
 export { JsonSerializer } from './serializers/json-serializer.ts';
 export type { ISerializer } from './serializers/serializer.ts';
 
+// Request-reply error classes (for consumer `instanceof` handling)
+export { MessagingNotSupportedError, RemoteHandlerError, RequestTimeoutError } from './errors.ts';
+
 // Option types
 export type {
   EventsMessagingBridgeOptions,
@@ -81,5 +84,7 @@ export type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  RequestHandler,
+  RequestOptions,
   SubscribeOptions,
 } from '@hono-enterprise/common';

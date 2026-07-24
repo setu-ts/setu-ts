@@ -5,6 +5,7 @@ import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisStreamsClient } from '../fixtures/fake-ioredis-client.ts';
 import type { IRedisStreamsClient } from '../../src/interfaces/index.ts';
+import { RequestTimeoutError } from '../../src/errors.ts';
 
 /**
  * RedisStreamsBroker unit tests.
@@ -609,5 +610,33 @@ describe('RedisStreamsBroker', () => {
     });
 
     await expect(broker.connect()).rejects.toThrow();
+  });
+});
+
+describe('RedisStreamsBroker request-reply delegation', () => {
+  it('respond() returns a subscription', async () => {
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeRedisStreamsClient(),
+    });
+    await broker.connect();
+    const sub = await broker.respond('resp.only', (m) => m);
+    expect(typeof sub.unsubscribe).toBe('function');
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
+  it('request() rejects with RequestTimeoutError when unanswered', async () => {
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeRedisStreamsClient(),
+    });
+    await broker.connect();
+    let caught: unknown;
+    try {
+      await broker.request('no.responder', { ping: true }, { timeoutMs: 30 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RequestTimeoutError);
+    await broker.disconnect();
   });
 });

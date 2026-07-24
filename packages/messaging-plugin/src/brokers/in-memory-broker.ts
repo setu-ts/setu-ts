@@ -2,11 +2,14 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  RequestHandler,
+  RequestOptions,
   SubscribeOptions,
 } from '@hono-enterprise/common';
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { RequestReplyCore } from './request-reply-core.ts';
 
 /**
  * Internal subscriber entry.
@@ -31,6 +34,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
   #subscribers: Map<string, Subscriber[]>;
   #queueCursors: Map<string, Map<string, number>>; // topic -> queue -> cursor
   #ready = false;
+  #rr: RequestReplyCore;
 
   /**
    * Creates a new in-memory broker.
@@ -43,6 +47,13 @@ export class InMemoryBroker implements MessageBrokerAdapter {
     this.#serializer = serializer;
     this.#subscribers = new Map();
     this.#queueCursors = new Map();
+    this.#rr = new RequestReplyCore({
+      publish: (topic, message) => this.publish(topic, message),
+      subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
+      uuid: () => this.#runtime.uuid(),
+      setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimeout: (handle) => this.#runtime.clearTimeout(handle),
+    });
   }
 
   /**
@@ -62,8 +73,8 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * @returns Resolves when disconnected
    * @since 0.1.0
    */
-  // deno-lint-ignore require-await
   async disconnect(): Promise<void> {
+    await this.#rr.close();
     this.#subscribers.clear();
     this.#queueCursors.clear();
     this.#ready = false;
@@ -193,5 +204,43 @@ export class InMemoryBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  /**
+   * Sends a request and awaits a single correlated reply.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - Destination topic a responder is listening on
+   * @param message - The request payload
+   * @param options - Reply timeout behavior
+   * @returns The reply payload
+   * @since 0.1.0
+   */
+  request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options);
+  }
+
+  /**
+   * Registers a responder whose result is returned to the requesting caller.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - The request topic to respond on
+   * @param handler - Invoked per request; its result is returned to the caller
+   * @param options - Consumer group behavior
+   * @returns The active subscription
+   * @since 0.1.0
+   */
+  respond<TReq, TRes>(
+    topic: string,
+    handler: RequestHandler<TReq, TRes>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.#rr.respond(
+      topic,
+      (message, metadata) => handler(message as TReq, metadata),
+      options,
+    );
   }
 }
