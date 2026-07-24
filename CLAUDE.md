@@ -355,7 +355,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   crash → drop + re-dispatch queued work; timeout → `WorkerTaskTimeoutError` + terminate & replace;
   queue overflow → `WorkerQueueFullError`. `worker-pool` health indicator (`{ available, pools }`) +
   `onClose` terminates all. Real-thread e2e on Deno spawning fixture task modules; developed in an
-  isolated worktree off `main`) — complete (PR pending)
+  isolated worktree off `main`) — complete (PR #64)
 - **Next milestone** — **Milestone 30** (`packages/notification-plugin`); resumes the main plugin
   sequence (M30–M40 follow) unless reprioritized.
 
