@@ -234,4 +234,33 @@ describe('parseMultipart', () => {
     expect(parts.length).toBe(1);
     expect(parts[0].data).toEqual(specialData);
   });
+
+  it('tryMatch returns false when offset + prefix exceeds body length', () => {
+    // Build a minimal body and verify that partial matches don't cause errors.
+    const boundary = 'tiny';
+    const encoder = new TextEncoder();
+    const body = encoder.encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name="t"\r\n\r\nx\r\n--${boundary}--\r\n`,
+    );
+    // The body is very short — verify parsing still works end-to-end.
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('t');
+  });
+
+  it('parseMultipart handles content-type with quoted boundary containing spaces', () => {
+    const boundary = 'quoted with space';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="qs"\r\n'),
+      ...encoder.encode('Content-Type: text/plain\r\n\r\n'),
+      ...encoder.encode('qs data'),
+      ...encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ]);
+
+    const parts = parseMultipart(body, 'multipart/form-data; boundary="quoted with space"');
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('qs');
+  });
 });

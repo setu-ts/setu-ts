@@ -1,6 +1,3 @@
-// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
-/**
-
 /**
  * Tests for {@linkcode AzureBlobProvider}, {@linkcode adaptAzureModule},
  * {@linkcode isAzureNotFound}, and guarded real-import path.
@@ -61,9 +58,10 @@ describe('canSign', () => {
   });
 
   it('returns true when connection string has AccountKey', () => {
-    expect(canSign({ connectionString: 'AccountName=foo;AccountKey=bar;', containerName: 'c' })).toBe(
-      true,
-    );
+    expect(canSign({ connectionString: 'AccountName=foo;AccountKey=bar;', containerName: 'c' }))
+      .toBe(
+        true,
+      );
   });
 
   it('returns false for account-name-only config', () => {
@@ -73,6 +71,39 @@ describe('canSign', () => {
   it('returns false with no config', () => {
     // deno-lint-ignore no-explicit-any
     expect(canSign({} as any)).toBe(false);
+  });
+
+  it('returns false for connection string without AccountKey', () => {
+    expect(
+      canSign({
+        connectionString: 'DefaultEndpointsProtocol=https;AccountName=foo;',
+        containerName: 'c',
+      }),
+    )
+      .toBe(false);
+  });
+
+  it('returns false for connection string without AccountName', () => {
+    expect(
+      canSign({
+        connectionString: 'DefaultEndpointsProtocol=https;AccountKey=bar;',
+        containerName: 'c',
+      }),
+    )
+      .toBe(false);
+  });
+
+  it('returns false for empty connection string', () => {
+    expect(canSign({ connectionString: '', containerName: 'c' })).toBe(false);
+  });
+
+  it('prefers accountName/accountKey over connectionString extraction', () => {
+    expect(canSign({
+      accountName: 'explicit',
+      accountKey: 'key',
+      connectionString: 'AccountName=ignored;AccountKey=ignored;',
+      containerName: 'c',
+    })).toBe(true);
   });
 });
 
@@ -159,6 +190,7 @@ describe('adaptAzureModule', () => {
       accountKey: 'dGVzdGtleQ==',
     }) as IAzureBlobClient & { canSign: boolean };
     const container = facade.getContainerClient('mycontainer');
+    // deno-lint-ignore no-explicit-any
     const blob = (container as any).getBlockBlobClient('test.bin');
     await blob.uploadData(new Uint8Array([11, 22, 33]));
     expect(store().get('mycontainer/test.bin')).toEqual(new Uint8Array([11, 22, 33]));
@@ -171,6 +203,7 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
+    // deno-lint-ignore no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'missing.bin',
     );
@@ -180,8 +213,80 @@ describe('adaptAzureModule', () => {
 
   it('non-404 error does not match isAzureNotFound', () => {
     const error = new Error('boom');
+    // deno-lint-ignore no-explicit-any
     (error as any).statusCode = 500;
     expect(isAzureNotFound(error)).toBe(false);
+  });
+
+  it('download throws 404 error → adapted blob returns deleted:true', () => {
+    const { mod } = buildFakeAzure();
+    const facade = adaptAzureModule(mod, {
+      containerName: 'mycontainer',
+      accountName: 'fakeaccount',
+      accountKey: 'key',
+    }) as IAzureBlobClient & { canSign: boolean };
+    // deno-lint-ignore no-explicit-any
+    const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
+      'missing.bin',
+    );
+    const result = blob.download();
+    expect(result.deleted).toBe(true);
+    expect(result.contentLength).toBe(0);
+  });
+
+  it('download error recovery with 404 statusCode in adaptAzureModule', () => {
+    // Build a fake where download() throws an object with statusCode: 404
+    const store = new Map<string, Uint8Array>();
+    const fakeMod = {
+      BlobServiceClient: class {
+        constructor(_urlOrCs: string) {}
+        getContainerClient(name: string) {
+          return {
+            getBlockBlobClient(blobName: string) {
+              return {
+                uploadData(_data: Uint8Array): Promise<void> {
+                  store.set(`${name}/${blobName}`, _data);
+                  return Promise.resolve();
+                },
+                download(): never {
+                  throw { statusCode: 404 };
+                },
+                delete() {
+                  return Promise.resolve();
+                },
+                exists() {
+                  return false;
+                },
+              };
+            },
+          };
+        }
+      },
+      StorageSharedKeyCredential: class {
+        constructor(public accountName: string, public accountKey: string) {}
+      },
+      generateBlobSASQueryParameters(_params: unknown): Promise<{ toString(): string }> {
+        return Promise.resolve({
+          toString() {
+            return 'sas';
+          },
+        });
+      },
+    };
+
+    const azureMod =
+      fakeMod as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule;
+    const adapterResult = adaptAzureModule(azureMod, {
+      containerName: 'errRecover',
+      accountName: 'fake',
+      accountKey: 'key',
+    }) as IAzureBlobClient & { canSign: boolean };
+    // deno-lint-ignore no-explicit-any
+    const blob = ((adapterResult as any).getContainerClient('errRecover') as any)
+      .getBlockBlobClient('gone.bin');
+    const downloadResult = blob.download();
+    expect(downloadResult.deleted).toBe(true);
+    expect(downloadResult.contentLength).toBe(0);
   });
 
   it('exists returns boolean', async () => {
@@ -191,6 +296,7 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
+    // deno-lint-ignore no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'new.bin',
     );
@@ -215,8 +321,9 @@ describe('adaptAzureModule', () => {
       containerName: 'mycontainer',
       accountName: 'fakeaccount',
       accountKey: 'key',
-    }) as any;
-    const url = await facade.getSignedUrl('blob.txt', 3600);
+    });
+    const url = await (facade as { getSignedUrl: (p: string, e: number) => Promise<string> })
+      .getSignedUrl('blob.txt', 3600);
     expect(url).toContain('sas-token-signed');
   });
 
@@ -229,6 +336,7 @@ describe('adaptAzureModule', () => {
     }) as IAzureBlobClient & { canSign: boolean };
     expect(facade.canSign).toBe(true);
     const container = facade.getContainerClient('mycontainer');
+    // deno-lint-ignore no-explicit-any
     const blob = (container as any).getBlockBlobClient('cs-test.bin');
     await blob.uploadData(new Uint8Array([8]));
     expect(await blob.exists()).toBe(true);
@@ -287,8 +395,9 @@ describe('AzureBlobProvider', () => {
     const fakeClient = {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
-          uploadData: async (_data: Uint8Array) => {
+          uploadData: (_data: Uint8Array) => {
             putCalled = true;
+            return Promise.resolve();
           },
           download: () => ({
             deleted: true,
@@ -389,7 +498,9 @@ describe('AzureBlobProvider', () => {
     const fakeClient = {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
-          uploadData: async () => {},
+          uploadData: () => {
+            return Promise.resolve();
+          },
           download: () => ({
             deleted: true,
             readableStreamBody: null as unknown as NodeJS.ReadableStream,
@@ -403,7 +514,7 @@ describe('AzureBlobProvider', () => {
           },
         }),
       }),
-      getSignedUrl: async () => 'https://sas.url?token=abc',
+      getSignedUrl: () => Promise.resolve('https://sas.url?token=abc'),
       canSign: true,
     } as unknown as IAzureBlobClient & { canSign: boolean };
     const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
@@ -467,5 +578,175 @@ describe('AzureBlobProvider', () => {
       // Expected — SDK not available or wrong shape
       expect(e).toBeInstanceOf(Error);
     }
+  });
+
+  it('getStream returns null when download indicates deleted', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('absent-blob');
+    expect(stream).toBeNull();
+  });
+
+  it('getStream catches 404 error and returns null', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => {
+            throw { statusCode: 404 };
+          },
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('notfound-stream');
+    expect(stream).toBeNull();
+  });
+
+  it('get throws null when download().deleted is true', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const data = await provider.get('absent-key');
+    expect(data).toBeNull();
+  });
+
+  it('get returns null when download throws 404', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => {
+            throw { statusCode: 404 };
+          },
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const data = await provider.get('missing-on-throw');
+    expect(data).toBeNull();
+  });
+
+  it('get rethrows non-404 error from download', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => {
+            throw new Error('network error');
+          },
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    await expect(provider.get('error-key')).rejects.toThrow('network error');
+  });
+
+  it('disconnect resets isReady to false', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient;
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+    await provider.disconnect();
+    expect(provider.isReady()).toBe(false);
+    await expect(provider.put('x', new Uint8Array())).rejects.toThrow('not connected');
+  });
+
+  it('connect() returns early when already connected (cached client)', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    await provider.connect(); // second connect should return immediately (cached)
+    expect(provider.isReady()).toBe(true);
   });
 });

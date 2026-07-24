@@ -47,8 +47,8 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   /** Disconnect is a no-op for local storage. */
-  async disconnect(): Promise<void> {
-    // no-op
+  disconnect(): Promise<void> {
+    return Promise.resolve();
   }
 
   /** Reports readiness (true when fs is present and connected). */

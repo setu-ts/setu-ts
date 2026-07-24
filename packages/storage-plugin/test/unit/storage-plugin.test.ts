@@ -109,7 +109,10 @@ describe('StoragePlugin', () => {
 
   it('unknown provider type at registration throws', async () => {
     const { ctx } = createFakeContext();
-    const plugin = StoragePlugin({ provider: 'nonexistent' as unknown as import('../../src/interfaces/index.ts').StorageProviderType });
+    const plugin = StoragePlugin({
+      provider:
+        'nonexistent' as unknown as import('../../src/interfaces/index.ts').StorageProviderType,
+    });
     await expect(plugin.register!(ctx)).rejects.toThrow('Unsupported storage provider');
   });
 

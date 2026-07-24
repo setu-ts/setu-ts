@@ -433,6 +433,193 @@ describe('adaptAwsS3Module', () => {
       endpoint: 'https://custom.s3.example.com',
     });
   });
+
+  it('getSignedUrl falls back to synthetic URL when presigner throws', async () => {
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(_cmd: any): Promise<unknown> {
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        // deno-lint-ignore no-unused-vars,require-await
+        getSignedUrl(_client: unknown, _cmd: unknown): Promise<string> {
+          throw new Error('presigner unavailable');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'fallback-bucket' });
+    const url = await facade.getSignedUrl('fallback-key.txt', 1800);
+    expect(url).toContain(
+      'https://fallback-bucket.s3.amazonaws.com/fallback-key.txt?X-Amz-Expires=1800',
+    );
+  });
+
+  it('getStream returns a web ReadableStream when Body has getReader', async () => {
+    const fakeStore = new Map<string, ReadableStream<Uint8Array>>();
+    const webStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      },
+    });
+    fakeStore.set('stream-key', webStream);
+
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
+            if (cmd.constructor.name === 'GetObjectCommand') {
+              const stream = fakeStore.get(input.Key);
+              if (stream === undefined) {
+                const err = new Error('NoSuchKey');
+                (err as { name: string }).name = 'NoSuchKey';
+                return Promise.reject(err);
+              }
+              return Promise.resolve({ Body: stream });
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://x');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'webstream-bucket' });
+    const stream = await facade.getStream('stream-key');
+    expect(stream).toBeDefined();
+    if (stream) {
+      const reader = stream.getReader();
+      const chunk = await reader.read();
+      expect(chunk.done).toBe(false);
+      expect(chunk.value).toEqual(new Uint8Array([1, 2, 3]));
+    }
+  });
+
+  it('get handles body that is Uint8Array directly', async () => {
+    const { mod } = buildFakeSdkModule();
+    const facade = adaptAwsS3Module(mod, { bucket: 'test-bucket' });
+    const data = new Uint8Array([100, 200]);
+    await facade.put('uint8-key.txt', data);
+    const result = await facade.get('uint8-key.txt');
+    // buildFakeSdkModule returns Body as the Uint8Array directly from the store,
+    // which covers the res.Body instanceof Uint8Array ? res.Body branch in get().
+    expect(result).toEqual(data);
+  });
+
+  it('getStream returns null when Body has neither getReader nor is Uint8Array', async () => {
+    const fakeStore = new Map<string, unknown>();
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
+            if (cmd.constructor.name === 'GetObjectCommand') {
+              const body = fakeStore.get(input.Key);
+              if (body === undefined) {
+                const err = new Error('NoSuchKey');
+                (err as { name: string }).name = 'NoSuchKey';
+                return Promise.reject(err);
+              }
+              return Promise.resolve({ Body: body });
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://x');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'null-stream-bucket' });
+    // Body is an object with neither getReader nor instanceof Uint8Array.
+    fakeStore.set('no-stream', { type: 'fake-body' });
+    const stream = await facade.getStream('no-stream');
+    expect(stream).toBeNull();
+  });
 });
 
 describe('S3Provider', () => {

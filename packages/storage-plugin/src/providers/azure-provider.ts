@@ -149,11 +149,10 @@ export function adaptAzureModule(
     if (options.connectionString) {
       return new mod.BlobServiceClient(options.connectionString);
     } else if (options.accountName && options.accountKey) {
-      // deno-lint-ignore no-explicit-any
       const cred = new mod.StorageSharedKeyCredential(
         options.accountName,
         options.accountKey,
-      ) as any;
+      ) as { accountName: string; accountKey: string };
       return new mod.BlobServiceClient(
         `https://${options.accountName}.blob.core.windows.net`,
         cred,
@@ -232,8 +231,7 @@ export function adaptAzureModule(
         blobName,
         permissions: 'r',
         expiresOn: new Date(Date.now() + expiresIn * 1000),
-        // deno-lint-ignore no-explicit-any
-        credential: null as any,
+        credential: null as unknown as { accountName: string; accountKey: string },
       };
       const sas = await mod.generateBlobSASQueryParameters(sasParams as GenerateSASParams);
       return `https://${options.accountName}.blob.core.windows.net/${containerName}/${blobName}?${sas.toString()}`;
@@ -273,27 +271,31 @@ export class AzureBlobProvider implements StorageProvider {
   /**
    * Establishes the Azure client — injects the SDK lazily or uses injected client.
    */
-  async connect(): Promise<void> {
-    if (this.#client !== null) return;
+  connect(): Promise<void> {
+    if (this.#client !== null) return Promise.resolve();
     const injected = this.#options.client;
     if (injected !== undefined) {
       if (!validateAzureBlobClient(injected)) {
-        throw new Error(
-          'Injected Azure client is missing required method (getContainerClient)',
+        return Promise.reject(
+          new Error(
+            'Injected Azure client is missing required method (getContainerClient)',
+          ),
         );
       }
-      // deno-lint-ignore no-explicit-any
-      this.#client = { ...injected as any, canSign: true } as IAzureBlobClient & {
+      this.#client = { ...injected, canSign: true } as IAzureBlobClient & {
         canSign: boolean;
       };
-      return;
+      return Promise.resolve();
     }
-    this.#client = adaptAzureModule(await loadAzureModule(), this.#options);
+    return loadAzureModule().then((mod) => {
+      this.#client = adaptAzureModule(mod, this.#options);
+    });
   }
 
   /** Disconnect is a no-op for Azure (connectionless HTTP client). */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this.#client = null;
+    return Promise.resolve();
   }
 
   /** Reports readiness. */
@@ -397,25 +399,26 @@ export class AzureBlobProvider implements StorageProvider {
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
-  async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+  getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     try {
       const result = this.#getBlockBlob(path).download();
-      if (result.deleted) return null;
-      return new ReadableStream({
-        start(controller) {
-          const readable = result.readableStreamBody as AsyncIterable<Uint8Array>;
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          (async () => {
-            for await (const chunk of readable) {
-              controller.enqueue(chunk);
-            }
-            controller.close();
-          })().catch((err) => controller.error(err));
-        },
-      });
+      if (result.deleted) return Promise.resolve(null);
+      const readable = result.readableStreamBody as AsyncIterable<Uint8Array>;
+      return Promise.resolve(
+        new ReadableStream({
+          start(controller) {
+            (async () => {
+              for await (const chunk of readable) {
+                controller.enqueue(chunk);
+              }
+              controller.close();
+            })().catch((err) => controller.error(err));
+          },
+        }),
+      );
     } catch (error) {
-      if (isAzureNotFound(error)) return null;
+      if (isAzureNotFound(error)) return Promise.resolve(null);
       throw error;
     }
   }

@@ -11,14 +11,30 @@ import { StorageService } from '../../src/services/storage-service.ts';
 /** Creates a minimal fake provider for testing. */
 function createFakeProvider(partial?: Partial<StorageProvider>): StorageProvider {
   return {
-    connect(): Promise<void> { return Promise.resolve(); },
-    disconnect(): Promise<void> { return Promise.resolve(); },
-    isReady(): boolean { return true; },
-    put(_path: string, _data: Uint8Array): Promise<void> { return Promise.resolve(); },
-    get(_path: string): Promise<Uint8Array | null> { return Promise.resolve(new Uint8Array()); },
-    delete(_path: string): Promise<boolean> { return Promise.resolve(true); },
-    exists(_path: string): Promise<boolean> { return Promise.resolve(true); },
-    getSignedUrl(_path: string, _options: { expiresIn: number }): Promise<string> { return Promise.resolve('https://example.com'); },
+    connect(): Promise<void> {
+      return Promise.resolve();
+    },
+    disconnect(): Promise<void> {
+      return Promise.resolve();
+    },
+    isReady(): boolean {
+      return true;
+    },
+    put(_path: string, _data: Uint8Array): Promise<void> {
+      return Promise.resolve();
+    },
+    get(_path: string): Promise<Uint8Array | null> {
+      return Promise.resolve(new Uint8Array());
+    },
+    delete(_path: string): Promise<boolean> {
+      return Promise.resolve(true);
+    },
+    exists(_path: string): Promise<boolean> {
+      return Promise.resolve(true);
+    },
+    getSignedUrl(_path: string, _options: { expiresIn: number }): Promise<string> {
+      return Promise.resolve('https://example.com');
+    },
     ...partial,
   };
 }
@@ -93,7 +109,9 @@ describe('StorageService', () => {
         },
       });
       const provider = createFakeProvider({
-        getStream(): Promise<ReadableStream<Uint8Array> | null> { return Promise.resolve(expectedStream); },
+        getStream(): Promise<ReadableStream<Uint8Array> | null> {
+          return Promise.resolve(expectedStream);
+        },
       });
       const service = new StorageService(provider);
       const result = await service.getStream('key');
@@ -110,7 +128,9 @@ describe('StorageService', () => {
 
     it('throws when provider.getStream returns null', async () => {
       const provider = createFakeProvider({
-        getStream(): Promise<null> { return Promise.resolve(null); },
+        getStream(): Promise<null> {
+          return Promise.resolve(null);
+        },
       });
       const service = new StorageService(provider);
       await expect(service.getStream('missing')).rejects.toThrow(
@@ -141,7 +161,9 @@ describe('StorageService', () => {
 
     it('fallback throws when get returns null (absent)', async () => {
       const provider = createFakeProvider({
-        get(): Promise<null> { return Promise.resolve(null); },
+        get(): Promise<null> {
+          return Promise.resolve(null);
+        },
         getStream: undefined as unknown as StorageProvider['getStream'],
       } as Partial<StorageProvider> as StorageProvider);
       const service = new StorageService(provider);

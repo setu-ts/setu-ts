@@ -90,6 +90,7 @@ describe('Storage integration (through a real kernel app)', () => {
     const { getUploadedFile } = await import('../../src/index.ts') as any;
 
     // Build a minimal request context that simulates what the kernel inject() provides.
+    // deno-lint-ignore no-explicit-any
     const ctx: any = {
       state: new Map<string, unknown>(),
       request: {
@@ -103,9 +104,18 @@ describe('Storage integration (through a real kernel app)', () => {
         _status: 200,
         // deno-lint-ignore no-explicit-any
         _body: null as any,
-        status(code: number) { this._status = code; return this; },
-        json(body: unknown) { this._body = body; return { status: this._status, body }; },
-        send(body: unknown) { this._body = body; return { status: this._status, body }; },
+        status(code: number) {
+          this._status = code;
+          return this;
+        },
+        json(body: unknown) {
+          this._body = body;
+          return { status: this._status, body };
+        },
+        send(body: unknown) {
+          this._body = body;
+          return { status: this._status, body };
+        },
       },
       services: { has: () => false, get: () => null, register: () => {} },
       params: {},

@@ -91,14 +91,12 @@ export function adaptGcsModule(
 ): IGcsClient {
   const storageConfig: { projectId?: string } = {};
   if (options.projectId !== undefined) storageConfig.projectId = options.projectId;
-  // deno-lint-ignore no-explicit-any
-  const storage = new mod.Storage(storageConfig) as any;
+  const storage = new mod.Storage(storageConfig);
   const bucketName = options.bucket;
 
   return {
     bucket(_name?: string): unknown {
-      // deno-lint-ignore no-explicit-any
-      const b = storage.bucket((_name ?? bucketName) as any);
+      const b = storage.bucket(_name ?? bucketName);
       return {
         file(name: string) {
           return {
@@ -223,8 +221,9 @@ export class GcsProvider implements StorageProvider {
   }
 
   /** Disconnect is a no-op for GCS (connectionless HTTP client). */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this.#client = null;
+    return Promise.resolve();
   }
 
   /** Reports readiness. */
@@ -239,6 +238,7 @@ export class GcsProvider implements StorageProvider {
   }
 
   #getFile(path: string) {
+    // bucket() returns unknown from the facade; cast through internal GcsFile shape.
     // deno-lint-ignore no-explicit-any
     return (this.#client!.bucket() as any).file(path);
   }
@@ -332,29 +332,30 @@ export class GcsProvider implements StorageProvider {
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
-  async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+  getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     try {
       const readable = this.#getFile(path).createReadStream();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return new ReadableStream({
-        start(controller) {
-          const on = (event: string, cb: (arg: any) => void) => {
-            (readable as any).on(event, cb);
-          };
-          on('data', (chunk: Uint8Array) => {
-            controller.enqueue(chunk);
-          });
-          on('end', () => {
-            controller.close();
-          });
-          on('error', (err: Error) => {
-            controller.error(err);
-          });
-        },
-      });
+      return Promise.resolve(
+        new ReadableStream({
+          start(controller) {
+            const on = (event: string, cb: (arg: unknown) => void) => {
+              (readable as NodeJS.ReadableStream).on(event, cb);
+            };
+            on('data', (chunk: unknown) => {
+              controller.enqueue(chunk as Uint8Array);
+            });
+            on('end', () => {
+              controller.close();
+            });
+            on('error', (err: unknown) => {
+              controller.error(err as Error);
+            });
+          },
+        }),
+      );
     } catch (error) {
-      if (isGcsNotFound(error)) return null;
+      if (isGcsNotFound(error)) return Promise.resolve(null);
       throw error;
     }
   }

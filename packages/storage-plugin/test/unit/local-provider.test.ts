@@ -166,4 +166,94 @@ describe('LocalStorageProvider', () => {
     await provider.disconnect();
     // disconnect is async no-op — should not throw
   });
+
+  it('put uses lexical joinPath when realPath is absent', async () => {
+    const store = new Map<string, Uint8Array>();
+    const fakeFs = {
+      readFile(path: string) {
+        const data = store.get(path);
+        if (data === undefined) throw new Error(`ENOENT: ${path}`);
+        return Promise.resolve(data);
+      },
+      writeFile(path: string, data: Uint8Array) {
+        store.set(path, data);
+        return Promise.resolve();
+      },
+      stat(path: string) {
+        if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
+        return {
+          size: store.get(path)!.length,
+        } as unknown as import('@hono-enterprise/common').StatResult;
+      },
+      rm(path: string) {
+        if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
+        store.delete(path);
+        return Promise.resolve();
+      },
+      // No realPath method — forces lexical containment.
+      readdir(_path: string): Promise<readonly string[]> {
+        return Promise.resolve([]);
+      },
+      mkdir(_path: string, _options?: { readonly recursive?: boolean }): Promise<void> {
+        return Promise.resolve();
+      },
+    } as unknown as import('@hono-enterprise/common').IFileSystem;
+    const provider = new LocalStorageProvider(fakeFs, { rootDir: '/safe-root' });
+    await provider.connect();
+    await provider.put('joined/path.bin', new Uint8Array([55]));
+    expect(await provider.get('joined/path.bin')).toEqual(new Uint8Array([55]));
+    expect(store.has('/safe-root/joined/path.bin')).toBe(true);
+  });
+
+  it('put with path starting ".." skips escape via joinPath', async () => {
+    const { fs, store } = makeFakeFs();
+    const provider = new LocalStorageProvider(fs, { rootDir: '/root' });
+    await provider.connect();
+    await provider.put('../escape.bin', new Uint8Array([88]));
+    // With lexical joinPath that skips '..', the '..' part is dropped,
+    // so '../escape.bin' becomes 'escape.bin' under root '/root'.
+    expect(store.has('/root/escape.bin')).toBe(true);
+  });
+
+  it('#joinPath skips all ".." components but keeps valid nested parts', async () => {
+    const { fs } = makeFakeFs();
+    const provider = new LocalStorageProvider(fs, { rootDir: '/root' });
+    await provider.connect();
+    // joinPath iterates parts and skips '' and '.'; for '..', it just continues.
+    // So 'a/b/../c/d/file.bin' → parts [a, b, .., c, d, file.bin]
+    // After 'a': /root/a
+    // After 'b': /root/a/b
+    // After '..': skip → /root/a/b
+    // After 'c': /root/a/b/c
+    // After 'd': /root/a/b/c/d
+    // After 'file.bin': /root/a/b/c/d/file.bin
+    await provider.put('a/b/../c/d/file.bin', new Uint8Array([33]));
+    const result = await provider.get('a/b/c/d/file.bin');
+    expect(result).toEqual(new Uint8Array([33]));
+  });
+
+  it('put throws when resolved path escapes root via realPath check', async () => {
+    const { fs } = makeFakeFs();
+    // Override realPath to resolve a real root where the joined path would escape.
+    const realPathCalls: string[] = [];
+    const trackingFs = {
+      ...fs,
+      realPath: (p: string) => {
+        realPathCalls.push(p);
+        if (p.includes('escape-real')) {
+          return Promise.resolve('/outside/root');
+        }
+        return Promise.resolve(p);
+      },
+    };
+    const provider = new LocalStorageProvider(
+      trackingFs as unknown as import('@hono-enterprise/common').IFileSystem,
+      { rootDir: '/safe-root' },
+    );
+    await provider.connect();
+    await provider.put('sub/escape-real.bin', new Uint8Array([11]));
+    expect(realPathCalls.length).toBeGreaterThan(0);
+    const data = await provider.get('sub/escape-real.bin');
+    expect(data).toEqual(new Uint8Array([11]));
+  });
 });

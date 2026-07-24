@@ -18,13 +18,15 @@ export class MemoryProvider implements StorageProvider {
   #connected = false;
 
   /** Connect is a no-op for the memory provider. */
-  async connect(): Promise<void> {
+  connect(): Promise<void> {
     this.#connected = true;
+    return Promise.resolve();
   }
 
   /** Disconnect is a no-op for the memory provider. */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this.#connected = false;
+    return Promise.resolve();
   }
 
   /** Reports readiness (memory is always ready once connected). */
