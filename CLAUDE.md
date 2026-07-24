@@ -167,7 +167,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   in-memory/redis-streams/rabbitmq/ nats, while `KafkaBroker.request`/`respond` throw the exported
   `MessagingNotSupportedError` (consumer-group/auto-commit model); exported
   `RequestTimeoutError`/`RemoteHandlerError`/ `MessagingNotSupportedError`; developed in parallel
-  with M28 in an isolated worktree off `main`) — complete (PR pending)
+  with M28 in an isolated worktree off `main`) — complete (PR #60)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
