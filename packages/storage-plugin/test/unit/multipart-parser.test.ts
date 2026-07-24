@@ -51,6 +51,41 @@ describe('parseMultipart', () => {
     expect(parts[0].data).toEqual(text);
   });
 
+  it('captures the original filename from Content-Disposition, distinct from the field name', () => {
+    const boundary = 'fbound';
+    const enc = new TextEncoder();
+    const fileData = enc.encode('JPEGDATA');
+    const body = new Uint8Array([
+      ...enc.encode(`--${boundary}\r\n`),
+      ...enc.encode('Content-Disposition: form-data; name="avatar"; filename="photo.jpg"\r\n'),
+      ...enc.encode('Content-Type: image/jpeg\r\n\r\n'),
+      ...fileData,
+      ...enc.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('avatar'); // field name, NOT captured from "filename"
+    expect(parts[0].filename).toBe('photo.jpg');
+    expect(parts[0].data).toEqual(fileData);
+  });
+
+  it('leaves filename undefined when the client sends no filename', () => {
+    const boundary = 'nof';
+    const enc = new TextEncoder();
+    const body = new Uint8Array([
+      ...enc.encode(`--${boundary}\r\n`),
+      ...enc.encode('Content-Disposition: form-data; name="field"\r\n'),
+      ...enc.encode('Content-Type: text/plain\r\n\r\n'),
+      ...enc.encode('x'),
+      ...enc.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts[0].name).toBe('field');
+    expect(parts[0].filename).toBeUndefined();
+  });
+
   it('parses multiple parts', () => {
     const boundary = 'abc123';
     const part1Data = new TextEncoder().encode('text content');

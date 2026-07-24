@@ -46,6 +46,7 @@ export function createFakeContext(
 
   const runtime = {
     env,
+    now: (): number => 1_700_000_000_000,
     hrtime: (): number => performance.now(),
     fs,
   } as unknown as IRuntimeServices;

@@ -43,6 +43,15 @@ describe('createProvider', () => {
     expect(p).toBeInstanceOf(MemoryProvider);
   });
 
+  it('injects runtime.now() as the provider clock (getSignedUrl expiry uses it, not Date.now)', async () => {
+    const rt = { ...makeFakeRuntime(), now: (): number => 1_700_000_000_000 } as IRuntimeServices;
+    const p = createProvider('memory', {}, rt) as StorageProvider;
+    await p.connect();
+    const url = await p.getSignedUrl('k.txt', { expiresIn: 60 });
+    // 1_700_000_000_000 ms → 1_700_000_000 s + 60 = 1700000060
+    expect(url).toBe('memory://k.txt?expires=1700000060');
+  });
+
   it('unknown provider type throws', () => {
     expect(() =>
       createProvider(

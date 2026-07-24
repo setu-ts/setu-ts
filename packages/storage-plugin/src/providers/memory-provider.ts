@@ -15,7 +15,18 @@ import type { StorageProvider } from '../interfaces/index.ts';
  */
 export class MemoryProvider implements StorageProvider {
   readonly #store = new Map<string, Uint8Array>();
+  readonly #now: () => number;
   #connected = false;
+
+  /**
+   * @param now - Wall-clock source (epoch ms). Injected by `createProvider`
+   *   as `runtime.now()`; the runtime service is the only sanctioned clock
+   *   outside `packages/runtime`. Defaults to `() => 0` for direct construction
+   *   where the synthetic signed-URL expiry is not exercised.
+   */
+  constructor(now: () => number = () => 0) {
+    this.#now = now;
+  }
 
   /** Connect is a no-op for the memory provider. */
   connect(): Promise<void> {
@@ -85,7 +96,7 @@ export class MemoryProvider implements StorageProvider {
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     const encoded = encodeURIComponent(path);
-    const expires = Math.floor(Date.now() / 1000) + options.expiresIn;
+    const expires = Math.floor(this.#now() / 1000) + options.expiresIn;
     return Promise.resolve(`memory://${encoded}?expires=${expires}`);
   }
 

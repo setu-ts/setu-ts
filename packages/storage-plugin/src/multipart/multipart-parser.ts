@@ -9,7 +9,10 @@
 
 /** A single parsed part from a multipart body. */
 export interface ParsedPart {
+  /** The form field name (Content-Disposition `name="…"`). */
   readonly name: string;
+  /** The client-provided file name (Content-Disposition `filename="…"`), when present. */
+  readonly filename?: string;
   readonly data: Uint8Array;
   readonly mimeType: string;
 }
@@ -70,6 +73,7 @@ export function parseMultipart(
     const headers = parseHeaders(headerBlock);
     const name = headers.name ?? 'unknown';
     const mimeType = headers.mime ?? MIME_DEFAULT;
+    const filename = headers.filename;
 
     // Content ends at next boundary.
     // headerEnd points to the first \r of \r\n\r\n; data starts 4 bytes later.
@@ -81,7 +85,12 @@ export function parseMultipart(
     const dataEnd = nextBoundary - 2;
     const partData = body.slice(dataStart, dataEnd > dataStart ? dataEnd : dataStart);
 
-    parts.push({ name, data: partData, mimeType });
+    // Omit `filename` when absent (exactOptionalPropertyTypes forbids `undefined`).
+    parts.push(
+      filename !== undefined
+        ? { name, filename, data: partData, mimeType }
+        : { name, data: partData, mimeType },
+    );
     offset = nextBoundary;
   }
 
@@ -120,17 +129,21 @@ function findDoubleCrlf(body: Uint8Array, offset: number): number {
 }
 
 /** Parses header lines into { name, mime }. */
-function parseHeaders(block: Uint8Array): { name?: string; mime?: string } {
+function parseHeaders(block: Uint8Array): { name?: string; mime?: string; filename?: string } {
   const text = new TextDecoder().decode(block);
-  const result: { name?: string; mime?: string } = {};
+  const result: { name?: string; mime?: string; filename?: string } = {};
 
   for (const line of text.split('\r\n').filter(Boolean)) {
     const trimmed = line.trim();
-    // Extract name from Content-Disposition header: look for name="..." anywhere in the line
+    // Extract name/filename from Content-Disposition: `name="…"` and optional `filename="…"`.
     if (trimmed.includes('Content-Disposition')) {
-      const nameMatch = trimmed.match(/name="([^"]*)"/);
+      const nameMatch = trimmed.match(/[^a-z]name="([^"]*)"/) ?? trimmed.match(/^name="([^"]*)"/);
       if (nameMatch) {
         result.name = nameMatch[1];
+      }
+      const fileMatch = trimmed.match(/filename="([^"]*)"/);
+      if (fileMatch) {
+        result.filename = fileMatch[1];
       }
     }
     if (trimmed.startsWith(CONTENT_TYPE_HEADER)) {

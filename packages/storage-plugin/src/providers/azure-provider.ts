@@ -62,6 +62,30 @@ export interface AzureBlob {
   exists(): Promise<boolean>;
 }
 
+/** Download result shape shared by the facade blob's `download`/`get`/`getStream`. */
+export interface AzureDownloadResult {
+  deleted: boolean;
+  readableStreamBody: NodeJS.ReadableStream;
+  contentLength: number;
+}
+
+/**
+ * Promise-style blob shape exposed by the {@linkcode adaptAzureModule} facade —
+ * what {@linkcode AzureBlobProvider} operates against (`delete` resolves to a
+ * boolean, unlike the raw SDK's `void`).
+ */
+export interface AzureFacadeBlob {
+  uploadData(data: Uint8Array, options?: Record<string, unknown>): Promise<void>;
+  download(offset?: number, length?: number): Promise<AzureDownloadResult>;
+  delete(): Promise<boolean>;
+  exists(): Promise<boolean>;
+}
+
+/** Container handle exposed by the facade. */
+export interface AzureFacadeContainer {
+  getBlockBlobClient(blobName: string): AzureFacadeBlob;
+}
+
 // ── Options ───────────────────────────────────────────────────────────────
 
 /**
@@ -149,6 +173,7 @@ export function canSign(options: AzureBlobProviderOptions): boolean {
 export function adaptAzureModule(
   mod: AzureSdkModule,
   options: AzureBlobProviderOptions,
+  now: () => number = () => 0,
 ): IAzureBlobClient & { canSign: boolean } {
   const containerName = options.containerName;
   const serviceClient: unknown = ((): unknown => {
@@ -253,11 +278,12 @@ export function adaptAzureModule(
         accountName,
         accountKey,
       ) as StorageSharedKeyCredential;
+      const nowMs = now();
       const sasValues: GenerateSASValues = {
         containerName,
         blobName,
         permissions: 'r',
-        expiresOn: new Date(Date.now() + expiresIn * 1000),
+        expiresOn: new Date(nowMs + expiresIn * 1000),
       };
       // Real SDK: generateBlobSASQueryParameters(values, credential) — SYNCHRONOUS.
       const sas = mod.generateBlobSASQueryParameters(sasValues, cred);
@@ -289,12 +315,17 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
 export class AzureBlobProvider implements StorageProvider {
   #client: IAzureBlobClient & { canSign: boolean } | null = null;
   readonly #options: AzureBlobProviderOptions;
+  readonly #now: () => number;
 
   /**
    * @param options - Azure connection/injection options
+   * @param now - Wall-clock source (epoch ms) for SAS expiry. Injected by
+   *   `createProvider` as `runtime.now()` (the only sanctioned clock outside
+   *   `packages/runtime`). Defaults to `() => 0` for direct construction.
    */
-  constructor(options?: AzureBlobProviderOptions) {
+  constructor(options?: AzureBlobProviderOptions, now: () => number = () => 0) {
     this.#options = options ?? { containerName: '' };
+    this.#now = now;
   }
 
   /**
@@ -317,7 +348,7 @@ export class AzureBlobProvider implements StorageProvider {
       return Promise.resolve();
     }
     return loadAzureModule().then((mod) => {
-      this.#client = adaptAzureModule(mod, this.#options);
+      this.#client = adaptAzureModule(mod, this.#options, this.#now);
     });
   }
 
@@ -338,14 +369,12 @@ export class AzureBlobProvider implements StorageProvider {
     }
   }
 
-  #getContainer() {
-    // deno-lint-ignore no-explicit-any
-    return this.#client!.getContainerClient(this.#options.containerName) as any;
+  #getContainer(): AzureFacadeContainer {
+    return this.#client!.getContainerClient(this.#options.containerName) as AzureFacadeContainer;
   }
 
-  #getBlockBlob(path: string) {
-    // deno-lint-ignore no-explicit-any
-    return (this.#getContainer() as any).getBlockBlobClient(path);
+  #getBlockBlob(path: string): AzureFacadeBlob {
+    return this.#getContainer().getBlockBlobClient(path);
   }
 
   /**

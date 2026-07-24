@@ -215,7 +215,7 @@ describe('adaptGcsModule', () => {
     const provider = new GcsProvider({
       bucket: 'my-bucket',
       client: facade as unknown as IGcsClient,
-    });
+    }, () => Date.now());
     await provider.connect();
     const before = Math.floor(Date.now() / 1000);
     await provider.getSignedUrl('obj.txt', { expiresIn: 3600 });

@@ -139,8 +139,13 @@ export interface IAzureBlobClient {
  * @since 0.1.0
  */
 export interface UploadedFile {
-  /** Original file name. */
+  /** The form field name the file was uploaded under (Content-Disposition `name="…"`). */
   readonly name: string;
+  /**
+   * The client-provided original file name (Content-Disposition `filename="…"`).
+   * Falls back to the field name when the client sent no `filename`.
+   */
+  readonly filename: string;
   /** File bytes. */
   readonly data: Uint8Array;
   /** MIME type reported by the client. */

@@ -46,9 +46,13 @@ export function createProvider(
   options: StorageProviderOptions,
   runtime: IRuntimeServices,
 ): unknown {
+  // Wall-clock source for providers that compute signed-URL expiry. `runtime.now()`
+  // is the only sanctioned clock outside `packages/runtime` (no direct platform clock).
+  const now = (): number => runtime.now();
+
   switch (type) {
     case 'memory':
-      return new MemoryProvider();
+      return new MemoryProvider(now);
 
     case 'local': {
       const localOpts = options as LocalStorageProviderOptions;
@@ -88,7 +92,7 @@ export function createProvider(
         projectId: gcsOpts.projectId,
         bucket: gcsOpts.bucket,
         client: gcsOpts.client as IGcsClient | undefined,
-      });
+      }, now);
     }
 
     case 'azure': {
@@ -99,7 +103,7 @@ export function createProvider(
         accountKey: azureOpts.accountKey,
         containerName: azureOpts.containerName,
         client: azureOpts.client as IAzureBlobClient | undefined,
-      });
+      }, now);
     }
 
     default:

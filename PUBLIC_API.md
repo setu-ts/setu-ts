@@ -2648,7 +2648,8 @@ app.post('/upload', {
     if (!file) return ctx.json({ error: 'No file' }, 400);
 
     const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-    const key = `uploads/${Date.now()}-${file.name}`;
+    // `file.name` is the form field name; `file.filename` is the client's original file name.
+    const key = `uploads/${Date.now()}-${file.filename}`;
     await storage.put(key, file.data);
 
     const url = await storage.getSignedUrl(key, { expiresIn: 3600 });

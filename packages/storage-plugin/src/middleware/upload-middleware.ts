@@ -104,6 +104,7 @@ export function createUploadMiddleware(
         }
         uploaded.push({
           name: part.name,
+          filename: part.filename ?? part.name,
           data: part.data,
           mimeType: part.mimeType,
           size: part.data.length,

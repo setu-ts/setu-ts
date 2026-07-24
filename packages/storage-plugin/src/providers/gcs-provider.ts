@@ -23,6 +23,25 @@ export interface GcsBucket {
   file(name: string): GcsFile;
 }
 
+/**
+ * Promise-style file shape exposed by the {@linkcode adaptGcsModule} facade
+ * (the raw SDK {@linkcode GcsFile} is callback-style; the facade wraps it).
+ * This is what {@linkcode GcsProvider} operates against.
+ */
+export interface GcsFacadeFile {
+  getMetadata(): Promise<[Record<string, unknown>]>;
+  download(): Promise<{ body: Uint8Array | ArrayLike<number> }>;
+  save(data: Uint8Array, cb: (error: Error | null) => void): void;
+  delete(): Promise<boolean>;
+  getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
+  createReadStream(): NodeJS.ReadableStream;
+}
+
+/** Bucket handle exposed by the facade (its `file()` returns a promisified file). */
+export interface GcsFacadeBucket {
+  file(name: string): GcsFacadeFile;
+}
+
 /** Shape of a GCS file handle. */
 /**
  * Pinned @google-cloud/storage@7.x is dual-mode: every op supports both a Promise-returning
@@ -206,12 +225,17 @@ export async function loadGcsModule(): Promise<GcsSdkModule> {
 export class GcsProvider implements StorageProvider {
   #client: IGcsClient | null = null;
   readonly #options: GcsProviderOptions;
+  readonly #now: () => number;
 
   /**
    * @param options - GCS connection/injection options
+   * @param now - Wall-clock source (epoch ms) for signed-URL expiry. Injected by
+   *   `createProvider` as `runtime.now()` (the only sanctioned clock outside
+   *   `packages/runtime`). Defaults to `() => 0` for direct construction.
    */
-  constructor(options?: GcsProviderOptions) {
+  constructor(options?: GcsProviderOptions, now: () => number = () => 0) {
     this.#options = options ?? { bucket: '' };
+    this.#now = now;
   }
 
   /**
@@ -249,10 +273,9 @@ export class GcsProvider implements StorageProvider {
     }
   }
 
-  #getFile(path: string) {
-    // bucket() returns unknown from the facade; cast through internal GcsFile shape.
-    // deno-lint-ignore no-explicit-any
-    return (this.#client!.bucket() as any).file(path);
+  #getFile(path: string): GcsFacadeFile {
+    // bucket() returns unknown from the facade; narrow through the promisified facade shape.
+    return (this.#client!.bucket() as GcsFacadeBucket).file(path);
   }
 
   /**
@@ -282,6 +305,8 @@ export class GcsProvider implements StorageProvider {
     this.#assertConnected();
     try {
       const { body } = await this.#getFile(path).download();
+      // The facade body is normally a Uint8Array, but a Buffer-like ArrayLike
+      // is converted defensively.
       return body instanceof Uint8Array ? body : new Uint8Array(body);
     } catch (error) {
       if (isGcsNotFound(error)) return null;
@@ -332,7 +357,7 @@ export class GcsProvider implements StorageProvider {
   async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     this.#assertConnected();
     // GCS `expires` is epoch-seconds (numeric), not milliseconds.
-    const expires = Math.floor(Date.now() / 1000) + options.expiresIn;
+    const expires = Math.floor(this.#now() / 1000) + options.expiresIn;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [url] = await this.#getFile(path).getSignedUrl({ action: 'read', expires });
     return url;

@@ -132,6 +132,8 @@ describe('Storage integration (through a real kernel app)', () => {
     const file = getUploadedFile(ctx, 'file');
     expect(file).toBeDefined();
     expect(file!.name).toBe('file');
+    // `filename` carries the client's original file name, distinct from the field name.
+    expect(file!.filename).toBe('upload.txt');
     expect(new TextDecoder().decode(file!.data)).toBe('uploaded content');
 
     // Store via IStorage.

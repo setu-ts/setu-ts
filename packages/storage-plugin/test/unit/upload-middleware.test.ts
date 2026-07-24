@@ -341,6 +341,7 @@ describe('getUploadedFile', () => {
     const ctx = makeCtx();
     const file: import('../../src/interfaces/index.ts').UploadedFile = {
       name: 'file',
+      filename: 'file.txt',
       data: new Uint8Array([88]),
       mimeType: 'text/plain',
       size: 1,
@@ -357,6 +358,7 @@ describe('getUploadedFile', () => {
     const ctx = makeCtx();
     const file: import('../../src/interfaces/index.ts').UploadedFile = {
       name: 'other',
+      filename: 'other.txt',
       data: new Uint8Array([88]),
       mimeType: 'text/plain',
       size: 1,
@@ -370,12 +372,14 @@ describe('getUploadedFile', () => {
     const files: import('../../src/interfaces/index.ts').UploadedFile[] = [
       {
         name: 'file',
+        filename: 'a.txt',
         data: new Uint8Array([1]),
         mimeType: 'text/plain',
         size: 1,
       },
       {
         name: 'file',
+        filename: 'b.txt',
         data: new Uint8Array([2]),
         mimeType: 'text/plain',
         size: 1,

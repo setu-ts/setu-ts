@@ -64,6 +64,13 @@ describe('MemoryProvider', () => {
     expect(url).toMatch(/^memory:\/\/.*\?expires=\d+$/);
   });
 
+  it('getSignedUrl computes expiry from the injected clock (runtime.now), not Date.now', async () => {
+    // Fixed epoch-ms clock → expiry is epoch-seconds + expiresIn, deterministic.
+    const provider = new MemoryProvider(() => 1_700_000_000_000);
+    const url = await provider.getSignedUrl('a.txt', { expiresIn: 3600 });
+    expect(url).toBe('memory://a.txt?expires=1700003600');
+  });
+
   it('not-connected put/get still works (no connection gating)', async () => {
     // MemoryProvider doesn't gate on connected state.
     const provider = new MemoryProvider();
