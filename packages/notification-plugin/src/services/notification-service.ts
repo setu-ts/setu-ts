@@ -50,14 +50,12 @@ export class NotificationService implements INotifier {
     }
 
     const results = await Promise.allSettled(
-      notification.channels.map((name) => {
+      notification.channels.map(async (name) => {
         const channel = this.channels.get(name);
         if (!channel) {
-          return Promise.reject(
-            new Error(`Unknown notification channel: ${name}`),
-          );
+          throw new Error(`Unknown notification channel: ${name}`);
         }
-        return channel.send(notification);
+        await channel.send(notification);
       }),
     );
 
