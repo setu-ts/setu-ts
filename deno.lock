@@ -9,6 +9,7 @@
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.19": "1.0.19",
     "npm:@aws-sdk/client-secrets-manager@3": "3.1092.0",
+    "npm:@aws-sdk/client-sesv2@3": "3.1093.0",
     "npm:@azure/identity@4": "4.13.1",
     "npm:@azure/keyvault-secrets@4": "4.11.2",
     "npm:@google-cloud/secret-manager@5": "5.6.0",
@@ -29,6 +30,7 @@
     "npm:ioredis@5": "5.11.1",
     "npm:kafkajs@2": "2.2.4",
     "npm:nats@2": "2.29.3",
+    "npm:nodemailer@9": "9.0.3",
     "npm:pino@*": "10.3.1",
     "npm:react-router@8": "8.3.0_react@19.2.7",
     "npm:zod@^3.24.0": "3.25.76"
@@ -74,6 +76,20 @@
       "dependencies": [
         "@aws-sdk/core",
         "@aws-sdk/credential-provider-node",
+        "@aws-sdk/types",
+        "@smithy/core",
+        "@smithy/fetch-http-handler",
+        "@smithy/node-http-handler",
+        "@smithy/types",
+        "tslib"
+      ]
+    },
+    "@aws-sdk/client-sesv2@3.1093.0": {
+      "integrity": "sha512-Lv39fmVecZiZvu92AHAZOC/BmubCoLlXTr7WUDv8cn2QYerkmhf5RV4m57NUj1K3yw1xKm7fleWm5odHE8rEMA==",
+      "dependencies": [
+        "@aws-sdk/core",
+        "@aws-sdk/credential-provider-node",
+        "@aws-sdk/signature-v4-multi-region",
         "@aws-sdk/types",
         "@smithy/core",
         "@smithy/fetch-http-handler",
@@ -1204,6 +1220,9 @@
       "dependencies": [
         "whatwg-url"
       ]
+    },
+    "nodemailer@9.0.3": {
+      "integrity": "sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw=="
     },
     "object-hash@3.0.0": {
       "integrity": "sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw=="
