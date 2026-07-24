@@ -9,8 +9,9 @@
  * @module
  */
 
-import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type { IFileSystem, IRuntimeServices, IWorkerHost } from '@hono-enterprise/common';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+import { createWebWorkerHost } from '../shared/web-worker-host.ts';
 
 /**
  * Minimal interface covering the Bun-specific operations used by this adapter.
@@ -53,10 +54,12 @@ export interface BunFileInfo {
  * Creates {@linkcode IRuntimeServices} backed by Bun APIs.
  *
  * @param host - Injected Bun host (defaults to real Bun global)
+ * @param workers - Injected worker host (defaults to the web `Worker` host)
  * @returns Complete runtime services for Bun
  */
 export function createBunRuntimeServices(
   host: BunHost = defaultBunHost,
+  workers: IWorkerHost = createWebWorkerHost(),
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => {
@@ -123,6 +126,7 @@ export function createBunRuntimeServices(
     env: host.env as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
     fs,
+    workers,
   });
 }
 

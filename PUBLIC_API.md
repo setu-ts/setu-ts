@@ -224,6 +224,7 @@ interface IRuntimeServices {
   exit(code?: number): never;
 
   fs?: IFileSystem;
+  workers?: IWorkerHost;
 }
 ```
 
@@ -232,6 +233,30 @@ interface IRuntimeServices {
 implemented by the Node/Deno/Bun runtime adapters and absent on runtimes that cannot canonicalize;
 callers must degrade gracefully when it is not present (e.g. the React Router plugin's static-asset
 handler uses it for symlink-safe containment when available, falling back to lexical containment).
+
+`workers` is an **optional** `IWorkerHost` for spawning worker threads. It is implemented by the
+Node/Deno/Bun runtime adapters and **absent on Cloudflare Workers** (no threads on the edge).
+Callers must degrade gracefully when it is not present — the `WorkerPoolPlugin` fails `run()` with a
+typed `WorkerPoolUnavailableError` rather than throwing at startup.
+
+```typescript
+interface IWorkerHost {
+  spawn(specifier: string): IWorkerHandle;
+  availableParallelism(): number;
+}
+
+interface IWorkerHandle {
+  postMessage(message: unknown): void;
+  onMessage(listener: (message: unknown) => void): void;
+  onError(listener: (error: Error) => void): void;
+  terminate(): Promise<void>;
+}
+```
+
+The runtime package also exports the worker host factories `createWebWorkerHost(globals?)`
+(Deno/Bun, over the web `Worker` API) and `createNodeWorkerHost(mods?)` (Node, over
+`node:worker_threads`), each behind an injectable seam, plus a `@hono-enterprise/runtime/worker`
+subpath whose sole export is `defineWorkerTask` (see the WorkerPoolPlugin section).
 
 ---
 
@@ -1574,6 +1599,108 @@ app.router.get('/api/health', (ctx) => {
   `ServerBuild` by the React Router Vite plugin at build time — M44 serves it without any plugin
   surface.
 - `@react-router/fs-routes` (if used) is an app-level `devDependency`, never imported by the plugin.
+
+---
+
+## WorkerPoolPlugin()
+
+Runs CPU-bound work (image processing, report generation, large data transforms) on **real worker
+threads**, off the event loop, behind the capability model. Registers an `IWorkerPool` under
+`CAPABILITIES.WORKER_POOL`. Task handlers are addressed by **module specifier**, never by closure —
+closures cannot cross a thread boundary. Inputs and outputs travel by structured clone.
+
+### Registration
+
+```typescript
+import { WorkerPoolPlugin } from '@hono-enterprise/worker-pool-plugin';
+
+app.register(WorkerPoolPlugin({
+  defaultPoolSize: 4, // default: runtime.workers.availableParallelism()
+  taskTimeoutMs: 10_000, // default: 30_000; 0 disables
+  maxQueue: 1024, // default: 1024
+  pools: {
+    // per-task-module overrides, keyed by the specifier passed to run()
+    'file:///app/tasks/resize.ts': { size: 2, taskTimeoutMs: 60_000 },
+  },
+}));
+```
+
+### Authoring a task module
+
+A task module is an ES module **your application owns**. It registers its handler at module top
+level with `defineWorkerTask` from the runtime package's `./worker` subpath:
+
+```typescript
+// tasks/resize-image.ts — runs on a worker thread
+import { defineWorkerTask } from '@hono-enterprise/runtime/worker';
+
+defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
+  return await resize(imageBytes);
+});
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IWorkerPool } from '@hono-enterprise/common';
+
+app.router.post('/thumbnail', async (ctx) => {
+  const pool = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+  const bytes = await ctx.request.bytes();
+  const thumb = await pool.run<Uint8Array, Uint8Array>(
+    new URL('./tasks/resize-image.ts', import.meta.url).href,
+    bytes,
+    { timeoutMs: 15_000 }, // optional per-call timeout override
+  );
+  return ctx.response.header('content-type', 'image/png').send(thumb);
+});
+```
+
+### Options
+
+| Option            | Type                              | Default                  | Description                                            |
+| ----------------- | --------------------------------- | ------------------------ | ------------------------------------------------------ |
+| `defaultPoolSize` | `number`                          | `availableParallelism()` | Workers per pool.                                      |
+| `maxQueue`        | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.      |
+| `taskTimeoutMs`   | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies. |
+| `pools`           | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.     |
+| `host`            | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.     |
+
+### Interface Reference
+
+- `IWorkerPool.run<TInput, TOutput>(taskModule, input, options?): Promise<TOutput>` — run a task,
+  creating the pool for `taskModule` lazily on first use.
+- `IWorkerPool.stats(): readonly TaskPoolStats[]` — one snapshot per pool
+  (`{ taskModule, workers, busy, queued, completed, failed }`).
+- `IWorkerPool.shutdown(): Promise<void>` — terminate every worker, reject pending tasks (called by
+  the plugin's `onClose`).
+
+### Errors (exported for `instanceof`)
+
+- `WorkerPoolUnavailableError` — the runtime has no worker support (e.g. Cloudflare Workers) or the
+  pool was shut down.
+- `WorkerTaskError` — the task handler threw, or the worker crashed; carries `taskModule`,
+  `remoteName`, and `remoteStack`.
+- `WorkerTaskTimeoutError` — the task exceeded its timeout; the worker was terminated and replaced.
+  Carries `taskModule` and `timeoutMs`.
+- `WorkerQueueFullError` — the pool's pending queue is at its bound. Carries `taskModule` and
+  `limit`.
+
+### Notes
+
+- **Runtime support.** Threads come from `IRuntimeServices.workers`, implemented on Node
+  (`node:worker_threads`), Deno, and Bun (web `Worker`). On **Cloudflare Workers** there are no
+  threads: the plugin still registers, but `run()` rejects with `WorkerPoolUnavailableError` and the
+  health indicator reports `available: false`. One codebase deploys everywhere.
+- **Error vs crash.** A thrown handler is a healthy worker reporting failure (`WorkerTaskError`, the
+  worker is retained). A worker-level crash drops the worker and re-dispatches its queued work to
+  survivors. A timeout terminates and replaces the worker (in-flight JS cannot be cancelled).
+- **Structured clone only.** `input`/`output` must be structured-clonable — no functions or class
+  instances. A clone failure surfaces as a rejected `run()`.
+- **Node `.ts` task modules** need an app-level loader/build, exactly as the frontend build is the
+  app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
+- Health indicator `worker-pool` reports `{ available, pools }`.
 
 ---
 
@@ -4293,17 +4420,20 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                                |
-| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework) |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                  |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                  |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                  |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                   |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                       |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                            |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                   |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                       |
+| Export                        | Kind     | Purpose                                                                                                                                                                   |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool) |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                     |
+| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                  |
+| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                  |
+| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                    |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                     |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                     |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                      |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                          |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                               |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                      |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                          |
 
 ### Types
 
@@ -4316,7 +4446,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore` |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                               |
 | HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`, `ResponseSnapshot`                                                   |
-| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                           |
+| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                           |
 | DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                           |
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                 |
 | Config              | `IConfig`                                                                                                                                                                                                                                |
@@ -4340,6 +4470,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                            |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                              |
+| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                      |
 
 Contract notes:
 
@@ -4456,33 +4587,40 @@ Cloudflare Workers.
 | `NodeHttpAdapter`                 | class    | Node.js HTTP server adapter implementing `IHttpAdapter`                                    |
 | `BunHttpAdapter`                  | class    | Bun HTTP server adapter implementing `IHttpAdapter`                                        |
 | `CloudflareWorkersHttpAdapter`    | class    | Cloudflare Workers HTTP adapter implementing `IHttpAdapter` (fetch-only, no listen)        |
+| `createWebWorkerHost`             | function | Creates an `IWorkerHost` over the web `Worker` API (Deno/Bun); throws if `Worker` absent   |
+| `createNodeWorkerHost`            | function | Creates an `IWorkerHost` over `node:worker_threads`                                        |
+| `defineWorkerTask`                | function | **`@hono-enterprise/runtime/worker` subpath.** Registers a worker module's task handler    |
 | `isDenoHttpServerHandle`          | function | Type guard for `DenoHttpServerHandle`                                                      |
 | `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                      |
 | `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                       |
 
 ### Types
 
-| Export                              | Kind | Purpose                                                         |
-| ----------------------------------- | ---- | --------------------------------------------------------------- |
-| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)  |
-| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`               |
-| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)           |
-| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                         |
-| `DenoDirEntry`                      | type | Directory entry returned by `DenoHost.readdir()`                |
-| `NodeHost`                          | type | Host interface for the Node adapter (extension point)           |
-| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                         |
-| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)    |
-| `BunHost`                           | type | Host interface for the Bun adapter (extension point)            |
-| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                          |
-| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                      |
-| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                      |
-| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                       |
-| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter         |
-| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point) |
-| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point) |
-| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)  |
-| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                       |
-| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin                  |
+| Export                              | Kind | Purpose                                                                        |
+| ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)                 |
+| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
+| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
+| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
+| `DenoDirEntry`                      | type | Directory entry returned by `DenoHost.readdir()`                               |
+| `NodeHost`                          | type | Host interface for the Node adapter (extension point)                          |
+| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                        |
+| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                   |
+| `BunHost`                           | type | Host interface for the Bun adapter (extension point)                           |
+| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                         |
+| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                     |
+| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                     |
+| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                      |
+| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter                        |
+| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point)                |
+| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point)                |
+| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)                 |
+| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                                      |
+| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin                                 |
+| `WebWorkerGlobals`                  | type | Injectable seam for `createWebWorkerHost` (`Worker` + concurrency)             |
+| `WebWorkerLike`                     | type | Minimal web `Worker` shape the host consumes                                   |
+| `NodeWorkerModules`                 | type | Injectable seam for `createNodeWorkerHost` (`Worker` + `availableParallelism`) |
+| `NodeWorkerLike`                    | type | Minimal `worker_threads.Worker` shape the host consumes                        |
 
 Contract notes:
 

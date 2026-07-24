@@ -339,6 +339,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMailer`/`MailMessage` contract and `MAIL: 'mail'` token were committed in M1; corrected the
   PUBLIC_API Mail `sendTemplate` example (subject is required) in the same PR; developed out of
   order in an isolated worktree off `main`, in parallel with M28) — complete (PR #61)
+- **Milestone 45** (`packages/worker-pool-plugin` — WorkerPoolPlugin registering an `IWorkerPool`
+  under a new `CAPABILITIES.WORKER_POOL = 'worker-pool'` token; runs CPU-bound work on real worker
+  threads off the event loop. Task handlers addressed by **module specifier** (never closure);
+  inputs/outputs by structured clone. Thread primitive is a new **optional**
+  `IRuntimeServices.workers?: IWorkerHost` (+ `IWorkerHandle`), a flagged `common` widening
+  alongside the M44 `fs?` precedent — implemented by `createNodeWorkerHost` (`node:worker_threads`)
+  and `createWebWorkerHost` (web `Worker`, Deno/Bun), and OMITTED on Cloudflare Workers (no edge
+  threads → `run()` throws `WorkerPoolUnavailableError`, plugin still registers). Worker-side helper
+  `defineWorkerTask` ships as a new `@hono-enterprise/runtime/worker` subpath (its sole export);
+  host↔worker envelope protocol (`WorkerReadySignal`/`WorkerTaskRequest`/`WorkerTaskReply` + three
+  guards) lives in `common` so both runtime (worker side) and plugin (host side) read it without a
+  plugin importing another plugin. Internal `TaskPool` (one per specifier, lazy; spawn-on-demand to
+  size, idle reuse, bounded FIFO queue): handler-error → `WorkerTaskError` + worker retained; worker
+  crash → drop + re-dispatch queued work; timeout → `WorkerTaskTimeoutError` + terminate & replace;
+  queue overflow → `WorkerQueueFullError`. `worker-pool` health indicator (`{ available, pools }`) +
+  `onClose` terminates all. Real-thread e2e on Deno spawning fixture task modules; developed in an
+  isolated worktree off `main`) — complete (PR pending)
 - **Next milestone** — **Milestone 30** (`packages/notification-plugin`); resumes the main plugin
   sequence (M30–M40 follow) unless reprioritized.
 
