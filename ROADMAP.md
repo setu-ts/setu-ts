@@ -3988,6 +3988,63 @@ revisit them if its implementation deviates.
 
 ---
 
+## Milestone 45: Worker Pool Plugin — CPU-Bound Tasks on Real Threads ✅ COMPLETE
+
+**Objective:** Give applications a way to run CPU-bound work (image processing, report generation,
+large data transforms) off the event loop, on **real worker threads**, behind the framework's
+capability model. Registers an `IWorkerPool` under a new `CAPABILITIES.WORKER_POOL = 'worker-pool'`
+token. Task handlers are addressed by **module specifier**, never by closure — closures cannot cross
+a thread boundary — and inputs/outputs travel by structured clone.
+
+> **Why a plugin, not a kernel change.** The framework's request path is I/O-bound and the event
+> loop serves it well; multi-core HTTP scaling is a deployment concern (`reusePort` / cluster / k8s
+> replicas), not a framework one. The one legitimate in-process opportunity is CPU-bound task
+> offload, and it fits the existing capability/adapter model cleanly as an **optional** plugin. The
+> kernel, the service registry, and every other plugin stay single-threaded and untouched.
+
+### Package: `@hono-enterprise/worker-pool-plugin`
+
+Registers a `WorkerPoolService` (`IWorkerPool`) under `CAPABILITIES.WORKER_POOL`. One `TaskPool` per
+task-module specifier, created lazily; workers spawn on demand up to the pool size, idle workers are
+reused, pending tasks wait in a bounded FIFO queue. Exports the four error classes
+(`WorkerPoolUnavailableError`, `WorkerTaskError`, `WorkerTaskTimeoutError`, `WorkerQueueFullError`),
+`WorkerPoolService`, and the option types. A `worker-pool` health indicator reports
+`{ available, pools }`; `onClose` terminates every worker.
+
+### Thread primitive: `IWorkerHost` on `IRuntimeServices` (`common` widening)
+
+A new **optional** `workers?: IWorkerHost` member on `IRuntimeServices` (alongside the M44 `fs?`
+precedent), with `IWorkerHandle`. Implemented by the runtime adapters:
+
+- **Node** — `createNodeWorkerHost` over `node:worker_threads` (static `node:` import + injectable
+  seam).
+- **Deno / Bun** — `createWebWorkerHost` over the web-standard `Worker` API (injectable globals
+  seam).
+- **Cloudflare Workers** — omitted (no threads on the edge). `run()` then throws
+  `WorkerPoolUnavailableError`; the plugin still registers, so one codebase deploys everywhere.
+
+### Worker-side helper: `@hono-enterprise/runtime/worker`
+
+A new runtime subpath whose sole export is `defineWorkerTask(fn)` — the only framework code that
+runs inside a worker. Application task modules call it at top level; it detects the worker channel
+(web-first, falling back to `node:worker_threads` `parentPort`) and speaks the shared host↔worker
+protocol (`WorkerReadySignal` / `WorkerTaskRequest` / `WorkerTaskReply`, with guards) defined in
+`common` so both the runtime (worker side) and the plugin (host side) can read it without a plugin
+importing another plugin.
+
+### Doc Deliverables (shipped in this milestone's PR)
+
+- [x] **PUBLIC_API.md** — `IWorkerHost`/`IWorkerHandle` added to the `IRuntimeServices` listing and
+      the common Runtime type group; `CAPABILITIES.WORKER_POOL` + the three protocol guards; the
+      `IWorkerPool`/`WorkerRunOptions`/`TaskPoolStats`/protocol types in a Worker pool type group;
+      `createWebWorkerHost`/`createNodeWorkerHost`/`defineWorkerTask` in the runtime export tables;
+      a full `WorkerPoolPlugin()` section.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row 45.
+- [x] **CLAUDE.md** — Current status M45 entry; Next milestone repointed.
+- [x] **README** — `packages/worker-pool-plugin/README.md`.
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -4168,3 +4225,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 42        | ✅     | streaming-response   |
 | 43        | ✅     | sse-plugin           |
 | 44        | ✅     | react-router-plugin  |
+| 45        | ✅     | worker-pool-plugin   |

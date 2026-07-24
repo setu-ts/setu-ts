@@ -9,8 +9,9 @@
  * @module
  */
 
-import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type { IFileSystem, IRuntimeServices, IWorkerHost } from '@hono-enterprise/common';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+import { createWebWorkerHost } from '../shared/web-worker-host.ts';
 
 /**
  * Minimal interface covering the Deno-specific operations used by this adapter.
@@ -58,10 +59,12 @@ export interface DenoDirEntry {
  * Creates {@linkcode IRuntimeServices} backed by Deno APIs.
  *
  * @param host - Injected Deno host (defaults to real Deno global)
+ * @param workers - Injected worker host (defaults to the web `Worker` host)
  * @returns Complete runtime services for Deno
  */
 export function createDenoRuntimeServices(
   host: DenoHost = Deno as unknown as DenoHost,
+  workers: IWorkerHost = createWebWorkerHost(),
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => host.readFile(path),
@@ -92,5 +95,6 @@ export function createDenoRuntimeServices(
     env: host.env.toObject() as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
     fs,
+    workers,
   });
 }

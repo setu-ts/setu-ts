@@ -10,11 +10,12 @@
  * @module
  */
 
-import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type { IFileSystem, IRuntimeServices, IWorkerHost } from '@hono-enterprise/common';
 import { hostname as osHostname } from 'node:os';
 import * as nodeFs from 'node:fs/promises';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+import { createNodeWorkerHost } from './node-worker-host.ts';
 
 // ---------------------------------------------------------------------------
 // Injection seam — Node built-ins that the adapter needs
@@ -148,10 +149,12 @@ const defaultNodeHost: NodeHost = buildNodeHost();
  * Creates {@linkcode IRuntimeServices} backed by Node.js APIs.
  *
  * @param host - Injected Node host (defaults to real Node.js via static node: imports)
+ * @param workers - Injected worker host (defaults to the `node:worker_threads` host)
  * @returns Complete runtime services for Node.js
  */
 export function createNodeRuntimeServices(
   host: NodeHost = defaultNodeHost,
+  workers: IWorkerHost = createNodeWorkerHost(),
 ): IRuntimeServices {
   const fsImpl: IFileSystem = {
     readFile: host.readFile,
@@ -170,5 +173,6 @@ export function createNodeRuntimeServices(
     env: host.env as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
     fs: fsImpl,
+    workers,
   });
 }

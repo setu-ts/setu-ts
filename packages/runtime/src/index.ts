@@ -29,6 +29,13 @@ export type { BunFileInfo, BunHost } from './adapters/bun/bun-runtime.ts';
 export { createCloudflareRuntimeServices } from './adapters/workers/cf-runtime.ts';
 export type { CloudflareEnv, CloudflareRuntimeOptions } from './adapters/workers/cf-runtime.ts';
 
+// Worker hosts (thread spawning behind IRuntimeServices.workers)
+export { createWebWorkerHost } from './adapters/shared/web-worker-host.ts';
+export type { WebWorkerGlobals, WebWorkerLike } from './adapters/shared/web-worker-host.ts';
+
+export { createNodeWorkerHost } from './adapters/node/node-worker-host.ts';
+export type { NodeWorkerLike, NodeWorkerModules } from './adapters/node/node-worker-host.ts';
+
 // HTTP adapters
 export { DenoHttpAdapter } from './adapters/deno/deno-http-adapter.ts';
 export type { DenoServeHost, DenoServer } from './adapters/deno/deno-http-adapter.ts';
