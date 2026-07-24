@@ -96,7 +96,7 @@ export default {
           throw new Error('Module not found: fake-react-router');
         },
       }),
-    ).rejects.toThrow("Failed to import 'npm:react-router@7'");
+    ).rejects.toThrow("Failed to import 'npm:react-router@8'");
   });
 
   it('default loadRequestHandler path unwraps .default from module namespace', async () => {

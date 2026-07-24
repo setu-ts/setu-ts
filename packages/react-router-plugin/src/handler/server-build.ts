@@ -31,7 +31,7 @@ export function assembleHandler(
  * Default implementation of `loadRequestHandler`.
  *
  * Lazily imports the app-provided server build (`import(serverBuildPath)`) and
- * the core `react-router` package (`import('npm:react-router@7')`), unwraps
+ * the core `react-router` package (`import('npm:react-router@8')`), unwraps
  * the `ServerBuild` (default export), then returns a callable request handler.
  *
  * @param serverBuildPath - Path to the RR Vite server build (app-provided)
@@ -65,11 +65,11 @@ export async function loadRequestHandler(
   try {
     const rr = options?.rrImportHook
       ? await options.rrImportHook()
-      : await import('npm:react-router@7');
+      : await import('npm:react-router@8');
     createRequestHandler = rr.createRequestHandler as (build: unknown, mode: string) => unknown;
   } catch (err) {
     throw new Error(
-      `Failed to import 'npm:react-router@7'. Ensure it is available in the ` +
+      `Failed to import 'npm:react-router@8'. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
