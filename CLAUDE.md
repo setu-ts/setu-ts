@@ -279,7 +279,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   React Router v7 framework mode as a plugin over a kernel catch-all handler; `ReactRouterPlugin`
   registering `SsrService` under `CAPABILITIES.SSR` (new `ISsrService` contract + `SSR: 'ssr'` token
   in `common`); async `register()` with an injectable `loadRequestHandler` seam (default lazily
-  imports `npm:react-router@7` + the app-provided `ServerBuild`); `IRequestContext` ↔ web
+  imports `npm:react-router@8` + the app-provided `ServerBuild`); `IRequestContext` ↔ web
   `Request`/`Response` bridge streaming through M42 `IResponse.stream()`, GET/HEAD bodies omitted;
   default `loadContext` exposing `{ services, user }`; catch-all mounted on all 7 verbs at
   `joinWildcard(basename)`; static-asset serving over `runtime.fs?.readFile` with symlink-safe
@@ -323,9 +323,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   plus `getUploadedFile()` helper; optional `IStorage.getStream?` for zero-copy streaming downloads
   wired through M42 `IResponse.stream()`; per-provider `getSignedUrl` semantics (Memory → synthetic
   URL, Local → throws, S3/GCS/Azure → real presigned/SAS URLs); `storage` health indicator;
-  `onClose` disconnect; full public API doc corrections in same PR — implemented & verified, pending
-  PR/merge)
-- **Next milestone** — M38 (auto-instrumentation, deferred from M24; follows the M28 merge).
+  `onClose` disconnect; full public API doc corrections in same PR) — complete (PR pending)
+- **Milestone 29** (`packages/mail-plugin` — MailPlugin registering an `IMailer` under
+  `CAPABILITIES.MAIL`, backed by a pluggable internal `MailProvider` port; four backends —
+  `LogProvider` (zero-dependency default, records/logs each message, every runtime incl. Workers),
+  `SmtpProvider` (inject-or-lazy `npm:nodemailer` via an
+  `adaptNodemailerModule`/`loadNodemailerModule` seam + injectable `ISmtpTransport`, Node/Deno/Bun
+  only — raw sockets), `SesProvider` (inject-or-lazy `npm:@aws-sdk/client-sesv2` via
+  `adaptSesModule`/`loadSesModule` + injectable `ISesClient`), and `SendGridProvider` (SendGrid v3
+  HTTP API over an injectable `fetch`-shaped `IMailHttp`, zero-dependency, Workers-portable);
+  `MailService` resolves the default `from` once (both `send` and `sendTemplate` funnel through it)
+  and dispatches; a zero-dependency `TemplateEngine` renders named `{{ variable }}` bodies with
+  HTML-escaping on the `html` body and a throw on a missing variable / unknown template; a `mail`
+  health indicator and an `onClose` that disconnects the provider; no `common` change — the
+  `IMailer`/`MailMessage` contract and `MAIL: 'mail'` token were committed in M1; corrected the
+  PUBLIC_API Mail `sendTemplate` example (subject is required) in the same PR; developed out of
+  order in an isolated worktree off `main`, in parallel with M28) — complete (PR #61)
+- **Next milestone** — **Milestone 30** (`packages/notification-plugin`); resumes the main plugin
+  sequence (M30–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
