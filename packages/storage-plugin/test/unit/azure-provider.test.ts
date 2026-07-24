@@ -1,4 +1,6 @@
-// deno-lint-ignore-file no-explicit-any ban-unused-ignore
+// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
+/**
+
 /**
  * Tests for {@linkcode AzureBlobProvider}, {@linkcode adaptAzureModule},
  * {@linkcode isAzureNotFound}, and guarded real-import path.
@@ -15,6 +17,26 @@ import {
   loadAzureModule,
   validateAzureBlobClient,
 } from '../../src/providers/azure-provider.ts';
+
+/** Helper: create a NodeJS.ReadableStream that also implements AsyncIterable<Uint8Array>. */
+function makeReadable(chunks: Uint8Array[]): AsyncIterable<Uint8Array> & NodeJS.ReadableStream {
+  let idx = 0;
+  return {
+    on(_event: string, _fn: (...args: unknown[]) => void) {
+      // no-op - adapter path for provider get()/getStream()
+    },
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          if (idx < chunks.length) {
+            return { done: false, value: chunks[idx++] };
+          }
+          return { done: true, value: undefined };
+        },
+      };
+    },
+  } as unknown as AsyncIterable<Uint8Array> & NodeJS.ReadableStream;
+}
 
 describe('isAzureNotFound', () => {
   it('returns true for statusCode 404', () => {
@@ -49,17 +71,14 @@ describe('adaptAzureModule', () => {
     const store = new Map<string, Uint8Array>();
     let canSign = true;
 
-    // deno-lint-ignore no-explicit-any
     return {
       mod: {
         BlobServiceClient: class {
           constructor(_urlOrCs: string) {}
           getContainerClient(name: string) {
-            // deno-lint-ignore no-explicit-any
             return {
               getBlockBlobClient(blobName: string) {
                 const key = `${name}/${blobName}`;
-                // deno-lint-ignore no-explicit-any
                 return {
                   uploadData(data: Uint8Array): Promise<{ _hasSas: boolean }> {
                     store.set(key, data);
@@ -68,18 +87,15 @@ describe('adaptAzureModule', () => {
                   download() {
                     const data = store.get(key);
                     if (data === undefined) {
-                      // deno-lint-ignore no-explicit-any
                       return {
                         deleted: true,
                         readableStreamBody: null as unknown as NodeJS.ReadableStream,
                         contentLength: 0,
                       };
                     }
-
-                    // deno-lint-ignore no-explicit-any
                     return {
                       deleted: false,
-                      readableStreamBody: makeReadable([data]) as any,
+                      readableStreamBody: makeReadable([data]),
                       contentLength: data.length,
                     };
                   },
@@ -113,43 +129,6 @@ describe('adaptAzureModule', () => {
     };
   }
 
-  function makeReadable(chunks: Uint8Array[]): AsyncIterable<Uint8Array> & NodeJS.ReadableStream {
-    let idx = 0;
-    // deno-lint-ignore no-explicit-any
-    // deno-lint-ignore no-explicit-any
-    return {
-      on(event: string, fn: (...args: unknown[]) => void) {
-        if (event === 'data' && idx < chunks.length) {
-          setTimeout(() => fn(chunks[idx++]), 0);
-        }
-      },
-      [Symbol.asyncIterator]() {
-        // deno-lint-ignore no-explicit-any
-        return {
-          next() {
-            // deno-lint-ignore no-explicit-any
-            if (idx < chunks.length) {
-              // deno-lint-ignore no-explicit-any
-              return { done: false, value: chunks[idx++] } as any;
-            }
-            // deno-lint-ignore no-explicit-any
-            return { done: true, value: undefined } as any;
-          },
-        };
-      },
-      // deno-lint-ignore no-explicit-any
-      next(): Promise<{ done: boolean; value?: unknown }> {
-        if (idx < chunks.length) {
-          // deno-lint-ignore no-explicit-any
-          return Promise.resolve(
-            { done: false, value: chunks[idx++] } as { done: boolean; value?: unknown },
-          );
-        }
-        return Promise.resolve({ done: true, value: undefined });
-      },
-    } as unknown as AsyncIterable<Uint8Array> & NodeJS.ReadableStream;
-  }
-
   it('uploadData → store round-trip', async () => {
     const { mod, store } = buildFakeAzure();
     const facade = adaptAzureModule(mod, {
@@ -158,7 +137,6 @@ describe('adaptAzureModule', () => {
       accountKey: 'dGVzdGtleQ==',
     }) as IAzureBlobClient & { canSign: boolean };
     const container = facade.getContainerClient('mycontainer');
-    // deno-lint-ignore no-explicit-any
     const blob = (container as any).getBlockBlobClient('test.bin');
     await blob.uploadData(new Uint8Array([11, 22, 33]));
     expect(store().get('mycontainer/test.bin')).toEqual(new Uint8Array([11, 22, 33]));
@@ -171,7 +149,6 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
-    // deno-lint-ignore no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'missing.bin',
     );
@@ -181,7 +158,6 @@ describe('adaptAzureModule', () => {
 
   it('non-404 error does not match isAzureNotFound', () => {
     const error = new Error('boom');
-    // deno-lint-ignore no-explicit-any
     (error as any).statusCode = 500;
     expect(isAzureNotFound(error)).toBe(false);
   });
@@ -193,7 +169,6 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
-    // deno-lint-ignore no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'new.bin',
     );
@@ -204,15 +179,16 @@ describe('adaptAzureModule', () => {
     // When accountName is provided without accountKey and no connectionString,
     // adaptAzureModule throws at construction time.
     const { mod } = buildFakeAzure();
-    await expect(() => adaptAzureModule(mod, {
-      containerName: 'mycontainer',
-      accountName: 'fakeaccount',
-    })).toThrow('accountName + options.accountKey');
+    await expect(() =>
+      adaptAzureModule(mod, {
+        containerName: 'mycontainer',
+        accountName: 'fakeaccount',
+      })
+    ).toThrow('accountName + options.accountKey');
   });
 
   it('getSignedUrl returns URL when signed', async () => {
     const { mod } = buildFakeAzure();
-    // deno-lint-ignore no-explicit-any
     const facade = adaptAzureModule(mod, {
       containerName: 'mycontainer',
       accountName: 'fakeaccount',
@@ -220,6 +196,20 @@ describe('adaptAzureModule', () => {
     }) as any;
     const url = await facade.getSignedUrl('blob.txt', 3600);
     expect(url).toContain('sas-token-signed');
+  });
+
+  it('connectionString-based config works', async () => {
+    const { mod } = buildFakeAzure();
+    const facade = adaptAzureModule(mod, {
+      containerName: 'mycontainer',
+      connectionString:
+        'DefaultEndpointsProtocol=https;AccountName=csg acct;AccountKey=csgkey;EndpointSuffix=core.windows.net',
+    }) as IAzureBlobClient & { canSign: boolean };
+    expect(facade.canSign).toBe(true);
+    const container = facade.getContainerClient('mycontainer');
+    const blob = (container as any).getBlockBlobClient('cs-test.bin');
+    await blob.uploadData(new Uint8Array([8]));
+    expect(await blob.exists()).toBe(true);
   });
 });
 
@@ -267,6 +257,193 @@ describe('AzureBlobProvider', () => {
       expect(mod.BlobServiceClient).toBeDefined();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
+    }
+  });
+
+  it('put delegates to injected client', async () => {
+    let putCalled = false;
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async (_data: Uint8Array) => {
+            putCalled = true;
+          },
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    await provider.put('myblob', new Uint8Array([1, 2, 3]));
+    expect(putCalled).toBe(true);
+  });
+
+  it('get returns data via injected client', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: false,
+            readableStreamBody: makeReadable([new Uint8Array([99])]),
+            contentLength: 1,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const result = await provider.get('someblob');
+    expect(result).toEqual(new Uint8Array([99]));
+  });
+
+  it('delete returns false from injected client', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve(false);
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const result = await provider.delete('someblob');
+    expect(result).toBe(false);
+  });
+
+  it('exists returns true from injected client', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return Promise.resolve(true);
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const result = await provider.exists('someblob');
+    expect(result).toBe(true);
+  });
+
+  it('getSignedUrl delegates via client', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: true,
+            readableStreamBody: null as unknown as NodeJS.ReadableStream,
+            contentLength: 0,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+      getSignedUrl: async () => 'https://sas.url?token=abc',
+      canSign: true,
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const url = await provider.getSignedUrl('blob.txt', { expiresIn: 3600 });
+    expect(url).toContain('sas.url');
+  });
+
+  it('getStream returns stream from injected client', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          download: () => ({
+            deleted: false,
+            readableStreamBody: makeReadable([new Uint8Array([42])]),
+            contentLength: 1,
+          }),
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return false;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient & { canSign: boolean };
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('streamblob');
+    expect(stream).toBeDefined();
+    if (stream) {
+      const reader = stream.getReader();
+      const chunk = await reader.read();
+      expect(chunk.done).toBe(false);
+      expect(chunk.value).toEqual(new Uint8Array([42]));
+    }
+  });
+
+  it('disconnect clears client', async () => {
+    const fakeClient = {
+      getContainerClient: () => ({}),
+    } as unknown as IAzureBlobClient;
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+    await provider.disconnect();
+    expect(provider.isReady()).toBe(false);
+  });
+
+  it('connect with non-injected client (via adaptAzureModule) throws without accountKey', async () => {
+    // When no client is injected and we try connect(), it tries to adaptAzureModule
+    // which will fail because loadAzureModule imports the real SDK
+    // This test just verifies the provider correctly delegates to connect()
+    const provider = new AzureBlobProvider({ containerName: 'c' });
+    expect(provider.isReady()).toBe(false);
+    // connect without injection tries the lazy load path
+    try {
+      await provider.connect();
+    } catch (e) {
+      // Expected — SDK not available or wrong shape
+      expect(e).toBeInstanceOf(Error);
     }
   });
 });

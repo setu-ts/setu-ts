@@ -1,4 +1,6 @@
+// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
 /**
+
  * Tests for {@linkcode GcsProvider}, {@linkcode adaptGcsModule},
  * {@linkcode validateGcsClient}, and guarded real-import path.
  *
@@ -43,10 +45,13 @@ describe('adaptGcsModule', () => {
           bucket(_name?: unknown): {
             file(name: string): {
               getMetadata(): Promise<[Record<string, unknown>]>;
-              download(): Promise<{ body: Uint8Array }>;
+              download(): Promise<{ body: Uint8Array | NodeJS.ReadableStream }>;
               save(data: Uint8Array, cb: (err: Error | null) => void): void;
-              delete(): Promise<void>;
-              getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
+              delete(cb?: (err: Error | null) => void): Promise<void>;
+              getSignedUrl(
+                config: { action: string; expires: number },
+                cb: (err: Error | null, url?: string) => void,
+              ): void;
               createReadStream(): { on(event: string, fn: (...args: unknown[]) => void): void };
             };
           } {
@@ -66,13 +71,17 @@ describe('adaptGcsModule', () => {
                     store.set(name, data);
                     cb(null);
                   },
-                  delete() {
+                  delete(cb: (err: Error | null) => void) {
                     store.delete(name);
+                    cb(null);
                     return Promise.resolve();
                   },
-                  getSignedUrl(config: { action: string; expires: number }) {
+                  getSignedUrl(
+                    config: { action: string; expires: number },
+                    cb: (err: Error | null, url?: string) => void,
+                  ) {
                     const params = new URLSearchParams(config as unknown as Record<string, string>);
-                    return Promise.resolve([`https://signed.url/${name}?${params.toString()}`]);
+                    cb(null, `https://signed.url/${name}?${params.toString()}`);
                   },
                   createReadStream() {
                     const data = store.get(name);
@@ -127,6 +136,30 @@ describe('adaptGcsModule', () => {
     };
     expect(bucketHandle.file('missing').download()).rejects.toThrow('ENOENT');
   });
+
+  it('getMetadata throws when absent', () => {
+    const result = buildFakeGcs();
+    const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
+    const fileHandle = (facade.bucket() as any).file('nope');
+    expect(fileHandle.getMetadata()).rejects.toThrow('ENOENT');
+  });
+
+  it('delete resolves when present', async () => {
+    const result = buildFakeGcs();
+    const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
+    const fileHandle = (facade.bucket() as any).file('to-delete');
+    result.store.set('to-delete', new Uint8Array([1]));
+    await fileHandle.delete();
+    expect(result.store.has('to-delete')).toBe(false);
+  });
+
+  it('getSignedUrl returns signed URL', async () => {
+    const result = buildFakeGcs();
+    const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
+    const fileHandle = (facade.bucket() as any).file('sig-url.bin');
+    const [url] = await fileHandle.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
+    expect(url).toContain('signed.url');
+  });
 });
 
 describe('GcsProvider', () => {
@@ -159,6 +192,234 @@ describe('GcsProvider', () => {
       expect(mod.Storage).toBeDefined();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
+    }
+  });
+
+  it('put delegates to injected client', async () => {
+    let putCalled = false;
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, cb: (err: Error | null) => void) => {
+            putCalled = true;
+            cb(null);
+          },
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    await provider.put('myfile', new Uint8Array([1, 2, 3]));
+    expect(putCalled).toBe(true);
+  });
+
+  it('get returns data via injected client', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([77, 88]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.get('getfile');
+    expect(result).toEqual(new Uint8Array([77, 88]));
+  });
+
+  it('get returns null on not-found error', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.reject(new Error('Not Found')),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.get('missing-file');
+    expect(result).toBeNull();
+  });
+
+  it('delete returns true from injected client', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.delete('del-me');
+    expect(result).toBe(true);
+  });
+
+  it('delete returns false on rejection', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.reject(new Error('network error')),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.delete('fail-del');
+    expect(result).toBe(false);
+  });
+
+  it('exists returns true from injected client', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.exists('ex-file');
+    expect(result).toBe(true);
+  });
+
+  it('exists returns false on error', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.reject(new Error('ENOENT')),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.exists('nope-file');
+    expect(result).toBe(false);
+  });
+
+  it('getSignedUrl returns signed URL', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://signed.gcs.url/myfile?token=abc']),
+          createReadStream: () => ({ on: () => {} }),
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const url = await provider.getSignedUrl('myfile', { expiresIn: 3600 });
+    expect(url).toContain('signed.gcs.url');
+  });
+
+  it('getStream returns ReadableStream from injected client', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => {
+            // Simulate Node.js stream - fire data and end synchronously
+            // so the ReadableStream completes before we read from it.
+            let dataRegistered = false;
+            let endRegistered = false;
+            return {
+              on(event: string, fn: (arg?: unknown) => void) {
+                if (event === 'data' && !dataRegistered) {
+                  dataRegistered = true;
+                  fn(new Uint8Array([100, 200, 255]));
+                }
+                if (event === 'end' && !endRegistered) {
+                  endRegistered = true;
+                  fn();
+                }
+              },
+            } as unknown as NodeJS.ReadableStream;
+          },
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('stream-file');
+    expect(stream).toBeDefined();
+    if (stream) {
+      const reader = stream.getReader();
+      const chunk = await reader.read();
+      expect(chunk.done).toBe(false);
+      expect(chunk.value).toEqual(new Uint8Array([100, 200, 255]));
+      const done = await reader.read();
+      expect(done.done).toBe(true);
+    }
+  });
+
+  it('getStream returns null on not-found', async () => {
+    const fakeClient = {
+      bucket: () => ({
+        file: () => {
+          throw new Error('Not Found');
+        },
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.getStream('missing-stream');
+    expect(result).toBeNull();
+  });
+
+  it('disconnect clears client', async () => {
+    const fakeClient = { bucket: () => ({}) } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+    await provider.disconnect();
+    expect(provider.isReady()).toBe(false);
+  });
+
+  it('connect with non-injected client tries lazy load', async () => {
+    const provider = new GcsProvider({ bucket: 'b' });
+    expect(provider.isReady()).toBe(false);
+    try {
+      await provider.connect();
+    } catch (e) {
+      expect(e).toBeInstanceOf(Error);
     }
   });
 });

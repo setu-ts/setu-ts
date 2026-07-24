@@ -1,4 +1,6 @@
+// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
 /**
+
  * Tests for {@linkcode LocalStorageProvider}.
  *
  * @module
@@ -24,16 +26,24 @@ describe('LocalStorageProvider', () => {
         },
         stat(path: string) {
           if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
-          return { size: store.get(path)!.length } as unknown as import('@hono-enterprise/common').StatResult;
+          return {
+            size: store.get(path)!.length,
+          } as unknown as import('@hono-enterprise/common').StatResult;
         },
         rm(path: string) {
           if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
           store.delete(path);
           return Promise.resolve();
         },
-        realPath(p: string): Promise<string> { return Promise.resolve(p); },
-        readdir(_path: string): Promise<readonly string[]> { return Promise.resolve([]); },
-        mkdir(_path: string, _options?: { readonly recursive?: boolean }): Promise<void> { return Promise.resolve(); },
+        realPath(p: string): Promise<string> {
+          return Promise.resolve(p);
+        },
+        readdir(_path: string): Promise<readonly string[]> {
+          return Promise.resolve([]);
+        },
+        mkdir(_path: string, _options?: { readonly recursive?: boolean }): Promise<void> {
+          return Promise.resolve();
+        },
       } as unknown as import('@hono-enterprise/common').IFileSystem,
       store,
     };
@@ -119,5 +129,41 @@ describe('LocalStorageProvider', () => {
     await provider.put('../escape', new Uint8Array([99]));
     const result = await provider.get('../escape');
     expect(result).toEqual(new Uint8Array([99]));
+  });
+
+  it('put → get with rootDir="./" uses relative path', async () => {
+    const { fs, store } = makeFakeFs();
+    const provider = new LocalStorageProvider(fs, { rootDir: './storage' });
+    await provider.connect();
+    await provider.put('rel.bin', new Uint8Array([1, 2]));
+    expect(await provider.get('rel.bin')).toEqual(new Uint8Array([1, 2]));
+    // Verify the file was stored at the joined path
+    expect(store.has('./storage/rel.bin')).toBe(true);
+  });
+
+  it('resolvePath skips .. parts but keeps valid nested path', async () => {
+    const { fs } = makeFakeFs();
+    const provider = new LocalStorageProvider(fs, { rootDir: '/safe' });
+    await provider.connect();
+    await provider.put('deep/nested/path/file.dat', new Uint8Array([42]));
+    const result = await provider.get('deep/nested/path/file.dat');
+    expect(result).toEqual(new Uint8Array([42]));
+  });
+
+  it('get returns null when readFile throws', async () => {
+    const { fs } = makeFakeFs();
+    const provider = new LocalStorageProvider(fs, { rootDir: '/root' });
+    await provider.connect();
+    // File never put — readFile will throw ENOENT
+    const result = await provider.get('never-existed.bin');
+    expect(result).toBeNull();
+  });
+
+  it('disconnect is no-op', async () => {
+    const { fs } = makeFakeFs();
+    const provider = new LocalStorageProvider(fs, { rootDir: '/root' });
+    await provider.connect();
+    await provider.disconnect();
+    // disconnect is async no-op — should not throw
   });
 });

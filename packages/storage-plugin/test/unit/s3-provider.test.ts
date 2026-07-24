@@ -1,4 +1,6 @@
+// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
 /**
+
  * Tests for {@linkcode S3Provider}, {@linkcode adaptAwsS3Module},
  * {@linkcode validateAwsS3Client}, and guarded real-import path.
  *
@@ -17,18 +19,34 @@ import {
 describe('validateAwsS3Client', () => {
   it('returns true for a valid client', () => {
     const client = {
-      put(): Promise<void> { return Promise.resolve(); },
-      get(): Promise<null> { return Promise.resolve(null); },
-      delete(): Promise<boolean> { return Promise.resolve(true); },
-      head(): Promise<boolean> { return Promise.resolve(true); },
-      getSignedUrl(): Promise<string> { return Promise.resolve(''); },
-      getStream(): Promise<null> { return Promise.resolve(null); },
+      put(): Promise<void> {
+        return Promise.resolve();
+      },
+      get(): Promise<null> {
+        return Promise.resolve(null);
+      },
+      delete(): Promise<boolean> {
+        return Promise.resolve(true);
+      },
+      head(): Promise<boolean> {
+        return Promise.resolve(true);
+      },
+      getSignedUrl(): Promise<string> {
+        return Promise.resolve('');
+      },
+      getStream(): Promise<null> {
+        return Promise.resolve(null);
+      },
     };
     expect(validateAwsS3Client(client)).toBe(true);
   });
 
   it('returns false for missing method', () => {
-    const client = { nope(): Promise<void> { return Promise.resolve(); } };
+    const client = {
+      nope(): Promise<void> {
+        return Promise.resolve();
+      },
+    };
     expect(validateAwsS3Client(client)).toBe(false);
   });
 
@@ -44,7 +62,12 @@ describe('adaptAwsS3Module', () => {
     // Create distinct command classes with proper constructor names for detection.
     function makeCommandClass(name: string) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const C = class { input: Record<string, unknown>; constructor(input: Record<string, unknown>) { this.input = input; } };
+      const C = class {
+        input: Record<string, unknown>;
+        constructor(input: Record<string, unknown>) {
+          this.input = input;
+        }
+      };
       Object.defineProperty(C, 'name', { value: name, writable: false });
       return C as new (input: Record<string, unknown>) => { input: Record<string, unknown> };
     }
@@ -164,17 +187,275 @@ describe('adaptAwsS3Module', () => {
     const result = await facade.getStream('missing');
     expect(result).toBeNull();
   });
+
+  it('getStream returns null when Body is not Uint8Array or stream', async () => {
+    // Test the fake-path: res.Body is neither Uint8Array nor has getReader.
+    const fakeStore = new Map<string, Uint8Array>();
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
+            if (cmd.constructor.name === 'GetObjectCommand') {
+              const data = fakeStore.get(input.Key);
+              if (data === undefined) {
+                const err = new Error('NoSuchKey');
+                (err as { name: string }).name = 'NoSuchKey';
+                return Promise.reject(err);
+              }
+              // Return Body as non-Uint8Array (simulates raw SDK response where Body is plain bytes)
+              return Promise.resolve({ Body: data as unknown as ReadableStream<Uint8Array> });
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://fallback.url');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'fb' });
+    const stream = await facade.getStream('not-found');
+    expect(stream).toBeNull();
+  });
+
+  it('head rejects with non-S3 error is propagated', async () => {
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            if (cmd.constructor.name === 'HeadObjectCommand') {
+              const err = new Error('AuthError');
+              (err as { name: string }).name = 'AuthError';
+              return Promise.reject(err);
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown> = {} as Record<string, unknown>;
+          constructor(_input: Record<string, unknown>) {}
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown> = {} as Record<string, unknown>;
+          constructor(_input: Record<string, unknown>) {}
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown> = {} as Record<string, unknown>;
+          constructor(_input: Record<string, unknown>) {}
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown> = {} as Record<string, unknown>;
+          constructor(_input: Record<string, unknown>) {}
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://x');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'fb' });
+    expect(await facade.head('blocked')).toBe(false);
+  });
+
+  it('buildS3Config with region only', () => {
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          constructor(config: Record<string, unknown>) {
+            expect(config.region).toBe('us-east-1');
+            expect(config.credentials).toBeUndefined();
+            expect(config.endpoint).toBeUndefined();
+          }
+          send() {
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://x');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    adaptAwsS3Module(fakeMod, { bucket: 'reg-only', region: 'us-east-1' });
+  });
+
+  it('buildS3Config with credentials', () => {
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          constructor(config: Record<string, unknown>) {
+            expect(config.credentials).toEqual({
+              accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+              secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+            });
+          }
+          send() {
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://x');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    adaptAwsS3Module(fakeMod, {
+      bucket: 'creds-bucket',
+      accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+      secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    });
+  });
+
+  it('buildS3Config with custom endpoint', () => {
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          constructor(config: Record<string, unknown>) {
+            expect(config.endpoint).toEqual('https://custom.s3.example.com');
+          }
+          send() {
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(input: Record<string, unknown>) {
+            this.input = input;
+          }
+        },
+      },
+      presigner: {
+        getSignedUrl() {
+          return Promise.resolve('https://x');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    adaptAwsS3Module(fakeMod, {
+      bucket: 'ep-bucket',
+      endpoint: 'https://custom.s3.example.com',
+    });
+  });
 });
 
 describe('S3Provider', () => {
   it('connect with injected client succeeds', async () => {
     const fakeClient: IAwsS3Client = {
-      put(): Promise<void> { return Promise.resolve(); },
-      get(): Promise<null> { return Promise.resolve(null); },
-      delete(): Promise<boolean> { return Promise.resolve(true); },
-      head(): Promise<boolean> { return Promise.resolve(true); },
-      getSignedUrl(): Promise<string> { return Promise.resolve('https://x'); },
-      getStream(): Promise<null> { return Promise.resolve(null); },
+      put(): Promise<void> {
+        return Promise.resolve();
+      },
+      get(): Promise<null> {
+        return Promise.resolve(null);
+      },
+      delete(): Promise<boolean> {
+        return Promise.resolve(true);
+      },
+      head(): Promise<boolean> {
+        return Promise.resolve(true);
+      },
+      getSignedUrl(): Promise<string> {
+        return Promise.resolve('https://x');
+      },
+      getStream(): Promise<null> {
+        return Promise.resolve(null);
+      },
     };
     const provider = new S3Provider({ bucket: 'b', client: fakeClient });
     await provider.connect();
@@ -197,10 +478,33 @@ describe('S3Provider', () => {
   });
 
   it('disconnect sets ready to false', async () => {
-    const provider = new S3Provider({ bucket: 'b' });
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
     await provider.connect();
     await provider.disconnect();
     expect(provider.isReady()).toBe(false);
+  });
+
+  it('operations reject after disconnect', async () => {
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    await provider.disconnect();
+    await expect(provider.put('k', new Uint8Array([1]))).rejects.toThrow('not connected');
   });
 
   it('loadAwsS3Module enters the real import path', async () => {
@@ -210,6 +514,111 @@ describe('S3Provider', () => {
       expect(mod.presigner).toBeDefined();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
+    }
+  });
+
+  it('put delegates to injected client', async () => {
+    let called = false;
+    const fakeClient: IAwsS3Client = {
+      put: async () => {
+        called = true;
+      },
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    await provider.put('put-file', new Uint8Array([5]));
+    expect(called).toBe(true);
+  });
+
+  it('get delegates to injected client', async () => {
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => new Uint8Array([10, 20]),
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.get('get-file');
+    expect(result).toEqual(new Uint8Array([10, 20]));
+  });
+
+  it('delete delegates to injected client', async () => {
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.delete('del-file');
+    expect(result).toBe(true);
+  });
+
+  it('exists delegates to injected client', async () => {
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const result = await provider.exists('ex-file');
+    expect(result).toBe(true);
+  });
+
+  it('getSignedUrl delegates to injected client', async () => {
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://presigned.s3.url?token=xyz',
+      getStream: async () => null,
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const url = await provider.getSignedUrl('signed-file', { expiresIn: 7200 });
+    expect(url).toContain('presigned.s3.url');
+  });
+
+  it('getStream delegates to injected client', async () => {
+    const fakeClient: IAwsS3Client = {
+      put: async () => {},
+      get: async () => null,
+      delete: async () => true,
+      head: async () => true,
+      getSignedUrl: async () => 'https://x',
+      getStream: async () =>
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([255]));
+            controller.close();
+          },
+        }),
+    };
+    const provider = new S3Provider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('stream-f');
+    expect(stream).toBeDefined();
+    if (stream) {
+      const reader = stream.getReader();
+      const chunk = await reader.read();
+      expect(chunk.done).toBe(false);
+      expect(chunk.value).toEqual(new Uint8Array([255]));
     }
   });
 });

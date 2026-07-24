@@ -98,6 +98,21 @@ describe('parseMultipart', () => {
     expect(() => parseMultipart(body, 'text/plain')).toThrow('Missing boundary');
   });
 
+  it('parses quoted boundary correctly', () => {
+    const boundary = 'quoted-boundary';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="qf"\r\n'),
+      ...encoder.encode('Content-Type: text/plain\r\n\r\n'),
+      ...encoder.encode('quoted boundary data'),
+      ...encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ]);
+    const parts = parseMultipart(body, 'multipart/form-data; boundary="quoted-boundary"');
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('qf');
+  });
+
   it('returns empty array for empty body', () => {
     const body = new Uint8Array([]);
     const parts = parseMultipart(body, 'multipart/form-data; boundary=x');
@@ -112,5 +127,111 @@ describe('parseMultipart', () => {
     const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
     expect(parts.length).toBe(1);
     expect(parts[0].name).toBe('tricky');
+  });
+
+  it('handles part without Content-Type header (default MIME)', () => {
+    const boundary = 'no-mime';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="nomime"\r\n\r\n'),
+      ...encoder.encode('no-type-value'),
+      ...encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ]);
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].mimeType).toBe('application/octet-stream');
+    expect(new TextDecoder().decode(parts[0].data)).toBe('no-type-value');
+  });
+
+  it('handles CRLF with extra whitespace in headers', () => {
+    const boundary = 'whitespace';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('  Content-Disposition: form-data; name="ws-field"  \r\n'),
+      ...encoder.encode('  Content-Type: text/plain  \r\n\r\n'),
+      ...encoder.encode('whitespacey data'),
+      ...encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ]);
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('ws-field');
+    expect(new TextDecoder().decode(parts[0].data)).toBe('whitespacey data');
+  });
+
+  it('parses binary data correctly', () => {
+    const boundary = 'bin-boundary';
+    const binaryData = new Uint8Array([0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD]);
+    const body = makeBody([{
+      name: 'binary-file',
+      mime: 'application/octet-stream',
+      data: binaryData,
+    }], boundary);
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].data).toEqual(binaryData);
+  });
+
+  it('handles large part data', () => {
+    const boundary = 'large';
+    const largeData = new Uint8Array(100_000).fill(42);
+    const body = makeBody(
+      [{ name: 'large', mime: 'application/octet-stream', data: largeData }],
+      boundary,
+    );
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].data.length).toBe(100_000);
+    expect(parts[0].data[0]).toBe(42);
+    expect(parts[0].data[99_999]).toBe(42);
+  });
+
+  it('handles part name in Content-Disposition with quotes', () => {
+    const boundary = 'quoted-name';
+    const encoder = new TextEncoder();
+    // Build body with quoted part name
+    const bodyBytes = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="quoted-field"\r\n'),
+      ...encoder.encode('Content-Type: text/plain\r\n\r\n'),
+      ...encoder.encode('quoted field data'),
+      ...encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ]);
+
+    const parts = parseMultipart(bodyBytes, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('quoted-field');
+  });
+
+  it('handles empty part data', () => {
+    const boundary = 'empty-data';
+    const encoder = new TextEncoder();
+    const bodyBytes = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="empty-field"\r\n'),
+      ...encoder.encode('Content-Type: text/plain\r\n\r\n'),
+      ...encoder.encode(''),
+      ...encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ]);
+
+    const parts = parseMultipart(bodyBytes, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].data.length).toBe(0);
+  });
+
+  it('handles part with special characters in data', () => {
+    const boundary = 'special';
+    const encoder = new TextEncoder();
+    const specialData = encoder.encode('Special chars: <>&"\'\\@#$%^&*()');
+    const body = makeBody([{ name: 'special', mime: 'text/plain', data: specialData }], boundary);
+
+    const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].data).toEqual(specialData);
   });
 });
