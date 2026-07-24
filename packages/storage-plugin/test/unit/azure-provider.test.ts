@@ -366,9 +366,126 @@ describe('adaptAzureModule', () => {
     expect(sasUrl).toContain('sas-token-signed');
     expect(sasUrl).toContain('csaccount');
   });
+
+  it('facade download rethrows a non-404 error', async () => {
+    const mod = {
+      BlobServiceClient: class {
+        constructor(_cs: string) {}
+        getContainerClient() {
+          return {
+            getBlockBlobClient() {
+              return {
+                download() {
+                  const e = new Error('boom');
+                  (e as { statusCode?: number }).statusCode = 500;
+                  return Promise.reject(e);
+                },
+              };
+            },
+          };
+        }
+      },
+      StorageSharedKeyCredential: class {
+        constructor(public accountName: string, public accountKey: string) {}
+      },
+      generateBlobSASQueryParameters: () => ({ toString: () => 'x' }),
+    } as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule;
+    const facade = adaptAzureModule(mod, { containerName: 'c', accountName: 'a', accountKey: 'k' });
+    // deno-lint-ignore no-explicit-any
+    const blob = ((facade as any).getContainerClient('c') as any).getBlockBlobClient('b');
+    await expect(blob.download()).rejects.toThrow('boom');
+  });
+
+  it('facade delete returns true on success and false on failure', async () => {
+    let shouldThrow = false;
+    const mod = {
+      BlobServiceClient: class {
+        constructor(_cs: string) {}
+        getContainerClient() {
+          return {
+            getBlockBlobClient() {
+              return {
+                delete() {
+                  return shouldThrow ? Promise.reject(new Error('nope')) : Promise.resolve();
+                },
+              };
+            },
+          };
+        }
+      },
+      StorageSharedKeyCredential: class {
+        constructor(public accountName: string, public accountKey: string) {}
+      },
+      generateBlobSASQueryParameters: () => ({ toString: () => 'x' }),
+    } as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule;
+    const facade = adaptAzureModule(mod, {
+      containerName: 'c',
+      connectionString: 'AccountName=a;AccountKey=k;',
+    });
+    // deno-lint-ignore no-explicit-any
+    const blob = ((facade as any).getContainerClient('c') as any).getBlockBlobClient('b');
+    expect(await blob.delete()).toBe(true);
+    shouldThrow = true;
+    expect(await blob.delete()).toBe(false);
+  });
+
+  it('facade getSignedUrl throws when the connection string carries no AccountKey', () => {
+    const { mod } = buildFakeAzure();
+    // Construction succeeds (connectionString present) but there is no AccountKey to sign with.
+    const facade = adaptAzureModule(mod, {
+      containerName: 'c',
+      connectionString: 'BlobEndpoint=https://x;SharedAccessSignature=sig;AccountName=acct',
+    }) as IAzureBlobClient & { canSign: boolean };
+    expect(facade.canSign).toBe(false);
+    expect(() =>
+      (facade as { getSignedUrl: (p: string, e: number) => Promise<string> }).getSignedUrl(
+        'b',
+        3600,
+      )
+    ).toThrow('requires an account key');
+  });
 });
 
 describe('AzureBlobProvider', () => {
+  it('constructor without options is not ready until connected', () => {
+    const provider = new AzureBlobProvider();
+    expect(provider.isReady()).toBe(false);
+  });
+
+  it('getSignedUrl throws when the resolved client exposes no getSignedUrl', async () => {
+    const client: IAzureBlobClient = { getContainerClient: () => ({}) };
+    const provider = new AzureBlobProvider({ containerName: 'c', client });
+    await provider.connect();
+    expect(() => provider.getSignedUrl('x', { expiresIn: 60 })).toThrow(
+      'does not support signed URLs',
+    );
+  });
+
+  it('getStream returns null on 404 and rethrows a non-404 error', async () => {
+    const makeProvider = (status: number): AzureBlobProvider => {
+      const client: IAzureBlobClient = {
+        getContainerClient: () => ({
+          getBlockBlobClient: () => ({
+            download: () => {
+              const e = new Error('download-failed');
+              (e as { statusCode?: number }).statusCode = status;
+              return Promise.reject(e);
+            },
+          }),
+        }),
+      };
+      return new AzureBlobProvider({ containerName: 'c', client });
+    };
+
+    const p404 = makeProvider(404);
+    await p404.connect();
+    expect(await p404.getStream('k')).toBeNull();
+
+    const p500 = makeProvider(500);
+    await p500.connect();
+    await expect(p500.getStream('k')).rejects.toThrow('download-failed');
+  });
+
   it('connect with injected client succeeds', async () => {
     const fakeClient = {
       getContainerClient: () => ({
