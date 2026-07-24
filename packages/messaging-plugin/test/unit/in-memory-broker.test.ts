@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { RemoteHandlerError, RequestTimeoutError } from '../../src/errors.ts';
 
 /**
  * InMemoryBroker unit tests.
@@ -217,6 +218,67 @@ describe('InMemoryBroker', () => {
 
     expect(received).toEqual(original);
 
+    await broker.disconnect();
+  });
+});
+
+describe('InMemoryBroker request-reply', () => {
+  it('round-trips request() to respond() and resolves with the handler result', async () => {
+    const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+    await broker.connect();
+
+    await broker.respond<{ n: number }, number>('math.square', (msg) => msg.n * msg.n);
+    const result = await broker.request<{ n: number }, number>('math.square', { n: 9 });
+
+    expect(result).toBe(81);
+    await broker.disconnect();
+  });
+
+  it('propagates a responder throw as RemoteHandlerError', async () => {
+    const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+    await broker.connect();
+
+    await broker.respond('failing', () => {
+      throw new Error('nope');
+    });
+
+    let caught: unknown;
+    try {
+      await broker.request('failing', {});
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RemoteHandlerError);
+    expect((caught as RemoteHandlerError).remoteMessage).toBe('nope');
+    await broker.disconnect();
+  });
+
+  it('rejects with RequestTimeoutError when no responder replies', async () => {
+    const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+    await broker.connect();
+
+    let caught: unknown;
+    try {
+      await broker.request('unanswered', {}, { timeoutMs: 20 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RequestTimeoutError);
+    await broker.disconnect();
+  });
+
+  it('load-balances requests across queued responders', async () => {
+    const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+    await broker.connect();
+
+    await broker.respond<number, string>('work', (n) => `a:${n}`, { queue: 'workers' });
+    await broker.respond<number, string>('work', (n) => `b:${n}`, { queue: 'workers' });
+
+    const r1 = await broker.request<number, string>('work', 1);
+    const r2 = await broker.request<number, string>('work', 2);
+
+    // Round-robin across the two queued responders.
+    expect([r1, r2].sort()).toEqual(['a:1', 'b:2']);
     await broker.disconnect();
   });
 });

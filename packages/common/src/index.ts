@@ -137,6 +137,8 @@ export type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  RequestHandler,
+  RequestOptions,
   SubscribeOptions,
 } from './services/messaging.ts';
 export type {

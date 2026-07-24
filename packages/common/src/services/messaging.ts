@@ -46,6 +46,34 @@ export interface SubscribeOptions {
 }
 
 /**
+ * Options accepted by {@linkcode IMessageBroker.request}.
+ *
+ * @since 0.1.0
+ */
+export interface RequestOptions {
+  /**
+   * Reply wait budget in milliseconds. When no correlated reply arrives within
+   * this window, `request` rejects. Defaults to `5000` when omitted.
+   */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Responder for a request topic. Its resolved value is sent back to the caller
+ * as the reply, correlated to the originating request.
+ *
+ * @typeParam TReq - The request payload type
+ * @typeParam TRes - The reply payload type
+ * @param message - The deserialized request payload
+ * @param metadata - Transport metadata for the request delivery
+ * @since 0.1.0
+ */
+export type RequestHandler<TReq = unknown, TRes = unknown> = (
+  message: TReq,
+  metadata: MessageMetadata,
+) => TRes | Promise<TRes>;
+
+/**
  * An active subscription.
  *
  * @since 0.1.0
@@ -96,6 +124,43 @@ export interface IMessageBroker {
   subscribe<T>(
     topic: string,
     handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription>;
+  /**
+   * Sends a request to a topic and awaits a single correlated reply, providing
+   * brokered request-reply (RPC) over the message broker.
+   *
+   * A responder registered with {@linkcode respond} on the same topic returns
+   * the reply. The call rejects with a `RequestTimeoutError` when no reply
+   * arrives within `options.timeoutMs`, and with a `RemoteHandlerError` when the
+   * responder throws. Not every transport supports this: brokers that cannot
+   * (e.g. Kafka's consumer-group model) reject with a `MessagingNotSupportedError`.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - Destination topic the responder is listening on
+   * @param message - The request payload (serialized by the broker adapter)
+   * @param options - Reply timeout behavior
+   * @returns The reply payload
+   */
+  request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes>;
+  /**
+   * Registers a responder for a request topic. The handler's resolved value is
+   * sent back to the requesting caller, correlated to the originating request.
+   *
+   * Pass `options.queue` to load-balance requests across competing responders.
+   * Brokers that do not support request-reply reject with a `MessagingNotSupportedError`.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - The request topic to respond on
+   * @param handler - Invoked per request; its result is returned to the caller
+   * @param options - Consumer group behavior
+   * @returns The active subscription
+   */
+  respond<TReq, TRes>(
+    topic: string,
+    handler: RequestHandler<TReq, TRes>,
     options?: SubscribeOptions,
   ): Promise<ISubscription>;
 }

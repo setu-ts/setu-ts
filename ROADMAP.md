@@ -1781,6 +1781,42 @@ app.register(MessagingPlugin({ broker: 'kafka', brokers: config.get('KAFKA_BROKE
 
 ---
 
+## Milestone 14c: Messaging Plugin — Brokered Request-Reply ✅ COMPLETE
+
+**Objective:** Add brokered request-reply (RPC) to the existing `@hono-enterprise/messaging-plugin`,
+closing the one NestJS-microservice pattern (`client.send`) that pub/sub alone cannot serve.
+
+> **Why this is a separate milestone.** Mirrors the M14 → M14b and M15 → M15b splits: a pure
+> addition to the existing plugin via the internal broker seam, with a small, flagged widening of
+> the committed `IMessageBroker` contract (`request`/`respond`) — no new capability token, no new
+> plugin. Direct point-to-point typed RPC (gRPC/Connect over the kernel catch-all) is a **separate
+> future milestone**, not this one.
+
+### Package: `@hono-enterprise/messaging-plugin` (extends the M14/M14b package)
+
+`IMessageBroker` gains `request<TReq, TRes>()` and `respond<TReq, TRes>()`. Correlation rides inside
+a message envelope over each broker's existing `publish`/`subscribe` path (not transport headers,
+which the in-memory and Redis brokers do not populate), coordinated by a shared internal
+`RequestReplyCore`. Reply-capable on **in-memory, Redis Streams, RabbitMQ, and NATS**; **Kafka**
+throws `MessagingNotSupportedError` (its consumer-group / auto-commit model makes per-caller reply
+correlation an anti-pattern).
+
+```typescript
+await broker.respond<Req, Res>('user.lookup', (req) => lookup(req));
+const res = await broker.request<Req, Res>('user.lookup', { userId: '42' }, { timeoutMs: 3000 });
+```
+
+### Deliverables
+
+- [x] `request`/`respond` + `RequestOptions`/`RequestHandler` added to committed `IMessageBroker`
+- [x] Shared `RequestReplyCore` (envelope-over-publish/subscribe); no new capability token
+- [x] Four reply-capable brokers wired; Kafka throws `MessagingNotSupportedError` (tested)
+- [x] Exported `RequestTimeoutError`/`RemoteHandlerError`/`MessagingNotSupportedError`
+- [x] 90%+ per-file coverage on every changed `src/` file
+- [x] PUBLIC_API.md + README.md + ROADMAP.md updated in the same PR
+
+---
+
 ## Milestone 15: Queue Plugin — Background Jobs
 
 **Objective:** Provide background job queue capability.
@@ -4097,6 +4133,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 13        | ✅     | cqrs-plugin          |
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
+| 14c       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
 | 16        | ✅     | auth-plugin          |
