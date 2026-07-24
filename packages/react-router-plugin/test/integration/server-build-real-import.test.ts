@@ -1,7 +1,7 @@
 /**
- * Guarded REAL import test for `npm:react-router@7`.
+ * Guarded REAL import test for `npm:react-router@8`.
  *
- * This is the single test that exercises the real `await import('npm:react-router@7')` path.
+ * This is the single test that exercises the real `await import('npm:react-router@8')` path.
  * Skipped when the package is absent; when present, asserts the core export shape
  * and drives the default `loadRequestHandler` end-to-end with a synthetic build module.
  *
@@ -13,11 +13,11 @@ import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { assembleHandler } from '../../src/handler/server-build.ts';
 
 describe('server-build-real-import', () => {
-  it('real npm:react-router@7 import resolves and has createRequestHandler', async () => {
+  it('real npm:react-router@8 import resolves and has createRequestHandler', async () => {
     let _createRequestHandler: ((b: unknown, m?: string) => unknown) | undefined;
 
     try {
-      const rr = await import('npm:react-router@7');
+      const rr = await import('npm:react-router@8');
       _createRequestHandler = rr.createRequestHandler as
         | ((b: unknown, m?: string) => unknown)
         | undefined;

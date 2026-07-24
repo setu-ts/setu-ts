@@ -1550,10 +1550,10 @@ app.router.get('/api/health', (ctx) => {
   handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
   unit-testable without I/O.
 - `loadRequestHandler(serverBuildPath, mode, options?): Promise<SsrRequestHandler>` — lazily imports
-  the app-provided server build and `npm:react-router@7`, unwraps the `ServerBuild` (default
+  the app-provided server build and `npm:react-router@8`, unwraps the `ServerBuild` (default
   export), and returns a callable `SsrRequestHandler`. The optional `options` parameter accepts
   `{ rrImportHook?: () => Promise<Record<string, unknown>> }` — a test-seam that replaces the
-  `npm:react-router@7` import. **Since 0.1.0** this parameter is optional and backward-compatible;
+  `npm:react-router@8` import. **Since 0.1.0** this parameter is optional and backward-compatible;
   callers may invoke it with only two arguments.
 - `bridgeRequestToRR(ctx, handler, getLoadContext?): Promise<HandlerResult>` — bridges a kernel
   `IRequestContext` into a web `Request` (omitting the body for GET/HEAD), invokes the RR handler,
