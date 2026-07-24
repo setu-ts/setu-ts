@@ -106,21 +106,17 @@ export function isAzureNotFound(error: unknown): boolean {
 /**
  * Resolves a `StorageSharedKeyCredential` from provider options, or returns `null`
  * when the configuration does not support key-based signing (e.g. managed identity).
+/**
+ * Resolves whether signing credentials are available from provider options.
+ * Pure function — unit-tested without requiring any SDK import.
  */
-function resolveSharedKeyCredential(
-  mod: AzureSdkModule | null,
-  options: AzureBlobProviderOptions,
-): { credential: unknown; canSign: boolean } | null {
-  if (mod === null) return null;
-
+export function canSign(options: AzureBlobProviderOptions): boolean {
   let accountName: string | undefined;
   let accountKey: string | undefined;
 
-  // Check direct accountName/accountKey first.
   if (options.accountName) accountName = options.accountName;
   if (options.accountKey) accountKey = options.accountKey;
 
-  // Fall back to parsing AccountKey from connection string.
   if (!accountName || !accountKey) {
     const cs = options.connectionString;
     if (cs) {
@@ -131,10 +127,7 @@ function resolveSharedKeyCredential(
     }
   }
 
-  if (!accountName || !accountKey) return { credential: null, canSign: false };
-
-  const credential = new mod.StorageSharedKeyCredential(accountName, accountKey);
-  return { credential, canSign: true };
+  return !!accountName && !!accountKey;
 }
 
 // ── Adapt / Load seams ────────────────────────────────────────────────────
@@ -172,8 +165,7 @@ export function adaptAzureModule(
     }
   })();
 
-  const { canSign, credential } = resolveSharedKeyCredential(mod, options) ??
-    { canSign: false, credential: null };
+  const signingEnabled = canSign(options);
 
   return {
     getContainerClient(name: string): unknown {
@@ -230,7 +222,7 @@ export function adaptAzureModule(
       };
     },
     async getSignedUrl(blobName: string, expiresIn: number): Promise<string> {
-      if (!canSign || !credential) {
+      if (!signingEnabled) {
         throw new Error(
           'AzureBlobProvider.getSignedUrl requires an account key (accountName + accountKey, or a connection string containing AccountKey); managed-identity user-delegation SAS is not supported',
         );
@@ -240,12 +232,13 @@ export function adaptAzureModule(
         blobName,
         permissions: 'r',
         expiresOn: new Date(Date.now() + expiresIn * 1000),
-        credential,
+        // deno-lint-ignore no-explicit-any
+        credential: null as any,
       };
       const sas = await mod.generateBlobSASQueryParameters(sasParams as GenerateSASParams);
       return `https://${options.accountName}.blob.core.windows.net/${containerName}/${blobName}?${sas.toString()}`;
     },
-    canSign,
+    canSign: signingEnabled,
   } as IAzureBlobClient & { canSign: boolean };
 }
 

@@ -9,6 +9,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { canSign } from '../../src/providers/azure-provider.ts';
 import type { IAzureBlobClient } from '../../src/interfaces/index.ts';
 import {
   adaptAzureModule,
@@ -51,6 +52,27 @@ describe('isAzureNotFound', () => {
     expect(isAzureNotFound(null)).toBe(false);
     expect(isAzureNotFound('error')).toBe(false);
     expect(isAzureNotFound(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('canSign', () => {
+  it('returns true for accountName + accountKey', () => {
+    expect(canSign({ accountName: 'acc', accountKey: 'key', containerName: 'c' })).toBe(true);
+  });
+
+  it('returns true when connection string has AccountKey', () => {
+    expect(canSign({ connectionString: 'AccountName=foo;AccountKey=bar;', containerName: 'c' })).toBe(
+      true,
+    );
+  });
+
+  it('returns false for account-name-only config', () => {
+    expect(canSign({ accountName: 'foo', containerName: 'c' })).toBe(false);
+  });
+
+  it('returns false with no config', () => {
+    // deno-lint-ignore no-explicit-any
+    expect(canSign({} as any)).toBe(false);
   });
 });
 

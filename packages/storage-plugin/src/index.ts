@@ -21,7 +21,7 @@ export { MemoryProvider } from './providers/memory-provider.ts';
 export { LocalStorageProvider } from './providers/local-provider.ts';
 export { S3Provider } from './providers/s3-provider.ts';
 export { GcsProvider } from './providers/gcs-provider.ts';
-export { AzureBlobProvider } from './providers/azure-provider.ts';
+export { AzureBlobProvider, canSign } from './providers/azure-provider.ts';
 
 // ── Middleware & helper ───────────────────────────────────────────────────
 
