@@ -71,7 +71,7 @@ export function adaptNodemailerModule(
  * @throws {Error} If `npm:nodemailer` cannot be resolved
  */
 export async function loadNodemailerModule(): Promise<NodemailerModule> {
-  return await import('npm:nodemailer@^6') as unknown as NodemailerModule;
+  return await import('npm:nodemailer@^9') as unknown as NodemailerModule;
 }
 
 /** Builds a transport config without assigning `undefined` to optional fields. */

@@ -30,7 +30,7 @@
     "npm:ioredis@5": "5.11.1",
     "npm:kafkajs@2": "2.2.4",
     "npm:nats@2": "2.29.3",
-    "npm:nodemailer@6": "6.10.1",
+    "npm:nodemailer@9": "9.0.3",
     "npm:pino@*": "10.3.1",
     "npm:react-router@7": "7.18.1_react@19.2.7",
     "npm:zod@^3.24.0": "3.25.76"
@@ -1221,8 +1221,8 @@
         "whatwg-url"
       ]
     },
-    "nodemailer@6.10.1": {
-      "integrity": "sha512-Z+iLaBGVaSjbIzQ4pX6XV41HrooLsQ10ZWPUehGmuantvzWoDVBnmsdUcOIDM1t+yPor5pDhVlDESgOMEGxhHA=="
+    "nodemailer@9.0.3": {
+      "integrity": "sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw=="
     },
     "object-hash@3.0.0": {
       "integrity": "sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw=="
