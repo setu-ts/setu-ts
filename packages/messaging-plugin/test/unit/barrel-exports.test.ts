@@ -36,6 +36,16 @@ describe('barrel exports', () => {
     // Serializer
     expect(messaging.JsonSerializer).toBeDefined();
     expect(typeof messaging.JsonSerializer).toBe('function');
+
+    // Request-reply error classes
+    expect(messaging.RequestTimeoutError).toBeDefined();
+    expect(typeof messaging.RequestTimeoutError).toBe('function');
+
+    expect(messaging.RemoteHandlerError).toBeDefined();
+    expect(typeof messaging.RemoteHandlerError).toBe('function');
+
+    expect(messaging.MessagingNotSupportedError).toBeDefined();
+    expect(typeof messaging.MessagingNotSupportedError).toBe('function');
   });
 
   it('type exports', () => {

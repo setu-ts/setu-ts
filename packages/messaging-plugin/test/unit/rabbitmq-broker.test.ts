@@ -5,6 +5,7 @@ import { RabbitMqBroker, validateClient } from '../../src/brokers/rabbitmq-broke
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
+import { RequestTimeoutError } from '../../src/errors.ts';
 
 /**
  * RabbitMqBroker unit tests.
@@ -504,6 +505,34 @@ describe('RabbitMqBroker', () => {
     const ackCall = calls.find((c) => c.method === 'ack');
     expect(ackCall).toBeDefined();
 
+    await broker.disconnect();
+  });
+});
+
+describe('RabbitMqBroker request-reply delegation', () => {
+  it('respond() returns a subscription', async () => {
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeAmqpConnection(),
+    });
+    await broker.connect();
+    const sub = await broker.respond('resp.only', (m) => m);
+    expect(typeof sub.unsubscribe).toBe('function');
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
+  it('request() rejects with RequestTimeoutError when unanswered', async () => {
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeAmqpConnection(),
+    });
+    await broker.connect();
+    let caught: unknown;
+    try {
+      await broker.request('no.responder', { ping: true }, { timeoutMs: 30 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RequestTimeoutError);
     await broker.disconnect();
   });
 });

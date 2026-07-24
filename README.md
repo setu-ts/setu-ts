@@ -80,7 +80,7 @@ Without becoming heavyweight. Without forcing opinions. Without locking you in.
 | Caching             | 📋 Designed | Memory and Redis stores with cache middleware                            |
 | Events              | 📋 Designed | In-memory event bus for domain events                                    |
 | CQRS                | 📋 Designed | Command and query buses with pipeline behaviors                          |
-| Messaging           | 📋 Designed | RabbitMQ, NATS, Kafka, Redis Streams adapters                            |
+| Messaging           | 📋 Designed | RabbitMQ, NATS, Kafka, Redis Streams adapters; pub/sub + request-reply   |
 | Queue               | 📋 Designed | Background jobs with Redis, RabbitMQ, and memory adapters                |
 | Scheduler           | 📋 Designed | Cron, delayed, and recurring jobs with distributed locking               |
 | Health checks       | 📋 Designed | `/health`, `/live`, `/ready` with pluggable indicators                   |

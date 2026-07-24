@@ -158,6 +158,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   to the existing MessagingPlugin via the internal MessageBrokerAdapter seam; no `common` change, no
   new capability token; each broker follows the inject-or-lazy `npm:` client pattern with a guarded
   real-import test) — complete (PR pending)
+- **Milestone 14c** (`packages/messaging-plugin` — brokered request-reply (RPC) added to the
+  existing MessagingPlugin: `request<TReq,TRes>()`/`respond<TReq,TRes>()` on the committed
+  `IMessageBroker` (flagged `common` widening — `RequestOptions`/`RequestHandler` types + the two
+  methods, no new capability token), correlation carried inside a message envelope over each
+  broker's existing `publish`/`subscribe` via a shared internal `RequestReplyCore` (NOT transport
+  headers, which the in-memory and Redis brokers do not populate); reply-capable on
+  in-memory/redis-streams/rabbitmq/ nats, while `KafkaBroker.request`/`respond` throw the exported
+  `MessagingNotSupportedError` (consumer-group/auto-commit model); exported
+  `RequestTimeoutError`/`RemoteHandlerError`/ `MessagingNotSupportedError`; developed in parallel
+  with M28 in an isolated worktree off `main`) — complete (PR pending)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:

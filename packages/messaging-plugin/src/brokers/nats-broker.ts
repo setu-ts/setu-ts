@@ -2,11 +2,14 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  RequestHandler,
+  RequestOptions,
   SubscribeOptions,
 } from '@hono-enterprise/common';
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { RequestReplyCore } from './request-reply-core.ts';
 import type { INatsConnection, NatsOptions } from '../interfaces/index.ts';
 
 /**
@@ -89,6 +92,7 @@ export class NatsBroker implements MessageBrokerAdapter {
   #js: unknown | null = null;
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
+  #rr: RequestReplyCore;
 
   /**
    * Creates a new NATS broker.
@@ -108,6 +112,13 @@ export class NatsBroker implements MessageBrokerAdapter {
     this.#injectedClient = options?.client;
     this.#streamName = options?.streamName ?? 'MESSAGING';
     this.#activeConsumers = new Map();
+    this.#rr = new RequestReplyCore({
+      publish: (topic, message) => this.publish(topic, message),
+      subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
+      uuid: () => this.#runtime.uuid(),
+      setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimeout: (handle) => this.#runtime.clearTimeout(handle),
+    });
   }
 
   /**
@@ -162,7 +173,8 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @returns Resolves when disconnected
    * @since 0.1.0
    */
-  disconnect(): Promise<void> {
+  async disconnect(): Promise<void> {
+    await this.#rr.close();
     // Stop all active consumers
     for (const consumer of this.#activeConsumers.values()) {
       try {
@@ -180,7 +192,6 @@ export class NatsBroker implements MessageBrokerAdapter {
     this.#connection = null;
     this.#js = null;
     this.#ready = false;
-    return Promise.resolve();
   }
 
   /**
@@ -327,5 +338,43 @@ export class NatsBroker implements MessageBrokerAdapter {
         return Promise.resolve();
       },
     };
+  }
+
+  /**
+   * Sends a request and awaits a single correlated reply.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - Destination topic a responder is listening on
+   * @param message - The request payload
+   * @param options - Reply timeout behavior
+   * @returns The reply payload
+   * @since 0.1.0
+   */
+  request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options);
+  }
+
+  /**
+   * Registers a responder whose result is returned to the requesting caller.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - The request topic to respond on
+   * @param handler - Invoked per request; its result is returned to the caller
+   * @param options - Consumer group behavior
+   * @returns The active subscription
+   * @since 0.1.0
+   */
+  respond<TReq, TRes>(
+    topic: string,
+    handler: RequestHandler<TReq, TRes>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.#rr.respond(
+      topic,
+      (message, metadata) => handler(message as TReq, metadata),
+      options,
+    );
   }
 }

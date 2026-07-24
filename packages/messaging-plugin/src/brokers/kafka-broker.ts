@@ -2,11 +2,14 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  RequestHandler,
+  RequestOptions,
   SubscribeOptions,
 } from '@hono-enterprise/common';
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { MessagingNotSupportedError } from '../errors.ts';
 import type { IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
 
 /**
@@ -302,5 +305,31 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  /**
+   * Kafka does not support brokered request-reply: its consumer-group and
+   * auto-commit delivery model makes per-caller reply correlation an
+   * anti-pattern. Use a reply-capable broker instead.
+   *
+   * @throws {MessagingNotSupportedError} Always
+   * @since 0.1.0
+   */
+  request<TReq, TRes>(_topic: string, _message: TReq, _options?: RequestOptions): Promise<TRes> {
+    throw new MessagingNotSupportedError();
+  }
+
+  /**
+   * Kafka does not support brokered request-reply. See {@link KafkaBroker.request}.
+   *
+   * @throws {MessagingNotSupportedError} Always
+   * @since 0.1.0
+   */
+  respond<TReq, TRes>(
+    _topic: string,
+    _handler: RequestHandler<TReq, TRes>,
+    _options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    throw new MessagingNotSupportedError();
   }
 }

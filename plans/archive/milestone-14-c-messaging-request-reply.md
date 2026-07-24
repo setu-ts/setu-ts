@@ -6,10 +6,11 @@
   messaging/common). External client-API claims re-grounded from source 2026-07-24.
 -->
 
-> **Status:** Planning. Branch: `feat/14c-messaging-request-reply` (isolated worktree off `main`,
-> developed in parallel with M28). `main` is protected — all work stays on this one branch until it
-> merges via a single PR. Independent of M28: no shared files and no ordering dependency, so each
-> milestone merges via its own PR in any order.
+> **Status:** Complete (PR pending). Branch: `feat/14c-messaging-request-reply` (isolated worktree
+> off `main`, developed in parallel with M28). `main` is protected — all work stayed on this one
+> branch. Independent of M28: no shared files and no ordering dependency, so each milestone merges
+> via its own PR in any order. All four gates + per-file coverage pass; see the ROADMAP M14c
+> deliverables.
 
 ## 0. Objective & scope
 
@@ -118,18 +119,23 @@ methods and reuses all five brokers already shipped.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol              | Kind            | Consumer / real code path that READS it                                                   |
-| ---------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `IMessageBroker.request`     | method (common) | App code doing brokered RPC; each broker implements it.                                   |
-| `IMessageBroker.respond`     | method (common) | App code registering a responder; each broker implements it.                              |
-| `RequestOptions`             | type (common)   | `request()` signature; read by `RequestReplyCore` for `timeoutMs`.                        |
-| `RequestHandler<TReq,TRes>`  | type (common)   | `respond()` signature; wrapped by each broker's respond path.                             |
-| `RequestTimeoutError`        | class (common)  | Thrown by `RequestReplyCore`; caught via `instanceof` by consumers and asserted in tests. |
-| `RemoteHandlerError`         | class (common)  | Thrown by `RequestReplyCore` on a serialized remote error; consumer `instanceof`.         |
-| `MessagingNotSupportedError` | class (common)  | Thrown by `KafkaBroker.request/respond`; asserted in tests, caught by consumers.          |
+| Exported symbol              | Kind                     | Consumer / real code path that READS it                                                   |
+| ---------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
+| `IMessageBroker.request`     | method (common)          | App code doing brokered RPC; each broker implements it.                                   |
+| `IMessageBroker.respond`     | method (common)          | App code registering a responder; each broker implements it.                              |
+| `RequestOptions`             | type (common)            | `request()` signature; read by `RequestReplyCore` for `timeoutMs`.                        |
+| `RequestHandler<TReq,TRes>`  | type (common)            | `respond()` signature; wrapped by each broker's respond path.                             |
+| `RequestTimeoutError`        | class (messaging-plugin) | Thrown by `RequestReplyCore`; caught via `instanceof` by consumers and asserted in tests. |
+| `RemoteHandlerError`         | class (messaging-plugin) | Thrown by `RequestReplyCore` on a serialized remote error; consumer `instanceof`.         |
+| `MessagingNotSupportedError` | class (messaging-plugin) | Thrown by `KafkaBroker.request/respond`; asserted in tests, caught by consumers.          |
 
-<!-- common barrel (packages/common/src/index.ts) re-exports the three error classes + two types;
-     messaging-plugin/src/index.ts re-exports them from common as it already re-exports IMessageBroker. -->
+<!-- DESIGN CORRECTION (verified during implementation): `common` exports NO runtime Error classes
+     (resilience-plugin/src/errors.ts, cqrs-plugin/src/errors/ set the precedent — service errors
+     live in the plugin). So the three error classes live in `packages/messaging-plugin/src/errors.ts`
+     and are exported from the plugin barrel; `common` gains only the two TYPES + the interface
+     methods. common barrel (packages/common/src/index.ts) re-exports the two types;
+     messaging-plugin/src/index.ts re-exports those two types from common AND exports the three
+     error classes from ./errors.ts. -->
 
 ### 4.1 Options — every option names its consumer
 
@@ -142,17 +148,18 @@ methods and reuses all five brokers already shipped.
 
 ## 5. Implementation files
 
-| File                                                            | Purpose                                                                                                                                                                |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/src/services/messaging.ts`                     | Add `request`/`respond` to `IMessageBroker`; add `RequestOptions`, `RequestHandler`; add the three error classes (or a dedicated `messaging-errors.ts` imported here). |
-| `packages/common/src/index.ts`                                  | Barrel re-export of the two types + three errors.                                                                                                                      |
-| `packages/messaging-plugin/src/brokers/request-reply-core.ts`   | Shared `RequestReplyCore` + internal `IReplyTransport` seam (NOT exported from index.ts).                                                                              |
-| `packages/messaging-plugin/src/brokers/in-memory-broker.ts`     | Implement `request`/`respond` over an in-process transport.                                                                                                            |
-| `packages/messaging-plugin/src/brokers/redis-streams-broker.ts` | Reply-stream transport.                                                                                                                                                |
-| `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`      | `replyTo`/`correlationId` property transport + exclusive reply queue.                                                                                                  |
-| `packages/messaging-plugin/src/brokers/nats-broker.ts`          | JetStream reply-subject transport.                                                                                                                                     |
-| `packages/messaging-plugin/src/brokers/kafka-broker.ts`         | `request`/`respond` throw `MessagingNotSupportedError`.                                                                                                                |
-| `packages/messaging-plugin/src/index.ts`                        | Re-export the three error classes + two types from common.                                                                                                             |
+| File                                                            | Purpose                                                                                                                                                        |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/services/messaging.ts`                     | Add `request`/`respond` to `IMessageBroker`; add `RequestOptions`, `RequestHandler` (types only — no error classes; see §4 correction).                        |
+| `packages/messaging-plugin/src/errors.ts`                       | The three error classes (`RequestTimeoutError`, `RemoteHandlerError`, `MessagingNotSupportedError`), per the resilience/cqrs plugin-owns-its-errors precedent. |
+| `packages/common/src/index.ts`                                  | Barrel re-export of the two types + three errors.                                                                                                              |
+| `packages/messaging-plugin/src/brokers/request-reply-core.ts`   | Shared `RequestReplyCore` + internal `IReplyTransport` seam (NOT exported from index.ts).                                                                      |
+| `packages/messaging-plugin/src/brokers/in-memory-broker.ts`     | Implement `request`/`respond` over an in-process transport.                                                                                                    |
+| `packages/messaging-plugin/src/brokers/redis-streams-broker.ts` | Reply-stream transport.                                                                                                                                        |
+| `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`      | `replyTo`/`correlationId` property transport + exclusive reply queue.                                                                                          |
+| `packages/messaging-plugin/src/brokers/nats-broker.ts`          | JetStream reply-subject transport.                                                                                                                             |
+| `packages/messaging-plugin/src/brokers/kafka-broker.ts`         | `request`/`respond` throw `MessagingNotSupportedError`.                                                                                                        |
+| `packages/messaging-plugin/src/index.ts`                        | Export the three error classes from `./errors.ts`; re-export `RequestOptions`/`RequestHandler` from common.                                                    |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 

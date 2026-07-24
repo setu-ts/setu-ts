@@ -4,6 +4,7 @@ import { KafkaBroker, validateClient } from '../../src/brokers/kafka-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeKafkaFactory } from '../fixtures/fake-kafkajs-client.ts';
+import { MessagingNotSupportedError } from '../../src/errors.ts';
 
 /**
  * KafkaBroker unit tests.
@@ -447,5 +448,21 @@ describe('KafkaBroker', () => {
     expect(consumer.committedOffsets).toContain('9');
 
     await broker.disconnect();
+  });
+});
+
+describe('KafkaBroker request-reply', () => {
+  it('request() throws MessagingNotSupportedError', () => {
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeKafkaFactory(),
+    });
+    expect(() => broker.request('topic', { a: 1 })).toThrow(MessagingNotSupportedError);
+  });
+
+  it('respond() throws MessagingNotSupportedError', () => {
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeKafkaFactory(),
+    });
+    expect(() => broker.respond('topic', () => 'x')).toThrow(MessagingNotSupportedError);
   });
 });
