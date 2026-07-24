@@ -15,6 +15,7 @@ import type {
   IWorkerHost,
   TaskPoolStats,
   TimerHandle,
+  WorkerErrorShape,
   WorkerTaskRequest,
 } from '@hono-enterprise/common';
 import { isWorkerReadySignal, isWorkerTaskReply } from '@hono-enterprise/common';
@@ -37,20 +38,25 @@ export interface TaskPoolConfig {
   readonly taskTimeoutMs: number;
 }
 
-/** A task waiting for a worker. */
-interface PendingTask {
+/**
+ * A task tracked from enqueue to settlement. The same object flows from the
+ * pending queue onto a worker slot; its timeout timer is armed at ENQUEUE (so
+ * a task that never reaches a worker — e.g. a module that never signals ready
+ * — still times out instead of hanging) and carried through dispatch.
+ *
+ * Single settlement is structural, not flag-guarded: every settle path both
+ * removes the task from its pending/slot location AND clears its timer, so no
+ * second settle (a duplicate reply, a post-settle timeout, a crash after
+ * completion) can reach it.
+ */
+interface Task {
   readonly input: unknown;
   readonly timeoutMs: number;
   readonly resolve: (result: unknown) => void;
   readonly reject: (error: Error) => void;
-}
-
-/** A task currently executing on a worker. */
-interface InFlightTask {
-  readonly id: number;
-  readonly timeoutMs: number;
-  readonly resolve: (result: unknown) => void;
-  readonly reject: (error: Error) => void;
+  /** Correlation id; `0` while still pending, assigned at dispatch. */
+  id: number;
+  /** Timeout handle armed at enqueue; `null` when the timeout is disabled or cleared. */
   timer: TimerHandle | null;
 }
 
@@ -58,18 +64,20 @@ interface InFlightTask {
 interface WorkerSlot {
   readonly handle: IWorkerHandle;
   ready: boolean;
-  task: InFlightTask | null;
+  task: Task | null;
 }
 
 /**
  * A pool of workers executing one task module. See the module doc for the
- * lifecycle; error semantics follow the milestone plan §3.6–3.8:
- * handler errors keep the worker, crashes and timeouts drop (and for
- * timeouts terminate) it, and `shutdown()` rejects everything in flight.
+ * lifecycle; error semantics follow the milestone plan §3.6–3.8: handler
+ * errors keep the worker; a crash while running drops the worker; a crash
+ * DURING startup (never became ready) fails the oldest waiting task so a load
+ * failure surfaces immediately instead of respawning forever; timeouts drop
+ * and terminate the worker; and `shutdown()` rejects everything in flight.
  */
 export class TaskPool {
   private readonly slots: WorkerSlot[] = [];
-  private readonly pending: PendingTask[] = [];
+  private readonly pending: Task[] = [];
   private nextTaskId = 0;
   private completedCount = 0;
   private failedCount = 0;
@@ -86,7 +94,8 @@ export class TaskPool {
    *
    * @param input - Structured-clonable task input
    * @param timeoutMs - Per-call timeout override; `undefined` uses the pool
-   * default, `0` disables
+   * default, `0` disables. The timeout is measured from ENQUEUE, so it also
+   * bounds time spent waiting for a free/ready worker.
    * @returns The task's output
    */
   run(input: unknown, timeoutMs?: number): Promise<unknown> {
@@ -99,12 +108,18 @@ export class TaskPool {
       );
     }
     return new Promise<unknown>((resolve, reject) => {
-      this.pending.push({
+      const task: Task = {
         input,
         timeoutMs: timeoutMs ?? this.config.taskTimeoutMs,
         resolve,
         reject,
-      });
+        id: 0,
+        timer: null,
+      };
+      if (task.timeoutMs > 0) {
+        task.timer = this.runtime.setTimeout(() => this.onTimeout(task), task.timeoutMs);
+      }
+      this.pending.push(task);
       this.pump();
     });
   }
@@ -130,16 +145,16 @@ export class TaskPool {
     const slots = this.slots.splice(0);
     for (const slot of slots) {
       if (slot.task !== null) {
-        this.clearTaskTimer(slot.task);
-        this.failedCount++;
-        slot.task.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
+        this.rejectTask(
+          slot.task,
+          new WorkerPoolUnavailableError('Worker pool has been shut down'),
+        );
         slot.task = null;
       }
     }
     const queued = this.pending.splice(0);
     for (const task of queued) {
-      this.failedCount++;
-      task.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
+      this.rejectTask(task, new WorkerPoolUnavailableError('Worker pool has been shut down'));
     }
     await Promise.all(slots.map((slot) => slot.handle.terminate()));
   }
@@ -181,24 +196,14 @@ export class TaskPool {
     this.slots.push(slot);
   }
 
-  private dispatch(slot: WorkerSlot, item: PendingTask): void {
-    const id = ++this.nextTaskId;
-    const task: InFlightTask = {
-      id,
-      timeoutMs: item.timeoutMs,
-      resolve: item.resolve,
-      reject: item.reject,
-      timer: null,
-    };
+  private dispatch(slot: WorkerSlot, task: Task): void {
+    task.id = ++this.nextTaskId;
     slot.task = task;
-    if (item.timeoutMs > 0) {
-      task.timer = this.runtime.setTimeout(() => this.onTimeout(slot), item.timeoutMs);
-    }
     const request: WorkerTaskRequest = {
       __hewp: 1,
       kind: 'task',
-      id,
-      input: item.input,
+      id: task.id,
+      input: task.input,
     };
     slot.handle.postMessage(request);
   }
@@ -216,14 +221,12 @@ export class TaskPool {
     if (task === null || message.id !== task.id) {
       return;
     }
-    this.clearTaskTimer(task);
     slot.task = null;
     if (message.ok) {
-      this.completedCount++;
-      task.resolve(message.result);
+      this.resolveTask(task, message.result);
     } else {
-      this.failedCount++;
-      task.reject(
+      this.rejectTask(
+        task,
         new WorkerTaskError(
           this.config.specifier,
           message.error ?? { name: 'Error', message: 'Unknown worker error' },
@@ -233,41 +236,70 @@ export class TaskPool {
     this.pump();
   }
 
-  /** A crashed worker fails its in-flight task and leaves the pool (§3.7). */
+  /**
+   * A crashed worker leaves the pool (§3.7). A crash WHILE RUNNING fails its
+   * in-flight task; a crash DURING startup (never became ready, no task yet)
+   * fails the oldest waiting task so a module that cannot load surfaces its
+   * error immediately instead of triggering an unbounded respawn loop.
+   */
   private onWorkerError(slot: WorkerSlot, error: Error): void {
     this.dropSlot(slot);
-    const task = slot.task;
-    if (task !== null) {
-      this.clearTaskTimer(task);
+    const shape: WorkerErrorShape = {
+      name: error.name,
+      message: error.message,
+      ...(error.stack !== undefined ? { stack: error.stack } : {}),
+    };
+    if (slot.task !== null) {
+      const task = slot.task;
       slot.task = null;
-      this.failedCount++;
-      task.reject(
-        new WorkerTaskError(this.config.specifier, {
-          name: error.name,
-          message: error.message,
-          ...(error.stack !== undefined ? { stack: error.stack } : {}),
-        }),
-      );
+      this.rejectTask(task, new WorkerTaskError(this.config.specifier, shape));
+    } else if (!slot.ready) {
+      const waiting = this.pending.shift();
+      if (waiting !== undefined) {
+        this.rejectTask(waiting, new WorkerTaskError(this.config.specifier, shape));
+      }
     }
     this.pump();
   }
 
-  /** A timed-out worker is terminated and replaced (§3.6). */
-  private onTimeout(slot: WorkerSlot): void {
-    const task = slot.task;
-    if (task === null) {
-      return;
-    }
+  /**
+   * The task timeout fired. A task still queued is removed from the pending
+   * queue; a task in flight has its worker terminated and replaced (§3.6).
+   */
+  private onTimeout(task: Task): void {
+    // Reaching here means the timer was never cleared, so the task is unsettled
+    // (every settle path clears the timer). No settled-flag guard is needed.
     task.timer = null;
-    slot.task = null;
-    this.dropSlot(slot);
-    void slot.handle.terminate();
-    this.failedCount++;
-    task.reject(new WorkerTaskTimeoutError(this.config.specifier, task.timeoutMs));
+    const pendingIndex = this.pending.indexOf(task);
+    if (pendingIndex !== -1) {
+      this.pending.splice(pendingIndex, 1);
+    } else {
+      const slot = this.slots.find((candidate) => candidate.task === task);
+      if (slot !== undefined) {
+        slot.task = null;
+        this.dropSlot(slot);
+        void slot.handle.terminate();
+      }
+    }
+    this.rejectTask(task, new WorkerTaskTimeoutError(this.config.specifier, task.timeoutMs));
     this.pump();
   }
 
-  private clearTaskTimer(task: InFlightTask): void {
+  /** Settles a task as fulfilled. Callers remove it from its location first. */
+  private resolveTask(task: Task, result: unknown): void {
+    this.clearTaskTimer(task);
+    this.completedCount++;
+    task.resolve(result);
+  }
+
+  /** Settles a task as rejected. Callers remove it from its location first. */
+  private rejectTask(task: Task, error: Error): void {
+    this.clearTaskTimer(task);
+    this.failedCount++;
+    task.reject(error);
+  }
+
+  private clearTaskTimer(task: Task): void {
     if (task.timer !== null) {
       this.runtime.clearTimeout(task.timer);
       task.timer = null;

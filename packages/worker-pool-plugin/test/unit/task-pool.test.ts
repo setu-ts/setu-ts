@@ -228,7 +228,9 @@ describe('TaskPool — error and crash semantics', () => {
     host.handles[0].emitWorkerError(new Error('segfault-ish'));
     await expect(inFlight).rejects.toBeInstanceOf(WorkerTaskError);
     await expect(inFlight).rejects.toMatchObject({ remoteName: 'Error' });
-    expect(timers.armed).toBe(0); // crashed task's timer cleared; queued task not yet dispatched
+    // Timers are armed at enqueue: 'dies' cleared on its rejection, 'survives'
+    // still armed while it waits for a replacement worker.
+    expect(timers.armed).toBe(1);
 
     // Queued task re-dispatched to a replacement worker once it is ready.
     expect(host.handles).toHaveLength(2);
@@ -248,6 +250,58 @@ describe('TaskPool — error and crash semantics', () => {
 
     host.handles[0].emitWorkerError(new Error('idle crash'));
     expect(pool.stats()).toMatchObject({ workers: 0, failed: 0 });
+  });
+
+  it('should reject the oldest waiting task when a worker crashes during startup', async () => {
+    const { pool, host } = makePool({ size: 1, taskTimeoutMs: 0 });
+    const failing = pool.run('load-fails');
+    expect(host.handles).toHaveLength(1);
+
+    // Worker crashes before ever posting ready (module failed to load).
+    host.handles[0].emitWorkerError(new Error('SyntaxError: bad module'));
+    await expect(failing).rejects.toBeInstanceOf(WorkerTaskError);
+    await expect(failing).rejects.toMatchObject({ remoteName: 'Error' });
+    expect(pool.stats().failed).toBe(1);
+  });
+
+  it('should not respawn without bound when startup keeps failing', async () => {
+    const { pool, host } = makePool({ size: 1, taskTimeoutMs: 0 });
+    const failing = pool.run('load-fails');
+    host.handles[0].emitWorkerError(new Error('boom'));
+    await expect(failing).rejects.toBeInstanceOf(WorkerTaskError);
+    // The task was rejected, so no pending work remains to drive a respawn.
+    expect(host.handles).toHaveLength(1);
+    expect(pool.stats()).toMatchObject({ workers: 0, queued: 0 });
+  });
+});
+
+describe('TaskPool — timeout while never dispatched', () => {
+  it('should time out a task whose worker never signals ready (no hang)', async () => {
+    const { pool, host, timers } = makePool({ size: 1, taskTimeoutMs: 100 });
+    const promise = pool.run('never-ready');
+    // Worker spawned but the module never calls defineWorkerTask → no ready.
+    expect(host.handles).toHaveLength(1);
+    expect(timers.armed).toBe(1); // armed at ENQUEUE, not at dispatch
+
+    timers.fire();
+    await expect(promise).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
+    await expect(promise).rejects.toMatchObject({ timeoutMs: 100 });
+    expect(pool.stats().failed).toBe(1);
+  });
+
+  it('should remove a timed-out still-pending task from the queue', async () => {
+    const { pool, host, timers } = makePool({ size: 1, taskTimeoutMs: 100 });
+    const first = pool.run('a');
+    const second = pool.run('b');
+    host.handles[0].emitReady(); // dispatches 'a'; 'b' stays pending (size 1, worker busy)
+    expect(pool.stats()).toMatchObject({ busy: 1, queued: 1 });
+
+    // Never reply to 'a' → both time out: 'a' via the in-flight path, 'b' via
+    // the still-pending removal path.
+    timers.fire();
+    await expect(first).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
+    await expect(second).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
+    expect(pool.stats().failed).toBe(2);
   });
 });
 
@@ -270,6 +324,19 @@ describe('TaskPool — shutdown', () => {
     await pool.shutdown();
     await pool.shutdown();
     await expect(pool.run('late')).rejects.toBeInstanceOf(WorkerPoolUnavailableError);
+  });
+
+  it('should ignore a lingering worker message after shutdown (pump is inert)', async () => {
+    const { pool, host } = makePool({ size: 1 });
+    const inFlight = pool.run('x');
+    host.handles[0].emitReady();
+    await pool.shutdown();
+    await expect(inFlight).rejects.toBeInstanceOf(WorkerPoolUnavailableError);
+
+    // A late message from the terminated worker must not resurrect the pool.
+    host.handles[0].emitReady();
+    host.handles[0].replyOk('too late');
+    expect(pool.stats()).toMatchObject({ workers: 0, queued: 0 });
   });
 });
 

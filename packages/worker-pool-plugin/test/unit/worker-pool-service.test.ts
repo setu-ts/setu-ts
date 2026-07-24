@@ -91,7 +91,8 @@ describe('WorkerPoolService — pools and option merging', () => {
     void service.run(SPEC_A, 2).catch(() => undefined);
     expect(host.handles).toHaveLength(1); // defaultPoolSize=1 beats parallelism 8
     host.handles[0].emitReady();
-    expect(timers.armed).toBe(1); // taskTimeoutMs=250 armed a timer
+    // taskTimeoutMs=250 arms a timer per enqueued task (timers arm at enqueue).
+    expect(timers.armed).toBe(2);
   });
 
   it('should let per-module overrides beat the global options', async () => {

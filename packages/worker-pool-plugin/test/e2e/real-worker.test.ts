@@ -11,10 +11,11 @@ import { RuntimePlugin } from '@hono-enterprise/runtime';
 import type { IWorkerPool } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
-import { WorkerPoolPlugin, WorkerTaskError } from '../../src/index.ts';
+import { WorkerPoolPlugin, WorkerTaskError, WorkerTaskTimeoutError } from '../../src/index.ts';
 
 const echoTaskUrl = new URL('../fixtures/echo-task.ts', import.meta.url).href;
 const errorTaskUrl = new URL('../fixtures/error-task.ts', import.meta.url).href;
+const noHandlerTaskUrl = new URL('../fixtures/no-handler-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
   it('should run a task on a real thread and return its output', async () => {
@@ -70,6 +71,21 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
         remoteName: 'RangeError',
         message: `Worker task failed (${errorTaskUrl}): RangeError: worker says no`,
       });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('should time out (not hang) a real module that never registers a handler', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 300 })],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const stuck = pool.run(noHandlerTaskUrl, { n: 1 });
+      await expect(stuck).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
+      await expect(stuck).rejects.toMatchObject({ timeoutMs: 300 });
     } finally {
       await app.stop();
     }
