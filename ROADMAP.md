@@ -3066,10 +3066,10 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 
 ### Deliverables
 
-- [ ] MailPlugin
-- [ ] SMTP, SES, SendGrid, Log providers
-- [ ] Template engine
-- [ ] Full test coverage
+- [x] MailPlugin
+- [x] SMTP, SES, SendGrid, Log providers
+- [x] Template engine
+- [x] Full test coverage
 
 ---
 
@@ -4152,7 +4152,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 26        | ✅     | audit-plugin         |
 | 27        | ✅     | resilience-plugin    |
 | 28        | ⬜     | storage-plugin       |
-| 29        | ⬜     | mail-plugin          |
+| 29        | ✅     | mail-plugin          |
 | 30        | ⬜     | notification-plugin  |
 | 31        | ⬜     | feature-flags-plugin |
 | 32        | ⬜     | multi-tenancy-plugin |

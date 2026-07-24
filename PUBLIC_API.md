@@ -2648,36 +2648,51 @@ app.router.get('/files/:key', async (ctx) => {
 
 ---
 
-## Mail
+## MailPlugin()
 
-Provides email sending.
+Provides email sending: registers an `IMailer` under `CAPABILITIES.MAIL`, backed by a pluggable
+provider. The default provider is `'log'` (zero-dependency, every runtime — records/logs each
+message instead of sending it). No mail SDK is a hard dependency — the SMTP and SES providers accept
+an injected client facade or lazily import their package (AI_GUIDELINES §12.2), and SendGrid sends
+over web-standard `fetch`. A zero-dependency template engine renders named `{{ variable }}` bodies
+for `sendTemplate`.
 
 ### Registration
 
 ```typescript
 import { MailPlugin } from '@hono-enterprise/mail-plugin';
 
+// Log provider (default) — records mail instead of sending; for tests/local dev
+app.register(MailPlugin({ defaults: { from: 'noreply@myapp.com' } }));
+
+// SMTP via nodemailer (Node/Deno/Bun only — not Cloudflare Workers)
 app.register(MailPlugin({
   provider: 'smtp',
   options: {
     host: config.get('SMTP_HOST'),
     port: 587,
-    auth: {
-      user: config.get('SMTP_USER'),
-      pass: config.get('SMTP_PASS'),
-    },
+    auth: { user: config.get('SMTP_USER'), pass: config.get('SMTP_PASS') },
   },
-  defaults: {
-    from: 'noreply@myapp.com',
-  },
+  defaults: { from: 'noreply@myapp.com' },
+  templates: { welcome: { html: '<h1>Hi {{ name }}</h1>', text: 'Hi {{ name }}' } },
+}));
+
+// SendGrid v3 HTTP API (zero dependency, Workers-portable)
+app.register(MailPlugin({
+  provider: 'sendgrid',
+  options: { apiKey: config.get('SENDGRID_API_KEY') },
+  defaults: { from: 'noreply@myapp.com' },
 }));
 ```
 
 ### Usage
 
 ```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IMailer } from '@hono-enterprise/common';
+
 app.router.post('/users', async (ctx) => {
-  const mailer = ctx.services.get<IMailer>('mail');
+  const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
   const user = await createUser(ctx.request.body);
 
   await mailer.send({
@@ -2687,17 +2702,59 @@ app.router.post('/users', async (ctx) => {
     text: 'Welcome! Thank you for joining.',
   });
 
-  // Using templates
+  // Using templates — `subject` is required on the envelope (the committed
+  // IMailer.sendTemplate signature keeps it); the template supplies html/text.
   await mailer.sendTemplate('welcome', {
     to: user.email,
+    subject: 'Welcome to MyApp',
   }, {
     name: user.name,
-    verificationUrl: `https://myapp.com/verify?token=${user.verificationToken}`,
   });
 
   return ctx.response.status(201).json(user);
 });
 ```
+
+### Options
+
+| Option                                               | Provider   | Description                                                      |
+| ---------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
+| `provider`                                           | —          | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.              |
+| `defaults.from`                                      | all        | Sender applied when a message omits `from`; else `send` throws.  |
+| `templates`                                          | all        | Named `{ html?, text? }` body templates for `sendTemplate`.      |
+| `options.host` / `port` / `secure` / `auth`          | `smtp`     | nodemailer transport config (ignored when `transport` injected). |
+| `options.transport`                                  | `smtp`     | Injected `ISmtpTransport` facade (bypasses the lazy import).     |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `ses`      | AWS client config (ignored when `client` injected).              |
+| `options.client`                                     | `ses`      | Injected `ISesClient` facade (bypasses the lazy SDK import).     |
+| `options.apiKey` / `endpoint`                        | `sendgrid` | SendGrid API key (Bearer) and endpoint (default v3 send URL).    |
+| `options.http`                                       | `sendgrid` | Injected `fetch`-shaped function (defaults to global `fetch`).   |
+| `options.sink`                                       | `log`      | Called with each sent `OutgoingMail` — a read-back seam.         |
+
+### Exports
+
+- `MailPlugin(options?)` — plugin factory. `createProvider(type, options, ctx)` — provider builder.
+- `MailService` — the `IMailer` implementation (default-`from` resolution + template dispatch).
+- `TemplateEngine`, `escapeHtml` — the `{{ variable }}` renderer and its HTML escaper.
+- `LogProvider`, `SmtpProvider`, `SesProvider`, `SendGridProvider` — provider classes.
+- `adaptNodemailerModule` / `loadNodemailerModule` / `toNodemailerMessage` /
+  `validateSmtpTransport`, `adaptSesModule` / `loadSesModule` / `toSesInput` / `validateSesClient`,
+  `toSendGridBody` — provider adapter/mapper/validator helpers.
+- `MailServiceOptions`, `MailPluginOptions`, `MailProviderType`, `MailProviderOptions`,
+  `MailTemplate`, `OutgoingMail`, `RenderedTemplate`, `LogProviderOptions`, `SmtpProviderOptions`,
+  `NodemailerModule`, `SesProviderOptions`, `SesSdkModule`, `SendGridProviderOptions` — types.
+- `ISmtpTransport`, `ISesClient`, `IMailHttp` — structural injection types.
+- `IMailer`, `MailMessage` — re-exported from `@hono-enterprise/common`.
+
+### Notes
+
+- `sendTemplate`'s envelope is `Omit<MailMessage, 'html' | 'text'>` — `subject` stays REQUIRED; the
+  template provides the `html`/`text` bodies only, never the subject.
+- In an HTML template, interpolated `data` values are HTML-escaped (`& < > " '`); text templates
+  substitute raw. A placeholder whose key is absent from `data`, or an unknown template name,
+  throws.
+- `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,
+  and logs via `ctx.logger`. `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only;
+  `SendGridProvider` is the Cloudflare Workers-portable path.
 
 ---
 

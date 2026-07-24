@@ -314,8 +314,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `BulkheadPolicy`, `BackoffStrategy` (distinct names from the scheduler's
   `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
   row + ROADMAP examples in the same PR) — complete (PR #59)
+- **Milestone 29** (`packages/mail-plugin` — MailPlugin registering an `IMailer` under
+  `CAPABILITIES.MAIL`, backed by a pluggable internal `MailProvider` port; four backends —
+  `LogProvider` (zero-dependency default, records/logs each message, every runtime incl. Workers),
+  `SmtpProvider` (inject-or-lazy `npm:nodemailer` via an
+  `adaptNodemailerModule`/`loadNodemailerModule` seam + injectable `ISmtpTransport`, Node/Deno/Bun
+  only — raw sockets), `SesProvider` (inject-or-lazy `npm:@aws-sdk/client-sesv2` via
+  `adaptSesModule`/`loadSesModule` + injectable `ISesClient`), and `SendGridProvider` (SendGrid v3
+  HTTP API over an injectable `fetch`-shaped `IMailHttp`, zero-dependency, Workers-portable);
+  `MailService` resolves the default `from` once (both `send` and `sendTemplate` funnel through it)
+  and dispatches; a zero-dependency `TemplateEngine` renders named `{{ variable }}` bodies with
+  HTML-escaping on the `html` body and a throw on a missing variable / unknown template; a `mail`
+  health indicator and an `onClose` that disconnects the provider; no `common` change — the
+  `IMailer`/`MailMessage` contract and `MAIL: 'mail'` token were committed in M1; corrected the
+  PUBLIC_API Mail `sendTemplate` example (subject is required) in the same PR; developed out of
+  order in an isolated worktree off `main`, in parallel with M28) — complete (PR pending)
 - **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
-  sequence (M28–M40 follow) unless reprioritized.
+  sequence (M28, M30–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
