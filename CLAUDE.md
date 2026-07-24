@@ -314,8 +314,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `BulkheadPolicy`, `BackoffStrategy` (distinct names from the scheduler's
   `RetryOptions`/`SchedulerBackoff`), extended the barrel, and corrected the PUBLIC_API Resilience
   row + ROADMAP examples in the same PR) — complete (PR #59)
-- **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
-  sequence (M28–M40 follow) unless reprioritized.
+- **Milestone 28** (`packages/storage-plugin` — StoragePlugin registering `IStorage` under
+  `CAPABILITIES.STORAGE`; five pluggable providers — `MemoryProvider` (zero-dep default),
+  `LocalStorageProvider` (over `runtime.fs`), `S3Provider`, `GcsProvider`, and `AzureBlobProvider`
+  (inject-or-lazy `npm:@azure/storage-blob@^12`); `'b2'` (Backblaze B2) as a first-class provider
+  type reusing `S3Provider` over B2's S3-compatible endpoint; a zero-dependency multipart parser and
+  an upload middleware factory `createUploadMiddleware` that exposes parsed files via `ctx.state`
+  plus `getUploadedFile()` helper; optional `IStorage.getStream?` for zero-copy streaming downloads
+  wired through M42 `IResponse.stream()`; per-provider `getSignedUrl` semantics (Memory → synthetic
+  URL, Local → throws, S3/GCS/Azure → real presigned/SAS URLs); `storage` health indicator;
+  `onClose` disconnect; full public API doc corrections in same PR — implemented & verified, pending
+  PR/merge)
+- **Next milestone** — M38 (auto-instrumentation, deferred from M24; follows the M28 merge).
 
 ## Verification (run before declaring any work done)
 

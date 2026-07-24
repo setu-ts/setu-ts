@@ -2608,7 +2608,13 @@ Provides file storage abstraction.
 ### Registration
 
 ```typescript
-import { StoragePlugin } from '@hono-enterprise/storage-plugin';
+import {
+  createUploadMiddleware,
+  getUploadedFile,
+  StoragePlugin,
+} from '@hono-enterprise/storage-plugin';
+import type { IStorage } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@hono-enterprise/common';
 
 app.register(StoragePlugin({
   provider: 's3',
@@ -2621,30 +2627,92 @@ app.register(StoragePlugin({
 }));
 ```
 
-### Usage
+### Upload middleware
+
+The upload surface is a **free exported middleware factory** (`createUploadMiddleware`), NOT a
+method on `IStorage`. Parsed files are exposed through the committed per-request `ctx.state` bag
+plus a typed `getUploadedFile()` helper.
 
 ```typescript
-app.router.post('/upload', {
-  middleware: [storage.upload({ fieldname: 'file', maxSize: 10 * 1024 * 1024 })],
-  handler: async (ctx) => {
-    const storage = ctx.services.get<IStorage>('storage');
-    const file = ctx.request.file('file');
+const uploadMw = createUploadMiddleware({
+  fieldname: 'file',
+  maxSize: 10 * 1024 * 1024,         // 10 MB default
+  allowedMimeTypes?: ['image/jpeg', 'image/png'],  // optional
+  maxFiles?: 5,                      // optional
+});
 
+app.post('/upload', {
+  middleware: [uploadMw],
+  handler: async (ctx) => {
+    const file = getUploadedFile(ctx, 'file');
+    if (!file) return ctx.json({ error: 'No file' }, 400);
+
+    const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
     const key = `uploads/${Date.now()}-${file.name}`;
     await storage.put(key, file.data);
 
     const url = await storage.getSignedUrl(key, { expiresIn: 3600 });
-
-    return ctx.response.json({ url, key });
+    return ctx.json({ url, key });
   },
 });
+```
 
-app.router.get('/files/:key', async (ctx) => {
-  const storage = ctx.services.get<IStorage>('storage');
-  const file = await storage.get(ctx.params.key);
-  return ctx.response.send(file, { type: 'application/octet-stream' });
+### Usage — buffered download
+
+```typescript
+app.get('/files/:key', async (ctx) => {
+  const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
+  const file = await storage.get(ctx.req.param('key'));
+  return ctx.header('content-type', 'application/octet-stream').send(file);
 });
 ```
+
+### Usage — streaming download (`getStream?`)
+
+```typescript
+app.get('/files/stream/:key', async (ctx) => {
+  const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
+  const stream = await storage.getStream!(ctx.req.param('key'));
+  return ctx.header('content-type', 'application/octet-stream').stream(stream);
+});
+```
+
+### Providers
+
+The plugin ships five named providers plus a first-class B2 preset that reuses S3 under the hood.
+
+| Provider               | Type       | Key options                                                         | Auth / SDK                                   | Notes                                                                          |
+| ---------------------- | ---------- | ------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `MemoryProvider`       | `'memory'` | _(none)_                                                            | N/A (zero-dep)                               | Default. In-process map. Every runtime incl. Cloudflare.                       |
+| `LocalStorageProvider` | `'local'`  | `rootDir?: string`                                                  | N/A (`runtime.fs` seam)                      | Node/Deno/Bun only. Throws on connect when `fs` absent.                        |
+| `S3Provider`           | `'s3'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`, `endpoint?`   | Lazy `npm:@aws-sdk/client-s3@^3` + presigner | R2 and MinIO via `endpoint`. Real presigned GET URLs.                          |
+| `GcsProvider`          | `'gcs'`    | `bucket`, `projectId?`                                              | Lazy `npm:@google-cloud/storage@^7`          | Real signed URLs via `file.getSignedUrl`.                                      |
+| `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `npm:@azure/storage-blob@^12`           | SAS requires `accountKey`. No `@azure/identity` needed.                        |
+| B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)             | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
+
+All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGcsClient` /
+`IAzureBlobClient`) that bypasses the lazy import for testing.
+
+### IStorage methods
+
+| Method                                                                   | Description                                                                                                                                                                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `put(path: string, data: Uint8Array): Promise<void>`                     | Stores an object.                                                                                                                                                                                |
+| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                       |
+| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                    |
+| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                |
+| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`). |
+| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                     |
+
+### Per-provider `getSignedUrl` behavior
+
+| Provider               | Behavior                                                                                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MemoryProvider`       | Returns deterministic synthetic URL `memory://<encoded-key>?expires=<epoch-seconds>`. Test/process affordance only — never grants real access. |
+| `LocalStorageProvider` | **Throws** `Error('LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider')`.                                   |
+| `S3Provider`           | Real presigned GET URL via `getSignedUrl(GetObjectCommand, { expiresIn })`.                                                                    |
+| `GcsProvider`          | Real signed URL via `file.getSignedUrl([{ action: 'read', expires }])`.                                                                        |
+| `AzureBlobProvider`    | Real SAS URL via `generateBlobSASQueryParameters`. Requires `accountKey`; throws if only managed-identity / account-name-only config.          |
 
 ---
 
