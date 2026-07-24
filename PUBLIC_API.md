@@ -2008,7 +2008,7 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 
 > **Broker support.** Request-reply is available on the **in-memory, Redis Streams, RabbitMQ, and
 > NATS** brokers. The **Kafka** broker's consumer-group / auto-commit model makes per-caller reply
-> correlation an anti-pattern, so `KafkaBroker.request`/`respond` throw
+> correlation an anti-pattern, so `KafkaBroker.request`/`respond` return a promise **rejected** with
 > `MessagingNotSupportedError`; use a reply-capable broker for RPC.
 
 ### Multiple Broker Instances

@@ -312,17 +312,19 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * auto-commit delivery model makes per-caller reply correlation an
    * anti-pattern. Use a reply-capable broker instead.
    *
-   * @throws {MessagingNotSupportedError} Always
+   * @returns A promise rejected with `MessagingNotSupportedError` (rejected, not
+   * a synchronous throw, so the `Promise`-returning contract holds uniformly
+   * across brokers and a caller's `.catch` / `await` both observe it)
    * @since 0.1.0
    */
   request<TReq, TRes>(_topic: string, _message: TReq, _options?: RequestOptions): Promise<TRes> {
-    throw new MessagingNotSupportedError();
+    return Promise.reject(new MessagingNotSupportedError());
   }
 
   /**
    * Kafka does not support brokered request-reply. See {@link KafkaBroker.request}.
    *
-   * @throws {MessagingNotSupportedError} Always
+   * @returns A promise rejected with `MessagingNotSupportedError`
    * @since 0.1.0
    */
   respond<TReq, TRes>(
@@ -330,6 +332,6 @@ export class KafkaBroker implements MessageBrokerAdapter {
     _handler: RequestHandler<TReq, TRes>,
     _options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    throw new MessagingNotSupportedError();
+    return Promise.reject(new MessagingNotSupportedError());
   }
 }

@@ -134,7 +134,7 @@ export interface IMessageBroker {
    * the reply. The call rejects with a `RequestTimeoutError` when no reply
    * arrives within `options.timeoutMs`, and with a `RemoteHandlerError` when the
    * responder throws. Not every transport supports this: brokers that cannot
-   * (e.g. Kafka's consumer-group model) throw a `MessagingNotSupportedError`.
+   * (e.g. Kafka's consumer-group model) reject with a `MessagingNotSupportedError`.
    *
    * @typeParam TReq - The request payload type
    * @typeParam TRes - The reply payload type
@@ -149,7 +149,7 @@ export interface IMessageBroker {
    * sent back to the requesting caller, correlated to the originating request.
    *
    * Pass `options.queue` to load-balance requests across competing responders.
-   * Brokers that do not support request-reply throw a `MessagingNotSupportedError`.
+   * Brokers that do not support request-reply reject with a `MessagingNotSupportedError`.
    *
    * @typeParam TReq - The request payload type
    * @typeParam TRes - The reply payload type

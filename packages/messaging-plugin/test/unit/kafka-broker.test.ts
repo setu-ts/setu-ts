@@ -452,17 +452,22 @@ describe('KafkaBroker', () => {
 });
 
 describe('KafkaBroker request-reply', () => {
-  it('request() throws MessagingNotSupportedError', () => {
+  it('request() rejects with MessagingNotSupportedError', async () => {
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
       client: new FakeKafkaFactory(),
     });
-    expect(() => broker.request('topic', { a: 1 })).toThrow(MessagingNotSupportedError);
+    // Rejected promise (not a synchronous throw) so `.catch`/`await` both observe it.
+    await expect(broker.request('topic', { a: 1 })).rejects.toBeInstanceOf(
+      MessagingNotSupportedError,
+    );
   });
 
-  it('respond() throws MessagingNotSupportedError', () => {
+  it('respond() rejects with MessagingNotSupportedError', async () => {
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
       client: new FakeKafkaFactory(),
     });
-    expect(() => broker.respond('topic', () => 'x')).toThrow(MessagingNotSupportedError);
+    await expect(broker.respond('topic', () => 'x')).rejects.toBeInstanceOf(
+      MessagingNotSupportedError,
+    );
   });
 });
