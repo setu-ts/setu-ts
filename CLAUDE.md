@@ -328,7 +328,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   health indicator and an `onClose` that disconnects the provider; no `common` change — the
   `IMailer`/`MailMessage` contract and `MAIL: 'mail'` token were committed in M1; corrected the
   PUBLIC_API Mail `sendTemplate` example (subject is required) in the same PR; developed out of
-  order in an isolated worktree off `main`, in parallel with M28) — complete (PR pending)
+  order in an isolated worktree off `main`, in parallel with M28) — complete (PR #61)
 - **Next milestone** — **Milestone 28** (`packages/storage-plugin`); resumes the main plugin
   sequence (M28, M30–M40 follow) unless reprioritized.
 
