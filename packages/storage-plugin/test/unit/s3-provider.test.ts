@@ -167,6 +167,217 @@ describe('adaptAwsS3Module', () => {
     expect(url).toContain('presigned.url');
   });
 
+  it('B3: getSignedUrl passes expiresIn to presigner as 3rd arg', async () => {
+    let receivedExpiresIn: number | undefined;
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(_cmd: any): Promise<unknown> {
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        // deno-lint-ignore no-explicit-any
+        getSignedUrl(_client: any, _cmd: any, opts: { expiresIn?: number } | undefined) {
+          receivedExpiresIn = opts?.expiresIn;
+          return Promise.resolve('https://presigned.url?expires=9999');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'b' });
+    await facade.getSignedUrl('key.txt', 7200);
+    expect(receivedExpiresIn).toBe(7200);
+  });
+
+  it('C3: presigner failure throws instead of returning unsigned fallback URL', async () => {
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(_cmd: any): Promise<unknown> {
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        // deno-lint-ignore no-explicit-any
+        getSignedUrl() {
+          return Promise.reject(new Error('PresignerUnavailable'));
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'b' });
+    // After C3 fix, presign failure should throw — not return a dead fallback URL.
+    await expect(facade.getSignedUrl('key.txt', 3600)).rejects.toThrow('PresignerUnavailable');
+  });
+
+  it('C1: get handles SdkStreamMixin-shaped Body with transformToByteArray', async () => {
+    const fakeData = new Uint8Array([10, 20, 30]);
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            if (cmd.constructor.name === 'GetObjectCommand') {
+              // Return a Body shaped like AWS SDK v3 SdkStreamMixin.
+              return Promise.resolve({
+                Body: {
+                  transformToByteArray: () => Promise.resolve(fakeData),
+                  transformToWebStream: () => new Blob([fakeData]).stream(),
+                },
+              });
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        // deno-lint-ignore no-explicit-any
+        getSignedUrl() {
+          return Promise.resolve('https://presigned.url');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'b' });
+    const result = await facade.get('sdk-stream-key');
+    expect(result).toEqual(fakeData);
+  });
+
+  it('C1: getStream handles SdkStreamMixin-shaped Body with transformToWebStream', async () => {
+    const fakeData = new Uint8Array([100, 200, 250]);
+    const fakeMod = {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            if (cmd.constructor.name === 'GetObjectCommand') {
+              return Promise.resolve({
+                Body: {
+                  transformToByteArray: () => Promise.resolve(fakeData),
+                  transformToWebStream: () => new Blob([fakeData]).stream(),
+                },
+              });
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: {
+        // deno-lint-ignore no-explicit-any
+        getSignedUrl() {
+          return Promise.resolve('https://presigned.url');
+        },
+      },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+    const facade = adaptAwsS3Module(fakeMod, { bucket: 'b' });
+    const stream = await facade.getStream('sdk-stream-key');
+    expect(stream).toBeDefined();
+    const reader = stream!.getReader();
+    const chunk = await reader.read();
+    expect(chunk.done).toBe(false);
+    expect(chunk.value).toEqual(fakeData);
+    const done = await reader.read();
+    expect(done.done).toBe(true);
+  });
+
   it('getStream returns a ReadableStream for existing object', async () => {
     const { mod } = buildFakeSdkModule();
     const facade = adaptAwsS3Module(mod, { bucket: 'test-bucket' });
@@ -434,7 +645,7 @@ describe('adaptAwsS3Module', () => {
     });
   });
 
-  it('getSignedUrl falls back to synthetic URL when presigner throws', async () => {
+  it('C3: getSignedUrl throws when presigner fails (no unsigned fallback)', async () => {
     const fakeMod = {
       s3: {
         S3Client: class {
@@ -469,16 +680,16 @@ describe('adaptAwsS3Module', () => {
         },
       },
       presigner: {
-        // deno-lint-ignore no-unused-vars,require-await
-        getSignedUrl(_client: unknown, _cmd: unknown): Promise<string> {
+        // deno-lint-ignore no-explicit-any
+        getSignedUrl(_client: any, _cmd: any, _opts?: Record<string, unknown>) {
           throw new Error('presigner unavailable');
         },
       },
     } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
     const facade = adaptAwsS3Module(fakeMod, { bucket: 'fallback-bucket' });
-    const url = await facade.getSignedUrl('fallback-key.txt', 1800);
-    expect(url).toContain(
-      'https://fallback-bucket.s3.amazonaws.com/fallback-key.txt?X-Amz-Expires=1800',
+    // C3 fix: presign failure now throws instead of returning a non-functional unsigned URL.
+    await expect(facade.getSignedUrl('fallback-key.txt', 1800)).rejects.toThrow(
+      'presigner unavailable',
     );
   });
 

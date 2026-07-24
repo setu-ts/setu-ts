@@ -319,7 +319,8 @@ export class GcsProvider implements StorageProvider {
    */
   async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     this.#assertConnected();
-    const expires = Date.now() + options.expiresIn * 1000;
+    // GCS `expires` is epoch-seconds (numeric), not milliseconds.
+    const expires = Math.floor(Date.now() / 1000) + options.expiresIn;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [url] = await this.#getFile(path).getSignedUrl({ action: 'read', expires });
     return url;

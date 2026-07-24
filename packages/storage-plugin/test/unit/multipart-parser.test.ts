@@ -410,4 +410,29 @@ describe('parseMultipart', () => {
     expect(parts[1].name).toBe('p2');
     expect(new TextDecoder().decode(parts[1].data)).toBe('part2value');
   });
+
+  it('A1: boundary with trailing params (e.g. "abc; charset=utf-8") parses correctly', () => {
+    const boundary = 'abc';
+    const encoder = new TextEncoder();
+    const data = encoder.encode('hello');
+    const segments: Uint8Array[] = [
+      encoder.encode(`--${boundary}\r\n`),
+      encoder.encode('Content-Disposition: form-data; name="f"\r\n'),
+      encoder.encode('Content-Type: text/plain\r\n\r\n'),
+      data,
+      encoder.encode('\r\n--' + boundary + '--\r\n'),
+    ];
+    const totalLength = segments.reduce((s, b) => s + b.length, 0);
+    const body = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const seg of segments) {
+      body.set(seg, offset);
+      offset += seg.length;
+    }
+    // Content-Type header includes boundary with trailing params — old regex captured "; charset=utf-8".
+    const contentType = 'multipart/form-data; boundary=abc; charset=utf-8';
+    const parts = parseMultipart(body, contentType);
+    expect(parts.length).toBe(1);
+    expect(new TextDecoder().decode(parts[0].data)).toBe('hello');
+  });
 });

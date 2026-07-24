@@ -251,9 +251,57 @@ describe('LocalStorageProvider', () => {
       { rootDir: '/safe-root' },
     );
     await provider.connect();
-    await provider.put('sub/escape-real.bin', new Uint8Array([11]));
+    // B1 fix: path-escape now throws instead of silently succeeding.
+    await expect(provider.put('sub/escape-real.bin', new Uint8Array([11]))).rejects.toThrow(
+      'Path traversal attempt blocked',
+    );
     expect(realPathCalls.length).toBeGreaterThan(0);
-    const data = await provider.get('sub/escape-real.bin');
-    expect(data).toEqual(new Uint8Array([11]));
+  });
+
+  it('put creates parent directories for nested keys', async () => {
+    const { fs } = makeFakeFs();
+    // deno-lint-ignore no-explicit-any
+    const mkdirPaths: string[] = [];
+    const mkdirFs = {
+      ...fs,
+      mkdir(path: string, _options?: { recursive?: boolean }) {
+        mkdirPaths.push(path);
+        // Simulate directory creation by populating the store with a marker.
+        return Promise.resolve();
+      },
+    };
+    const provider = new LocalStorageProvider(
+      mkdirFs as unknown as import('@hono-enterprise/common').IFileSystem,
+      {
+        rootDir: '/root',
+      },
+    );
+    await provider.connect();
+    // Nested key should trigger mkdir for parent dir.
+    await provider.put('a/b/c/file.bin', new Uint8Array([42]));
+    // Verify mkdir was called for the parent directory.
+    expect(mkdirPaths).toContain('/root/a/b/c');
+    // get should succeed after mkdir and writeFile.
+    const data = await provider.get('a/b/c/file.bin');
+    expect(data).toEqual(new Uint8Array([42]));
+  });
+
+  it('resolvePath falls back to lexical join when realPath IO throws', async () => {
+    const { fs } = makeFakeFs();
+    const throwFs = {
+      ...fs,
+      realPath() {
+        return Promise.reject(new Error('realPath not supported'));
+      },
+    };
+    const provider = new LocalStorageProvider(
+      throwFs as unknown as import('@hono-enterprise/common').IFileSystem,
+      { rootDir: '/root' },
+    );
+    await provider.connect();
+    // Should fall through to lexical path without throwing.
+    await provider.put('normal.bin', new Uint8Array([99]));
+    const data = await provider.get('normal.bin');
+    expect(data).toEqual(new Uint8Array([99]));
   });
 });

@@ -90,8 +90,11 @@ export function parseMultipart(
 
 /** Extracts the boundary parameter from a content-type header. */
 function extractBoundary(contentType: string): string | null {
-  const match = contentType.match(/boundary=(["']?)(.+)\1/);
-  return match ? match[2] : null;
+  // Match `boundary=` followed by optional quote + quoted value OR unquoted token (no `;`).
+  // Quoted boundaries can contain spaces: boundary="abc xyz"
+  // Unquoted boundaries cannot: boundary=abc; charset=utf-8 → capture only "abc".
+  const match = contentType.match(/boundary=(?:"([^"]+)"|'([^']+)'|([^";\s]+))/);
+  return match ? match[1] ?? match[2] ?? match[3] ?? null : null;
 }
 
 /** Checks if `body` at `offset` starts with `prefix`. */

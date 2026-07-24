@@ -69,9 +69,11 @@ describe('adaptGcsModule', () => {
                     store.set(name, data);
                     cb(null);
                   },
-                  delete(cb: (err: Error | null) => void) {
-                    store.delete(name);
-                    cb(null);
+                  delete(cb?: (err: Error | null) => void) {
+                    if (cb) {
+                      store.delete(name);
+                      cb(null);
+                    }
                     return Promise.resolve();
                   },
                   getSignedUrl(
@@ -174,6 +176,55 @@ describe('adaptGcsModule', () => {
     const fileHandle = (facade.bucket() as any).file('sig-url.bin');
     const [url] = await fileHandle.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
     expect(url).toContain('signed.url');
+  });
+
+  it('B4: GcsProvider.getSignedUrl uses epoch-seconds for expires (not ms)', async () => {
+    let capturedExpires: number | undefined;
+    // Inject a pre-adapted facade directly — avoids adaptGcsModule's callback wrapping.
+    // deno-lint-ignore no-explicit-any
+    const facade: any = {
+      bucket() {
+        return {
+          file() {
+            return {
+              getSignedUrl(cfg: { action: string; expires: number }) {
+                capturedExpires = cfg.expires;
+                return Promise.resolve(['https://signed.url/path?sig=abc']);
+              },
+              download() {
+                return Promise.resolve({ body: new Uint8Array() });
+              },
+              save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                cb(null);
+              },
+              delete(cb: (e: Error | null) => void) {
+                cb(null);
+                return Promise.resolve();
+              },
+              getMetadata() {
+                return Promise.resolve([{}]);
+              },
+              createReadStream() {
+                return {} as unknown as NodeJS.ReadableStream;
+              },
+            };
+          },
+        };
+      },
+    };
+    const provider = new GcsProvider({
+      bucket: 'my-bucket',
+      client: facade as unknown as IGcsClient,
+    });
+    await provider.connect();
+    const before = Math.floor(Date.now() / 1000);
+    await provider.getSignedUrl('obj.txt', { expiresIn: 3600 });
+    const after = Math.floor(Date.now() / 1000);
+    // B4 fix: expires should be epoch-seconds (~1.7e9), NOT milliseconds (~5e12).
+    expect(capturedExpires).toBeGreaterThanOrEqual(before + 3600);
+    expect(capturedExpires).toBeLessThanOrEqual(after + 3600 + 1);
+    // Ensure it's NOT in millisecond range (which would be ~5 trillion).
+    expect(capturedExpires!).toBeLessThan(1e12);
   });
 });
 

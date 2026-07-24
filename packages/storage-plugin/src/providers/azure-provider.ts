@@ -21,17 +21,23 @@ export interface AzureSdkModule {
     accountKey: string;
   };
   generateBlobSASQueryParameters: (
-    params: GenerateSASParams,
-  ) => Promise<SASResult>;
+    values: { containerName: string; blobName: string; permissions: string; expiresOn: Date },
+    credential: StorageSharedKeyCredential,
+  ) => SASResult;
 }
 
-/** Parameters for SAS generation. */
-export interface GenerateSASParams {
+/** Parameters for SAS generation (values only, no credential). */
+export interface GenerateSASValues {
   containerName: string;
   blobName: string;
   permissions: string;
   expiresOn: Date;
-  credential: unknown;
+}
+
+/** Azure shared-key credential shape. */
+export interface StorageSharedKeyCredential {
+  accountName: string;
+  accountKey: string;
 }
 
 /** SAS query result. */
@@ -220,21 +226,44 @@ export function adaptAzureModule(
         },
       };
     },
-    async getSignedUrl(blobName: string, expiresIn: number): Promise<string> {
+    getSignedUrl(blobName: string, expiresIn: number): Promise<string> {
       if (!signingEnabled) {
         throw new Error(
           'AzureBlobProvider.getSignedUrl requires an account key (accountName + accountKey, or a connection string containing AccountKey); managed-identity user-delegation SAS is not supported',
         );
       }
-      const sasParams = {
+      // Build credential from options.
+      let accountName: string | undefined;
+      let accountKey: string | undefined;
+      if (options.accountName) accountName = options.accountName;
+      if (options.accountKey) accountKey = options.accountKey;
+      if (!accountName || !accountKey) {
+        const cs = options.connectionString;
+        if (cs) {
+          const nameMatch = cs.match(/AccountName=([^;]+)/);
+          const keyMatch = cs.match(/AccountKey=([^;]+)/);
+          if (nameMatch) accountName ??= nameMatch[1];
+          if (keyMatch) accountKey ??= keyMatch[1];
+        }
+      }
+      if (!accountName || !accountKey) {
+        throw new Error('Unable to resolve Azure storage account credentials for SAS signing');
+      }
+      const cred = new mod.StorageSharedKeyCredential(
+        accountName,
+        accountKey,
+      ) as StorageSharedKeyCredential;
+      const sasValues: GenerateSASValues = {
         containerName,
         blobName,
         permissions: 'r',
         expiresOn: new Date(Date.now() + expiresIn * 1000),
-        credential: null as unknown as { accountName: string; accountKey: string },
       };
-      const sas = await mod.generateBlobSASQueryParameters(sasParams as GenerateSASParams);
-      return `https://${options.accountName}.blob.core.windows.net/${containerName}/${blobName}?${sas.toString()}`;
+      // Real SDK: generateBlobSASQueryParameters(values, credential) — SYNCHRONOUS.
+      const sas = mod.generateBlobSASQueryParameters(sasValues, cred);
+      return Promise.resolve(
+        `https://${accountName}.blob.core.windows.net/${containerName}/${blobName}?${sas.toString()}`,
+      );
     },
     canSign: signingEnabled,
   } as IAzureBlobClient & { canSign: boolean };

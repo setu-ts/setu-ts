@@ -63,17 +63,24 @@ export class LocalStorageProvider implements StorageProvider {
     const joined = this.#joinPath(this.#root, path);
     // Containment check via realPath when available, else lexical.
     if (this.#fs.realPath) {
+      // Resolve real paths (IO that can fail) inside a try/catch block.
+      let realRoot: string;
+      let resolvedRealPath: string | null = null;
       try {
-        const realRoot = await this.#fs.realPath!(this.#root);
-        const realPath = await this.#fs.realPath!(joined);
-        if (!realPath.startsWith(realRoot)) {
-          throw new Error(`Path traversal attempt blocked: ${path}`);
-        }
-        return realPath;
+        realRoot = await this.#fs!.realPath!(this.#root);
+        resolvedRealPath = await this.#fs!.realPath!(joined);
       } catch {
-        // Fallback to lexical check.
+        // realPath IO failed — fall back to lexical join.
         return joined;
       }
+      // Containment check OUTSIDE the try/catch so traversal throws are not swallowed.
+      if (
+        resolvedRealPath !== realRoot &&
+        !resolvedRealPath.startsWith(realRoot + '/')
+      ) {
+        throw new Error(`Path traversal attempt blocked: ${path}`);
+      }
+      return resolvedRealPath;
     }
     return joined;
   }
@@ -101,6 +108,17 @@ export class LocalStorageProvider implements StorageProvider {
    */
   async put(path: string, data: Uint8Array): Promise<void> {
     const resolved = await this.#resolvePath(path);
+    // Ensure parent directory exists for nested keys (e.g. "a/b/c.txt").
+    const slashIdx = resolved.lastIndexOf('/');
+    if (slashIdx > 0) {
+      const parentDir = resolved.slice(0, slashIdx);
+      try {
+        // deno-lint-ignore no-explicit-any
+        await (this.#fs! as any).mkdir(parentDir, { recursive: true });
+      } catch {
+        // mkdir with recursive=true can fail if parent is root or doesn't exist — ignore.
+      }
+    }
     await this.#fs!.writeFile(resolved, data);
   }
 

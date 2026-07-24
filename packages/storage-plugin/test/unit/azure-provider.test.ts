@@ -166,12 +166,21 @@ describe('adaptAzureModule', () => {
         StorageSharedKeyCredential: class {
           constructor(public accountName: string, public accountKey: string) {}
         },
-        generateBlobSASQueryParameters(_params: unknown): Promise<{ toString(): string }> {
-          return Promise.resolve({
+        // C2 fix: real SDK signature is synchronous: generateBlobSASQueryParameters(values, credential)
+        generateBlobSASQueryParameters(
+          _values: {
+            containerName: string;
+            blobName: string;
+            permissions: string;
+            expiresOn: Date;
+          },
+          _credential: { accountName: string; accountKey: string },
+        ) {
+          return {
             toString() {
               return 'sas-token-signed';
             },
-          });
+          };
         },
       } as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule,
       store: () => store,
@@ -340,6 +349,20 @@ describe('adaptAzureModule', () => {
     const blob = (container as any).getBlockBlobClient('cs-test.bin');
     await blob.uploadData(new Uint8Array([8]));
     expect(await blob.exists()).toBe(true);
+  });
+
+  it('getSignedUrl resolves credentials from connectionString (covers cs-parsing path)', async () => {
+    const { mod } = buildFakeAzure();
+    // deno-lint-ignore no-explicit-any
+    const facade: any = adaptAzureModule(mod, {
+      containerName: 'mycontainer',
+      connectionString:
+        'DefaultEndpointsProtocol=https;AccountName=csaccount;AccountKey=cskey;EndpointSuffix=core.windows.net',
+    });
+    expect(facade.canSign).toBe(true);
+    const sasUrl = await facade.getSignedUrl('blob.txt', 3600);
+    expect(sasUrl).toContain('sas-token-signed');
+    expect(sasUrl).toContain('csaccount');
   });
 });
 

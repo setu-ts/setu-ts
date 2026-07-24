@@ -25,7 +25,8 @@ export interface AwsSdkModule {
 
 /** Shape of the presigner SDK module. */
 export interface PresignerSdkModule {
-  getSignedUrl(client: unknown, command: unknown): Promise<string>;
+  // deno-lint-ignore no-explicit-any
+  getSignedUrl(client: any, command: any, options?: Record<string, unknown>): Promise<string>;
 }
 
 /** Combined S3 SDK module shape. */
@@ -123,7 +124,11 @@ export function adaptAwsS3Module(
         const res: any = await client.send(
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
         );
-        // Convert body to Uint8Array (real SDK returns a Readable in node env)
+        // Real SDK v3 Body is an SdkStreamMixin with transformToByteArray().
+        if (res.Body && typeof res.Body.transformToByteArray === 'function') {
+          return await res.Body.transformToByteArray();
+        }
+        // Fallback: already a Uint8Array or translatable.
         return res.Body instanceof Uint8Array ? res.Body : new Uint8Array(res.Body);
       } catch (error) {
         if (isS3NotFound(error)) return null;
@@ -148,15 +153,12 @@ export function adaptAwsS3Module(
     },
     async getSignedUrl(path: string, expiresIn: number): Promise<string> {
       // Build a real presigned URL via the presigner.
-      try {
-        return await presignerMod.getSignedUrl(
-          client,
-          new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
-        );
-      } catch {
-        // Fallback synthetic URL when presigner is not available.
-        return `https://${bucket}.s3.amazonaws.com/${path}?X-Amz-Expires=${expiresIn}`;
-      }
+      const url = await presignerMod.getSignedUrl(
+        client,
+        new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
+        { expiresIn },
+      );
+      return url;
     },
     async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
       try {
@@ -164,8 +166,11 @@ export function adaptAwsS3Module(
         const res: any = await client.send(
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
         );
-        // Real SDK: transformToWebStream() returns web ReadableStream.
-        // For injected fakes, return the Body as-is or null.
+        // Real SDK v3 Body is an SdkStreamMixin with transformToWebStream().
+        if (res.Body && typeof res.Body.transformToWebStream === 'function') {
+          return res.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+        }
+        // Fallback: Body is already a Web ReadableStream (injected fake).
         if (res.Body && typeof (res.Body as unknown as ReadableStream).getReader === 'function') {
           return res.Body as ReadableStream<Uint8Array>;
         }

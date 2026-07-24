@@ -35,6 +35,8 @@ export function createUploadMiddleware(
   const maxSize = options?.maxSize ?? DEFAULT_MAX_SIZE;
   const allowedMimeTypes = options?.allowedMimeTypes;
   const maxFiles = options?.maxFiles;
+  // Upper bound on total buffered body bytes to prevent unbounded memory growth.
+  const maxBodyBytes = Math.max(maxSize * 2, 50 * 1024 * 1024); // at least 2× max per file, cap at 50 MB
 
   return async (ctx, next) => {
     const ct = ctx.request.headers.get('content-type') ?? '';
@@ -45,11 +47,31 @@ export function createUploadMiddleware(
       return;
     }
 
+    // Check Content-Length header early to reject oversized bodies before buffering.
+    const clHeader = ctx.request.headers.get('content-length');
+    if (clHeader !== null) {
+      const contentLength = parseInt(clHeader, 10);
+      if (!isNaN(contentLength) && contentLength > maxBodyBytes) {
+        return ctx.response.status(400).json({
+          error: 'Request entity too large',
+          detail: `Request body exceeds the maximum allowed size of ${maxBodyBytes} bytes`,
+        });
+      }
+    }
+
     try {
       const body = await ctx.request.bytes();
       if (body.length === 0) {
         await next();
         return;
+      }
+
+      // Hard cap on buffered bytes — reject without parsing.
+      if (body.length > maxBodyBytes) {
+        return ctx.response.status(400).json({
+          error: 'Request entity too large',
+          detail: `Request body exceeds the maximum allowed size of ${maxBodyBytes} bytes`,
+        });
       }
 
       const parts = parseMultipart(body, ct);

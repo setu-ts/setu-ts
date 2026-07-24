@@ -295,6 +295,46 @@ describe('createUploadMiddleware', () => {
     expect(uploads.length).toBe(1);
     expect(uploads[0].name).toBe('file');
   });
+
+  it('A2: oversized body rejected (400) before parsing via Content-Length header', async () => {
+    const ctx = makeCtx();
+    const response = ctx.response as unknown as {
+      _lastStatus: number;
+      constructor: { name: string };
+    };
+    ctx.request.headers.set(
+      'content-type',
+      `multipart/form-data; boundary=${response.constructor.name ?? 'b'}`,
+    );
+    ctx.request.bytes = () => Promise.resolve(new Uint8Array([1, 2, 3]));
+    ctx.request.headers.set('content-length', '60000000');
+    const mw = createUploadMiddleware({ maxSize: 10 * 1024 * 1024 });
+    let nextCalled = false;
+    await mw(ctx, (): Promise<void> => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+    expect(nextCalled).toBe(false);
+    expect(response._lastStatus).toBe(400);
+  });
+
+  it('A2: oversized body rejected (400) even without Content-Length (buffer cap)', async () => {
+    const ctx = makeCtx();
+    const response = ctx.response as unknown as { _lastStatus: number };
+    ctx.request.headers.set('content-type', 'multipart/form-data; boundary=b');
+    // Send a body larger than the 50 MB hard cap — use 51 MB.
+    const bigBody = new Uint8Array(51 * 1024 * 1024);
+    bigBody.fill(65);
+    ctx.request.bytes = () => Promise.resolve(bigBody);
+    const mw = createUploadMiddleware({ maxSize: 10 * 1024 * 1024 });
+    let nextCalled = false;
+    await mw(ctx, (): Promise<void> => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+    expect(nextCalled).toBe(false);
+    expect(response._lastStatus).toBe(400);
+  });
 });
 describe('getUploadedFile', () => {
   it('returns the matching uploaded file', () => {
