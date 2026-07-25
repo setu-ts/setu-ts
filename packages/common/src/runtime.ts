@@ -6,6 +6,7 @@
  */
 import type { RuntimePlatform } from './types.ts';
 import type { IRequest, IResponse } from './http.ts';
+import type { WebSocketUpgradeRouter } from './services/websocket.ts';
 
 /**
  * Opaque handle returned by runtime timer methods. Its concrete shape is
@@ -311,4 +312,24 @@ export interface IHttpAdapter {
    * @param handle - The server handle returned by `listen`
    */
   close(handle: ServerHandle): Promise<void>;
+  /**
+   * Installs a WebSocket upgrade router, consulted for every inbound upgrade
+   * request *before* the request is mapped to an {@linkcode IRequest} and
+   * enters the middleware pipeline.
+   *
+   * Optional: absent on adapters that cannot perform a WebSocket handshake.
+   * Callers MUST degrade gracefully when it is not provided — see the
+   * WebSocketPlugin, which still registers its service and health indicator
+   * but fails `route()` with a typed error. Because the member is optional,
+   * adapters written before this seam existed remain valid implementations.
+   *
+   * An adapter that implements this must call the router only for requests
+   * carrying a WebSocket upgrade header, and must fall through to normal HTTP
+   * handling whenever the router returns `null`, so installing a router never
+   * changes the behavior of non-WebSocket traffic.
+   *
+   * @param router - Decides accept, reject, or fall-through per upgrade request
+   * @since 0.2.0
+   */
+  setUpgradeRouter?(router: WebSocketUpgradeRouter): void;
 }

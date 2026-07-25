@@ -202,6 +202,23 @@ export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';
 // SSE contracts
 export type { ISseConnection, ISseService, SseChannel, SseMessage } from './services/sse.ts';
 
+// WebSocket contracts
+export type {
+  IWebSocketConnection,
+  IWebSocketService,
+  IWebSocketTransport,
+  RoomBroadcastOptions,
+  WebSocketCloseEvent,
+  WebSocketConnectionContext,
+  WebSocketEventSink,
+  WebSocketHandlers,
+  WebSocketReadyState,
+  WebSocketRoom,
+  WebSocketRouteOptions,
+  WebSocketUpgradeDecision,
+  WebSocketUpgradeRouter,
+} from './services/websocket.ts';
+
 // SSR contracts
 export type { ISsrService } from './services/ssr.ts';
 

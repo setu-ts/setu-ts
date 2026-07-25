@@ -38,7 +38,8 @@
     "./packages/starters/full-stack-starter",
     "./packages/sse-plugin",
     "./packages/react-router-plugin",
-    "./packages/worker-pool-plugin"
+    "./packages/worker-pool-plugin",
+    "./packages/websocket-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

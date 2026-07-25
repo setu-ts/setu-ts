@@ -101,6 +101,8 @@ export const CAPABILITIES = {
   HTTP_ADAPTER: 'http-adapter',
   /** Server-Sent Events (SSE) hub for in-process real-time broadcasting. */
   SSE: 'sse',
+  /** WebSocket hub for bidirectional real-time messaging. */
+  WEBSOCKET: 'websocket',
   /** Server-side rendering (SSR) — React Router or similar framework. */
   SSR: 'ssr',
   /** Health indicator contributions (multi-provider). */
