@@ -64,7 +64,7 @@ Deno.test('HeaderResolver — whitespace-only header value reaches normalize and
   // the Headers constructor and supply a raw value that is truthy but normalizes to
   // null (whitespace-only).  This covers the otherwise-invisible branch at line 50.
   const resolver = new HeaderResolver();
-  const fakeHeaders = { get: (_name: string) => '   ' as unknown as string };
+  const fakeHeaders = { get: (_name: string) => '   ' };
   const request = { method: 'GET', url: 'https://example.com/', path: '/', headers: fakeHeaders };
   const result = await resolver.resolve(request as import('@hono-enterprise/common').IRequest);
   assert(!result.present);

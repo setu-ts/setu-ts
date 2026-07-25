@@ -22,9 +22,9 @@ export class MultiTenancyService implements IMultiTenancyService {
   private readonly store: ITenantDataStore;
   private readonly separator: string;
 
-  constructor(options?: { store?: ITenantDataStore; separator?: string }) {
-    this.store = options?.store ?? null as unknown as ITenantDataStore;
-    this.separator = options?.separator ?? DEFAULT_SEPARATOR;
+  constructor(options: { store: ITenantDataStore; separator?: string }) {
+    this.store = options.store;
+    this.separator = options.separator ?? DEFAULT_SEPARATOR;
   }
 
   /** Return the tenant resolved for this request context, or `undefined`. */
@@ -51,17 +51,9 @@ export class MultiTenancyService implements IMultiTenancyService {
 
   /**
    * Build a cache key that includes the tenant id and separator.
+   * Uses the separator configured at construction.
    */
-  prefixCacheKey(tenantId: string, key: string, separator?: string): string {
-    const sep = separator ?? this.separator;
-    return `${tenantId}${sep}${key}`;
-  }
-
-  /**
-   * Return the cache-key prefix for a tenant (the separator when key is empty).
-   * Used by middleware to obtain the stamp value.
-   */
-  getCachePrefix(tenantId: string, separator?: string): string {
-    return this.prefixCacheKey(tenantId, '', separator);
+  prefixCacheKey(tenantId: string, key: string): string {
+    return `${tenantId}${this.separator}${key}`;
   }
 }

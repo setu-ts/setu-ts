@@ -17,7 +17,7 @@ export function attachRecordingLogger(
   logger: ReturnType<typeof createRecordingFakeLogger>,
 ): import('@hono-enterprise/common').ILogger {
   return {
-    level: 2 as const, // WARN
+    level: 'warn' as const,
     fatal(_message: string, _metadata?: import('@hono-enterprise/common').LogMetadata) {
       logger.errorCalls.push(_message);
     },

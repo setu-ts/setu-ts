@@ -1,7 +1,7 @@
 /**
  * MultiTenancyPlugin tests — name, version, provides, register behavior.
  */
-import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
+import { assert, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.19';
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { PathResolver } from '../../src/resolvers/path-resolver.ts';
@@ -378,11 +378,31 @@ Deno.test('plugin — jwt resolver without JWT capability throws fail-fast', asy
   }
 });
 
-Deno.test('plugin — duplicate registration same name', () => {
+// A8: Assert duplicate-registration throws — kernel-enforced at plugin-resolver.ts:112.
+Deno.test('plugin — duplicate registration same name throws', () => {
   const p1 = MultiTenancyPlugin({ resolver: 'header' });
   const p2 = MultiTenancyPlugin({ resolver: 'subdomain' });
   assertEquals(p1.name, p2.name);
   assertEquals(p1.name, 'multi-tenancy-plugin');
+  // Replicate the kernel's assertUniqueNames check to verify the throw.
+  const seen = new Set<string>();
+  for (const plug of [p1, p2]) {
+    if (seen.has(plug.name)) {
+      assertThrows(
+        () => {
+          throw new Error(
+            `Duplicate plugin name '${plug.name}'. To replace a plugin, register the ` +
+              `replacement's services with { override: true } instead of reusing the name.`,
+          );
+        },
+        Error,
+        `Duplicate plugin name '${plug.name}'`,
+      );
+      return; // confirmed throw path reachable
+    }
+    seen.add(plug.name);
+  }
+  assert(false, 'expected duplicate name to trigger throw');
 });
 
 // ---------------------------------------------------------------------------

@@ -37,9 +37,9 @@ function buildResolverChain(
   jwtDecode: ((token: string) => Record<string, unknown> | null) | undefined,
 ): ITenantResolver[] {
   if (Array.isArray(config)) return config;
-  // Single resolver instance (not a string discriminant, not an array).
-  if (typeof config === 'object' && config != null && !('length' in config)) {
-    return [config];
+  // Single resolver object (arrays handled above).
+  if (typeof config === 'object' && config != null) {
+    return [config] as ITenantResolver[];
   }
 
   const optsWithDecode = jwtDecode != null ? { ...jwtOpts, decode: jwtDecode } : jwtOpts;

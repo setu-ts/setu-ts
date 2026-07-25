@@ -3,7 +3,9 @@
  */
 import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { MemoryTenantDataStore } from '../../src/stores/memory-tenant-store.ts';
-import { ColumnPerTenant, DatabasePerTenant, SchemaPerTenant } from '../../src/strategies/index.ts';
+import { ColumnPerTenant } from '../../src/strategies/column-strategy.ts';
+import { DatabasePerTenant } from '../../src/strategies/database-strategy.ts';
+import { SchemaPerTenant } from '../../src/strategies/schema-strategy.ts';
 
 Deno.test('MemoryTenantDataStore — create and findAll', async () => {
   const store = new MemoryTenantDataStore();
@@ -153,4 +155,19 @@ Deno.test('MemoryTenantDataStore — strategy partitions differ by tenant', asyn
   assertEquals(bItems.length, 1);
   assertEquals((aItems[0] as { id: string }).id, 'i-a');
   assertEquals((bItems[0] as { id: string }).id, 'i-b');
+});
+
+// A6: update(id, { id: 'other' }) must NOT create a key/field split.
+Deno.test('MemoryTenantDataStore — update ignores id in payload (key is authoritative)', async () => {
+  const store = new MemoryTenantDataStore();
+  await store.create('t1', 'User', { id: 'u1', name: 'Original' });
+  // Attempt to change the id field via update — must be ignored.
+  await store.update('t1', 'User', 'u1', { id: 'u999', name: 'Modified' });
+  const found = await store.findById('t1', 'User', 'u1');
+  assert(found != null);
+  assertEquals((found as Record<string, unknown>).id, 'u1');
+  assertEquals((found as Record<string, unknown>).name, 'Modified');
+  // The orphaned key 'u999' must NOT exist.
+  const orphaned = await store.findById('t1', 'User', 'u999');
+  assertEquals(orphaned, null);
 });

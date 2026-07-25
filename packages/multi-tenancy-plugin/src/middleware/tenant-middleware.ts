@@ -69,13 +69,13 @@ export function tenantMiddleware({
   const required = options?.required ?? false;
   const rejectionStatus = options?.rejectionStatus ?? 400;
   const cacheConfig = options?.cache;
-  const separator = cacheConfig?.separator;
 
   return async (ctx: IRequestContext, next: NextFunction) => {
     // Resolve tenant by chaining resolvers; first `Some` wins.
     let resolved: import('@hono-enterprise/common').ITenant | undefined;
 
-    for (const resolver of resolvers) {
+    for (let i = 0; i < resolvers.length; i++) {
+      const resolver = resolvers[i];
       try {
         const result = await resolver.resolve(ctx.request);
         if (result.present) {
@@ -85,7 +85,10 @@ export function tenantMiddleware({
       } catch (err) {
         // Throwing resolver → warn + treat as none → continue chain.
         if (logger) {
-          logger.warn('Tenant resolver threw, treating as none', { error: String(err) });
+          logger.warn(
+            `Tenant resolver at index ${i} threw, treating as none`,
+            { error: String(err) },
+          );
         }
       }
     }
@@ -95,7 +98,7 @@ export function tenantMiddleware({
 
       // Stamp cache prefix into ctx.state when configured.
       if (cacheConfig?.prefix) {
-        const prefix = service.prefixCacheKey(resolved.id, '', separator);
+        const prefix = service.prefixCacheKey(resolved.id, '');
         ctx.state.set(TENANT_CACHE_PREFIX_STATE_KEY, prefix);
       }
 

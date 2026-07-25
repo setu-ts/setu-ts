@@ -66,23 +66,16 @@ Deno.test('MultiTenancyService — prefixCacheKey default separator', () => {
   assertEquals(service.prefixCacheKey('t1', 'k'), 't1:k');
 });
 
-Deno.test('MultiTenancyService — prefixCacheKey custom separator', () => {
+Deno.test('MultiTenancyService — prefixCacheKey uses configured separator', () => {
   const store = {} as unknown as ITenantDataStore;
-  const service = new MultiTenancyService({ store });
-  assertEquals(service.prefixCacheKey('t1', 'k', '/'), 't1/k');
+  const service = new MultiTenancyService({ store, separator: '/' });
+  assertEquals(service.prefixCacheKey('t1', 'k'), 't1/k');
 });
 
-Deno.test('MultiTenancyService — constructor separator', () => {
+Deno.test('MultiTenancyService — prefixCacheKey with dash separator', () => {
   const store = {} as unknown as ITenantDataStore;
   const service = new MultiTenancyService({ store, separator: '-' });
   assertEquals(service.prefixCacheKey('t1', 'k'), 't1-k');
-});
-
-Deno.test('MultiTenancyService — getCachePrefix returns prefix for empty key', () => {
-  const store = {} as unknown as ITenantDataStore;
-  const service = new MultiTenancyService({ store });
-  assertEquals(service.getCachePrefix('acme'), 'acme:');
-  assertEquals(service.getCachePrefix('acme', '/'), 'acme/');
 });
 
 Deno.test('MultiTenancyService — getCurrentTenant returns tenant from ctx.request.tenant', () => {

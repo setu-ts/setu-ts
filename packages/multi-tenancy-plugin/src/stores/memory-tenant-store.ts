@@ -142,7 +142,10 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     const existing = entityMap.get(String(id));
     if (!existing) return Promise.resolve(null);
 
-    const updated = { ...existing, ...data };
+    // Ignore an `id` field in the update payload — the key is authoritative;
+    // mutating it would create a key/field split that breaks findById.
+    const { id: _ignored, ...safeData } = data;
+    const updated = { ...existing, ...safeData };
     if (typeof updated.id !== 'string' && typeof updated.id !== 'number') {
       updated.id = id;
     }

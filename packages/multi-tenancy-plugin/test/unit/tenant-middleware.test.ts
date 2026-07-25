@@ -73,7 +73,7 @@ function makeContext(opts?: { state?: Map<string, unknown>; tenant?: unknown }) 
 }
 
 function makeService() {
-  return new MultiTenancyService({});
+  return new MultiTenancyService({ store: {} as never });
 }
 
 // Logger with all required ILogger methods.
@@ -123,6 +123,72 @@ Deno.test('middleware — required:true + none() short-circuits without next', a
   });
   await mw(ctx as never, next);
   assert(!getNextCalled());
+});
+
+// A4: Assert the FULL short-circuit response body (error label + message), status code, AND no-downstream.
+Deno.test('middleware — required:true short-circuit asserts full response body and status', async () => {
+  let capturedBody: unknown;
+  let capturedStatus: number | undefined;
+  const response = {
+    status: (code: number) => ({
+      json: (body: unknown) => {
+        capturedStatus = code;
+        capturedBody = body;
+        return undefined;
+      },
+    }),
+    json: () => undefined,
+    snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+  };
+  let nextCalled = false;
+  const req = {
+    method: 'GET' as const,
+    url: 'https://example.com/' as const,
+    path: '/' as const,
+    headers: new Headers(),
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+    get tenant() {
+      return undefined;
+    },
+    // prettier-ignore
+    set tenant(_v) {/* intentional no-op for short-circuit test */},
+  };
+  const ctx = {
+    id: 'req-2',
+    request: req,
+    response,
+    services: {} as never,
+    params: {},
+    query: {},
+    state: new Map(),
+    startTime: performance.now(),
+    signal: new AbortController().signal,
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
+  const noneResolver: FakeResolver = {
+    resolve(_request) {
+      return Promise.resolve({ present: false });
+    },
+  };
+  const mw = tenantMiddleware({
+    service: makeService(),
+    resolvers: [toITenantResolver(noneResolver)],
+    options: { required: true, rejectionStatus: 422 },
+  });
+  await mw(
+    ctx,
+    (() => {
+      nextCalled = true;
+      return Promise.resolve();
+    }) as never,
+  );
+  assert(!nextCalled, 'downstream middleware must NOT run on short-circuit');
+  assertEquals(capturedStatus, 422);
+  assert(typeof capturedBody === 'object' && capturedBody != null);
+  const body = capturedBody as Record<string, unknown>;
+  assertEquals(body.error, 'Tenant Required');
+  assertEquals(body.message, 'No tenant could be resolved for this request');
 });
 
 Deno.test('middleware — required:false + none() proceeds', async () => {
