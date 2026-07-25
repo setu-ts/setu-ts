@@ -5,51 +5,67 @@ import { assert, assertEquals, assertNotEquals } from 'jsr:@std/assert@^1.0.19';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
+import type { ITenantResolver } from '@hono-enterprise/common';
 
 // Fake ITenantResolver for tests that need a custom one.
+type FakeResolverResult = { present: boolean; value?: { id: string } };
+
 interface FakeResolver {
-  resolve(req: any): Promise<{ present: boolean; value?: { id: string } }>;
+  resolve(req: { tenant?: { id: string; name?: string } }): Promise<FakeResolverResult>;
+}
+
+function toITenantResolver(fake: FakeResolver): ITenantResolver {
+  return {
+    resolve: fake.resolve.bind(fake),
+  } as unknown as ITenantResolver;
 }
 
 // -- Helpers ---------------------------------------------------------------
 
 function makeContext(opts?: { state?: Map<string, unknown>; tenant?: unknown }) {
   const state = opts?.state ?? new Map();
+  let storedTenant: { id: string; name?: string } | undefined = opts?.tenant as
+    | { id: string; name?: string }
+    | undefined;
   const request = {
     method: 'GET',
     url: 'https://acme.example.com/',
     path: '/',
     headers: new Headers(),
-    json: async () => Promise.resolve({}) as Promise<unknown>,
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+    get tenant() {
+      return storedTenant;
+    },
+    set tenant(v) {
+      storedTenant = v;
+    },
   };
-  if (opts?.tenant != null) {
-    (request as Record<string, unknown>).tenant = opts.tenant;
-  }
   let nextCalled = false;
   const response = {
     status: (_code: number) => ({
-      header: () => ({ json: () => null as never }),
-      json: () => null as never,
+      header: () => ({ json: () => undefined }),
+      json: () => undefined,
     }),
-    json: () => null as never,
+    json: () => undefined,
     snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
-  } as any;
+  };
   return {
     ctx: {
       id: 'req-1',
-      request: request as any,
+      request,
       response,
-      services: {} as any,
+      services: {} as never,
       params: {},
       query: {},
       state,
       startTime: performance.now(),
       signal: new AbortController().signal,
     },
-    next: async () => {
+    next: () => {
       nextCalled = true;
+      return Promise.resolve();
     },
     getNextCalled: () => nextCalled,
     getState: () => state,
@@ -64,7 +80,7 @@ function makeService() {
 function makeLogger() {
   const warnCalls: string[] = [];
   const log = {
-    level: 2,
+    level: 'warn' as const,
     warn(m: string, _md?: unknown) {
       warnCalls.push(m);
     },
@@ -80,45 +96,48 @@ function makeLogger() {
   return { warnCalls, logger: log };
 }
 
+// -- Tests -----------------------------------------------------------------
+
 Deno.test('middleware — success sets ctx.request.tenant and calls next', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   const resolver = new SubdomainResolver();
   const mw = tenantMiddleware({ service: makeService(), resolvers: [resolver], options: {} });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(getNextCalled());
-  assert((ctx.request as any).tenant != null);
-  assertEquals((ctx.request as any).tenant.id, 'acme');
+  const typedRequest = ctx.request as { tenant?: { id: string } };
+  assert(typedRequest.tenant != null);
+  assertEquals(typedRequest.tenant!.id, 'acme');
 });
 
 Deno.test('middleware — required:true + none() short-circuits without next', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   const noneResolver: FakeResolver = {
-    async resolve(_request) {
-      return { present: false };
+    resolve(_request) {
+      return Promise.resolve({ present: false });
     },
   };
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [noneResolver as any],
+    resolvers: [toITenantResolver(noneResolver)],
     options: { required: true, rejectionStatus: 403 },
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(!getNextCalled());
 });
 
 Deno.test('middleware — required:false + none() proceeds', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   const noneResolver: FakeResolver = {
-    async resolve(_request) {
-      return { present: false };
+    resolve(_request) {
+      return Promise.resolve({ present: false });
     },
   };
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [noneResolver as any],
+    resolvers: [toITenantResolver(noneResolver)],
     options: { required: false },
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(getNextCalled());
 });
 
@@ -126,25 +145,26 @@ Deno.test('middleware — chain order: first Some wins', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   let secondInvoked = false;
   const firstResolver: FakeResolver = {
-    async resolve(_request) {
-      return { present: true, value: { id: 'first' } };
+    resolve(_request) {
+      return Promise.resolve({ present: true, value: { id: 'first' } });
     },
   };
   const secondResolver: FakeResolver = {
-    async resolve(_request) {
+    resolve(_request) {
       secondInvoked = true;
-      return { present: true, value: { id: 'second' } };
+      return Promise.resolve({ present: true, value: { id: 'second' } });
     },
   };
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [firstResolver as any, secondResolver as any],
+    resolvers: [toITenantResolver(firstResolver), toITenantResolver(secondResolver)],
     options: {},
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(getNextCalled());
   assert(!secondInvoked);
-  assertEquals((ctx.request as any).tenant.id, 'first');
+  const typedRequest = ctx.request as { tenant?: { id: string } };
+  assertEquals(typedRequest.tenant!.id, 'first');
 });
 
 Deno.test('middleware — cache.prefix:true stamps ctx.state', async () => {
@@ -155,7 +175,7 @@ Deno.test('middleware — cache.prefix:true stamps ctx.state', async () => {
     resolvers: [resolver],
     options: { cache: { prefix: true, separator: ':' } },
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(getNextCalled());
   const prefix = getTenantCachePrefix(ctx);
   assertNotEquals(prefix, undefined);
@@ -165,72 +185,73 @@ Deno.test('middleware — cache.prefix:true stamps ctx.state', async () => {
 Deno.test('middleware — cache.prefix absent returns undefined', async () => {
   const { ctx, next } = makeContext();
   const noneResolver: FakeResolver = {
-    async resolve(_request) {
-      return { present: false };
+    resolve(_request) {
+      return Promise.resolve({ present: false });
     },
   };
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [noneResolver as any],
+    resolvers: [toITenantResolver(noneResolver)],
     options: {},
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assertEquals(getTenantCachePrefix(ctx), undefined);
 });
 
 Deno.test('middleware — resolver throw is caught and treated as none', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   const throwingResolver: FakeResolver = {
-    async resolve(_request) {
+    resolve(_request) {
       throw new Error('boom');
     },
   };
   const continuingResolver: FakeResolver = {
-    async resolve(_request) {
-      return { present: true, value: { id: 'fallback' } };
+    resolve(_request) {
+      return Promise.resolve({ present: true, value: { id: 'fallback' } });
     },
   };
   const { logger } = makeLogger();
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [throwingResolver as any, continuingResolver as any],
+    resolvers: [toITenantResolver(throwingResolver), toITenantResolver(continuingResolver)],
     options: {},
-    logger: logger as any,
+    logger,
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(getNextCalled());
-  assertEquals((ctx.request as any).tenant.id, 'fallback');
+  const typedRequest = ctx.request as { tenant?: { id: string } };
+  assertEquals(typedRequest.tenant!.id, 'fallback');
 });
 
 Deno.test('middleware — no logger: throw does not propagate', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   const throwingResolver: FakeResolver = {
-    async resolve(_request) {
+    resolve(_request) {
       throw new Error('silent boom');
     },
   };
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [throwingResolver as any],
+    resolvers: [toITenantResolver(throwingResolver)],
     options: { required: false },
   });
   // Should not throw
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(getNextCalled());
 });
 
 Deno.test('middleware — custom rejectionStatus honored', async () => {
   const { ctx, next, getNextCalled } = makeContext();
   const noneResolver: FakeResolver = {
-    async resolve(_request) {
-      return { present: false };
+    resolve(_request) {
+      return Promise.resolve({ present: false });
     },
   };
   const mw = tenantMiddleware({
     service: makeService(),
-    resolvers: [noneResolver as any],
+    resolvers: [toITenantResolver(noneResolver)],
     options: { required: true, rejectionStatus: 401 },
   });
-  await mw(ctx, next);
+  await mw(ctx as never, next);
   assert(!getNextCalled());
 });

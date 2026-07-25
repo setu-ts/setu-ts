@@ -125,7 +125,7 @@ export function MultiTenancyPlugin(
     optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.JWT],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    async register(ctx: IPluginContext) {
+    register(ctx: IPluginContext) {
       // Resolve JWT decode function if needed.
       let jwtDecode: ((token: string) => Record<string, unknown> | null) | undefined;
       const isJwtMode = options.resolver === 'jwt' || (
@@ -202,16 +202,15 @@ export function MultiTenancyPlugin(
       const storeType: 'custom' | 'memory' = providedStore ? 'custom' : 'memory';
 
       // Register health indicator.
-      ctx.health.register('multi-tenancy', async () => {
-        return {
+      ctx.health.register('multi-tenancy', (): Promise<HealthCheckResult> =>
+        Promise.resolve({
           status: 'up',
           data: {
             resolver: getResolverType(options.resolver),
             strategy: strategy.kind,
             store: storeType,
           },
-        } satisfies HealthCheckResult;
-      });
+        }));
 
       // Register lifecycle close.
       ctx.lifecycle.onClose(async () => {

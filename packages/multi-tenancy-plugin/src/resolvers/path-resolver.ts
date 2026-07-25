@@ -8,19 +8,22 @@ import { none, type Option, some } from '@hono-enterprise/common';
 import type { PathResolverOptions } from '../interfaces/index.ts';
 
 /**
- * Resolves the tenant id from a path segment in `request.path`.
+ * Extracts the tenant id from the given path segments at the specified index.
  *
- * **Limitation:** This resolver parses `request.path` directly by segment
- * index — it cannot read router `:param` values because those live on
- * `IRequestContext.params`, which the resolver interface does not receive.
+ * Returns the segment when non-empty, otherwise `null`. This pure function
+ * allows every branch of the extraction logic to be tested directly.
  *
- * @example
- * ```typescript
- * // For request.path = '/api/acme/users'
- * const resolver = new PathResolver({ segment: 1 });
- * const result = await resolver.resolve(request);
- * // => some({ id: 'acme' })
- * ```
+ * @internal
+ */
+export function extractPathTenant(segments: string[], index: number): string | null {
+  if (index < 0 || index >= segments.length) return null;
+  const segment = segments[index];
+  if (!segment) return null;
+  return segment;
+}
+
+/**
+ * Resolves the tenant id from a segment of `request.path`.
  */
 export class PathResolver implements ITenantResolver {
   private readonly segmentIndex: number;
@@ -35,11 +38,8 @@ export class PathResolver implements ITenantResolver {
   // deno-lint-ignore require-await
   async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
     const parts = request.path.split('/').filter(Boolean);
-    if (this.segmentIndex < 0 || this.segmentIndex >= parts.length) {
-      return none();
-    }
-    const segment = parts[this.segmentIndex];
-    if (!segment) return none();
-    return some({ id: segment });
+    const tenantId = extractPathTenant(parts, this.segmentIndex);
+    if (tenantId === null) return none();
+    return some({ id: tenantId });
   }
 }

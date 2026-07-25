@@ -8,13 +8,63 @@ import { PathResolver } from '../../src/resolvers/path-resolver.ts';
 import { CAPABILITIES, type ITenantResolver, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { ITenantDataStore } from '../../src/interfaces/index.ts';
 import { createRecordingFakeStore } from '../fixtures/fake-store.ts';
+import type { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
+import type { ILogger, IPluginContext } from '@hono-enterprise/common';
+
+// ---------------------------------------------------------------------------
+// Types — minimal interfaces to avoid `as any`
+// ---------------------------------------------------------------------------
+
+interface RegisteredServices extends Map<string, unknown> {}
+
+interface HealthRegistration {
+  name: string;
+  checkFn(): Promise<unknown>;
+}
+
+interface MiddlewareRegistration {
+  fn: unknown;
+  opts: { priority: number; name: string };
+}
+
+interface MockContext {
+  services: {
+    has(token: string): boolean;
+    get<T>(token: string): T;
+    register(token: string, svc: unknown): void;
+  };
+  middleware: {
+    add(fn: unknown, opts: { priority: number; name: string }): void;
+  };
+  health: {
+    register(name: string, checkFn: () => Promise<unknown>): void;
+  };
+  lifecycle: {
+    onClose(cb: () => Promise<void>): void;
+  };
+  logger?: ILogger;
+  runtime: {
+    uuid(): string;
+  };
+  // Exposed for assertions
+  registeredServices: RegisteredServices;
+  addedMiddlewares: MiddlewareRegistration[];
+  healthRegistrations: HealthRegistration[];
+  onCloseCallbacks: Array<() => Promise<void>>;
+  warnCalls: string[];
+}
 
 // -- Helpers ---------------------------------------------------------------
 
-function makeMockContext() {
-  const registeredServices = new Map<string, unknown>();
-  const addedMiddlewares: Array<{ fn: unknown; opts: { priority: number; name: string } }> = [];
-  const healthRegistrations: Array<{ name: string; checkFn: () => Promise<unknown> }> = [];
+/** Helper to cast mock context to IPluginContext for plugin.register(). */
+function ctxAsPlugin(ctx: MockContext): IPluginContext {
+  return ctx as unknown as IPluginContext;
+}
+
+function makeMockContext(): MockContext {
+  const registeredServices = new Map<string, unknown>() as RegisteredServices;
+  const addedMiddlewares: MiddlewareRegistration[] = [];
+  const healthRegistrations: HealthRegistration[] = [];
   const onCloseCallbacks: Array<() => Promise<void>> = [];
   const warnCalls: string[] = [];
 
@@ -47,7 +97,7 @@ function makeMockContext() {
       },
     },
     logger: {
-      level: 2,
+      level: 'warn' as const,
       warn(m: string) {
         warnCalls.push(m);
       },
@@ -59,7 +109,7 @@ function makeMockContext() {
       child() {
         return this;
       },
-    } as any,
+    },
     runtime: {
       uuid: () => `uuid-${Math.random().toString(36).slice(2)}`,
     },
@@ -71,6 +121,10 @@ function makeMockContext() {
     warnCalls,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 Deno.test('plugin — metadata correct', () => {
   const plugin = MultiTenancyPlugin({ resolver: new HeaderResolver() });
@@ -84,7 +138,7 @@ Deno.test('plugin — metadata correct', () => {
 Deno.test('plugin — register() registers service under MULTI_TENANCY', async () => {
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: 'header' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
 });
@@ -92,7 +146,7 @@ Deno.test('plugin — register() registers service under MULTI_TENANCY', async (
 Deno.test('plugin — register() adds middleware with default priority 40', async () => {
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: 'header' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assertEquals(ctx.addedMiddlewares.length, 1);
   assertEquals(ctx.addedMiddlewares[0].opts.priority, 40);
@@ -102,36 +156,47 @@ Deno.test('plugin — register() adds middleware with default priority 40', asyn
 Deno.test('plugin — register() honors custom middlewarePriority', async () => {
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: 'header', middlewarePriority: 55 });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assertEquals(ctx.addedMiddlewares[0].opts.priority, 55);
 });
 
 Deno.test('plugin — register() passes strategy to store.useIsolation', async () => {
   // Verify that a custom dataStore with useIsolation receives the strategy.
-  let receivedStrategy: any = null;
+  let receivedStrategy: unknown = null;
   const customStore = {
-    useIsolation: (s: any) => {
+    useIsolation(s: unknown) {
       receivedStrategy = s;
     },
-    findAll: () => Promise.resolve([]),
-    findById: () => Promise.resolve(null),
-    find: () => Promise.resolve([]),
-    create: () => Promise.resolve({}),
-    update: () => Promise.resolve(null),
-    delete: () => Promise.resolve(false),
-    close: () => {},
-  } as any;
+    findAll() {
+      return Promise.resolve([]);
+    },
+    findById() {
+      return Promise.resolve(null);
+    },
+    find() {
+      return Promise.resolve([]);
+    },
+    create() {
+      return Promise.resolve({});
+    },
+    update() {
+      return Promise.resolve(null);
+    },
+    delete() {
+      return Promise.resolve(false);
+    },
+  } as ITenantDataStore;
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({
     resolver: 'header',
     database: 'schema-per-tenant',
     dataStore: customStore,
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(receivedStrategy != null, 'useIsolation should have been called');
-  assertEquals(receivedStrategy.kind, 'schema');
+  assertEquals((receivedStrategy as { kind: string }).kind, 'schema');
 });
 
 Deno.test('plugin — register() guarded when store lacks useIsolation', async () => {
@@ -142,16 +207,16 @@ Deno.test('plugin — register() guarded when store lacks useIsolation', async (
     dataStore: fakeStore,
   });
   // Should not throw
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 });
 
 Deno.test('plugin — default store uses ctx.runtime.uuid()', async () => {
   const ctx = makeMockContext();
   const expectedUuid = 'test-uuid-123';
-  (ctx.runtime as any).uuid = () => expectedUuid;
+  ctx.runtime.uuid = () => expectedUuid;
 
   const plugin = MultiTenancyPlugin({ resolver: 'header' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   // Just verify register didn't throw — uuid was called.
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
@@ -160,13 +225,13 @@ Deno.test('plugin — default store uses ctx.runtime.uuid()', async () => {
 Deno.test('plugin — health indicator returns { status: up, data: {...} }', async () => {
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: 'header', database: 'schema-per-tenant' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assertEquals(ctx.healthRegistrations.length, 1);
   const result = await ctx.healthRegistrations[0].checkFn();
-  assertEquals((result as any).status, 'up');
-  assertEquals((result as any).data.strategy, 'schema');
-  assertEquals((result as any).data.store, 'memory');
+  assertEquals((result as { status: string }).status, 'up');
+  assertEquals((result as { data: { strategy: string; store: string } }).data.strategy, 'schema');
+  assertEquals((result as { data: { strategy: string; store: string } }).data.store, 'memory');
 });
 
 Deno.test('plugin — health indicator: custom store shows store=custom', async () => {
@@ -175,33 +240,45 @@ Deno.test('plugin — health indicator: custom store shows store=custom', async 
     resolver: 'header',
     dataStore: {} as ITenantDataStore,
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   const result = await ctx.healthRegistrations[0].checkFn();
-  assertEquals((result as any).data.store, 'custom');
+  assertEquals((result as { data: { store: string } }).data.store, 'custom');
 });
 
 Deno.test('plugin — onClose calls store.close()', async () => {
   let closeCalled = false;
   const customStore = {
-    useIsolation: () => {},
-    findAll: () => Promise.resolve([]),
-    findById: () => Promise.resolve(null),
-    find: () => Promise.resolve([]),
-    create: () => Promise.resolve({}),
-    update: () => Promise.resolve(null),
-    delete: () => Promise.resolve(false),
-    close: () => {
+    useIsolation() {},
+    findAll() {
+      return Promise.resolve([]);
+    },
+    findById() {
+      return Promise.resolve(null);
+    },
+    find() {
+      return Promise.resolve([]);
+    },
+    create() {
+      return Promise.resolve({});
+    },
+    update() {
+      return Promise.resolve(null);
+    },
+    delete() {
+      return Promise.resolve(false);
+    },
+    close() {
       closeCalled = true;
       return Promise.resolve();
     },
-  } as any;
+  } as ITenantDataStore;
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({
     resolver: 'header',
     dataStore: customStore,
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   // Simulate lifecycle close
   for (const cb of ctx.onCloseCallbacks) {
@@ -212,40 +289,88 @@ Deno.test('plugin — onClose calls store.close()', async () => {
 });
 
 Deno.test('plugin — jwt resolver with JWT capability wires decode', async () => {
-  const ctx = makeMockContext();
-  const regSvc = ctx.registeredServices;
-  (ctx.services as unknown as Record<string, unknown>).has = (token: string) =>
-    token === CAPABILITIES.JWT || token === CAPABILITIES.LOGGER;
-  (ctx.services as unknown as Record<string, unknown>).get = (token: string) => {
-    if (token === CAPABILITIES.JWT) {
-      return {
-        decode: (_t: string) => ({ tenant_id: 'jwt-from-capability' } as Record<string, unknown>),
-      };
-    }
-    return regSvc.get(token) ?? null;
-  };
-  (ctx.services as unknown as Record<string, unknown>).register = (
-    _token: string,
-    svc: unknown,
-  ) => {
-    regSvc.set(_token, svc);
-  };
+  const regSvc = new Map<string, unknown>() as RegisteredServices;
+  const ctx = {
+    services: {
+      has: (token: string) => token === CAPABILITIES.JWT || token === CAPABILITIES.LOGGER,
+      get: (token: string) => {
+        if (token === CAPABILITIES.JWT) {
+          return {
+            decode: (
+              _t: string,
+            ) => ({ tenant_id: 'jwt-from-capability' } as Record<string, unknown>),
+          };
+        }
+        return regSvc.get(token) ?? null;
+      },
+      register: (_token: string, svc: unknown) => {
+        regSvc.set(_token, svc);
+      },
+    },
+    middleware: { add: () => {} },
+    health: { register: () => {} },
+    lifecycle: { onClose: () => {} },
+    logger: {
+      level: 'warn' as const,
+      warn() {},
+      fatal() {},
+      error() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return this;
+      },
+    },
+    runtime: { uuid: () => 'uuid-1' },
+    registeredServices: regSvc,
+    addedMiddlewares: [],
+    healthRegistrations: [],
+    onCloseCallbacks: [],
+    warnCalls: [],
+  } as unknown as MockContext;
 
   const plugin = MultiTenancyPlugin({ resolver: 'jwt' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   // Should succeed — JWT capability provides the decoder.
   assert(regSvc.has(CAPABILITIES.MULTI_TENANCY));
 });
 
 Deno.test('plugin — jwt resolver without JWT capability throws fail-fast', async () => {
-  const ctx = makeMockContext();
-  (ctx.services as any).has = (token: string) => token === CAPABILITIES.LOGGER; // no JWT
-  ctx.services.get = () => null as never;
+  const regSvc = new Map<string, unknown>() as RegisteredServices;
+  const ctx = {
+    services: {
+      has: (token: string) => token === CAPABILITIES.LOGGER,
+      get: () => null,
+      register: () => {},
+    },
+    middleware: { add: () => {} },
+    health: { register: () => {} },
+    lifecycle: { onClose: () => {} },
+    logger: {
+      level: 'warn' as const,
+      warn() {},
+      fatal() {},
+      error() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return this;
+      },
+    },
+    runtime: { uuid: () => 'uuid-1' },
+    registeredServices: regSvc,
+    addedMiddlewares: [],
+    healthRegistrations: [],
+    onCloseCallbacks: [],
+    warnCalls: [],
+  } as unknown as MockContext;
 
   const plugin = MultiTenancyPlugin({ resolver: 'jwt' });
   try {
-    await plugin.register(ctx as any);
+    await plugin.register(ctxAsPlugin(ctx));
     assert(false, 'should have thrown');
   } catch (err) {
     assert(err instanceof Error);
@@ -267,7 +392,7 @@ Deno.test('plugin — duplicate registration same name', () => {
 Deno.test('plugin — resolver discriminant "subdomain" builds SubdomainResolver', async () => {
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: 'subdomain' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
   assertEquals(ctx.addedMiddlewares.length, 1);
@@ -276,7 +401,7 @@ Deno.test('plugin — resolver discriminant "subdomain" builds SubdomainResolver
 Deno.test('plugin — resolver discriminant "path" builds PathResolver', async () => {
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: 'path' });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
   assertEquals(ctx.addedMiddlewares.length, 1);
@@ -288,39 +413,68 @@ Deno.test('plugin — resolver discriminant "database" uses DatabasePerTenant st
     resolver: 'header',
     database: 'database-per-tenant',
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   const result = await ctx.healthRegistrations[0].checkFn();
-  assertEquals((result as any).data.strategy, 'database');
+  assertEquals((result as { data: { strategy: string } }).data.strategy, 'database');
 });
 
 Deno.test('plugin — custom resolver object passed directly wraps in array', async () => {
   const customResolver = {
-    resolve: async () => ({ present: true, value: { id: 'custom' } }),
-  } as unknown as ITenantResolver;
+    resolve() {
+      return Promise.resolve({ present: true, value: { id: 'custom' } });
+    },
+  } as ITenantResolver;
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: customResolver });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
   assertEquals(ctx.addedMiddlewares.length, 1);
 });
 
 Deno.test('plugin — array of resolvers passes through as-is', async () => {
-  const resolvers = [new HeaderResolver(), new PathResolver()];
+  const resolvers = [new HeaderResolver(), new PathResolver()] as readonly ITenantResolver[];
   const ctx = makeMockContext();
   const plugin = MultiTenancyPlugin({ resolver: resolvers });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
   assertEquals(ctx.addedMiddlewares.length, 1);
 });
 
 Deno.test('plugin — jwt resolver with jwt.decode option (not capability)', async () => {
-  const ctx = makeMockContext();
-  // Override services.has to NOT provide JWT capability
-  (ctx.services as any).has = (token: string) => token === CAPABILITIES.LOGGER;
-  ctx.services.get = () => null as never;
+  const regSvc = new Map<string, unknown>() as RegisteredServices;
+  const ctx = {
+    services: {
+      has: (token: string) => token === CAPABILITIES.LOGGER,
+      get: () => null,
+      register: (token: string, svc: unknown) => {
+        regSvc.set(token, svc);
+      },
+    },
+    middleware: { add: () => {} },
+    health: { register: () => {} },
+    lifecycle: { onClose: () => {} },
+    logger: {
+      level: 'warn' as const,
+      warn() {},
+      fatal() {},
+      error() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return this;
+      },
+    },
+    runtime: { uuid: () => 'uuid-1' },
+    registeredServices: regSvc,
+    addedMiddlewares: [],
+    healthRegistrations: [],
+    onCloseCallbacks: [],
+    warnCalls: [],
+  } as unknown as MockContext;
 
   const plugin = MultiTenancyPlugin({
     resolver: 'jwt',
@@ -328,9 +482,9 @@ Deno.test('plugin — jwt resolver with jwt.decode option (not capability)', asy
       decode: () => ({ tenant_id: 'direct-decode' }),
     },
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
-  assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
+  assert(regSvc.has(CAPABILITIES.MULTI_TENANCY));
 });
 
 Deno.test('plugin — cache.separator option path triggers separator in service construction', async () => {
@@ -339,23 +493,24 @@ Deno.test('plugin — cache.separator option path triggers separator in service 
     resolver: 'header',
     cache: { separator: '/' },
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
-  const service = ctx.registeredServices.get(CAPABILITIES.MULTI_TENANCY);
+  const service = ctx.registeredServices.get(
+    CAPABILITIES.MULTI_TENANCY,
+  ) as MultiTenancyService;
   assert(service != null);
   // The service should use '/' as the separator
   assertEquals(
-    (service as import('../../src/services/multi-tenancy-service.ts').MultiTenancyService)
-      .prefixCacheKey('t1', 'k'),
+    service.prefixCacheKey('t1', 'k'),
     't1/k',
   );
 });
 
 Deno.test('plugin — unknown resolver discriminant defaults to empty chain', async () => {
   const ctx = makeMockContext();
-  const plugin = MultiTenancyPlugin({ resolver: 'unknown-strategy' as any });
-  await plugin.register(ctx as any);
+  const plugin = MultiTenancyPlugin({ resolver: 'unknown-strategy' as 'header' });
+  await plugin.register(ctxAsPlugin(ctx));
 
   assert(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY));
   assertEquals(ctx.addedMiddlewares.length, 1);
@@ -366,12 +521,13 @@ Deno.test('plugin — custom strategy object bypasses buildStrategy switch', asy
   const customStrategy = { kind: 'column' as const, getTenantColumn: () => 'tenant_id' };
   const plugin = MultiTenancyPlugin({
     resolver: 'header',
-    database: customStrategy as any,
+    database:
+      customStrategy as unknown as import('../../src/interfaces/index.ts').ITenantIsolationStrategy,
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   const result = await ctx.healthRegistrations[0].checkFn();
-  assertEquals((result as any).data.strategy, 'column');
+  assertEquals((result as { data: { strategy: string } }).data.strategy, 'column');
 });
 
 Deno.test('plugin — health indicator resolver type for array config', async () => {
@@ -379,10 +535,10 @@ Deno.test('plugin — health indicator resolver type for array config', async ()
   const plugin = MultiTenancyPlugin({
     resolver: [new HeaderResolver()],
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   const result = await ctx.healthRegistrations[0].checkFn();
-  assertEquals((result as any).data.resolver, 'chain');
+  assertEquals((result as { data: { resolver: string } }).data.resolver, 'chain');
 });
 
 Deno.test('plugin — health indicator resolver type for unknown/null', async () => {
@@ -390,10 +546,10 @@ Deno.test('plugin — health indicator resolver type for unknown/null', async ()
   const plugin = MultiTenancyPlugin({
     resolver: undefined as unknown as 'header',
   });
-  await plugin.register(ctx as any);
+  await plugin.register(ctxAsPlugin(ctx));
 
   const result = await ctx.healthRegistrations[0].checkFn();
-  assertEquals((result as any).data.resolver, 'unknown');
+  assertEquals((result as { data: { resolver: string } }).data.resolver, 'unknown');
 });
 
 // ---------------------------------------------------------------------------
@@ -401,11 +557,11 @@ Deno.test('plugin — health indicator resolver type for unknown/null', async ()
 // ---------------------------------------------------------------------------
 
 Deno.test('plugin — jwt decode function from capability is invoked when middleware processes request', async () => {
-  // This test exercises the jwtDecode arrow function at line 142 and generatesId at line 171
+  // This test exercises the jwtDecode arrow function at line ~142 and generatesId at line ~171
   // by wiring the full plugin → service → middleware → JwtResolver chain.
   let decodedToken = '';
   const regSvc = new Map<string, unknown>();
-  const addedMiddlewares: Array<{ fn: unknown; opts: { priority: number; name: string } }> = [];
+  const addedMiddlewares: MiddlewareRegistration[] = [];
   const ctx = {
     services: {
       has: (token: string) => token === CAPABILITIES.JWT || token === CAPABILITIES.LOGGER,
@@ -432,10 +588,27 @@ Deno.test('plugin — jwt decode function from capability is invoked when middle
     health: { register: () => {} },
     lifecycle: { onClose: () => {} },
     runtime: { uuid: () => 'uuid-123' },
-  } as any;
+    registeredServices: regSvc as RegisteredServices,
+    addedMiddlewares,
+    healthRegistrations: [],
+    onCloseCallbacks: [],
+    warnCalls: [],
+    logger: {
+      level: 'warn' as const,
+      warn() {},
+      fatal() {},
+      error() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return this;
+      },
+    },
+  } as unknown as MockContext;
 
   const plugin = MultiTenancyPlugin({ resolver: 'jwt' });
-  await plugin.register(ctx);
+  await plugin.register(ctxAsPlugin(ctx));
 
   // Now invoke the middleware with a Bearer token that JwtResolver will decode
   const mwFn = addedMiddlewares[0]?.fn as (
@@ -465,8 +638,9 @@ Deno.test('plugin — jwt decode function from capability is invoked when middle
     signal: undefined as AbortSignal | undefined,
   };
   let nextCalled = false;
-  await mwFn!(mwCtx, async () => {
+  await mwFn!(mwCtx, () => {
     nextCalled = true;
+    return Promise.resolve();
   });
 
   assert(nextCalled, 'next should have been called');
@@ -474,12 +648,12 @@ Deno.test('plugin — jwt decode function from capability is invoked when middle
 });
 
 Deno.test('plugin — default store generateId is invoked when creating records via middleware', async () => {
-  // Exercises generateId: () => ctx.runtime.uuid() at line 171 by wiring full plugin →
+  // Exercises generateId: () => ctx.runtime.uuid() at line ~171 by wiring full plugin →
   // middleware → resolver chain, then invoking a request. The middleware attaches resolved
   // tenant to ctx.request.tenant; MemoryTenantDataStore calls generateId on record creation.
   let uuidCalled = false;
   const regSvc = new Map<string, unknown>();
-  const addedMiddlewares: Array<{ fn: unknown; opts: { priority: number; name: string } }> = [];
+  const addedMiddlewares: MiddlewareRegistration[] = [];
   const ctx = {
     services: {
       has: (token: string) => token === CAPABILITIES.LOGGER,
@@ -501,10 +675,27 @@ Deno.test('plugin — default store generateId is invoked when creating records 
         return 'generated-uuid';
       },
     },
-  } as any;
+    registeredServices: regSvc as RegisteredServices,
+    addedMiddlewares,
+    healthRegistrations: [],
+    onCloseCallbacks: [],
+    warnCalls: [],
+    logger: {
+      level: 'warn' as const,
+      warn() {},
+      fatal() {},
+      error() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return this;
+      },
+    },
+  } as unknown as MockContext;
 
   const plugin = MultiTenancyPlugin({ resolver: 'header' });
-  await plugin.register(ctx);
+  await plugin.register(ctxAsPlugin(ctx));
 
   // Verify that the service was registered
   assert(regSvc.has(CAPABILITIES.MULTI_TENANCY));
@@ -512,9 +703,10 @@ Deno.test('plugin — default store generateId is invoked when creating records 
   // Get the service and call create() on the store to trigger generateId
   const service = regSvc.get(
     CAPABILITIES.MULTI_TENANCY,
-  ) as import('../../src/services/multi-tenancy-service.ts').MultiTenancyService;
+  ) as MultiTenancyService;
   assert(service != null);
-  const mockStore = (service as any).store;
+  // @ts-expect-error store is private but accessible for testing
+  const mockStore = service.store;
   assert(mockStore != null);
 
   await mockStore.create('tenant1', 'User', { name: 'test-user' });

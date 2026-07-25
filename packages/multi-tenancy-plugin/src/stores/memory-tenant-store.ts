@@ -74,19 +74,19 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     return entityMap;
   }
 
-  async findAll<E>(tenantId: string, entity: string): Promise<readonly E[]> {
+  findAll<E>(tenantId: string, entity: string): Promise<readonly E[]> {
     const scope = this.deriveScope(tenantId);
     const entityMap = this.getEntityMap(scope, entity);
-    return Array.from(entityMap.values()) as readonly E[];
+    return Promise.resolve(Array.from(entityMap.values()) as readonly E[]);
   }
 
-  async findById<E, Id>(tenantId: string, entity: string, id: Id): Promise<E | null> {
+  findById<E, Id>(tenantId: string, entity: string, id: Id): Promise<E | null> {
     const scope = this.deriveScope(tenantId);
     const entityMap = this.getEntityMap(scope, entity);
-    return (entityMap.get(String(id)) ?? null) as E | null;
+    return Promise.resolve((entityMap.get(String(id)) ?? null) as E | null);
   }
 
-  async find<E>(
+  find<E>(
     tenantId: string,
     entity: string,
     filter: Readonly<Record<string, unknown>>,
@@ -101,10 +101,10 @@ export class MemoryTenantDataStore implements ITenantDataStore {
         results.push(row);
       }
     }
-    return results as readonly E[];
+    return Promise.resolve(results as readonly E[]);
   }
 
-  async create<E>(
+  create<E>(
     tenantId: string,
     entity: string,
     data: Readonly<Record<string, unknown>>,
@@ -128,10 +128,10 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     }
 
     entityMap.set(idKey, rowData);
-    return rowData as E;
+    return Promise.resolve(rowData as E);
   }
 
-  async update<E, Id>(
+  update<E, Id>(
     tenantId: string,
     entity: string,
     id: Id,
@@ -140,20 +140,20 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     const scope = this.deriveScope(tenantId);
     const entityMap = this.getEntityMap(scope, entity);
     const existing = entityMap.get(String(id));
-    if (!existing) return null;
+    if (!existing) return Promise.resolve(null);
 
     const updated = { ...existing, ...data };
     if (typeof updated.id !== 'string' && typeof updated.id !== 'number') {
       updated.id = id;
     }
     entityMap.set(String(id), updated);
-    return updated as E;
+    return Promise.resolve(updated as E);
   }
 
-  async delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
+  delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
     const scope = this.deriveScope(tenantId);
     const entityMap = this.getEntityMap(scope, entity);
-    return entityMap.delete(String(id));
+    return Promise.resolve(entityMap.delete(String(id)));
   }
 
   close(): Promise<void> {

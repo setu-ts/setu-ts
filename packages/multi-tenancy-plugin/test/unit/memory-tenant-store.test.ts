@@ -127,7 +127,7 @@ Deno.test('MemoryTenantDataStore — schema strategy derives scope', async () =>
   // Reading back via 't1' also maps to 'schema_t1'.
   const all = await store.findAll('t1', 'User');
   assertEquals(all.length, 1);
-  assertEquals((all[0] as any).id, 'u1');
+  assertEquals((all[0] as { id: string }).id, 'u1');
 });
 
 Deno.test('MemoryTenantDataStore — database strategy derives scope', async () => {
@@ -151,6 +151,6 @@ Deno.test('MemoryTenantDataStore — strategy partitions differ by tenant', asyn
   const bItems = await store.findAll('b', 'Item');
   assertEquals(aItems.length, 1);
   assertEquals(bItems.length, 1);
-  assertEquals((aItems[0] as any).id, 'i-a');
-  assertEquals((bItems[0] as any).id, 'i-b');
+  assertEquals((aItems[0] as { id: string }).id, 'i-a');
+  assertEquals((bItems[0] as { id: string }).id, 'i-b');
 });

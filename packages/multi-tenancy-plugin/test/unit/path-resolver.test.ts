@@ -2,8 +2,33 @@
  * PathResolver tests.
  */
 import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
-import { PathResolver } from '../../src/resolvers/path-resolver.ts';
+import { extractPathTenant, PathResolver } from '../../src/resolvers/path-resolver.ts';
 import { createFakeRequest } from '../fixtures/fake-request.ts';
+
+// ---------------------------------------------------------------------------
+// Direct unit tests for the extracted pure helper
+// ---------------------------------------------------------------------------
+
+Deno.test('extractPathTenant — valid index returns segment', () => {
+  assertEquals(extractPathTenant(['acme', 'users'], 0), 'acme');
+  assertEquals(extractPathTenant(['api', 'acme', 'users'], 1), 'acme');
+});
+
+Deno.test('extractPathTenant — negative index returns null', () => {
+  assertEquals(extractPathTenant(['acme'], -1), null);
+});
+
+Deno.test('extractPathTenant — out-of-range index returns null', () => {
+  assertEquals(extractPathTenant(['acme'], 5), null);
+});
+
+Deno.test('extractPathTenant — empty segments array returns null', () => {
+  assertEquals(extractPathTenant([], 0), null);
+});
+
+Deno.test('extractPathTenant — empty string segment returns null', () => {
+  assertEquals(extractPathTenant(['acme', '', 'users'], 1), null);
+});
 
 Deno.test('PathResolver — segment 0', async () => {
   const resolver = new PathResolver({ segment: 0 });

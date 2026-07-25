@@ -52,13 +52,15 @@ Deno.test('integration — full pipeline with header resolver', async () => {
     signal: new AbortController().signal,
   } as unknown as import('@hono-enterprise/common').IRequestContext;
 
-  await mw(ctx, async () => {
+  await mw(ctx, () => {
     middlewareNextCalled = true;
+    return Promise.resolve();
   });
 
   assert(middlewareNextCalled);
-  assert((request as any).tenant != null);
-  assertEquals((request as any).tenant.id, 'acme');
+  const typedRequest = request as { tenant?: { id: string } };
+  assert(typedRequest.tenant != null);
+  assertEquals(typedRequest.tenant!.id, 'acme');
 
   // Service returns current tenant
   assertEquals(service.getCurrentTenant(ctx)?.id, 'acme');
@@ -132,8 +134,10 @@ Deno.test('integration — required:true rejects unresolvable request', async ()
   const store = new MemoryTenantDataStore();
   const service = new MultiTenancyService({ store });
   const noneResolver = {
-    resolve: () => Promise.resolve({ present: false }),
-  };
+    resolve() {
+      return Promise.resolve({ present: false } as const);
+    },
+  } as import('@hono-enterprise/common').ITenantResolver;
 
   const state = new Map();
   const request = {
@@ -169,12 +173,13 @@ Deno.test('integration — required:true rejects unresolvable request', async ()
   let handlerNextCalled = false;
   const mw = tenantMiddleware({
     service,
-    resolvers: [noneResolver as any],
+    resolvers: [noneResolver],
     options: { required: true },
   });
 
-  await mw(ctx, async () => {
+  await mw(ctx, () => {
     handlerNextCalled = true;
+    return Promise.resolve();
   });
 
   assertEquals(shortCircuitStatus, 400);
