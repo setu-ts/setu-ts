@@ -10,11 +10,31 @@
  * @module
  */
 
-import type { IHttpAdapter, IRequest, IResponse, ServerHandle } from '@hono-enterprise/common';
+import type {
+  IHttpAdapter,
+  IRequest,
+  IResponse,
+  ServerHandle,
+  WebSocketUpgradeRouter,
+} from '@hono-enterprise/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import type {
+  NodeIncomingMessage,
+  RawUpgradeSocket,
+  WsModuleLike,
+  WsServerLike,
+} from './node-ws-upgrader.ts';
+import {
+  asUpgradeEmitter,
+  bindWsSocketToSink,
+  createUpgradeRequest,
+  loadWsModule,
+  rejectRawUpgrade,
+} from './node-ws-upgrader.ts';
 
 // ---------------------------------------------------------------------------
 // Host seam — what the adapter depends on
@@ -41,6 +61,10 @@ export interface NodeServeHost {
 
 /**
  * Node.js HTTP server handle (returned by `@hono/node-server` `serve()`).
+ *
+ * `serve()` returns node-server's `ServerType`, which is a `node:http.Server`
+ * (or its HTTP/2 equivalents) — so the `upgrade` event this adapter needs for
+ * WebSocket support is available on it.
  */
 export interface NodeServer {
   /**
@@ -77,12 +101,104 @@ const defaultNodeServeHost: NodeServeHost = {
 export class NodeHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: NodeServer | null = null;
+  readonly #upgrades = new UpgradeRouterStore();
+  #wsModule: WsModuleLike | null;
+  #wsServer: WsServerLike | null = null;
+  #pendingProtocol: string | undefined;
+
+  constructor(wsModule?: WsModuleLike) {
+    this.#wsModule = wsModule ?? null;
+  }
 
   /**
    * Stores the handler set by `setHandler`.
    */
   setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handler = handler;
+  }
+
+  /**
+   * Stores the WebSocket upgrade router set by `setUpgradeRouter`.
+   */
+  setUpgradeRouter(router: WebSocketUpgradeRouter): void {
+    this.#upgrades.set(router);
+  }
+
+  /** Whether a router has been installed — the gate for attaching the listener. */
+  get hasUpgradeRouter(): boolean {
+    return this.#upgrades.hasRouter;
+  }
+
+  /**
+   * Attaches the raw `upgrade` listener to a freshly-created server.
+   *
+   * A no-op when no router was installed (so a plain HTTP app never loads `ws`)
+   * or when the server handle emits no events.
+   *
+   * @param server - The server returned by `serve()`
+   */
+  attachUpgradeListener(server: NodeServer): void {
+    const emitter = this.#upgrades.hasRouter ? asUpgradeEmitter(server) : null;
+    if (emitter === null) {
+      return;
+    }
+
+    emitter.on('upgrade', (...args: never[]): void => {
+      const [incoming, socket, head] = args as unknown as [
+        NodeIncomingMessage,
+        RawUpgradeSocket,
+        unknown,
+      ];
+      // The listener cannot be async — Node ignores a returned promise — so the
+      // rejection is handled here rather than escaping as an unhandled one.
+      void this.#handleUpgrade(incoming, socket, head).catch(() => {
+        rejectRawUpgrade(socket, 500);
+      });
+    });
+  }
+
+  /**
+   * Runs the router and completes or refuses the handshake.
+   */
+  async #handleUpgrade(
+    incoming: NodeIncomingMessage,
+    socket: RawUpgradeSocket,
+    head: unknown,
+  ): Promise<void> {
+    const request = createUpgradeRequest(incoming);
+    const decision = await this.#upgrades.consult(request);
+
+    if (decision === null) {
+      // Not one of our routes. Leaving the socket alone would hang the client,
+      // and no other listener is expected on a framework-owned server.
+      rejectRawUpgrade(socket, 400);
+      return;
+    }
+    if (!decision.accept) {
+      rejectRawUpgrade(socket, decision.status);
+      return;
+    }
+
+    this.#wsModule ??= await loadWsModule();
+    this.#wsServer ??= new this.#wsModule.WebSocketServer({
+      noServer: true,
+      // `ws` selects the subprotocol through this callback rather than through
+      // handleUpgrade, so the already-negotiated choice is handed over via
+      // #pendingProtocol. handleUpgrade resolves protocols synchronously, so
+      // no other upgrade can interleave between the assignment and this read.
+      handleProtocols: () => this.#pendingProtocol ?? false,
+    });
+
+    this.#pendingProtocol = decision.protocol;
+    this.#wsServer.handleUpgrade(incoming, socket, head, (ws) => {
+      bindWsSocketToSink(ws, decision.sink);
+    });
+  }
+
+  /** Shuts down the `ws` server, when one was ever created. */
+  closeWebSocketServer(): void {
+    this.#wsServer?.close();
+    this.#wsServer = null;
   }
 
   /**
@@ -137,17 +253,17 @@ export class NodeHttpAdapter implements IHttpAdapter {
   #host: NodeServeHost;
   #handle: NodeHttpServerHandle;
 
-  constructor(host?: NodeServeHost) {
+  constructor(host?: NodeServeHost, wsModule?: WsModuleLike) {
     this.#host = host ?? defaultNodeServeHost;
-    this.#handle = new NodeHttpServerHandle();
+    this.#handle = new NodeHttpServerHandle(wsModule);
   }
 
   setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handle.setHandler(handler);
   }
 
-  fetch(request: Request): Promise<Response> {
-    return this.#handle.createFetchHandler()(request);
+  setUpgradeRouter(router: WebSocketUpgradeRouter): void {
+    this.#handle.setUpgradeRouter(router);
   }
 
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
@@ -158,7 +274,15 @@ export class NodeHttpAdapter implements IHttpAdapter {
       ...(hostname !== undefined && { hostname }),
     });
     this.#handle.server = server;
+    // WebSocket upgrades never reach the fetch callback on Node — they arrive
+    // on the server's raw `upgrade` event, which only exists once serve() has
+    // produced a server.
+    this.#handle.attachUpgradeListener(server);
     return this.#handle;
+  }
+
+  fetch(request: Request): Promise<Response> {
+    return this.#handle.createFetchHandler()(request);
   }
 
   close(handle: ServerHandle): Promise<void> {
@@ -166,6 +290,7 @@ export class NodeHttpAdapter implements IHttpAdapter {
       throw new Error('Invalid server handle for NodeHttpAdapter');
     }
 
+    handle.closeWebSocketServer();
     if (handle.server !== null) {
       handle.server.close();
       handle.server = null;

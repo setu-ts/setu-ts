@@ -36,6 +36,56 @@ export type { WebWorkerGlobals, WebWorkerLike } from './adapters/shared/web-work
 export { createNodeWorkerHost } from './adapters/node/node-worker-host.ts';
 export type { NodeWorkerLike, NodeWorkerModules } from './adapters/node/node-worker-host.ts';
 
+// WebSocket upgrade — shared primitives
+export { isWebSocketUpgradeRequest } from './adapters/shared/upgrade-detection.ts';
+export {
+  createWebSocketTransport,
+  normalizeFrame,
+  toReadyState,
+  toTransportError,
+} from './adapters/shared/web-socket-transport.ts';
+export type { WebSocketLike } from './adapters/shared/web-socket-transport.ts';
+
+// WebSocket upgrade — per-runtime seams
+export { bindDenoSocketToSink } from './adapters/deno/deno-ws-upgrader.ts';
+export type { DenoWebSocketLike, DenoWebSocketUpgrade } from './adapters/deno/deno-ws-upgrader.ts';
+
+export {
+  adaptWsModule,
+  asUpgradeEmitter,
+  bindWsSocketToSink,
+  createUpgradeRequest,
+  createWsTransport,
+  loadWsModule,
+  rejectRawUpgrade,
+  toWsReadyState,
+} from './adapters/node/node-ws-upgrader.ts';
+export type {
+  NodeIncomingMessage,
+  RawUpgradeSocket,
+  UpgradeEmitter,
+  WsModuleLike,
+  WsServerLike,
+  WsSocketLike,
+} from './adapters/node/node-ws-upgrader.ts';
+
+export { createBunWebSocketHandlers } from './adapters/bun/bun-ws-upgrader.ts';
+export type {
+  BunServerWebSocket,
+  BunSocketData,
+  BunWebSocketHandlers,
+} from './adapters/bun/bun-ws-upgrader.ts';
+
+export {
+  bindCloudflareSocketToSink,
+  createDefaultCloudflareWebSocketHost,
+} from './adapters/workers/cf-ws-upgrader.ts';
+export type {
+  CloudflareServerSocket,
+  CloudflareWebSocketHost,
+  CloudflareWebSocketPair,
+} from './adapters/workers/cf-ws-upgrader.ts';
+
 // HTTP adapters
 export { DenoHttpAdapter } from './adapters/deno/deno-http-adapter.ts';
 export type { DenoServeHost, DenoServer } from './adapters/deno/deno-http-adapter.ts';
