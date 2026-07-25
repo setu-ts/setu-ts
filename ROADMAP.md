@@ -4054,6 +4054,87 @@ importing another plugin.
 
 ---
 
+## Milestone 46: WebSocket Plugin — Bidirectional Real-Time Across All Four Runtimes
+
+**Objective:** Give applications full-duplex, bidirectional real-time messaging, completing the
+real-time story that the SSE plugin (M43) started one-way. Registers an `IWebSocketService` under a
+new `CAPABILITIES.WEBSOCKET = 'websocket'` token. Applications declare WebSocket routes with
+lifecycle handlers (`onOpen`/`onMessage`/`onClose`/`onError`), address connections individually or
+through named **rooms**, and get heartbeat-based dead-peer detection — all without touching a
+runtime-specific socket API.
+
+> **Why the upgrade cannot ride the normal pipeline.** A WebSocket handshake needs the **native**
+> `Request` and answers with a 101 that carries a socket. The framework's `IRequest` deliberately
+> carries no native request, and `mapWebRequestToFrameworkRequest` pre-reads the body via
+> `arrayBuffer()` — which **disturbs** the request and makes `Deno.upgradeWebSocket` fail outright.
+> The upgrade therefore has to be intercepted inside the HTTP adapter, the one component that holds
+> the native request and owns the runtime's serve loop (AI_GUIDELINES §4.3). That is a single,
+> flagged widening of `IHttpAdapter`, not a new server.
+
+### Package: `@hono-enterprise/websocket-plugin`
+
+Registers a `WebSocketService` (`IWebSocketService`) under `CAPABILITIES.WEBSOCKET`. The service
+owns a path→handlers route table compiled once at registration, a connection registry, and named
+`WebSocketRoom` broadcast groups (the bidirectional analogue of the SSE plugin's channels). A
+`websocket` health indicator reports `{ available, connections, rooms }`; `onClose` closes every
+live connection with code `1001` (going away). Exports `WebSocketService`, the room/connection
+types, and `WebSocketUnavailableError`.
+
+### Upgrade seam: `setUpgradeRouter` on `IHttpAdapter` (`common` widening)
+
+One new **optional** member on the committed `IHttpAdapter`, alongside the M44 `fs?` and M45
+`workers?` precedents:
+
+```typescript
+setUpgradeRouter?(router: WebSocketUpgradeRouter): void;
+```
+
+The plugin installs a router at `register()` time. On every inbound upgrade request the adapter asks
+the router for a `WebSocketUpgradeDecision` — accept (with the event sink the adapter binds the
+native socket into), reject (with a status), or `null` to fall through to the ordinary HTTP
+pipeline. Each adapter then performs its own runtime-native handshake, so the runtime differences
+stay contained in `packages/runtime` and never leak into the plugin:
+
+- **Deno** — `Deno.upgradeWebSocket(request)` inside the fetch path, before the shared mapping runs,
+  returning the handshake `response`.
+- **Cloudflare Workers** — `new WebSocketPair()` + `server.accept()`, answering
+  `new Response(null, { status: 101, webSocket: client })`.
+- **Bun** — `server.upgrade(request, { data })` inside `Bun.serve`'s fetch callback, returning
+  `undefined`; the serve-time `websocket` handler object routes open/message/close/error back to the
+  sink. Requires threading Bun's `server` argument through `BunServeHost`.
+- **Node** — the raw `upgrade` event on the `node:http` server that `@hono/node-server` `serve()`
+  returns, with `npm:ws`'s `WebSocketServer({ noServer: true }).handleUpgrade(...)` performing the
+  handshake. `ws` is an inject-or-lazy optional dependency (AI_GUIDELINES §12.2), never a hard one.
+
+> **Why not `@hono/node-ws`.** Verified against its shipped types: `createNodeWebSocket` requires a
+> concrete `Hono` app instance and drives the handshake through Hono's `c.env` plus private
+> connection symbols, while `NodeHttpAdapter` hands `serve()` a bare fetch **function**. It also
+> peer-depends on `@hono/node-server@^1.19.11` against the `^2.0.0` this repo pins. The raw
+> `upgrade` event with `ws` uses only public Node APIs and stays independent of node-server
+> internals.
+
+Every upgrader hangs off the adapters' existing injectable host seams (`DenoServeHost`,
+`BunServeHost`, `NodeServeHost`, plus a new Workers pair factory), so all four are unit-tested with
+fakes on any runtime, and Deno additionally gets a real-socket e2e test that binds a port and
+connects a genuine client.
+
+### Doc Deliverables (shipped in this milestone's PR)
+
+- [ ] **PUBLIC_API.md** — `CAPABILITIES.WEBSOCKET`; the WebSocket contract type group in `common`
+      (`IWebSocketService`, `IWebSocketConnection`, `WebSocketRoom`, `WebSocketHandlers`,
+      `WebSocketUpgradeRouter`, `WebSocketUpgradeDecision`, `WebSocketEventSink`,
+      `IWebSocketTransport`, `WebSocketReadyState`, `WebSocketCloseEvent`); the `setUpgradeRouter`
+      widening on the `IHttpAdapter` listing; the four upgraders in the runtime export tables; a
+      full `WebSocketPlugin()` section.
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row 46.
+- [ ] **CLAUDE.md** — Current status M46 entry; Next milestone repointed.
+- [ ] **README.md** — flip the WebSocket row from `🚧 Planned` to shipped.
+- [ ] **ARCHITECTURE.md** — WebSocket moves out of the "future extension points" table into the
+      shipped plugin set.
+- [ ] **README** — `packages/websocket-plugin/README.md`.
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -4235,3 +4316,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 43        | ✅     | sse-plugin           |
 | 44        | ✅     | react-router-plugin  |
 | 45        | ✅     | worker-pool-plugin   |
+| 46        | ⬜     | websocket-plugin     |
