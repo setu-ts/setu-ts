@@ -1,6 +1,6 @@
 /**
  * Pino-backed structured logger. Pino is an optional dependency — it is
- * loaded via a real `import('npm:pino')` when the async factory
+ * loaded via a real `import('npm:pino@10.x')` when the async factory
  * {@linkcode PinoLogger.create} is used, or can be injected through the
  * `pinoFactory` option for tests and pre-loaded clients.
  *
@@ -71,7 +71,7 @@ export interface PinoLoggerOptions {
   /** Bindings merged into every entry produced by this logger. */
   readonly bindings?: LogMetadata;
   /**
-   * Inject a pre-loaded Pino factory, bypassing the `import('npm:pino')`
+   * Inject a pre-loaded Pino factory, bypassing the `import('npm:pino@10.x')`
    * path. Useful for tests and environments where the module is already
    * available in-memory.
    *
@@ -123,7 +123,7 @@ export class PinoLogger implements ILogger {
    *
    * When `pinoFactory` is provided in options, the factory is called
    * synchronously and no import is performed. Otherwise, Pino is loaded
-   * via `await import('npm:pino')`.
+   * via `await import('npm:pino@10.x')`.
    *
    * @param options - Configuration
    * @returns A new PinoLogger instance
@@ -209,7 +209,7 @@ export class PinoLogger implements ILogger {
   }
 
   /**
-   * Loads the real Pino module lazily via `import('npm:pino')`. Wraps import
+   * Loads the real Pino module lazily via `import('npm:pino@10.x')`. Wraps import
    * failures in a clear error message.
    *
    * @returns The Pino factory function
@@ -217,8 +217,8 @@ export class PinoLogger implements ILogger {
    */
   static async #loadPino(): Promise<PinoFactory> {
     try {
-      // deno-lint-ignore no-unversioned-import -- pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      const mod = await import('npm:pino');
+      // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
+      const mod = await import('npm:pino@10.x');
       return normalizePinoFactory(mod);
     } catch {
       throw new Error(

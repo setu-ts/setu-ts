@@ -540,4 +540,4 @@ export class MetadataStore implements IMetadataStore {
  *
  * @since 0.1.0
  */
-export const metadataStore = new MetadataStore();
+export const metadataStore: MetadataStore = new MetadataStore();

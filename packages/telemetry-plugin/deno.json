@@ -1,6 +1,7 @@
 {
   "name": "@hono-enterprise/telemetry-plugin",
   "version": "0.1.0",
+  "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
     "@hono-enterprise/common": "../common/src/index.ts"

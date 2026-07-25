@@ -40,6 +40,7 @@
     "npm:nats@2": "2.29.3",
     "npm:nodemailer@9": "9.0.3",
     "npm:pino@*": "10.3.1",
+    "npm:pino@10": "10.3.1",
     "npm:react-router@8": "8.3.0_react@19.2.7",
     "npm:ws@^8.18.0": "8.21.1",
     "npm:zod@^3.24.0": "3.25.76"

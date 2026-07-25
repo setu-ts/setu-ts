@@ -47,6 +47,7 @@
     "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname packages",
     "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
     "audit": "deno audit --level=high",
+    "publish:check": "deno publish --dry-run",
     "lint": "deno lint",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"
@@ -82,5 +83,8 @@
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",
     "@std/testing": "jsr:@std/testing@^1.0.19"
+  },
+  "publish": {
+    "exclude": ["**/test"]
   }
 }
