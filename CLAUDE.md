@@ -403,8 +403,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   allow-list, a `websocket` health indicator, and an `onClose` that closes every connection with
   `1001`. Real-socket e2e on Deno caught a bug no fake would have: the connection context was built
   lazily in `onOpen`, which fires after the handshake response is returned, by which point the
-  runtime has closed the native request — it is now snapshotted in the router. Outstanding: the root
-  `README.md` WebSocket row was deferred at the maintainer's request) — complete (PR pending)
+  runtime has closed the native request — it is now snapshotted in the router. Code review then
+  caught that `maxConnections` could be exceeded, because connections registered only at `onOpen`
+  while the capacity check ran before the handshake completed; slots are now claimed at accept time
+  and released by all four adapters through `sink.onClose({ code: 1006 })` when a handshake fails
+  after acceptance, so malformed upgrades cannot starve the limit. Outstanding: the root `README.md`
+  WebSocket row was deferred at the maintainer's request) — complete (PR #66)
 - **Next milestone** — **Milestone 31** (`packages/feature-flags-plugin`); resumes the main plugin
   sequence (M31–M40 follow) unless reprioritized.
 
