@@ -24,8 +24,15 @@ export interface FlagDefinition {
 
 // ── Flag provider port ─────────────────────────────────────────────────────
 
-/** Concrete provider type identifier. */
-export type FlagProviderType = 'config' | 'memory' | 'database';
+/**
+ * Provider identity reported by {@linkcode FlagProvider.type}, and surfaced as
+ * `data.provider` by the plugin's `feature-flags` health indicator.
+ *
+ * Includes `'custom'` so a provider supplied through the `'custom'` options arm
+ * can report its own identity honestly rather than masquerading as one of the
+ * three built-ins — otherwise the health indicator would name the wrong provider.
+ */
+export type FlagProviderType = 'config' | 'memory' | 'database' | 'custom';
 
 /** Status reported by a flag provider. */
 export interface FlagProviderStatus {

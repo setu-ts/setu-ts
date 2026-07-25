@@ -7,10 +7,7 @@
 import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { HealthCheckResult, HealthIndicatorFn } from '@hono-enterprise/common';
-import type {
-  FeatureFlagsPluginOptions,
-  FlagProvider,
-} from '../interfaces/index.ts';
+import type { FeatureFlagsPluginOptions, FlagProvider } from '../interfaces/index.ts';
 import { ConfigProvider } from '../providers/config-provider.ts';
 import { MemoryProvider } from '../providers/memory-provider.ts';
 import { DatabaseProvider } from '../providers/database-provider.ts';

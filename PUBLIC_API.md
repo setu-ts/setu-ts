@@ -3133,10 +3133,17 @@ app.router.get('/beta', {
 | `MemoryProvider`               | class            | Mutable in-process provider with `setFlag`/`removeFlag`/`replaceFlags`        |
 | `DatabaseProvider`             | class            | Polled database-backed provider                                               |
 | `createFlagGuard`              | function         | Free-function route guard — short-circuits to redirect/404 when flag is off   |
-| `FlagProvider`                 | interface        | Port implemented by all providers                                             |
+| `FlagProvider`                 | interface        | Port implemented by all providers, and by the `'custom'` arm's instance       |
 | `FlagProviderStatus`           | interface        | Health status shape (`{ healthy, detail? }`)                                  |
+| `FlagProviderType`             | type             | Provider identity: `'config' \| 'memory' \| 'database' \| 'custom'`           |
 | `FlagDefinition`               | interface        | `{ enabled, percentage?, users? }`                                            |
 | `IFlagStore`                   | interface        | Structural facade for `DatabaseProvider`                                      |
+| `FeatureFlagsPluginOptions`    | type             | Discriminated union of the four provider option shapes                        |
+| `ConfigProviderOptions`        | interface        | The `'config'` arm — requires `options.flags`                                 |
+| `MemoryProviderOptions`        | interface        | The `'memory'` arm — `options.flags` optional                                 |
+| `DatabaseProviderOptions`      | interface        | The `'database'` arm — requires `options.store`                               |
+| `CustomProviderOptions`        | interface        | The `'custom'` arm — requires `options.instance`                              |
+| `FlagGuardOptions`             | interface        | `createFlagGuard` options (`fallback`, `statusCode`, `context`)               |
 | `IFeatureFlags`, `FlagContext` | type (re-export) | From `@hono-enterprise/common`                                                |
 
 ### Notes

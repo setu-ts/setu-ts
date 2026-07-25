@@ -52,7 +52,7 @@ describe('FeatureFlagsPlugin', () => {
   it('createProvider returns custom instance for "custom" arm', () => {
     const ctx = createFakeContext();
     const customInstance: FlagProvider = {
-      type: 'config',
+      type: 'custom',
       isEnabled: (): boolean => false,
       start: (): Promise<void> => Promise.resolve(),
       stop: (): Promise<void> => Promise.resolve(),
@@ -77,7 +77,7 @@ describe('FeatureFlagsPlugin', () => {
     const ctx = createFakeContext();
     const startCalled = { value: false };
     const customInstance: FlagProvider = {
-      type: 'config',
+      type: 'custom',
       isEnabled: (): boolean => false,
       start: (): Promise<void> => {
         startCalled.value = true;
@@ -111,7 +111,7 @@ describe('FeatureFlagsPlugin', () => {
 
   it('health indicator returns "up" for a healthy provider', async () => {
     const fakeProvider: FlagProvider = {
-      type: 'config',
+      type: 'custom',
       isEnabled: (): boolean => false,
       start: (): Promise<void> => Promise.resolve(),
       stop: (): Promise<void> => Promise.resolve(),
@@ -127,11 +127,12 @@ describe('FeatureFlagsPlugin', () => {
     const indicator = ctx.healthIndicators.get('feature-flags');
     const result = await indicator!();
     expect(result.status).toBe('up');
+    expect(result.data).toEqual({ provider: 'custom' });
   });
 
   it('health indicator returns "degraded" for an unhealthy provider', async () => {
     const fakeProvider: FlagProvider = {
-      type: 'config',
+      type: 'custom',
       isEnabled: (): boolean => false,
       start: (): Promise<void> => Promise.resolve(),
       stop: (): Promise<void> => Promise.resolve(),
@@ -150,13 +151,38 @@ describe('FeatureFlagsPlugin', () => {
     const indicator = ctx.healthIndicators.get('feature-flags');
     const result = await indicator!();
     expect(result.status).toBe('degraded');
-    expect((result.data as Record<string, unknown> | undefined)?.detail).toBe('poll failed');
+    expect(result.data).toEqual({ provider: 'custom', detail: 'poll failed' });
+  });
+
+  it('health indicator omits detail when an unhealthy provider reports none', async () => {
+    const fakeProvider: FlagProvider = {
+      type: 'custom',
+      isEnabled: (): boolean => false,
+      start: (): Promise<void> => Promise.resolve(),
+      stop: (): Promise<void> => Promise.resolve(),
+      status: (): import('../../src/interfaces/index.ts').FlagProviderStatus => ({
+        healthy: false,
+      }),
+    };
+    const ctx = createFakeContext();
+    const plugin = FeatureFlagsPlugin({
+      provider: 'custom',
+      options: { instance: fakeProvider },
+    });
+    await plugin.register(ctx.ctx);
+
+    const indicator = ctx.healthIndicators.get('feature-flags');
+    const result = await indicator!();
+    expect(result.status).toBe('degraded');
+    // `detail` must be ABSENT, not present-and-undefined (exactOptionalPropertyTypes).
+    expect(result.data).toEqual({ provider: 'custom' });
+    expect(Object.keys(result.data as Record<string, unknown>)).toEqual(['provider']);
   });
 
   it('onClose calls service.stop()', async () => {
     let stopped = false;
     const fakeProvider: FlagProvider = {
-      type: 'config',
+      type: 'custom',
       isEnabled: (): boolean => false,
       start: (): Promise<void> => Promise.resolve(),
       stop: (): Promise<void> => {

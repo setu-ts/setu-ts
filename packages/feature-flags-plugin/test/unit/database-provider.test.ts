@@ -228,6 +228,30 @@ describe('DatabaseProvider', () => {
       await provider.stop();
     });
 
+    it('coerces a non-Error rejection into the status detail', async () => {
+      // A store that rejects with a bare string exercises the String(err)
+      // arm of the poll catch, and must not crash the poll.
+      let callCount = 0;
+      const store: IFlagStore = {
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
+          callCount++;
+          if (callCount === 1) return Promise.resolve({ 'stable': { enabled: true } });
+          return Promise.reject('connection reset');
+        },
+      };
+      const runtime = new FakeRuntimeServices();
+      // No logger injected — also covers the `logger?.warn` absent arm.
+      const provider = new DatabaseProvider({ store }, runtime);
+      await provider.start();
+
+      await runtime.capturedCallback!();
+
+      expect(provider.isEnabled('stable')).toBe(true);
+      expect(provider.status()).toEqual({ healthy: false, detail: 'connection reset' });
+
+      await provider.stop();
+    });
+
     it('subsequent successful poll clears the recorded failure', async () => {
       // start() succeeds on first load (callCount=1).
       // Driven polls 2-4 fail, poll 5 succeeds and clears the error.
