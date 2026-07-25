@@ -49,6 +49,61 @@ export function createLoadContextFactory(
 }
 
 /**
+ * Names a rejected `loadRequestHandler` result for the error message.
+ *
+ * @param value - The value the seam resolved to
+ * @returns A short human description
+ * @since 0.2.0
+ */
+function describeSeamResult(value: unknown): string {
+  if (typeof value === 'function') {
+    return 'a bare request handler function (the pre-0.2.0 shape)';
+  }
+  if (value === null || value === undefined) {
+    return String(value);
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    return `an object with keys [${keys.join(', ')}]`;
+  }
+  return `a ${typeof value}`;
+}
+
+/**
+ * Validates that an injected `loadRequestHandler` resolved to a usable
+ * {@linkcode SsrRuntime}, and narrows it.
+ *
+ * Without this check a seam returning the pre-0.2.0 bare handler registers
+ * cleanly, reports a healthy indicator, and then fails EVERY request with an
+ * opaque 500 when the missing `createLoadContext` is invoked per request —
+ * the same silent-500 class of defect this contract exists to remove. Failing
+ * during `register()` turns that into one actionable startup error.
+ *
+ * @param value - Whatever the seam resolved to
+ * @returns The value narrowed to an `SsrRuntime`
+ * @throws {Error} When `handler` or `createLoadContext` is not a function
+ * @since 0.2.0
+ */
+export function assertSsrRuntime(value: unknown): SsrRuntime {
+  const candidate = value as Partial<SsrRuntime> | null | undefined;
+
+  if (
+    typeof candidate?.handler !== 'function' ||
+    typeof candidate?.createLoadContext !== 'function'
+  ) {
+    throw new Error(
+      `'loadRequestHandler' must resolve to { handler, createLoadContext }, but got ` +
+        `${describeSeamResult(value)}. React Router 8 requires a real 'RouterContextProvider' ` +
+        `instance for every request, so the seam must return a 'createLoadContext' factory ` +
+        `alongside the handler — sourced from the same 'react-router' module the handler came ` +
+        `from. See docs/react-router-dev.md for a worked development-mode seam.`,
+    );
+  }
+
+  return candidate as SsrRuntime;
+}
+
+/**
  * Pure function that assembles an RR request handler from a pre-loaded build
  * and the `createRequestHandler` factory.
  *
@@ -113,6 +168,13 @@ export async function loadRequestHandler(
     throw new Error(
       `Failed to import 'npm:react-router@8'. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (typeof rr.createRequestHandler !== 'function') {
+    throw new Error(
+      `The loaded 'react-router' module exposes no 'createRequestHandler' export. ` +
+        `Ensure the resolved package is React Router 8 or later.`,
     );
   }
 

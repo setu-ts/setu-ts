@@ -179,6 +179,35 @@ describe('react-router-plugin', () => {
     expect(ssrService).toBeInstanceOf(SsrService);
   });
 
+  it('register() fails fast when loadRequestHandler returns the pre-0.2.0 bare handler', async () => {
+    // Without the startup assertion this registers cleanly, reports a healthy
+    // indicator, and then 500s on EVERY request when createLoadContext is
+    // invoked per request — an opaque failure with no pointer to the cause.
+    const plugin = ReactRouterPlugin({
+      serverBuildPath: './build/server',
+      loadRequestHandler: (() =>
+        // deno-lint-ignore require-await
+        Promise.resolve(async () => new Response('ok'))) as unknown as never,
+    });
+
+    await expect(plugin.register(buildFakeCtx())).rejects.toThrow(
+      'a bare request handler function (the pre-0.2.0 shape)',
+    );
+  });
+
+  it('register() does not register the SSR capability when the seam shape is wrong', async () => {
+    const plugin = ReactRouterPlugin({
+      serverBuildPath: './build/server',
+      loadRequestHandler: (() => Promise.resolve({})) as unknown as never,
+    });
+    const fakeCtx = buildFakeCtx();
+
+    await expect(plugin.register(fakeCtx)).rejects.toThrow();
+
+    // Nothing half-registered: no service, so the kernel cannot serve broken SSR.
+    expect(fakeCtx.services.get(CAPABILITIES.SSR)).toBeUndefined();
+  });
+
   it('registers catch-all for all 7 verbs at /* (default basename)', async () => {
     const routes = new Map<string, string[]>();
     const plugin = ReactRouterPlugin({

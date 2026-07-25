@@ -9,6 +9,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   assembleHandler,
+  assertSsrRuntime,
   bridgeRequestToRR,
   CAPABILITIES,
   createLoadContextFactory,
@@ -55,6 +56,10 @@ describe('barrel exports', () => {
 
   it('exports createLoadContextFactory', () => {
     expect(typeof createLoadContextFactory).toBe('function');
+  });
+
+  it('exports assertSsrRuntime', () => {
+    expect(typeof assertSsrRuntime).toBe('function');
   });
 
   it('exports the servicesContext and userContext keys', () => {

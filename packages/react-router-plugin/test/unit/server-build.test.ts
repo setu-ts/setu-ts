@@ -8,6 +8,7 @@ import { expect } from '@std/expect';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import {
   assembleHandler,
+  assertSsrRuntime,
   createLoadContextFactory,
   loadRequestHandler,
 } from '../../src/handler/server-build.ts';
@@ -141,6 +142,63 @@ describe('server-build', () => {
     expect(() => createLoadContextFactory({ RouterContextProvider: 'nope' })).toThrow(
       "exposes no 'RouterContextProvider' export",
     );
+  });
+
+  it('assertSsrRuntime returns the runtime when both members are functions', () => {
+    const runtime = {
+      // deno-lint-ignore require-await
+      handler: async () => new Response('ok'),
+      createLoadContext: createFakeLoadContextFactory(),
+    };
+
+    expect(assertSsrRuntime(runtime)).toBe(runtime);
+  });
+
+  it('assertSsrRuntime rejects a bare handler and names the pre-0.2.0 shape', () => {
+    // deno-lint-ignore require-await
+    const legacy = async () => new Response('ok');
+
+    expect(() => assertSsrRuntime(legacy)).toThrow(
+      'a bare request handler function (the pre-0.2.0 shape)',
+    );
+  });
+
+  it('assertSsrRuntime rejects an object missing createLoadContext and lists its keys', () => {
+    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow(
+      'an object with keys [handler]',
+    );
+  });
+
+  it('assertSsrRuntime rejects a runtime whose handler is not a function', () => {
+    expect(() => assertSsrRuntime({ handler: 'nope', createLoadContext: () => {} })).toThrow(
+      'must resolve to { handler, createLoadContext }',
+    );
+  });
+
+  it('assertSsrRuntime rejects null and undefined by name', () => {
+    expect(() => assertSsrRuntime(null)).toThrow('but got null');
+    expect(() => assertSsrRuntime(undefined)).toThrow('but got undefined');
+  });
+
+  it('assertSsrRuntime names a primitive by type', () => {
+    expect(() => assertSsrRuntime(42)).toThrow('a number');
+  });
+
+  it('loadRequestHandler throws when the module has no createRequestHandler', async () => {
+    // A real build module, so the failure is attributable to the rr module.
+    const tmp = await Deno.makeTempDir({ prefix: 'rr-crh-' });
+    try {
+      const buildPath = `${tmp}/build.mjs`;
+      await Deno.writeTextFile(buildPath, 'export default { routes: {} };');
+
+      await expect(
+        loadRequestHandler(buildPath, 'production', {
+          rrImportHook: () => Promise.resolve({ RouterContextProvider: class {} }),
+        }),
+      ).rejects.toThrow("exposes no 'createRequestHandler' export");
+    } finally {
+      await Deno.remove(tmp, { recursive: true });
+    }
   });
 
   it('loadRequestHandler rejects when server build path does not exist', async () => {

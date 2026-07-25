@@ -25,6 +25,7 @@ export { SsrService } from './services/ssr-service.ts';
 export { createStaticAssetHandler } from './assets/static-assets.ts';
 export {
   assembleHandler,
+  assertSsrRuntime,
   createLoadContextFactory,
   loadRequestHandler,
 } from './handler/server-build.ts';

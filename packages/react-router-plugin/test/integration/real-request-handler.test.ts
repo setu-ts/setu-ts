@@ -19,6 +19,15 @@ import { assembleHandler, createLoadContextFactory } from '../../src/handler/ser
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
 import { servicesContext, userContext } from '../../src/handler/context-keys.ts';
 
+// Resolved once so the suite genuinely SKIPS when the optional npm dependency
+// is unavailable, rather than reporting a failure for an absent package.
+let rrModule: Record<string, unknown> | null = null;
+try {
+  rrModule = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+} catch {
+  rrModule = null;
+}
+
 /**
  * Minimal-but-real `ServerBuild`: enough shape for `createRequestHandler` to
  * route a GET `/` to a single root route whose loader reads the context.
@@ -142,9 +151,9 @@ function buildCtx(registry: IServiceRegistry): {
   };
 }
 
-describe('real createRequestHandler — loadContext contract', () => {
+describe('real createRequestHandler — loadContext contract', { ignore: rrModule === null }, () => {
   it('renders 200 and exposes servicesContext to a real loader', async () => {
-    const rr = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+    const rr = rrModule!;
     const registry = { get: () => undefined } as unknown as IServiceRegistry;
 
     // deno-lint-ignore no-explicit-any
@@ -177,7 +186,7 @@ describe('real createRequestHandler — loadContext contract', () => {
   });
 
   it('a plain-object context is rejected by the real handler (the original defect)', async () => {
-    const rr = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+    const rr = rrModule!;
     const createRequestHandler = rr.createRequestHandler as (
       build: unknown,
       mode: string,
@@ -198,8 +207,8 @@ describe('real createRequestHandler — loadContext contract', () => {
     expect(response.status).toBe(500);
   });
 
-  it('createLoadContextFactory produces an instance of the real provider class', async () => {
-    const rr = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+  it('createLoadContextFactory produces an instance of the real provider class', () => {
+    const rr = rrModule!;
     const Provider = rr.RouterContextProvider as new () => unknown;
 
     const context = createLoadContextFactory(rr)();

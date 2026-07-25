@@ -1694,6 +1694,10 @@ app.router.get('/api/health', (ctx) => {
 - `createLoadContextFactory(rr): () => RouterLoadContext` — pure seam building the per-request
   context factory from a loaded `react-router` module namespace. **@throws** when the module has no
   `RouterContextProvider` export.
+- `assertSsrRuntime(value): SsrRuntime` — validates an injected `loadRequestHandler` result during
+  `register()`. **@throws** a message naming what was received when `handler` or `createLoadContext`
+  is missing — notably for a bare handler function, the pre-`populateLoadContext` shape. Without
+  this, a wrong-shaped seam registers cleanly and then fails every request with an opaque 500.
 - `bridgeRequestToRR(ctx, handler, createLoadContext, populateLoadContext?): Promise<HandlerResult>`
   — bridges a kernel `IRequestContext` into a web `Request` (omitting the body for GET/HEAD), builds
   a fresh context provider, invokes the RR handler, and maps the resulting `Response` back onto

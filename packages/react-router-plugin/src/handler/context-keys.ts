@@ -18,7 +18,9 @@ import type { RouterContextKey } from '../interfaces/index.ts';
  * Key holding the kernel {@linkcode IServiceRegistry} for the current request.
  *
  * Always set by the plugin, so `context.get(servicesContext)` never returns the
- * `null` default on a request served through {@linkcode SsrService}.
+ * `null` default on a request served through the SSR catch-all. The `| null` in
+ * the type exists only because the key needs a default at all — React Router's
+ * `get()` throws for an unset key that has none.
  *
  * @example
  * ```typescript

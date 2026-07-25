@@ -166,8 +166,10 @@ app.router.get(`${BASE}*`, async (ctx) => {
 await app.start({ port: 5299 });
 ```
 
-Register this **before** `ReactRouterPlugin` or keep it more-static than the catch-all, per the
-route precedence rules in PUBLIC_API.md.
+`/__vite/*` carries one static segment, so it outranks the plugin's `/*` catch-all under the
+precedence rules in PUBLIC_API.md — registering it _after_ `ReactRouterPlugin` works, which is how
+the verification above was run. Keep at least one static segment in the prefix: a bare `/*`-adjacent
+pattern would tie with the catch-all and be silently shadowed.
 
 ## The HMR WebSocket needs nothing from you
 

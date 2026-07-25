@@ -17,7 +17,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
 import { createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
-import { loadRequestHandler } from '../handler/server-build.ts';
+import { assertSsrRuntime, loadRequestHandler } from '../handler/server-build.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'react-router-plugin';
@@ -92,9 +92,10 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       const mode = options.mode ?? DEFAULT_MODE;
       const getLoadRequestHandler = options.loadRequestHandler ??
         loadRequestHandler;
-      const { handler, createLoadContext } = await getLoadRequestHandler(
-        options.serverBuildPath,
-        mode,
+      // Validated at registration: a seam returning the pre-0.2.0 bare handler
+      // would otherwise register cleanly and 500 on every request instead.
+      const { handler, createLoadContext } = assertSsrRuntime(
+        await getLoadRequestHandler(options.serverBuildPath, mode),
       );
 
       // Build and register the SSR service.
