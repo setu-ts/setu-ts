@@ -1403,7 +1403,7 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 | **Dependencies**     | `common`, `kernel`                                                      |
 | **Public API**       | `FeatureFlagsPlugin()`; `IFeatureFlags`                                 |
 | **Extension Points** | Custom flag provider                                                    |
-| **Rules**            | Config provider for simple cases; LaunchDarkly for enterprise           |
+| **Rules**            | Config provider for simple cases; DatabaseProvider for production       |
 
 #### @hono-enterprise/multi-tenancy-plugin
 
