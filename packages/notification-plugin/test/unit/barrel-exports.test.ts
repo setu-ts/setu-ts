@@ -10,6 +10,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as barrel from '../../src/index.ts';
+import type { ProviderType } from '../../src/index.ts';
 
 /** Every value export of `src/index.ts`, in barrel order. */
 const VALUE_EXPORTS = [
@@ -36,6 +37,12 @@ describe('barrel exports', () => {
 
   it('exports no unexpected runtime values', () => {
     expect(Object.keys(barrel).sort()).toEqual([...VALUE_EXPORTS].sort());
+  });
+
+  it('exposes ProviderType as the ChannelConfig discriminant', () => {
+    // Type-level: each literal must remain assignable to the derived union.
+    const providers: ProviderType[] = ['mail', 'twilio', 'fcm', 'slack'];
+    expect(providers).toHaveLength(4);
   });
 
   // Type-only exports are verified at compile time by the `import type` uses in

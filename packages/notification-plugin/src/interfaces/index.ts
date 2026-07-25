@@ -152,13 +152,6 @@ export interface INotificationHttp {
 // ── Plugin options ───────────────────────────────────────────────────────────
 
 /**
- * Provider type selector.
- *
- * @since 0.1.0
- */
-export type ProviderType = 'mail' | 'twilio' | 'fcm' | 'slack';
-
-/**
  * Email channel configuration.
  *
  * Carries no `options`: transport is delegated to the `IMailer` resolved from
@@ -213,6 +206,15 @@ export type ChannelConfig =
   | TwilioChannelConfig
   | FcmChannelConfig
   | SlackChannelConfig;
+
+/**
+ * Provider type selector — the `ChannelConfig` discriminant.
+ *
+ * Derived from the union so it cannot drift out of sync with the arms.
+ *
+ * @since 0.1.0
+ */
+export type ProviderType = ChannelConfig['provider'];
 
 /**
  * Plugin-level channels map.

@@ -54,4 +54,29 @@ describe('SlackChannel', () => {
     expect(captured!.text).toBe('Alert!');
     expect('channel' in captured!).toBe(false);
   });
+
+  it('treats an empty to.channel as absent (Slack rejects channel: "")', async () => {
+    let captured: Parameters<SlackTransport['send']>[0] | undefined;
+    const transport: SlackTransport = {
+      send: (msg) => {
+        captured = msg;
+        return Promise.resolve();
+      },
+    };
+    const channel = new SlackChannel('slack', transport);
+    const notification: NotificationMessage = {
+      channels: ['slack'],
+      // A configured channel name that resolved to the empty string.
+      to: { channel: '' },
+      body: 'Alert!',
+    };
+
+    await channel.send(notification);
+
+    expect(captured).toBeDefined();
+    expect(captured!.text).toBe('Alert!');
+    // Forwarding `channel: ''` would make the webhook reject the whole message;
+    // omitting it posts to the webhook's default channel.
+    expect('channel' in captured!).toBe(false);
+  });
 });
