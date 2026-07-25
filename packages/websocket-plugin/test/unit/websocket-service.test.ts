@@ -13,9 +13,12 @@ import {
 } from '../../src/services/websocket-service.ts';
 import { WebSocketUnavailableError } from '../../src/errors/websocket-errors.ts';
 import {
+  createFakeLogger,
   createFakeRuntime,
   createFakeTransport,
+  type FakeLogger,
   type FakeTransport,
+  requestFailingOnSecondHeaderRead,
   upgradeRequest,
 } from '../fixtures/fake-runtime.ts';
 
@@ -106,9 +109,16 @@ describe('buildContext', () => {
 });
 
 describe('WebSocketService', () => {
-  function build(options?: Parameters<typeof resolveOptions>[0], available = true) {
+  function build(
+    options?: Parameters<typeof resolveOptions>[0],
+    available = true,
+    logger?: FakeLogger,
+  ) {
     const runtime = createFakeRuntime();
-    return { runtime, service: new WebSocketService(runtime, resolveOptions(options), available) };
+    return {
+      runtime,
+      service: new WebSocketService(runtime, resolveOptions(options), available, logger),
+    };
   }
 
   it('reports availability and starts empty', () => {
@@ -300,6 +310,51 @@ describe('WebSocketService', () => {
 
     const second = await router(upgradeRequest('http://localhost/ws'));
     expect(second?.accept).toBe(true);
+  });
+
+  it('logs the cause and refuses with 500 when route selection throws', async () => {
+    const logger = createFakeLogger();
+    const { service } = build(undefined, true, logger);
+    service.route('/ws', {});
+
+    const decision = await service.createUpgradeRouter()(
+      requestFailingOnSecondHeaderRead('http://localhost/ws'),
+    );
+
+    expect(decision).toEqual({ accept: false, status: 500 });
+    expect(logger.entries).toHaveLength(1);
+    const [entry] = logger.entries;
+    expect(entry.level).toBe('error');
+    expect(entry.message).toBe('WebSocket upgrade routing failed');
+    expect(entry.metadata?.url).toBe('http://localhost/ws');
+    expect((entry.metadata?.error as Error).message).toBe('request already closed');
+  });
+
+  it('refuses with 500 without a logger registered', async () => {
+    // The logger is optional; a routing failure must still be contained.
+    const { service } = build();
+    service.route('/ws', {});
+
+    const decision = await service.createUpgradeRouter()(
+      requestFailingOnSecondHeaderRead('http://localhost/ws'),
+    );
+
+    expect(decision).toEqual({ accept: false, status: 500 });
+  });
+
+  it('releases the admission slot when route selection throws after claiming it', async () => {
+    // The throw lands between claiming the slot and returning a sink, so
+    // nothing will ever arrive to settle it. A leaked slot here would let a
+    // handful of routing failures permanently starve maxConnections.
+    const { service } = build({ maxConnections: 1 });
+    service.route('/ws', {});
+    const router = service.createUpgradeRouter();
+
+    const failed = await router(requestFailingOnSecondHeaderRead('http://localhost/ws'));
+    expect(failed).toEqual({ accept: false, status: 500 });
+
+    const next = await router(upgradeRequest('http://localhost/ws'));
+    expect(next?.accept).toBe(true);
   });
 
   it('refuses with 400 when the requested subprotocol is unacceptable', async () => {

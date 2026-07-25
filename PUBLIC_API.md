@@ -1580,6 +1580,7 @@ ws.route('/ws/chat', {
 | `WebSocketPluginOptions`    | type     | The options above                                                     |
 | `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                    |
 | `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                      |
+| `RoomMembershipListener`    | type     | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates    |
 
 ### Notes
 
@@ -1599,7 +1600,15 @@ ws.route('/ws/chat', {
   `fetch` path.
 - **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
   the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
-- **Rooms are in-process.** Cross-replica fan-out is deferred to a follow-up milestone.
+- **Rooms are in-process.** Cross-replica fan-out is deferred to a follow-up milestone. A
+  `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer costs
+  only the rooms that peer had actually joined rather than a scan of every live room. The index is
+  maintained through the `RoomMembershipListener` the registry gives each `Room` it creates; a
+  standalone `new Room(name)` takes no listener and is not tracked.
+- **A failing upgrade router is logged, then refused with `500`.** The service catches its own
+  routing errors and reports them through the logger capability when one is registered — the HTTP
+  adapter's `UpgradeRouterStore` backstop runs inside `@hono-enterprise/runtime`, which has no
+  logger, so the cause would otherwise be lost. Register the LoggerPlugin to see it.
 - **`app.inject()` cannot exercise a WebSocket**; tests must bind a real socket
   (`app.start({ port })` + `new WebSocket(...)`).
 - A `websocket` health indicator reports `{ available, connections, rooms, routes }`. `onClose`

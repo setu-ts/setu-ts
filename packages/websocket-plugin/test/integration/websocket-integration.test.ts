@@ -8,8 +8,23 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@hono-enterprise/kernel';
 import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CAPABILITIES, type IWebSocketService } from '@hono-enterprise/common';
+import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { CAPABILITIES, type IWebSocketService, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import { WebSocketPlugin } from '../../src/index.ts';
+import { createFakeLogger, requestFailingOnSecondHeaderRead } from '../fixtures/fake-runtime.ts';
+
+/** A minimal plugin that publishes a capturing logger under the logger token. */
+function FakeLoggerPlugin(logger: ILogger): IPlugin {
+  return {
+    name: 'fake-logger-plugin',
+    version: '0.0.0',
+    provides: [CAPABILITIES.LOGGER],
+    priority: PLUGIN_PRIORITY.HIGH,
+    register(ctx: IPluginContext): void {
+      ctx.services.register<ILogger>(CAPABILITIES.LOGGER, logger);
+    },
+  };
+}
 
 describe('WebSocketPlugin integration', () => {
   it('resolves the service from the WEBSOCKET capability token', async () => {
@@ -20,6 +35,28 @@ describe('WebSocketPlugin integration', () => {
 
     expect(ws.available).toBe(true);
     expect(ws.connectionCount).toBe(0);
+    await app.stop();
+  });
+
+  it('reports an upgrade-router failure through the registered logger', async () => {
+    // Proves the plugin really hands ctx.logger to the service: without that
+    // wiring the cause is swallowed by the adapter backstop and nothing is
+    // ever written anywhere.
+    const logger = createFakeLogger();
+    const app = createApplication({
+      plugins: [RuntimePlugin(), FakeLoggerPlugin(logger), WebSocketPlugin()],
+    });
+    await app.start();
+    const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+    ws.route('/ws', {});
+
+    const response = await app.fetch(requestFailingOnSecondHeaderRead('http://localhost/ws'));
+
+    expect(response.status).toBe(500);
+    expect(logger.entries.map((entry) => entry.message)).toEqual([
+      'WebSocket upgrade routing failed',
+    ]);
+    expect(logger.entries[0].level).toBe('error');
     await app.stop();
   });
 
