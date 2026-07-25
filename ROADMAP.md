@@ -4054,7 +4054,7 @@ importing another plugin.
 
 ---
 
-## Milestone 46: WebSocket Plugin — Bidirectional Real-Time Across All Four Runtimes
+## Milestone 46: WebSocket Plugin — Bidirectional Real-Time Across All Four Runtimes ✅ COMPLETE
 
 **Objective:** Give applications full-duplex, bidirectional real-time messaging, completing the
 real-time story that the SSE plugin (M43) started one-way. Registers an `IWebSocketService` under a
@@ -4120,18 +4120,23 @@ connects a genuine client.
 
 ### Doc Deliverables (shipped in this milestone's PR)
 
-- [ ] **PUBLIC_API.md** — `CAPABILITIES.WEBSOCKET`; the WebSocket contract type group in `common`
+- [x] **PUBLIC_API.md** — `CAPABILITIES.WEBSOCKET`; the WebSocket contract type group in `common`
       (`IWebSocketService`, `IWebSocketConnection`, `WebSocketRoom`, `WebSocketHandlers`,
       `WebSocketUpgradeRouter`, `WebSocketUpgradeDecision`, `WebSocketEventSink`,
       `IWebSocketTransport`, `WebSocketReadyState`, `WebSocketCloseEvent`); the `setUpgradeRouter`
       widening on the `IHttpAdapter` listing; the four upgraders in the runtime export tables; a
       full `WebSocketPlugin()` section.
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row 46.
-- [ ] **CLAUDE.md** — Current status M46 entry; Next milestone repointed.
-- [ ] **README.md** — flip the WebSocket row from `🚧 Planned` to shipped.
-- [ ] **ARCHITECTURE.md** — WebSocket moves out of the "future extension points" table into the
-      shipped plugin set.
-- [ ] **README** — `packages/websocket-plugin/README.md`.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row 46.
+- [x] **CLAUDE.md** — Current status M46 entry; Next milestone repointed.
+- [x] **ARCHITECTURE.md** — WebSocket removed from the "future extension points" table and from the
+      Future subgraph, with a note that the upgrade is an HTTP-adapter concern rather than a kernel
+      one.
+- [ ] **Root `README.md`** — the WebSocket row is still `🚧 Planned`. Deferred at the maintainer's
+      request; not part of this PR. (The `Server-Sent Events` row in the same table is also still
+      `🚧 Planned` even though M43 shipped — a pre-existing defect in merged `main` that belongs on
+      a `fix/…` branch, not here.)
+- [ ] **README** — `packages/websocket-plugin/README.md`. Deferred at the maintainer's request;
+      AI_GUIDELINES §7.1 still requires it before the milestone is fully closed.
 
 ---
 
@@ -4316,4 +4321,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 43        | ✅     | sse-plugin           |
 | 44        | ✅     | react-router-plugin  |
 | 45        | ✅     | worker-pool-plugin   |
-| 46        | ⬜     | websocket-plugin     |
+| 46        | ✅     | websocket-plugin     |
