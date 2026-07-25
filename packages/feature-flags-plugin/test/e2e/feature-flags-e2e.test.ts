@@ -8,9 +8,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@hono-enterprise/kernel';
 import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { FeatureFlagsPlugin, createFlagGuard } from '../../src/index.ts';
+import { createFlagGuard, FeatureFlagsPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IFeatureFlags } from '@hono-enterprise/common';
+import type { FlagDefinition, IFlagStore } from '../../src/interfaces/index.ts';
 
 describe('feature-flags-e2e', () => {
   it('kernel integration — flag evaluation end-to-end', async () => {
@@ -74,14 +75,14 @@ describe('feature-flags-e2e', () => {
   it('DatabaseProvider with fake store works end-to-end', async () => {
     const runtimePlugin = RuntimePlugin();
 
-    let snapshot: Record<string, any> = { 'db-flag': { enabled: true } };
-    const fakeStore = {
-      loadFlags: async (): Promise<Record<string, any>> => snapshot,
+    const snapshot: Record<string, FlagDefinition> = { 'db-flag': { enabled: true } };
+    const fakeStore: IFlagStore = {
+      loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => Promise.resolve(snapshot),
     };
 
     const flagPlugin = FeatureFlagsPlugin({
       provider: 'database',
-      options: { store: fakeStore as any, refreshIntervalMs: 60000 },
+      options: { store: fakeStore, refreshIntervalMs: 60000 },
     });
 
     const app = createApplication({

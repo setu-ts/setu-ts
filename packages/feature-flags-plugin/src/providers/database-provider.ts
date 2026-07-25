@@ -82,11 +82,12 @@ export class DatabaseProvider implements FlagProvider {
   /**
    * Stops the poll timer.
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     if (this._timer) {
       this._runtime.clearInterval(this._timer.handle);
       this._timer = undefined;
     }
+    return Promise.resolve();
   }
 
   /**

@@ -8,9 +8,9 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@hono-enterprise/kernel';
 import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { FeatureFlagsPlugin, createFlagGuard } from '../../src/index.ts';
+import { createFlagGuard, FeatureFlagsPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IFeatureFlags, IHealthIndicator } from '@hono-enterprise/common';
+import type { IFeatureFlags, IHealthIndicator, IRequestContext } from '@hono-enterprise/common';
 
 describe('feature-flags-integration', () => {
   it('evaluates flags through the public surface', async () => {
@@ -19,6 +19,7 @@ describe('feature-flags-integration', () => {
       provider: 'config',
       options: {
         flags: {
+          'always-on': { enabled: true },
           'new-dashboard': { enabled: true, percentage: 50 },
           'beta-features': { enabled: false, users: ['user1'] },
           'off-flag': { enabled: false },
@@ -36,8 +37,11 @@ describe('feature-flags-integration', () => {
       // Resolve IFeatureFlags from the capability token
       const flags = app.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);
 
-      // enabled:true flag
-      expect(flags.isEnabled('new-dashboard')).toBe(true);
+      // enabled:true flag (no percentage — always on)
+      expect(flags.isEnabled('always-on')).toBe(true);
+
+      // Percentage without userId → false (stable bucket needs a key)
+      expect(flags.isEnabled('new-dashboard')).toBe(false);
 
       // enabled:false flag → false for unknown user
       expect(flags.isEnabled('off-flag')).toBe(false);
@@ -78,23 +82,33 @@ describe('feature-flags-integration', () => {
         services: {
           get: (token: string) => {
             if (token === CAPABILITIES.FEATURE_FLAGS) {
-              return { isEnabled: () => false };
+              return { isEnabled: (): boolean => false };
             }
             throw new Error(`Unknown token: ${token}`);
           },
         },
         request: { user: undefined },
         response: {
-          redirect: (url: string) => {
+          redirect: (url: string): void => {
             expect(url).toBe('/old');
           },
-          status: () => {},
-          text: () => {},
+          status: (): void => {},
+          text: (): string => '',
         },
-      } as any;
+        id: 'test-id',
+        params: {} as Record<string, string>,
+        query: new URLSearchParams(),
+        state: {} as Record<string, unknown>,
+        secure: false,
+        body: undefined,
+        raw: null,
+        startTime: Date.now(),
+        signal: new AbortController().signal,
+      } as unknown as IRequestContext;
 
-      await guard(ctx, async () => {
+      await guard(ctx, (): Promise<void> => {
         handlerCalled = true;
+        return Promise.resolve();
       });
 
       expect(handlerCalled).toBe(false);
@@ -124,7 +138,7 @@ describe('feature-flags-integration', () => {
       expect(flagIndicator).toBeDefined();
       const result = await flagIndicator!.check();
       expect(result.status).toBe('up');
-      expect((result.data as any)?.provider).toBe('config');
+      expect(result.data?.provider as string | undefined).toBe('config');
     } finally {
       await app.stop();
     }
@@ -139,8 +153,11 @@ describe('feature-flags-integration', () => {
         instance: {
           type: 'config',
           isEnabled: () => false,
-          start: async () => {},
-          stop: async () => { stopped = true; },
+          start: (): Promise<void> => Promise.resolve(),
+          stop: (): Promise<void> => {
+            stopped = true;
+            return Promise.resolve();
+          },
         },
       },
     });

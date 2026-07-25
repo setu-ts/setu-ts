@@ -42,7 +42,7 @@ describe('ConfigProvider', () => {
 
   it('does not expose status()', () => {
     const provider = new ConfigProvider({});
-    expect(('status' in provider)).toBe(false);
+    expect('status' in provider).toBe(false);
   });
 
   it('allowlist on enabled flag', () => {

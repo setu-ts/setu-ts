@@ -57,7 +57,11 @@ export function createProvider(
     }
 
     default:
-      throw new Error(`Unrecognized feature flags provider: ${String((options as { provider: string }).provider)}`);
+      throw new Error(
+        `Unrecognized feature flags provider: ${
+          String((options as { provider: string }).provider)
+        }`,
+      );
   }
 }
 
@@ -105,21 +109,21 @@ export function FeatureFlagsPlugin(options: FeatureFlagsPluginOptions): IPlugin 
       ctx.services.register(CAPABILITIES.FEATURE_FLAGS, service);
 
       // Health indicator
-      const indicator: HealthIndicatorFn = async (): Promise<HealthCheckResult> => {
+      const indicator: HealthIndicatorFn = (): Promise<HealthCheckResult> => {
         const svc = ctx.services.get<typeof service>(CAPABILITIES.FEATURE_FLAGS);
         const status = svc.status();
 
         if (status === undefined || status.healthy === true) {
-          return {
+          return Promise.resolve({
             status: 'up',
             data: { provider: provider.type },
-          };
+          });
         }
 
-        return {
+        return Promise.resolve({
           status: 'degraded',
           data: { provider: provider.type, detail: status.detail },
-        };
+        });
       };
 
       ctx.health.register('feature-flags', indicator);

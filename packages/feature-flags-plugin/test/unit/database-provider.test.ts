@@ -6,16 +6,19 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { ILogger } from '@hono-enterprise/common';
 import { DatabaseProvider } from '../../src/providers/database-provider.ts';
 import type { FlagDefinition, IFlagStore } from '../../src/interfaces/index.ts';
+import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
 describe('DatabaseProvider', () => {
   describe('type', () => {
     it('is "database"', async () => {
       const store: IFlagStore = {
-        loadFlags: async () => ({}),
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => Promise.resolve({}),
       };
-      const provider = new DatabaseProvider({ store }, null as never);
+      const runtime = new FakeRuntimeServices();
+      const provider = new DatabaseProvider({ store }, runtime);
       await provider.start();
       expect(provider.type).toBe('database');
       await provider.stop();
@@ -29,12 +32,13 @@ describe('DatabaseProvider', () => {
       };
       let loadCalled = false;
       const store: IFlagStore = {
-        loadFlags: async () => {
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           loadCalled = true;
-          return flags;
+          return Promise.resolve(flags);
         },
       };
-      const provider = new DatabaseProvider({ store }, null as never);
+      const runtime = new FakeRuntimeServices();
+      const provider = new DatabaseProvider({ store }, runtime);
       await provider.start();
       expect(loadCalled).toBe(true);
       expect(provider.isEnabled('beta')).toBe(true);
@@ -45,73 +49,57 @@ describe('DatabaseProvider', () => {
 
   describe('poll timer', () => {
     it('arms a timer on start and calls setInterval with default interval', async () => {
-      let capturedMs: number | null = null;
-      const fakeRuntime = {
-        setInterval: (_fn: () => void, ms: number): unknown => {
-          capturedMs = ms;
-          return 'handle-1';
-        },
-        clearInterval: (_handle: unknown): void => {},
-      } as any;
+      const runtime = new FakeRuntimeServices();
 
       const store: IFlagStore = {
-        loadFlags: async () => ({}),
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => Promise.resolve({}),
       };
 
-      const provider = new DatabaseProvider({ store }, fakeRuntime);
+      const provider = new DatabaseProvider({ store }, runtime);
       await provider.start();
-      expect(capturedMs).toBe(30000); // default
+      expect(runtime.calledWithMs).toBe(30000); // default
       await provider.stop();
     });
 
     it('uses explicit refreshIntervalMs', async () => {
-      let capturedMs: number | null = null;
-      const fakeRuntime = {
-        setInterval: (_fn: () => void, ms: number): unknown => {
-          capturedMs = ms;
-          return 'handle-1';
-        },
-        clearInterval: (): void => {},
-      } as any;
+      const runtime = new FakeRuntimeServices();
 
       const store: IFlagStore = {
-        loadFlags: async () => ({}),
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => Promise.resolve({}),
       };
 
-      const provider = new DatabaseProvider({ store, refreshIntervalMs: 60000 }, fakeRuntime);
+      const provider = new DatabaseProvider({ store, refreshIntervalMs: 60000 }, runtime);
       await provider.start();
-      expect(capturedMs).toBe(60000);
+      expect(runtime.calledWithMs).toBe(60000);
       await provider.stop();
     });
 
     it('poll refresh swaps the snapshot when loadFlags resolves new data', async () => {
+      // start() calls loadFlags twice: once directly, once via _poll().
+      // Both return 'flag-a'. The driven poll call returns 'flag-b'.
       let callCount = 0;
       const store: IFlagStore = {
-        loadFlags: async () => {
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           callCount++;
-          if (callCount === 1) {
-            return { 'flag-a': { enabled: true } };
+          if (callCount <= 2) {
+            // start() direct + start()._poll() → flag-a
+            return Promise.resolve({ 'flag-a': { enabled: true } });
           }
-          return { 'flag-b': { enabled: true } };
+          // driven poll → flag-b
+          return Promise.resolve({ 'flag-b': { enabled: true } });
         },
       };
 
-      let capturedCallback: (() => void) | null = null;
-      const fakeRuntime = {
-        setInterval: (fn: () => void): unknown => {
-          capturedCallback = fn;
-          return 'handle-1';
-        },
-        clearInterval: (): void => {},
-      } as any;
+      const runtime = new FakeRuntimeServices();
 
-      const provider = new DatabaseProvider({ store }, fakeRuntime);
+      const provider = new DatabaseProvider({ store }, runtime);
       await provider.start();
+      expect(callCount).toBe(2);
       expect(provider.isEnabled('flag-a')).toBe(true);
 
-      // Drive the poll
-      expect(capturedCallback).not.toBeNull();
-      await capturedCallback!();
+      // Drive the poll — this is callCount=3 → flag-b
+      expect(runtime.capturedCallback).not.toBeNull();
+      await runtime.capturedCallback!();
 
       expect(provider.isEnabled('flag-a')).toBe(false);
       expect(provider.isEnabled('flag-b')).toBe(true);
@@ -122,37 +110,39 @@ describe('DatabaseProvider', () => {
   describe('poll failure handling', () => {
     it('rejection logs via logger, keeps old snapshot, flips status to unhealthy', async () => {
       let logMsg: string | null = null;
-      const fakeLogger = {
-        warn: (msg: string): void => { logMsg = msg; },
-      } as any;
+      const fakeLogger: ILogger = {
+        level: 'debug' as const,
+        fatal: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        error: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        warn: (msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {
+          logMsg = msg;
+        },
+        info: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        debug: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        trace: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        child: (): ILogger => fakeLogger,
+      };
 
       let callCount = 0;
       const store: IFlagStore = {
-        loadFlags: async () => {
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           callCount++;
           if (callCount === 1) {
-            return { 'stable': { enabled: true } };
+            return Promise.resolve({ 'stable': { enabled: true } });
           }
-          throw new Error('network error');
+          return Promise.reject(new Error('network error'));
         },
       };
 
-      let capturedCallback: (() => void) | null = null;
-      const fakeRuntime = {
-        setInterval: (fn: () => void): unknown => {
-          capturedCallback = fn;
-          return 'handle-1';
-        },
-        clearInterval: (): void => {},
-      } as any;
+      const runtime = new FakeRuntimeServices();
 
-      const provider = new DatabaseProvider({ store }, fakeRuntime, fakeLogger);
+      const provider = new DatabaseProvider({ store }, runtime, fakeLogger);
       await provider.start();
       expect(provider.isEnabled('stable')).toBe(true);
 
       // Drive failing poll
-      expect(capturedCallback).not.toBeNull();
-      await capturedCallback!();
+      expect(runtime.capturedCallback).not.toBeNull();
+      await runtime.capturedCallback!();
 
       // Old snapshot preserved
       expect(provider.isEnabled('stable')).toBe(true);
@@ -167,42 +157,56 @@ describe('DatabaseProvider', () => {
     });
 
     it('subsequent successful poll clears the recorded failure', async () => {
+      // start() succeeds on first load (callCount=1), then _poll() fails (callCount=2).
+      // Each subsequent driven poll fails until we flip to success.
       let callCount = 0;
-      const fakeLogger = { warn: (): void => {} } as any;
+      const fakeLogger: ILogger = {
+        level: 'debug' as const,
+        fatal: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        error: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        warn: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        info: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        debug: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        trace: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        child: (): ILogger => fakeLogger,
+      };
 
       const store: IFlagStore = {
-        loadFlags: async () => {
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           callCount++;
-          if (callCount <= 2) {
-            throw new Error('fail');
+          // Call 1: start() initial load → success (returns empty snapshot)
+          // Calls 2+: _poll() inside start() + driven polls → fail, then eventually succeed
+          if (callCount === 1) {
+            return Promise.resolve({});
           }
-          return { 'recovered': { enabled: true } };
+          if (callCount <= 4) {
+            // _poll from start + 2 driven polls fail
+            return Promise.reject(new Error('fail'));
+          }
+          return Promise.resolve({ 'recovered': { enabled: true } });
         },
       };
 
-      let capturedCallback: (() => void) | null = null;
-      const fakeRuntime = {
-        setInterval: (fn: () => void): unknown => {
-          capturedCallback = fn;
-          return 'handle-1';
-        },
-        clearInterval: (): void => {},
-      } as any;
+      const runtime = new FakeRuntimeServices();
 
-      const provider = new DatabaseProvider({ store }, fakeRuntime, fakeLogger);
+      const provider = new DatabaseProvider({ store }, runtime, fakeLogger);
       await provider.start();
 
-      // First failing poll
-      expect(capturedCallback).not.toBeNull();
-      await capturedCallback!();
+      // start() already caused _poll to fail (callCount=2), so status is unhealthy
+      expect(provider.status()?.healthy).toBe(false);
+      expect(provider.isEnabled('recovered')).toBe(false); // no snapshot yet
+
+      // First driven poll fails (callCount=3) — still unhealthy
+      expect(runtime.capturedCallback).not.toBeNull();
+      await runtime.capturedCallback!();
       expect(provider.status()?.healthy).toBe(false);
 
-      // Second failing poll
-      await capturedCallback!();
+      // Second driven poll fails (callCount=4) — still unhealthy
+      await runtime.capturedCallback!();
       expect(provider.status()?.healthy).toBe(false);
 
-      // Successful poll
-      await capturedCallback!();
+      // Third driven poll succeeds (callCount=5) — clears error
+      await runtime.capturedCallback!();
       const st = provider.status();
       expect(st?.healthy).toBe(true);
       expect(provider.isEnabled('recovered')).toBe(true);
@@ -213,22 +217,23 @@ describe('DatabaseProvider', () => {
 
   describe('stop', () => {
     it('calls clearInterval with the handle setInterval returned', async () => {
-      let capturedHandle: unknown = 'handle-abc';
+      const capturedHandle: unknown = 'handle-abc';
       let clearedHandle: unknown | null = null;
-      const fakeRuntime = {
-        setInterval: (): unknown => {
-          return capturedHandle;
-        },
-        clearInterval: (handle: unknown): void => {
-          clearedHandle = handle;
-        },
-      } as any;
+      const runtime = new FakeRuntimeServices();
+      // Override to control the handle returned from setInterval
+      runtime.setInterval = ((_: () => void, ms: number): unknown => {
+        runtime.calledWithMs = ms;
+        return capturedHandle;
+      }).bind(runtime);
+      runtime.clearInterval = ((handle: unknown): void => {
+        clearedHandle = handle;
+      }).bind(runtime);
 
       const store: IFlagStore = {
-        loadFlags: async () => ({}),
+        loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => Promise.resolve({}),
       };
 
-      const provider = new DatabaseProvider({ store }, fakeRuntime);
+      const provider = new DatabaseProvider({ store }, runtime);
       await provider.start();
       await provider.stop();
       expect(clearedHandle).toBe(capturedHandle);

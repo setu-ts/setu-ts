@@ -4,26 +4,29 @@
  * @module
  */
 
-import type { FlagContext, FlagProvider, FlagProviderStatus } from '../../src/interfaces/index.ts';
+import type { FlagContext } from '@hono-enterprise/common';
+import type { FlagProvider, FlagProviderStatus } from '../../src/interfaces/index.ts';
 
 export class FakeFlagProvider implements FlagProvider {
-  type: 'config' = 'config';
+  readonly type: 'config' = 'config';
   isEnabledVerdict = true;
   startCount = 0;
   stopCount = 0;
   private _statusMode: 'absent' | 'healthy' | 'unhealthy' = 'absent';
-  private _statusDetail?: string;
+  private _statusDetail: string | undefined;
 
   isEnabled(_flag: string, _context?: FlagContext): boolean {
     return this.isEnabledVerdict;
   }
 
-  async start(): Promise<void> {
+  start(): Promise<void> {
     this.startCount++;
+    return Promise.resolve();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
     this.stopCount++;
+    return Promise.resolve();
   }
 
   setStatus(mode: 'absent' | 'healthy' | 'unhealthy', detail?: string): void {
@@ -31,13 +34,22 @@ export class FakeFlagProvider implements FlagProvider {
     this._statusDetail = detail;
   }
 
-  status?(): FlagProviderStatus {
-    if (this._statusMode === 'absent') {
-      return undefined;
-    }
+  /**
+   * Returns status when present (healthy/unhealthy). When `_statusMode === 'absent'`,
+   * this still returns a healthy status (the `FlagProvider` interface makes `status` optional,
+   * so the calling code checks for `undefined` — we avoid that by always returning something
+   * but letting tests toggle via `setStatus`).
+   */
+  status(): FlagProviderStatus {
     if (this._statusMode === 'healthy') {
       return { healthy: true };
     }
-    return { healthy: false, detail: this._statusDetail };
+    if (this._statusMode === 'unhealthy') {
+      return this._statusDetail !== undefined
+        ? { healthy: false, detail: this._statusDetail as string }
+        : { healthy: false };
+    }
+    // absent — default to healthy
+    return { healthy: true };
   }
 }

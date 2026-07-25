@@ -3194,10 +3194,10 @@ app.router.get('/dashboard', {
 - `DatabaseProvider` — Polls injected `IFlagStore` (`'database'`)
 - Custom providers via `'custom'` arm (ARCHITECTURE extension point)
 
-> **Note:** `LaunchDarklyProvider` was deferred to a later milestone because the
-> Node server SDK exposes only async evaluation APIs (`variation`, `allFlagsState`),
-> which cannot satisfy the synchronous `IFeatureFlags.isEnabled` contract. The `'custom'`
-> arm serves as the documented bridge until a future milestone resolves the sync/async mismatch.
+> **Note:** `LaunchDarklyProvider` was deferred to a later milestone because the Node server SDK
+> exposes only async evaluation APIs (`variation`, `allFlagsState`), which cannot satisfy the
+> synchronous `IFeatureFlags.isEnabled` contract. The `'custom'` arm serves as the documented bridge
+> until a future milestone resolves the sync/async mismatch.
 
 **Implementation Files:**
 

@@ -65,6 +65,6 @@ describe('MemoryProvider', () => {
 
   it('does not expose status()', () => {
     const provider = new MemoryProvider();
-    expect(('status' in provider)).toBe(false);
+    expect('status' in provider).toBe(false);
   });
 });

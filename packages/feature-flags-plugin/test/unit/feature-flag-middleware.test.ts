@@ -7,7 +7,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFlagGuard } from '../../src/middleware/feature-flag-middleware.ts';
-import type { FlagContext, IFeatureFlags, IRequestContext } from '@hono-enterprise/common';
+import type {
+  FlagContext,
+  IFeatureFlags,
+  IRequestContext,
+  NextFunction,
+} from '@hono-enterprise/common';
 
 describe('createFlagGuard', () => {
   function buildCtx(flagOn: boolean, user?: { id: string }, capRegistered = true): {
@@ -15,9 +20,10 @@ describe('createFlagGuard', () => {
     redirectUrl: string | null;
     statusCode: number | null;
     body: string | null;
-    nextInvoked: boolean;
+    nextCalled: boolean;
+    wrapNext(fn: () => void): NextFunction;
   } {
-    let nextInvoked = false;
+    let nextCalledValue = false;
     let redirectUrl: string | null = null;
     let statusCode: number | null = null;
     let body: string | null = null;
@@ -57,19 +63,37 @@ describe('createFlagGuard', () => {
 
     return {
       ctx,
-      get redirectUrl() { return redirectUrl; },
-      get statusCode() { return statusCode; },
-      get body() { return body; },
-      get nextInvoked() { return nextInvoked; },
+      get redirectUrl() {
+        return redirectUrl;
+      },
+      get statusCode() {
+        return statusCode;
+      },
+      get body() {
+        return body;
+      },
+      get nextCalled() {
+        return nextCalledValue;
+      },
+      wrapNext(fn: () => void): NextFunction {
+        return (): Promise<void> => {
+          nextCalledValue = true;
+          fn();
+          return Promise.resolve();
+        };
+      },
     };
   }
 
   it('flag on ⇒ next() called, no response set', async () => {
     const capture = buildCtx(true, { id: 'user1' });
     const guard = createFlagGuard('beta');
-    await guard(capture.ctx, async () => {
-      capture.nextInvoked = true;
-    });
+    await guard(
+      capture.ctx,
+      capture.wrapNext(() => {
+        // next invoked — no response should be set
+      }),
+    );
 
     expect(capture.redirectUrl).toBeNull();
     expect(capture.statusCode).toBeNull();
@@ -79,36 +103,30 @@ describe('createFlagGuard', () => {
   it('flag off + fallback ⇒ redirect, next() NOT called', async () => {
     const capture = buildCtx(false, { id: 'user1' });
     const guard = createFlagGuard('beta', { fallback: '/old' });
-    await guard(capture.ctx, async () => {
-      capture.nextInvoked = true;
-    });
+    await guard(capture.ctx, capture.wrapNext(() => {}));
 
     expect(capture.redirectUrl).toBe('/old');
-    expect(capture.nextInvoked).toBe(false);
+    expect(capture.nextCalled).toBe(false);
   });
 
   it('flag off + no fallback ⇒ 404, next() NOT called', async () => {
     const capture = buildCtx(false, { id: 'user1' });
     const guard = createFlagGuard('beta');
-    await guard(capture.ctx, async () => {
-      capture.nextInvoked = true;
-    });
+    await guard(capture.ctx, capture.wrapNext(() => {}));
 
     expect(capture.statusCode).toBe(404);
     expect(capture.body).toBe('Not Found');
-    expect(capture.nextInvoked).toBe(false);
+    expect(capture.nextCalled).toBe(false);
   });
 
   it('custom statusCode honored', async () => {
     const capture = buildCtx(false, { id: 'user1' });
     const guard = createFlagGuard('beta', { statusCode: 403 });
-    await guard(capture.ctx, async () => {
-      capture.nextInvoked = true;
-    });
+    await guard(capture.ctx, capture.wrapNext(() => {}));
 
     expect(capture.statusCode).toBe(403);
     expect(capture.body).toBe('Not Found');
-    expect(capture.nextInvoked).toBe(false);
+    expect(capture.nextCalled).toBe(false);
   });
 
   it('context derived from ctx.request.user.id', async () => {
@@ -128,14 +146,14 @@ describe('createFlagGuard', () => {
         user: { id: 'auto-user' },
       },
       response: {
-        redirect: () => {},
-        status: () => {},
-        text: () => {},
+        redirect: (): void => {},
+        status: (): void => {},
+        text: (): void => {},
       },
     } as unknown as IRequestContext;
 
     const guard = createFlagGuard('beta');
-    await guard(ctx, async () => {});
+    await guard(ctx, (): Promise<void> => Promise.resolve());
 
     expect(receivedContext).toEqual({ userId: 'auto-user' });
   });
@@ -157,14 +175,14 @@ describe('createFlagGuard', () => {
         user: undefined,
       },
       response: {
-        redirect: () => {},
-        status: () => {},
-        text: () => {},
+        redirect: (): void => {},
+        status: (): void => {},
+        text: (): void => {},
       },
     } as unknown as IRequestContext;
 
     const guard = createFlagGuard('beta');
-    await guard(ctx, async () => {});
+    await guard(ctx, (): Promise<void> => Promise.resolve());
 
     expect(receivedContext).toBeUndefined();
   });
@@ -186,14 +204,14 @@ describe('createFlagGuard', () => {
         user: { id: 'user-from-request' },
       },
       response: {
-        redirect: () => {},
-        status: () => {},
-        text: () => {},
+        redirect: (): void => {},
+        status: (): void => {},
+        text: (): void => {},
       },
     } as unknown as IRequestContext;
 
     const guard = createFlagGuard('beta', { context: { userId: 'override' } });
-    await guard(ctx, async () => {});
+    await guard(ctx, (): Promise<void> => Promise.resolve());
 
     expect(receivedContext).toEqual({ userId: 'override' });
   });
@@ -203,14 +221,12 @@ describe('createFlagGuard', () => {
     const guard = createFlagGuard('beta');
     let errorThrown = false;
     try {
-      await guard(capture.ctx, async () => {
-        capture.nextInvoked = true;
-      });
+      await guard(capture.ctx, capture.wrapNext(() => {}));
     } catch {
       errorThrown = true;
     }
 
     expect(errorThrown).toBe(true);
-    expect(capture.nextInvoked).toBe(false);
+    expect(capture.nextCalled).toBe(false);
   });
 });

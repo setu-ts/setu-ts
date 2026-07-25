@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
 
 export class FakeRuntimeServices implements IRuntimeServices {
   setIntervalFn: ((fn: () => void, ms: number) => unknown) | null = null;
@@ -17,23 +17,41 @@ export class FakeRuntimeServices implements IRuntimeServices {
   readonly now = (): number => Date.now();
   readonly uuid = (): string => 'fake-uuid';
   readonly randomBytes = (n: number): Uint8Array => new Uint8Array(n);
-  readonly platform = (): string => 'test';
-  fs?: any;
+  readonly subtle: SubtleCrypto = globalThis.crypto.subtle;
 
   setInterval(fn: () => void, ms: number): unknown {
-    this.calledWithMs = ms;
     this.capturedCallback = fn;
-    const handle = this.handleCounter++;
-    if (this.setIntervalFn) {
-      return this.setIntervalFn(fn, ms);
-    }
-    return handle;
+    this.calledWithMs = ms;
+    this.handleCounter += 1;
+    return `handle-${this.handleCounter}`;
   }
 
   clearInterval(handle: unknown): void {
-    this.capturedCallback = null;
     if (this.clearIntervalFn) {
       this.clearIntervalFn(handle);
     }
+  }
+
+  setTimeout(): unknown {
+    this.handleCounter += 1;
+    return `timeout-handle-${this.handleCounter}`;
+  }
+
+  clearTimeout(): void {}
+
+  platform(): RuntimePlatform {
+    return 'deno';
+  }
+
+  version(): string {
+    return 'test';
+  }
+
+  hostname(): string {
+    return 'localhost';
+  }
+
+  exit(): never {
+    throw new Error('exit not implemented');
   }
 }

@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { evaluateFlag, bucket, fnv1a32 } from '../../src/evaluation/flag-evaluator.ts';
+import { bucket, evaluateFlag, fnv1a32 } from '../../src/evaluation/flag-evaluator.ts';
 import type { FlagDefinition } from '../../src/interfaces/index.ts';
 
 describe('flag-evaluator', () => {

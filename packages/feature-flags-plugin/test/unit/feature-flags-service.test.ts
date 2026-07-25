@@ -20,8 +20,12 @@ describe('FeatureFlagService', () => {
         capturedContext = context;
         return true;
       },
-      start: async () => {},
-      stop: async () => {},
+      start: (): Promise<void> => {
+        return Promise.resolve();
+      },
+      stop: (): Promise<void> => {
+        return Promise.resolve();
+      },
     };
 
     const service = new FeatureFlagService(fakeProvider);
@@ -36,8 +40,11 @@ describe('FeatureFlagService', () => {
     const fakeProvider: FlagProvider = {
       type: 'config',
       isEnabled: () => false,
-      start: async () => { started = true; },
-      stop: async () => {},
+      start: (): Promise<void> => {
+        started = true;
+        return Promise.resolve();
+      },
+      stop: (): Promise<void> => Promise.resolve(),
     };
 
     const service = new FeatureFlagService(fakeProvider);
@@ -50,8 +57,11 @@ describe('FeatureFlagService', () => {
     const fakeProvider: FlagProvider = {
       type: 'config',
       isEnabled: () => false,
-      start: async () => {},
-      stop: async () => { stopped = true; },
+      start: (): Promise<void> => Promise.resolve(),
+      stop: (): Promise<void> => {
+        stopped = true;
+        return Promise.resolve();
+      },
     };
 
     const service = new FeatureFlagService(fakeProvider);
@@ -63,9 +73,9 @@ describe('FeatureFlagService', () => {
     const fakeProvider: FlagProvider = {
       type: 'config',
       isEnabled: () => false,
-      start: async () => {},
-      stop: async () => {},
-      status: () => ({ healthy: true }),
+      start: (): Promise<void> => Promise.resolve(),
+      stop: (): Promise<void> => Promise.resolve(),
+      status: (): { healthy: boolean } => ({ healthy: true }),
     };
 
     const service = new FeatureFlagService(fakeProvider);
@@ -76,8 +86,8 @@ describe('FeatureFlagService', () => {
     const fakeProvider: FlagProvider = {
       type: 'config',
       isEnabled: () => false,
-      start: async () => {},
-      stop: async () => {},
+      start: (): Promise<void> => Promise.resolve(),
+      stop: (): Promise<void> => Promise.resolve(),
     };
 
     const service = new FeatureFlagService(fakeProvider);
