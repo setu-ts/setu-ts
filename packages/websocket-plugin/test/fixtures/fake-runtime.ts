@@ -11,8 +11,10 @@
  */
 
 import type {
+  ILogger,
   IRuntimeServices,
   IWebSocketTransport,
+  LogMetadata,
   TimerHandle,
   WebSocketReadyState,
 } from '@hono-enterprise/common';
@@ -127,5 +129,78 @@ export function createFakeTransport(): FakeTransport {
 export function upgradeRequest(url: string, headers?: Record<string, string>): Request {
   return new Request(url, {
     headers: { upgrade: 'websocket', connection: 'Upgrade', ...headers },
+  });
+}
+
+/** One captured log entry. */
+export interface LoggedEntry {
+  /** The severity the entry was written at. */
+  readonly level: string;
+  /** The log message. */
+  readonly message: string;
+  /** The structured context, when any was supplied. */
+  readonly metadata: LogMetadata | undefined;
+}
+
+/** A logger fake that records every entry written to it. */
+export interface FakeLogger extends ILogger {
+  /** Entries recorded so far, in order. */
+  readonly entries: LoggedEntry[];
+}
+
+/**
+ * Creates a logger fake.
+ *
+ * @returns The fake logger
+ */
+export function createFakeLogger(): FakeLogger {
+  const entries: LoggedEntry[] = [];
+  const record = (level: string) => (message: string, metadata?: LogMetadata): void => {
+    entries.push({ level, message, metadata });
+  };
+
+  const logger: FakeLogger = {
+    level: 'trace',
+    fatal: record('fatal'),
+    error: record('error'),
+    warn: record('warn'),
+    info: record('info'),
+    debug: record('debug'),
+    trace: record('trace'),
+    child: () => logger,
+    entries,
+  };
+  return logger;
+}
+
+/**
+ * Wraps an upgrade request so that reading `headers` fails after the first
+ * read, reproducing a request the runtime has already closed underneath us —
+ * the failure shape that the real M46 bug took.
+ *
+ * Called directly on the service's router, the first read is the route table's
+ * subprotocol lookup and the second is the context snapshot, so the throw
+ * lands *after* an admission slot has been claimed — the case that
+ * distinguishes a leaked slot from a released one. Driven through `app.fetch`
+ * the adapter's upgrade detection takes the first read instead and the route
+ * table throws on the second; either way the router must contain it.
+ *
+ * @param url - The request URL
+ * @returns The booby-trapped request
+ */
+export function requestFailingOnSecondHeaderRead(url: string): Request {
+  const request = upgradeRequest(url);
+  let reads = 0;
+  return new Proxy(request, {
+    get(target, prop, receiver): unknown {
+      if (prop === 'headers') {
+        reads++;
+        if (reads > 1) {
+          throw new Error('request already closed');
+        }
+      }
+      const value = Reflect.get(target, prop, receiver) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
   });
 }

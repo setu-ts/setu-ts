@@ -147,4 +147,143 @@ describe('RoomRegistry', () => {
 
     expect(registry.size).toBe(0);
   });
+
+  it('touches only the rooms the connection actually joined', () => {
+    // The regression guard for the O(rooms) scan: eviction must not reach into
+    // rooms the peer was never in. Before the reverse index every room on the
+    // server was visited on every single disconnect.
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    registry.get('joined').add(a.conn);
+
+    const untouched = registry.get('untouched');
+    untouched.add(b.conn);
+    let removeCalls = 0;
+    const realRemove = untouched.remove.bind(untouched);
+    untouched.remove = (conn) => {
+      removeCalls++;
+      realRemove(conn);
+    };
+
+    registry.evict(a.conn);
+
+    expect(removeCalls).toBe(0);
+    expect(registry.get('untouched').rawSize).toBe(1);
+  });
+
+  it('evicts a connection that belongs to no room without touching anything', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    registry.get('lobby').add(b.conn);
+
+    registry.evict(a.conn);
+
+    expect(registry.size).toBe(1);
+    expect(registry.get('lobby').rawSize).toBe(1);
+  });
+
+  it('stops tracking a connection once it has left every room', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    registry.get('one').add(a.conn);
+    registry.get('two').add(a.conn);
+
+    registry.get('one').remove(a.conn);
+    registry.get('two').remove(a.conn);
+
+    // Both rooms emptied, so both are gone and the reverse index holds nothing.
+    expect(registry.size).toBe(0);
+    // A second eviction is a no-op rather than a resurrection.
+    registry.evict(a.conn);
+    expect(registry.size).toBe(0);
+  });
+
+  it('discards a room emptied by a mid-broadcast drop', () => {
+    // The drop happens inside broadcast, not through evict — the reverse index
+    // and the room map both have to notice it.
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    registry.get('lobby').add(a.conn);
+    a.conn.close();
+
+    registry.get('lobby').broadcast('hello');
+
+    expect(registry.size).toBe(0);
+  });
+
+  it('counts a repeated add once, so one removal really empties the room', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    registry.get('lobby').add(a.conn);
+    registry.get('lobby').add(a.conn);
+
+    expect(registry.get('lobby').rawSize).toBe(1);
+
+    registry.evict(a.conn);
+
+    expect(registry.size).toBe(0);
+  });
+
+  it('keeps a rebound room when a stale one empties under the same name', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const stale = registry.get('lobby');
+    stale.add(a.conn);
+
+    // clear() unbinds the name while application code still holds `stale`.
+    registry.clear();
+    const fresh = registry.get('lobby');
+    fresh.add(b.conn);
+    expect(fresh).not.toBe(stale);
+
+    // The orphan emptying must not delete the live binding under that name.
+    stale.remove(a.conn);
+
+    expect(registry.get('lobby')).toBe(fresh);
+    expect(registry.get('lobby').rawSize).toBe(1);
+  });
+});
+
+describe('Room membership listener', () => {
+  it('reports joins and leaves exactly once each', () => {
+    const events: string[] = [];
+    const room = new Room('lobby', {
+      onJoin: (conn) => events.push(`join:${conn.id}`),
+      onLeave: (conn) => events.push(`leave:${conn.id}`),
+    });
+    const a = makeConnection('a');
+
+    room.add(a.conn);
+    room.add(a.conn); // duplicate — must not re-report
+    room.remove(a.conn);
+    room.remove(a.conn); // already gone — must not re-report
+
+    expect(events).toEqual(['join:a', 'leave:a']);
+  });
+
+  it('reports a leave for a peer dropped mid-broadcast', () => {
+    const events: string[] = [];
+    const room = new Room('lobby', {
+      onJoin: () => {},
+      onLeave: (conn) => events.push(`leave:${conn.id}`),
+    });
+    const open = makeConnection('open');
+    const closed = makeConnection('closed');
+    const unwritable = makeConnection('unwritable');
+    unwritable.transport.send = () => {
+      throw new Error('socket write failed');
+    };
+    room.add(open.conn);
+    room.add(closed.conn);
+    room.add(unwritable.conn);
+    closed.conn.close();
+
+    room.broadcast('hello');
+
+    expect(events).toEqual(['leave:closed', 'leave:unwritable']);
+    expect(room.rawSize).toBe(1);
+  });
 });

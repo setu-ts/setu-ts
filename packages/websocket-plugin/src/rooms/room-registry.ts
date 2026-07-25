@@ -13,6 +13,33 @@ import type {
 } from '@hono-enterprise/common';
 
 /**
+ * Notified whenever a connection joins or leaves a {@linkcode Room}.
+ *
+ * A {@linkcode RoomRegistry} supplies one to every room it creates so it can
+ * maintain a reverse `connection → rooms` index. Membership changes are the
+ * only way that index can be kept accurate, because application code holds the
+ * {@linkcode WebSocketRoom} directly (`ws.room('lobby').add(conn)`) and never
+ * goes back through the registry to join.
+ *
+ * @since 0.2.0
+ */
+export interface RoomMembershipListener {
+  /**
+   * Called when a connection is added to a room it was not already in.
+   *
+   * @param conn - The joining connection
+   */
+  onJoin(conn: IWebSocketConnection): void;
+  /**
+   * Called when a connection is removed from a room it was in — whether by an
+   * explicit {@linkcode Room.remove} or by being dropped mid-broadcast.
+   *
+   * @param conn - The leaving connection
+   */
+  onLeave(conn: IWebSocketConnection): void;
+}
+
+/**
  * A named group of connections that can be addressed as one.
  *
  * @since 0.1.0
@@ -20,14 +47,18 @@ import type {
 export class Room implements WebSocketRoom {
   readonly #name: string;
   readonly #members = new Set<IWebSocketConnection>();
+  readonly #listener: RoomMembershipListener | undefined;
 
   /**
    * Creates a room.
    *
    * @param name - The room name
+   * @param listener - Notified on every membership change. Supplied by a
+   *   {@linkcode RoomRegistry}; omit for a standalone room.
    */
-  constructor(name: string) {
+  constructor(name: string, listener?: RoomMembershipListener) {
     this.#name = name;
+    this.#listener = listener;
   }
 
   get name(): string {
@@ -50,11 +81,17 @@ export class Room implements WebSocketRoom {
   }
 
   add(conn: IWebSocketConnection): void {
+    if (this.#members.has(conn)) {
+      // Re-adding an existing member must not emit a second join, or the
+      // registry's reverse index would count it twice.
+      return;
+    }
     this.#members.add(conn);
+    this.#listener?.onJoin(conn);
   }
 
   remove(conn: IWebSocketConnection): void {
-    this.#members.delete(conn);
+    this.#drop(conn);
   }
 
   broadcast(data: string | Uint8Array, options?: RoomBroadcastOptions): void {
@@ -66,7 +103,7 @@ export class Room implements WebSocketRoom {
       if (!member.isOpen) {
         // A closed member can never receive again, so drop it here rather than
         // letting the set grow without bound as connections churn.
-        this.#members.delete(member);
+        this.#drop(member);
         continue;
       }
       try {
@@ -76,8 +113,21 @@ export class Room implements WebSocketRoom {
         // members would silently miss the message. Matches the notification
         // plugin's rule that one failing channel cannot stop the others. The
         // peer is dropped; its own close event does the rest of the cleanup.
-        this.#members.delete(member);
+        this.#drop(member);
       }
+    }
+  }
+
+  /**
+   * Removes a member and notifies the listener, but only if it really was one.
+   * Every removal path funnels through here so the registry's reverse index
+   * can never drift from the actual membership.
+   *
+   * @param conn - The connection to drop
+   */
+  #drop(conn: IWebSocketConnection): void {
+    if (this.#members.delete(conn)) {
+      this.#listener?.onLeave(conn);
     }
   }
 
@@ -95,6 +145,16 @@ export class Room implements WebSocketRoom {
  */
 export class RoomRegistry {
   readonly #rooms = new Map<string, Room>();
+  /**
+   * Reverse index: which rooms each connection currently belongs to.
+   *
+   * Without it, evicting a disconnecting peer means scanning every live room —
+   * O(rooms) on every single close, which degrades as a server accumulates
+   * rooms even though a typical connection belongs to one or two. Kept exact by
+   * the {@linkcode RoomMembershipListener} each room is created with, so every
+   * join, removal, and mid-broadcast drop updates it.
+   */
+  readonly #membership = new Map<IWebSocketConnection, Set<Room>>();
 
   /** Number of live rooms. */
   get size(): number {
@@ -108,11 +168,39 @@ export class RoomRegistry {
    * @returns The room
    */
   get(name: string): Room {
-    let room = this.#rooms.get(name);
-    if (room === undefined) {
-      room = new Room(name);
-      this.#rooms.set(name, room);
+    const existing = this.#rooms.get(name);
+    if (existing !== undefined) {
+      return existing;
     }
+    // `room` is referenced by the listener closures, which only ever run after
+    // the constructor has returned.
+    const room: Room = new Room(name, {
+      onJoin: (conn: IWebSocketConnection): void => {
+        let joined = this.#membership.get(conn);
+        if (joined === undefined) {
+          joined = new Set<Room>();
+          this.#membership.set(conn, joined);
+        }
+        joined.add(room);
+      },
+      onLeave: (conn: IWebSocketConnection): void => {
+        const joined = this.#membership.get(conn);
+        if (joined !== undefined) {
+          joined.delete(room);
+          if (joined.size === 0) {
+            this.#membership.delete(conn);
+          }
+        }
+        // Disposal lives here, not only in `evict`, so a room emptied by a
+        // mid-broadcast drop is discarded too. The identity check matters: the
+        // name may already have been rebound to a fresh room by a `get` that
+        // ran after this one emptied.
+        if (room.rawSize === 0 && this.#rooms.get(room.name) === room) {
+          this.#rooms.delete(room.name);
+        }
+      },
+    });
+    this.#rooms.set(name, room);
     return room;
   }
 
@@ -120,19 +208,29 @@ export class RoomRegistry {
    * Removes a connection from every room it belongs to, then discards any room
    * left empty.
    *
+   * Costs O(rooms this connection is in) rather than O(all rooms), which for
+   * the overwhelmingly common case — a peer in no rooms at all — is a single
+   * failed map lookup.
+   *
    * @param conn - The connection to evict
    */
   evict(conn: IWebSocketConnection): void {
-    for (const [name, room] of this.#rooms) {
+    const joined = this.#membership.get(conn);
+    if (joined === undefined) {
+      return;
+    }
+    // Dropped up front so the `onLeave` each `remove` fires returns early
+    // instead of mutating the set being iterated here. Discarding a room left
+    // empty is `onLeave`'s job.
+    this.#membership.delete(conn);
+    for (const room of joined) {
       room.remove(conn);
-      if (room.rawSize === 0) {
-        this.#rooms.delete(name);
-      }
     }
   }
 
   /** Discards every room. */
   clear(): void {
     this.#rooms.clear();
+    this.#membership.clear();
   }
 }
