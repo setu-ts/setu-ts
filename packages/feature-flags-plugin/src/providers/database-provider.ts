@@ -71,16 +71,24 @@ export class DatabaseProvider implements FlagProvider {
   }
 
   /**
-   * Loads initial state and arms the poll timer.
+   * Loads initial state ONCE and arms the poll interval ONCE.
    */
   async start(): Promise<void> {
+    // Initial synchronous load from the injected store
     this._snapshot = await this._store.loadFlags();
     this._lastError = undefined;
-    this._poll();
+
+    // Arm the repeating interval exactly once (never inside _poll).
+    // If the store rejects repeatedly, status() reports degraded but
+    // isEnabled continues serving the last good snapshot.
+    this._timer = {
+      handle: this._runtime.setInterval(() => this._poll(), this._refreshIntervalMs),
+    };
   }
 
   /**
-   * Stops the poll timer.
+   * Stops the poll timer. Guards against stop()-before-arm (no-op if start
+   * was never called or the timer is already cleared).
    */
   stop(): Promise<void> {
     if (this._timer) {
@@ -100,6 +108,14 @@ export class DatabaseProvider implements FlagProvider {
     return { healthy: true };
   }
 
+  /**
+   * Poll callback — called by the single interval armed in start().
+   *
+   * Loads flags into the snapshot; on failure records the error via
+   * `this._lastError`, logs via `this._logger?.warn`, and keeps the last
+   * good snapshot. A subsequent successful poll clears the recorded error.
+   * Does NOT re-arm the interval.
+   */
   private _poll = async (): Promise<void> => {
     try {
       this._snapshot = await this._store.loadFlags();
@@ -108,8 +124,5 @@ export class DatabaseProvider implements FlagProvider {
       this._lastError = err instanceof Error ? err.message : String(err);
       this._logger?.warn(`[feature-flags] DatabaseProvider poll failed: ${this._lastError}`);
     }
-    this._timer = {
-      handle: this._runtime.setInterval(this._poll, this._refreshIntervalMs),
-    };
   };
 }

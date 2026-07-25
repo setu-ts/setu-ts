@@ -8,8 +8,6 @@ import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { HealthCheckResult, HealthIndicatorFn } from '@hono-enterprise/common';
 import type {
-  CustomProviderOptions,
-  DatabaseProviderOptions,
   FeatureFlagsPluginOptions,
   FlagProvider,
 } from '../interfaces/index.ts';
@@ -47,20 +45,18 @@ export function createProvider(
     }
 
     case 'database': {
-      const dbOpts = options as DatabaseProviderOptions;
-      return new DatabaseProvider(dbOpts.options, ctx.runtime, ctx.logger);
+      // Narrowed by switch discriminant — no cast needed.
+      return new DatabaseProvider(options.options, ctx.runtime, ctx.logger);
     }
 
     case 'custom': {
-      const customOpts = options as CustomProviderOptions;
-      return customOpts.options.instance;
+      // Narrowed by switch discriminant — no cast needed.
+      return options.options.instance;
     }
 
     default:
       throw new Error(
-        `Unrecognized feature flags provider: ${
-          String((options as { provider: string }).provider)
-        }`,
+        `Unrecognized feature flags provider: ${(options as { provider: string }).provider}`,
       );
   }
 }
@@ -108,10 +104,9 @@ export function FeatureFlagsPlugin(options: FeatureFlagsPluginOptions): IPlugin 
       // Register under the capability token
       ctx.services.register(CAPABILITIES.FEATURE_FLAGS, service);
 
-      // Health indicator
+      // Health indicator — uses the closed-over `provider` (not re-resolved)
       const indicator: HealthIndicatorFn = (): Promise<HealthCheckResult> => {
-        const svc = ctx.services.get<typeof service>(CAPABILITIES.FEATURE_FLAGS);
-        const status = svc.status();
+        const status = service.status();
 
         if (status === undefined || status.healthy === true) {
           return Promise.resolve({
@@ -120,9 +115,17 @@ export function FeatureFlagsPlugin(options: FeatureFlagsPluginOptions): IPlugin 
           });
         }
 
+        // Only include detail when the custom provider actually returned one
+        if (status.detail !== undefined) {
+          return Promise.resolve({
+            status: 'degraded',
+            data: { provider: provider.type, detail: status.detail },
+          });
+        }
+
         return Promise.resolve({
           status: 'degraded',
-          data: { provider: provider.type, detail: status.detail },
+          data: { provider: provider.type },
         });
       };
 

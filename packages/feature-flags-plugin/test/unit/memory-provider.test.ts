@@ -52,9 +52,9 @@ describe('MemoryProvider', () => {
     provider.setFlag('targeted', def);
     // user1 is in the allowlist, so overridden to true
     expect(provider.isEnabled('targeted', { userId: 'user1' })).toBe(true);
-    // other user sees percentage bucket check
-    const offResult = provider.isEnabled('targeted', { userId: 'other' });
-    expect(typeof offResult).toBe('boolean');
+    // "other" has bucket("targeted", "other") = 69 (pinned from flag-evaluator),
+    // which is >= 50% threshold → false.
+    expect(provider.isEnabled('targeted', { userId: 'other' })).toBe(false);
   });
 
   it('start / stop no-op', async () => {

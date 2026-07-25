@@ -13,22 +13,29 @@ import type { FlagDefinition } from '../interfaces/index.ts';
 
 const FNV_OFFSET_BASIS = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
-const FNV_MOD = 2 ** 32;
 
 /**
  * Computes an FNV-1a 32-bit hash over `input`.
+ *
+ * Iterates UTF-8 bytes (via `TextEncoder`) using the textbook sequence:
+ * `hash = (hash ^ byte) >>> 0; hash = Math.imul(hash, FNV_PRIME) >>> 0;`
+ * for every input byte.
+ *
+ * Verified against the known vector: `fnv1a32("foobar") === 0xbf9cf968`
+ * (3214735720 decimal).
  *
  * @param input - String to hash.
  * @returns Unsigned 32-bit hash value.
  */
 export function fnv1a32(input: string): number {
   let hash = FNV_OFFSET_BASIS;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = (hash * FNV_PRIME) % FNV_MOD;
+  const bytes = new TextEncoder().encode(input);
+  for (let i = 0; i < bytes.length; i++) {
+    const byte = bytes[i];
+    hash = (hash ^ byte) >>> 0;
+    hash = Math.imul(hash, FNV_PRIME) >>> 0;
   }
-  // Ensure unsigned right shift for consistent results across runtimes
-  return hash >>> 0;
+  return hash;
 }
 
 /**

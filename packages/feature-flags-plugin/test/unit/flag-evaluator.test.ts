@@ -28,6 +28,16 @@ describe('flag-evaluator', () => {
       expect(value).toBeGreaterThanOrEqual(0);
       expect(value).toBeLessThan(2 ** 32);
     });
+
+    // Pinned vector — FNV-1a 32-bit over UTF-8 bytes.
+    // Reference: https://isthe.com/chongo/tech/comp/fnv/ (64-1.txt)
+    it('fnv1a32("foobar") === 0xbf9cf968 (3214735720)', () => {
+      expect(fnv1a32('foobar')).toBe(0xbf9cf968);
+    });
+
+    it('fnv1a32("") === 0x811c9dc5 (empty-string offset basis)', () => {
+      expect(fnv1a32('')).toBe(0x811c9dc5);
+    });
   });
 
   describe('bucket', () => {
@@ -41,6 +51,12 @@ describe('flag-evaluator', () => {
       const v1 = bucket('my-flag', 'user-42');
       const v2 = bucket('my-flag', 'user-42');
       expect(v1).toBe(v2);
+    });
+
+    // Pinned bucket value — not circular against bucket() itself.
+    // bucket("flag:user") = fnv1a32("flag:user") % 100 = 0x1dddc424 % 100 = 32
+    it('bucket("flag", "user") === 32 (pinned)', () => {
+      expect(bucket('flag', 'user')).toBe(32);
     });
   });
 

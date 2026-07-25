@@ -57,13 +57,13 @@ describe('feature-flags-integration', () => {
     }
   });
 
-  it('guard short-circuit — flag off returns 302 to fallback', async () => {
+  it('guard short-circuit — real kernel route, flag off returns 302 to fallback, handler NOT run', async () => {
     const runtimePlugin = RuntimePlugin();
     const flagPlugin = FeatureFlagsPlugin({
       provider: 'config',
       options: {
         flags: {
-          'my-flag': { enabled: false },
+          'guarded-flag': { enabled: false },
         },
       },
     });
@@ -75,43 +75,54 @@ describe('feature-flags-integration', () => {
     await app.start();
 
     try {
-      const guard = createFlagGuard('my-flag', { fallback: '/old' });
-
-      let handlerCalled = false;
-      const ctx = {
-        services: {
-          get: (token: string) => {
-            if (token === CAPABILITIES.FEATURE_FLAGS) {
-              return { isEnabled: (): boolean => false };
-            }
-            throw new Error(`Unknown token: ${token}`);
-          },
+      let handlerRunCount = 0;
+      app.router.get('/protected', {
+        middleware: [createFlagGuard('guarded-flag', { fallback: '/old' })],
+        handler: (ctx: IRequestContext) => {
+          handlerRunCount++;
+          return ctx.response.text('safe');
         },
-        request: { user: undefined },
-        response: {
-          redirect: (url: string): void => {
-            expect(url).toBe('/old');
-          },
-          status: (): void => {},
-          text: (): string => '',
-        },
-        id: 'test-id',
-        params: {} as Record<string, string>,
-        query: new URLSearchParams(),
-        state: {} as Record<string, unknown>,
-        secure: false,
-        body: undefined,
-        raw: null,
-        startTime: Date.now(),
-        signal: new AbortController().signal,
-      } as unknown as IRequestContext;
-
-      await guard(ctx, (): Promise<void> => {
-        handlerCalled = true;
-        return Promise.resolve();
       });
 
-      expect(handlerCalled).toBe(false);
+      // Inject a request to the guarded route (flag is OFF)
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/protected' });
+      expect(res.statusCode).toBe(302);
+      expect(handlerRunCount).toBe(0); // handler MUST NOT have run
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('guard short-circuit — real kernel route, flag off, no fallback returns 404', async () => {
+    const runtimePlugin = RuntimePlugin();
+    const flagPlugin = FeatureFlagsPlugin({
+      provider: 'config',
+      options: {
+        flags: {
+          'guarded-flag-2': { enabled: false },
+        },
+      },
+    });
+
+    const app = createApplication({
+      plugins: [runtimePlugin, flagPlugin],
+    });
+
+    await app.start();
+
+    try {
+      let handlerRunCount = 0;
+      app.router.get('/protected2', {
+        middleware: [createFlagGuard('guarded-flag-2')], // no fallback → 404 default
+        handler: (ctx: IRequestContext) => {
+          handlerRunCount++;
+          return ctx.response.text('safe');
+        },
+      });
+
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/protected2' });
+      expect(res.statusCode).toBe(404);
+      expect(handlerRunCount).toBe(0);
     } finally {
       await app.stop();
     }
