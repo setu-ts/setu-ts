@@ -22,17 +22,11 @@ import {
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
-import type {
-  NodeIncomingMessage,
-  RawUpgradeSocket,
-  WsModuleLike,
-  WsServerLike,
-} from './node-ws-upgrader.ts';
+import type { NodeIncomingMessage, RawUpgradeSocket, WsModuleLike } from './node-ws-upgrader.ts';
 import {
   asUpgradeEmitter,
-  bindWsSocketToSink,
   createUpgradeRequest,
-  loadWsModule,
+  NodeUpgradeCoordinator,
   rejectRawUpgrade,
 } from './node-ws-upgrader.ts';
 
@@ -102,12 +96,10 @@ export class NodeHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: NodeServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
-  #wsModule: WsModuleLike | null;
-  #wsServer: WsServerLike | null = null;
-  #pendingProtocol: string | undefined;
+  readonly #coordinator: NodeUpgradeCoordinator;
 
   constructor(wsModule?: WsModuleLike) {
-    this.#wsModule = wsModule ?? null;
+    this.#coordinator = new NodeUpgradeCoordinator(wsModule);
   }
 
   /**
@@ -122,11 +114,6 @@ export class NodeHttpServerHandle {
    */
   setUpgradeRouter(router: WebSocketUpgradeRouter): void {
     this.#upgrades.set(router);
-  }
-
-  /** Whether a router has been installed — the gate for attaching the listener. */
-  get hasUpgradeRouter(): boolean {
-    return this.#upgrades.hasRouter;
   }
 
   /**
@@ -179,26 +166,12 @@ export class NodeHttpServerHandle {
       return;
     }
 
-    this.#wsModule ??= await loadWsModule();
-    this.#wsServer ??= new this.#wsModule.WebSocketServer({
-      noServer: true,
-      // `ws` selects the subprotocol through this callback rather than through
-      // handleUpgrade, so the already-negotiated choice is handed over via
-      // #pendingProtocol. handleUpgrade resolves protocols synchronously, so
-      // no other upgrade can interleave between the assignment and this read.
-      handleProtocols: () => this.#pendingProtocol ?? false,
-    });
-
-    this.#pendingProtocol = decision.protocol;
-    this.#wsServer.handleUpgrade(incoming, socket, head, (ws) => {
-      bindWsSocketToSink(ws, decision.sink);
-    });
+    await this.#coordinator.handshake(incoming, socket, head, decision.sink, decision.protocol);
   }
 
   /** Shuts down the `ws` server, when one was ever created. */
   closeWebSocketServer(): void {
-    this.#wsServer?.close();
-    this.#wsServer = null;
+    this.#coordinator.close();
   }
 
   /**

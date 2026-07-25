@@ -348,6 +348,88 @@ export function createUpgradeRequest(incoming: NodeIncomingMessage): Request {
 }
 
 /**
+ * Owns the `ws` server for one Node HTTP adapter and performs the handshake.
+ *
+ * Split out of the adapter so the adapter keeps its single responsibility
+ * (mapping HTTP) and so the handshake's branches are measurable in isolation.
+ * The `ws` server is created on the first accepted upgrade — a plain HTTP
+ * application therefore never loads the optional dependency at all.
+ *
+ * @since 0.2.0
+ */
+export class NodeUpgradeCoordinator {
+  #module: WsModuleLike | null;
+  #server: WsServerLike | null = null;
+  #pendingProtocol: string | undefined;
+
+  /**
+   * Creates the coordinator.
+   *
+   * @param module - An injected `ws` module; omit to load it lazily
+   */
+  constructor(module?: WsModuleLike) {
+    this.#module = module ?? null;
+  }
+
+  /**
+   * `ws` selects the subprotocol through this callback rather than through
+   * `handleUpgrade`, so the already-negotiated choice is handed over via
+   * `#pendingProtocol`. `handleUpgrade` resolves protocols synchronously, so no
+   * other upgrade can interleave between the assignment and this read.
+   */
+  readonly #selectProtocol = (): string | false => {
+    return this.#pendingProtocol ?? false;
+  };
+
+  /** Whether a `ws` server has been created yet. */
+  get hasServer(): boolean {
+    return this.#server !== null;
+  }
+
+  /**
+   * Completes the RFC 6455 handshake over an already-accepted TCP connection
+   * and binds the resulting socket to the decision's sink.
+   *
+   * @param incoming - The Node request from the `upgrade` event
+   * @param socket - The raw duplex socket
+   * @param head - The bytes the HTTP parser already buffered
+   * @param sink - The sink to bind the completed socket into
+   * @param protocol - The negotiated subprotocol to echo, when one was selected
+   * @throws {Error} If `ws` is not installed
+   */
+  async handshake(
+    incoming: NodeIncomingMessage,
+    socket: unknown,
+    head: unknown,
+    sink: WebSocketEventSink,
+    protocol?: string,
+  ): Promise<void> {
+    if (this.#module === null) {
+      this.#module = await loadWsModule();
+    }
+    if (this.#server === null) {
+      this.#server = new this.#module.WebSocketServer({
+        noServer: true,
+        handleProtocols: this.#selectProtocol,
+      });
+    }
+
+    this.#pendingProtocol = protocol;
+    this.#server.handleUpgrade(incoming, socket, head, (ws) => {
+      bindWsSocketToSink(ws, sink);
+    });
+  }
+
+  /** Shuts down the `ws` server, when one was ever created. */
+  close(): void {
+    if (this.#server !== null) {
+      this.#server.close();
+      this.#server = null;
+    }
+  }
+}
+
+/**
  * Refuses an upgrade on the raw socket, since there is no `Response` object to
  * return on Node's `upgrade` path.
  *

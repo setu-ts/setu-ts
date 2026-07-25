@@ -57,6 +57,7 @@ export {
   createUpgradeRequest,
   createWsTransport,
   loadWsModule,
+  NodeUpgradeCoordinator,
   rejectRawUpgrade,
   toWsReadyState,
 } from './adapters/node/node-ws-upgrader.ts';

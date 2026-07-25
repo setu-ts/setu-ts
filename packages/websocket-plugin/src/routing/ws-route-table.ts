@@ -132,8 +132,6 @@ export class WsRouteTable {
       return { matched: false, status: 400 };
     }
 
-    return protocol === undefined
-      ? { matched: true, route }
-      : { matched: true, route, protocol };
+    return protocol === undefined ? { matched: true, route } : { matched: true, route, protocol };
   }
 }

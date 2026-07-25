@@ -78,6 +78,45 @@ interface WebSocketPairGlobal {
 }
 
 /**
+ * The `ResponseInit` a Workers WebSocket handshake answers with.
+ *
+ * `webSocket` is a Workers-specific member absent from the web-standard
+ * `ResponseInit`; only the Workers runtime reads it, and other runtimes drop it
+ * when constructing a `Response`. It is built here as a plain object so the
+ * wiring is assertable off-Workers, where a round-trip through `new Response()`
+ * would silently discard it.
+ *
+ * @since 0.2.0
+ */
+export interface CloudflareUpgradeResponseInit {
+  /** Always `101 Switching Protocols`. */
+  readonly status: 101;
+  /** Carries the echoed subprotocol, when one was negotiated. */
+  readonly headers: Headers;
+  /** The client half of the pair, handed back to the peer. */
+  readonly webSocket: unknown;
+}
+
+/**
+ * Builds the 101 response init for a Workers handshake.
+ *
+ * @param client - The client half of the `WebSocketPair`
+ * @param protocol - The negotiated subprotocol to echo, when one was selected
+ * @returns The response init
+ * @since 0.2.0
+ */
+export function buildUpgradeResponseInit(
+  client: unknown,
+  protocol?: string,
+): CloudflareUpgradeResponseInit {
+  const headers = new Headers();
+  if (protocol !== undefined) {
+    headers.set('sec-websocket-protocol', protocol);
+  }
+  return { status: 101, headers, webSocket: client };
+}
+
+/**
  * Builds the default host from the real Workers globals.
  *
  * Exported as a factory rather than a constant so the boundary cast is only
@@ -108,13 +147,9 @@ export function createDefaultCloudflareWebSocketHost(): CloudflareWebSocketHost 
       return { client, server };
     },
     createUpgradeResponse(client: unknown, protocol?: string): Response {
-      const headers = new Headers();
-      if (protocol !== undefined) {
-        headers.set('sec-websocket-protocol', protocol);
-      }
-      // `webSocket` is a Workers-specific ResponseInit member absent from the
-      // web-standard lib types, so the init object is cast at this one boundary.
-      const init = { status: 101, headers, webSocket: client } as unknown as ResponseInit;
+      // The init carries the Workers-only `webSocket` member, so it is cast at
+      // this one boundary to satisfy the web-standard `ResponseInit` type.
+      const init = buildUpgradeResponseInit(client, protocol) as unknown as ResponseInit;
       return new Response(null, init);
     },
   };
