@@ -356,8 +356,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   queue overflow → `WorkerQueueFullError`. `worker-pool` health indicator (`{ available, pools }`) +
   `onClose` terminates all. Real-thread e2e on Deno spawning fixture task modules; developed in an
   isolated worktree off `main`) — complete (PR #64)
-- **Next milestone** — **Milestone 30** (`packages/notification-plugin`); resumes the main plugin
-  sequence (M30–M40 follow) unless reprioritized.
+- **Milestone 30** (`packages/notification-plugin` — NotificationPlugin registering an `INotifier`
+  under `CAPABILITIES.NOTIFICATION`, backed by a two-layer channel → transport design: four channels
+  own address extraction and payload shaping (`EmailChannel` reads `to.email` and delegates to the
+  `IMailer` resolved from `CAPABILITIES.MAIL`, `SmsChannel` `to.phone`, `PushChannel` `to.token` +
+  `subject` as title, `SlackChannel` optional `to.channel`), while three zero-dependency HTTP
+  providers own transport (`TwilioProvider` form-encoded Basic-auth REST, `FcmProvider` legacy
+  `serverKey` `POST /fcm/send`, `SlackProvider` incoming webhook with the compound
+  HTTP-200-AND-body- `ok` check) behind one injectable `INotificationHttp` seam defaulting to
+  `createDefaultNotificationHttp()` (web-standard `fetch`, so every channel is Workers-portable, no
+  `npm:` import anywhere); `NotificationService.send` fans out with `Promise.allSettled` and throws
+  `AggregateError` whose `errors` are coerced to `Error`, so one failing channel never aborts the
+  others; `ChannelConfig` is a union discriminated on `provider` and `createProvider` is overloaded
+  per arm, so a missing credential is a compile error rather than a startup throw; `email`
+  configured without a `mail` capability throws during `register` (fail fast, ordered by
+  `optionalDependencies: ['mail']`); a `notification` health indicator and no `onClose` (stateless
+  providers); no `common` change — the `INotifier`/`NotificationMessage` contract and
+  `NOTIFICATION: 'notification'` token were committed in M1; corrected the PUBLIC_API/ROADMAP
+  `sendEmail`/`sendSms`/`sendSlack` examples to the committed one-method `send` surface, dropped the
+  email `options` bag, fixed the Twilio registration example that omitted the required `from`, and
+  added the missing Notifications Options/Exports/Notes sections in the same PR; the legacy FCM
+  `serverKey` API it ships was decommissioned by Google in 2024 — FCM HTTP v1 with service-account
+  JWT signing is a follow-up) — complete (PR #65)
+- **Next milestone** — **Milestone 31** (`packages/feature-flags-plugin`); resumes the main plugin
+  sequence (M31–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

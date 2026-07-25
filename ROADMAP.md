@@ -3088,10 +3088,10 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 ```typescript
 app.register(NotificationPlugin({
   channels: {
-    email: { provider: 'mail', options: {/* ... */} },
-    sms: { provider: 'twilio', options: {/* ... */} },
-    push: { provider: 'fcm', options: {/* ... */} },
-    slack: { provider: 'slack', options: {/* ... */} },
+    email: { provider: 'mail' }, // transport comes from MailPlugin (M29)
+    sms: { provider: 'twilio', options: { accountSid: '…', authToken: '…', from: '+1234567890' } },
+    push: { provider: 'fcm', options: { serverKey: '…' } },
+    slack: { provider: 'slack', options: { webhookUrl: 'https://hooks.slack.com/…' } },
   },
 }));
 ```
@@ -3108,9 +3108,18 @@ await notifier.send({
   body: 'Your order has been shipped.',
 });
 
-// Channel-specific
-await notifier.sendEmail('user@example.com', 'Welcome', 'Welcome!');
-await notifier.sendSms('+1234567890', 'Your code is 123456');
+// Channel-specific (single-channel send)
+await notifier.send({
+  channels: ['email'],
+  to: { email: 'user@example.com' },
+  subject: 'Welcome',
+  body: 'Welcome!',
+});
+await notifier.send({
+  channels: ['sms'],
+  to: { phone: '+1234567890' },
+  body: 'Your code is 123456',
+});
 ```
 
 **Implementation Files:**
@@ -3134,9 +3143,9 @@ await notifier.sendSms('+1234567890', 'Your code is 123456');
 
 ### Deliverables
 
-- [ ] NotificationPlugin
-- [ ] Email, SMS, Push, Slack channels
-- [ ] Full test coverage
+- [x] NotificationPlugin
+- [x] Email, SMS, Push, Slack channels
+- [x] Full test coverage
 
 ---
 
@@ -4210,7 +4219,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 27        | ✅     | resilience-plugin    |
 | 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
-| 30        | ⬜     | notification-plugin  |
+| 30        | ✅     | notification-plugin  |
 | 31        | ⬜     | feature-flags-plugin |
 | 32        | ⬜     | multi-tenancy-plugin |
 | 33        | ⬜     | testing              |
