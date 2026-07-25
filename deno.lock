@@ -41,6 +41,7 @@
     "npm:nodemailer@9": "9.0.3",
     "npm:pino@*": "10.3.1",
     "npm:react-router@8": "8.3.0_react@19.2.7",
+    "npm:ws@^8.18.0": "8.21.1",
     "npm:zod@^3.24.0": "3.25.76"
   },
   "jsr": {
@@ -1694,6 +1695,9 @@
     },
     "wrappy@1.0.2": {
       "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="
+    },
+    "ws@8.21.1": {
+      "integrity": "sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw=="
     },
     "wsl-utils@0.1.0": {
       "integrity": "sha512-h3Fbisa2nKGPxCpm89Hk33lBLsnaGBvctQopaBSOW/uIs6FTe1ATyAnKFJrzVs9vpGdsTe73WF3V4lIsk4Gacw==",

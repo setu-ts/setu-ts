@@ -378,6 +378,37 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   added the missing Notifications Options/Exports/Notes sections in the same PR; the legacy FCM
   `serverKey` API it ships was decommissioned by Google in 2024 — FCM HTTP v1 with service-account
   JWT signing is a follow-up) — complete (PR #65)
+- **Milestone 46** (`packages/websocket-plugin` — WebSocketPlugin registering an `IWebSocketService`
+  under a new `CAPABILITIES.WEBSOCKET = 'websocket'` token; full-duplex bidirectional messaging,
+  completing the real-time story M43's SSE plugin covers one-way. The RFC 6455 handshake needs the
+  **native** `Request` and answers with a 101 carrying a socket, neither of which `IRequest`/
+  `IResponse` can express — and `mapWebRequestToFrameworkRequest` pre-reads the body, which
+  _disturbs_ it and makes `Deno.upgradeWebSocket` fail outright. The upgrade is therefore
+  intercepted inside the HTTP adapter via one new **optional**
+  `IHttpAdapter.setUpgradeRouter?(router)` member (a flagged `common` widening alongside the M44
+  `fs?` / M45 `workers?` precedents); the router answers accept / reject / `null`-fall-through, so
+  non-WebSocket traffic is untouched. All four runtimes implemented: Deno (`Deno.upgradeWebSocket`
+  on the fetch path), Cloudflare Workers (`WebSocketPair` + a 101 carrying the client half), Bun
+  (`server.upgrade` inside `Bun.serve`'s fetch callback returning `undefined`, with serve-time
+  `websocket` handlers routing through `ws.data.sink`), and Node (the raw `upgrade` event on the
+  `node:http` server `serve()` returns, with `npm:ws@^8` inject-or-lazy via
+  `adaptWsModule`/`loadWsModule` and a `NodeUpgradeCoordinator`; `@hono/node-ws` was rejected with
+  cause — its shipped types require a concrete `Hono` app and it peer-deps
+  `@hono/node-server@^1.19.11` against the `^2` this repo pins). Plugin ships an exact-path route
+  table (kernel's matcher is internal, so no `:param` patterns and no duplicated matcher), named
+  `WebSocketRoom` broadcast groups with `except` and auto-eviction of closed members, an
+  application-level heartbeat + idle sweeper (`heartbeatMs`/`heartbeatPayload`/`idleTimeoutMs` —
+  protocol pings are unusable since Deno and Workers expose no `ping()`), `maxConnections` (503) and
+  `maxMessageBytes` (1009) admission control, single-value subprotocol echo from a configured
+  allow-list, a `websocket` health indicator, and an `onClose` that closes every connection with
+  `1001`. Real-socket e2e on Deno caught a bug no fake would have: the connection context was built
+  lazily in `onOpen`, which fires after the handshake response is returned, by which point the
+  runtime has closed the native request — it is now snapshotted in the router. Code review then
+  caught that `maxConnections` could be exceeded, because connections registered only at `onOpen`
+  while the capacity check ran before the handshake completed; slots are now claimed at accept time
+  and released by all four adapters through `sink.onClose({ code: 1006 })` when a handshake fails
+  after acceptance, so malformed upgrades cannot starve the limit. Outstanding: the root `README.md`
+  WebSocket row was deferred at the maintainer's request) — complete (PR #66)
 - **Milestone 31** (`packages/feature-flags-plugin` — FeatureFlagsPlugin registering the committed
   synchronous `IFeatureFlags` under `CAPABILITIES.FEATURE_FLAGS`, backed by an exported
   `FlagProvider` port whose implementations own a cached snapshot plus an async `start()`/`stop()`

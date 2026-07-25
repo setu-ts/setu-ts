@@ -163,7 +163,11 @@ describe('deno-http-adapter | close', () => {
 
 describe('deno-http-adapter | isDenoHttpServerHandle', () => {
   it('accepts valid handles', () => {
-    expect(isDenoHttpServerHandle(new DenoHttpServerHandle())).toBe(true);
+    expect(
+      isDenoHttpServerHandle(
+        new DenoHttpServerHandle({ serve: () => ({ shutdown: () => Promise.resolve() }) }),
+      ),
+    ).toBe(true);
   });
 
   it('rejects invalid handles', () => {

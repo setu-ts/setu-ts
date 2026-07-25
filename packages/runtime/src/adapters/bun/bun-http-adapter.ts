@@ -10,11 +10,21 @@
  * @module
  */
 
-import type { IHttpAdapter, IRequest, IResponse, ServerHandle } from '@hono-enterprise/common';
+import type {
+  IHttpAdapter,
+  IRequest,
+  IResponse,
+  ServerHandle,
+  WebSocketUpgradeRouter,
+} from '@hono-enterprise/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
+import type { BunSocketData, BunWebSocketHandlers } from './bun-ws-upgrader.ts';
+import { createBunWebSocketHandlers } from './bun-ws-upgrader.ts';
 
 // ---------------------------------------------------------------------------
 // Host seam (existing)
@@ -28,13 +38,22 @@ export interface BunServeHost {
   /**
    * Starts an HTTP server.
    *
+   * The `fetch` callback receives the `BunServer` as its second argument
+   * (Bun's own signature) because `server.upgrade()` is the only way to
+   * perform a WebSocket handshake, and it may resolve `undefined` to tell Bun
+   * that the request was upgraded and needs no response.
+   *
    * @param options - Server options
    * @returns The server handle
    */
   serve(options: {
     port: number;
     hostname?: string;
-    fetch: (request: Request) => Response | Promise<Response>;
+    fetch: (
+      request: Request,
+      server: BunServer,
+    ) => Response | undefined | Promise<Response | undefined>;
+    websocket?: BunWebSocketHandlers;
   }): BunServer;
 }
 
@@ -46,6 +65,20 @@ export interface BunServer {
    * Stops the server gracefully.
    */
   stop(): void;
+  /**
+   * Upgrades an inbound request to a WebSocket.
+   *
+   * Optional so a host injected before this seam existed still satisfies the
+   * interface; when absent, the adapter refuses upgrades with 501.
+   *
+   * @param request - The native, undisturbed upgrade request
+   * @param options - Per-socket data and response headers for the handshake
+   * @returns `true` when the upgrade succeeded and no response should be sent
+   */
+  upgrade?(
+    request: Request,
+    options: { data: BunSocketData; headers?: Headers },
+  ): boolean;
 }
 
 /**
@@ -69,12 +102,20 @@ const defaultBunServeHost: BunServeHost = (globalThis as { Bun?: BunServeHost })
 export class BunHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: BunServer | null = null;
+  readonly #upgrades = new UpgradeRouterStore();
 
   /**
    * Stores the handler set by `setHandler`.
    */
   setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handler = handler;
+  }
+
+  /**
+   * Stores the WebSocket upgrade router set by `setUpgradeRouter`.
+   */
+  setUpgradeRouter(router: WebSocketUpgradeRouter): void {
+    this.#upgrades.set(router);
   }
 
   /**
@@ -92,7 +133,8 @@ export class BunHttpServerHandle {
   }
 
   /**
-   * Creates the fetch handler for Bun.serve.
+   * Creates the plain HTTP fetch handler — the entry point used by
+   * `IHttpAdapter.fetch`, which always answers with a `Response`.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
@@ -102,6 +144,48 @@ export class BunHttpServerHandle {
       }
       const frameworkResponse = await this.#handler(frameworkRequest);
       return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+    };
+  }
+
+  /**
+   * Creates the callback handed to `Bun.serve`. It differs from
+   * {@linkcode BunHttpServerHandle.createFetchHandler} in exactly one way: it
+   * may resolve `undefined`, which is how Bun is told a request was upgraded
+   * to a WebSocket and needs no response. WebSocket upgrades are therefore
+   * only available through `listen()`, not through `IHttpAdapter.fetch`.
+   */
+  createServeCallback(): (
+    request: Request,
+    server: BunServer,
+  ) => Promise<Response | undefined> {
+    const httpHandler = this.createFetchHandler();
+    return async (request: Request, server: BunServer): Promise<Response | undefined> => {
+      const decision = await this.#upgrades.consult(request);
+      if (decision !== null) {
+        if (!decision.accept) {
+          return new Response(null, { status: decision.status });
+        }
+        if (server.upgrade === undefined) {
+          decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
+          return new Response(null, { status: 501 });
+        }
+
+        const headers = new Headers();
+        if (decision.protocol !== undefined) {
+          headers.set('sec-websocket-protocol', decision.protocol);
+        }
+        const upgraded = server.upgrade(request, { data: { sink: decision.sink }, headers });
+        if (upgraded) {
+          // `undefined` tells Bun the socket was taken over.
+          return undefined;
+        }
+        // Bun refused after the router accepted, so release whatever the
+        // consumer reserved for this socket before answering.
+        decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Handshake refused' });
+        return new Response(null, { status: 400 });
+      }
+
+      return await httpHandler(request);
     };
   }
 }
@@ -138,17 +222,21 @@ export class BunHttpAdapter implements IHttpAdapter {
     this.#handle.setHandler(handler);
   }
 
+  setUpgradeRouter(router: WebSocketUpgradeRouter): void {
+    this.#handle.setUpgradeRouter(router);
+  }
+
   fetch(request: Request): Promise<Response> {
     return this.#handle.createFetchHandler()(request);
   }
 
   // deno-lint-ignore require-await
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
-    const fetchHandler = this.#handle.createFetchHandler();
     const server = this.#host.serve({
       port,
       ...(hostname !== undefined ? { hostname } : {}),
-      fetch: fetchHandler,
+      fetch: this.#handle.createServeCallback(),
+      websocket: createBunWebSocketHandlers(),
     });
 
     this.#handle.server = server;

@@ -2383,7 +2383,6 @@ graph TB
         GraphQL[GraphQL Plugin]
         gRPC[gRPC Plugin]
         Edge[Edge Runtime]
-        WebSocket[WebSocket Plugin]
     end
 
     Kernel --> Existing
@@ -2392,8 +2391,15 @@ graph TB
     Kernel --> GraphQL
     Kernel --> gRPC
     Kernel --> Edge
-    Kernel --> WebSocket
 ```
+
+> The **WebSocket Plugin** shipped in Milestone 46 and is no longer a future extension point. Note
+> that it does **not** hang off the kernel: the kernel is untouched by WebSocket support. The plugin
+> depends on `common` and the `http-adapter` capability, because an RFC 6455 handshake needs the
+> native `Request` and answers with a 101 carrying a socket — neither of which the kernel's
+> `IRequest`/`IResponse` abstraction can express. The upgrade is therefore an HTTP-adapter concern,
+> reached through the optional `IHttpAdapter.setUpgradeRouter` seam (§10 middleware pipeline is
+> likewise bypassed for upgrade requests, by design).
 
 ### Versioning
 
@@ -2453,7 +2459,6 @@ The architecture supports future additions without breaking existing application
 | **GraphQL Plugin**       | New plugin that registers GraphQL routes and schema              |
 | **gRPC Plugin**          | New plugin that provides gRPC server and client                  |
 | **Edge Runtime**         | New runtime adapter for Cloudflare Workers                       |
-| **WebSocket Plugin**     | New plugin that provides WebSocket support                       |
 | **SSE Plugin**           | New plugin that provides Server-Sent Events                      |
 | **New Database Adapter** | New plugin that provides the `database` token with a new ORM     |
 | **New Message Broker**   | New plugin that provides the `messaging` token with a new broker |

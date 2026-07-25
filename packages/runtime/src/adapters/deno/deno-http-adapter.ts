@@ -10,18 +10,28 @@
  * @module
  */
 
-import type { IHttpAdapter, IRequest, IResponse, ServerHandle } from '@hono-enterprise/common';
+import type {
+  IHttpAdapter,
+  IRequest,
+  IResponse,
+  ServerHandle,
+  WebSocketUpgradeRouter,
+} from '@hono-enterprise/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
+import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
+import { bindDenoSocketToSink } from './deno-ws-upgrader.ts';
 
 // ---------------------------------------------------------------------------
 // Host seam
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal interface covering the Deno `Deno.serve` operation.
+ * Minimal interface covering the Deno operations this adapter needs.
  * Inject this interface to test the adapter without real Deno.
  */
 export interface DenoServeHost {
@@ -36,6 +46,20 @@ export interface DenoServeHost {
     hostname?: string;
     fetch: (request: Request) => Response | Promise<Response>;
   }): DenoServer;
+  /**
+   * Performs an RFC 6455 handshake on an inbound request.
+   *
+   * Optional so that a host injected before this seam existed still satisfies
+   * the interface; when absent, the adapter refuses upgrades with 501.
+   *
+   * @param request - The native, undisturbed upgrade request
+   * @param options - Handshake options; `protocol` echoes a negotiated subprotocol
+   * @returns The server-side socket and the 101 response to return
+   */
+  upgradeWebSocket?(
+    request: Request,
+    options?: { protocol?: string },
+  ): DenoWebSocketUpgrade;
 }
 
 /**
@@ -65,6 +89,12 @@ const defaultDenoServeHost: DenoServeHost = {
     );
     return server as unknown as DenoServer;
   },
+  upgradeWebSocket: (request, options) => {
+    const result = options?.protocol !== undefined
+      ? Deno.upgradeWebSocket(request, { protocol: options.protocol })
+      : Deno.upgradeWebSocket(request);
+    return result as unknown as DenoWebSocketUpgrade;
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -79,12 +109,25 @@ const defaultDenoServeHost: DenoServeHost = {
 export class DenoHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: DenoServer | null = null;
+  readonly #upgrades = new UpgradeRouterStore();
+  #host: DenoServeHost;
+
+  constructor(host: DenoServeHost) {
+    this.#host = host;
+  }
 
   /**
    * Stores the handler set by `setHandler`.
    */
   setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handler = handler;
+  }
+
+  /**
+   * Stores the WebSocket upgrade router set by `setUpgradeRouter`.
+   */
+  setUpgradeRouter(router: WebSocketUpgradeRouter): void {
+    this.#upgrades.set(router);
   }
 
   /**
@@ -103,9 +146,18 @@ export class DenoHttpServerHandle {
 
   /**
    * Creates the web-standard fetch handler for Deno.serve.
+   *
+   * The WebSocket upgrade is consulted first and short-circuits: the request
+   * body must stay undisturbed for `Deno.upgradeWebSocket` to succeed, and
+   * `mapWebRequestToFrameworkRequest` reads it.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
+      const upgraded = await this.#tryUpgrade(request);
+      if (upgraded !== null) {
+        return upgraded;
+      }
+
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -113,6 +165,48 @@ export class DenoHttpServerHandle {
       const frameworkResponse = await this.#handler(frameworkRequest);
       return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
+  }
+
+  /**
+   * Performs the handshake when the router accepts. Returns `null` to fall
+   * through to normal HTTP handling.
+   */
+  async #tryUpgrade(request: Request): Promise<Response | null> {
+    const decision = await this.#upgrades.consult(request);
+    if (decision === null) {
+      return null;
+    }
+    if (!decision.accept) {
+      return new Response(null, { status: decision.status });
+    }
+
+    const upgradeWebSocket = this.#host.upgradeWebSocket;
+    if (upgradeWebSocket === undefined) {
+      // A host injected before this seam existed cannot handshake. Refusing is
+      // the honest answer; falling through would hand a WebSocket client an
+      // ordinary HTTP response it cannot interpret.
+      decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
+      return new Response(null, { status: 501 });
+    }
+
+    try {
+      const { socket, response } = upgradeWebSocket.call(
+        this.#host,
+        request,
+        decision.protocol !== undefined ? { protocol: decision.protocol } : undefined,
+      );
+      bindDenoSocketToSink(socket, decision.sink);
+      return response;
+    } catch (cause) {
+      // The router already accepted, so the consumer may be holding resources
+      // for this socket (a reserved connection slot). Tell it the connection is
+      // over rather than leaving the sink dangling forever.
+      decision.sink.onClose({
+        code: ABNORMAL_CLOSURE,
+        reason: cause instanceof Error ? cause.message : 'Handshake failed',
+      });
+      return new Response(null, { status: 400 });
+    }
   }
 }
 
@@ -141,11 +235,15 @@ export class DenoHttpAdapter implements IHttpAdapter {
 
   constructor(host?: DenoServeHost) {
     this.#host = host ?? defaultDenoServeHost;
-    this.#handle = new DenoHttpServerHandle();
+    this.#handle = new DenoHttpServerHandle(this.#host);
   }
 
   setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
     this.#handle.setHandler(handler);
+  }
+
+  setUpgradeRouter(router: WebSocketUpgradeRouter): void {
+    this.#handle.setUpgradeRouter(router);
   }
 
   fetch(request: Request): Promise<Response> {

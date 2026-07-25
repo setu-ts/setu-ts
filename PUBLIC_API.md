@@ -1506,6 +1506,107 @@ Omitting an option disables that behaviour (no timer created).
 
 ---
 
+## WebSocketPlugin()
+
+Provides full-duplex, bidirectional real-time messaging, completing the real-time story that
+`SsePlugin` covers one-way. Registers an `IWebSocketService` under `CAPABILITIES.WEBSOCKET`. Added
+in Milestone 46.
+
+The RFC 6455 handshake is performed by the runtime's HTTP adapter through the optional
+`IHttpAdapter.setUpgradeRouter` seam, so the same application code runs on Node, Deno, Bun, and
+Cloudflare Workers. The plugin never creates a server and never touches a runtime API.
+
+### Registration
+
+```typescript
+import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
+
+app.register(WebSocketPlugin({
+  maxConnections: 10_000,
+  heartbeatMs: 30_000,
+  heartbeatPayload: 'ping',
+  idleTimeoutMs: 90_000,
+  maxMessageBytes: 1_048_576,
+}));
+```
+
+### Options
+
+| Option             | Type     | Default  | Behavior                                                                                                                                                                                    |
+| ------------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxConnections`   | `number` | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                     |
+| `heartbeatMs`      | `number` | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                   |
+| `heartbeatPayload` | `string` | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                            |
+| `idleTimeoutMs`    | `number` | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert. |
+| `maxMessageBytes`  | `number` | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                   |
+
+### Usage
+
+```typescript
+import { CAPABILITIES, type IWebSocketService } from '@hono-enterprise/common';
+
+const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+
+ws.route('/ws/chat', {
+  onOpen: (conn, { query, headers }) => {
+    conn.data.set('room', query.room ?? 'lobby');
+    ws.room(query.room ?? 'lobby').add(conn);
+  },
+  onMessage: (conn, data) => {
+    ws.room(conn.data.get('room') as string).broadcast(data, { except: conn });
+  },
+  onClose: (conn, { code, reason }) => logger.info('closed', { code, reason }),
+  onError: (conn, error) => logger.error('socket error', { error }),
+}, { protocols: ['chat'] });
+```
+
+### Exports
+
+| Export                      | Kind     | Purpose                                                               |
+| --------------------------- | -------- | --------------------------------------------------------------------- |
+| `WebSocketPlugin`           | function | Creates the plugin                                                    |
+| `WebSocketService`          | class    | The `IWebSocketService` implementation registered under the token     |
+| `WebSocketConnection`       | class    | The `IWebSocketConnection` implementation                             |
+| `Room`                      | class    | The `WebSocketRoom` implementation                                    |
+| `RoomRegistry`              | class    | Owns live rooms, creating on demand and discarding when empty         |
+| `WsRouteTable`              | class    | Exact-path route table with subprotocol selection                     |
+| `HeartbeatSweeper`          | class    | The interval implementing `heartbeatMs` / `idleTimeoutMs`             |
+| `WebSocketUnavailableError` | class    | Thrown by `route()` when the adapter offers no upgrade seam           |
+| `resolveOptions`            | function | Applies option defaults and rejects a contradictory configuration     |
+| `frameByteLength`           | function | Measures a frame in bytes (text by UTF-8 encoding, not string length) |
+| `buildContext`              | function | Builds the `WebSocketConnectionContext` from an upgrade request       |
+| `parseRequestedProtocols`   | function | Parses a `Sec-WebSocket-Protocol` header into tokens                  |
+| `selectProtocol`            | function | Picks the subprotocol to echo, or refuses                             |
+| `WebSocketPluginOptions`    | type     | The options above                                                     |
+| `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                    |
+| `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                      |
+
+### Notes
+
+- **Routes match on exact path.** Variable data travels in the query string and reaches `onOpen` via
+  `WebSocketConnectionContext.query`. Pattern parameters (`:id`) are deliberately not supported: the
+  kernel's matcher is internal to `@hono-enterprise/kernel` and hand-rolling a second one would
+  duplicate logic.
+- **The heartbeat is an application-level frame, not an RFC 6455 ping.** The web `WebSocket` API on
+  Deno and Cloudflare Workers exposes no `ping()`, so a protocol ping would silently no-op on half
+  the supported runtimes.
+- **Node requires `npm:ws`.** It is an optional dependency, loaded lazily on the first accepted
+  upgrade (AI_GUIDELINES §12.2) — a plain HTTP application never loads it. `loadWsModule` throws
+  with the install command when it is absent. The other three runtimes need no dependency.
+- **Upgrades on Node arrive on the raw `upgrade` event, not the `fetch` path**, so they are only
+  available after `listen()`. On Bun, upgrades likewise only work through `listen()`, since
+  `server.upgrade` requires the serve-time `websocket` handlers. Deno and Workers upgrade on the
+  `fetch` path.
+- **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
+  the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
+- **Rooms are in-process.** Cross-replica fan-out is deferred to a follow-up milestone.
+- **`app.inject()` cannot exercise a WebSocket**; tests must bind a real socket
+  (`app.start({ port })` + `new WebSocket(...)`).
+- A `websocket` health indicator reports `{ available, connections, rooms, routes }`. `onClose`
+  closes every live connection with code `1001` and stops the heartbeat.
+
+---
+
 ## ReactRouterPlugin()
 
 Embeds **React Router v7 framework mode** as a first-party plugin so a Hono Enterprise application
@@ -4549,40 +4650,41 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Types
 
-| Group               | Exports                                                                                                                                                                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                  |
-| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                            |
-| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                        |
-| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                              |
-| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore` |
-| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                               |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`, `ResponseSnapshot`                                                   |
-| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                           |
-| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                           |
-| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                 |
-| Config              | `IConfig`                                                                                                                                                                                                                                |
-| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                              |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                           |
-| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                            |
-| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                            |
-| Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                            |
-| Cache               | `ICacheStore`                                                                                                                                                                                                                            |
-| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                         |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                            |
-| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                            |
-| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                      |
-| Secrets             | `ISecretManager`                                                                                                                                                                                                                         |
-| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                             |
-| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`                                                                                       |
-| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                           |
-| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                 |
-| Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                       |
-| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                           |
-| Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                             |
-| SSR                 | `ISsrService`                                                                                                                                                                                                                            |
-| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                              |
-| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                      |
+| Group               | Exports                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                           |
+| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                                                                                                     |
+| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                 |
+| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                       |
+| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                          |
+| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                                                                                                        |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`, `ResponseSnapshot`                                                                                                                            |
+| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                    |
+| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                    |
+| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                          |
+| Config              | `IConfig`                                                                                                                                                                                                                                                                                                         |
+| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                       |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                                                                                                    |
+| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                     |
+| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                     |
+| Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                                                                                                     |
+| Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                     |
+| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                  |
+| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                     |
+| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                     |
+| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                               |
+| Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                  |
+| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                      |
+| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`                                                                                                                                                                |
+| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                    |
+| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                          |
+| Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                |
+| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                    |
+| Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                      |
+| SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                     |
+| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                       |
+| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |
+| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                               |
 
 Contract notes:
 
@@ -4619,6 +4721,10 @@ Contract notes:
 - `CAPABILITIES.SSR` (`'ssr'`) — the capability token under which the React Router plugin registers
   the `ISsrService`. The service provides server-side rendering by delegating to React Router's
   request handler and writing back the result via `IResponse`. Added in Milestone 44.
+- `CAPABILITIES.WEBSOCKET` (`'websocket'`) — the capability token under which the WebSocket plugin
+  registers the `IWebSocketService`. The service provides full-duplex, bidirectional real-time
+  messaging: exact-path routes with lifecycle handlers, named broadcast rooms, and an
+  application-level heartbeat. Distinct from `SSE`, which is one-way. Added in Milestone 46.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
@@ -4706,6 +4812,35 @@ Cloudflare Workers.
 | `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                      |
 | `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                       |
 
+WebSocket upgrade support (Milestone 46) — shared primitives:
+
+| Export                      | Kind     | Purpose                                                                         |
+| --------------------------- | -------- | ------------------------------------------------------------------------------- |
+| `isWebSocketUpgradeRequest` | function | Whether request headers describe an RFC 6455 upgrade (`Upgrade` + `Connection`) |
+| `createWebSocketTransport`  | function | Wraps a web-API socket as an `IWebSocketTransport`                              |
+| `normalizeFrame`            | function | Normalizes an inbound frame payload to `string \| Uint8Array`                   |
+| `toReadyState`              | function | Maps the web WebSocket numeric `readyState` to `WebSocketReadyState`            |
+| `toTransportError`          | function | Coerces an error-event payload into a real `Error`                              |
+
+Per-runtime upgrade seams:
+
+| Export                                 | Kind     | Purpose                                                                           |
+| -------------------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `bindDenoSocketToSink`                 | function | Binds a `Deno.upgradeWebSocket` socket's `on*` handlers to a `WebSocketEventSink` |
+| `createBunWebSocketHandlers`           | function | Builds the serve-time handler object for `Bun.serve`'s `websocket` option         |
+| `bindCloudflareSocketToSink`           | function | Accepts a Workers `WebSocketPair` server half and binds it to a sink              |
+| `createDefaultCloudflareWebSocketHost` | function | Builds the Workers host from the real `WebSocketPair` global                      |
+| `buildUpgradeResponseInit`             | function | Builds the Workers 101 `ResponseInit` carrying the client socket                  |
+| `NodeUpgradeCoordinator`               | class    | Owns the `ws` server for one Node adapter and performs the raw handshake          |
+| `adaptWsModule`                        | function | Narrows an imported `ws` module to `WsModuleLike`                                 |
+| `loadWsModule`                         | function | Lazily imports `npm:ws@^8.18.0`; throws with the install command if absent        |
+| `bindWsSocketToSink`                   | function | Binds a `ws` socket's events to a `WebSocketEventSink`                            |
+| `createWsTransport`                    | function | Wraps a `ws` socket as an `IWebSocketTransport`                                   |
+| `toWsReadyState`                       | function | Maps a `ws` numeric ready state to `WebSocketReadyState`                          |
+| `createUpgradeRequest`                 | function | Rebuilds a web `Request` from Node's `upgrade` event arguments                    |
+| `asUpgradeEmitter`                     | function | Probes a Node server handle for the raw `upgrade` event                           |
+| `rejectRawUpgrade`                     | function | Writes an HTTP status line to a raw socket and destroys it                        |
+
 ### Types
 
 | Export                              | Kind | Purpose                                                                        |
@@ -4733,6 +4868,22 @@ Cloudflare Workers.
 | `WebWorkerLike`                     | type | Minimal web `Worker` shape the host consumes                                   |
 | `NodeWorkerModules`                 | type | Injectable seam for `createNodeWorkerHost` (`Worker` + `availableParallelism`) |
 | `NodeWorkerLike`                    | type | Minimal `worker_threads.Worker` shape the host consumes                        |
+| `WebSocketLike`                     | type | Minimal web `WebSocket` shape the adapters drive                               |
+| `DenoWebSocketLike`                 | type | A web socket exposing the `on*` handler properties (Deno)                      |
+| `DenoWebSocketUpgrade`              | type | Result shape of `Deno.upgradeWebSocket` (`{ socket, response }`)               |
+| `BunServerWebSocket`                | type | Minimal Bun `ServerWebSocket` shape, carrying `data`                           |
+| `BunSocketData`                     | type | Per-socket data Bun carries from `upgrade()` to its handlers (`{ sink }`)      |
+| `BunWebSocketHandlers`              | type | The serve-time handler object for `Bun.serve`'s `websocket` option             |
+| `CloudflareServerSocket`            | type | Workers server-half socket (`accept()` + `addEventListener`)                   |
+| `CloudflareWebSocketPair`           | type | A created Workers pair (`{ client, server }`)                                  |
+| `CloudflareWebSocketHost`           | type | Injectable seam for the Workers upgrader (extension point)                     |
+| `CloudflareUpgradeResponseInit`     | type | The Workers 101 response init, including the `webSocket` member                |
+| `WsModuleLike`                      | type | Structural facade over the `ws` module (`{ WebSocketServer }`)                 |
+| `WsServerLike`                      | type | Structural facade over a `noServer` `ws` `WebSocketServer`                     |
+| `WsSocketLike`                      | type | Structural facade over a `ws` socket                                           |
+| `NodeIncomingMessage`               | type | Minimal `node:http.IncomingMessage` shape for building an upgrade `Request`    |
+| `RawUpgradeSocket`                  | type | Minimal raw duplex socket shape a refusal writes to                            |
+| `UpgradeEmitter`                    | type | A server handle that emits the raw `upgrade` event                             |
 
 Contract notes:
 
@@ -4742,6 +4893,17 @@ Contract notes:
   `close` tears it down. Adapters (`NodeHttpAdapter`, `DenoHttpAdapter`, `BunHttpAdapter`,
   `CloudflareWorkersHttpAdapter`) are registered under `CAPABILITIES.HTTP_ADAPTER` via
   `RuntimePlugin`.
+- **M46 added a fifth, OPTIONAL member: `setUpgradeRouter?(router)`.** It installs a
+  `WebSocketUpgradeRouter` consulted for every inbound WebSocket upgrade **before** the request is
+  mapped to an `IRequest` and enters the middleware pipeline. That ordering is a correctness
+  requirement, not an optimization: the shared mapping pre-reads the body via `arrayBuffer()`, and
+  `Deno.upgradeWebSocket` fails once the request body has been disturbed. The router answers accept
+  (with the `WebSocketEventSink` the adapter binds its native socket into), reject (with a status),
+  or `null` to fall through — so installing a router never changes the behavior of non-WebSocket
+  traffic. Because the member is optional, adapters written before this seam remain valid
+  implementations; consumers must degrade gracefully when it is absent (see `WebSocketPlugin`, which
+  reports `available: false` and fails `route()` with a typed error). All four first-party adapters
+  implement it.
 - **Migration note — `IRequest.ip` is no longer populated (M23).** The web-standard `fetch` mapping
   does not set `IRequest.ip`; a web `Request` carries no client address. The old M39 Node adapter
   populated `ip` from the native `socket.remoteAddress`, so Node consumers that read
