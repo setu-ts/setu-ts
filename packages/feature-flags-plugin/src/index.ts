@@ -10,7 +10,7 @@
 
 // ── Plugin factory ─────────────────────────────────────────────────────────
 
-export { FeatureFlagsPlugin, createProvider } from './plugin/feature-flags-plugin.ts';
+export { createProvider, FeatureFlagsPlugin } from './plugin/feature-flags-plugin.ts';
 
 // ── Service ─────────────────────────────────────────────────────────────────
 
@@ -29,19 +29,19 @@ export { createFlagGuard } from './middleware/feature-flag-middleware.ts';
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export type {
+  ConfigProviderOptions,
+  CustomProviderOptions,
+  DatabaseProviderOptions,
+  FeatureFlagsPluginOptions,
   FlagDefinition,
+  FlagGuardOptions,
   FlagProvider,
   FlagProviderStatus,
   FlagProviderType,
-  ConfigProviderOptions,
-  MemoryProviderOptions,
-  DatabaseProviderOptions,
-  CustomProviderOptions,
-  FeatureFlagsPluginOptions,
-  FlagGuardOptions,
   IFlagStore,
+  MemoryProviderOptions,
 } from './interfaces/index.ts';
 
 // ── Re-export common contracts ──────────────────────────────────────────────
 
-export type { IFeatureFlags, FlagContext } from '@hono-enterprise/common';
+export type { FlagContext, IFeatureFlags } from '@hono-enterprise/common';
