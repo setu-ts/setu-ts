@@ -39,10 +39,12 @@ export default {
     const modulePath = `${tmpDir}/server-build.mjs`;
     await Deno.writeTextFile(modulePath, moduleContent);
 
-    const handler = await loadRequestHandler(modulePath, 'production');
+    const { handler, createLoadContext } = await loadRequestHandler(modulePath, 'production');
 
-    expect(handler).toBeDefined();
     expect(typeof handler).toBe('function');
+    // The factory came from the REAL npm:react-router@8 module, so the provider
+    // it builds is an instance of the class the handler's instanceof tests.
+    expect(typeof createLoadContext().set).toBe('function');
     // We proved the load chain works: module import (.default unwrap) + rr import
     // + assembleHandler all succeeded. Invoking the handler would fail because our
     // build is minimal and RR validates routes deeply, so we stop here for coverage.
@@ -59,10 +61,12 @@ export const entry = { module: { default: async () => {} } };
     const modulePath = `${tmpDir}/namespace-build.mjs`;
     await Deno.writeTextFile(modulePath, moduleContent);
 
-    const handler = await loadRequestHandler(modulePath, 'production');
+    const { handler, createLoadContext } = await loadRequestHandler(modulePath, 'production');
 
-    expect(handler).toBeDefined();
     expect(typeof handler).toBe('function');
+    // The factory came from the REAL npm:react-router@8 module, so the provider
+    // it builds is an instance of the class the handler's instanceof tests.
+    expect(typeof createLoadContext().set).toBe('function');
   });
 
   it('throws with meaningful message when the server build file cannot be loaded', async () => {
@@ -115,7 +119,7 @@ export default {
 
     // Use rrImportHook to capture what assembleHandler receives.
     let capturedBuild: unknown;
-    const handler = await loadRequestHandler(modulePath, 'production', {
+    const { handler } = await loadRequestHandler(modulePath, 'production', {
       rrImportHook: () =>
         Promise.resolve({
           // deno-lint-ignore no-explicit-any
@@ -123,6 +127,10 @@ export default {
             capturedBuild = build;
             return () => Promise.resolve(new Response('ok'));
           }) as unknown as (b: unknown, m: string) => SsrRequestHandler,
+          RouterContextProvider: class {
+            get() {}
+            set() {}
+          },
         }),
     });
 
@@ -130,5 +138,22 @@ export default {
     // The assembled handler should receive the unwrapped .default (the object inside export default).
     expect(capturedBuild).toBeDefined();
     expect((capturedBuild as Record<string, unknown>)?.routes).toEqual({});
+  });
+
+  it('throws a version-naming error when the module has no RouterContextProvider', async () => {
+    const moduleContent = `export default { routes: {}, entry: { module: {} } };`;
+    const modulePath = `${tmpDir}/no-provider-build.mjs`;
+    await Deno.writeTextFile(modulePath, moduleContent);
+
+    // A pre-8 react-router exports no RouterContextProvider; failing loudly at
+    // startup beats a 500 on every SSR request at runtime.
+    await expect(
+      loadRequestHandler(modulePath, 'production', {
+        rrImportHook: () =>
+          Promise.resolve({
+            createRequestHandler: () => () => Promise.resolve(new Response('ok')),
+          }),
+      }),
+    ).rejects.toThrow("exposes no 'RouterContextProvider' export");
   });
 });

@@ -5,15 +5,18 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IPrincipal } from '@hono-enterprise/common';
-import type { LoadContextFunction } from '../../src/interfaces/index.ts';
-import { createDefaultLoadContext } from '../../src/handler/load-context.ts';
+import type { IPrincipal, IServiceRegistry } from '@hono-enterprise/common';
+import type { IRequestContext } from '../../src/interfaces/index.ts';
+import { applyDefaultLoadContext } from '../../src/handler/load-context.ts';
+import { servicesContext, userContext } from '../../src/handler/context-keys.ts';
+import { FakeRouterContextProvider } from '../fixtures/fake-handler.ts';
 
 describe('load-context', () => {
-  // Build minimal IRequestContext using a partial mock (we only read ctx.services and ctx.request.user).
-  function buildCtx(
-    principal?: IPrincipal,
-  ): Parameters<typeof createDefaultLoadContext>[0] {
+  const registry = { get: () => undefined } as unknown as IServiceRegistry;
+
+  // Build minimal IRequestContext using a partial mock (we only read
+  // ctx.services and ctx.request.user).
+  function buildCtx(principal?: IPrincipal): IRequestContext {
     return {
       id: 'req-1',
       request: {
@@ -27,7 +30,7 @@ describe('load-context', () => {
         bytes: () => new Uint8Array(),
       },
       response: {} as never,
-      services: {} as never,
+      services: registry,
       params: {},
       query: {},
       state: new Map(),
@@ -36,28 +39,30 @@ describe('load-context', () => {
     } as never;
   }
 
-  it('default loadContext exposes services and user when present', () => {
+  it('sets servicesContext and userContext when a principal is present', () => {
     const fakeUser = { id: '1', name: 'test-user' } as IPrincipal;
-    const ctx = buildCtx(fakeUser);
-    const result = createDefaultLoadContext(ctx);
+    const context = new FakeRouterContextProvider();
 
-    expect(result).toHaveProperty('services');
-    expect((result as Record<string, unknown>).user).toBe(fakeUser);
+    applyDefaultLoadContext(buildCtx(fakeUser), context);
+
+    expect(context.get(servicesContext)).toBe(registry);
+    expect(context.get(userContext)).toBe(fakeUser);
   });
 
-  it('default omits user key when user is absent (exactOptionalPropertyTypes)', () => {
-    const ctx = buildCtx(undefined);
-    const result = createDefaultLoadContext(ctx);
+  it('leaves userContext at its null default on an anonymous request', () => {
+    const context = new FakeRouterContextProvider();
 
-    expect(result).toHaveProperty('services');
-    expect('user' in result).toBe(false);
+    applyDefaultLoadContext(buildCtx(undefined), context);
+
+    expect(context.get(servicesContext)).toBe(registry);
+    // Resolves to the key's defaultValue rather than throwing.
+    expect(context.get(userContext)).toBe(null);
   });
 
-  it('custom LoadContextFunction override is honored', () => {
-    const ctx = buildCtx({ id: '2', name: 'u' } as unknown as IPrincipal);
-    const customFn: LoadContextFunction = (_c: unknown) => ({ custom: 'http://localhost/' });
-    const result = customFn(ctx);
-
-    expect(result).toEqual({ custom: 'http://localhost/' });
+  it('context keys carry a null default so get() never throws for them', () => {
+    // React Router's get() throws for an unset key with no defaultValue; both
+    // exported keys must therefore declare one.
+    expect(servicesContext.defaultValue).toBe(null);
+    expect(userContext.defaultValue).toBe(null);
   });
 });

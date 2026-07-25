@@ -5,30 +5,28 @@
  * @since 0.1.0
  */
 
-import type { IRequestContext } from '../interfaces/index.ts';
+import type { IRequestContext, RouterLoadContext } from '../interfaces/index.ts';
+import { servicesContext, userContext } from './context-keys.ts';
 
 /**
- * Creates the default `loadContext` function for React Router.
+ * Populates the per-request React Router context with the plugin's defaults.
  *
- * Returns `{ services, user }` — with `user` omitted (not set to `undefined`)
- * when no principal is attached, honoring `exactOptionalPropertyTypes`.
+ * Sets {@linkcode servicesContext} to the kernel service registry, and
+ * {@linkcode userContext} to the authenticated principal when one is attached.
+ * An anonymous request leaves `userContext` unset, which resolves to the key's
+ * `null` default rather than throwing.
  *
  * @param ctx - The kernel request context
- * @returns A `Record<string, unknown>` suitable as RR's `loadContext`
- * @since 0.1.0
+ * @param context - The React Router context provider to populate
+ * @since 0.2.0
  */
-export function createDefaultLoadContext(
+export function applyDefaultLoadContext(
   ctx: IRequestContext,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {
-    services: ctx.services,
-  };
+  context: RouterLoadContext,
+): void {
+  context.set(servicesContext, ctx.services);
 
-  // Omit `user` entirely when absent — never assign `undefined` to an optional
-  // property under `exactOptionalPropertyTypes`.
   if (ctx.request.user != null) {
-    result.user = ctx.request.user;
+    context.set(userContext, ctx.request.user);
   }
-
-  return result;
 }

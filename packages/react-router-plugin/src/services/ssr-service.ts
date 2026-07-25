@@ -8,7 +8,8 @@
 import type { HandlerResult, ISsrService } from '@hono-enterprise/common';
 import type {
   IRequestContext,
-  LoadContextFunction,
+  PopulateLoadContext,
+  RouterLoadContext,
   SsrRequestHandler,
 } from '../interfaces/index.ts';
 import { bridgeRequestToRR } from '../handler/request-bridge.ts';
@@ -16,26 +17,32 @@ import { bridgeRequestToRR } from '../handler/request-bridge.ts';
 /**
  * Implements {@linkcode ISsrService}.
  *
- * Holds the resolved RR request handler and the optional custom `getLoadContext`,
- * and delegates `render()` to the request bridge.
+ * Holds the resolved RR request handler, the factory for its per-request
+ * context provider, and the optional `populateLoadContext` hook, and delegates
+ * `render()` to the request bridge.
  *
  * @since 0.1.0
  */
 export class SsrService implements ISsrService {
   readonly #handler: SsrRequestHandler;
-  readonly #getLoadContext: LoadContextFunction | undefined;
+  readonly #createLoadContext: () => RouterLoadContext;
+  readonly #populateLoadContext: PopulateLoadContext | undefined;
 
   /**
    * @param handler - The resolved RR request handler
-   * @param getLoadContext - Optional custom loadContext builder
+   * @param createLoadContext - Factory for the per-request context provider,
+   *   sourced from the same `react-router` module as `handler`
+   * @param populateLoadContext - Optional hook adding app values to the context
    * @since 0.1.0
    */
   constructor(
     handler: SsrRequestHandler,
-    getLoadContext: LoadContextFunction | undefined,
+    createLoadContext: () => RouterLoadContext,
+    populateLoadContext: PopulateLoadContext | undefined,
   ) {
     this.#handler = handler;
-    this.#getLoadContext = getLoadContext;
+    this.#createLoadContext = createLoadContext;
+    this.#populateLoadContext = populateLoadContext;
   }
 
   /**
@@ -49,7 +56,8 @@ export class SsrService implements ISsrService {
     const result = await bridgeRequestToRR(
       ctx,
       this.#handler,
-      this.#getLoadContext,
+      this.#createLoadContext,
+      this.#populateLoadContext,
     );
     return result;
   }
