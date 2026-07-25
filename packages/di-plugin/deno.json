@@ -1,6 +1,7 @@
 {
   "name": "@hono-enterprise/di-plugin",
   "version": "0.1.0",
+  "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
     "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0"

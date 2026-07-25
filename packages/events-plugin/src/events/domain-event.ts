@@ -99,7 +99,16 @@ export abstract class IntegrationEvent<T = unknown> extends DomainEvent<T> {
  * ```
  * @since 0.1.0
  */
-export function defineDomainEvent(runtime: IRuntimeServices) {
+export function defineDomainEvent(runtime: IRuntimeServices): {
+  DomainEvent: new <T>(
+    data: T,
+    opts?: { aggregateId?: string; version?: number },
+  ) => DomainEvent<T>;
+  IntegrationEvent: new <T>(
+    data: T,
+    opts?: { aggregateId?: string; version?: number },
+  ) => IntegrationEvent<T>;
+} {
   abstract class DomainEventBound<T = unknown> extends DomainEvent<T> {
     constructor(data: T, opts?: { aggregateId?: string; version?: number }) {
       super(runtime, data, opts);
