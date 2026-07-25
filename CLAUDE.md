@@ -433,7 +433,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Corrected the ROADMAP/PUBLIC_API `flags.middleware(...)` examples to `createFlagGuard`, dropped
   LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules row, added the missing Feature
   Flags Options/Exports/Notes sections, and fixed the ROADMAP implementation-files list in the same
-  PR) — complete (PR pending)
+  PR) — complete (PR #67)
 - **Next milestone** — **Milestone 32** (`packages/multi-tenancy-plugin`); continues the main plugin
   sequence (M32–M40 follow) unless reprioritized.
 
