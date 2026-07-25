@@ -1734,19 +1734,20 @@ export async function loader({ context }: Route.LoaderArgs) {
   `initialContext instanceof RouterContextProvider` inside `createRequestHandler` and answers
   `500 Unexpected Server Error` for anything else — it does not degrade — and the static handler
   repeats the check nominally whenever route middleware runs. The plugin therefore constructs the
-  provider from the same `react-router` module the handler came from. **Breaking change in 0.2.0:**
-  the `getLoadContext` option and the `LoadContextFunction` type are removed, because a function
-  returning `Record<string, unknown>` cannot produce a valid context under any wrapping. Migrate by
-  mutating the provider instead of returning an object, and reading values through context keys:
+  provider from the same `react-router` module the handler came from. **Breaking change
+  (unreleased):** the `getLoadContext` option and the `LoadContextFunction` type are removed,
+  because a function returning `Record<string, unknown>` cannot produce a valid context under any
+  wrapping. Migrate by mutating the provider instead of returning an object, and reading values
+  through context keys:
 
   ```typescript
-  // Before (0.1.0) — produced a 500 on every SSR request against react-router@8.
+  // Before — produced a 500 on every SSR request against react-router@8.
   ReactRouterPlugin({
     serverBuildPath,
     getLoadContext: (ctx) => ({ db: myDb, user: ctx.request.user }),
   });
 
-  // After (0.2.0)
+  // After
   import { createContext } from 'react-router';
   export const dbContext = createContext<Db | null>(null);
 
