@@ -3178,27 +3178,36 @@ if (flags.isEnabled('new-dashboard', { userId: '123' })) {
   // Show new dashboard
 }
 
-// Middleware
+// Middleware (free-function guard — IFeatureFlags has no middleware method)
+import { createFlagGuard } from '@hono-enterprise/feature-flags-plugin';
+
 app.router.get('/dashboard', {
-  middleware: [flags.middleware('new-dashboard', { fallback: '/old-dashboard' })],
+  middleware: [createFlagGuard('new-dashboard', { fallback: '/old-dashboard' })],
   handler: async (ctx) => {/* ... */},
 });
 ```
 
 **Providers:**
 
-- `ConfigProvider` — From config
-- `DatabaseProvider` — From database
-- `LaunchDarklyProvider` — LaunchDarkly
-- `MemoryProvider` — For testing
+- `ConfigProvider` — Static inline flags (`'config'`)
+- `MemoryProvider` — Mutable in-process store (`'memory'`)
+- `DatabaseProvider` — Polls injected `IFlagStore` (`'database'`)
+- Custom providers via `'custom'` arm (ARCHITECTURE extension point)
+
+> **Note:** `LaunchDarklyProvider` was deferred to a later milestone because the Node server SDK
+> exposes only async evaluation APIs (`variation`, `allFlagsState`), which cannot satisfy the
+> synchronous `IFeatureFlags.isEnabled` contract. The `'custom'` arm serves as the documented bridge
+> until a future milestone resolves the sync/async mismatch.
 
 **Implementation Files:**
 
 - `src/plugin/feature-flags-plugin.ts`
 - `src/services/feature-flags-service.ts`
 - `src/providers/config-provider.ts`
+- `src/providers/memory-provider.ts`
 - `src/providers/database-provider.ts`
-- `src/providers/launchdarkly-provider.ts`
+- `src/evaluation/flag-evaluator.ts`
+- `src/interfaces/index.ts`
 - `src/middleware/feature-flag-middleware.ts`
 - `src/index.ts`
 
@@ -4306,7 +4315,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
 | 30        | ✅     | notification-plugin  |
-| 31        | ⬜     | feature-flags-plugin |
+| 31        | ✅     | feature-flags-plugin |
 | 32        | ⬜     | multi-tenancy-plugin |
 | 33        | ⬜     | testing              |
 | 34        | ⬜     | cli                  |

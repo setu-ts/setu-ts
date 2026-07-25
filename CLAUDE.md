@@ -409,8 +409,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and released by all four adapters through `sink.onClose({ code: 1006 })` when a handshake fails
   after acceptance, so malformed upgrades cannot starve the limit. Outstanding: the root `README.md`
   WebSocket row was deferred at the maintainer's request) — complete (PR #66)
-- **Next milestone** — **Milestone 31** (`packages/feature-flags-plugin`); resumes the main plugin
-  sequence (M31–M40 follow) unless reprioritized.
+- **Milestone 31** (`packages/feature-flags-plugin` — FeatureFlagsPlugin registering the committed
+  synchronous `IFeatureFlags` under `CAPABILITIES.FEATURE_FLAGS`, backed by an exported
+  `FlagProvider` port whose implementations own a cached snapshot plus an async `start()`/`stop()`
+  lifecycle the plugin drives from an async `register()` (genuinely awaited by the kernel) and
+  `onClose`; three providers — `ConfigProvider` (immutable inline flags, `'config'`),
+  `MemoryProvider` (mutable map with `setFlag`/`removeFlag`/`replaceFlags`), `DatabaseProvider`
+  (injected structural `IFlagStore`, single `runtime.setInterval` poll armed once in `start()`,
+  keeps the last good snapshot on poll failure and reports it) — plus a `'custom'` arm accepting any
+  `FlagProvider`; one pure zero-dependency `evaluateFlag` seam whose precedence is
+  **allowlist-first** (`users` overrides `enabled: false`, so the committed
+  `{ enabled: false, users: [...] }` examples behave as documented) then `enabled`, then a
+  deterministic FNV-1a-32 `bucket(flag, userId) % 100` percentage rollout (no `userId` on a partial
+  rollout → `false`); a free-function `createFlagGuard(flag, options?)` route guard (302 `fallback`,
+  else `statusCode ?? 404`, short-circuiting without `next()`, letting an unregistered-capability
+  error propagate) rather than a `middleware` method on the committed contract; a `feature-flags`
+  health indicator reporting `'degraded'` with `detail` when a provider's optional `status()`
+  reports unhealthy; no `common` change and no npm dependency — the `IFeatureFlags`/`FlagContext`
+  contract and `FEATURE_FLAGS: 'feature-flags'` token were committed in M1. **LaunchDarkly was
+  deferred**: the Node server SDK's `variation`/`allFlagsState` are async (verified from
+  `@launchdarkly/js-server-sdk-common` `LDClient.d.ts`), so no provider can satisfy the synchronous
+  `isEnabled` without widening `common`; the `'custom'` arm is the documented bridge until then.
+  Corrected the ROADMAP/PUBLIC_API `flags.middleware(...)` examples to `createFlagGuard`, dropped
+  LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules row, added the missing Feature
+  Flags Options/Exports/Notes sections, and fixed the ROADMAP implementation-files list in the same
+  PR) — complete (PR #67)
+- **Next milestone** — **Milestone 32** (`packages/multi-tenancy-plugin`); continues the main plugin
+  sequence (M32–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

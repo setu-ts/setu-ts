@@ -3204,12 +3204,59 @@ app.router.get('/dashboard', async (ctx) => {
   return ctx.response.json({ dashboard: 'old' });
 });
 
-// Middleware
+// Middleware (free-function guard — IFeatureFlags has no middleware method)
+import { createFlagGuard } from '@hono-enterprise/feature-flags-plugin';
+
 app.router.get('/beta', {
-  middleware: [flags.middleware('beta-features', { fallback: '/not-found' })],
+  middleware: [createFlagGuard('beta-features', { fallback: '/not-found' })],
   handler: async (ctx) => {/* ... */},
 });
 ```
+
+### Options
+
+| Option                      | Provider(s)            | Required                | Description                                                       |
+| --------------------------- | ---------------------- | ----------------------- | ----------------------------------------------------------------- |
+| `provider`                  | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, or `'custom'` |
+| `options.flags`             | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                 |
+| `options.store`             | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`   |
+| `options.refreshIntervalMs` | `'database'`           | no                      | Poll cadence; defaults to `30000`                                 |
+| `options.instance`          | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                 |
+
+### Exports
+
+| Symbol                         | Kind             | Description                                                                   |
+| ------------------------------ | ---------------- | ----------------------------------------------------------------------------- |
+| `FeatureFlagsPlugin`           | function         | Plugin factory — registers `IFeatureFlags` under `CAPABILITIES.FEATURE_FLAGS` |
+| `FeatureFlagService`           | class            | Service implementing `IFeatureFlags`                                          |
+| `createProvider`               | function         | Provider factory dispatching on the `provider` discriminant                   |
+| `ConfigProvider`               | class            | Immutable config-backed provider                                              |
+| `MemoryProvider`               | class            | Mutable in-process provider with `setFlag`/`removeFlag`/`replaceFlags`        |
+| `DatabaseProvider`             | class            | Polled database-backed provider                                               |
+| `createFlagGuard`              | function         | Free-function route guard — short-circuits to redirect/404 when flag is off   |
+| `FlagProvider`                 | interface        | Port implemented by all providers, and by the `'custom'` arm's instance       |
+| `FlagProviderStatus`           | interface        | Health status shape (`{ healthy, detail? }`)                                  |
+| `FlagProviderType`             | type             | Provider identity: `'config' \| 'memory' \| 'database' \| 'custom'`           |
+| `FlagDefinition`               | interface        | `{ enabled, percentage?, users? }`                                            |
+| `IFlagStore`                   | interface        | Structural facade for `DatabaseProvider`                                      |
+| `FeatureFlagsPluginOptions`    | type             | Discriminated union of the four provider option shapes                        |
+| `ConfigProviderOptions`        | interface        | The `'config'` arm — requires `options.flags`                                 |
+| `MemoryProviderOptions`        | interface        | The `'memory'` arm — `options.flags` optional                                 |
+| `DatabaseProviderOptions`      | interface        | The `'database'` arm — requires `options.store`                               |
+| `CustomProviderOptions`        | interface        | The `'custom'` arm — requires `options.instance`                              |
+| `FlagGuardOptions`             | interface        | `createFlagGuard` options (`fallback`, `statusCode`, `context`)               |
+| `IFeatureFlags`, `FlagContext` | type (re-export) | From `@hono-enterprise/common`                                                |
+
+### Notes
+
+- `IFeatureFlags.isEnabled` is **synchronous**; providers refresh their state out of band.
+- The allowlist (`users`) **overrides** `enabled: false` — `{ enabled: false, users: ['user1'] }`
+  evaluates to `true` for `userId: 'user1'`.
+- Percentage rollout uses deterministic FNV-1a 32-bit bucketing over `` `${flag}:${userId}` ``.
+- `FlagContext.attributes` is accepted but not consumed by the built-in evaluators; the `'custom'`
+  arm is its extension point.
+- `LaunchDarklyProvider` was deferred: the Node server SDK exposes only async evaluation APIs that
+  cannot satisfy the synchronous contract. The `'custom'` arm bridges this gap.
 
 ---
 
