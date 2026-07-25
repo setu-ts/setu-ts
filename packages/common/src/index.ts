@@ -54,6 +54,8 @@ export type {
   IFileSystem,
   IHttpAdapter,
   IRuntimeServices,
+  IWorkerHandle,
+  IWorkerHost,
   ServerHandle,
   StatResult,
   TimerHandle,
@@ -202,3 +204,19 @@ export type { ISseConnection, ISseService, SseChannel, SseMessage } from './serv
 
 // SSR contracts
 export type { ISsrService } from './services/ssr.ts';
+
+// Worker pool contracts
+export type {
+  IWorkerPool,
+  TaskPoolStats,
+  WorkerErrorShape,
+  WorkerReadySignal,
+  WorkerRunOptions,
+  WorkerTaskReply,
+  WorkerTaskRequest,
+} from './services/worker-pool.ts';
+export {
+  isWorkerReadySignal,
+  isWorkerTaskReply,
+  isWorkerTaskRequest,
+} from './services/worker-pool.ts';

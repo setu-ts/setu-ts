@@ -104,6 +104,65 @@ export interface IFileSystem {
 }
 
 /**
+ * Handle to one spawned worker thread, normalized across web `Worker`
+ * (Deno/Bun) and `node:worker_threads` (Node).
+ *
+ * Messages travel by structured clone. Listeners receive the message payload
+ * directly (already unwrapped from `MessageEvent` on web-worker runtimes).
+ *
+ * @since 0.1.0
+ */
+export interface IWorkerHandle {
+  /**
+   * Posts a structured-clonable message to the worker.
+   *
+   * @param message - The message payload
+   */
+  postMessage(message: unknown): void;
+  /**
+   * Registers a listener for messages from the worker.
+   *
+   * @param listener - Receives each message payload
+   */
+  onMessage(listener: (message: unknown) => void): void;
+  /**
+   * Registers a listener for worker-level errors (module evaluation failure,
+   * uncaught error in the worker).
+   *
+   * @param listener - Receives the normalized error
+   */
+  onError(listener: (error: Error) => void): void;
+  /**
+   * Terminates the worker immediately.
+   */
+  terminate(): Promise<void>;
+}
+
+/**
+ * Thread-spawning primitive provided by runtimes that support worker threads.
+ * Absent on runtimes without them (e.g. Cloudflare Workers) — consumers MUST
+ * degrade gracefully when it is not provided (see the WorkerPoolPlugin, which
+ * fails `run()` with a typed error when no host exists).
+ *
+ * @since 0.1.0
+ */
+export interface IWorkerHost {
+  /**
+   * Spawns a module worker.
+   *
+   * @param specifier - Module specifier (URL string) of the worker module
+   * @returns A normalized handle to the worker
+   */
+  spawn(specifier: string): IWorkerHandle;
+  /**
+   * Number of threads the host can usefully run in parallel.
+   *
+   * @returns The available parallelism (at least 1)
+   */
+  availableParallelism(): number;
+}
+
+/**
  * Runtime services — every runtime-specific operation the framework needs,
  * abstracted behind one interface. Registered under `CAPABILITIES.RUNTIME`
  * by the RuntimePlugin, which is mandatory in every application.
@@ -205,6 +264,9 @@ export interface IRuntimeServices {
 
   /** File system access; absent on runtimes without one (edge platforms). */
   readonly fs?: IFileSystem;
+
+  /** Worker-thread spawning; absent on runtimes without threads (edge platforms). */
+  readonly workers?: IWorkerHost;
 }
 
 /**

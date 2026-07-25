@@ -93,6 +93,8 @@ export const CAPABILITIES = {
   QUERY_BUS: 'query-bus',
   /** Multi-tenancy service. */
   MULTI_TENANCY: 'multi-tenancy',
+  /** Worker-thread pool for CPU-bound tasks. */
+  WORKER_POOL: 'worker-pool',
   /** Optional dependency injection container. */
   DI_CONTAINER: 'di-container',
   /** HTTP server adapter — the runtime plugin registers its IHttpAdapter here. */
