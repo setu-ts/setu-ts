@@ -77,3 +77,37 @@ Deno.test('MultiTenancyService — constructor separator', () => {
   const service = new MultiTenancyService({ store, separator: '-' });
   assertEquals(service.prefixCacheKey('t1', 'k'), 't1-k');
 });
+
+Deno.test('MultiTenancyService — getCachePrefix returns prefix for empty key', () => {
+  const store = {} as unknown as ITenantDataStore;
+  const service = new MultiTenancyService({ store });
+  assertEquals(service.getCachePrefix('acme'), 'acme:');
+  assertEquals(service.getCachePrefix('acme', '/'), 'acme/');
+});
+
+Deno.test('MultiTenancyService — getCurrentTenant returns tenant from ctx.request.tenant', () => {
+  const store = {} as unknown as ITenantDataStore;
+  const service = new MultiTenancyService({ store });
+  // Create a context where request.tenant is set (simulating middleware has run).
+  const fakeRequest = {
+    method: 'GET' as const,
+    url: 'https://example.com/' as string,
+    path: '/' as string,
+    headers: new Headers(),
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+  };
+  const ctx = {
+    id: 'test-id',
+    request: { ...fakeRequest, tenant: { id: 'resolved-tenant' } },
+    response: {} as import('@hono-enterprise/common').IResponse,
+    services: new Map(),
+    params: {},
+    query: {},
+    state: new Map(),
+    startTime: Date.now(),
+    signal: undefined as AbortSignal | undefined,
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
+  assertEquals(service.getCurrentTenant(ctx)?.id, 'resolved-tenant');
+});

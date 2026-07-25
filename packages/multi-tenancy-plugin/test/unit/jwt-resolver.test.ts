@@ -53,3 +53,27 @@ Deno.test('JwtResolver — custom claim and header name', async () => {
   assert(result.present);
   assertEquals(result.value.id, 'globex');
 });
+
+Deno.test('JwtResolver — non-Bearer header uses raw value as token', async () => {
+  // Tests the branch where rawHeader does NOT start with "Bearer " or "bearer "
+  // (line 49 in jwt-resolver.ts: else { token = rawHeader; }).
+  const fakeDecode = (token: string) => {
+    assert(token === 'raw-jwt-token', 'should have received raw token');
+    return { tenant_id: 'raw-tenant' };
+  };
+  const resolver = new JwtResolver({ decode: fakeDecode });
+  const result = await resolver.resolve(
+    createFakeRequest({ headers: { authorization: 'raw-jwt-token' } }),
+  );
+  assert(result.present);
+  assertEquals(result.value.id, 'raw-tenant');
+});
+
+Deno.test('JwtResolver — header present but decode returns null returns none', async () => {
+  const fakeDecode = () => null;
+  const resolver = new JwtResolver({ decode: fakeDecode });
+  const result = await resolver.resolve(
+    createFakeRequest({ headers: { authorization: 'some-token' } }),
+  );
+  assert(!result.present);
+});
