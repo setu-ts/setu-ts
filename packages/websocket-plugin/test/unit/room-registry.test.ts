@@ -226,6 +226,49 @@ describe('RoomRegistry', () => {
     expect(registry.size).toBe(0);
   });
 
+  it('reclaims rooms that were looked up but never joined', () => {
+    // `ws.room(id)` used only to read size or to broadcast to an audience that
+    // already left would otherwise accumulate forever over an unbounded key
+    // space, because a room nobody joined emits no membership event to hang
+    // disposal on.
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    registry.get('lobby').add(a.conn);
+    registry.get('ghost-1');
+    registry.get('ghost-2');
+    expect(registry.size).toBe(3);
+
+    registry.evict(a.conn);
+
+    expect(registry.size).toBe(0);
+  });
+
+  it('reclaims never-joined rooms even when the evicted peer was in none', () => {
+    const registry = new RoomRegistry();
+    const stranger = makeConnection('stranger');
+    registry.get('ghost');
+
+    registry.evict(stranger.conn);
+
+    expect(registry.size).toBe(0);
+  });
+
+  it('spares a looked-up room that has since been joined', () => {
+    // The reclaim must not treat "created empty" as "still empty".
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const room = registry.get('lobby');
+    room.add(b.conn);
+    registry.get('other').add(a.conn);
+
+    registry.evict(a.conn);
+
+    expect(registry.size).toBe(1);
+    expect(registry.get('lobby')).toBe(room);
+    expect(registry.get('lobby').rawSize).toBe(1);
+  });
+
   it('keeps a rebound room when a stale one empties under the same name', () => {
     const registry = new RoomRegistry();
     const a = makeConnection('a');

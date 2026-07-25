@@ -155,6 +155,18 @@ export class RoomRegistry {
    * join, removal, and mid-broadcast drop updates it.
    */
   readonly #membership = new Map<IWebSocketConnection, Set<Room>>();
+  /**
+   * Rooms created by {@linkcode RoomRegistry.get} that nobody has joined yet.
+   *
+   * A room emptied by a departure is discarded the moment it empties, but one
+   * that was never joined emits no membership event to hang that on — so
+   * `ws.room(id)` used only to read `size` or to broadcast to an audience that
+   * has already left would accumulate forever over an unbounded key space.
+   * These are reclaimed on the next eviction, matching when the previous
+   * whole-map sweep collected them, at a cost proportional to the abandoned
+   * rooms rather than to every room on the server.
+   */
+  readonly #neverJoined = new Set<Room>();
 
   /** Number of live rooms. */
   get size(): number {
@@ -176,6 +188,7 @@ export class RoomRegistry {
     // the constructor has returned.
     const room: Room = new Room(name, {
       onJoin: (conn: IWebSocketConnection): void => {
+        this.#neverJoined.delete(room);
         let joined = this.#membership.get(conn);
         if (joined === undefined) {
           joined = new Set<Room>();
@@ -201,6 +214,7 @@ export class RoomRegistry {
       },
     });
     this.#rooms.set(name, room);
+    this.#neverJoined.add(room);
     return room;
   }
 
@@ -216,21 +230,38 @@ export class RoomRegistry {
    */
   evict(conn: IWebSocketConnection): void {
     const joined = this.#membership.get(conn);
-    if (joined === undefined) {
-      return;
+    if (joined !== undefined) {
+      // Dropped up front so the `onLeave` each `remove` fires returns early
+      // instead of mutating the set being iterated here. Discarding a room
+      // left empty is `onLeave`'s job.
+      this.#membership.delete(conn);
+      for (const room of joined) {
+        room.remove(conn);
+      }
     }
-    // Dropped up front so the `onLeave` each `remove` fires returns early
-    // instead of mutating the set being iterated here. Discarding a room left
-    // empty is `onLeave`'s job.
-    this.#membership.delete(conn);
-    for (const room of joined) {
-      room.remove(conn);
-    }
+    this.#reclaimNeverJoined();
   }
 
   /** Discards every room. */
   clear(): void {
     this.#rooms.clear();
     this.#membership.clear();
+    this.#neverJoined.clear();
+  }
+
+  /**
+   * Discards rooms that were looked up but never joined.
+   *
+   * Every member of the set is, by construction, both empty and still the room
+   * bound to its name: the only `add` path removes it from the set, `onLeave`
+   * disposal can only fire for a room that had a member, and `clear` empties
+   * `#rooms` and this set together. So each entry can be dropped by name
+   * without re-checking either property.
+   */
+  #reclaimNeverJoined(): void {
+    for (const room of this.#neverJoined) {
+      this.#rooms.delete(room.name);
+    }
+    this.#neverJoined.clear();
   }
 }
