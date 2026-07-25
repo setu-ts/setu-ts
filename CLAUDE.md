@@ -378,8 +378,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   added the missing Notifications Options/Exports/Notes sections in the same PR; the legacy FCM
   `serverKey` API it ships was decommissioned by Google in 2024 — FCM HTTP v1 with service-account
   JWT signing is a follow-up) — complete (PR #65)
-- **Next milestone** — **Milestone 31** (`packages/feature-flags-plugin`); resumes the main plugin
-  sequence (M31–M40 follow) unless reprioritized.
+- **Next milestone** — **Milestone 32** (`packages/multi-tenancy-plugin`); continues the main plugin
+  sequence (M32–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

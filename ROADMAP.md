@@ -4229,7 +4229,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
 | 30        | ✅     | notification-plugin  |
-| 31        | ⬜     | feature-flags-plugin |
+| 31        | ✅     | feature-flags-plugin |
 | 32        | ⬜     | multi-tenancy-plugin |
 | 33        | ⬜     | testing              |
 | 34        | ⬜     | cli                  |
