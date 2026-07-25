@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-unused-vars
 /**
  * Path-segment-based tenant resolver.
  *
@@ -33,6 +32,7 @@ export class PathResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from a segment of `request.path`.
    */
+  // deno-lint-ignore require-await
   async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
     const parts = request.path.split('/').filter(Boolean);
     if (this.segmentIndex < 0 || this.segmentIndex >= parts.length) {

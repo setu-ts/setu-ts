@@ -8,6 +8,7 @@ export function createFakeRequest(overrides?: {
   headers?: Record<string, string>;
   tenant?: { id: string; name?: string; metadata?: Record<string, unknown> };
 }): import('@hono-enterprise/common').IRequest {
+  let storedTenant: { id: string; name?: string; metadata?: Record<string, unknown> } | undefined;
   const baseHeaders = new Headers(overrides?.headers ?? {});
   return {
     method: overrides?.method ?? 'GET',
@@ -27,16 +28,16 @@ export function createFakeRequest(overrides?: {
     bytes(): Promise<Uint8Array> {
       return Promise.resolve(new Uint8Array());
     },
-    // Writable fields — must use Object.defineProperty or cast.
+    // Writable fields — shadowed via closure variable.
     get user(): import('@hono-enterprise/common').IPrincipal | undefined {
       return undefined;
     },
     set user(_v: import('@hono-enterprise/common').IPrincipal | undefined) {/* no-op */},
     get tenant(): { id: string; name?: string; metadata?: Record<string, unknown> } | undefined {
-      return overrides?.tenant;
+      return storedTenant ?? overrides?.tenant;
     },
     set tenant(v: { id: string; name?: string; metadata?: Record<string, unknown> } | undefined) {
-      (this as any).___tenant = v;
+      storedTenant = v;
     },
   } as unknown as import('@hono-enterprise/common').IRequest;
 }

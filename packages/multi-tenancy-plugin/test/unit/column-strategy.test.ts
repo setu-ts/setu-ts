@@ -1,7 +1,7 @@
 /**
  * ColumnPerTenant strategy tests.
  */
-import { assertEquals } from 'jsr:@std/assert';
+import { assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { ColumnPerTenant } from '../../src/strategies/column-strategy.ts';
 
 Deno.test('ColumnPerTenant — kind is column', () => {

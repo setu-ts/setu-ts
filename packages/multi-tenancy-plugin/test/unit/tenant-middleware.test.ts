@@ -1,7 +1,7 @@
 /**
  * Tenant middleware tests — success, short-circuit, cache prefix, resolver throw.
  */
-import { assert, assertEquals, assertNotEquals } from 'jsr:@std/assert';
+import { assert, assertEquals, assertNotEquals } from 'jsr:@std/assert@^1.0.19';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';

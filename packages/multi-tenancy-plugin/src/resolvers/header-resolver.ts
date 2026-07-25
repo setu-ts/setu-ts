@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-unused-vars
 /**
  * Header-based tenant resolver.
  *
@@ -28,6 +27,7 @@ export class HeaderResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from the configured request header.
    */
+  // deno-lint-ignore require-await
   async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
     const raw = request.headers.get(this.headerName);
     if (!raw) return none();

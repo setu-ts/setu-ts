@@ -17,7 +17,7 @@ import {
   tenantMiddleware,
   TenantNotResolvedError,
 } from '../../src/index.ts';
-import { assertEquals, assertType } from 'jsr:@std/assert';
+import { assertEquals } from 'jsr:@std/assert@^1.0.19';
 
 Deno.test('barrel — all §4 exports are present', () => {
   assertEquals(typeof MultiTenancyPlugin, 'function');

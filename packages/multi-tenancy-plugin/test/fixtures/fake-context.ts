@@ -25,7 +25,7 @@ export function createFakeContext(
   const state = new Map<string, unknown>();
 
   if (opts?.tenant) {
-    (request as Record<string, unknown>).tenant = opts.tenant;
+    (request as unknown as Record<string, unknown>).tenant = opts.tenant;
   }
 
   const services = opts?.services ?? new Map<string, unknown>();

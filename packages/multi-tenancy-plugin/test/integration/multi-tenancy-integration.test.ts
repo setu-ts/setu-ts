@@ -2,12 +2,11 @@
  * End-to-end integration: plugin registration, middleware resolution,
  * memory store CRUD, and cross-tenant isolation.
  */
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { MemoryTenantDataStore } from '../../src/stores/memory-tenant-store.ts';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
 
 Deno.test('integration — full pipeline with header resolver', async () => {
   const store = new MemoryTenantDataStore({ generateId: () => 'int-id-1' });
@@ -30,28 +29,28 @@ Deno.test('integration — full pipeline with header resolver', async () => {
     path: '/',
     headers,
     json: () => Promise.resolve({}) as Promise<unknown>,
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
-  } as any;
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+  } as unknown as import('@hono-enterprise/common').IRequest;
 
   const ctx = {
     id: 'integ-1',
     request,
     response: {
-      status: (code: number) => ({
+      status: (_code: number) => ({
         header: () => ({ json: () => null as never }),
         json: () => null as never,
       }),
       json: () => null as never,
       snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
-    } as any,
-    services: { has: () => true, get: () => service, register: () => {} } as any,
+    },
+    services: { has: () => true, get: () => service, register: () => {} },
     params: {},
     query: {},
     state,
     startTime: performance.now(),
     signal: new AbortController().signal,
-  } as any;
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
 
   await mw(ctx, async () => {
     middlewareNextCalled = true;
@@ -80,9 +79,9 @@ Deno.test('integration — cross-tenant isolation via memory store', async () =>
     path: '/',
     headers: new Headers(),
     json: () => Promise.resolve({}) as Promise<unknown>,
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
-  } as any;
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+  } as unknown as import('@hono-enterprise/common').IRequest;
   requestA.tenant = { id: 'tenant-a' };
 
   const requestB = {
@@ -91,36 +90,36 @@ Deno.test('integration — cross-tenant isolation via memory store', async () =>
     path: '/',
     headers: new Headers(),
     json: () => Promise.resolve({}) as Promise<unknown>,
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
-  } as any;
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+  } as unknown as import('@hono-enterprise/common').IRequest;
   requestB.tenant = { id: 'tenant-b' };
 
   const ctxA = {
     id: 'a',
     request: requestA,
-    services: { has: () => true, get: () => serviceA, register: () => {} } as any,
+    services: { has: () => true, get: () => serviceA, register: () => {} },
     state: new Map(),
     startTime: performance.now(),
     signal: new AbortController().signal,
-  } as any;
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
 
   const ctxB = {
     id: 'b',
     request: requestB,
-    services: { has: () => true, get: () => serviceB, register: () => {} } as any,
+    services: { has: () => true, get: () => serviceB, register: () => {} },
     state: new Map(),
     startTime: performance.now(),
     signal: new AbortController().signal,
-  } as any;
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
 
   // Tenant A creates a record
-  const repoA = serviceA.getRepository<any>(ctxA, 'Item');
+  const repoA = serviceA.getRepository<unknown, string>(ctxA, 'Item');
   const created = await repoA.create({ name: 'From A' }) as Record<string, unknown>;
   assert(created.id != null);
 
   // Tenant B should NOT see it
-  const repoB = serviceB.getRepository<any>(ctxB, 'Item');
+  const repoB = serviceB.getRepository<unknown, string>(ctxB, 'Item');
   const bItems = await repoB.findAll();
   assertEquals(bItems.length, 0);
 
@@ -143,9 +142,9 @@ Deno.test('integration — required:true rejects unresolvable request', async ()
     path: '/',
     headers: new Headers(),
     json: () => Promise.resolve({}) as Promise<unknown>,
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
-  } as any;
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
+  } as unknown as import('@hono-enterprise/common').IRequest;
 
   let shortCircuitStatus = 0;
   const ctx = {
@@ -158,14 +157,14 @@ Deno.test('integration — required:true rejects unresolvable request', async ()
       },
       json: () => null as never,
       snapshot: () => ({ streaming: false, status: 0, headers: new Headers(), body: null }),
-    } as any,
-    services: { has: () => true, get: () => service, register: () => {} } as any,
+    },
+    services: { has: () => true, get: () => service, register: () => {} },
     params: {},
     query: {},
     state,
     startTime: performance.now(),
     signal: new AbortController().signal,
-  } as any;
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
 
   let handlerNextCalled = false;
   const mw = tenantMiddleware({

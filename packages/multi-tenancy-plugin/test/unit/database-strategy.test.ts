@@ -1,7 +1,7 @@
 /**
  * DatabasePerTenant strategy tests.
  */
-import { assertEquals } from 'jsr:@std/assert';
+import { assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { DatabasePerTenant } from '../../src/strategies/database-strategy.ts';
 
 Deno.test('DatabasePerTenant — kind is database', () => {

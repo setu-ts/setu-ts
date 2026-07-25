@@ -1,7 +1,7 @@
 /**
  * PathResolver tests.
  */
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { PathResolver } from '../../src/resolvers/path-resolver.ts';
 import { createFakeRequest } from '../fixtures/fake-request.ts';
 

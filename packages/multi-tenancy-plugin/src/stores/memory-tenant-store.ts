@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-unused-vars
 /**
  * Zero-dependency in-memory tenant data store.
  *

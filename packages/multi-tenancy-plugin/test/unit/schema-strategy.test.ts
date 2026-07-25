@@ -1,7 +1,7 @@
 /**
  * SchemaPerTenant strategy tests.
  */
-import { assertEquals } from 'jsr:@std/assert';
+import { assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { SchemaPerTenant } from '../../src/strategies/schema-strategy.ts';
 
 Deno.test('SchemaPerTenant — kind is schema', () => {

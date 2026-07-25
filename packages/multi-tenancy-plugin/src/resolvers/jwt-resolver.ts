@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-unused-vars
 /**
  * JWT-claim-based tenant resolver.
  *
@@ -38,6 +37,7 @@ export class JwtResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from the configured JWT claim.
    */
+  // deno-lint-ignore require-await
   async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
     const rawHeader = request.headers.get(this.headerName);
     if (!rawHeader) return none();

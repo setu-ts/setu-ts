@@ -1,7 +1,7 @@
 /**
  * TenantNotResolvedError — basic verification.
  */
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { TenantNotResolvedError } from '../../src/errors.ts';
 
 Deno.test('TenantNotResolvedError is an Error', () => {

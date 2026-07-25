@@ -1,7 +1,7 @@
 /**
  * MultiTenancyService tests.
  */
-import { assert, assertEquals, assertThrows } from 'jsr:@std/assert';
+import { assert, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.19';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import { TenantNotResolvedError } from '../../src/errors.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
@@ -38,20 +38,19 @@ Deno.test('MultiTenancyService — getRepository returns repo with tenant', () =
   const service = new MultiTenancyService({ store });
   const tenant = { id: 'acme' };
   const fakeRequest = {
-    ...{},
     method: 'GET',
     url: 'https://example.com/',
     path: '/',
     headers: new Headers(),
-    json: async () => ({}),
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
   };
   const ctx = {
     ...createFakeContext(),
-    request: { ...fakeRequest, tenant } as any,
-  } as any;
-  const repo = service.getRepository<any>(ctx, 'User');
+    request: { ...fakeRequest, tenant },
+  } as unknown as import('@hono-enterprise/common').IRequestContext;
+  const repo = service.getRepository<unknown, string>(ctx, 'User');
   // Verify it satisfies ITenantRepository surface
   assert(typeof repo.findAll === 'function');
   assert(typeof repo.findById === 'function');

@@ -1,26 +1,26 @@
 /**
  * MemoryTenantDataStore tests.
  */
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { MemoryTenantDataStore } from '../../src/stores/memory-tenant-store.ts';
 import { ColumnPerTenant, DatabasePerTenant, SchemaPerTenant } from '../../src/strategies/index.ts';
 
 Deno.test('MemoryTenantDataStore — create and findAll', async () => {
   const store = new MemoryTenantDataStore();
   const result = await store.create('t1', 'User', { name: 'Ada' });
-  assertEquals(result.name, 'Ada');
+  assertEquals((result as Record<string, unknown>).name, 'Ada');
   const all = await store.findAll('t1', 'User');
   assertEquals(all.length, 1);
-  assertEquals(all[0].name, 'Ada');
+  assertEquals((all[0] as Record<string, unknown>).name, 'Ada');
 });
 
 Deno.test('MemoryTenantDataStore — findById', async () => {
   const store = new MemoryTenantDataStore();
   const created = await store.create('t1', 'User', { id: 'u1', name: 'Ada' });
-  assertEquals(created.id, 'u1');
+  assertEquals((created as Record<string, unknown>).id, 'u1');
   const found = await store.findById('t1', 'User', 'u1');
   assert(found != null);
-  assertEquals(found.name, 'Ada');
+  assertEquals((found as Record<string, unknown>).name, 'Ada');
 });
 
 Deno.test('MemoryTenantDataStore — findById returns null for unknown id', async () => {
@@ -35,7 +35,7 @@ Deno.test('MemoryTenantDataStore — find with filter', async () => {
   await store.create('t1', 'User', { id: 'u2', role: 'user' });
   const results = await store.find('t1', 'User', { role: 'admin' });
   assertEquals(results.length, 1);
-  assertEquals(results[0].id, 'u1');
+  assertEquals((results[0] as Record<string, unknown>).id, 'u1');
 });
 
 Deno.test('MemoryTenantDataStore — update returns updated entity', async () => {
@@ -43,7 +43,7 @@ Deno.test('MemoryTenantDataStore — update returns updated entity', async () =>
   await store.create('t1', 'User', { id: 'u1', name: 'Ada' });
   const updated = await store.update('t1', 'User', 'u1', { name: 'Ada Updated' });
   assert(updated != null);
-  assertEquals(updated.name, 'Ada Updated');
+  assertEquals((updated as Record<string, unknown>).name, 'Ada Updated');
 });
 
 Deno.test('MemoryTenantDataStore — update returns null for unknown id', async () => {
@@ -75,28 +75,28 @@ Deno.test('MemoryTenantDataStore — cross-tenant isolation', async () => {
   const bUsers = await store.findAll('t2', 'User');
   assertEquals(aUsers.length, 1);
   assertEquals(bUsers.length, 1);
-  assertEquals(aUsers[0].tenant, 'A');
-  assertEquals(bUsers[0].tenant, 'B');
+  assertEquals((aUsers[0] as Record<string, unknown>).tenant, 'A');
+  assertEquals((bUsers[0] as Record<string, unknown>).tenant, 'B');
 });
 
 Deno.test('MemoryTenantDataStore — string id is preserved', async () => {
   const store = new MemoryTenantDataStore();
   const result = await store.create('t1', 'User', { id: 'custom-123', name: 'X' });
-  assertEquals(result.id, 'custom-123');
+  assertEquals((result as Record<string, unknown>).id, 'custom-123');
 });
 
 Deno.test('MemoryTenantDataStore — number id is preserved', async () => {
   const store = new MemoryTenantDataStore();
   const result = await store.create('t1', 'User', { id: 42, name: 'X' });
-  assertEquals(result.id, 42);
+  assertEquals((result as Record<string, unknown>).id, 42);
 });
 
 Deno.test('MemoryTenantDataStore — missing id uses default counter', async () => {
   const store = new MemoryTenantDataStore();
   const r1 = await store.create('t1', 'User', { name: 'A' });
   const r2 = await store.create('t1', 'User', { name: 'B' });
-  assertEquals(r1.id, '1');
-  assertEquals(r2.id, '2');
+  assertEquals((r1 as Record<string, unknown>).id, '1');
+  assertEquals((r2 as Record<string, unknown>).id, '2');
 });
 
 Deno.test('MemoryTenantDataStore — injected generateId', async () => {
@@ -105,7 +105,7 @@ Deno.test('MemoryTenantDataStore — injected generateId', async () => {
     generateId: () => `gen-${counter++}`,
   });
   const result = await store.create('t1', 'User', { name: 'X' });
-  assertEquals(result.id, 'gen-100');
+  assertEquals((result as Record<string, unknown>).id, 'gen-100');
 });
 
 Deno.test('MemoryTenantDataStore — column strategy stamps tenant column', async () => {

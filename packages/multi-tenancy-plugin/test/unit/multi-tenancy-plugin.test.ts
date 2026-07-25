@@ -1,7 +1,7 @@
 /**
  * MultiTenancyPlugin tests — name, version, provides, register behavior.
  */
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
@@ -213,15 +213,20 @@ Deno.test('plugin — onClose calls store.close()', async () => {
 Deno.test('plugin — jwt resolver with JWT capability wires decode', async () => {
   const ctx = makeMockContext();
   const regSvc = ctx.registeredServices;
-  (ctx.services as any).has = (token: string) =>
+  (ctx.services as unknown as Record<string, unknown>).has = (token: string) =>
     token === CAPABILITIES.JWT || token === CAPABILITIES.LOGGER;
-  ctx.services.get = (token: string) => {
+  (ctx.services as unknown as Record<string, unknown>).get = (token: string) => {
     if (token === CAPABILITIES.JWT) {
-      return { decode: (t: string) => ({ tenant_id: 'jwt-from-capability' }) };
+      return {
+        decode: (_t: string) => ({ tenant_id: 'jwt-from-capability' } as Record<string, unknown>),
+      };
     }
     return regSvc.get(token) ?? null;
   };
-  (ctx.services as any).register = (_token: string, svc: unknown) => {
+  (ctx.services as unknown as Record<string, unknown>).register = (
+    _token: string,
+    svc: unknown,
+  ) => {
     regSvc.set(_token, svc);
   };
 

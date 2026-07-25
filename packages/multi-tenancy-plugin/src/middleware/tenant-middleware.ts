@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-unused-vars require-await
 /**
  * Tenant resolution middleware.
  *
@@ -12,7 +11,6 @@ import type {
   MiddlewareFunction,
   NextFunction,
 } from '@hono-enterprise/common';
-import type { MultiTenancyPluginOptions } from '../interfaces/index.ts';
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`

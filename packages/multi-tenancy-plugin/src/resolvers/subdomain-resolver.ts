@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-unused-vars
 /**
  * Subdomain-based tenant resolver.
  *
@@ -28,6 +27,7 @@ export class SubdomainResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from the request's subdomain.
    */
+  // deno-lint-ignore require-await
   async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
     let host: string;
     try {

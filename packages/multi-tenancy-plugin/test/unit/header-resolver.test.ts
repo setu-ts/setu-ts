@@ -1,7 +1,7 @@
 /**
  * HeaderResolver tests.
  */
-import { assert, assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { createFakeRequest } from '../fixtures/fake-request.ts';
 
