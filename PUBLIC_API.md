@@ -1757,8 +1757,12 @@ export async function loader({ context }: Route.LoaderArgs) {
   // `servicesContext` and `userContext` are already set — populateLoadContext augments, never replaces.
   ```
 
-- **Vite is never imported.** The consuming app runs `react-router dev` as a separate process and
-  feeds this plugin the production build. Vite is an app-level, build-time concern.
+- **Vite is never imported _by the plugin_.** In production the app feeds this plugin a compiled
+  build; Vite stays an app-level, build-time concern. For a development loop with HMR and React Fast
+  Refresh, the app runs Vite in-process and supplies a `loadRequestHandler` that returns a handler
+  over a build thunk — no plugin change required. See
+  [docs/react-router-dev.md](docs/react-router-dev.md) for the verified recipe, including the
+  `base`-prefix proxy route and the version pins React Router requires.
 - **`@react-router/node` is excluded.** Only core `react-router` (`createRequestHandler`) is lazy
   imported. `@react-router/node`'s `installGlobals()` is unnecessary on web-standard runtimes.
 - **Static-asset serving uses `runtime.fs?.readFile`.** On edge platforms where `fs` is absent,
