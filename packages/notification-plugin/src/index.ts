@@ -33,14 +33,7 @@
  * ```
  * @since 0.1.0
  */
-export {
-  createChannel,
-  createProvider,
-  FcmProvider,
-  NotificationPlugin,
-  SlackProvider,
-  TwilioProvider,
-} from './plugin/notification-plugin.ts';
+export { createChannel, createProvider, NotificationPlugin } from './plugin/notification-plugin.ts';
 
 // ── Service ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +74,29 @@ export { PushChannel } from './channels/push-channel.ts';
  */
 export { SlackChannel } from './channels/slack-channel.ts';
 
+// ── Providers (transports) ──────────────────────────────────────────────────
+
+/**
+ * `TwilioProvider` — `SmsTransport` over the Twilio REST API.
+ *
+ * @since 0.1.0
+ */
+export { TwilioProvider } from './providers/twilio-provider.ts';
+
+/**
+ * `FcmProvider` — `PushTransport` over the legacy FCM server-key API.
+ *
+ * @since 0.1.0
+ */
+export { FcmProvider } from './providers/fcm-provider.ts';
+
+/**
+ * `SlackProvider` — `SlackTransport` over a Slack incoming webhook.
+ *
+ * @since 0.1.0
+ */
+export { SlackProvider } from './providers/slack-provider.ts';
+
 // ── HTTP seam ───────────────────────────────────────────────────────────────
 
 /**
@@ -95,14 +111,25 @@ export { createDefaultNotificationHttp } from './http/default-http.ts';
 /** Options for {@linkcode NotificationPlugin}. */
 export type { NotificationPluginOptions } from './interfaces/index.ts';
 
-/** Per-channel configuration. */
+/** Per-channel configuration — a union discriminated on `provider`. */
 export type { ChannelConfig } from './interfaces/index.ts';
+
+/** The four `ChannelConfig` arms, one per provider type. */
+export type {
+  FcmChannelConfig,
+  MailChannelConfig,
+  SlackChannelConfig,
+  TwilioChannelConfig,
+} from './interfaces/index.ts';
 
 /** Provider type selector. */
 export type { ProviderType } from './interfaces/index.ts';
 
 /** Channels map for {@linkcode NotificationPluginOptions}. */
 export type { ChannelsMap } from './interfaces/index.ts';
+
+/** Union of every transport `createProvider` can return. */
+export type { NotificationTransport } from './interfaces/index.ts';
 
 /** Options for {@linkcode TwilioProvider}. */
 export type { TwilioProviderOptions } from './interfaces/index.ts';

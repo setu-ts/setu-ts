@@ -35,11 +35,9 @@ export class PushChannel implements NotificationChannel {
       throw new Error('Push channel requires "to.token"');
     }
     // Honor exactOptionalPropertyTypes — build without `title` when absent.
-    const msgBody: Record<string, unknown> = { to: token, body: notification.body };
-    if (notification.subject !== undefined) {
-      msgBody.title = notification.subject;
-    }
-    const message = msgBody as unknown as PushMessage;
+    const message: PushMessage = notification.subject === undefined
+      ? { to: token, body: notification.body }
+      : { to: token, title: notification.subject, body: notification.body };
     await this.transport.send(message);
   }
 }

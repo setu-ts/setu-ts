@@ -1,178 +1,248 @@
 /**
- * End-to-end integration: kernel app registers RuntimePlugin, a stub plugin providing
- * CAPABILITIES.MAIL (recording fake), and NotificationPlugin — then resolves INotifier,
- * calls send with multi-channel dispatch, reads back through fakes, and verifies health.
+ * End-to-end integration through a REAL kernel app: `createApplication` registers
+ * `RuntimePlugin`, a stub plugin providing `CAPABILITIES.MAIL` (recording fake
+ * `IMailer`), and `NotificationPlugin`. The notifier is resolved from the live
+ * service registry, driven from an HTTP route via `app.inject()`, and every write
+ * is read back through the fakes.
  *
  * @module
  */
 
-// deno-lint-ignore-file no-explicit-any
-
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HealthIndicatorFn, IRuntimeServices } from '@hono-enterprise/common';
-import { NotificationPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import { createFakeMailer } from '../fixtures/fake-mailer.ts';
+import type {
+  IHealthIndicator,
+  IMailer,
+  INotifier,
+  IPlugin,
+  IPluginContext,
+  MailMessage,
+} from '@hono-enterprise/common';
+import { createApplication } from '@hono-enterprise/kernel';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { NotificationPlugin } from '../../src/index.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
 
-describe('notification-plugin integration', () => {
-  it('registers INotifier, dispatches multi-channel send, and reports health', async () => {
-    // Single shared service registry map.
-    const serviceRegistry = new Map<string, unknown>();
-
-    // Fake mailer for email channel.
-    const capturedFakeMailer = createFakeMailer();
-    serviceRegistry.set(CAPABILITIES.MAIL, capturedFakeMailer);
-
-    // Fake HTTP for SMS and Slack channels.
-    const smsFakeHttp = createFakeNotificationHttp({ responseBody: '{}', responseOk: true });
-    const slackFakeHttp = createFakeNotificationHttp({ responseBody: 'ok', responseOk: true });
-
-    // Build a minimal plugin context.
-    const ctx = {
-      services: {
-        has(token: string): boolean {
-          return serviceRegistry.has(token);
+/** Stub plugin standing in for M29's MailPlugin — provides `CAPABILITIES.MAIL` only. */
+function MailStubPlugin(sent: MailMessage[]): IPlugin {
+  return {
+    name: 'mail-stub-plugin',
+    version: '0.1.0',
+    provides: [CAPABILITIES.MAIL],
+    register(ctx: IPluginContext): void {
+      const mailer: IMailer = {
+        send(message: MailMessage): Promise<void> {
+          sent.push(message);
+          return Promise.resolve();
         },
-        get(token: string): any {
-          if (!serviceRegistry.has(token)) {
-            throw new Error(
-              `No service registered for capability '${token}'. ` +
-                `Register a plugin that provides it, or check the token spelling against CAPABILITIES.`,
-            );
-          }
-          return serviceRegistry.get(token);
+        sendTemplate(): Promise<void> {
+          return Promise.reject(new Error('sendTemplate is not used by the email channel'));
         },
-        register(name: string, service: any): void {
-          serviceRegistry.set(name, service);
-        },
-      },
-      health: {
-        register(name: string, fn: HealthIndicatorFn): void {
-          if (name === 'notification') {
-            // Capture health function so we can call it after registration.
-            (ctx as any)._capturedHealthFn = fn;
-          }
-        },
-      },
-      lifecycle: {
-        onClose: () => {},
-        onRegister: () => {},
-        onInit: () => {},
-        onBootstrap: () => {},
-        onRequest: () => {},
-        onResponse: () => {},
-        onShutdown: () => {},
-        onError: () => {},
-      },
-      runtime: {} as IRuntimeServices,
-      logger: undefined,
-    };
+      };
+      ctx.services.register<IMailer>(CAPABILITIES.MAIL, mailer);
+    },
+  };
+}
 
-    // Register notification plugin.
-    const notificationOptions: import('../../src/interfaces/index.ts').NotificationPluginOptions = {
-      channels: {
-        email: { provider: 'mail' as const },
-        sms: {
-          provider: 'twilio' as const,
-          options: {
-            accountSid: 'AC123',
-            authToken: 'authToken',
-            from: '+19998887777',
-            http: smsFakeHttp,
+describe('notification-plugin integration (through a real kernel app)', () => {
+  it('dispatches every channel, reports health, and is reachable from a route', async () => {
+    const sent: MailMessage[] = [];
+    const smsHttp = createFakeNotificationHttp({ responseBody: '{"sid":"SM1"}' });
+    const pushHttp = createFakeNotificationHttp({ responseBody: '{"success":1}' });
+    const slackHttp = createFakeNotificationHttp({ responseBody: 'ok' });
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MailStubPlugin(sent),
+        NotificationPlugin({
+          channels: {
+            email: { provider: 'mail' },
+            sms: {
+              provider: 'twilio',
+              options: {
+                accountSid: 'AC_test',
+                authToken: 'tok',
+                from: '+15550000000',
+                http: smsHttp,
+              },
+            },
+            push: { provider: 'fcm', options: { serverKey: 'srv-key', http: pushHttp } },
+            slack: {
+              provider: 'slack',
+              options: { webhookUrl: 'https://hooks.slack.com/services/T/B/X', http: slackHttp },
+            },
           },
-        },
-        slack: {
-          provider: 'slack' as const,
-          options: {
-            webhookUrl: 'https://hooks.slack.com/webhook',
-            http: slackFakeHttp,
-          },
-        },
-      },
-    };
-
-    const notifPlugin = NotificationPlugin(notificationOptions);
-    notifPlugin.register(ctx as any);
-
-    // Resolve INotifier via our service registry.
-    const notifier = serviceRegistry.get(CAPABILITIES.NOTIFICATION) as any;
-    expect(notifier).toBeDefined();
-
-    // Send notification on all three channels.
-    await notifier.send({
-      channels: ['email', 'sms', 'slack'],
-      to: {
-        email: 'user@example.com',
-        phone: '+15554443333',
-        token: 'device-token',
-        channel: '#general',
-      },
-      subject: 'Test alert',
-      body: 'Hello from notification plugin',
+        }),
+      ],
     });
 
-    // Verify email channel: fake mailer received the message.
-    expect(capturedFakeMailer.getLastMessage()).toBeDefined();
-    const mailMsg = capturedFakeMailer.getLastMessage()!;
-    expect(mailMsg.to).toBe('user@example.com');
-    expect(mailMsg.subject).toBe('Test alert');
-    expect(mailMsg.text).toBe('Hello from notification plugin');
+    app.router.post('/orders', async (ctx) => {
+      const notifier = ctx.services.get<INotifier>(CAPABILITIES.NOTIFICATION);
+      await notifier.send({
+        channels: ['email', 'sms', 'push', 'slack'],
+        to: {
+          email: 'user@example.com',
+          phone: '+15554443333',
+          token: 'device-token-1',
+          channel: '#orders',
+        },
+        subject: 'Order Confirmed',
+        body: 'Your order 42 has been confirmed.',
+      });
+      return ctx.response.status(201).json({ ok: true });
+    });
 
-    // Verify SMS channel: fake HTTP received the POST.
-    const smsCall = smsFakeHttp.getLastCall();
-    expect(smsCall).toBeDefined();
-    expect(smsCall!.url).toContain('api.twilio.com');
-    expect(smsCall!.body).toContain('To=%2B15554443333');
+    await app.start();
 
-    // Verify Slack channel: fake HTTP received the POST.
-    const slackCall = slackFakeHttp.getLastCall();
-    expect(slackCall).toBeDefined();
-    const slackBody = JSON.parse(slackCall!.body);
-    expect(slackBody.text).toBe('Hello from notification plugin');
-    expect(slackBody.channel).toBe('#general');
+    const res = await app.inject({ method: 'POST', url: 'http://localhost/orders' });
+    expect(res.statusCode).toBe(201);
+    expect(res.json<{ ok: boolean }>()).toEqual({ ok: true });
 
-    // Verify health indicator.
-    const capturedHealthFn = (ctx as any)._capturedHealthFn;
-    expect(capturedHealthFn).toBeDefined();
-    const healthResult = await capturedHealthFn();
-    expect(healthResult.status).toBe('up');
-    expect(healthResult.data).toBeDefined();
-    const data = healthResult.data as Record<string, unknown>;
-    expect(data.channels).toEqual(['email', 'sms', 'slack']);
+    // Email — read back through the stub mailer registered by another plugin.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({
+      to: 'user@example.com',
+      subject: 'Order Confirmed',
+      text: 'Your order 42 has been confirmed.',
+    });
+
+    // SMS — Twilio form-encoded POST with Basic auth.
+    const smsCall = smsHttp.getLastCall();
+    expect(smsCall?.url).toBe(
+      'https://api.twilio.com/2010-04-01/Accounts/AC_test/Messages.json',
+    );
+    expect(smsCall?.body).toBe(
+      'To=%2B15554443333&From=%2B15550000000&Body=Your+order+42+has+been+confirmed.',
+    );
+    expect(smsCall?.headers['Authorization']).toBe(`Basic ${btoa('AC_test:tok')}`);
+    expect(smsCall?.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+
+    // Push — FCM legacy server-key POST.
+    const pushCall = pushHttp.getLastCall();
+    expect(pushCall?.url).toBe('https://fcm.googleapis.com/fcm/send');
+    expect(JSON.parse(pushCall!.body)).toEqual({
+      to: 'device-token-1',
+      notification: { title: 'Order Confirmed', body: 'Your order 42 has been confirmed.' },
+    });
+    expect(pushCall?.headers['Authorization']).toBe('key=srv-key');
+
+    // Slack — incoming-webhook JSON POST.
+    const slackCall = slackHttp.getLastCall();
+    expect(slackCall?.url).toBe('https://hooks.slack.com/services/T/B/X');
+    expect(JSON.parse(slackCall!.body)).toEqual({
+      text: 'Your order 42 has been confirmed.',
+      channel: '#orders',
+    });
+
+    // Health indicator, resolved the way the health plugin resolves it.
+    const indicators = app.services.getAll<IHealthIndicator>(CAPABILITIES.HEALTH_INDICATOR);
+    const notification = indicators.find((i) => i.name === 'notification');
+    expect(notification).toBeDefined();
+    expect(await notification!.check()).toEqual({
+      status: 'up',
+      data: { channels: ['email', 'sms', 'push', 'slack'] },
+    });
+
+    await app.stop();
   });
 
-  it('fails fast when email channel configured without MailPlugin', () => {
-    const ctx = {
-      services: {
-        has(_token: string): boolean {
-          return false;
-        },
-        get(): any {
-          return undefined;
-        },
-        register(): void {},
-      },
-      health: { register: () => {} },
-      lifecycle: {
-        onClose: () => {},
-        onRegister: () => {},
-        onInit: () => {},
-        onBootstrap: () => {},
-        onRequest: () => {},
-        onResponse: () => {},
-        onShutdown: () => {},
-        onError: () => {},
-      },
-      runtime: {} as IRuntimeServices,
-      logger: undefined,
-    };
+  it('resolves the mail capability even when MailPlugin is registered later', async () => {
+    const sent: MailMessage[] = [];
+    // NotificationPlugin is listed FIRST; the `mail` optionalDependencies edge
+    // must still order the mail provider ahead of it.
+    const app = createApplication({
+      plugins: [
+        NotificationPlugin({ channels: { email: { provider: 'mail' } } }),
+        MailStubPlugin(sent),
+        RuntimePlugin(),
+      ],
+    });
+    await app.start();
 
-    expect(() =>
-      NotificationPlugin({
-        channels: { email: { provider: 'mail' as const } },
-      }).register(ctx as any)
-    ).toThrow('Notification "email" channel requires the mail capability');
+    const notifier = app.services.get<INotifier>(CAPABILITIES.NOTIFICATION);
+    await notifier.send({
+      channels: ['email'],
+      to: { email: 'late@example.com' },
+      body: 'no subject here',
+    });
+    // Default subject applied for a NotificationMessage with no `subject`.
+    expect(sent[0]).toEqual({
+      to: 'late@example.com',
+      subject: '(no subject)',
+      text: 'no subject here',
+    });
+
+    await app.stop();
+  });
+
+  it('aggregates per-channel failures without aborting the healthy channels', async () => {
+    const sent: MailMessage[] = [];
+    // Slack replies 400 — the whole send must still deliver email and report both errors.
+    const slackHttp = createFakeNotificationHttp({
+      responseOk: false,
+      responseStatus: 400,
+      responseBody: 'invalid_payload',
+    });
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MailStubPlugin(sent),
+        NotificationPlugin({
+          channels: {
+            email: { provider: 'mail' },
+            slack: {
+              provider: 'slack',
+              options: { webhookUrl: 'https://hooks/x', http: slackHttp },
+            },
+          },
+        }),
+      ],
+    });
+    await app.start();
+
+    const notifier = app.services.get<INotifier>(CAPABILITIES.NOTIFICATION);
+    let caught: unknown;
+    try {
+      await notifier.send({
+        channels: ['email', 'nonexistent', 'slack'],
+        to: { email: 'user@example.com' },
+        subject: 'Hi',
+        body: 'body',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(AggregateError);
+    const agg = caught as AggregateError;
+    expect(agg.message).toBe('One or more notification channels failed');
+    expect(agg.errors.every((e: unknown) => e instanceof Error)).toBe(true);
+    expect((agg.errors as Error[]).map((e) => e.message)).toEqual([
+      'Unknown notification channel: nonexistent',
+      'Slack webhook error (400)',
+    ]);
+    // The healthy channel still delivered.
+    expect(sent).toHaveLength(1);
+
+    await app.stop();
+  });
+
+  it('fails app startup when an email channel is configured without any mail provider', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), NotificationPlugin({ channels: { email: { provider: 'mail' } } })],
+    });
+    let caught: unknown;
+    try {
+      await app.start();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain(
+      'Notification "email" channel requires the mail capability',
+    );
   });
 });

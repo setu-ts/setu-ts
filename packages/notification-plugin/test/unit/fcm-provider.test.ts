@@ -7,12 +7,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { FcmProvider } from '../../src/providers/fcm-provider.ts';
+import type { FcmProviderOptions } from '../../src/index.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
 
 describe('FcmProvider', () => {
   it('throws on missing serverKey', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(() => new FcmProvider({} as any)).toThrow(
+    // An empty options object is a JS caller's mistake; the ctor must reject it.
+    expect(() => new FcmProvider({} as FcmProviderOptions)).toThrow(
       'FcmProvider requires "serverKey"',
     );
   });

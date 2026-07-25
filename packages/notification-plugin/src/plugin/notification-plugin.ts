@@ -15,12 +15,16 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type {
   ChannelConfig,
   ChannelsMap,
-  FcmProviderOptions,
-  INotificationHttp,
+  FcmChannelConfig,
+  MailChannelConfig,
+  NotificationChannel,
   NotificationPluginOptions,
-  ProviderType,
-  SlackProviderOptions,
-  TwilioProviderOptions,
+  NotificationTransport,
+  PushTransport,
+  SlackChannelConfig,
+  SlackTransport,
+  SmsTransport,
+  TwilioChannelConfig,
 } from '../interfaces/index.ts';
 import { NotificationService } from '../services/notification-service.ts';
 import { EmailChannel } from '../channels/email-channel.ts';
@@ -33,9 +37,6 @@ import { SlackProvider } from '../providers/slack-provider.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'notification-plugin';
-
-// Re-exported at the top level of each provider for test assertion.
-export { FcmProvider, SlackProvider, TwilioProvider };
 
 /**
  * Creates the plugin factory.
@@ -50,7 +51,10 @@ export { FcmProvider, SlackProvider, TwilioProvider };
  * app.register(NotificationPlugin({
  *   channels: {
  *     email: { provider: 'mail' },
- *     sms: { provider: 'twilio', options: { accountSid: '…', authToken: '…', from: '+1234' } },
+ *     sms: {
+ *       provider: 'twilio',
+ *       options: { accountSid: '…', authToken: '…', from: '+1234' },
+ *     },
  *     slack: { provider: 'slack', options: { webhookUrl: 'https://hooks.slack.com/…' } },
  *   },
  * }));
@@ -65,16 +69,15 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
   return {
     name: PLUGIN_NAME,
     version: '0.1.0',
-    optionalDependencies: [CAPABILITIES.MAIL, CAPABILITIES.LOGGER],
+    optionalDependencies: [CAPABILITIES.MAIL],
     provides: [CAPABILITIES.NOTIFICATION],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void {
-      const channelMap = new Map<string, import('../interfaces/index.ts').NotificationChannel>();
+      const channelMap = new Map<string, NotificationChannel>();
 
       for (const [name, config] of Object.entries(channels)) {
-        const channel = createChannel(name, config, ctx);
-        channelMap.set(name, channel);
+        channelMap.set(name, createChannel(name, config, ctx));
       }
 
       const service = new NotificationService(channelMap);
@@ -92,101 +95,85 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
 /**
  * Creates a `NotificationChannel` for the given channel entry.
  *
- * Resolves the provider via {@linkcode createProvider}, then wraps it in the
- * appropriate channel class (`EmailChannel`, `SmsChannel`, `PushChannel`, or `SlackChannel`).
+ * Resolves the transport via {@linkcode createProvider}, then wraps it in the
+ * matching channel class (`EmailChannel`, `SmsChannel`, `PushChannel`, or `SlackChannel`).
  *
  * @param name - The channel dispatch name
  * @param config - The channel configuration
- * @param ctx - The plugin context
+ * @param ctx - The plugin context (required for `'mail'`, which resolves `IMailer`)
  * @returns The configured channel
- * @throws {Error} If the provider type is unsupported or `email` is used without MailPlugin
+ * @throws {Error} If the provider type is unsupported or `mail` is used without MailPlugin
  * @since 0.1.0
  */
 export function createChannel(
   name: string,
   config: ChannelConfig,
-  ctx: IPluginContext,
-): import('../interfaces/index.ts').NotificationChannel {
-  const provider = createProvider(config.provider, config.options ?? {}, ctx);
-
+  ctx?: IPluginContext,
+): NotificationChannel {
   switch (config.provider) {
     case 'mail':
-      return new EmailChannel(name, provider as unknown as IMailer);
-    case 'twilio': {
-      const smsTransport = provider as import('../interfaces/index.ts').SmsTransport;
-      return new SmsChannel(name, smsTransport);
-    }
-    case 'fcm': {
-      const pushTransport = provider as import('../interfaces/index.ts').PushTransport;
-      return new PushChannel(name, pushTransport);
-    }
-    case 'slack': {
-      const slackTransport = provider as import('../interfaces/index.ts').SlackTransport;
-      return new SlackChannel(name, slackTransport);
-    }
+      return new EmailChannel(name, createProvider(config, ctx));
+    case 'twilio':
+      return new SmsChannel(name, createProvider(config));
+    case 'fcm':
+      return new PushChannel(name, createProvider(config));
+    case 'slack':
+      return new SlackChannel(name, createProvider(config));
+    default:
+      // Unreachable for a type-checked config; guards JS callers and bad casts.
+      throw new Error(
+        `Unsupported notification provider: ${(config as ChannelConfig).provider as string}`,
+      );
   }
 }
 
 /**
- * Creates a transport provider for the given type.
+ * Creates the transport for a channel configuration.
  *
  * For `'mail'`, resolves `IMailer` from the context service registry. For
- * `'twilio'`, `'fcm'`, and `'slack'`, returns the corresponding HTTP-based provider.
+ * `'twilio'`, `'fcm'`, and `'slack'`, constructs the corresponding HTTP provider
+ * from the config's `options`, which each provider validates.
  *
- * @param type - The provider type
- * @param options - Provider-specific options
- * @param ctx - The plugin context (for resolving `IMailer` when `type === 'mail'`)
- * @returns The transport provider
- * @throws {Error} If the provider type is unsupported, required options are missing, or `email` is configured without MailPlugin
+ * The overloads bind each config arm to the transport port it produces, so a
+ * caller never has to narrow or cast the result.
+ *
+ * @param config - The channel configuration
+ * @param ctx - The plugin context (for resolving `IMailer` when `provider` is `'mail'`)
+ * @returns The transport for this configuration
+ * @throws {Error} If the provider type is unsupported, required options are missing, or `mail` is configured without MailPlugin
  * @since 0.1.0
  */
+export function createProvider(config: MailChannelConfig, ctx?: IPluginContext): IMailer;
+export function createProvider(config: TwilioChannelConfig): SmsTransport;
+export function createProvider(config: FcmChannelConfig): PushTransport;
+export function createProvider(config: SlackChannelConfig): SlackTransport;
 export function createProvider(
-  type: ProviderType,
-  options: Readonly<Record<string, unknown>>,
+  config: ChannelConfig,
   ctx?: IPluginContext,
-): unknown {
-  switch (type) {
+): NotificationTransport;
+export function createProvider(
+  config: ChannelConfig,
+  ctx?: IPluginContext,
+): NotificationTransport {
+  switch (config.provider) {
     case 'mail': {
       if (!ctx || !ctx.services.has(CAPABILITIES.MAIL)) {
         throw new Error(
           'Notification "email" channel requires the mail capability (CAPABILITIES.MAIL); register MailPlugin (M29) or remove the email channel',
         );
       }
-      const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
-      return mailer;
+      return ctx.services.get<IMailer>(CAPABILITIES.MAIL);
     }
-    case 'twilio': {
-      const twilioOpts = options as unknown as TwilioProviderOptions;
-      const http = (twilioOpts as { http?: INotificationHttp }).http;
-      const result: TwilioProviderOptions = {
-        accountSid: twilioOpts.accountSid,
-        authToken: twilioOpts.authToken,
-        from: twilioOpts.from,
-      };
-      if (http !== undefined) {
-        result.http = http;
-      }
-      return new TwilioProvider(result);
-    }
-    case 'fcm': {
-      const fcmOpts = options as unknown as FcmProviderOptions;
-      const http = (fcmOpts as { http?: INotificationHttp }).http;
-      const result: FcmProviderOptions = { serverKey: fcmOpts.serverKey };
-      if (http !== undefined) {
-        result.http = http;
-      }
-      return new FcmProvider(result);
-    }
-    case 'slack': {
-      const slackOpts = options as unknown as SlackProviderOptions;
-      const http = (slackOpts as { http?: INotificationHttp }).http;
-      const result: SlackProviderOptions = { webhookUrl: slackOpts.webhookUrl };
-      if (http !== undefined) {
-        result.http = http;
-      }
-      return new SlackProvider(result);
-    }
+    case 'twilio':
+      return new TwilioProvider(config.options);
+    case 'fcm':
+      return new FcmProvider(config.options);
+    case 'slack':
+      return new SlackProvider(config.options);
     default:
-      throw new Error(`Unsupported notification provider: ${type as string}`);
+      // Unreachable for a type-checked config; guards JS callers and bad casts.
+      throw new Error(
+        `Unsupported notification provider: ${(config as ChannelConfig).provider as string}`,
+      );
   }
 }

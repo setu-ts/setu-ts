@@ -7,26 +7,29 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { TwilioProvider } from '../../src/providers/twilio-provider.ts';
+import type { TwilioProviderOptions } from '../../src/index.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
+
+/** Builds an options object missing a required credential (a JS caller's mistake). */
+function partialOptions(options: Partial<TwilioProviderOptions>): TwilioProviderOptions {
+  return options as TwilioProviderOptions;
+}
 
 describe('TwilioProvider', () => {
   it('throws on missing accountSid', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(() => new TwilioProvider({ authToken: 't', from: '+1' } as any)).toThrow(
+    expect(() => new TwilioProvider(partialOptions({ authToken: 't', from: '+1' }))).toThrow(
       'TwilioProvider requires "accountSid"',
     );
   });
 
   it('throws on missing authToken', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(() => new TwilioProvider({ accountSid: 'A', from: '+1' } as any)).toThrow(
+    expect(() => new TwilioProvider(partialOptions({ accountSid: 'A', from: '+1' }))).toThrow(
       'TwilioProvider requires "authToken"',
     );
   });
 
   it('throws on missing from', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(() => new TwilioProvider({ accountSid: 'A', authToken: 't' } as any)).toThrow(
+    expect(() => new TwilioProvider(partialOptions({ accountSid: 'A', authToken: 't' }))).toThrow(
       'TwilioProvider requires "from"',
     );
   });

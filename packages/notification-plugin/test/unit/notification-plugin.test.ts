@@ -6,231 +6,166 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { INotifier } from '@hono-enterprise/common';
 import {
   createChannel,
   createProvider,
+  EmailChannel,
   FcmProvider,
   NotificationPlugin,
+  PushChannel,
+  SlackChannel,
   SlackProvider,
+  SmsChannel,
   TwilioProvider,
-} from '../../src/plugin/notification-plugin.ts';
-import type { IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '../../src/index.ts';
+import type { ChannelConfig } from '../../src/index.ts';
 import { createFakeMailer } from '../fixtures/fake-mailer.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
+import { createFakeContext } from '../fixtures/fake-context.ts';
 
-/* ------------------------------------------------------------------ */
-/*  Shared fake-context helper — mirrors sibling-plugin conventions.  */
-/* ------------------------------------------------------------------ */
+const twilioConfig: ChannelConfig = {
+  provider: 'twilio',
+  options: { accountSid: 'AC1', authToken: 'tok', from: '+15550000000' },
+};
+const fcmConfig: ChannelConfig = { provider: 'fcm', options: { serverKey: 'srv-key' } };
+const slackConfig: ChannelConfig = {
+  provider: 'slack',
+  options: { webhookUrl: 'https://hooks.slack.com/services/T/B/X' },
+};
 
-interface FakeContextCapture {
-  registeredServices?: Map<string, unknown>;
-  registeredHealth?: Map<string, unknown>;
-  onCloseHandlers?: Array<() => void | Promise<void>>;
-  onRegisterHandlers?: Array<() => void | Promise<void>>;
-  onInitHandlers?: Array<() => void | Promise<void>>;
-  onBootstrapHandlers?: Array<() => void | Promise<void>>;
-  onRequestHandlers?: Array<(ctx: unknown) => void | Promise<void>>;
-  onResponseHandlers?: Array<(ctx: unknown) => void | Promise<void>>;
-  onShutdownHandlers?: Array<() => void | Promise<void>>;
-  onErrorHandlers?: Array<(err: Error, ctx: unknown) => void | Promise<void>>;
-}
-
-/**
- * Creates a minimal fake `IPluginContext` with no bare `any` types.
- */
-function createFakeContext(capture?: FakeContextCapture): IPluginContext {
-  const reg = capture?.registeredServices ?? new Map<string, unknown>();
-  const health = capture?.registeredHealth ?? new Map<string, unknown>();
-  const onClose = capture?.onCloseHandlers ?? [];
-  const onRegister = capture?.onRegisterHandlers ?? [];
-  const onInit = capture?.onInitHandlers ?? [];
-  const onBootstrap = capture?.onBootstrapHandlers ?? [];
-  const onRequest = capture?.onRequestHandlers ?? [];
-  const onResponse = capture?.onResponseHandlers ?? [];
-  const onShutdown = capture?.onShutdownHandlers ?? [];
-  const onError = capture?.onErrorHandlers ?? [];
-
-  return {
-    services: {
-      has(_token: string): boolean {
-        return reg.has(_token);
-      },
-      get<T>(token: string): T {
-        if (!reg.has(token)) {
-          throw new Error(
-            `No service registered for capability '${token}'. ` +
-              `Register a plugin that provides it, or check the token spelling against CAPABILITIES.`,
-          );
-        }
-        return reg.get(token) as T;
-      },
-      getAll<T>(_token: string): readonly T[] {
-        const v = reg.get(_token);
-        return v ? ([v] as unknown as readonly T[]) : [];
-      },
-      register(name: string, svc: unknown): void {
-        reg.set(name, svc);
-      },
-    },
-    health: {
-      register: (name: string, fn: () => Promise<{ status: string }>): void => {
-        health.set(name, fn);
-      },
-    },
-    lifecycle: {
-      onClose: (fn: () => void | Promise<void>): void => {
-        onClose.push(fn);
-      },
-      onRegister: (fn: () => void | Promise<void>): void => {
-        onRegister.push(fn);
-      },
-      onInit: (fn: () => void | Promise<void>): void => {
-        onInit.push(fn);
-      },
-      onBootstrap: (fn: () => void | Promise<void>): void => {
-        onBootstrap.push(fn);
-      },
-      onRequest: (fn: (ctx: unknown) => void | Promise<void>): void => {
-        onRequest.push(fn);
-      },
-      onResponse: (fn: (ctx: unknown) => void | Promise<void>): void => {
-        onResponse.push(fn);
-      },
-      onShutdown: (fn: () => void | Promise<void>): void => {
-        onShutdown.push(fn);
-      },
-      onError: (fn: (err: Error, ctx: unknown) => void | Promise<void>): void => {
-        onError.push(fn);
-      },
-    },
-    runtime: {},
-  } as unknown as IPluginContext;
-}
-
-describe('NotificationPlugin', () => {
-  it('creates the plugin with correct metadata', () => {
+describe('NotificationPlugin metadata', () => {
+  it('exposes the expected plugin contract fields', () => {
     const plugin = NotificationPlugin({ channels: {} });
     expect(plugin.name).toBe('notification-plugin');
     expect(plugin.version).toBe('0.1.0');
     expect(plugin.provides).toEqual([CAPABILITIES.NOTIFICATION]);
-    expect(plugin.priority).toBe(500);
-    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.MAIL, CAPABILITIES.LOGGER]);
+    expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
+    // `mail` only — the plugin never reads a logger, so it declares no logger edge.
+    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.MAIL]);
+  });
+});
+
+describe('NotificationPlugin.register', () => {
+  it('registers a working INotifier and a healthy indicator listing the channels', async () => {
+    const fakeMailer = createFakeMailer();
+    const fakeHttp = createFakeNotificationHttp({ responseBody: 'ok' });
+    const fake = createFakeContext({ [CAPABILITIES.MAIL]: fakeMailer });
+
+    NotificationPlugin({
+      channels: {
+        email: { provider: 'mail' },
+        slack: { provider: 'slack', options: { webhookUrl: 'https://hooks/x', http: fakeHttp } },
+      },
+    }).register(fake.ctx);
+
+    // Capability resolves to a service that actually dispatches.
+    const notifier = fake.registered.get(CAPABILITIES.NOTIFICATION) as INotifier;
+    await notifier.send({
+      channels: ['email', 'slack'],
+      to: { email: 'u@example.com', channel: '#ops' },
+      subject: 'Hi',
+      body: 'body text',
+    });
+    expect(fakeMailer.getLastMessage()?.to).toBe('u@example.com');
+    expect(JSON.parse(fakeHttp.getLastCall()!.body).channel).toBe('#ops');
+
+    // Health indicator reports up with the configured channel names.
+    const indicator = fake.healthIndicators.get('notification');
+    expect(indicator).toBeDefined();
+    const result = await indicator!();
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ channels: ['email', 'slack'] });
   });
 
-  it('registers INotifier and health indicator', () => {
-    const registeredServices = new Map<string, unknown>();
-    const registeredHealth = new Map<string, unknown>();
-    const ctx = createFakeContext({
-      registeredServices,
-      registeredHealth,
-    });
+  it('registers an empty channel map without touching the mail capability', () => {
+    const fake = createFakeContext();
+    NotificationPlugin({ channels: {} }).register(fake.ctx);
+    expect(fake.registered.has(CAPABILITIES.NOTIFICATION)).toBe(true);
+    expect(fake.healthIndicators.has('notification')).toBe(true);
+  });
 
-    const plugin = NotificationPlugin({ channels: {} });
-    plugin.register(ctx);
-
-    expect(registeredServices.has(CAPABILITIES.NOTIFICATION)).toBe(true);
-    expect(registeredHealth.has('notification')).toBe(true);
+  it('fails fast when an email channel is configured without the mail capability', () => {
+    const fake = createFakeContext();
+    expect(() =>
+      NotificationPlugin({ channels: { email: { provider: 'mail' } } }).register(fake.ctx)
+    ).toThrow('Notification "email" channel requires the mail capability');
   });
 });
 
 describe('createProvider', () => {
-  it("returns IMailer for 'mail'", () => {
+  it('resolves the registered IMailer for a mail config', () => {
     const fakeMailer = createFakeMailer();
-    const registeredServices = new Map<string, unknown>();
-    registeredServices.set(CAPABILITIES.MAIL, fakeMailer);
-
-    const ctx = createFakeContext({ registeredServices });
-    const result = createProvider('mail', {}, ctx);
-    expect(result).toBe(fakeMailer);
+    const fake = createFakeContext({ [CAPABILITIES.MAIL]: fakeMailer });
+    expect(createProvider({ provider: 'mail' }, fake.ctx)).toBe(fakeMailer);
   });
 
-  it('throws for mail without context', () => {
-    expect(() => createProvider('mail', {} as never)).toThrow(
+  it('throws for a mail config with no context at all', () => {
+    expect(() => createProvider({ provider: 'mail' })).toThrow(
       'Notification "email" channel requires the mail capability',
     );
   });
 
-  it('returns TwilioProvider for twilio', () => {
-    const fakeHttp = createFakeNotificationHttp();
-    const result = createProvider('twilio', {
-      accountSid: 'A',
-      authToken: 't',
-      from: '+1',
-      http: fakeHttp,
-    });
-    expect(result).toBeInstanceOf(TwilioProvider);
-  });
-
-  it('TwilioProvider uses default http when http is not provided', () => {
-    const result = createProvider('twilio', { accountSid: 'A', authToken: 't', from: '+1' });
-    expect(result).toBeInstanceOf(TwilioProvider);
-  });
-
-  it('returns FcmProvider for fcm', () => {
-    const fakeHttp = createFakeNotificationHttp();
-    const result = createProvider('fcm', { serverKey: 'key', http: fakeHttp });
-    expect(result).toBeInstanceOf(FcmProvider);
-  });
-
-  it('returns SlackProvider for slack', () => {
-    const fakeHttp = createFakeNotificationHttp();
-    const result = createProvider('slack', {
-      webhookUrl: 'https://hooks.slack.com/x',
-      http: fakeHttp,
-    });
-    expect(result).toBeInstanceOf(SlackProvider);
-  });
-
-  it('throws for unknown provider type', () => {
-    expect(() => createProvider('unknown' as never, {})).toThrow(
-      'Unsupported notification provider: unknown',
+  it('throws for a mail config when the mail capability is absent', () => {
+    const fake = createFakeContext();
+    expect(() => createProvider({ provider: 'mail' }, fake.ctx)).toThrow(
+      'Notification "email" channel requires the mail capability',
     );
+  });
+
+  it('builds the matching provider for each transport config', () => {
+    expect(createProvider(twilioConfig)).toBeInstanceOf(TwilioProvider);
+    expect(createProvider(fcmConfig)).toBeInstanceOf(FcmProvider);
+    expect(createProvider(slackConfig)).toBeInstanceOf(SlackProvider);
+  });
+
+  it('passes an injected http seam through to the provider', async () => {
+    const fakeHttp = createFakeNotificationHttp({ responseBody: 'ok' });
+    const provider = createProvider({
+      provider: 'slack',
+      options: { webhookUrl: 'https://hooks/y', http: fakeHttp },
+    });
+    await provider.send({ text: 'hello' });
+    expect(fakeHttp.getLastCall()?.url).toBe('https://hooks/y');
+  });
+
+  it('throws for an unsupported provider type', () => {
+    expect(() => createProvider({ provider: 'carrier-pigeon' } as unknown as ChannelConfig))
+      .toThrow(
+        'Unsupported notification provider: carrier-pigeon',
+      );
   });
 });
 
 describe('createChannel', () => {
-  it('returns EmailChannel for mail provider', () => {
-    const fakeMailer = createFakeMailer();
-    const registeredServices = new Map<string, unknown>();
-    registeredServices.set(CAPABILITIES.MAIL, fakeMailer);
-
-    const ctx = createFakeContext({ registeredServices });
-    const channel = createChannel('my-email', { provider: 'mail' }, ctx);
+  it('returns an EmailChannel for a mail config', () => {
+    const fake = createFakeContext({ [CAPABILITIES.MAIL]: createFakeMailer() });
+    const channel = createChannel('my-email', { provider: 'mail' }, fake.ctx);
+    expect(channel).toBeInstanceOf(EmailChannel);
     expect(channel.name).toBe('my-email');
-    expect(channel.constructor.name).toBe('EmailChannel');
   });
 
-  it('returns SmsChannel for twilio provider', () => {
-    const ctx = createFakeContext();
-    const channel = createChannel('my-sms', {
-      provider: 'twilio',
-      options: { accountSid: 'A', authToken: 't', from: '+1' },
-    }, ctx);
+  it('returns an SmsChannel for a twilio config', () => {
+    const channel = createChannel('my-sms', twilioConfig);
+    expect(channel).toBeInstanceOf(SmsChannel);
     expect(channel.name).toBe('my-sms');
-    expect(channel.constructor.name).toBe('SmsChannel');
   });
 
-  it('returns PushChannel for fcm provider', () => {
-    const ctx = createFakeContext();
-    const channel = createChannel('my-push', { provider: 'fcm', options: { serverKey: 'k' } }, ctx);
+  it('returns a PushChannel for an fcm config', () => {
+    const channel = createChannel('my-push', fcmConfig);
+    expect(channel).toBeInstanceOf(PushChannel);
     expect(channel.name).toBe('my-push');
-    expect(channel.constructor.name).toBe('PushChannel');
   });
 
-  it('returns SlackChannel for slack provider', () => {
-    const ctx = createFakeContext();
-    const channel = createChannel('my-slack', {
-      provider: 'slack',
-      options: { webhookUrl: 'https://hooks.slack.com/x' },
-    }, ctx);
+  it('returns a SlackChannel for a slack config', () => {
+    const channel = createChannel('my-slack', slackConfig);
+    expect(channel).toBeInstanceOf(SlackChannel);
     expect(channel.name).toBe('my-slack');
-    expect(channel.constructor.name).toBe('SlackChannel');
   });
 
-  it('throws for unknown provider type', () => {
-    const ctx = createFakeContext();
-    expect(() => createChannel('x', { provider: 'bogus' as never }, ctx)).toThrow(
+  it('throws for an unsupported provider type', () => {
+    expect(() => createChannel('x', { provider: 'bogus' } as unknown as ChannelConfig)).toThrow(
       'Unsupported notification provider: bogus',
     );
   });

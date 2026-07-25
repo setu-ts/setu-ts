@@ -2838,16 +2838,24 @@ import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
 
 app.register(NotificationPlugin({
   channels: {
+    // Email delegates to the `IMailer` from MailPlugin (M29) — no options here.
     email: { provider: 'mail' },
     sms: {
       provider: 'twilio',
-      options: { accountSid: config.get('TWILIO_SID'), authToken: config.get('TWILIO_TOKEN') },
+      options: {
+        accountSid: config.get('TWILIO_SID'),
+        authToken: config.get('TWILIO_TOKEN'),
+        from: config.get('TWILIO_FROM'), // required — the sender number
+      },
     },
     push: { provider: 'fcm', options: { serverKey: config.get('FCM_SERVER_KEY') } },
     slack: { provider: 'slack', options: { webhookUrl: config.get('SLACK_WEBHOOK') } },
   },
 }));
 ```
+
+`ChannelConfig` is discriminated on `provider`, so each entry's `options` are checked against that
+provider's option type: omitting `from` above is a compile error, not a startup throw.
 
 ### Usage
 
@@ -2874,6 +2882,62 @@ app.router.post('/orders', async (ctx) => {
   return ctx.response.status(201).json(order);
 });
 ```
+
+### Options
+
+| Option                                      | Provider                 | Description                                                                                                         |
+| ------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `channels`                                  | —                        | Required map of dispatch name → `ChannelConfig`. Keys are the names a caller passes in `send({ channels: [...] })`. |
+| `channels.*.provider`                       | —                        | `'mail' \| 'twilio' \| 'fcm' \| 'slack'` — selects the channel class and transport.                                 |
+| `options.accountSid` / `authToken` / `from` | `twilio`                 | Twilio credentials and sender number; all three required (construction throws).                                     |
+| `options.serverKey`                         | `fcm`                    | FCM legacy server key; required (construction throws).                                                              |
+| `options.webhookUrl`                        | `slack`                  | Slack incoming-webhook URL; required (construction throws).                                                         |
+| `options.http`                              | `twilio`, `fcm`, `slack` | Injected `INotificationHttp` (defaults to `createDefaultNotificationHttp()`, i.e. global `fetch`).                  |
+
+The `mail` arm takes no `options`: email transport is configured on MailPlugin (M29) and resolved
+through `CAPABILITIES.MAIL`.
+
+### Exports
+
+- `NotificationPlugin(options)` — plugin factory. `createChannel(name, config, ctx?)` — channel
+  builder. `createProvider(config, ctx?)` — transport builder, overloaded so each `ChannelConfig`
+  arm returns its own transport port (`mail` → `IMailer`, `twilio` → `SmsTransport`, `fcm` →
+  `PushTransport`, `slack` → `SlackTransport`).
+- `NotificationService` — the `INotifier` implementation (parallel fan-out + `AggregateError`).
+- `EmailChannel`, `SmsChannel`, `PushChannel`, `SlackChannel` — channel classes (address extraction
+  and payload shaping).
+- `TwilioProvider`, `FcmProvider`, `SlackProvider` — zero-dependency HTTP transports.
+- `createDefaultNotificationHttp(fetchImpl?)` — the `fetch`-backed default `INotificationHttp`.
+- `NotificationPluginOptions`, `ChannelsMap`, `ChannelConfig`, `MailChannelConfig`,
+  `TwilioChannelConfig`, `FcmChannelConfig`, `SlackChannelConfig`, `ProviderType`,
+  `NotificationTransport`, `TwilioProviderOptions`, `FcmProviderOptions`, `SlackProviderOptions` —
+  configuration types.
+- `INotificationHttp`, `NotificationHttpResponse`, `SmsTransport`, `SmsMessage`, `PushTransport`,
+  `PushMessage`, `SlackTransport`, `SlackMessage` — injection/transport types.
+- `INotifier`, `NotificationMessage` — re-exported from `@hono-enterprise/common`.
+
+### Notes
+
+- `INotifier` has exactly one method, `send`. There is no `sendEmail` / `sendSms` / `sendSlack` —
+  single-channel dispatch is `send({ channels: ['sms'], … })`.
+- Channels dispatch in parallel via `Promise.allSettled`: one failing channel never aborts the
+  others. When any fail, `send` throws an `AggregateError` (message
+  `'One or more notification channels failed'`) whose `errors` are always `Error` instances, one per
+  failed channel, including unknown channel names. An empty `channels` array resolves without
+  dispatching.
+- Each channel reads its own address key out of `to` and throws when it is absent: `to.email`
+  (email), `to.phone` (sms), `to.token` (push). Slack's `to.channel` is optional — omitted, the
+  webhook's default channel applies. `subject` becomes the mail subject (defaulting to
+  `'(no subject)'`) and the push notification title; SMS and Slack ignore it. Built-in channels do
+  not read `metadata` — it is there for custom `NotificationChannel` implementations.
+- Configuring an `email` channel without a registered `mail` capability throws during `register`, so
+  the misconfiguration surfaces at startup rather than at first send.
+- All three HTTP providers are zero-dependency (web-standard `fetch`) and Workers-portable; the
+  email channel inherits M29's provider constraints (`SmtpProvider` needs raw sockets).
+  `FcmProvider` targets the legacy `serverKey` API (`POST /fcm/send`); HTTP v1 with OAuth2
+  service-account signing is not implemented.
+- A `notification` health indicator reports `'up'` with the configured channel names. There is no
+  `onClose`: the providers hold no socket, timer, or connection.
 
 ---
 

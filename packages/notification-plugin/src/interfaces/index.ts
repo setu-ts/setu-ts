@@ -8,6 +8,8 @@
  * @module
  */
 
+import type { IMailer, NotificationMessage } from '@hono-enterprise/common';
+
 // ── NotificationChannel port (internal) ──────────────────────────────────────
 
 /**
@@ -27,7 +29,7 @@ export interface NotificationChannel {
    * @param notification - The notification to send
    * @throws {Error} If the channel fails to deliver
    */
-  send(notification: import('@hono-enterprise/common').NotificationMessage): Promise<void>;
+  send(notification: NotificationMessage): Promise<void>;
 }
 
 // ── Transport ports ──────────────────────────────────────────────────────────
@@ -157,16 +159,60 @@ export interface INotificationHttp {
 export type ProviderType = 'mail' | 'twilio' | 'fcm' | 'slack';
 
 /**
- * Per-channel configuration.
+ * Email channel configuration.
+ *
+ * Carries no `options`: transport is delegated to the `IMailer` resolved from
+ * `CAPABILITIES.MAIL`, which MailPlugin (M29) configures.
  *
  * @since 0.1.0
  */
-export interface ChannelConfig {
-  /** Provider type that selects the transport. */
-  provider: ProviderType;
-  /** Provider-specific options (ignored for `'mail'`). */
-  options?: Readonly<Record<string, unknown>>;
+export interface MailChannelConfig {
+  readonly provider: 'mail';
 }
+
+/**
+ * SMS channel configuration — `options` are {@linkcode TwilioProviderOptions}.
+ *
+ * @since 0.1.0
+ */
+export interface TwilioChannelConfig {
+  readonly provider: 'twilio';
+  readonly options: TwilioProviderOptions;
+}
+
+/**
+ * Push channel configuration — `options` are {@linkcode FcmProviderOptions}.
+ *
+ * @since 0.1.0
+ */
+export interface FcmChannelConfig {
+  readonly provider: 'fcm';
+  readonly options: FcmProviderOptions;
+}
+
+/**
+ * Slack channel configuration — `options` are {@linkcode SlackProviderOptions}.
+ *
+ * @since 0.1.0
+ */
+export interface SlackChannelConfig {
+  readonly provider: 'slack';
+  readonly options: SlackProviderOptions;
+}
+
+/**
+ * Per-channel configuration, discriminated on `provider`.
+ *
+ * Each arm names the exact options its provider consumes, so a missing or
+ * misspelled credential is a compile error rather than a startup throw.
+ *
+ * @since 0.1.0
+ */
+export type ChannelConfig =
+  | MailChannelConfig
+  | TwilioChannelConfig
+  | FcmChannelConfig
+  | SlackChannelConfig;
 
 /**
  * Plugin-level channels map.
@@ -174,6 +220,14 @@ export interface ChannelConfig {
  * @since 0.1.0
  */
 export type ChannelsMap = Readonly<Record<string, ChannelConfig>>;
+
+/**
+ * Union of every transport a channel can be built on, as returned by
+ * `createProvider`.
+ *
+ * @since 0.1.0
+ */
+export type NotificationTransport = IMailer | SmsTransport | PushTransport | SlackTransport;
 
 /**
  * Options for {@linkcode NotificationPlugin}.

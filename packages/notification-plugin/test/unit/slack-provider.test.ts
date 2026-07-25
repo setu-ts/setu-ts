@@ -7,12 +7,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { SlackProvider } from '../../src/providers/slack-provider.ts';
+import type { SlackProviderOptions } from '../../src/index.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
 
 describe('SlackProvider', () => {
   it('throws on missing webhookUrl', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(() => new SlackProvider({} as any)).toThrow(
+    // An empty options object is a JS caller's mistake; the ctor must reject it.
+    expect(() => new SlackProvider({} as SlackProviderOptions)).toThrow(
       'SlackProvider requires "webhookUrl"',
     );
   });

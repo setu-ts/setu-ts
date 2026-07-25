@@ -1,7 +1,8 @@
 # Milestone 30 — Notification Plugin (`@hono-enterprise/notification-plugin`)
 
-> **Status:** Planning. Branch: `feat/30-notification-plugin`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete. Branch: `feat/30-notification-plugin`. `main` is protected — all work
+> (implementation + fixes) stayed on this one branch and merges via a single PR. Deviations decided
+> during verification are recorded in §10.
 
 ## 0. Objective & scope
 
@@ -47,11 +48,12 @@ surface (one method).
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                                                                                      | Resolution (picked side)                                                                                                                                                                                                                | Doc deliverable (same PR)                                                         |
-| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| C1 | `PUBLIC_API.md:2868` shows `notifier.sendSlack({ channel, message })`, but the committed `INotifier` (`notification.ts:41`) has ONLY `send`.                                                                                                                                                                                  | Honor the committed contract — implement `send` only; Slack dispatch goes through `send({ channels: ['slack'], to: { channel: '#orders' }, body: '...' })`. No `sendSlack` method is added.                                             | Correct the PUBLIC_API.md Notifications usage example to use `send` for Slack.    |
-| C2 | `ROADMAP.md:3112-3113` shows `notifier.sendEmail(...)` and `notifier.sendSms(...)`, neither present on the committed `INotifier`.                                                                                                                                                                                             | Honor the committed contract — single-channel dispatch uses `send({ channels: ['email'], to: { email }, subject, body })` and `send({ channels: ['sms'], to: { phone }, body })`. No convenience methods ship.                          | Correct the ROADMAP M30 programmatic-API example to the committed `send` surface. |
-| C3 | `ROADMAP.md:3091` registers `email: { provider: 'mail', options: {...} }` (with options) while `PUBLIC_API.md:2841` registers `email: { provider: 'mail' }` (no options). The email channel delegates to the resolved `IMailer`, which M29's MailPlugin already configures — there is no consumer for an email `options` bag. | Drop the email `options`: the email entry is `{ provider: 'mail' }` and ignores any `options`. Mail transport config lives on `MailPlugin`. This removes a planned option with no consumer (the dead-option rule applied at plan time). | Align both docs to `email: { provider: 'mail' }` (no options).                    |
+| #  | Conflict                                                                                                                                                                                                                                                                                                                      | Resolution (picked side)                                                                                                                                                                                                                | Doc deliverable (same PR)                                                                                                                                                                                                        |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | `PUBLIC_API.md:2868` shows `notifier.sendSlack({ channel, message })`, but the committed `INotifier` (`notification.ts:41`) has ONLY `send`.                                                                                                                                                                                  | Honor the committed contract — implement `send` only; Slack dispatch goes through `send({ channels: ['slack'], to: { channel: '#orders' }, body: '...' })`. No `sendSlack` method is added.                                             | Correct the PUBLIC_API.md Notifications usage example to use `send` for Slack.                                                                                                                                                   |
+| C2 | `ROADMAP.md:3112-3113` shows `notifier.sendEmail(...)` and `notifier.sendSms(...)`, neither present on the committed `INotifier`.                                                                                                                                                                                             | Honor the committed contract — single-channel dispatch uses `send({ channels: ['email'], to: { email }, subject, body })` and `send({ channels: ['sms'], to: { phone }, body })`. No convenience methods ship.                          | Correct the ROADMAP M30 programmatic-API example to the committed `send` surface.                                                                                                                                                |
+| C3 | `ROADMAP.md:3091` registers `email: { provider: 'mail', options: {...} }` (with options) while `PUBLIC_API.md:2841` registers `email: { provider: 'mail' }` (no options). The email channel delegates to the resolved `IMailer`, which M29's MailPlugin already configures — there is no consumer for an email `options` bag. | Drop the email `options`: the email entry is `{ provider: 'mail' }` and ignores any `options`. Mail transport config lives on `MailPlugin`. This removes a planned option with no consumer (the dead-option rule applied at plan time). | Align both docs to `email: { provider: 'mail' }` (no options).                                                                                                                                                                   |
+| C4 | `PUBLIC_API.md`'s Notifications registration example passes Twilio `options: { accountSid, authToken }` with NO `from`, but `from` is a required Twilio credential — running the documented example verbatim throws `TwilioProvider requires "from"` at startup. (Caught in verification, not at plan time.)                  | Honor the provider requirement: `from` stays required, and the omission becomes a COMPILE error rather than a startup throw by discriminating `ChannelConfig` on `provider` (§10.1).                                                    | Add `from` to the PUBLIC_API registration example, and add the missing Notifications **Options**/**Exports**/**Notes** subsections — every sibling package section has them and the new `src/index.ts` surface was undocumented. |
 
 ## 3. Design decisions
 
@@ -96,11 +98,11 @@ surface (one method).
 
 ### 3.3 Email channel ↔ `MailPlugin` coupling via capability token
 
-- **Decision:** `NotificationPlugin` declares
-  `optionalDependencies: [CAPABILITIES.MAIL,
-  CAPABILITIES.LOGGER]`. The `mail` provider path
-  resolves `ctx.services.get<IMailer>(CAPABILITIES.MAIL)` during `register`; if the `email` channel
-  is configured but no mail capability is registered, `register` throws
+- **Decision:** `NotificationPlugin` declares `optionalDependencies: [CAPABILITIES.MAIL]` (see §10.3
+  — the planned `CAPABILITIES.LOGGER` entry was dropped: nothing in this package reads a logger, so
+  the edge was dead surface). The `mail` provider path resolves
+  `ctx.services.get<IMailer>(CAPABILITIES.MAIL)` during `register`; if the `email` channel is
+  configured but no mail capability is registered, `register` throws
   `Error('Notification "email" channel requires the mail capability (CAPABILITIES.MAIL); register
   MailPlugin (M29) or remove the email channel')`
   (fail fast). `EmailChannel.send` then calls
@@ -156,9 +158,8 @@ surface (one method).
 - **Decision:** `NotificationPlugin` returns an `IPlugin` with `name: 'notification-plugin'`,
   `provides:
   [CAPABILITIES.NOTIFICATION]`, `priority: PLUGIN_PRIORITY.NORMAL`,
-  `optionalDependencies:
-  [CAPABILITIES.MAIL, CAPABILITIES.LOGGER]`. `register` builds each channel
-  via `createChannel(name,
+  `optionalDependencies: [CAPABILITIES.MAIL]` (§10.3). `register` builds each channel via
+  `createChannel(name,
   entry, ctx)` (which calls `createProvider`), constructs
   `NotificationService(channels)`, registers it under `CAPABILITIES.NOTIFICATION`, and registers a
   `notification` health indicator returning
@@ -176,41 +177,43 @@ surface (one method).
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                                              | Kind                         | Consumer / real code path that READS it                                                   |
-| ------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `NotificationPlugin`                                         | fn (factory)                 | app code `app.register(NotificationPlugin({...}))`; integration test                      |
-| `NotificationService`                                        | class                        | `NotificationPlugin.register` constructs it; registered under `CAPABILITIES.NOTIFICATION` |
-| `createChannel`                                              | fn                           | `NotificationPlugin.register` calls it per channel entry; `notification-plugin.test.ts`   |
-| `createProvider`                                             | fn                           | `createChannel` calls it; `notification-plugin.test.ts`                                   |
-| `EmailChannel`                                               | class                        | `createChannel('mail'…)`; `email-channel.test.ts`                                         |
-| `SmsChannel`                                                 | class                        | `createChannel('twilio'…)`; `sms-channel.test.ts`                                         |
-| `PushChannel`                                                | class                        | `createChannel('fcm'…)`; `push-channel.test.ts`                                           |
-| `SlackChannel`                                               | class                        | `createChannel('slack'…)`; `slack-channel.test.ts`                                        |
-| `TwilioProvider`                                             | class                        | `createProvider('twilio')`; `twilio-provider.test.ts`                                     |
-| `FcmProvider`                                                | class                        | `createProvider('fcm')`; `fcm-provider.test.ts`                                           |
-| `SlackProvider`                                              | class                        | `createProvider('slack')`; `slack-provider.test.ts`                                       |
-| `createDefaultNotificationHttp`                              | fn                           | `createProvider` default `http`; `default-http.test.ts`                                   |
-| `INotificationHttp`, `NotificationHttpResponse`              | type                         | provider options field type; `createDefaultNotificationHttp` return                       |
-| `SmsTransport`, `SmsMessage`                                 | type                         | `SmsChannel` constructor param; `TwilioProvider` implements                               |
-| `PushTransport`, `PushMessage`                               | type                         | `PushChannel` constructor param; `FcmProvider` implements                                 |
-| `SlackTransport`, `SlackMessage`                             | type                         | `SlackChannel` constructor param; `SlackProvider` implements                              |
-| `TwilioProviderOptions`                                      | type                         | `TwilioProvider` constructor                                                              |
-| `FcmProviderOptions`                                         | type                         | `FcmProvider` constructor                                                                 |
-| `SlackProviderOptions`                                       | type                         | `SlackProvider` constructor                                                               |
-| `NotificationPluginOptions`, `ChannelConfig`, `ProviderType` | type                         | `NotificationPlugin` parameter; `createChannel`/`createProvider` switch                   |
-| `INotifier`, `NotificationMessage`                           | type (re-export from common) | consumers resolving the capability                                                        |
+| Exported symbol                                                                      | Kind                         | Consumer / real code path that READS it                                                   |
+| ------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `NotificationPlugin`                                                                 | fn (factory)                 | app code `app.register(NotificationPlugin({...}))`; integration test                      |
+| `NotificationService`                                                                | class                        | `NotificationPlugin.register` constructs it; registered under `CAPABILITIES.NOTIFICATION` |
+| `createChannel`                                                                      | fn                           | `NotificationPlugin.register` calls it per channel entry; `notification-plugin.test.ts`   |
+| `createProvider`                                                                     | fn                           | `createChannel` calls it; `notification-plugin.test.ts`                                   |
+| `EmailChannel`                                                                       | class                        | `createChannel('mail'…)`; `email-channel.test.ts`                                         |
+| `SmsChannel`                                                                         | class                        | `createChannel('twilio'…)`; `sms-channel.test.ts`                                         |
+| `PushChannel`                                                                        | class                        | `createChannel('fcm'…)`; `push-channel.test.ts`                                           |
+| `SlackChannel`                                                                       | class                        | `createChannel('slack'…)`; `slack-channel.test.ts`                                        |
+| `TwilioProvider`                                                                     | class                        | `createProvider('twilio')`; `twilio-provider.test.ts`                                     |
+| `FcmProvider`                                                                        | class                        | `createProvider('fcm')`; `fcm-provider.test.ts`                                           |
+| `SlackProvider`                                                                      | class                        | `createProvider('slack')`; `slack-provider.test.ts`                                       |
+| `createDefaultNotificationHttp`                                                      | fn                           | `createProvider` default `http`; `default-http.test.ts`                                   |
+| `INotificationHttp`, `NotificationHttpResponse`                                      | type                         | provider options field type; `createDefaultNotificationHttp` return                       |
+| `SmsTransport`, `SmsMessage`                                                         | type                         | `SmsChannel` constructor param; `TwilioProvider` implements                               |
+| `PushTransport`, `PushMessage`                                                       | type                         | `PushChannel` constructor param; `FcmProvider` implements                                 |
+| `SlackTransport`, `SlackMessage`                                                     | type                         | `SlackChannel` constructor param; `SlackProvider` implements                              |
+| `TwilioProviderOptions`                                                              | type                         | `TwilioProvider` constructor                                                              |
+| `FcmProviderOptions`                                                                 | type                         | `FcmProvider` constructor                                                                 |
+| `SlackProviderOptions`                                                               | type                         | `SlackProvider` constructor                                                               |
+| `NotificationPluginOptions`, `ChannelsMap`, `ChannelConfig`, `ProviderType`          | type                         | `NotificationPlugin` parameter; `createChannel`/`createProvider` switch                   |
+| `MailChannelConfig`, `TwilioChannelConfig`, `FcmChannelConfig`, `SlackChannelConfig` | type                         | the four `ChannelConfig` arms; each selects a `createProvider` overload (§10.1)           |
+| `NotificationTransport`                                                              | type                         | `createProvider`'s widest return type (union of `IMailer` and the three transport ports)  |
+| `INotifier`, `NotificationMessage`                                                   | type (re-export from common) | consumers resolving the capability                                                        |
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                  | Consumer                             | Behavior (per implementation)                                                                                            |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `channels`                              | `NotificationPlugin`                 | `Readonly<Record<string, ChannelConfig>>`; required; each key is the dispatch name a caller passes in `channels: [...]`. |
-| `channels.*.provider`                   | `createChannel`/`createProvider`     | `'mail' \| 'twilio' \| 'fcm' \| 'slack'`; selects transport and channel class.                                           |
-| `channels.*.options`                    | `createProvider` → provider ctor     | per-provider config; ignored for `mail` (email delegates to `IMailer`, configured by MailPlugin) — see C3.               |
-| `options.accountSid`/`authToken`/`from` | `TwilioProvider`                     | Twilio credentials and sender number; construction throws if any is missing.                                             |
-| `options.serverKey`                     | `FcmProvider`                        | FCM legacy server key; construction throws if missing.                                                                   |
-| `options.webhookUrl`                    | `SlackProvider`                      | Slack incoming webhook URL; construction throws if missing.                                                              |
-| `options.http`                          | each provider (via `createProvider`) | injectable `INotificationHttp`; defaults to `createDefaultNotificationHttp()` (global `fetch`).                          |
+| Option                                  | Consumer                             | Behavior (per implementation)                                                                                                                                             |
+| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `channels`                              | `NotificationPlugin`                 | `Readonly<Record<string, ChannelConfig>>`; required; each key is the dispatch name a caller passes in `channels: [...]`.                                                  |
+| `channels.*.provider`                   | `createChannel`/`createProvider`     | `'mail' \| 'twilio' \| 'fcm' \| 'slack'`; selects transport and channel class.                                                                                            |
+| `channels.*.options`                    | `createProvider` → provider ctor     | per-provider config, typed by the `provider` discriminant (§10.1); absent from the `mail` arm entirely (email delegates to `IMailer`, configured by MailPlugin) — see C3. |
+| `options.accountSid`/`authToken`/`from` | `TwilioProvider`                     | Twilio credentials and sender number; construction throws if any is missing.                                                                                              |
+| `options.serverKey`                     | `FcmProvider`                        | FCM legacy server key; construction throws if missing.                                                                                                                    |
+| `options.webhookUrl`                    | `SlackProvider`                      | Slack incoming webhook URL; construction throws if missing.                                                                                                               |
+| `options.http`                          | each provider (via `createProvider`) | injectable `INotificationHttp`; defaults to `createDefaultNotificationHttp()` (global `fetch`).                                                                           |
 
 ## 5. Implementation files
 
@@ -250,6 +253,7 @@ surface (one method).
 | `test/unit/barrel-exports.test.ts`                  | `index.ts` (+ `interfaces/index.ts`)   | every §4 symbol is defined/exported. `interfaces/index.ts` is type-only (no runtime branches) and is exercised transitively by the channel/provider tests that implement its ports.                                                                                                                                                                                                                                                                                                                                                                                        |
 | `test/integration/notification-integration.test.ts` | plugin + service + channels end-to-end | kernel app registers RuntimePlugin, a stub plugin providing `CAPABILITIES.MAIL` (recording fake `IMailer`), and `NotificationPlugin({ channels: { email:{provider:'mail'}, sms:{provider:'twilio',options:{…,http:fakeHttp}}, slack:{provider:'slack',options:{…,http:fakeHttp}} } })`; resolve `INotifier` via `CAPABILITIES.NOTIFICATION`; `send({channels:['email','sms','slack'],…})` is read back through the fake `IMailer` and fake `INotificationHttp` (one capability, one implementation); `notification` health indicator reports `'up'` with the channel list. |
 | `test/fixtures/fake-notification-http.ts`           | fixture (excluded from coverage)       | recording `INotificationHttp` capturing the last `(url, body, headers)` and a controllable response.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `test/fixtures/fake-context.ts`                     | fixture (excluded from coverage)       | fake `IPluginContext` for the `register`/`createProvider` unit tests; its `services.get` throws for an absent token and `register` rejects a duplicate, mirroring the kernel's real `ServiceRegistry` so a missing fail-fast guard cannot hide.                                                                                                                                                                                                                                                                                                                            |
 | `test/fixtures/fake-mailer.ts`                      | fixture (excluded from coverage)       | recording `IMailer` capturing the last `MailMessage` (read-back for the email channel + integration test).                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## 7. Verification gates
@@ -292,3 +296,48 @@ deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/f
   plus the `IMailer`-backed email channel (not in the ROADMAP file list; deferred).
 - A `NotificationChannel` registry/plugin hook for third-party channels (the exported transport
   interfaces already allow injection; a formal registration extension point is a future concern).
+
+## 10. Deviations from this plan, decided during verification
+
+Each of these ships in the same PR; the sections above have been corrected to match.
+
+### 10.1 `ChannelConfig` is discriminated on `provider`; `createProvider` is overloaded
+
+The plan's §4.1 shape — `provider: ProviderType` plus an untyped
+`options?: Readonly<Record<string, unknown>>` bag — type-checked a config that no provider can
+honor, which is exactly how C4 (the documented example missing Twilio's required `from`) escaped
+review. `ChannelConfig` is now the union
+`MailChannelConfig | TwilioChannelConfig |
+FcmChannelConfig | SlackChannelConfig`, each arm naming
+its provider's option type, and `createProvider(config, ctx?)` carries one overload per arm
+returning that arm's transport port.
+
+Consequences: `createProvider`'s signature is `(config, ctx?)` rather than the planned
+`(type, options, ctx)` — the type and its options travel together, so they cannot disagree; and the
+plan's four `as unknown as` casts (`provider as unknown as IMailer` in `createChannel`, plus one per
+provider-options bag) are gone. The `default:` arm of each switch is retained as a runtime guard for
+JS callers, driven by a test that casts a bogus provider.
+
+### 10.2 The integration test drives a real kernel app
+
+As §6 specified —
+`createApplication({ plugins: [RuntimePlugin(), <mail stub>,
+NotificationPlugin(…)] })`,
+`app.start()`, dispatch from a route via `app.inject()`, read back through the fakes, resolve the
+health indicator from `CAPABILITIES.HEALTH_INDICATOR`. It also proves the §3.3 ordering claim
+(NotificationPlugin listed BEFORE the mail provider still resolves `IMailer`) and that `email` with
+no mail capability fails `app.start()`, not just `register()`.
+
+### 10.3 No `CAPABILITIES.LOGGER` optional dependency
+
+§3.3/§3.6 planned `optionalDependencies: [CAPABILITIES.MAIL, CAPABILITIES.LOGGER]`, but nothing in
+the package reads `ctx.logger` — verified with a real app: a successful send and a failing send
+emitted zero log lines. Per the dead-symbol rule the declaration is dropped rather than given
+speculative log statements (logging on dispatch is behavior no design decision here specifies).
+
+### 10.4 Providers are exported from their own modules
+
+`src/plugin/notification-plugin.ts` re-exported `TwilioProvider`/`FcmProvider`/`SlackProvider` so
+its unit test could import them from one place, with a comment describing something else. The barrel
+now re-exports each provider from `src/providers/*.ts` and the tests import from the barrel, so each
+symbol has exactly one export path.

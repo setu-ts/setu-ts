@@ -31,11 +31,10 @@ export class SlackChannel implements NotificationChannel {
    */
   async send(notification: NotificationMessage): Promise<void> {
     // Honor exactOptionalPropertyTypes — build without `channel` when absent.
-    const msgBody: Record<string, unknown> = { text: notification.body };
-    if (notification.to.channel !== undefined) {
-      msgBody.channel = notification.to.channel;
-    }
-    const message = msgBody as unknown as SlackMessage;
+    const channel = notification.to.channel;
+    const message: SlackMessage = channel === undefined
+      ? { text: notification.body }
+      : { text: notification.body, channel };
     await this.transport.send(message);
   }
 }
