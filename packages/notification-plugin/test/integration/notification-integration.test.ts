@@ -32,7 +32,16 @@ describe('notification-plugin integration', () => {
     // Build a minimal plugin context.
     const ctx = {
       services: {
+        has(token: string): boolean {
+          return serviceRegistry.has(token);
+        },
         get(token: string): any {
+          if (!serviceRegistry.has(token)) {
+            throw new Error(
+              `No service registered for capability '${token}'. ` +
+                `Register a plugin that provides it, or check the token spelling against CAPABILITIES.`,
+            );
+          }
           return serviceRegistry.get(token);
         },
         register(name: string, service: any): void {
@@ -137,6 +146,9 @@ describe('notification-plugin integration', () => {
   it('fails fast when email channel configured without MailPlugin', () => {
     const ctx = {
       services: {
+        has(_token: string): boolean {
+          return false;
+        },
         get(): any {
           return undefined;
         },

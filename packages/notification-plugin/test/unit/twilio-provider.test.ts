@@ -48,7 +48,7 @@ describe('TwilioProvider', () => {
     const call = fakeHttp.getLastCall();
     expect(call).toBeDefined();
     expect(call!.url).toBe('https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json');
-    expect(call!.headers['Authorization']).toMatch(/^Basic /);
+    expect(call!.headers['Authorization']).toBe(`Basic ${btoa('AC123:token')}`);
     expect(call!.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
     expect(call!.body).toContain('To=%2B15554443333');
     expect(call!.body).toContain('From=%2B19998887777');

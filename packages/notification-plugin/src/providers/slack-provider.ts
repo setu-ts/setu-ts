@@ -35,7 +35,7 @@ export class SlackProvider implements SlackTransport {
    * Posts a message to the Slack webhook.
    *
    * Slack signals success only when HTTP 200 AND body is the literal `"ok"` —
-   * a compound check: `!response.ok` **and** `response.text !== 'ok'` each
+   * a compound check: `!response.ok` **or** `response.text !== 'ok'` each
    * constitute failure arms.
    *
    * @param message - The Slack message

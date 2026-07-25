@@ -57,6 +57,12 @@ function createFakeContext(capture?: FakeContextCapture): IPluginContext {
         return reg.has(_token);
       },
       get<T>(token: string): T {
+        if (!reg.has(token)) {
+          throw new Error(
+            `No service registered for capability '${token}'. ` +
+              `Register a plugin that provides it, or check the token spelling against CAPABILITIES.`,
+          );
+        }
         return reg.get(token) as T;
       },
       getAll<T>(_token: string): readonly T[] {

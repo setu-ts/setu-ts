@@ -2864,10 +2864,11 @@ app.router.post('/orders', async (ctx) => {
     body: `Your order ${order.id} has been confirmed.`,
   });
 
-  // Channel-specific
-  await notifier.sendSlack({
-    channel: '#orders',
-    message: `New order: ${order.id}`,
+  // Slack-only
+  await notifier.send({
+    channels: ['slack'],
+    to: { channel: '#orders' },
+    body: `New order: ${order.id}`,
   });
 
   return ctx.response.status(201).json(order);

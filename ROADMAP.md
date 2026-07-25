@@ -3088,7 +3088,7 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 ```typescript
 app.register(NotificationPlugin({
   channels: {
-    email: { provider: 'mail', options: {/* ... */} },
+    email: { provider: 'mail' },
     sms: { provider: 'twilio', options: {/* ... */} },
     push: { provider: 'fcm', options: {/* ... */} },
     slack: { provider: 'slack', options: {/* ... */} },
@@ -3108,9 +3108,18 @@ await notifier.send({
   body: 'Your order has been shipped.',
 });
 
-// Channel-specific
-await notifier.sendEmail('user@example.com', 'Welcome', 'Welcome!');
-await notifier.sendSms('+1234567890', 'Your code is 123456');
+// Channel-specific (single-channel send)
+await notifier.send({
+  channels: ['email'],
+  to: { email: 'user@example.com' },
+  subject: 'Welcome',
+  body: 'Welcome!',
+});
+await notifier.send({
+  channels: ['sms'],
+  to: { phone: '+1234567890' },
+  body: 'Your code is 123456',
+});
 ```
 
 **Implementation Files:**

@@ -124,8 +124,6 @@ export function createChannel(
       const slackTransport = provider as import('../interfaces/index.ts').SlackTransport;
       return new SlackChannel(name, slackTransport);
     }
-    default:
-      throw new Error(`Unsupported notification provider: ${config.provider as string}`);
   }
 }
 
@@ -149,17 +147,12 @@ export function createProvider(
 ): unknown {
   switch (type) {
     case 'mail': {
-      if (!ctx) {
+      if (!ctx || !ctx.services.has(CAPABILITIES.MAIL)) {
         throw new Error(
           'Notification "email" channel requires the mail capability (CAPABILITIES.MAIL); register MailPlugin (M29) or remove the email channel',
         );
       }
       const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
-      if (!mailer) {
-        throw new Error(
-          'Notification "email" channel requires the mail capability (CAPABILITIES.MAIL); register MailPlugin (M29) or remove the email channel',
-        );
-      }
       return mailer;
     }
     case 'twilio': {
