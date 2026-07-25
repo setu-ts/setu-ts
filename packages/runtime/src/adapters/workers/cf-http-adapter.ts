@@ -22,6 +22,7 @@ import {
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
 import {
   bindCloudflareSocketToSink,
@@ -91,13 +92,23 @@ export class CloudflareWorkersServerHandle {
       return new Response(null, { status: decision.status });
     }
 
-    // Resolved lazily so the Workers-global boundary cast is never evaluated on
-    // a runtime that has no WebSocketPair.
-    this.#wsHost ??= createDefaultCloudflareWebSocketHost();
+    try {
+      // Resolved lazily so the Workers-global boundary cast is never evaluated
+      // on a runtime that has no WebSocketPair.
+      this.#wsHost ??= createDefaultCloudflareWebSocketHost();
 
-    const { client, server } = this.#wsHost.createPair();
-    bindCloudflareSocketToSink(server, decision.sink);
-    return this.#wsHost.createUpgradeResponse(client, decision.protocol);
+      const { client, server } = this.#wsHost.createPair();
+      bindCloudflareSocketToSink(server, decision.sink);
+      return this.#wsHost.createUpgradeResponse(client, decision.protocol);
+    } catch (cause) {
+      // The router already accepted, so release whatever the consumer reserved
+      // for this socket rather than leaving the sink dangling.
+      decision.sink.onClose({
+        code: ABNORMAL_CLOSURE,
+        reason: cause instanceof Error ? cause.message : 'Handshake failed',
+      });
+      return new Response(null, { status: 500 });
+    }
   }
 }
 

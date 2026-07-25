@@ -179,24 +179,29 @@ describe('BunHttpAdapter WebSocket upgrade', () => {
     expect(upgradeCalls[0]?.protocol).toBe('chat');
   });
 
-  it('answers 400 when Bun refuses the upgrade', async () => {
+  it('answers 400 and releases the sink when Bun refuses the upgrade', async () => {
     const { adapter, server, serveOptions } = build({ upgradeReturns: false });
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink: recordingSink() }));
+    const sink = recordingSink();
+    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
     await adapter.listen(3000);
 
     const result = await serveOptions().fetch(upgradeRequest(), server);
 
     expect(result?.status).toBe(400);
+    // The router accepted, so the consumer's reserved slot must be released.
+    expect(sink.events).toEqual(['close:1006:Handshake refused']);
   });
 
-  it('answers 501 when the server exposes no upgrade method', async () => {
+  it('answers 501 and releases the sink when the server cannot upgrade', async () => {
     const { adapter, server, serveOptions } = build({ omitUpgrade: true });
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink: recordingSink() }));
+    const sink = recordingSink();
+    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
     await adapter.listen(3000);
 
     const result = await serveOptions().fetch(upgradeRequest(), server);
 
     expect(result?.status).toBe(501);
+    expect(sink.events).toEqual(['close:1006:Upgrade unsupported']);
   });
 
   it('answers a rejection with the decision status', async () => {

@@ -100,11 +100,18 @@ export class HeartbeatSweeper {
       if (!conn.isOpen) {
         continue;
       }
-      if (idleTimeoutMs > 0 && now - conn.lastSeenAt >= idleTimeoutMs) {
-        conn.close(CLOSE_GOING_AWAY, 'Idle timeout');
-        continue;
+      try {
+        if (idleTimeoutMs > 0 && now - conn.lastSeenAt >= idleTimeoutMs) {
+          conn.close(CLOSE_GOING_AWAY, 'Idle timeout');
+          continue;
+        }
+        conn.send(heartbeatPayload);
+      } catch {
+        // This runs inside a timer callback, where a throw would escape as an
+        // unhandled error AND skip every remaining connection — one unwritable
+        // peer would stop heartbeats and idle eviction for the whole server.
+        // The peer is left alone; its close event removes it.
       }
-      conn.send(heartbeatPayload);
     }
   }
 }

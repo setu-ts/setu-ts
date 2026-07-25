@@ -114,6 +114,43 @@ describe('HeartbeatSweeper', () => {
     expect(active.transport.sent).toEqual(['ping']);
   });
 
+  it('keeps sweeping when one peer send throws inside the timer callback', () => {
+    const runtime = createFakeRuntime();
+    const bad = makeConnection(runtime.hrtime());
+    const good = makeConnection(runtime.hrtime());
+    bad.transport.send = () => {
+      throw new Error('socket write failed');
+    };
+    const sweeper = new HeartbeatSweeper(
+      runtime,
+      { heartbeatMs: 1000, heartbeatPayload: 'ping', idleTimeoutMs: 0 },
+      () => [bad.conn, good.conn],
+    );
+
+    // A throw here would escape the timer callback as an unhandled error and
+    // skip every remaining connection.
+    expect(() => sweeper.tick()).not.toThrow();
+    expect(good.transport.sent).toEqual(['ping']);
+  });
+
+  it('keeps sweeping when closing an idle peer throws', () => {
+    const runtime = createFakeRuntime();
+    const bad = makeConnection(runtime.hrtime());
+    const good = makeConnection(runtime.hrtime());
+    bad.transport.close = () => {
+      throw new Error('close failed');
+    };
+    const sweeper = new HeartbeatSweeper(
+      runtime,
+      { heartbeatMs: 1000, heartbeatPayload: 'ping', idleTimeoutMs: 100 },
+      () => [bad.conn, good.conn],
+    );
+
+    runtime.advance(500);
+    expect(() => sweeper.tick()).not.toThrow();
+    expect(good.transport.closes).toEqual([{ code: 1001, reason: 'Idle timeout' }]);
+  });
+
   it('stops the interval idempotently', () => {
     const runtime = createFakeRuntime();
     const sweeper = new HeartbeatSweeper(

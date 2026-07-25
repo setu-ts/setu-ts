@@ -26,7 +26,15 @@ import type {
   WebSocketEventSink,
   WebSocketReadyState,
 } from '@hono-enterprise/common';
-import { normalizeFrame, toTransportError } from '../shared/web-socket-transport.ts';
+import {
+  ABNORMAL_CLOSURE,
+  normalizeFrame,
+  toTransportError,
+} from '../shared/web-socket-transport.ts';
+
+// Hoisted decoder — avoids a per-message allocation on the hot path, matching
+// the shared fetch mapping (AI_GUIDELINES §14).
+const decoder = new TextDecoder();
 
 // ---------------------------------------------------------------------------
 // Structural facades over `ws`
@@ -242,7 +250,7 @@ export function bindWsSocketToSink(socket: WsSocketLike, sink: WebSocketEventSin
     // the isBinary flag, so a text frame is decoded rather than passed as bytes.
     const frame = normalizeFrame(data);
     if (isBinary === false && frame instanceof Uint8Array) {
-      sink.onMessage(new TextDecoder().decode(frame));
+      sink.onMessage(decoder.decode(frame));
       return;
     }
     sink.onMessage(frame);
@@ -250,8 +258,8 @@ export function bindWsSocketToSink(socket: WsSocketLike, sink: WebSocketEventSin
 
   socket.on('close', (...args: never[]): void => {
     const [code, reason] = args as unknown as [number | undefined, unknown];
-    const decoded = reason instanceof Uint8Array ? new TextDecoder().decode(reason) : '';
-    sink.onClose({ code: code ?? 1006, reason: decoded });
+    const decoded = reason instanceof Uint8Array ? decoder.decode(reason) : '';
+    sink.onClose({ code: code ?? ABNORMAL_CLOSURE, reason: decoded });
   });
 
   socket.on('error', (...args: never[]): void => {

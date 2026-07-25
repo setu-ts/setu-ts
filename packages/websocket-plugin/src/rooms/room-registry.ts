@@ -69,7 +69,15 @@ export class Room implements WebSocketRoom {
         this.#members.delete(member);
         continue;
       }
-      member.send(data);
+      try {
+        member.send(data);
+      } catch {
+        // One unwritable peer must never abort the fan-out — the remaining
+        // members would silently miss the message. Matches the notification
+        // plugin's rule that one failing channel cannot stop the others. The
+        // peer is dropped; its own close event does the rest of the cleanup.
+        this.#members.delete(member);
+      }
     }
   }
 

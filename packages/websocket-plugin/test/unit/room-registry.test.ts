@@ -78,6 +78,28 @@ describe('Room', () => {
     expect(b.transport.sent).toEqual([]);
   });
 
+  it('keeps broadcasting when one peer send throws, and drops that peer', () => {
+    const room = new Room('lobby');
+    const a = makeConnection('a');
+    const bad = makeConnection('bad');
+    const c = makeConnection('c');
+    // A transport that reports open but fails on write — a peer whose socket
+    // died without a close event yet.
+    bad.transport.send = () => {
+      throw new Error('socket write failed');
+    };
+    room.add(a.conn);
+    room.add(bad.conn);
+    room.add(c.conn);
+
+    expect(() => room.broadcast('hello')).not.toThrow();
+
+    // The peer after the failing one still received it.
+    expect(a.transport.sent).toEqual(['hello']);
+    expect(c.transport.sent).toEqual(['hello']);
+    expect(room.rawSize).toBe(2);
+  });
+
   it('removes a member explicitly', () => {
     const room = new Room('lobby');
     const a = makeConnection('a');

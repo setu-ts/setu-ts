@@ -22,6 +22,7 @@ import {
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { BunSocketData, BunWebSocketHandlers } from './bun-ws-upgrader.ts';
 import { createBunWebSocketHandlers } from './bun-ws-upgrader.ts';
 
@@ -165,6 +166,7 @@ export class BunHttpServerHandle {
           return new Response(null, { status: decision.status });
         }
         if (server.upgrade === undefined) {
+          decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
           return new Response(null, { status: 501 });
         }
 
@@ -173,9 +175,14 @@ export class BunHttpServerHandle {
           headers.set('sec-websocket-protocol', decision.protocol);
         }
         const upgraded = server.upgrade(request, { data: { sink: decision.sink }, headers });
-        // `undefined` tells Bun the socket was taken over. A refused upgrade
-        // still needs an answer, so fall back to 400.
-        return upgraded ? undefined : new Response(null, { status: 400 });
+        if (upgraded) {
+          // `undefined` tells Bun the socket was taken over.
+          return undefined;
+        }
+        // Bun refused after the router accepted, so release whatever the
+        // consumer reserved for this socket before answering.
+        decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Handshake refused' });
+        return new Response(null, { status: 400 });
       }
 
       return await httpHandler(request);

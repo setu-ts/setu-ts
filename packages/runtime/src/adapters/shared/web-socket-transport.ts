@@ -44,6 +44,18 @@ const WS_OPEN = 1;
 const WS_CLOSING = 2;
 
 /**
+ * RFC 6455 close code `1006` — the connection ended without a close frame.
+ *
+ * Adapters report it through {@linkcode WebSocketEventSink.onClose} when a
+ * handshake fails *after* the upgrade router accepted, so a consumer holding
+ * resources for the pending socket (e.g. a reserved connection slot) learns the
+ * connection is over instead of waiting on a socket that will never open.
+ *
+ * @since 0.2.0
+ */
+export const ABNORMAL_CLOSURE = 1006;
+
+/**
  * Maps the web WebSocket API's numeric `readyState` to the framework's named
  * {@linkcode WebSocketReadyState}.
  *

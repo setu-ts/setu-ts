@@ -538,11 +538,10 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
     expect(socket.writes[0]).toContain('400 Bad Request');
   });
 
-  it('refuses with 500 when the handshake itself throws', async () => {
+  it('refuses with 500 and releases the sink when the handshake itself throws', async () => {
     const harness = build({ handleUpgradeThrows: true });
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
-    );
+    const sink = recordingSink();
+    harness.adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
     await harness.adapter.listen(3000);
 
     const socket = await harness.emitUpgrade();
@@ -551,6 +550,8 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
     // unhandled one — it becomes a 500 on the raw socket.
     expect(harness.handleUpgradeCalls).toHaveLength(1);
     expect(socket.writes[0]).toContain('500 Internal Server Error');
+    // And the consumer's reserved slot is released rather than leaked.
+    expect(sink.events).toEqual(['close:1006:handshake failed']);
   });
 
   it('defaults the request target when Node reports no url', async () => {

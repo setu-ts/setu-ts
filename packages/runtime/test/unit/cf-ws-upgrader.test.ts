@@ -251,6 +251,25 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade', () => {
     expect(calls()).toBe(1);
   });
 
+  it('releases the sink when the pair cannot be created', async () => {
+    const sink = recordingSink();
+    const failingHost: CloudflareWebSocketHost = {
+      createPair: () => {
+        throw new Error('WebSocketPair is not available');
+      },
+      createUpgradeResponse: () => new Response(null, { status: 101 }),
+    };
+    const adapter = new CloudflareWorkersHttpAdapter(failingHost);
+    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+
+    const response = await adapter.fetch(upgradeRequest());
+
+    // Without this the consumer's reserved slot would leak on every failed
+    // handshake, starving maxConnections.
+    expect(response.status).toBe(500);
+    expect(sink.events).toEqual(['close:1006:WebSocketPair is not available']);
+  });
+
   it('still refuses listen, since Workers has no socket model', () => {
     const { adapter } = build();
 

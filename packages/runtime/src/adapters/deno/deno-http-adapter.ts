@@ -22,6 +22,7 @@ import {
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
 import { bindDenoSocketToSink } from './deno-ws-upgrader.ts';
 
@@ -184,16 +185,28 @@ export class DenoHttpServerHandle {
       // A host injected before this seam existed cannot handshake. Refusing is
       // the honest answer; falling through would hand a WebSocket client an
       // ordinary HTTP response it cannot interpret.
+      decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
       return new Response(null, { status: 501 });
     }
 
-    const { socket, response } = upgradeWebSocket.call(
-      this.#host,
-      request,
-      decision.protocol !== undefined ? { protocol: decision.protocol } : undefined,
-    );
-    bindDenoSocketToSink(socket, decision.sink);
-    return response;
+    try {
+      const { socket, response } = upgradeWebSocket.call(
+        this.#host,
+        request,
+        decision.protocol !== undefined ? { protocol: decision.protocol } : undefined,
+      );
+      bindDenoSocketToSink(socket, decision.sink);
+      return response;
+    } catch (cause) {
+      // The router already accepted, so the consumer may be holding resources
+      // for this socket (a reserved connection slot). Tell it the connection is
+      // over rather than leaving the sink dangling forever.
+      decision.sink.onClose({
+        code: ABNORMAL_CLOSURE,
+        reason: cause instanceof Error ? cause.message : 'Handshake failed',
+      });
+      return new Response(null, { status: 400 });
+    }
   }
 }
 

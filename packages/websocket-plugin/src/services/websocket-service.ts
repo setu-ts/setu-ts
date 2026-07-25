@@ -76,6 +76,10 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
   };
 }
 
+// Hoisted encoder — avoids a per-message allocation on the hot path, matching
+// the shared fetch mapping in packages/runtime (AI_GUIDELINES §14).
+const encoder = new TextEncoder();
+
 /**
  * Measures an inbound frame in bytes.
  *
@@ -87,7 +91,7 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
  * @since 0.1.0
  */
 export function frameByteLength(data: string | Uint8Array): number {
-  return typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength;
+  return typeof data === 'string' ? encoder.encode(data).byteLength : data.byteLength;
 }
 
 /**
@@ -103,6 +107,14 @@ export class WebSocketService implements IWebSocketService {
   readonly #connections = new Set<WebSocketConnection>();
   readonly #heartbeat: HeartbeatSweeper;
   readonly #available: boolean;
+  /**
+   * Accepted upgrades that have neither opened nor closed yet — sockets still
+   * completing their handshake. Counted alongside `#connections` when enforcing
+   * `maxConnections`, because `onOpen` fires only after the adapter finishes the
+   * handshake and a burst of overlapping handshakes would otherwise all pass the
+   * check and blow through the limit.
+   */
+  #pending = 0;
 
   /**
    * Creates the service.
@@ -175,12 +187,15 @@ export class WebSocketService implements IWebSocketService {
       if (!match.matched) {
         return { accept: false, status: match.status };
       }
+      // A slot is claimed the moment the upgrade is accepted, not when onOpen
+      // fires — see the #pending field.
       if (
         this.#options.maxConnections > 0 &&
-        this.#connections.size >= this.#options.maxConnections
+        this.#connections.size + this.#pending >= this.#options.maxConnections
       ) {
         return { accept: false, status: STATUS_AT_CAPACITY };
       }
+      this.#pending++;
 
       // Snapshotted here, while the request is still live. The sink's onOpen
       // fires only after the adapter has answered the handshake, at which
@@ -206,6 +221,8 @@ export class WebSocketService implements IWebSocketService {
     }
     this.#connections.clear();
     this.#rooms.clear();
+    // In-flight handshakes are abandoned along with everything else.
+    this.#pending = 0;
   }
 
   /**
@@ -264,8 +281,21 @@ export class WebSocketService implements IWebSocketService {
       }
     };
 
+    // The pending slot claimed at accept time is settled exactly once, by
+    // whichever of onOpen / onClose arrives first. An adapter whose handshake
+    // fails after the router accepted signals it via onClose, so a refused or
+    // malformed upgrade can never leak a slot and starve `maxConnections`.
+    let settled = false;
+    const settlePending = (): void => {
+      if (!settled) {
+        settled = true;
+        this.#pending--;
+      }
+    };
+
     return {
       onOpen: (transport: IWebSocketTransport): void => {
+        settlePending();
         const opened = new WebSocketConnection(
           this.#runtime.uuid(),
           route.path,
@@ -294,6 +324,9 @@ export class WebSocketService implements IWebSocketService {
       },
 
       onClose: (event): void => {
+        // Settled first: a handshake that failed before onOpen still has to
+        // release its slot, and that path has no connection to report on.
+        settlePending();
         if (conn === null) {
           return;
         }

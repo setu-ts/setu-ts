@@ -22,6 +22,7 @@ import {
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
+import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { NodeIncomingMessage, RawUpgradeSocket, WsModuleLike } from './node-ws-upgrader.ts';
 import {
   asUpgradeEmitter,
@@ -166,7 +167,23 @@ export class NodeHttpServerHandle {
       return;
     }
 
-    await this.#coordinator.handshake(incoming, socket, head, decision.sink, decision.protocol);
+    try {
+      await this.#coordinator.handshake(
+        incoming,
+        socket,
+        head,
+        decision.sink,
+        decision.protocol,
+      );
+    } catch (cause) {
+      // The router already accepted, so release whatever the consumer reserved
+      // for this socket before refusing on the wire.
+      decision.sink.onClose({
+        code: ABNORMAL_CLOSURE,
+        reason: cause instanceof Error ? cause.message : 'Handshake failed',
+      });
+      rejectRawUpgrade(socket, 500);
+    }
   }
 
   /** Shuts down the `ws` server, when one was ever created. */

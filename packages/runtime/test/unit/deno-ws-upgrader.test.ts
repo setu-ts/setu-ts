@@ -112,7 +112,7 @@ describe('bindDenoSocketToSink', () => {
 
 describe('DenoHttpAdapter WebSocket upgrade', () => {
   /** Builds an adapter over a host whose upgrade is fully faked. */
-  function build(options?: { omitUpgrade?: boolean }) {
+  function build(options?: { omitUpgrade?: boolean; upgradeThrows?: unknown }) {
     const socket = fakeSocket();
     const response = new Response(null, { status: 101 });
     const upgradeCalls: { request: Request; protocol?: string }[] = [];
@@ -122,6 +122,10 @@ describe('DenoHttpAdapter WebSocket upgrade', () => {
       serve: () => ({ shutdown: () => Promise.resolve() }),
       ...(options?.omitUpgrade === true ? {} : {
         upgradeWebSocket: (request: Request, opts?: { protocol?: string }) => {
+          if (options?.upgradeThrows !== undefined) {
+            // Deno throws on a malformed handshake (e.g. no Sec-WebSocket-Key).
+            throw options.upgradeThrows;
+          }
           upgradeCalls.push({
             request,
             ...(opts?.protocol !== undefined && {
@@ -225,13 +229,42 @@ describe('DenoHttpAdapter WebSocket upgrade', () => {
     expect(upgradeCalls).toHaveLength(0);
   });
 
-  it('answers 501 when the injected host cannot handshake', async () => {
+  it('answers 501 when the injected host cannot handshake, and releases the sink', async () => {
     const { adapter } = build({ omitUpgrade: true });
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink: recordingSink() }));
+    const sink = recordingSink();
+    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
 
     const result = await adapter.fetch(upgradeRequest());
 
     expect(result.status).toBe(501);
+    // The router already accepted, so the consumer must learn the socket is
+    // over — otherwise a reserved connection slot leaks forever.
+    expect(sink.events).toEqual(['close:1006:Upgrade unsupported']);
+  });
+
+  it('releases the sink when the runtime handshake throws', async () => {
+    const { adapter, calls } = build({ upgradeThrows: new Error('bad handshake') });
+    const sink = recordingSink();
+    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+
+    const result = await adapter.fetch(upgradeRequest());
+
+    // A malformed handshake must not be able to leak slots: without this, a
+    // burst of bad upgrades would starve maxConnections permanently.
+    expect(result.status).toBe(400);
+    expect(sink.events).toEqual(['close:1006:bad handshake']);
+    expect(calls()).toBe(0);
+  });
+
+  it('reports a generic reason when the handshake throws a non-Error', async () => {
+    const { adapter } = build({ upgradeThrows: 'not an error object' });
+    const sink = recordingSink();
+    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+
+    const result = await adapter.fetch(upgradeRequest());
+
+    expect(result.status).toBe(400);
+    expect(sink.events).toEqual(['close:1006:Handshake failed']);
   });
 
   it('serves plain HTTP unchanged when no router was ever installed', async () => {

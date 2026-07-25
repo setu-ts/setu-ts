@@ -263,6 +263,45 @@ describe('WebSocketService', () => {
     expect(third?.accept).toBe(true);
   });
 
+  it('does not exceed maxConnections when handshakes overlap', async () => {
+    // Every accepted upgrade occupies a slot from the moment it is accepted.
+    // Counting only connections that have already reached onOpen would let a
+    // burst of concurrent handshakes all pass the check, since onOpen fires
+    // only after the adapter has completed the handshake.
+    const { service } = build({ maxConnections: 2 });
+    service.route('/ws', {});
+    const router = service.createUpgradeRouter();
+
+    const decisions = await Promise.all([
+      router(upgradeRequest('http://localhost/ws')),
+      router(upgradeRequest('http://localhost/ws')),
+      router(upgradeRequest('http://localhost/ws')),
+    ]);
+
+    expect(decisions.filter((d) => d?.accept === true)).toHaveLength(2);
+    expect(decisions.filter((d) => d?.accept === false)).toEqual([{
+      accept: false,
+      status: 503,
+    }]);
+  });
+
+  it('frees a reserved slot when an accepted handshake never opens', async () => {
+    const { service } = build({ maxConnections: 1 });
+    service.route('/ws', {});
+    const router = service.createUpgradeRouter();
+
+    const first = await router(upgradeRequest('http://localhost/ws'));
+    expect(first?.accept).toBe(true);
+    // The adapter failed the handshake after the router accepted, so the peer
+    // never opens. Its slot must not leak.
+    if (first?.accept === true) {
+      first.sink.onClose({ code: 1006, reason: 'handshake aborted' });
+    }
+
+    const second = await router(upgradeRequest('http://localhost/ws'));
+    expect(second?.accept).toBe(true);
+  });
+
   it('refuses with 400 when the requested subprotocol is unacceptable', async () => {
     const { service } = build();
     service.route('/ws', {}, { protocols: ['chat'] });
