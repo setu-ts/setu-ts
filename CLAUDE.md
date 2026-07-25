@@ -434,8 +434,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules row, added the missing Feature
   Flags Options/Exports/Notes sections, and fixed the ROADMAP implementation-files list in the same
   PR) — complete (PR #67)
-- **Next milestone** — **Milestone 32** (`packages/multi-tenancy-plugin`); continues the main plugin
-  sequence (M32–M40 follow) unless reprioritized.
+- **Milestone 32** (`packages/multi-tenancy-plugin` — MultiTenancyPlugin factory; four resolvers:
+  Subdomain/Header/Path/Jwt; three isolation strategies: Column/Schema/Database; `ITenantDataStore`
+  port + `MemoryTenantDataStore` default; `TenantRepository`; cache-key isolation via
+  `prefixCacheKey`; `tenantMiddleware` at priority 40; `multi-tenancy` health indicator; widening
+  `common` with `IMultiTenancyService`, `ITenantRepository<Entity, Id>`, and `IRequest.tenant`;
+  correcting ROADMAP ctx-less example, PUBLIC_API common row, ARCHITECTURE priority table per
+  C-series conflicts) — complete (PR pending)
+- **Next milestone** — **Milestone 33** (`packages/testing` — test utilities); continues the main
+  plugin sequence (M33–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

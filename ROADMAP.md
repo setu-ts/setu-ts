@@ -3251,8 +3251,8 @@ const tenancy = ctx.services.get<IMultiTenancyService>('multi-tenancy');
 // Access current tenant
 const tenant = ctx.request.tenant;
 
-// Tenant-aware repository
-const userRepo = tenancy.getRepository<User>('User');
+// Tenant-aware repository (reads ctx.request.tenant set by middleware)
+const userRepo = tenancy.getRepository<User>(ctx, 'User');
 const users = await userRepo.findAll(); // Scoped to current tenant
 ```
 
@@ -3291,9 +3291,9 @@ const users = await userRepo.findAll(); // Scoped to current tenant
 
 ### Deliverables
 
-- [ ] MultiTenancyPlugin
-- [ ] Resolvers and strategies
-- [ ] Full test coverage
+- [x] MultiTenancyPlugin
+- [x] Resolvers and strategies
+- [x] Full test coverage
 
 ---
 
@@ -4316,7 +4316,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 29        | ✅     | mail-plugin          |
 | 30        | ✅     | notification-plugin  |
 | 31        | ✅     | feature-flags-plugin |
-| 32        | ⬜     | multi-tenancy-plugin |
+| 32        | ✅     | multi-tenancy-plugin |
 | 33        | ⬜     | testing              |
 | 34        | ⬜     | cli                  |
 | 35        | ⬜     | sdk                  |
