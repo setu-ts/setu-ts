@@ -11,15 +11,21 @@ import {
   assembleHandler,
   bridgeRequestToRR,
   CAPABILITIES,
+  createLoadContextFactory,
   createStaticAssetHandler,
   loadRequestHandler,
   ReactRouterPlugin,
+  servicesContext,
   SsrService,
+  userContext,
 } from '../../src/index.ts';
 import type {
-  LoadContextFunction,
+  PopulateLoadContext,
   ReactRouterPluginOptions,
+  RouterContextKey,
+  RouterLoadContext,
   SsrRequestHandler,
+  SsrRuntime,
 } from '../../src/index.ts';
 
 describe('barrel exports', () => {
@@ -47,6 +53,15 @@ describe('barrel exports', () => {
     expect(typeof bridgeRequestToRR).toBe('function');
   });
 
+  it('exports createLoadContextFactory', () => {
+    expect(typeof createLoadContextFactory).toBe('function');
+  });
+
+  it('exports the servicesContext and userContext keys', () => {
+    expect(servicesContext.defaultValue).toBe(null);
+    expect(userContext.defaultValue).toBe(null);
+  });
+
   it('re-exports CAPABILITIES constant with SSR token', () => {
     expect(CAPABILITIES).toBeDefined();
     expect(CAPABILITIES.SSR).toBe('ssr');
@@ -57,8 +72,18 @@ describe('barrel exports', () => {
     const _opt: ReactRouterPluginOptions = {
       serverBuildPath: './build/server',
     };
-    const _lc: LoadContextFunction = (_ctx: unknown) => ({});
+    const _key: RouterContextKey<string> = { defaultValue: 'x' };
+    void _key;
+    const _lc: PopulateLoadContext = (_ctx, context: RouterLoadContext) => {
+      context.set(_key, 'y');
+    };
     void _lc;
+    const _runtime: SsrRuntime = {
+      // deno-lint-ignore require-await
+      handler: async () => new Response('ok'),
+      createLoadContext: () => ({ get: <T>() => undefined as T, set: () => {} }),
+    };
+    void _runtime;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     // deno-lint-ignore require-await
     const _handler: SsrRequestHandler = async (_r: Request, _c: unknown) => new Response('ok');

@@ -9,9 +9,10 @@ import { expect } from '@std/expect';
 // deno-lint-ignore no-explicit-any
 type Any = any;
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
+import type { SsrRuntime } from '../../src/interfaces/index.ts';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
+import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
 
 describe('react-router-plugin', () => {
   function buildFakeCtx(): Any {
@@ -142,11 +143,14 @@ describe('react-router-plugin', () => {
 
   function makeLoadRequestHandler(response: Response) {
     // deno-lint-ignore require-await
-    return async (_path: string, _mode: string): Promise<SsrRequestHandler> => {
+    return async (_path: string, _mode: string): Promise<SsrRuntime> => {
       void _path;
       void _mode;
-      // deno-lint-ignore require-await
-      return async () => response;
+      return {
+        // deno-lint-ignore require-await
+        handler: async () => response,
+        createLoadContext: createFakeLoadContextFactory(),
+      };
     };
   }
 

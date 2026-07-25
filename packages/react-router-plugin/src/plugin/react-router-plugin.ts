@@ -87,17 +87,22 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
     async register(ctx: IPluginContext): Promise<void> {
       const runtime = ctx.runtime;
 
-      // Resolve the RR handler via the injectable seam.
+      // Resolve the RR handler and its context-provider factory via the
+      // injectable seam. Both come from one `react-router` module object.
       const mode = options.mode ?? DEFAULT_MODE;
       const getLoadRequestHandler = options.loadRequestHandler ??
         loadRequestHandler;
-      const handler = await getLoadRequestHandler(
+      const { handler, createLoadContext } = await getLoadRequestHandler(
         options.serverBuildPath,
         mode,
       );
 
       // Build and register the SSR service.
-      const ssrService = new SsrService(handler, options.getLoadContext);
+      const ssrService = new SsrService(
+        handler,
+        createLoadContext,
+        options.populateLoadContext,
+      );
       ctx.services.register<ISsrService>(CAPABILITIES.SSR, ssrService);
 
       // Register the SSR catch-all route for all 7 verbs. The route handler is

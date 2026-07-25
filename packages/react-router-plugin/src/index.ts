@@ -23,12 +23,20 @@
 export { ReactRouterPlugin } from './plugin/react-router-plugin.ts';
 export { SsrService } from './services/ssr-service.ts';
 export { createStaticAssetHandler } from './assets/static-assets.ts';
-export { assembleHandler, loadRequestHandler } from './handler/server-build.ts';
+export {
+  assembleHandler,
+  createLoadContextFactory,
+  loadRequestHandler,
+} from './handler/server-build.ts';
 export { bridgeRequestToRR } from './handler/request-bridge.ts';
+export { servicesContext, userContext } from './handler/context-keys.ts';
 export type {
-  LoadContextFunction,
+  PopulateLoadContext,
   ReactRouterPluginOptions,
+  RouterContextKey,
+  RouterLoadContext,
   SsrRequestHandler,
+  SsrRuntime,
 } from './interfaces/index.ts';
 
 // Re-export common SSR contract for convenience.

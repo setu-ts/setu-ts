@@ -6,9 +6,14 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { HandlerResult, ISsrService } from '@hono-enterprise/common';
-import type { LoadContextFunction, SsrRequestHandler } from '../../src/interfaces/index.ts';
+import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
+import { servicesContext } from '../../src/handler/context-keys.ts';
+import {
+  createFakeLoadContextFactory,
+  FakeRouterContextProvider,
+} from '../fixtures/fake-handler.ts';
 
 describe('ssr-service', () => {
   function buildMockCtx() {
@@ -86,7 +91,7 @@ describe('ssr-service', () => {
     });
     // deno-lint-ignore require-await
     const fakeHandler: SsrRequestHandler = async () => fakeResponse;
-    const service = new SsrService(fakeHandler, undefined);
+    const service = new SsrService(fakeHandler, createFakeLoadContextFactory(), undefined);
     const ctx = buildMockCtx();
 
     const result = await service.render(ctx);
@@ -94,22 +99,45 @@ describe('ssr-service', () => {
     expect(result).toEqual({ __handlerResult: true });
   });
 
-  it('custom getLoadContext is passed through to the bridge', async () => {
-    const loadCtx: LoadContextFunction = (_c: unknown) => ({ custom: 'http://localhost/' });
-    let capturedContext: unknown = null;
+  it('render passes a provider instance carrying the plugin defaults', async () => {
+    let capturedContext: FakeRouterContextProvider | null = null;
 
     // deno-lint-ignore require-await
-    const fakeHandler: SsrRequestHandler = async (_req: Request, ctx: unknown) => {
-      capturedContext = ctx;
+    const fakeHandler: SsrRequestHandler = async (_req: Request, loadContext: unknown) => {
+      capturedContext = loadContext as FakeRouterContextProvider;
       return new Response('ok');
     };
 
-    const service = new SsrService(fakeHandler, loadCtx);
+    const service = new SsrService(fakeHandler, createFakeLoadContextFactory(), undefined);
     const mockCtx = buildMockCtx();
 
     await service.render(mockCtx);
 
-    expect(capturedContext).toEqual({ custom: 'http://localhost/' });
+    expect(capturedContext).toBeInstanceOf(FakeRouterContextProvider);
+    expect(capturedContext!.get(servicesContext)).toBe(
+      (mockCtx as unknown as { services: unknown }).services,
+    );
+  });
+
+  it('populateLoadContext is threaded through to the bridge', async () => {
+    const tenantContext = { defaultValue: null } as { defaultValue: string | null };
+    let capturedContext: FakeRouterContextProvider | null = null;
+
+    // deno-lint-ignore require-await
+    const fakeHandler: SsrRequestHandler = async (_req: Request, loadContext: unknown) => {
+      capturedContext = loadContext as FakeRouterContextProvider;
+      return new Response('ok');
+    };
+
+    const populate: PopulateLoadContext = (_c, context) => {
+      context.set(tenantContext, 'acme');
+    };
+
+    const service = new SsrService(fakeHandler, createFakeLoadContextFactory(), populate);
+
+    await service.render(buildMockCtx());
+
+    expect(capturedContext!.get(tenantContext)).toBe('acme');
   });
 
   it('service is the value registered under CAPABILITIES.SSR (structural check)', () => {
@@ -117,6 +145,7 @@ describe('ssr-service', () => {
     const service = new SsrService(
       // deno-lint-ignore require-await
       async () => new Response('ok'),
+      createFakeLoadContextFactory(),
       undefined,
     );
 

@@ -1658,15 +1658,15 @@ app.router.get('/api/health', (ctx) => {
 
 ### Options
 
-| Option               | Type                                                | Default        | Description                                                                                           |
-| -------------------- | --------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
-| `serverBuildPath`    | `string`                                            | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
-| `loadRequestHandler` | `(buildPath, mode) => Promise<SsrRequestHandler>`   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
-| `assetsDir`          | `string`                                            | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
-| `assetUrlPrefix`     | `string`                                            | `/assets/`     | URL prefix for the asset route.                                                                       |
-| `basename`           | `string`                                            | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
-| `getLoadContext`     | `(ctx: IRequestContext) => Record<string, unknown>` | default        | Override the default `loadContext` bridge (`{ services, user }`).                                     |
-| `mode`               | `'production' \| 'development'`                     | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+| Option                | Type                                                         | Default        | Description                                                                                           |
+| --------------------- | ------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`     | `string`                                                     | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
+| `loadRequestHandler`  | `(buildPath, mode) => Promise<SsrRuntime>`                   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
+| `assetsDir`           | `string`                                                     | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
+| `assetUrlPrefix`      | `string`                                                     | `/assets/`     | URL prefix for the asset route.                                                                       |
+| `basename`            | `string`                                                     | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
+| `populateLoadContext` | `(ctx: IRequestContext, context: RouterLoadContext) => void` | omitted        | Adds app values to the per-request React Router context, on top of the keys the plugin always sets.   |
+| `mode`                | `'production' \| 'development'`                              | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
 
 ### Interface Reference
 
@@ -1684,20 +1684,78 @@ app.router.get('/api/health', (ctx) => {
 - `assembleHandler(build, createRequestHandler, mode): SsrRequestHandler` — assembles an RR request
   handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
   unit-testable without I/O.
-- `loadRequestHandler(serverBuildPath, mode, options?): Promise<SsrRequestHandler>` — lazily imports
-  the app-provided server build and `npm:react-router@8`, unwraps the `ServerBuild` (default
-  export), and returns a callable `SsrRequestHandler`. The optional `options` parameter accepts
-  `{ rrImportHook?: () => Promise<Record<string, unknown>> }` — a test-seam that replaces the
-  `npm:react-router@8` import. **Since 0.1.0** this parameter is optional and backward-compatible;
-  callers may invoke it with only two arguments.
-- `bridgeRequestToRR(ctx, handler, getLoadContext?): Promise<HandlerResult>` — bridges a kernel
-  `IRequestContext` into a web `Request` (omitting the body for GET/HEAD), invokes the RR handler,
-  and maps the resulting `Response` back onto `ctx.response`.
-- `class SsrService implements ISsrService` — holds a resolved RR request handler and optional
-  `getLoadContext`; its `render(ctx)` method delegates to `bridgeRequestToRR` and returns the
-  `HandlerResult`.
+- `loadRequestHandler(serverBuildPath, mode, options?): Promise<SsrRuntime>` — lazily imports the
+  app-provided server build and `npm:react-router@8`, unwraps the `ServerBuild` (default export),
+  and returns `{ handler, createLoadContext }`. Both come from the SAME module object so the
+  provider instance is always an instance of the class the handler's `instanceof` check tests. The
+  optional `options` parameter accepts `{ rrImportHook?: () => Promise<Record<string, unknown>> }` —
+  a test-seam that replaces the `npm:react-router@8` import. Throws when the resolved module exposes
+  no `RouterContextProvider` export (i.e. react-router earlier than 8).
+- `createLoadContextFactory(rr): () => RouterLoadContext` — pure seam building the per-request
+  context factory from a loaded `react-router` module namespace. **@throws** when the module has no
+  `RouterContextProvider` export.
+- `bridgeRequestToRR(ctx, handler, createLoadContext, populateLoadContext?): Promise<HandlerResult>`
+  — bridges a kernel `IRequestContext` into a web `Request` (omitting the body for GET/HEAD), builds
+  a fresh context provider, invokes the RR handler, and maps the resulting `Response` back onto
+  `ctx.response`.
+- `class SsrService implements ISsrService` — holds a resolved RR request handler, its
+  `createLoadContext` factory, and the optional `populateLoadContext` hook; its `render(ctx)` method
+  delegates to `bridgeRequestToRR` and returns the `HandlerResult`.
+- `servicesContext: RouterContextKey<IServiceRegistry | null>` — context key holding the kernel
+  service registry. Always set by the plugin.
+- `userContext: RouterContextKey<IPrincipal | null>` — context key holding the authenticated
+  principal, or `null` on an anonymous request.
+- `interface RouterContextKey<T>` — `{ readonly defaultValue?: T }`. Structurally identical to React
+  Router's `RouterContext<T>`, so keys from this package and keys from `createContext<T>()` are
+  interchangeable.
+- `interface RouterLoadContext` — `get<T>(key)` / `set<T>(key, value)`; the per-request `context`
+  React Router passes to loaders, actions, and middleware.
+- `interface SsrRuntime` —
+  `{ handler: SsrRequestHandler; createLoadContext: () => RouterLoadContext }`.
+- `type PopulateLoadContext` — `(ctx: IRequestContext, context: RouterLoadContext) => void`.
+
+### Reading the load context in a route module
+
+```typescript
+import { servicesContext, userContext } from '@hono-enterprise/react-router-plugin';
+import { CAPABILITIES, type ILogger } from '@hono-enterprise/common';
+
+export async function loader({ context }: Route.LoaderArgs) {
+  const services = context.get(servicesContext);
+  const user = context.get(userContext); // null when anonymous
+  services?.get<ILogger>(CAPABILITIES.LOGGER).info('ssr loader');
+  return { user };
+}
+```
 
 ### Notes
+
+- **The React Router `context` is a real `RouterContextProvider`.** React Router 8 checks
+  `initialContext instanceof RouterContextProvider` inside `createRequestHandler` and answers
+  `500 Unexpected Server Error` for anything else — it does not degrade — and the static handler
+  repeats the check nominally whenever route middleware runs. The plugin therefore constructs the
+  provider from the same `react-router` module the handler came from. **Breaking change in 0.2.0:**
+  the `getLoadContext` option and the `LoadContextFunction` type are removed, because a function
+  returning `Record<string, unknown>` cannot produce a valid context under any wrapping. Migrate by
+  mutating the provider instead of returning an object, and reading values through context keys:
+
+  ```typescript
+  // Before (0.1.0) — produced a 500 on every SSR request against react-router@8.
+  ReactRouterPlugin({
+    serverBuildPath,
+    getLoadContext: (ctx) => ({ db: myDb, user: ctx.request.user }),
+  });
+
+  // After (0.2.0)
+  import { createContext } from 'react-router';
+  export const dbContext = createContext<Db | null>(null);
+
+  ReactRouterPlugin({
+    serverBuildPath,
+    populateLoadContext: (_ctx, context) => context.set(dbContext, myDb),
+  });
+  // `servicesContext` and `userContext` are already set — populateLoadContext augments, never replaces.
+  ```
 
 - **Vite is never imported.** The consuming app runs `react-router dev` as a separate process and
   feeds this plugin the production build. Vite is an app-level, build-time concern.

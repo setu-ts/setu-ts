@@ -5,7 +5,48 @@
  * @since 0.1.0
  */
 
-import type { SsrRequestHandler } from '../interfaces/index.ts';
+import type { RouterLoadContext, SsrRequestHandler, SsrRuntime } from '../interfaces/index.ts';
+
+/**
+ * Constructor shape of React Router's `RouterContextProvider` class.
+ *
+ * @since 0.2.0
+ */
+type RouterContextProviderConstructor = new () => RouterLoadContext;
+
+/**
+ * Builds the per-request context factory from React Router's
+ * `RouterContextProvider` class.
+ *
+ * React Router 8 checks `initialContext instanceof RouterContextProvider` and
+ * answers a 500 `Unexpected Server Error` when it fails, so the class itself —
+ * not a structural stand-in — has to reach the handler.
+ *
+ * Extracted as a pure function so the branch is unit-testable without importing
+ * `react-router`.
+ *
+ * @param rr - The loaded `react-router` module namespace
+ * @returns A factory constructing a fresh, empty provider per request
+ * @throws {Error} When the module exposes no `RouterContextProvider` export
+ * @since 0.2.0
+ */
+export function createLoadContextFactory(
+  rr: Record<string, unknown>,
+): () => RouterLoadContext {
+  const Provider = rr.RouterContextProvider as
+    | RouterContextProviderConstructor
+    | undefined;
+
+  if (typeof Provider !== 'function') {
+    throw new Error(
+      `The loaded 'react-router' module exposes no 'RouterContextProvider' export. ` +
+        `React Router 8 or later is required — 'createRequestHandler' rejects any ` +
+        `context that is not an instance of that class.`,
+    );
+  }
+
+  return () => new Provider();
+}
 
 /**
  * Pure function that assembles an RR request handler from a pre-loaded build
@@ -34,10 +75,14 @@ export function assembleHandler(
  * the core `react-router` package (`import('npm:react-router@8')`), unwraps
  * the `ServerBuild` (default export), then returns a callable request handler.
  *
+ * Both the handler and the context-provider factory come from the SAME module
+ * object, so the provider instance can never be tested against a different copy
+ * of the `RouterContextProvider` class than the one it was constructed from.
+ *
  * @param serverBuildPath - Path to the RR Vite server build (app-provided)
  * @param mode - `'production'` or `'development'`
  * @param options - Optional override for the react-router import seam
- * @returns A promise resolving to the request handler
+ * @returns A promise resolving to the handler and its context factory
  * @throws {Error} When either import fails, with a message naming the missing specifier
  * @since 0.1.0
  */
@@ -45,7 +90,7 @@ export async function loadRequestHandler(
   serverBuildPath: string,
   mode: string,
   options?: { rrImportHook?: () => Promise<Record<string, unknown>> },
-): Promise<SsrRequestHandler> {
+): Promise<SsrRuntime> {
   let buildMod: unknown;
   try {
     // Vite ESM build: { default: ServerBuild, routes: {}, ... }
@@ -61,12 +106,9 @@ export async function loadRequestHandler(
   // Unwrap the default export (ESM `default` or CJS spread).
   const build = (buildMod as Record<string, unknown>)?.default ?? buildMod;
 
-  let createRequestHandler: (build: unknown, mode: string) => unknown;
+  let rr: Record<string, unknown>;
   try {
-    const rr = options?.rrImportHook
-      ? await options.rrImportHook()
-      : await import('npm:react-router@8');
-    createRequestHandler = rr.createRequestHandler as (build: unknown, mode: string) => unknown;
+    rr = options?.rrImportHook ? await options.rrImportHook() : await import('npm:react-router@8');
   } catch (err) {
     throw new Error(
       `Failed to import 'npm:react-router@8'. Ensure it is available in the ` +
@@ -74,5 +116,13 @@ export async function loadRequestHandler(
     );
   }
 
-  return assembleHandler(build, createRequestHandler, mode);
+  const createRequestHandler = rr.createRequestHandler as (
+    build: unknown,
+    mode: string,
+  ) => unknown;
+
+  return {
+    handler: assembleHandler(build, createRequestHandler, mode),
+    createLoadContext: createLoadContextFactory(rr),
+  };
 }

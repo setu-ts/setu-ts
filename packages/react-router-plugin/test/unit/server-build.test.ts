@@ -6,8 +6,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
-import { assembleHandler, loadRequestHandler } from '../../src/handler/server-build.ts';
-import { createSimpleFakeHandler } from '../fixtures/fake-handler.ts';
+import {
+  assembleHandler,
+  createLoadContextFactory,
+  loadRequestHandler,
+} from '../../src/handler/server-build.ts';
+import { createFakeLoadContextFactory, createSimpleFakeHandler } from '../fixtures/fake-handler.ts';
 
 describe('server-build', () => {
   it('assembleHandler returns a handler that calls createRequestHandler(build, mode)', () => {
@@ -95,11 +99,48 @@ describe('server-build', () => {
     const expectedResponse = new Response('fixed', { status: 418 });
     const handler = createSimpleFakeHandler(expectedResponse);
     const request = new Request('http://localhost/test');
-    const result = await handler(request, {});
+    const result = await handler(request, createFakeLoadContextFactory()());
 
     expect(result).toBe(expectedResponse);
     const text = await result.text();
     expect(text).toBe('fixed');
+  });
+
+  it('createSimpleFakeHandler rejects a plain-object context like the real handler', async () => {
+    // Guards the fixture itself: a double that accepted any context is what let
+    // the RouterContextProvider defect ship green.
+    const handler = createSimpleFakeHandler(new Response('unused'));
+
+    await expect(handler(new Request('http://localhost/'), {})).rejects.toThrow(
+      'Invalid `context` value provided to `handleRequest`',
+    );
+  });
+
+  it('createLoadContextFactory builds a fresh provider instance per call', () => {
+    class FakeProvider {
+      get() {}
+      set() {}
+    }
+
+    const factory = createLoadContextFactory({ RouterContextProvider: FakeProvider });
+    const a = factory();
+    const b = factory();
+
+    expect(a).toBeInstanceOf(FakeProvider);
+    expect(b).toBeInstanceOf(FakeProvider);
+    expect(a).not.toBe(b);
+  });
+
+  it('createLoadContextFactory throws when RouterContextProvider is missing', () => {
+    expect(() => createLoadContextFactory({})).toThrow(
+      "exposes no 'RouterContextProvider' export",
+    );
+  });
+
+  it('createLoadContextFactory throws when RouterContextProvider is not callable', () => {
+    expect(() => createLoadContextFactory({ RouterContextProvider: 'nope' })).toThrow(
+      "exposes no 'RouterContextProvider' export",
+    );
   });
 
   it('loadRequestHandler rejects when server build path does not exist', async () => {
