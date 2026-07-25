@@ -46,8 +46,7 @@ export class HeaderResolver implements ITenantResolver {
   async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
     const raw = request.headers.get(this.headerName);
     if (!raw) return none();
-    const tenantId = normalizeHeaderTenant(raw);
-    if (tenantId === null) return none();
-    return some({ id: tenantId });
+    const result = normalizeHeaderTenant(raw);
+    return result !== null ? some({ id: result }) : none();
   }
 }
