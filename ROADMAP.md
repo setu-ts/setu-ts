@@ -4135,8 +4135,8 @@ connects a genuine client.
       request; not part of this PR. (The `Server-Sent Events` row in the same table is also still
       `🚧 Planned` even though M43 shipped — a pre-existing defect in merged `main` that belongs on
       a `fix/…` branch, not here.)
-- [ ] **README** — `packages/websocket-plugin/README.md`. Deferred at the maintainer's request;
-      AI_GUIDELINES §7.1 still requires it before the milestone is fully closed.
+- [x] **README** — `packages/websocket-plugin/README.md`, including the WebSocket-vs-SSE choice, the
+      per-runtime upgrade-arrival table, and the `listen()`-only caveat for Bun and Node.
 
 ---
 

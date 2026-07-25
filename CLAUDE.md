@@ -404,8 +404,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `1001`. Real-socket e2e on Deno caught a bug no fake would have: the connection context was built
   lazily in `onOpen`, which fires after the handshake response is returned, by which point the
   runtime has closed the native request — it is now snapshotted in the router. Outstanding: the root
-  `README.md` WebSocket row and `packages/websocket-plugin/README.md` were deferred at the
-  maintainer's request) — complete (PR pending)
+  `README.md` WebSocket row was deferred at the maintainer's request) — complete (PR pending)
 - **Next milestone** — **Milestone 31** (`packages/feature-flags-plugin`); resumes the main plugin
   sequence (M31–M40 follow) unless reprioritized.
 
