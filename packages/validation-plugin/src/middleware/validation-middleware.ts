@@ -11,6 +11,7 @@
  * @module
  */
 import type {
+  HandlerResult,
   IRequestContext,
   IValidationService,
   MiddlewareFunction,
@@ -19,7 +20,14 @@ import type {
 } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
-import type { ValidationErrorFormatter } from '../formatters/error-formatter.ts';
+import type {
+  FormatValidationErrors,
+  ValidationErrorFormatter,
+} from '../formatters/error-formatter.ts';
+import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
+
+/** The `application/problem+json` media type RFC 7807 §3 requires. */
+const PROBLEM_JSON = 'application/problem+json';
 
 // ---------------------------------------------------------------------------
 // Target extraction
@@ -114,6 +122,12 @@ export function createValidationMiddleware(
   service: IValidationService,
   formatter: ValidationErrorFormatter,
 ): MiddlewareFunction {
+  // Resolved once at registration time: a Problem Details body must be served
+  // as `application/problem+json` (RFC 7807 §3), not the `application/json`
+  // that `response.json()` sets. Keyed off the formatter identity so both
+  // `errorFormat: 'rfc7807'` and `errorFormat: rfc7807Formatter` agree.
+  const isProblemJson = formatter === rfc7807Formatter;
+
   return async (ctx, next) => {
     let rawData: unknown;
     try {
@@ -123,7 +137,7 @@ export function createValidationMiddleware(
         const issues: readonly ValidationIssue[] = [
           { path: '', message: 'Invalid JSON in request body' },
         ];
-        return ctx.response.status(400).json(formatter(issues, ctx));
+        return respond(ctx, formatter(issues, ctx), isProblemJson);
       }
       throw e;
     }
@@ -136,8 +150,36 @@ export function createValidationMiddleware(
       return;
     }
 
-    return ctx.response.status(400).json(formatter(result.error, ctx));
+    return respond(ctx, formatter(result.error, ctx), isProblemJson);
   };
+}
+
+/**
+ * Sends a `400` carrying the formatted body, with the media type the format
+ * requires.
+ *
+ * Problem Details bodies go out as `application/problem+json` via
+ * `send(bytes)`, because `response.json()` would overwrite the header with
+ * `application/json`.
+ *
+ * @param ctx - The request context
+ * @param body - The formatted error body
+ * @param isProblemJson - Whether the body is RFC 7807 Problem Details
+ * @returns The handler result (short-circuits the pipeline)
+ */
+function respond(
+  ctx: IRequestContext,
+  body: FormatValidationErrors,
+  isProblemJson: boolean,
+): HandlerResult {
+  if (!isProblemJson) {
+    return ctx.response.status(400).json(body);
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  return ctx.response
+    .status(400)
+    .header('content-type', PROBLEM_JSON)
+    .send(bytes);
 }
 
 // ---------------------------------------------------------------------------

@@ -103,21 +103,46 @@ function createFakeRequest(method: string, path: string): IRequest {
   };
 }
 
+/**
+ * Fake response that RECORDS what was written, like the kernel's real
+ * `ResponseBuilder`. It previously ignored `status()` and hard-coded
+ * `snapshot().status` to 200, which would have made the middleware's status
+ * logging untestable (and hid that it logged a constant 0).
+ */
 function createFakeResponse(ctx: { response: IResponse }): IResponse {
+  let status = 200;
+  const headers = new Headers();
+  let body: string | null = null;
   return {
-    status: () => ctx.response,
-    header: () => ctx.response,
-    appendHeader: () => ctx.response,
-    json: () => ({ __handlerResult: true }) as HandlerResult,
-    text: () => ({ __handlerResult: true }) as HandlerResult,
+    status: (code: number) => {
+      status = code;
+      return ctx.response;
+    },
+    header: (name: string, value: string) => {
+      headers.set(name, value);
+      return ctx.response;
+    },
+    appendHeader: (name: string, value: string) => {
+      headers.append(name, value);
+      return ctx.response;
+    },
+    json: <T>(b: T) => {
+      body = JSON.stringify(b);
+      headers.set('content-type', 'application/json; charset=utf-8');
+      return { __handlerResult: true } as HandlerResult;
+    },
+    text: (b: string) => {
+      body = b;
+      return { __handlerResult: true } as HandlerResult;
+    },
     send: () => ({ __handlerResult: true }) as HandlerResult,
     redirect: () => ({ __handlerResult: true }) as HandlerResult,
     stream: () => ({ __handlerResult: true }) as HandlerResult,
     snapshot: () => ({
       streaming: false,
-      status: 200,
-      headers: new Headers(),
-      body: null,
+      status,
+      headers,
+      body,
     }),
   };
 }
@@ -262,12 +287,15 @@ describe('createRequestLoggerMiddleware', () => {
     await middleware(ctx, async () => {});
   });
 
-  it('reads response status from ctx.state when set', async () => {
+  it('logs the real response status the handler produced', async () => {
     const middleware = createRequestLoggerMiddleware();
     const { ctx } = createFakeContext(logger);
 
+    // Previously this read a `'responseStatus'` state key that nothing in the
+    // framework ever set, so every entry logged `status: 0`. It now reads
+    // `ctx.response.snapshot().status`.
     await middleware(ctx, async () => {
-      ctx.state.set('responseStatus', 404);
+      ctx.response.status(404).json({ error: 'Not Found' });
     });
 
     const completed = logger.entries.find((e) => e.message === 'request completed');
@@ -275,7 +303,7 @@ describe('createRequestLoggerMiddleware', () => {
     expect(completed!.metadata.status).toBe(404);
   });
 
-  it('reports status 0 when not set in state', async () => {
+  it('logs the default 200 status when the handler sets none', async () => {
     const middleware = createRequestLoggerMiddleware();
     const { ctx } = createFakeContext(logger);
 
@@ -283,7 +311,7 @@ describe('createRequestLoggerMiddleware', () => {
 
     const completed = logger.entries.find((e) => e.message === 'request completed');
     expect(completed).toBeDefined();
-    expect(completed!.metadata.status).toBe(0);
+    expect(completed!.metadata.status).toBe(200);
   });
 
   it('logs request method and path in the incoming entry', async () => {
@@ -312,5 +340,23 @@ describe('createRequestLoggerMiddleware', () => {
     // The child logger was created with { requestId: ctx.id }
     // Since child() returns self in our fake, we verify the middleware called child()
     // by checking that logging happened at all (it would only happen if a logger was resolved).
+  });
+
+  it('logs a non-Error throw as its string form, with no stack', async () => {
+    const middleware = createRequestLoggerMiddleware();
+    const { ctx } = createFakeContext(logger);
+
+    await expect(
+      middleware(ctx, () => {
+        // A thrown non-Error (a string, a rejected value from a library) must
+        // still be logged, and must not claim a stack it does not have.
+        throw 'boom';
+      }),
+    ).rejects.toBe('boom');
+
+    const failed = logger.entries.find((e) => e.message === 'request failed');
+    expect(failed).toBeDefined();
+    expect(failed!.metadata.error).toBe('boom');
+    expect(failed!.metadata.stack).toBeUndefined();
   });
 });

@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { ValidationService } from '../../src/services/validation-service.ts';
+import { applySchemaPolicy, ValidationService } from '../../src/services/validation-service.ts';
 import { defaultFormatter } from '../../src/formatters/default-formatter.ts';
 
 // ---------------------------------------------------------------------------
@@ -190,5 +190,27 @@ describe('ValidationService — real Zod schema', () => {
     if (!result.success) {
       expect(result.error[0].path).toBe('address.zip');
     }
+  });
+
+  describe('applySchemaPolicy', () => {
+    it('returns non-object schemas unchanged', () => {
+      // A primitive or null can carry no `.strip()` / `.strict()`.
+      expect(applySchemaPolicy(null, { whitelist: true })).toBeNull();
+      expect(applySchemaPolicy('not-a-schema', { forbidNonWhitelisted: true }))
+        .toBe('not-a-schema');
+      expect(applySchemaPolicy(42, { whitelist: true })).toBe(42);
+    });
+
+    it('returns the schema unchanged when it cannot honor the policy', () => {
+      const schema = { safeParse: () => ({ success: true as const, data: {} }) };
+      expect(applySchemaPolicy(schema, { whitelist: true })).toBe(schema);
+      expect(applySchemaPolicy(schema, { forbidNonWhitelisted: true })).toBe(schema);
+    });
+
+    it('returns the schema unchanged when no policy is configured', () => {
+      const stripped = { stripped: true };
+      const schema = { strip: () => stripped, strict: () => stripped };
+      expect(applySchemaPolicy(schema, {})).toBe(schema);
+    });
   });
 });

@@ -176,6 +176,8 @@ describe('ValidationPlugin — error format flows through middleware', () => {
 
     const snap = responseSnapshot();
     expect(snap.status).toBe(400);
+    // RFC 7807 §3 requires this media type for a Problem Details body.
+    expect(snap.headers.get('content-type')).toBe('application/problem+json');
     const body = JSON.parse(snap.body!);
     expect(body.type).toBe('https://hono-enterprise.dev/errors/validation');
     expect(body.instance).toBe('/api/v1/users');
@@ -227,5 +229,79 @@ describe('resolveFormatter — all formatters produce valid output', () => {
     const ctx2 = createFakeContext({ request: { path: '/test' } }).ctx;
     const result = rfc7807Formatter(issues, ctx2);
     expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  // Retro review (Part 3): `whitelist` / `forbidNonWhitelisted` were stored and
+  // read by nothing — their own JSDoc admitted they could not be enforced. They
+  // now call the schema's `.strip()` / `.strict()` once at registration time.
+  describe('unknown-property policy', () => {
+    /** Records which unknown-key configuration the plugin asked for. */
+    function policySchema() {
+      const calls: string[] = [];
+      const base = {
+        calls,
+        safeParse() {
+          return { success: true as const, data: {} };
+        },
+        strip() {
+          calls.push('strip');
+          return base;
+        },
+        strict() {
+          calls.push('strict');
+          return base;
+        },
+      };
+      return base;
+    }
+
+    function serviceWith(options?: Parameters<typeof ValidationPlugin>[0]) {
+      const plugin = ValidationPlugin(options);
+      const { ctx, registeredServices } = createFakePluginContext();
+      plugin.register!(ctx);
+      return registeredServices.get(CAPABILITIES.VALIDATION) as IValidationService;
+    }
+
+    it('applies strip() when whitelist is set', () => {
+      const schema = policySchema();
+      serviceWith({ whitelist: true }).middleware(schema, 'body');
+      expect(schema.calls).toEqual(['strip']);
+    });
+
+    it('applies strict() when forbidNonWhitelisted is set', () => {
+      const schema = policySchema();
+      serviceWith({ forbidNonWhitelisted: true }).middleware(schema, 'body');
+      expect(schema.calls).toEqual(['strict']);
+    });
+
+    it('prefers strict() over strip() when both are set', () => {
+      const schema = policySchema();
+      serviceWith({ whitelist: true, forbidNonWhitelisted: true })
+        .middleware(schema, 'body');
+      expect(schema.calls).toEqual(['strict']);
+    });
+
+    it('leaves the schema untouched when neither option is set', () => {
+      const schema = policySchema();
+      serviceWith().middleware(schema, 'body');
+      expect(schema.calls).toEqual([]);
+    });
+
+    it('uses a schema that cannot be configured unchanged', async () => {
+      // A non-Zod schema exposes only safeParse; the policy is best-effort.
+      const plain = {
+        safeParse() {
+          return { success: true as const, data: { ok: true } };
+        },
+      };
+      const middleware = serviceWith({ forbidNonWhitelisted: true }).middleware(plain, 'body');
+      const { ctx: reqCtx } = createFakeContext({ request: { body: { ok: true } } });
+      let ran = false;
+      await middleware(reqCtx, () => {
+        ran = true;
+        return Promise.resolve();
+      });
+      expect(ran).toBe(true);
+    });
   });
 });
