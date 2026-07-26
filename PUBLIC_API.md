@@ -517,20 +517,17 @@ interface ValidationPluginOptions {
   readonly errorFormat?: ErrorFormat | ValidationErrorFormatter;
 
   /**
-   * Strip unknown properties not defined in the schema.
-   *
-   * **Limitation:** Cannot be enforced at the middleware layer because schemas
-   * are duck-typed via `safeParse()`. Configure on the schema instead:
-   * `z.object({ ... }).strip()`.
+   * Strip properties the schema does not declare. Applied once per middleware
+   * at registration time via the schema's own `.strip()` (Zod-style). A schema
+   * without `.strip()` is used unchanged.
    */
   readonly whitelist?: boolean;
 
   /**
-   * Reject requests with properties not defined in the schema.
-   *
-   * **Limitation:** Cannot be enforced at the middleware layer because schemas
-   * are duck-typed via `safeParse()`. Configure on the schema instead:
-   * `z.object({ ... }).strict()`.
+   * Reject payloads carrying properties the schema does not declare. Applied
+   * once per middleware at registration time via the schema's own `.strict()`
+   * (Zod-style), and takes precedence over `whitelist` when both are set. A
+   * schema without `.strict()` is used unchanged.
    */
   readonly forbidNonWhitelisted?: boolean;
 }
@@ -1197,6 +1194,14 @@ Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTION
 `Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
 origins call `next()` without CORS headers (browser enforces block).
 
+`Vary: Origin` is appended to **every** response for a request carrying an `Origin` header —
+including a denied one — so a shared cache cannot serve an allowed origin's response to a denied
+origin or the reverse.
+
+`origin: true` (reflect any origin) combined with `credentials: true` **throws at construction**:
+reflecting an arbitrary origin while allowing credentials lets any site the user visits read
+credentialed responses. List the origins, or pass a `CorsOriginMatcher`.
+
 #### Security Headers (`securityHeadersMiddleware`)
 
 Sets headers **before** `next()` so they persist through handler and downstream short-circuits.
@@ -1222,6 +1227,11 @@ without reading body. Absent or malformed `Content-Length` → pass through.
 Resolves client IP and publishes to `ctx.state.set('clientIp', ip)`. When `trustProxy: true`, reads
 the configured `ipHeader` (default `X-Forwarded-For`) and takes the leftmost address. Never
 short-circuits.
+
+**`trustProxy` is the only working source on the first-party adapters.** The fallback to
+`request.ip` is vestigial since M23: a web `Request` carries no peer address, so the shared `fetch`
+mapping cannot populate `IRequest.ip` and `clientIp` is `undefined` unless the proxy header is
+present. The fallback is retained for a custom `IHttpAdapter` that does set it.
 
 ---
 
@@ -5190,7 +5200,9 @@ Contract notes:
 - **RFC 7807 compliance**: when `format: 'rfc7807'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (RFC 7807
-  uses `detail`).
+  uses `detail`). The media type follows the RESOLVED formatter, so passing the exported
+  `rfc7807Formatter` function as `format` produces the same body **and** the same content type as
+  the `'rfc7807'` alias.
 - **Logger is optional**: `errorHandler` logs via `ILogger` resolved from
   `ctx.services.get(CAPABILITIES.LOGGER)` only when a logger is registered; otherwise logging is
   silently skipped.

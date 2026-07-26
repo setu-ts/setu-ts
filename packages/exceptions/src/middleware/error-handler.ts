@@ -35,6 +35,7 @@ import {
   type ErrorHandlerFormatter,
   selectFormatter,
 } from '../formatters/error-formatter.ts';
+import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
 
 /**
  * Options for the {@linkcode errorHandler} middleware factory.
@@ -90,7 +91,11 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
   const includeStackTrace = options?.includeStackTrace ?? false;
   const logErrors = options?.logErrors ?? true;
   const formatter = selectFormatter(format);
-  const isRfc7807 = format === 'rfc7807';
+  // Key the media type off the RESOLVED formatter, not just the string alias:
+  // `rfc7807Formatter` is exported, so `format: rfc7807Formatter` produces the
+  // identical Problem Details body and must carry the same content type. RFC
+  // 7807 §3 identifies that body with `application/problem+json`.
+  const isRfc7807 = formatter === rfc7807Formatter;
   const contentType = isRfc7807 ? PROBLEM_JSON : JSON_CONTENT_TYPE;
 
   return async function handleError(

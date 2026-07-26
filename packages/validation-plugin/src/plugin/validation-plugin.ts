@@ -29,33 +29,23 @@ export interface ValidationPluginOptions {
   readonly errorFormat?: ErrorFormat | ValidationErrorFormatter;
 
   /**
-   * When true, strip unknown properties not defined in the schema.
+   * When true, strip properties the schema does not declare.
    *
-   * **Limitation:** This option cannot be enforced at the middleware layer
-   * because schemas are duck-typed via `safeParse()` which does not expose
-   * Zod's `.strip()` configuration. Configure stripping on the schema
-   * itself instead:
-   *
-   * ```typescript
-   * import { z } from 'zod';
-   * const MySchema = z.object({ name: z.string() }).strip();
-   * ```
+   * Applied once per middleware at registration time by calling the schema's
+   * own `.strip()` (Zod-style). A schema that does not expose `.strip()` — a
+   * non-object schema, or a validator other than Zod — is used unchanged, since
+   * schemas are duck-typed through `safeParse`.
    */
   readonly whitelist?: boolean;
 
   /**
-   * When true, reject requests containing properties not defined in the
-   * schema.
+   * When true, reject payloads carrying properties the schema does not declare.
    *
-   * **Limitation:** This option cannot be enforced at the middleware layer
-   * because schemas are duck-typed via `safeParse()` which does not expose
-   * Zod's `.strict()` configuration. Configure strict mode on the schema
-   * itself instead:
-   *
-   * ```typescript
-   * import { z } from 'zod';
-   * const MySchema = z.object({ name: z.string() }).strict();
-   * ```
+   * Applied once per middleware at registration time by calling the schema's
+   * own `.strict()` (Zod-style), and takes precedence over
+   * {@linkcode ValidationPluginOptions.whitelist} when both are set (rejecting
+   * is stronger than stripping). A schema that does not expose `.strict()` is
+   * used unchanged.
    */
   readonly forbidNonWhitelisted?: boolean;
 }
@@ -97,7 +87,11 @@ export function ValidationPlugin(options?: ValidationPluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.HIGH,
 
     register(ctx: IPluginContext): void {
-      const service = new ValidationService(formatter);
+      const service = new ValidationService(formatter, {
+        ...(options?.whitelist !== undefined && { whitelist: options.whitelist }),
+        ...(options?.forbidNonWhitelisted !== undefined &&
+          { forbidNonWhitelisted: options.forbidNonWhitelisted }),
+      });
       ctx.services.register<IValidationService>(CAPABILITIES.VALIDATION, service);
     },
   };

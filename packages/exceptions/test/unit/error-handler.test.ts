@@ -15,6 +15,7 @@ import { errorHandler } from '../../src/middleware/error-handler.ts';
 import { badRequest, internalServerError, notFound } from '../../src/errors/exceptions.ts';
 import { HttpError } from '../../src/errors/http-error.ts';
 import { createFakeContext, FakeLogger } from '../fixtures/fake-runtime.ts';
+import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';
 
 /** Decode the response body (Uint8Array or string) back to a parsed object. */
 function parseBody(body: Uint8Array | string | null): Record<string, unknown> {
@@ -255,5 +256,24 @@ describe('errorHandler middleware', () => {
       expect(body.custom).toBe(true);
       expect(body.code).toBe('ERR_CUSTOM');
     });
+  });
+
+  // Retro review (Part 3): the content type keyed off the string alias only, so
+  // passing the exported formatter itself produced an identical Problem Details
+  // body under `application/json`. RFC 7807 §3 requires `application/problem+json`.
+  it('serves Problem Details as application/problem+json through BOTH entry points', async () => {
+    for (const format of ['rfc7807' as const, rfc7807Formatter]) {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ format, logErrors: false });
+      await mw(ctx, () => Promise.reject(notFound('nope')));
+
+      const snap = responseSnapshot();
+      expect(snap.status).toBe(404);
+      expect(snap.headers.get('content-type')).toBe('application/problem+json');
+      const body = parseBody(snap.body);
+      expect(body.title).toBe('Not Found');
+      expect(body.detail).toBe('nope');
+      expect('message' in body).toBe(false);
+    }
   });
 });

@@ -81,6 +81,7 @@ interface SafeParseIssue {
 export class ValidationService implements IValidationService {
   constructor(
     private readonly formatter: ValidationErrorFormatter,
+    private readonly schemaPolicy: SchemaPolicy = {},
   ) {}
 
   /**
@@ -123,8 +124,66 @@ export class ValidationService implements IValidationService {
    * @returns The validation middleware
    */
   middleware(schema: unknown, target: ValidationTarget): MiddlewareFunction {
-    return createValidationMiddleware(schema, target, this, this.formatter);
+    // Applied once here, at middleware-construction (registration) time, so
+    // both entry points — `service.middleware(...)` and the `validateBody(...)`
+    // family, which delegate to it — honor the configured policy identically.
+    return createValidationMiddleware(
+      applySchemaPolicy(schema, this.schemaPolicy),
+      target,
+      this,
+      this.formatter,
+    );
   }
+}
+
+/**
+ * Unknown-property policy resolved from the plugin's `whitelist` /
+ * `forbidNonWhitelisted` options.
+ *
+ * @since 0.1.0
+ */
+export interface SchemaPolicy {
+  /** Strip properties the schema does not declare. */
+  readonly whitelist?: boolean;
+  /** Reject payloads carrying properties the schema does not declare. */
+  readonly forbidNonWhitelisted?: boolean;
+}
+
+/**
+ * Structural shape of the unknown-key configuration a Zod-style object schema
+ * exposes. Both methods return a NEW schema; neither mutates the original.
+ */
+interface UnknownKeyConfigurable {
+  strip?: () => unknown;
+  strict?: () => unknown;
+}
+
+/**
+ * Applies the unknown-property policy to a schema, once, at registration time.
+ *
+ * `forbidNonWhitelisted` wins over `whitelist` when both are set: rejecting is
+ * strictly stronger than stripping. A schema that does not expose the matching
+ * method (a non-object schema, or a validator other than Zod) is returned
+ * unchanged — the policy is best-effort by construction, since schemas are
+ * duck-typed through `safeParse`.
+ *
+ * @param schema - The schema to configure
+ * @param policy - The resolved unknown-property policy
+ * @returns The configured schema, or the original when it cannot be configured
+ * @since 0.1.0
+ */
+export function applySchemaPolicy(schema: unknown, policy: SchemaPolicy): unknown {
+  if (schema === null || typeof schema !== 'object') {
+    return schema;
+  }
+  const configurable = schema as UnknownKeyConfigurable;
+  if (policy.forbidNonWhitelisted === true && typeof configurable.strict === 'function') {
+    return configurable.strict();
+  }
+  if (policy.whitelist === true && typeof configurable.strip === 'function') {
+    return configurable.strip();
+  }
+  return schema;
 }
 
 // ---------------------------------------------------------------------------

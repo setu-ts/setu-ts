@@ -84,11 +84,24 @@ const HANDLER_RESULT: HandlerResult = { __handlerResult: true };
 export interface FakeResponseResult {
   /** The fake response builder. */
   response: IResponse;
-  /** Capture the current response state for assertions. */
+  /**
+   * Capture the current response state for assertions. `body` is decoded to
+   * text so assertions can `JSON.parse` it regardless of whether the code under
+   * test used `json()`, `text()`, or `send(bytes)`.
+   */
   snapshot: () => { status: number; headers: Headers; body: string | null };
 }
 
-/** Create a fake IResponse with a snapshot for assertions. */
+/**
+ * Create a fake IResponse with a snapshot for assertions.
+ *
+ * Mirrors the kernel's real `ResponseBuilder`: `header`/`appendHeader` RECORD
+ * onto a real `Headers`, `send(bytes)` records the body, and `json`/`text` set
+ * the same content types the kernel sets. The previous version made
+ * `header`, `appendHeader`, `text`, and `send` no-ops, which silently dropped
+ * every header and byte body — that is why a Problem Details response missing
+ * its `application/problem+json` content type went unnoticed here.
+ */
 export function createFakeResponse(): FakeResponseResult {
   let status = 200;
   const headers = new Headers();
@@ -99,10 +112,12 @@ export function createFakeResponse(): FakeResponseResult {
       status = code;
       return response;
     },
-    header(_name: string, _value: string): IResponse {
+    header(name: string, value: string): IResponse {
+      headers.set(name, value);
       return response;
     },
-    appendHeader(_name: string, _value: string): IResponse {
+    appendHeader(name: string, value: string): IResponse {
+      headers.append(name, value);
       return response;
     },
     json<T>(b: T): HandlerResult {
@@ -110,13 +125,22 @@ export function createFakeResponse(): FakeResponseResult {
       headers.set('content-type', 'application/json; charset=utf-8');
       return HANDLER_RESULT;
     },
-    text(_b: string): HandlerResult {
+    text(b: string): HandlerResult {
+      body = b;
+      headers.set('content-type', 'text/plain; charset=utf-8');
       return HANDLER_RESULT;
     },
-    send(_b?: Uint8Array): HandlerResult {
+    send(b?: Uint8Array): HandlerResult {
+      body = b === undefined ? null : new TextDecoder().decode(b);
+      if (b !== undefined && !headers.has('content-type')) {
+        headers.set('content-type', 'application/octet-stream');
+      }
       return HANDLER_RESULT;
     },
-    redirect(_url: string, _status?: number): HandlerResult {
+    redirect(url: string, code = 302): HandlerResult {
+      status = code;
+      headers.set('location', url);
+      body = null;
       return HANDLER_RESULT;
     },
     stream(_body: ReadableStream<Uint8Array>): HandlerResult {
