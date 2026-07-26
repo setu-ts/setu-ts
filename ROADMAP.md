@@ -4330,7 +4330,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 30        | ✅     | notification-plugin  |
 | 31        | ✅     | feature-flags-plugin |
 | 32        | ✅     | multi-tenancy-plugin |
-| 33        | ⬜     | testing              |
+| 33        | ✅     | testing              |
 | 34        | ⬜     | cli                  |
 | 35        | ⬜     | sdk                  |
 | 36        | ⬜     | starters             |

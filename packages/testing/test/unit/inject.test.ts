@@ -29,7 +29,7 @@ function createFakeApp(): {
     },
   };
   const app: IKernelApplication = {
-    inject: async (request: InjectRequest): Promise<InjectResponse> => {
+    inject: (request: InjectRequest): InjectResponse => {
       recorded.push({ request });
       return fakeResponse;
     },

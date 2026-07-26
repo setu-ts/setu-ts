@@ -5316,6 +5316,89 @@ Contract notes:
 
 ---
 
+## Testing Package (`@hono-enterprise/testing`)
+
+First-party testing utilities for the Hono Enterprise framework: a test application factory, mock
+plugin builder, request injector, mock request context, service registry double, fixture manager,
+and streaming-response reader.
+
+### Exports
+
+| Export                | File                                       | Description                        |
+| --------------------- | ------------------------------------------ | ---------------------------------- |
+| `createTestApp`       | `src/test-app.ts`                          | Test application factory           |
+| `TestAppOptions`      | `src/test-app.ts`                          | Factory options                    |
+| `createMockPlugin`    | `src/mock-plugin.ts`                       | Mock plugin builder                |
+| `MockPluginOptions`   | `src/mock-plugin.ts`                       | Builder options                    |
+| `collectStream`       | `src/inject.ts`                            | Collect streaming response body    |
+| `inject`              | `src/inject.ts`                            | Inject HTTP requests into test app |
+| `StreamingBody`       | `src/inject.ts`                            | Stream collector result shape      |
+| `createTestContext`   | `src/mock-context.ts`                      | Create a mock `IRequestContext`    |
+| `TestContextOptions`  | `src/mock-context.ts`                      | Context builder options            |
+| `MockResponse`        | `src/mock-context.ts`                      | Fake `IResponse` double            |
+| `MockServiceRegistry` | `src/mock-registry.ts`                     | Fake `IServiceRegistry` double     |
+| `FixtureManager`      | `src/fixtures/fixture-manager.ts`          | Assemble mock plugins per-test     |
+| `IKernelApplication`  | (re-export from `@hono-enterprise/kernel`) | Kernel application interface       |
+| `InjectRequest`       | (re-export from `@hono-enterprise/kernel`) | Shape for `inject()` request       |
+| `InjectResponse`      | (re-export from `@hono-enterprise/kernel`) | Shape for `inject()` response      |
+
+### Registration
+
+```typescript
+import { createTestApp } from '@hono-enterprise/testing';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+
+const app = await createTestApp({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({ type: 'memory' }),
+  ],
+});
+```
+
+### Programmatic Testing
+
+```typescript
+import { createMockPlugin, createTestContext, inject } from '@hono-enterprise/testing';
+import { FixtureManager, MockServiceRegistry } from '@hono-enterprise/testing';
+
+// Mock a plugin service
+const mockDb = createMockPlugin({
+  name: 'database',
+  service: { find: async () => [] },
+});
+
+// Use FixtureManager to assemble mocks
+const fixtures = new FixtureManager();
+fixtures.mock('cache', { get: async () => null, set: async () => {} });
+
+// Inject a request directly
+const response = await inject(app, {
+  method: 'GET',
+  url: '/users',
+});
+
+// Create a fake context for handler-level tests
+const ctx = createTestContext();
+const mockRegistry = new MockServiceRegistry();
+
+// Collect a streaming body
+const stream = await collectStream(response as Response);
+console.log(stream.text);
+```
+
+### Notes
+
+- The testing package does **not** start an HTTP server; `createTestApp` returns a started kernel
+  application that can be exercised via `inject()` or `fetch()`.
+- `createTestContext` uses a built-in monotonic fake runtime (`hrtime: () => 0`) by default — inject
+  your own `IRuntimeServices` when you need controllable timing.
+- `MockServiceRegistry` reproduces the kernel's `ServiceRegistry` semantics (factory caching, single
+  vs multi registration, override policy) so tests catch real regressions.
+
+---
+
 ## Summary
 
 The Hono Enterprise public API is designed for developer experience:

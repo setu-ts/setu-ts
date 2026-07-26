@@ -5,6 +5,7 @@
   "exports": "./src/index.ts",
   "imports": {
     "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0",
-    "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0"
+    "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0",
+    "@hono-enterprise/runtime": "jsr:@hono-enterprise/runtime@^0.1.0"
   }
 }

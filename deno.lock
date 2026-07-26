@@ -1818,7 +1818,8 @@
       "packages/testing": {
         "dependencies": [
           "jsr:@hono-enterprise/common@0.1",
-          "jsr:@hono-enterprise/kernel@0.1"
+          "jsr:@hono-enterprise/kernel@0.1",
+          "jsr:@hono-enterprise/runtime@0.1"
         ]
       }
     }

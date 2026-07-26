@@ -447,8 +447,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   integration test was added because none existed; an empty resolver chain and a malformed injected
   `dataStore` now fail at `register()` rather than per request; all 15 test files were converted
   from the banned `Deno.test` to `describe`/`it` + `expect`) — complete (PR #71)
-- **Next milestone** — **Milestone 33** (`packages/testing` — test utilities); continues the main
-  plugin sequence (M33–M40 follow) unless reprioritized.
+- **Milestone 33** (`packages/testing` — test utilities) — created `createTestApp`, `inject`,
+  `collectStream`, `MockServiceRegistry`, `createMockPlugin`, `createTestContext`, `FixtureManager`;
+  full test suite across unit/integration/e2e with 90%+ coverage per file — complete
+- **Next milestone** — **Milestone 34** (`packages/cli` — CLI scaffolding and management tooling);
+  continues the main plugin sequence (M34–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
