@@ -68,16 +68,49 @@ describe('inject — integration through real started app', () => {
     await app.stop();
   });
 
-  it('byte-body via inject() yields body: null (Uint8Array limitation)', async () => {
+  // KERNEL BEHAVIOR: inject() UTF-8 decodes a byte body rather than reporting
+  // `null`, which used to make a non-empty response look empty and made json()
+  // throw for a valid JSON payload sent as bytes.
+  it('byte-body via inject() is UTF-8 decoded, not dropped', async () => {
     const app = await createTestApp({ plugins: [fakeRuntime()] });
 
     app.router.get('/bytes', (ctx) => {
-      return ctx.response.send(new Uint8Array([1, 2, 3]));
+      return ctx.response.send(new TextEncoder().encode('{"ok":true}'));
     });
 
     const injectRes = await inject(app, '/bytes');
-    // inject() maps non-string bodies to null (KERNEL BEHAVIOR)
-    expect(injectRes.body).toBeNull();
+    expect(injectRes.body).toBe('{"ok":true}');
+    // A JSON payload sent as bytes is parseable through json().
+    expect(injectRes.json<{ ok: boolean }>().ok).toBe(true);
+
+    await app.stop();
+  });
+
+  // KERNEL BEHAVIOR: a streaming response cannot be rendered as a string body
+  // without draining the live stream, so inject() throws with a pointer to
+  // fetch() rather than reporting `body: null` (which reads as "empty").
+  it('streaming response via inject() throws and points at fetch()', async () => {
+    const app = await createTestApp({ plugins: [fakeRuntime()] });
+
+    app.router.get('/stream', (ctx) => {
+      return ctx.response.stream(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('chunk'));
+            controller.close();
+          },
+        }),
+      );
+    });
+
+    let message = '';
+    try {
+      await inject(app, '/stream');
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('inject() cannot read a streaming response body');
+    expect(message).toContain('app.fetch()');
 
     await app.stop();
   });

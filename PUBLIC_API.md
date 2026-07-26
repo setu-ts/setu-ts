@@ -5517,8 +5517,10 @@ console.log(stream.text); // → "hello world"
   `http-adapter`; without it `app.fetch()` throws `No HTTP adapter registered.` `inject()` needs
   only `runtime`, so unit tests use `inject()` and `fetch()` assertions belong to integration/e2e
   tests on the real `RuntimePlugin()`.
-- `inject()` returns `body: string | null` and so cannot carry a streaming **or** a `Uint8Array`
-  body — both read back as `null`. Assert those through `app.fetch()` plus `collectStream`.
+- `inject()` returns `body: string | null`, where a byte body from `response.send(bytes)` is UTF-8
+  decoded and `null` means the response genuinely had no body. A **streaming** response cannot be
+  rendered as a string without draining the live stream, so `inject()` throws for one — read those
+  through `app.fetch()` plus `collectStream` instead.
 - `createTestContext` uses a built-in monotonic fake runtime (`hrtime: () => 0`) by default — inject
   your own `IRuntimeServices` when you need controllable timing. Its timers are inert no-ops, so a
   fixture can never leak a callback past the test that created it.
