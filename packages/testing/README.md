@@ -90,6 +90,7 @@ Collects mocks and plugins, produces `IPlugin[]`, resets between tests.
 
 ```typescript
 import { createTestApp, FixtureManager } from '@hono-enterprise/testing';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
 
 const fixtures = new FixtureManager();
 
@@ -99,7 +100,7 @@ beforeEach(async () => {
     .mock('cache', { get: () => null });
 
   const app = await createTestApp({
-    plugins: fixtures.plugins(),
+    plugins: [RuntimePlugin(), ...fixtures.plugins()],
   });
 });
 

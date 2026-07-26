@@ -30,7 +30,7 @@ describe('FixtureManager', () => {
     expect(plugins[0]).toBe(realPlugin);
   });
 
-  it('plugins() returns mocks then reals in insertion order', () => {
+  it('plugins() returns true insertion order (mocks and reals interleaved)', () => {
     const fixtures = new FixtureManager();
     fixtures.mock('first', {});
     const realPlugin = createMockPlugin({ name: 'second', service: {} });
@@ -39,11 +39,10 @@ describe('FixtureManager', () => {
 
     const plugins = fixtures.plugins();
     expect(plugins).toHaveLength(3);
-    // first and third are mocks, second is real — but order is: mocks first, then reals
-    // Actually, the implementation puts ALL mocks first, then ALL reals
+    // True insertion order: first(mock), second(real), third(mock)
     expect(plugins[0].name).toBe('first');
-    expect(plugins[1].name).toBe('third');
-    expect(plugins[2].name).toBe('second');
+    expect(plugins[1].name).toBe('second');
+    expect(plugins[2].name).toBe('third');
   });
 
   it('reset clears the store so plugins() returns []', () => {

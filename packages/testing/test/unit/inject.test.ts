@@ -86,6 +86,21 @@ describe('inject (free function)', () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0].request.body).toBe(bodyContent);
   });
+
+  // --- P1-3 empty string body preservation ---
+  it('web Request with empty body preserves body field for POST (P1-3)', async () => {
+    const { app, recorded } = createFakeApp();
+    const req = new Request('http://localhost/data', {
+      method: 'POST',
+      body: '',
+    });
+    await inject(app, req);
+
+    expect(recorded).toHaveLength(1);
+    // The body key MUST be present (even though empty) because the
+    // original Request.body is non-null — real kernel path would parse it.
+    expect(recorded[0].request).toHaveProperty('body', '');
+  });
 });
 
 describe('collectStream', () => {

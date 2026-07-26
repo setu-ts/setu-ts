@@ -102,7 +102,7 @@ async function normalizeWebRequest(request: Request): Promise<InjectRequest> {
     method: request.method,
     url: request.url,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    ...(body !== undefined && body !== '' ? { body } : {}),
+    ...(request.body !== null && request.body !== undefined ? { body } : {}),
   };
 }
 

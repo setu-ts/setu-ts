@@ -13,6 +13,7 @@ import { createMockPlugin } from '../mock-plugin.ts';
  * @example
  * ```typescript
  * import { FixtureManager, createTestApp } from '@hono-enterprise/testing';
+ * import { RuntimePlugin } from '@hono-enterprise/runtime';
  *
  * const fixtures = new FixtureManager();
  *
@@ -22,7 +23,7 @@ import { createMockPlugin } from '../mock-plugin.ts';
  *     .mock('cache', { get: () => null, set: () => {} });
  *
  *   const app = await createTestApp({
- *     plugins: fixtures.plugins(),
+ *     plugins: [RuntimePlugin(), ...fixtures.plugins()],
  *   });
  * });
  *
@@ -32,8 +33,7 @@ import { createMockPlugin } from '../mock-plugin.ts';
  * @since 0.1.0
  */
 export class FixtureManager {
-  #mocks: IPlugin[] = [];
-  #plugins: IPlugin[] = [];
+  #list: IPlugin[] = [];
 
   /**
    * Registers a mock service under a capability token.
@@ -48,7 +48,7 @@ export class FixtureManager {
     service: object,
     options?: { provides?: string; priority?: number },
   ): this {
-    this.#mocks.push(createMockPlugin({ name, service, ...options }));
+    this.#list.push(createMockPlugin({ name, service, ...options }));
     return this;
   }
 
@@ -59,24 +59,23 @@ export class FixtureManager {
    * @returns `this` for chaining
    */
   plugin(plugin: IPlugin): this {
-    this.#plugins.push(plugin);
+    this.#list.push(plugin);
     return this;
   }
 
   /**
-   * Returns all stored mocks and plugins in insertion order.
+   * Returns all plugins in true insertion order.
    *
    * @returns All plugins for `createTestApp({ plugins })`
    */
   plugins(): IPlugin[] {
-    return [...this.#mocks, ...this.#plugins];
+    return [...this.#list];
   }
 
   /**
    * Clears the store. Call in `afterEach` to reset between tests.
    */
   reset(): void {
-    this.#mocks = [];
-    this.#plugins = [];
+    this.#list = [];
   }
 }

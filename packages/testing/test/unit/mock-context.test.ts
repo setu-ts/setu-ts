@@ -340,4 +340,62 @@ describe('MockResponse', () => {
     resp.send();
     expect(resp.snapshot().body).toBeNull();
   });
+
+  // --- P1-1 content-type fidelity ---
+
+  it('json() sets content-type application/json; charset=utf-8', () => {
+    const resp = new MockResponse();
+    resp.json({ x: 1 });
+    expect(resp.snapshot().headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+
+  it('text() sets content-type text/plain; charset=utf-8', () => {
+    const resp = new MockResponse();
+    resp.text('hello');
+    expect(resp.snapshot().headers.get('content-type')).toBe('text/plain; charset=utf-8');
+  });
+
+  it('send(Uint8Array) sets content-type application/octet-stream when not previously set', () => {
+    const resp = new MockResponse();
+    resp.send(new Uint8Array([1, 2, 3]));
+    expect(resp.snapshot().headers.get('content-type')).toBe('application/octet-stream');
+  });
+
+  it('send() does NOT override content-type when already set', () => {
+    const resp = new MockResponse();
+    resp.header('content-type', 'custom/type');
+    resp.send(new Uint8Array([1, 2, 3]));
+    expect(resp.snapshot().headers.get('content-type')).toBe('custom/type');
+  });
+
+  it('redirect() clears a prior body', () => {
+    const resp = new MockResponse();
+    resp.json({ x: 1 });
+    expect(resp.snapshot().body).toBe('{"x":1}');
+    resp.redirect('/new-path');
+    expect(resp.snapshot().body).toBeNull();
+  });
+
+  // --- P1-2 ip/user/tenant propagation ---
+
+  it('createTestContext propagates ip from request override', () => {
+    const ctx = createTestContext({
+      request: { method: 'GET', url: 'http://localhost/', ip: '1.2.3.4' },
+    });
+    expect(ctx.request.ip).toBe('1.2.3.4');
+  });
+
+  it('createTestContext propagates user from request override', () => {
+    const ctx = createTestContext({
+      request: { method: 'GET', url: 'http://localhost/', user: { name: 'alice' } as never },
+    });
+    expect((ctx.request as unknown as Record<string, unknown>).user).toEqual({ name: 'alice' });
+  });
+
+  it('createTestContext propagates tenant from request override', () => {
+    const ctx = createTestContext({
+      request: { method: 'GET', url: 'http://localhost/', tenant: { id: 't1' } as never },
+    });
+    expect((ctx.request as unknown as Record<string, unknown>).tenant).toEqual({ id: 't1' });
+  });
 });

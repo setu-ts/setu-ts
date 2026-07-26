@@ -121,6 +121,9 @@ class MockRequest implements IRequest {
     headers?: Headers;
     body?: unknown;
     signal?: AbortSignal;
+    ip?: string;
+    user?: IPrincipal;
+    tenant?: ITenant;
   }) {
     this.method = options.method as HttpMethod;
     this.url = options.url;
@@ -129,6 +132,15 @@ class MockRequest implements IRequest {
     this.#body = options.body;
     if (options.signal !== undefined) {
       this.signal = options.signal;
+    }
+    if (options.ip !== undefined) {
+      this.ip = options.ip;
+    }
+    if (options.user !== undefined) {
+      this.user = options.user;
+    }
+    if (options.tenant !== undefined) {
+      this.tenant = options.tenant;
     }
   }
 
@@ -193,18 +205,23 @@ export class MockResponse implements IResponse {
 
   json<T>(_body: T): HandlerResult {
     this.#body = JSON.stringify(_body);
+    this.#headers.set('content-type', 'application/json; charset=utf-8');
     this.#ended = true;
     return { __handlerResult: true };
   }
 
   text(_body: string): HandlerResult {
     this.#body = _body;
+    this.#headers.set('content-type', 'text/plain; charset=utf-8');
     this.#ended = true;
     return { __handlerResult: true };
   }
 
   send(_body?: Uint8Array): HandlerResult {
     this.#body = _body ?? null;
+    if (_body !== undefined && !this.#headers.has('content-type')) {
+      this.#headers.set('content-type', 'application/octet-stream');
+    }
     this.#ended = true;
     return { __handlerResult: true };
   }
@@ -212,6 +229,7 @@ export class MockResponse implements IResponse {
   redirect(url: string, _status?: number): HandlerResult {
     this.#status = _status ?? 302;
     this.header('Location', url);
+    this.#body = null;
     this.#ended = true;
     return { __handlerResult: true };
   }
@@ -285,6 +303,9 @@ export function createTestContext(options?: TestContextOptions): IRequestContext
     headers,
     body: options?.body,
     signal,
+    ...(reqOptions.ip !== undefined ? { ip: reqOptions.ip } : {}),
+    ...(reqOptions.user !== undefined ? { user: reqOptions.user } : {}),
+    ...(reqOptions.tenant !== undefined ? { tenant: reqOptions.tenant } : {}),
   });
 
   // Parse query from URL when not provided

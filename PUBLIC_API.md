@@ -5389,8 +5389,9 @@ const response = await inject(app, {
 const ctx = createTestContext();
 const mockRegistry = new MockServiceRegistry();
 
-// Collect a streaming body
-const stream = await collectStream(response as Response);
+// Collect a streaming body — use fetch() which returns a real web Response
+const fetchRes = await app.fetch(new Request('http://localhost/stream'));
+const stream = await collectStream(fetchRes);
 console.log(stream.text);
 ```
 
