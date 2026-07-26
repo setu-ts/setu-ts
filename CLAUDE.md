@@ -464,7 +464,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   post-implementation review fixed contract-infidelities in the default test runtime that the tests
   had enshrined — `env` was a `Map` cast to a `Record`, `subtle` was `null`, `randomBytes(n)`
   returned 0 bytes, and the timers were real rather than inert — plus a `MockRequest` whose `json()`
-  returned an object body while `text()`/`bytes()` silently dropped it — complete (PR pending)
+  returned an object body while `text()`/`bytes()` silently dropped it — complete (PR #78)
 - **Next milestone** — **Milestone 34** (`packages/cli` — CLI scaffolding and management tooling);
   continues the main plugin sequence (M34–M40 follow) unless reprioritized.
 
