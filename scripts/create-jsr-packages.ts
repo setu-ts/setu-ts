@@ -28,7 +28,11 @@
  */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
-const API = 'https://api.jsr.io';
+// Overridable so the error paths below can be driven against a local stub —
+// the quota branch in particular is unreachable in a normal run once the quota
+// has been raised, and an untested error path is how a release script fails at
+// the worst moment. Defaults to the real API; production runs never set it.
+const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
 const SCOPE = 'hono-enterprise';
 
 const dryRun = Deno.args.includes('--dry-run');
@@ -85,6 +89,24 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
     console.log(`${position} exists   @${SCOPE}/${name}`);
     existing.push(name);
     continue;
+  }
+
+  // The weekly package-creation quota (20 per rolling 7 days by default) is
+  // scope-wide, so once it is exhausted every remaining request is guaranteed
+  // to fail the same way. Stop instead of firing them: the first run of this
+  // script produced 15 identical errors, which buries the one line that
+  // matters. See docs/releasing.md for how to request an increase.
+  if (body.includes('weeklyPackageLimitExceeded')) {
+    console.error(`\n${position} @${SCOPE}/${name} — weekly package-creation quota exhausted.`);
+    const remaining = PUBLISHED_PACKAGES.slice(index).map(packageName);
+    console.error(
+      `\nStopping. ${created.length + existing.length} of ${PUBLISHED_PACKAGES.length} packages ` +
+        `now exist; ${remaining.length} still needed:\n  ${remaining.join(', ')}\n\n` +
+        'The quota is 20 new packages per rolling 7-day window. Either request an increase at\n' +
+        `  https://jsr.io/@${SCOPE}/~/settings  →  Quotas  →  New packages per week\n` +
+        'or wait for the window to roll over, then re-run this task.\n',
+    );
+    Deno.exit(1);
   }
 
   // Anything else is surfaced verbatim rather than summarised — the API's own
