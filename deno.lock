@@ -1743,47 +1743,47 @@
     "members": {
       "packages/config-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
         ]
       },
       "packages/decorator-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
         ]
       },
       "packages/di-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
         ]
       },
       "packages/kernel": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
           "jsr:@hono/hono@^4.12.30"
         ]
       },
       "packages/logger-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
         ]
       },
       "packages/openapi-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1",
-          "jsr:@hono-enterprise/kernel@0.1",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.1",
           "npm:zod@^3.24.0"
         ]
       },
       "packages/runtime": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1",
-          "jsr:@hono-enterprise/kernel@0.1"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.1"
         ]
       },
       "packages/testing": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1",
-          "jsr:@hono-enterprise/kernel@0.1"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.1"
         ]
       }
     }
