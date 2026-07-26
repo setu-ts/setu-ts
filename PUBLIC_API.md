@@ -4956,7 +4956,7 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 | `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                        |
 | `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection           |
 | `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)        |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`). `body` is text; a byte body from `response.send(bytes)` is UTF-8 decoded, and a streaming response makes `inject()` throw |
+| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`) |
 
 Contract notes:
 
@@ -4968,6 +4968,13 @@ Contract notes:
   `{ error: 'Internal Server Error' }` → `500`; `{ error: 'Service Unavailable' }` for a request
   arriving while `stop()` is draining → `503`). Error formatting belongs to the exceptions package,
   not the kernel.
+- **`inject()` body semantics.** `InjectResponse.body` is text: a byte body written with
+  `response.send(bytes)` is UTF-8 decoded rather than reported as `null`, and `json()` parses it. A
+  **streaming** response cannot be presented as text without draining the live stream, so `inject()`
+  throws and points at `app.fetch()` with a web `Request` instead.
+- **`app.fetch()` rejects rather than throwing synchronously** when no `http-adapter` capability is
+  registered, so the Workers `export default { fetch: app.fetch }` entry point sees a failed promise
+  instead of an unhandled exception.
 - **Contribution-token pattern**: `ctx.health.register()`, `ctx.metrics.register()`,
   `ctx.openapi.addSchema()`, `ctx.cli.register()`, and `ctx.decorators.register()` funnel
   contributions into multi-provider services under the Step-1 tokens; consumers retrieve them with
@@ -4996,7 +5003,7 @@ Cloudflare Workers.
 | `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
 | `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
 | `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
-| `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to real `node:` built-ins, which Bun implements) |
+| `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to `node:` built-ins)              |
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
 | `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
 | `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
@@ -5049,13 +5056,13 @@ Per-runtime upgrade seams:
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
 | `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
-| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`, matching `Deno.readDir`) |
+| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`)           |
 | `NodeHost`                          | type | Host interface for the Node adapter (extension point)                          |
 | `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                        |
 | `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                   |
 | `BunHost`                           | type | Host interface for the Bun adapter (extension point)                           |
 | `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                         |
-| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (`node:fs` sync, `node:os`, `node:process`, plus the `Bun` global for its version) |
+| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (testing seam)                         |
 | `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                     |
 | `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                     |
 | `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                      |
@@ -5088,6 +5095,17 @@ Per-runtime upgrade seams:
 
 Contract notes:
 
+- **The Bun and Deno host defaults are backed by real APIs (retro review, Part 2).**
+  `buildBunHost()` builds the default `BunHost` from `node:fs` (sync), `node:os`, and `node:process`
+  — which Bun implements — NOT from members of the `Bun` global: Bun's file API is `Bun.file()` /
+  `Bun.write()`, and it has no
+  `readFile`/`stat`/`readdir`/`mkdir`/`rm`/`realPath`/`hostname`/`exit`. Only `Bun.version` is read
+  from the global. On the Deno side, `DenoHost.readDir()` is named and shaped after the real
+  `Deno.readDir` — an **`AsyncIterable`**, consumed with `for await`. Both defaults are exercised
+  against their real APIs by the test suite, not only through injected fakes.
+- **`IRuntimeServices.env` is a snapshot on Deno and Workers**, taken when the services were created
+  (`Deno.env.toObject()`, the per-invocation Workers bindings object), and a live pass-through of
+  `process.env` on Node and Bun. Nothing in the framework mutates the environment at runtime.
 - **M23 replaced M39's HTTP server adapters.** The `IHttpAdapter` contract now exposes the
   web-standard `fetch` entry: `setHandler` installs the framework handler, `fetch` is the universal
   entry point callable without `listen` (Cloudflare Workers), `listen` binds a real TCP socket, and
