@@ -1,0 +1,69 @@
+name: Release
+
+# Publishes the implemented workspace packages to JSR.
+#
+# Triggered by pushing a `v*` tag (e.g. `v0.1.0-alpha.1`), or manually via
+# workflow_dispatch with `dry_run: true` to rehearse without uploading.
+#
+# JSR versions are IMMUTABLE: a published version can be yanked but never
+# deleted or replaced. The gates below run before anything is uploaded.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Simulate the publish without uploading'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  # Required for JSR's OIDC authentication and for provenance attestation.
+  id-token: write
+
+jobs:
+  release:
+    name: Publish to JSR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # ── Gates ────────────────────────────────────────────────────────────
+      # Same four gates as CI, re-run here so a tag can never publish a tree
+      # that would have failed on a pull request.
+      - name: Format check
+        run: deno task fmt:check
+
+      - name: Lint
+        run: deno task lint
+
+      - name: Type check
+        run: deno task check
+
+      - name: Test with coverage
+        run: deno task test:coverage
+
+      # ── Consistency ──────────────────────────────────────────────────────
+      # The tag and the package versions must agree, or the release notes
+      # would describe versions nobody can install.
+      - name: Verify tag matches package versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: deno run --allow-read scripts/verify-release.ts "${GITHUB_REF_NAME#v}"
+
+      # ── Publish ──────────────────────────────────────────────────────────
+      # Published one package at a time from an explicit list, NOT with a
+      # workspace-wide `deno publish`: the workspace also contains the `cli`,
+      # `sdk`, and starter stubs, which export nothing and must not reach JSR.
+      #
+      # The list is ordered so a dependency is always published before its
+      # dependents (common → kernel/runtime → everything else). JSR rejects a
+      # package whose dependency version does not yet exist.
+      - name: Publish
+        run: |
+          deno run --allow-read --allow-run=deno scripts/publish-packages.ts \
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}

@@ -465,6 +465,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   had enshrined — `env` was a `Map` cast to a `Record`, `subtle` was `null`, `randomBytes(n)`
   returned 0 bytes, and the timers were real rather than inert — plus a `MockRequest` whose `json()`
   returned an object body while `text()`/`bytes()` silently dropped it — complete (PR #78)
+- **Alpha release `v0.1.0-alpha.1`** — taken out of band before M34, on `release/v0.1.0-alpha.1`
+  (not a milestone, so not a `feat/…` branch). All 40 workspace members bumped to `0.1.0-alpha.1`;
+  the 11 explicit `jsr:@hono-enterprise/{common,kernel}@^0.1.0` specifiers bumped alongside, because
+  a `^0.1.0` range does NOT match a prerelease and `deno publish` does not warn. **35 implemented
+  packages publish; the 5 stubs (`cli`, `sdk`, three starters) do not** — `deno publish` from the
+  workspace root would push all 40, so releases go through `scripts/publish-packages.ts`, which
+  walks an explicit dependency-ordered allow-list in `scripts/release-packages.ts` one package at a
+  time. `deno task release:verify <version>` guards the four things the gates cannot see (version
+  agreement, specifier resolvability, full workspace coverage, no stub in the list). Added a
+  `CHANGELOG.md`, a tag-triggered `.github/workflows/release.yml`, and the 23 missing package
+  READMEs. **JSR versions are immutable** — yankable, never deletable or replaceable.
 - **Next milestone** — **Milestone 34** (`packages/cli` — CLI scaffolding and management tooling);
   continues the main plugin sequence (M34–M40 follow) unless reprioritized.
 
