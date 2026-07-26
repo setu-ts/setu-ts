@@ -165,10 +165,16 @@ const app = createApplication({ plugins: [RuntimePlugin()] });
 
 app.router.get('/users', (ctx) => ctx.response.json([{ id: 1 }]));
 
+await app.start();
+
 const response = await app.inject({ method: 'GET', url: '/users' });
 console.log(response.statusCode); // 200
 console.log(response.json()); // [{ id: 1 }]
 ```
+
+For testing, prefer [`createTestApp()`](packages/testing/src/test-app.ts:1) — it calls `start()`
+automatically (without binding a socket), so you can call `inject()` or `fetch()` directly. See the
+[Testing Package section](#testing-package) for the full API.
 
 ---
 

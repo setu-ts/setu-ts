@@ -3378,10 +3378,10 @@ const testApp = await createTestApp({
 
 ### Deliverables
 
-- [ ] Test app factory
-- [ ] Mock plugin utility
-- [ ] Request injection
-- [ ] Full test coverage
+- [x] Test app factory
+- [x] Mock plugin utility
+- [x] Request injection
+- [x] Full test coverage
 
 ---
 
