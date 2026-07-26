@@ -13,7 +13,14 @@
 export interface FlagContext {
   /** The user the flag is evaluated for. */
   readonly userId?: string;
-  /** Additional targeting attributes. */
+  /**
+   * Additional targeting attributes.
+   *
+   * The built-in evaluation path accepts these but does not read them — only
+   * `userId` participates in allowlist and percentage targeting. They are
+   * carried through for a custom provider that implements its own targeting
+   * rules.
+   */
   readonly attributes?: Readonly<Record<string, string | number | boolean>>;
 }
 
