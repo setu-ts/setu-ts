@@ -39,6 +39,36 @@ env JSR_TOKEN=jsrp_… deno task release:create-packages
 The script is idempotent — packages that already exist are reported and skipped — so it is safe to
 re-run after a partial failure. Pass `--dry-run` to see what it would create without a token.
 
+#### The weekly package-creation quota
+
+**A scope may create only 20 new packages per rolling 7-day window by default.** This release needs
+35, so the first run stops two-thirds of the way through:
+
+```
+[21/35] FAILED @hono-enterprise/metrics-plugin — HTTP 400: {
+  "code": "weeklyPackageLimitExceeded",
+  "message": "Exceeded weekly limit of 20 new packages for scope."
+}
+```
+
+No dry run can predict this — the quota is only evaluated on a real write.
+
+Request an increase at `https://jsr.io/@hono-enterprise/~/settings` → **Quotas** → _Request scope
+quota increase_. Choose **New packages per week** (not _Total packages_, which is a different quota)
+and give a concrete reason: what the scope is, why it is many small packages, and the exact package
+names still needed. Requests are reviewed by a human, so vague ones stall.
+
+The scope's three quotas and what they mean for a 35-package release:
+
+| Quota                     | Default | Relevance                                                     |
+| ------------------------- | ------- | ------------------------------------------------------------- |
+| Total packages            | 100     | Fine — 35 fits.                                               |
+| New packages per week     | **20**  | **The constraint.** Blocks any release creating more than 20. |
+| Publish attempts per week | 1000    | Fine — 35 versions is nothing.                                |
+
+If the increase is declined, the window is rolling: packages created together free up together, so
+waiting a week lets the remaining batch be created in one go.
+
 ### 3. Link the GitHub repository
 
 For each package, or via scope settings, link `dkpaul91/hono-enterprise` in JSR. This is what lets

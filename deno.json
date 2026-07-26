@@ -49,7 +49,7 @@
     "audit": "deno audit --level=high",
     "publish:check": "deno publish --dry-run",
     "release:verify": "deno run --allow-read scripts/verify-release.ts",
-    "release:create-packages": "deno run --allow-read --allow-env=JSR_TOKEN --allow-net=api.jsr.io scripts/create-jsr-packages.ts",
+    "release:create-packages": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/create-jsr-packages.ts",
     "release:publish": "deno run --allow-read --allow-env=JSR_TOKEN --allow-run=deno scripts/publish-packages.ts",
     "lint": "deno lint",
     "fmt": "deno fmt",
