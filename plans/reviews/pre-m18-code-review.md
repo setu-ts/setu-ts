@@ -200,7 +200,7 @@ Cheap sweeps already run, so no part wastes time re-deriving them:
 |    1 | `fix/review-p1-common`         | merge-ready | #72 |
 |    2 | `fix/review-p2-kernel-runtime` | merge-ready | #73 |
 |    3 | `fix/review-p3-request-path`   | merge-ready | #74 |
-|    4 | `fix/review-p4-data`           | merge-ready | —   |
+|    4 | `fix/review-p4-data`           | merge-ready | #75 |
 |    5 | —                              | not started | —   |
 |    6 | —                              | not started | —   |
 
