@@ -198,7 +198,7 @@ Cheap sweeps already run, so no part wastes time re-deriving them:
 | Part | Branch                         | Verdict     | PR  |
 | ---: | ------------------------------ | ----------- | --- |
 |    1 | `fix/review-p1-common`         | merge-ready | #72 |
-|    2 | `fix/review-p2-kernel-runtime` | merge-ready | —   |
+|    2 | `fix/review-p2-kernel-runtime` | merge-ready | #73 |
 |    3 | —                              | not started | —   |
 |    4 | —                              | not started | —   |
 |    5 | —                              | not started | —   |
