@@ -186,4 +186,85 @@ describe('runJob', () => {
       });
     });
   });
+
+  // Retro review (Part 5): the processor's error was caught to drive
+  // requeue/dead-letter and then DISCARDED, so a failing job was silent —
+  // nothing logged the reason anywhere.
+  describe('failure reporting', () => {
+    it('reports the retry with the job context and the error', async () => {
+      const reported: Array<{
+        message: string;
+        error: unknown;
+        meta: Record<string, unknown> | undefined;
+      }> = [];
+      const job: StoredJob<{ x: number }> = {
+        id: 'j1',
+        name: 'send-email',
+        data: { x: 1 },
+        attempts: 1,
+        maxAttempts: 3,
+        availableAtMs: 0,
+      };
+
+      await runJob(
+        runtime,
+        adapter,
+        job,
+        () => {
+          throw new Error('smtp refused');
+        },
+        (message, error, meta) => reported.push({ message, error, meta }),
+      );
+
+      expect(reported).toHaveLength(1);
+      expect(reported[0].message).toContain('retrying');
+      expect((reported[0].error as Error).message).toBe('smtp refused');
+      expect(reported[0].meta).toEqual({
+        job: 'j1',
+        name: 'send-email',
+        attempts: 1,
+        maxAttempts: 3,
+        retryInMs: 2000,
+      });
+    });
+
+    it('reports the dead-letter at the final attempt', async () => {
+      const reported: string[] = [];
+      const job: StoredJob<{ x: number }> = {
+        id: 'j2',
+        name: 'send-email',
+        data: { x: 1 },
+        attempts: 3,
+        maxAttempts: 3,
+        availableAtMs: 0,
+      };
+
+      await runJob(
+        runtime,
+        adapter,
+        job,
+        () => {
+          throw new Error('still failing');
+        },
+        (message) => reported.push(message),
+      );
+
+      expect(reported).toEqual(['queue job failed — dead-lettered']);
+    });
+
+    it('works without a report sink (the parameter is optional)', async () => {
+      const job: StoredJob<{ x: number }> = {
+        id: 'j3',
+        name: 'send-email',
+        data: { x: 1 },
+        attempts: 1,
+        maxAttempts: 3,
+        availableAtMs: 0,
+      };
+      await runJob(runtime, adapter, job, () => {
+        throw new Error('boom');
+      });
+      expect(adapter.requeueCalls).toHaveLength(1);
+    });
+  });
 });

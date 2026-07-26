@@ -383,4 +383,99 @@ describe('QueuePlugin integration', () => {
     const health = await ctx.health.check();
     expect(health['queue']?.status).toBe('down');
   });
+
+  // Retro review (Part 5): a failing job used to be completely silent — the
+  // error was caught to drive requeue/dead-letter and then discarded, and both
+  // background loops swallowed theirs into an empty catch.
+  it('reports a failing job through the registered logger capability', async () => {
+    const entries: Array<{ level: string; message: string; meta?: Record<string, unknown> }> = [];
+    const logger = {
+      fatal: () => {},
+      error: (message: string, meta?: Record<string, unknown>) =>
+        entries.push({ level: 'error', message, ...(meta !== undefined && { meta }) }),
+      warn: (message: string, meta?: Record<string, unknown>) =>
+        entries.push({ level: 'warn', message, ...(meta !== undefined && { meta }) }),
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      level: 'info' as const,
+      child: () => logger,
+    };
+    ctx.services.register('logger', logger);
+
+    const plugin = QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS });
+    await plugin.register(ctx as never);
+    const queue = ctx.services.get<IQueue>('queue');
+
+    queue.process('send-email', () => {
+      throw new Error('smtp refused');
+    });
+    await queue.add('send-email', { to: 'ada@example.com' });
+    await runtime.advanceMs(POLL_MS * 2);
+
+    const failure = entries.find((e) => e.message.includes('queue job failed'));
+    expect(failure).toBeDefined();
+    expect(failure!.level).toBe('error');
+    expect(failure!.meta?.error).toBe('smtp refused');
+    expect(failure!.meta?.name).toBe('send-email');
+  });
+
+  it('keeps running when no logger is registered', async () => {
+    const plugin = QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS });
+    await plugin.register(ctx as never);
+    const queue = ctx.services.get<IQueue>('queue');
+
+    const seen: number[] = [];
+    queue.process('t', (job) => {
+      seen.push(job.attempts);
+      throw new Error('always fails');
+    });
+    await queue.add('t', {}, { maxAttempts: 1 });
+    await runtime.advanceMs(POLL_MS * 3);
+
+    // Delivered once, dead-lettered, no crash, nothing logged anywhere.
+    expect(seen).toEqual([1]);
+  });
+
+  it('survives a logger that itself throws, and reports a non-Error throw', async () => {
+    const seen: string[] = [];
+    let first = true;
+    const logger = {
+      fatal: () => {},
+      error: (message: string, meta?: Record<string, unknown>) => {
+        if (first) {
+          first = false;
+          throw new Error('logger exploded');
+        }
+        seen.push(`${message}:${String(meta?.error)}`);
+      },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      level: 'info' as const,
+      child: () => logger,
+    };
+    ctx.services.register('logger', logger);
+
+    const plugin = QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS });
+    await plugin.register(ctx as never);
+    const queue = ctx.services.get<IQueue>('queue');
+
+    // First failure: the logger throws. The worker loop must keep going.
+    queue.process('a', () => {
+      throw new Error('first');
+    });
+    await queue.add('a', {}, { maxAttempts: 1 });
+    await runtime.advanceMs(POLL_MS * 2);
+
+    // Second failure throws a NON-Error value, which must still be reported.
+    queue.process('b', () => {
+      throw 'plain string';
+    });
+    await queue.add('b', {}, { maxAttempts: 1 });
+    await runtime.advanceMs(POLL_MS * 2);
+
+    expect(seen.some((entry) => entry.includes('plain string'))).toBe(true);
+  });
 });

@@ -248,4 +248,27 @@ describe('RequestReplyCore', () => {
     const inboxSubs = t.subscribers.get('rr.inbox.id-0') ?? [];
     expect(inboxSubs.length).toBe(1);
   });
+
+  it('recovers when the first inbox subscribe fails', async () => {
+    const transport = new FakeTransport();
+    let failNext = true;
+    const originalSubscribe = transport.subscribe.bind(transport);
+    transport.subscribe = (topic: string, handler: Handler): Promise<ISubscription> => {
+      if (failNext) {
+        failNext = false;
+        return Promise.reject(new Error('broker down'));
+      }
+      return originalSubscribe(topic, handler);
+    };
+
+    const core = new RequestReplyCore(transport);
+
+    // First request fails while the broker is down.
+    await expect(core.request('topic', { a: 1 })).rejects.toThrow('broker down');
+
+    // The broker is back. A cached rejected inbox promise would make every
+    // later request fail with the same stale error forever.
+    await core.respond('topic', (msg) => ({ echo: msg }));
+    await expect(core.request('topic', { a: 1 })).resolves.toEqual({ echo: { a: 1 } });
+  });
 });

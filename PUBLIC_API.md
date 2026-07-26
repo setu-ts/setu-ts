@@ -2432,6 +2432,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`AddJobOptions`** — Options for `queue.add()` (re-exported)
 - **`ProcessOptions`** — Options for `queue.process()` (re-exported)
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
+- **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
+  through (structurally compatible with `ILogger`)
 
 ### Registration
 
@@ -2539,6 +2541,14 @@ await queue.addRecurring('cleanup-old-sessions', {}, hourlyOptions);
 // Every day at 9 AM
 await queue.addRecurring('daily-report', { type: 'summary' }, { cron: '0 9 * * *' });
 ```
+
+### Failure Reporting
+
+The worker loop, the recurring-schedule loop, and the job runner all report failures through the
+`logger` capability when one is registered — a failing job logs at `error` with the job id, name,
+attempt count and the retry delay (or the dead-letter decision), and an adapter outage logs the poll
+failure. Nothing is required: with no `LoggerPlugin` registered the queue keeps running and reports
+nowhere, and a throwing logger can never take the worker loop down.
 
 ### Dead-Lettered Jobs
 
