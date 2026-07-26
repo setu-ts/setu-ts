@@ -53,17 +53,18 @@ function createFakeDenoHost(overrides: Partial<DenoHost> = {}): DenoHost {
       }
       return Promise.reject(new Error(`ENOENT: ${path}`));
     },
-    readdir: (path: string) => {
+    // Async generator, mirroring the real `Deno.readDir` (an AsyncIterable) —
+    // a sync-iterable double here would hide the fact that `for await` is
+    // required, which is exactly how the broken call slipped through.
+    readDir: async function* (path: string) {
       if (!dirs.has(path)) {
-        return [];
+        return;
       }
-      const entries: { name: string }[] = [];
       for (const key of files.keys()) {
         if (key.startsWith(path + '/')) {
-          entries.push({ name: key.split('/').pop()! });
+          yield { name: key.split('/').pop()! };
         }
       }
-      return entries;
     },
     mkdir: (path: string) => {
       dirs.add(path);
@@ -238,7 +239,7 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
           size: 0,
           mtime: null,
         }),
-      readdir: () => [],
+      readDir: async function* () {},
       mkdir: () => Promise.resolve(),
       remove: () => Promise.resolve(),
     };
@@ -246,5 +247,36 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
     const info = await services.fs!.stat('/any');
     expect(info.isFile).toBe(true);
     expect('mtime' in info).toBe(false);
+  });
+
+  // The default host is the REAL `Deno` global. Every test above injects a
+  // fake, which is how a call to the non-existent `Deno.readdir` (the real API
+  // is `Deno.readDir`, an AsyncIterable) survived: the fake defined whatever
+  // member the adapter happened to call. This exercises the real global.
+  describe('default host (real Deno global)', () => {
+    it('fs.readdir lists a real directory through Deno.readDir', async () => {
+      const services = createDenoRuntimeServices();
+      // Read-only: the suite runs without --allow-write, so list a directory
+      // that is already in the repo rather than creating a temp one.
+      const entries = await services.fs!.readdir('packages/runtime/src');
+      expect(entries).toContain('index.ts');
+      expect(entries).toContain('adapters');
+    });
+
+    it('fs.stat and fs.readFile work through the real Deno global', async () => {
+      const services = createDenoRuntimeServices();
+      const info = await services.fs!.stat('packages/runtime/deno.json');
+      expect(info.isFile).toBe(true);
+      expect(info.size).toBeGreaterThan(0);
+      const bytes = await services.fs!.readFile('packages/runtime/deno.json');
+      expect(new TextDecoder().decode(bytes)).toContain('@hono-enterprise/runtime');
+    });
+
+    it('reports the real platform, version, and hostname through the real global', () => {
+      const services = createDenoRuntimeServices();
+      expect(services.platform()).toBe('deno');
+      expect(services.version()).toBe(Deno.version.deno);
+      expect(typeof services.hostname()).toBe('string');
+    });
   });
 });

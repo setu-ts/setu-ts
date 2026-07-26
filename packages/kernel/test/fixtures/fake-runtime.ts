@@ -14,6 +14,13 @@ import type {
 
 import type { IRequest } from '@hono-enterprise/common';
 
+/**
+ * Wall-clock origin for the fake `now()`. Any fixed epoch works; the point is
+ * that it is nowhere near the monotonic `hrtime()` reading, so code that
+ * subtracts one from the other produces an obviously wrong number.
+ */
+const EPOCH_BASE = 1_700_000_000_000;
+
 export interface FakeRuntimeOptions {
   /** Seed value for UUID counter. */
   uuidSeed?: number;
@@ -58,7 +65,12 @@ export function createFakeRuntime(options: FakeRuntimeOptions = {}): {
         // Return a minimal SubtleCrypto stub — tests shouldn't use this
         throw new Error('SubtleCrypto not implemented in fake runtime');
       },
-      now: () => clock,
+      // The two clocks are deliberately DIFFERENT magnitudes, matching the real
+      // runtime: `now()` is a wall-clock epoch (~1.7e12) and `hrtime()` is a
+      // small monotonic reading. A fixture that returned the same number for
+      // both made clock-mixing bugs (`Date.now() - ctx.startTime`, or a
+      // duration budget measured with `now()`) pass silently.
+      now: () => EPOCH_BASE + clock,
       hrtime: () => clock,
       setTimeout: (fn: () => void, ms: number): TimerHandle => {
         timerId++;

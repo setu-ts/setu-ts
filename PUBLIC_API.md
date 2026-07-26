@@ -1502,8 +1502,8 @@ Omitting an option disables that behaviour (no timer created).
   messaging capability.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
-- The `inject()` method discards streaming bodies; SSE integration tests must use a real socket
-  (`app.start({ port })` + `fetch()`).
+- The `inject()` method cannot read a streaming body and throws when it meets one; SSE integration
+  tests must use a real socket (`app.start({ port })` + `fetch()`).
 
 ---
 
@@ -4956,7 +4956,7 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 | `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                        |
 | `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection           |
 | `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)        |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`) |
+| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`). `body` is text; a byte body from `response.send(bytes)` is UTF-8 decoded, and a streaming response makes `inject()` throw |
 
 Contract notes:
 
@@ -4996,6 +4996,7 @@ Cloudflare Workers.
 | `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
 | `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
 | `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
+| `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to real `node:` built-ins, which Bun implements) |
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
 | `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
 | `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
@@ -5048,12 +5049,13 @@ Per-runtime upgrade seams:
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
 | `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
-| `DenoDirEntry`                      | type | Directory entry returned by `DenoHost.readdir()`                               |
+| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`, matching `Deno.readDir`) |
 | `NodeHost`                          | type | Host interface for the Node adapter (extension point)                          |
 | `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                        |
 | `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                   |
 | `BunHost`                           | type | Host interface for the Bun adapter (extension point)                           |
 | `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                         |
+| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (`node:fs` sync, `node:os`, `node:process`, plus the `Bun` global for its version) |
 | `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                     |
 | `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                     |
 | `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                      |

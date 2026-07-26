@@ -34,8 +34,12 @@ export interface DenoHost {
   writeFile(path: string, data: Uint8Array): Promise<void>;
   /** Get file/directory info. */
   stat(path: string): Promise<DenoFileInfo>;
-  /** List directory entries. */
-  readdir(path: string): Iterable<DenoDirEntry>;
+  /**
+   * Lists directory entries. Named and shaped after the real API this host
+   * defaults to: `Deno.readDir` (capital `D`) returns an **async** iterable,
+   * so it must be consumed with `for await`.
+   */
+  readDir(path: string): AsyncIterable<DenoDirEntry>;
   /** Create a directory. */
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   /** Remove a file or directory. */
@@ -77,12 +81,12 @@ export function createDenoRuntimeServices(
         size: info.size,
         ...(info.mtime !== null ? { mtime: info.mtime } : {}),
       })),
-    readdir: (path: string) => {
+    readdir: async (path: string) => {
       const entries: string[] = [];
-      for (const entry of host.readdir(path)) {
+      for await (const entry of host.readDir(path)) {
         entries.push(entry.name);
       }
-      return Promise.resolve(entries as readonly string[]);
+      return entries as readonly string[];
     },
     mkdir: (path: string, options?: { readonly recursive?: boolean }) => host.mkdir(path, options),
     rm: (path: string, options?: { readonly recursive?: boolean }) => host.remove(path, options),
