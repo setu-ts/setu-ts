@@ -3883,6 +3883,16 @@ app.router.post('/users', {
 });
 ```
 
+### Notes
+
+- Every `RouteSchema` position the generator reads becomes part of the operation: `body` becomes the
+  `application/json` request body, `response` becomes the responses map, `tags`/`summary` become the
+  operation metadata, and `params`, `query`, and `headers` become `parameters` with `in: 'path'`,
+  `in: 'query'`, and `in: 'header'` respectively. Path parameters are always `required: true` (they
+  come from the path template); query and header parameters take their `required` flag from the
+  schema. Header parameters are emitted verbatim — per OpenAPI 3.1, tooling ignores definitions
+  named `Accept`, `Content-Type`, and `Authorization`, so the generator does not filter them out.
+
 ### Accessing the Spec
 
 ```typescript

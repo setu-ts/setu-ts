@@ -309,7 +309,8 @@ export class OpenApiGenerator {
   }
 
   /**
-   * Builds parameters from params and query schemas.
+   * Builds parameters from the route's `params`, `query`, and `headers`
+   * schemas, in that order.
    *
    * @param route - Route information
    * @returns Array of parameters
@@ -353,6 +354,24 @@ export class OpenApiGenerator {
           name,
           in: 'query',
           required: !isOptional,
+          schema: propSchema,
+        });
+      }
+    }
+
+    // Header parameters, from the route's `headers` schema. Emitted verbatim:
+    // per OpenAPI 3.1, tooling ignores definitions named `Accept`,
+    // `Content-Type`, and `Authorization`, so filtering them here would only
+    // hide what the route actually declared.
+    if (schema?.headers) {
+      const headerObj = this.#transformer.transform(schema.headers);
+      const headerProps = headerObj.properties ?? {};
+      const headerRequired = headerObj.required ?? [];
+      for (const [name, propSchema] of Object.entries(headerProps)) {
+        parameters.push({
+          name,
+          in: 'header',
+          required: headerRequired.includes(name),
           schema: propSchema,
         });
       }

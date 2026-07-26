@@ -19,7 +19,13 @@ export interface NotificationMessage {
   readonly subject?: string;
   /** Notification body. */
   readonly body: string;
-  /** Channel-specific extras. */
+  /**
+   * Channel-specific extras.
+   *
+   * The four built-in channels (email, sms, push, slack) accept these but do
+   * not read them; they exist for custom channel implementations registered
+   * alongside the built-ins.
+   */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

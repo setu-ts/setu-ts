@@ -127,6 +127,19 @@ export const CAPABILITIES = {
 export type StandardCapability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
 
 /**
+ * One kebab-case segment of a token: a lowercase letter, then lowercase
+ * alphanumerics, then any number of `-`-joined alphanumeric groups.
+ */
+const TOKEN_SEGMENT = '[a-z][a-z0-9]*(?:-[a-z0-9]+)*';
+
+/**
+ * The full token grammar: one or more {@linkcode TOKEN_SEGMENT}s joined by
+ * dots. Compiled once at module load rather than per
+ * {@linkcode createCapabilityToken} call.
+ */
+const TOKEN_PATTERN = new RegExp(`^${TOKEN_SEGMENT}(?:\\.${TOKEN_SEGMENT})*$`);
+
+/**
  * Creates a custom capability token for third-party plugins.
  *
  * Tokens must be lowercase kebab-case (`my-capability`). Namespacing by
@@ -145,9 +158,7 @@ export type StandardCapability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES
  * @since 0.1.0
  */
 export function createCapabilityToken(name: string): CapabilityToken {
-  const segment = '[a-z][a-z0-9]*(?:-[a-z0-9]+)*';
-  const pattern = new RegExp(`^${segment}(?:\\.${segment})*$`);
-  if (!pattern.test(name)) {
+  if (!TOKEN_PATTERN.test(name)) {
     throw new TypeError(
       `Invalid capability token "${name}": tokens must be lowercase kebab-case, ` +
         `optionally namespaced with dots (e.g. "my-capability" or "vendor.my-capability").`,

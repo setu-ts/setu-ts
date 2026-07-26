@@ -24,7 +24,9 @@ export type HttpMethod =
 /**
  * JavaScript runtimes the framework can execute on.
  *
- * `cloudflare-workers` is reserved for the planned edge adapter.
+ * Every value has a runtime implementation: `node`, `deno`, and `bun` bind a
+ * socket through their HTTP adapter, while `cloudflare-workers` runs on the
+ * adapter's `fetch` entry point without `listen`.
  *
  * @since 0.1.0
  */

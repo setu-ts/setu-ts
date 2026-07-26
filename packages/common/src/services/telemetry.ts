@@ -7,27 +7,27 @@
  * to OTel types at the implementation seam.
  *
  * @module
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 /**
  * Span status — whether the span completed successfully or not.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export type SpanStatus = 'ok' | 'error' | 'unset';
 
 /**
  * The kind of span. Maps to OTel `SpanKind` at the implementation boundary.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export type SpanKind = 'internal' | 'server' | 'client' | 'producer' | 'consumer';
 
 /**
  * Attribute value — a span attribute can be a primitive or an array of primitives.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export type SpanAttributeValue =
   | string
@@ -38,7 +38,7 @@ export type SpanAttributeValue =
 /**
  * Options for span creation.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface SpanOptions {
   /** The span kind (defaults to `'internal'`). */
@@ -50,7 +50,7 @@ export interface SpanOptions {
    *
    * When set, the real implementation uses this as the OTel parent context.
    *
-   * @since 0.24.1
+   * @since 0.2.0
    */
   readonly parentContext?: TelemetryContext;
 }
@@ -58,7 +58,7 @@ export interface SpanOptions {
 /**
  * Opaque marker symbol for {@link TelemetryContext}.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export const TELEMETRY_CONTEXT_OPAQUE: unique symbol = Symbol.for(
   'he.telemetry.context',
@@ -73,7 +73,7 @@ export const TELEMETRY_CONTEXT_OPAQUE: unique symbol = Symbol.for(
  * Carries the W3C Trace Context fields extracted from incoming `traceparent`
  * / `tracestate` headers so the real `TracerHost` can use them to parent spans.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface TelemetryContext {
   /** Internal marker — consumers must not inspect this type. */
@@ -91,7 +91,7 @@ export interface TelemetryContext {
 /**
  * A span represents a single operation within a trace.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface ISpan {
   /**
@@ -136,7 +136,7 @@ export interface ISpan {
    * Used by the middleware to inject the span's own `traceparent` into the
    * response header so downstream hops see this server span as the parent.
    *
-   * @since 0.24.1
+   * @since 0.2.0
    */
   spanContext(): SpanContext;
 }
@@ -144,7 +144,7 @@ export interface ISpan {
 /**
  * The return type of {@link ISpan.spanContext}.
  *
- * @since 0.24.1
+ * @since 0.2.0
  */
 export interface SpanContext {
   /** 32-character lowercase hex trace ID. */
@@ -161,7 +161,7 @@ export interface SpanContext {
  * The `withSpan` method is the only manual span-creation API; it ensures
  * every span is ended in a `finally` block to prevent leaks.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface ITelemetryService {
   /**
