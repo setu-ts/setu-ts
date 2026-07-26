@@ -13,6 +13,7 @@
  */
 
 import type {
+  ILogger,
   IRuntimeServices,
   IWebSocketConnection,
   IWebSocketService,
@@ -34,6 +35,12 @@ import type { WebSocketPluginOptions } from '../interfaces/index.ts';
 
 /** Refused because the server is at its connection limit. */
 const STATUS_AT_CAPACITY = 503;
+/**
+ * Refused because route selection itself threw. Matches the status the
+ * adapter-side `UpgradeRouterStore` backstop uses, so a router failure looks
+ * the same on the wire wherever it was caught.
+ */
+const STATUS_ROUTER_FAILED = 500;
 /** Close code for a frame that exceeded the configured size limit. */
 const CLOSE_MESSAGE_TOO_BIG = 1009;
 /** Close code used when the server shuts down. */
@@ -107,6 +114,7 @@ export class WebSocketService implements IWebSocketService {
   readonly #connections = new Set<WebSocketConnection>();
   readonly #heartbeat: HeartbeatSweeper;
   readonly #available: boolean;
+  readonly #logger: ILogger | undefined;
   /**
    * Accepted upgrades that have neither opened nor closed yet — sockets still
    * completing their handshake. Counted alongside `#connections` when enforcing
@@ -122,11 +130,19 @@ export class WebSocketService implements IWebSocketService {
    * @param runtime - Runtime services (ids, monotonic clock, timers)
    * @param options - Resolved plugin options
    * @param available - Whether the HTTP adapter can perform upgrades
+   * @param logger - Optional logger used to report an upgrade-router failure;
+   *   the HTTP adapter that consults the router has no logger of its own
    */
-  constructor(runtime: IRuntimeServices, options: ResolvedOptions, available: boolean) {
+  constructor(
+    runtime: IRuntimeServices,
+    options: ResolvedOptions,
+    available: boolean,
+    logger?: ILogger,
+  ) {
     this.#runtime = runtime;
     this.#options = options;
     this.#available = available;
+    this.#logger = logger;
     this.#heartbeat = new HeartbeatSweeper(
       runtime,
       {
@@ -173,6 +189,12 @@ export class WebSocketService implements IWebSocketService {
    * route table, applies admission control, and builds the sink the adapter
    * binds its native socket into.
    *
+   * A failure here is reported through the logger before it is turned into a
+   * `500` refusal. The adapter-side `UpgradeRouterStore` also catches, but it
+   * runs inside `@hono-enterprise/runtime`, which has no logger and therefore
+   * has nowhere to put the cause — so the only place a routing bug can be made
+   * visible is here, at its source.
+   *
    * @param request - The native upgrade request
    * @returns The decision, or `null` when this is not a WebSocket route
    * @since 0.1.0
@@ -180,23 +202,44 @@ export class WebSocketService implements IWebSocketService {
   createUpgradeRouter(): (request: Request) => Promise<WebSocketUpgradeDecision | null> {
     // deno-lint-ignore require-await
     return async (request: Request): Promise<WebSocketUpgradeDecision | null> => {
-      const match = this.#routes.match(request);
-      if (match === null) {
-        return null;
+      try {
+        return this.#route(request);
+      } catch (error) {
+        this.#logger?.error('WebSocket upgrade routing failed', {
+          error,
+          url: request.url,
+        });
+        return { accept: false, status: STATUS_ROUTER_FAILED };
       }
-      if (!match.matched) {
-        return { accept: false, status: match.status };
-      }
-      // A slot is claimed the moment the upgrade is accepted, not when onOpen
-      // fires — see the #pending field.
-      if (
-        this.#options.maxConnections > 0 &&
-        this.#connections.size + this.#pending >= this.#options.maxConnections
-      ) {
-        return { accept: false, status: STATUS_AT_CAPACITY };
-      }
-      this.#pending++;
+    };
+  }
 
+  /**
+   * The routing decision itself, separated from the reporting wrapper so the
+   * happy path stays readable.
+   *
+   * @param request - The native upgrade request
+   * @returns The decision, or `null` when this is not a WebSocket route
+   */
+  #route(request: Request): WebSocketUpgradeDecision | null {
+    const match = this.#routes.match(request);
+    if (match === null) {
+      return null;
+    }
+    if (!match.matched) {
+      return { accept: false, status: match.status };
+    }
+    // A slot is claimed the moment the upgrade is accepted, not when onOpen
+    // fires — see the #pending field.
+    if (
+      this.#options.maxConnections > 0 &&
+      this.#connections.size + this.#pending >= this.#options.maxConnections
+    ) {
+      return { accept: false, status: STATUS_AT_CAPACITY };
+    }
+    this.#pending++;
+
+    try {
       // Snapshotted here, while the request is still live. The sink's onOpen
       // fires only after the adapter has answered the handshake, at which
       // point the runtime has already closed the native request and reading
@@ -207,7 +250,14 @@ export class WebSocketService implements IWebSocketService {
       return match.protocol === undefined
         ? { accept: true, sink }
         : { accept: true, sink, protocol: match.protocol };
-    };
+    } catch (error) {
+      // The slot was claimed a moment ago but no sink escaped, so nothing will
+      // ever call onOpen/onClose to settle it. Releasing it here is the only
+      // thing standing between a routing bug and a server that slowly starves
+      // its own maxConnections limit.
+      this.#pending--;
+      throw error;
+    }
   }
 
   /**

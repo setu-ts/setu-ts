@@ -10,8 +10,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { HandlerResult } from '@hono-enterprise/common';
-import type { LoadContextFunction, SsrRequestHandler } from '../../src/interfaces/index.ts';
+import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
+import { servicesContext, userContext } from '../../src/handler/context-keys.ts';
+import {
+  createFakeLoadContextFactory,
+  FakeRouterContextProvider,
+} from '../fixtures/fake-handler.ts';
 
 describe('request-bridge', () => {
   // Build a minimal IRequestContext mock capturing response state.
@@ -125,7 +130,7 @@ describe('request-bridge', () => {
     };
 
     const { ctx } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(receivedMethod).toBe('GET');
     expect(hasBody).toBe(false);
@@ -141,7 +146,7 @@ describe('request-bridge', () => {
     };
 
     const { ctx } = buildCtx({ method: 'POST', body: postBody });
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(receivedBody).toBe(JSON.stringify({ key: 'val' }));
   });
@@ -156,7 +161,7 @@ describe('request-bridge', () => {
       );
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(respState.status).toBe(200);
   });
@@ -178,7 +183,7 @@ describe('request-bridge', () => {
       );
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(respState.streamed).toBe(true);
   });
@@ -193,7 +198,7 @@ describe('request-bridge', () => {
     };
 
     const { ctx, respState } = buildCtx({ method: 'GET' });
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(respState.setCookies).toContain('session=abc; HttpOnly');
     expect(respState.setCookies).toContain('token=xyz; Secure');
@@ -215,27 +220,73 @@ describe('request-bridge', () => {
     ctx.request.headers.set('Content-Type', 'application/json');
     (ctx.request as { url: string }).url = 'http://localhost/foo?bar=1';
 
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(receivedMethod).toBe('POST');
     expect(receivedUrl).toBe('http://localhost/foo?bar=1');
     expect(receivedContentType).toBe('application/json');
   });
 
-  it('custom LoadContextFunction is passed through', async () => {
+  it('passes the provider built by the factory, not a plain object', async () => {
+    // Regression: react-router@8 answers 500 Unexpected Server Error unless the
+    // context is a real RouterContextProvider instance.
     let capturedContext: unknown = null;
 
-    const handler: SsrRequestHandler = (_req, ctx) => {
-      capturedContext = ctx;
+    const handler: SsrRequestHandler = (_req, loadContext) => {
+      capturedContext = loadContext;
       return Promise.resolve(new Response('ok'));
     };
 
-    const customLc: LoadContextFunction = (_c: unknown) => ({ custom: 'http://localhost/' });
     const { ctx } = buildCtx({ method: 'GET' });
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
-    await bridgeRequestToRR(ctx, handler, customLc);
+    expect(capturedContext).toBeInstanceOf(FakeRouterContextProvider);
+  });
 
-    expect(capturedContext).toEqual({ custom: 'http://localhost/' });
+  it('populateLoadContext augments the defaults rather than replacing them', async () => {
+    const requestIdContext = { defaultValue: null } as { defaultValue: string | null };
+    let capturedContext: FakeRouterContextProvider | null = null;
+
+    const handler: SsrRequestHandler = (_req, loadContext) => {
+      capturedContext = loadContext as FakeRouterContextProvider;
+      return Promise.resolve(new Response('ok'));
+    };
+
+    const populate: PopulateLoadContext = (c, context) => {
+      context.set(requestIdContext, c.id);
+    };
+
+    const { ctx } = buildCtx({ method: 'GET' });
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory(), populate);
+
+    expect(capturedContext).not.toBe(null);
+    // The app value landed...
+    expect(capturedContext!.get(requestIdContext)).toBe('r1');
+    // ...and the plugin defaults survived it.
+    expect(capturedContext!.get(servicesContext)).toBe(ctx.services);
+    expect(capturedContext!.get(userContext)).toBe(null);
+  });
+
+  it('builds a fresh provider per request so values never leak between requests', async () => {
+    const leakKey = { defaultValue: null } as { defaultValue: string | null };
+    const seen: (string | null)[] = [];
+    let first = true;
+
+    const handler: SsrRequestHandler = (_req, loadContext) => {
+      const context = loadContext as FakeRouterContextProvider;
+      seen.push(context.get(leakKey));
+      if (first) {
+        context.set(leakKey, 'from-request-1');
+        first = false;
+      }
+      return Promise.resolve(new Response('ok'));
+    };
+
+    const factory = createFakeLoadContextFactory();
+    await bridgeRequestToRR(buildCtx({ method: 'GET' }).ctx, handler, factory);
+    await bridgeRequestToRR(buildCtx({ method: 'GET' }).ctx, handler, factory);
+
+    expect(seen).toEqual([null, null]);
   });
 
   it('ctx.signal is wired into the web Request', async () => {
@@ -247,7 +298,7 @@ describe('request-bridge', () => {
       return Promise.resolve(new Response('ok'));
     };
 
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     // Signal was already connected; assert no thrown exception confirms wiring.
     expect(respState.status).toBe(200);
@@ -326,7 +377,7 @@ describe('request-bridge abort signal', () => {
       return Promise.resolve(new Response('ok'));
     };
 
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(receivedSignal).toBeDefined();
     expect(receivedSignal!.aborted).toBe(false);
@@ -344,7 +395,7 @@ describe('request-bridge abort signal', () => {
     // Abort BEFORE awaiting handler
     controller.abort();
 
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     expect(receivedSignal).toBeDefined();
     expect(receivedSignal!.aborted).toBe(true);
@@ -432,7 +483,7 @@ describe('request-bridge multi-value headers', () => {
 
     const handler: SsrRequestHandler = () => Promise.resolve(resp);
 
-    await bridgeRequestToRR(ctx, handler, undefined);
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
 
     // appendHeader ensures all values arrive; the capture shows the combined value.
     const values = capturedNonCookieHeaders.get('x-custom');

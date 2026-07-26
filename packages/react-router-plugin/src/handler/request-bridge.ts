@@ -8,10 +8,11 @@
 import type { HandlerResult } from '@hono-enterprise/common';
 import type {
   IRequestContext,
-  LoadContextFunction,
+  PopulateLoadContext,
+  RouterLoadContext,
   SsrRequestHandler,
 } from '../interfaces/index.ts';
-import { createDefaultLoadContext } from './load-context.ts';
+import { applyDefaultLoadContext } from './load-context.ts';
 
 /**
  * Bridges a kernel `IRequestContext` into a web `Request`, invokes the RR
@@ -21,17 +22,22 @@ import { createDefaultLoadContext } from './load-context.ts';
  *
  * @param ctx - The kernel request context
  * @param handler - The React Router request handler
- * @param getLoadContext - Optional custom loadContext builder
+ * @param createLoadContext - Factory for the per-request context provider
+ * @param populateLoadContext - Optional hook adding app values to the context
  * @returns The `HandlerResult` produced by writing the response back
  * @since 0.1.0
  */
 export async function bridgeRequestToRR(
   ctx: IRequestContext,
   handler: SsrRequestHandler,
-  getLoadContext: LoadContextFunction | undefined,
+  createLoadContext: () => RouterLoadContext,
+  populateLoadContext?: PopulateLoadContext,
 ): Promise<HandlerResult> {
-  // Build the loadContext — default exposes services + user.
-  const loadContext = (getLoadContext ?? createDefaultLoadContext)(ctx);
+  // A fresh provider per request — React Router requires a real
+  // `RouterContextProvider` instance and rejects anything else with a 500.
+  const loadContext = createLoadContext();
+  applyDefaultLoadContext(ctx, loadContext);
+  populateLoadContext?.(ctx, loadContext);
 
   // Buffer the body only for methods that carry one. A web `Request` throws
   // when constructed with a GET/HEAD method and a non-null body, so the body

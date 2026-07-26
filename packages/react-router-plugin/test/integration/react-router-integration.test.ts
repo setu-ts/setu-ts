@@ -19,7 +19,8 @@ import type { IPluginContext, RouteHandler } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
-import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
+import type { SsrRequestHandler, SsrRuntime } from '../../src/interfaces/index.ts';
+import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
 
 type RouterMethod = (p: string, h: RouteHandler) => void;
 
@@ -51,8 +52,9 @@ async function readAll(body: ReadableStream<Uint8Array>): Promise<string> {
 /** A fake `loadRequestHandler` that always resolves to `handler`. */
 function fakeLoader(
   handler: SsrRequestHandler,
-): (path: string, mode: string) => Promise<SsrRequestHandler> {
-  return (_path, _mode) => Promise.resolve(handler);
+): (path: string, mode: string) => Promise<SsrRuntime> {
+  return (_path, _mode) =>
+    Promise.resolve({ handler, createLoadContext: createFakeLoadContextFactory() });
 }
 
 describe('react-router integration (real socket)', () => {
@@ -207,10 +209,11 @@ describe('react-router integration (real socket)', () => {
       serverBuildPath: './build/server',
       assetsDir: './build/client',
       // deno-lint-ignore require-await
-      loadRequestHandler: async (_path: string, _mode: string) => {
+      loadRequestHandler: async (_path: string, _mode: string) => ({
         // deno-lint-ignore require-await
-        return async () => new Response('ok');
-      },
+        handler: async () => new Response('ok'),
+        createLoadContext: createFakeLoadContextFactory(),
+      }),
     });
 
     await plugin.register(mockCtx as never);
@@ -228,10 +231,11 @@ describe('react-router integration (real socket)', () => {
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
       // deno-lint-ignore require-await
-      loadRequestHandler: async (_path: string, _mode: string) => {
+      loadRequestHandler: async (_path: string, _mode: string) => ({
         // deno-lint-ignore require-await
-        return async () => new Response('<html>ok</html>');
-      },
+        handler: async () => new Response('<html>ok</html>'),
+        createLoadContext: createFakeLoadContextFactory(),
+      }),
     });
 
     const routes: Map<string, RouteHandler[]> = new Map();

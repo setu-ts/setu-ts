@@ -17,7 +17,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
 import { createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
-import { loadRequestHandler } from '../handler/server-build.ts';
+import { assertSsrRuntime, loadRequestHandler } from '../handler/server-build.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'react-router-plugin';
@@ -87,17 +87,23 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
     async register(ctx: IPluginContext): Promise<void> {
       const runtime = ctx.runtime;
 
-      // Resolve the RR handler via the injectable seam.
+      // Resolve the RR handler and its context-provider factory via the
+      // injectable seam. Both come from one `react-router` module object.
       const mode = options.mode ?? DEFAULT_MODE;
       const getLoadRequestHandler = options.loadRequestHandler ??
         loadRequestHandler;
-      const handler = await getLoadRequestHandler(
-        options.serverBuildPath,
-        mode,
+      // Validated at registration: a seam returning the pre-0.2.0 bare handler
+      // would otherwise register cleanly and 500 on every request instead.
+      const { handler, createLoadContext } = assertSsrRuntime(
+        await getLoadRequestHandler(options.serverBuildPath, mode),
       );
 
       // Build and register the SSR service.
-      const ssrService = new SsrService(handler, options.getLoadContext);
+      const ssrService = new SsrService(
+        handler,
+        createLoadContext,
+        options.populateLoadContext,
+      );
       ctx.services.register<ISsrService>(CAPABILITIES.SSR, ssrService);
 
       // Register the SSR catch-all route for all 7 verbs. The route handler is

@@ -146,8 +146,8 @@ describe('PinoLogger', () => {
   it('throws when Pino cannot be loaded and no factory injected', async () => {
     // Guard: only run when pino is NOT installed (the error path).
     try {
-      // deno-lint-ignore no-unversioned-import -- pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      await import('npm:pino');
+      // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
+      await import('npm:pino@10.x');
       return; // pino IS installed — skip this test
     } catch {
       // pino not available — the error path should be exercised.
@@ -222,8 +222,8 @@ describe('PinoLogger', () => {
   it('loads real Pino via import when no factory injected', async () => {
     // Guard: skip if pino is not installed in this environment.
     try {
-      // deno-lint-ignore no-unversioned-import -- pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      await import('npm:pino');
+      // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
+      await import('npm:pino@10.x');
     } catch {
       // Pino not available — skip this test rather than failing.
       return;

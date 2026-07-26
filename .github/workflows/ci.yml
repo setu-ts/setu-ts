@@ -31,16 +31,45 @@ jobs:
       - name: Test with coverage
         run: deno task test:coverage
 
+  publish-dry-run:
+    name: JSR publish dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Validates every workspace package against JSR's publish rules without
+      # publishing: exports resolve, package metadata is complete, and the
+      # public API is free of "slow types". Slow types block JSR's automatic
+      # .d.ts generation, which is precisely what the Node and Bun compat jobs
+      # below will consume — so this job is the upstream gate for both.
+      #
+      # No --allow-dirty: a fresh checkout is clean, and a dirty tree here
+      # would mean a previous step mutated the working copy.
+      - name: Publish dry-run
+        run: deno task publish:check
+
   node-compat:
     name: Node compatibility (stub)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Once packages are published (or `jsr publish --dry-run` artifacts are
-      # available), this job installs them via JSR's npm compatibility layer
-      # and runs the compat test suite under Node. See AI_GUIDELINES.md §4.5.
+      # BLOCKED ON FIRST PUBLISH. This job installs the packages via JSR's npm
+      # compatibility layer and runs the compat suite under Node
+      # (AI_GUIDELINES.md §4.5). It cannot run against the working tree:
+      # cross-package specifiers are `jsr:@hono-enterprise/*` and the optional
+      # heavy deps are imported as `npm:*`, neither of which Node resolves.
+      # JSR rewrites both at publish time, so the published artifact is the
+      # only thing that can be tested.
+      #
+      # Unblocks at the first (pre-)release publish to JSR. That must happen no
+      # later than Milestone 34, whose CLI generates `--runtime node|bun`
+      # projects that consume these packages from npm. See ROADMAP.md M34/M40.
       - name: Placeholder
-        run: echo "Node compat suite lands with Milestone 1 (first real package)."
+        run: echo "Node compat suite is blocked on the first JSR publish (see comment)."
 
   bun-compat:
     name: Bun compatibility (stub)
@@ -49,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
       # Same as node-compat, but running the compat suite under Bun.
       - name: Placeholder
-        run: echo "Bun compat suite lands with Milestone 1 (first real package)."
+        run: echo "Bun compat suite is blocked on the first JSR publish (see node-compat)."
 
   audit:
     name: Dependency vulnerability scan

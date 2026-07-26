@@ -1,9 +1,13 @@
 /**
  * Guarded REAL import test for `npm:react-router@8`.
  *
- * This is the single test that exercises the real `await import('npm:react-router@8')` path.
- * Skipped when the package is absent; when present, asserts the core export shape
- * and drives the default `loadRequestHandler` end-to-end with a synthetic build module.
+ * The first case exercises the real `await import('npm:react-router@8')` path and
+ * is genuinely SKIPPED when the package is unavailable. The remaining cases are
+ * pure `assembleHandler` checks that need no network — they assert the build
+ * unwrapping contract with a synthetic `ServerBuild`.
+ *
+ * The end-to-end drive of the default `loadRequestHandler` over a real import
+ * lives in `server-build-load-request-handler.test.ts`.
  *
  * @module
  */
@@ -12,24 +16,32 @@ import { expect } from '@std/expect';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { assembleHandler } from '../../src/handler/server-build.ts';
 
+// Resolved once at module load. A `throw new Error('SKIP: ...')` inside the test
+// would report a FAILURE, not a skip — the whole point of guarding is that an
+// absent optional dependency does not turn the suite red.
+let rrModule: Record<string, unknown> | null = null;
+try {
+  rrModule = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+} catch {
+  rrModule = null;
+}
+
 describe('server-build-real-import', () => {
-  it('real npm:react-router@8 import resolves and has createRequestHandler', async () => {
-    let _createRequestHandler: ((b: unknown, m?: string) => unknown) | undefined;
+  it(
+    'real npm:react-router@8 import resolves and has createRequestHandler',
+    { ignore: rrModule === null },
+    () => {
+      const createRequestHandler = rrModule?.createRequestHandler;
 
-    try {
-      const rr = await import('npm:react-router@8');
-      _createRequestHandler = rr.createRequestHandler as
-        | ((b: unknown, m?: string) => unknown)
-        | undefined;
-    } catch {
-      throw new Error('SKIP: npm:react-router not available');
-    }
+      expect(createRequestHandler).toBeDefined();
+      expect(typeof createRequestHandler).toBe('function');
+      // React Router 8 is required for the nominal context-provider check the
+      // plugin depends on, so assert that export is present too.
+      expect(typeof rrModule?.RouterContextProvider).toBe('function');
+    },
+  );
 
-    expect(_createRequestHandler).toBeDefined();
-    expect(typeof _createRequestHandler).toBe('function');
-  });
-
-  it('assembleHandler works with a synthetic ServerBuild (guarded)', () => {
+  it('assembleHandler works with a synthetic ServerBuild', () => {
     const fakeBuild = {
       __esModule: true,
       default: {
@@ -51,7 +63,7 @@ describe('server-build-real-import', () => {
     expect(typeof handler).toBe('function');
   });
 
-  it('default loadRequestHandler path unwraps .default from module namespace (guarded)', () => {
+  it('assembleHandler receives the unwrapped .default of a module namespace', () => {
     const syntheticBuild = {
       default: {
         bootstrapModules: [],
@@ -77,7 +89,6 @@ describe('server-build-real-import', () => {
       return async () => new Response('mock');
     };
 
-    // Call assembleHandler directly to verify the build shape passed is the .default.
     // deno-lint-ignore no-explicit-any
     const handler = assembleHandler(syntheticBuild.default, trackedCrh as any, 'production');
     expect(handler).toBeDefined();

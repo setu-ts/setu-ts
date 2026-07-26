@@ -3948,9 +3948,16 @@ app.register(ReactRouterPlugin({
   serverBuildPath: './build/server/index.js', // RR production server build
   assetsDir: './build/client', // hashed client assets + static files
   basename: '/', // mount point
-  getLoadContext: (ctx) => ({ services: ctx.services, user: ctx.request.user }),
+  // `servicesContext` and `userContext` are set automatically; this hook adds
+  // app values on top. React Router 8 requires a real RouterContextProvider,
+  // so the callback mutates the provider instead of returning an object.
+  populateLoadContext: (ctx, context) => context.set(tenantContext, ctx.state.get('tenant')),
 }));
 ```
+
+For a development loop with HMR and React Fast Refresh, see
+[docs/react-router-dev.md](docs/react-router-dev.md) — the app runs Vite in-process and injects a
+`loadRequestHandler` over a build thunk; no plugin change is required.
 
 **Behavior:**
 
@@ -3958,8 +3965,9 @@ app.register(ReactRouterPlugin({
   buffered body), invoke `createRequestHandler(build)`, and write the returned `Response` back —
   streaming via `IResponse.stream()` (M42) so Suspense/deferred data stream progressively; abort
   wired to `ctx.signal`.
-- `loadContext` bridge exposes `ctx.services` (DI), config, and `ctx.request.user` to RR loaders and
-  actions — the integration's core value.
+- `loadContext` bridge exposes `ctx.services` (DI) and `ctx.request.user` to RR loaders and actions
+  — the integration's core value — through the exported `servicesContext` / `userContext` keys on a
+  real `RouterContextProvider`, which React Router 8 checks nominally.
 - Static asset serving for `assetsDir` (hashed immutable assets, long-lived `Cache-Control`), built
   on `IRuntimeServices.readFile` + content-type — the only static-file handler in the tree; flagged
   as a candidate for later extraction into a shared static middleware.

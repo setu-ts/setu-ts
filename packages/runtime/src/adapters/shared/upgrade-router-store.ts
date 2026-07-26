@@ -44,6 +44,14 @@ export class UpgradeRouterStore {
    * down the serve loop, and the socket has not been touched at this point so
    * refusing is always safe (AI_GUIDELINES §11.7).
    *
+   * **The cause is deliberately discarded here, and a router is expected to
+   * report its own failures.** This module runs inside the HTTP adapter, which
+   * holds no logger and has no error channel to write to — so re-raising or
+   * stashing the cause would only move the silence somewhere less useful. The
+   * WebSocket plugin's router accordingly logs and returns its own `500`
+   * before this backstop is ever reached; this `catch` exists for a
+   * third-party router that does not.
+   *
    * @param request - The native, undisturbed request
    * @returns The decision, or `null` to fall through
    */

@@ -66,7 +66,10 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
       const adapter = ctx.services.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       const canUpgrade = typeof adapter.setUpgradeRouter === 'function';
 
-      const service = new WebSocketService(ctx.runtime, resolved, canUpgrade);
+      // `ctx.logger` is undefined when no logger capability is registered;
+      // `optionalDependencies` above is what orders the logger plugin ahead of
+      // this one so it is resolvable here.
+      const service = new WebSocketService(ctx.runtime, resolved, canUpgrade, ctx.logger);
       ctx.services.register<IWebSocketService>(CAPABILITIES.WEBSOCKET, service);
 
       if (canUpgrade) {
