@@ -440,7 +440,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `prefixCacheKey`; `tenantMiddleware` at priority 40; `multi-tenancy` health indicator; widening
   `common` with `IMultiTenancyService`, `ITenantRepository<Entity, Id>`, and `IRequest.tenant`;
   correcting ROADMAP ctx-less example, PUBLIC_API common row, ARCHITECTURE priority table per
-  C-series conflicts) — complete (PR pending)
+  C-series conflicts; post-implementation fixes: `SubdomainResolver`'s `baseDomain` now constrains
+  resolution instead of being ignored — `evil.com` resolved a tenant before; the memory store hands
+  out detached row snapshots and never allocates a partition on a read path; the committed
+  `prefixCacheKey` lost a third `separator?` parameter the implementation ignored; a real kernel-app
+  integration test was added because none existed; an empty resolver chain and a malformed injected
+  `dataStore` now fail at `register()` rather than per request; all 15 test files were converted
+  from the banned `Deno.test` to `describe`/`it` + `expect`) — complete (PR #71)
 - **Next milestone** — **Milestone 33** (`packages/testing` — test utilities); continues the main
   plugin sequence (M33–M40 follow) unless reprioritized.
 
