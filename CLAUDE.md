@@ -447,9 +447,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   integration test was added because none existed; an empty resolver chain and a malformed injected
   `dataStore` now fail at `register()` rather than per request; all 15 test files were converted
   from the banned `Deno.test` to `describe`/`it` + `expect`) — complete (PR #71)
-- **Milestone 33** (`packages/testing` — test utilities) — created `createTestApp`, `inject`,
-  `collectStream`, `MockServiceRegistry`, `createMockPlugin`, `createTestContext`, `FixtureManager`;
-  full test suite across unit/integration/e2e with 90%+ coverage per file — complete
+- **Milestone 33** (`packages/testing` — test utilities; depends on `common` + `kernel` only, no
+  plugin and no npm dep) — `createTestApp` wrapping `createApplication` + auto-`start()` with no
+  port (so `inject()`/`fetch()` work with no socket) plus an `autoStart: false` escape hatch;
+  `createMockPlugin` collapsing the `provides: [CAPABILITIES.RUNTIME]` plugin literal hand-rolled in
+  nine packages; a free-function `inject` accepting a URL string / `InjectRequest` / web `Request`;
+  `createTestContext` replicating the kernel's internal `createRequestContext` (monotonic
+  `startTime` via `hrtime()`, never `Date.now()`; live `AbortSignal`; `request.signal` > `signal` >
+  default precedence); `MockServiceRegistry` and `MockResponse` standing in for the kernel-internal
+  `ServiceRegistry`/`ResponseBuilder`; `FixtureManager`; and `collectStream` for reading a streaming
+  `fetch()` body incrementally. Two kernel constraints are load-bearing and documented rather than
+  worked around: `plugins` must include a `runtime` provider (the kernel makes it mandatory at
+  `start()` and this package cannot import `RuntimePlugin`), and global middleware needs
+  `autoStart: false` because `start()` compiles the pipeline. Verification corrected a committed
+  `PUBLIC_API.md` example that called `inject()` without `start()` (it throws), and
+  post-implementation review fixed contract-infidelities in the default test runtime that the tests
+  had enshrined — `env` was a `Map` cast to a `Record`, `subtle` was `null`, `randomBytes(n)`
+  returned 0 bytes, and the timers were real rather than inert — plus a `MockRequest` whose `json()`
+  returned an object body while `text()`/`bytes()` silently dropped it — complete (PR pending)
 - **Next milestone** — **Milestone 34** (`packages/cli` — CLI scaffolding and management tooling);
   continues the main plugin sequence (M34–M40 follow) unless reprioritized.
 

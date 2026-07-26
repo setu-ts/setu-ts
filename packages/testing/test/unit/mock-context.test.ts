@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { _getDefaults, createTestContext, MockResponse } from '../../src/mock-context.ts';
 import { MockServiceRegistry } from '../../src/mock-registry.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices, IServiceRegistry } from '@hono-enterprise/common';
 
 // Build a runtime fake where every accessor is verified individually.
 // This covers all DEFAULT_TEST_RUNTIME accessors plus any injected runtime.
@@ -148,9 +148,37 @@ describe('createTestContext', () => {
     expect(await ctx.request.bytes()).toEqual(new TextEncoder().encode('hello'));
   });
 
-  it('MockRequest.bytes() handles non-string body', async () => {
+  it('MockRequest.bytes() serializes a non-string body instead of dropping it', async () => {
     const ctx = createTestContext({ body: 42 });
-    expect(await ctx.request.bytes()).toEqual(new TextEncoder().encode(''));
+    expect(await ctx.request.bytes()).toEqual(new TextEncoder().encode('42'));
+  });
+
+  // All three readers must agree about what the request carries. Deriving each
+  // from the raw value independently previously let an object body answer
+  // json() correctly while text() returned '' and bytes() returned 0 bytes —
+  // a middleware reading text() and parsing it got a SyntaxError on a request
+  // whose json() worked fine.
+  it('MockRequest json()/text()/bytes() agree on an object body', async () => {
+    const ctx = createTestContext({ body: { a: 1 } });
+    expect(await ctx.request.json()).toEqual({ a: 1 });
+    expect(await ctx.request.text()).toBe('{"a":1}');
+    expect(await ctx.request.bytes()).toEqual(new TextEncoder().encode('{"a":1}'));
+    // The round-trip a handler would actually perform.
+    expect(JSON.parse(await ctx.request.text())).toEqual({ a: 1 });
+  });
+
+  it('MockRequest json()/text()/bytes() agree on an array body', async () => {
+    const ctx = createTestContext({ body: [1, 2] });
+    expect(await ctx.request.json()).toEqual([1, 2]);
+    expect(await ctx.request.text()).toBe('[1,2]');
+    expect(await ctx.request.bytes()).toEqual(new TextEncoder().encode('[1,2]'));
+  });
+
+  it('MockRequest with no body reads as empty text, empty bytes, empty json object', async () => {
+    const ctx = createTestContext();
+    expect(await ctx.request.text()).toBe('');
+    expect(await ctx.request.bytes()).toEqual(new Uint8Array(0));
+    expect(await ctx.request.json()).toEqual({});
   });
 
   it('request.path defaults to pathname from url', () => {
@@ -173,6 +201,29 @@ describe('createTestContext', () => {
     const ctx = createTestContext({ services: customRegistry });
     expect(ctx.services).toBe(customRegistry);
     expect(ctx.services.get('token')).toEqual({ test: true });
+  });
+
+  // `services` is typed as the IServiceRegistry INTERFACE, so a test may pass
+  // any implementation — a custom fake, or a real kernel registry from a
+  // started app. Typing it as the concrete MockServiceRegistry would reject
+  // both at compile time.
+  it('context accepts any IServiceRegistry implementation, not just MockServiceRegistry', () => {
+    const calls: string[] = [];
+    const custom: IServiceRegistry = {
+      register: () => {},
+      registerFactory: () => {},
+      get: <T extends object>(token: string): T => {
+        calls.push(token);
+        return { custom: true } as unknown as T;
+      },
+      getAll: () => [],
+      has: () => true,
+      unregister: () => true,
+    };
+    const ctx = createTestContext({ services: custom });
+    expect(ctx.services).toBe(custom);
+    expect(ctx.services.get('anything')).toEqual({ custom: true });
+    expect(calls).toEqual(['anything']);
   });
 
   it('context with explicit response uses provided response', () => {
@@ -216,32 +267,49 @@ describe('createTestContext', () => {
     expect(ctx.startTime).toBe(0);
   });
 
-  it('all DEFAULT_TEST_RUNTIME accessors return expected defaults', () => {
+  it('all DEFAULT_TEST_RUNTIME accessors return expected defaults', async () => {
     const defaults = _getDefaults();
     // Verify every accessor on DEFAULT_TEST_RUNTIME directly.
     expect(defaults.platform()).toBe('deno');
     expect(defaults.version()).toBe('0.0.0');
     expect(defaults.hostname()).toBe('localhost');
     expect(defaults.uuid()).toBe('test-ctx');
+    // randomBytes honors its length contract — a fake that returns fewer
+    // bytes than asked silently starves code deriving a token or IV from it.
     const rb = defaults.randomBytes(4);
-    // DEFAULT_TEST_RUNTIME returns empty Uint8Array for coverage testing;
-    // a real runtime would return the requested bytes.
     expect(rb).toBeInstanceOf(Uint8Array);
-    expect(rb.length).toBeGreaterThanOrEqual(0);
+    expect(rb.length).toBe(4);
+    expect(defaults.randomBytes(0).length).toBe(0);
     expect(defaults.now()).toBe(0);
     expect(defaults.hrtime()).toBe(0);
 
-    // setTimeout/setInterval return timer handles
-    const timerHandle = defaults.setTimeout(() => {
-      /* no-op — timers fire asynchronously */
-    }, 1);
-    // These are real timers; we skip waiting for them in tests.
-    expect(timerHandle).toBeDefined();
-    defaults.clearTimeout(timerHandle);
+    // subtle is an object, not null: a missing method reads as undefined
+    // rather than throwing on property access.
+    expect(typeof defaults.subtle).toBe('object');
+    expect(defaults.subtle).not.toBe(null);
 
-    const intervalHandle = defaults.setInterval(() => {}, 1000);
+    // env is a plain Record, not a Map — Object.keys/spread must work on it,
+    // which they silently do not for a Map cast to Record.
+    expect(Object.keys(defaults.env)).toEqual([]);
+    expect({ ...defaults.env }).toEqual({});
+
+    // Timers are INERT no-ops: they hand back a handle but never arm anything,
+    // so a callback can never fire after the test that created it finished.
+    let fired = false;
+    const timerHandle = defaults.setTimeout(() => {
+      fired = true;
+    }, 0);
+    const intervalHandle = defaults.setInterval(() => {
+      fired = true;
+    }, 0);
+    expect(timerHandle).toBeDefined();
     expect(intervalHandle).toBeDefined();
+    // Clearing an inert handle is a total function — never throws.
+    defaults.clearTimeout(timerHandle);
     defaults.clearInterval(intervalHandle);
+    // Yield past a real 0ms timer's turn; nothing should have run.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(fired).toBe(false);
 
     // exit throws
     let exited = false;

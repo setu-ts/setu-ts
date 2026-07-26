@@ -55,12 +55,7 @@ export interface MockPluginOptions {
  */
 export function createMockPlugin(options: MockPluginOptions): IPlugin {
   const provides = options.provides ?? options.name;
-  const pluginParts: {
-    name: string;
-    version: string;
-    provides: string[];
-    register: (ctx: IPluginContext) => void | Promise<void>;
-  } = {
+  const pluginParts: IPlugin = {
     name: options.name,
     version: '0.1.0',
     provides: [provides],
@@ -72,9 +67,11 @@ export function createMockPlugin(options: MockPluginOptions): IPlugin {
     },
   };
 
+  // `priority` is set only when supplied: `exactOptionalPropertyTypes` forbids
+  // assigning `undefined` to an optional property.
   if (options.priority !== undefined) {
     return { ...pluginParts, priority: options.priority };
   }
 
-  return pluginParts as IPlugin;
+  return pluginParts;
 }

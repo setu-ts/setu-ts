@@ -172,9 +172,9 @@ console.log(response.statusCode); // 200
 console.log(response.json()); // [{ id: 1 }]
 ```
 
-For testing, prefer [`createTestApp()`](packages/testing/src/test-app.ts:1) — it calls `start()`
-automatically (without binding a socket), so you can call `inject()` or `fetch()` directly. See the
-[Testing Package section](#testing-package) for the full API.
+For testing, prefer `createTestApp()` — it calls `start()` automatically (without binding a socket),
+so you can call `inject()` or `fetch()` directly. See
+[Testing Package](#testing-package-hono-enterprisetesting) for the full API.
 
 ---
 
@@ -5363,6 +5363,40 @@ const app = await createTestApp({
 });
 ```
 
+### Options
+
+`TestAppOptions` — `createTestApp(options?)`:
+
+| Option      | Type        | Default | Behavior                                                                                                                                                                                                                              |
+| ----------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugins`   | `IPlugin[]` | `[]`    | Pre-registered before `start()`. **Must include a `runtime` capability provider** (`RuntimePlugin()`, or a mock providing `CAPABILITIES.RUNTIME`) whenever `autoStart` is left `true` — the kernel requires one and throws otherwise. |
+| `autoStart` | `boolean`   | `true`  | `true` calls `await app.start()` (no port, so no socket) before returning. `false` returns the un-started app — required to register further plugins or to add global middleware.                                                     |
+
+`MockPluginOptions` — `createMockPlugin(options)`:
+
+| Option     | Type                                             | Default  | Behavior                                                                            |
+| ---------- | ------------------------------------------------ | -------- | ----------------------------------------------------------------------------------- |
+| `name`     | `string`                                         | required | Plugin name, and the capability token when `provides` is omitted.                   |
+| `service`  | `object`                                         | required | The mock service registered under the token.                                        |
+| `provides` | `string`                                         | `name`   | Overrides the token when the plugin name and capability token differ.               |
+| `priority` | `number`                                         | omitted  | Registration priority passed to the kernel resolver.                                |
+| `register` | `(ctx: IPluginContext) => void \| Promise<void>` | omitted  | Extra registration (middleware, routes, hooks) run after the service is registered. |
+
+`TestContextOptions` — `createTestContext(options?)`:
+
+| Option      | Type                     | Default                     | Behavior                                                                                                        |
+| ----------- | ------------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `request`   | `Partial<IRequest>`      | `GET http://localhost/`     | Overrides on the mock request (`method`, `url`, `path`, `headers`, `ip`, `user`, `tenant`, `signal`).           |
+| `body`      | `unknown`                | none                        | Backs `json()`, `text()` and `bytes()`. A non-string body is JSON-stringified once, so all three readers agree. |
+| `runtime`   | `IRuntimeServices`       | internal monotonic fake     | Supplies `ctx.id` (`uuid()`) and `ctx.startTime` (`hrtime()`).                                                  |
+| `startTime` | `number`                 | `runtime.hrtime()` (`0`)    | Highest-precedence monotonic origin — **never** pass `Date.now()`.                                              |
+| `services`  | `IServiceRegistry`       | `new MockServiceRegistry()` | Any implementation, including a real kernel registry from a started app.                                        |
+| `response`  | `IResponse`              | `new MockResponse()`        | The response builder on `ctx.response`.                                                                         |
+| `params`    | `Record<string, string>` | `{}`                        | Path parameters.                                                                                                |
+| `query`     | `Record<string, string>` | parsed from the request URL | Query parameters.                                                                                               |
+| `state`     | `Map<string, unknown>`   | `new Map()`                 | Request-scoped state.                                                                                           |
+| `signal`    | `AbortSignal`            | live, never-aborting        | `ctx.signal`. Precedence: `request.signal` > `signal` > default, matching the kernel.                           |
+
 ### Programmatic Testing
 
 ```typescript
@@ -5416,10 +5450,30 @@ console.log(stream.text); // → "hello world"
 
 - The testing package does **not** start an HTTP server; `createTestApp` returns a started kernel
   application that can be exercised via `inject()` or `fetch()`.
+- **`plugins` must include a runtime provider.** The package depends only on `common` and `kernel`,
+  so it cannot import `RuntimePlugin` to supply one for you, and the kernel treats the `runtime`
+  capability as mandatory at `start()`. `await createTestApp()` with no plugins therefore rejects
+  with `No plugin provides the mandatory 'runtime' capability`. Pass `RuntimePlugin()`, or for a
+  dependency-free unit test
+  `createMockPlugin({ name: 'runtime', service: fakeRuntime, provides: CAPABILITIES.RUNTIME })`.
+- **Adding global middleware requires `autoStart: false`.** `start()` compiles the pipeline, after
+  which `app.middleware.add(...)` throws
+  `Cannot add middleware after the pipeline has been
+  compiled.` Routes are unaffected —
+  `app.router.get(...)` works on a started app.
+- **A mock providing only `runtime` cannot serve `fetch()`.** The real `RuntimePlugin` also provides
+  `http-adapter`; without it `app.fetch()` throws `No HTTP adapter registered.` `inject()` needs
+  only `runtime`, so unit tests use `inject()` and `fetch()` assertions belong to integration/e2e
+  tests on the real `RuntimePlugin()`.
+- `inject()` returns `body: string | null` and so cannot carry a streaming **or** a `Uint8Array`
+  body — both read back as `null`. Assert those through `app.fetch()` plus `collectStream`.
 - `createTestContext` uses a built-in monotonic fake runtime (`hrtime: () => 0`) by default — inject
-  your own `IRuntimeServices` when you need controllable timing.
-- `MockServiceRegistry` reproduces the kernel's `ServiceRegistry` semantics (factory caching, single
-  vs multi registration, override policy) so tests catch real regressions.
+  your own `IRuntimeServices` when you need controllable timing. Its timers are inert no-ops, so a
+  fixture can never leak a callback past the test that created it.
+- `MockServiceRegistry` and `MockResponse` reproduce their kernel counterparts' observable semantics
+  (factory caching, single-vs-multi registration and `getAll` merge order, override policy, the
+  verbatim not-registered message, `content-type` defaults, and the `snapshot()` discriminated
+  union) so a test cannot pass against the double and fail against the real thing.
 
 ---
 

@@ -3358,6 +3358,9 @@ const testApp = await createTestApp({
 - `inject` — HTTP request injection without network
 - `createTestContext` — Create a mock request context
 - `MockServiceRegistry` — Mock service registry
+- `MockResponse` — Mock response builder with `snapshot()` and `ended`
+- `FixtureManager` — Assemble mock plugins per test and reset between them
+- `collectStream` — Read a streaming `Response` body incrementally
 
 **Implementation Files:**
 

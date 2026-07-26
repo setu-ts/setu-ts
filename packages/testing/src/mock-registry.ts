@@ -32,8 +32,17 @@ interface Registration {
 export class MockServiceRegistry implements IServiceRegistry {
   readonly #single = new Map<CapabilityToken, Registration>();
   readonly #multi = new Map<CapabilityToken, Registration[]>();
-  /** Records every `register`/`registerFactory` call. */
-  readonly registrations: Array<{ token: string; multi: boolean }> = [];
+  /**
+   * Records every `register`/`registerFactory` call, in order.
+   *
+   * Exposed as a `ReadonlyArray` so a test can assert against the recording
+   * without being able to rewrite it; `#record` is the mutable backing store.
+   */
+  get registrations(): ReadonlyArray<{ token: string; multi: boolean }> {
+    return this.#record;
+  }
+
+  readonly #record: Array<{ token: string; multi: boolean }> = [];
 
   register<T extends object>(
     token: CapabilityToken,
@@ -86,7 +95,7 @@ export class MockServiceRegistry implements IServiceRegistry {
     registration: Registration,
     options?: RegisterOptions,
   ): void {
-    this.registrations.push({
+    this.#record.push({
       token,
       multi: options?.multi ?? false,
     });
