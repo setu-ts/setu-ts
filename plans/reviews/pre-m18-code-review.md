@@ -202,7 +202,7 @@ Cheap sweeps already run, so no part wastes time re-deriving them:
 |    3 | `fix/review-p3-request-path`   | merge-ready | #74 |
 |    4 | `fix/review-p4-data`           | merge-ready | #75 |
 |    5 | `fix/review-p5-async`          | merge-ready | #76 |
-|    6 | `fix/review-p6-identity`       | merge-ready | —   |
+|    6 | `fix/review-p6-identity`       | merge-ready | #77 |
 
 **Campaign complete.** All six parts reviewed: 17 packages, 212 `src` files, ~29k lines, 30 findings
 fixed and 19 recorded below. The recurring root cause across Parts 3–6 was a **test double that did
