@@ -63,6 +63,15 @@ jobs:
       # The list is ordered so a dependency is always published before its
       # dependents (common → kernel/runtime → everything else). JSR rejects a
       # package whose dependency version does not yet exist.
+      #
+      # PREREQUISITE: every package must already EXIST on JSR. Creating the
+      # scope is not enough, and `deno publish` cannot create packages without
+      # a terminal — it fails with "Following packages don't exist" and a
+      # creation link each. Run `deno task release:create-packages` once (see
+      # docs/releasing.md); after that this job is self-sufficient.
+      #
+      # No JSR_TOKEN here: the runner's OIDC identity authenticates, which is
+      # why `id-token: write` is requested above.
       - name: Publish
         run: |
           deno run --allow-read --allow-run=deno scripts/publish-packages.ts \

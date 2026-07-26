@@ -23,6 +23,16 @@ import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
 const dryRun = Deno.args.includes('--dry-run');
 
+// `deno publish` falls back to interactive browser auth only when it is
+// attached to a TTY. It is not one here — this script spawns it as a
+// subprocess, and CI has no terminal at all — so without a token it fails with
+// "No means to authenticate. Pass a token to `--token`."
+//
+// The token is read from the environment rather than taken as an argument so
+// it stays out of shell history and the process table. In GitHub Actions the
+// variable is left unset: the runner's OIDC identity authenticates instead.
+const token = Deno.env.get('JSR_TOKEN');
+
 console.log(
   `${dryRun ? 'Simulating' : 'Publishing'} ${PUBLISHED_PACKAGES.length} packages to JSR…\n`,
 );
@@ -33,6 +43,7 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
 
   const args = ['publish', '--config', `${dir}/deno.json`];
   if (dryRun) args.push('--dry-run');
+  if (token) args.push('--token', token);
 
   const { success } = await new Deno.Command('deno', {
     args,
