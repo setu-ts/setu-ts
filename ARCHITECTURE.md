@@ -1418,14 +1418,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/testing
 
-| Aspect               | Detail                                                         |
-| -------------------- | -------------------------------------------------------------- |
-| **Purpose**          | Testing utilities                                              |
-| **Responsibilities** | Test app factory; mock plugin; request injection; mock context |
-| **Dependencies**     | `common`, `kernel`                                             |
-| **Public API**       | `createTestApp()`; `createMockPlugin()`; `inject()`            |
-| **Extension Points** | N/A (testing utility)                                          |
-| **Rules**            | No real external dependencies; in-memory adapters only         |
+| Aspect               | Detail                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | Testing utilities                                                                                                                                      |
+| **Responsibilities** | Test app factory; mock plugin; request injection; mock context                                                                                         |
+| **Dependencies**     | `common`, `kernel`                                                                                                                                     |
+| **Public API**       | `createTestApp()`; `createMockPlugin()`; `inject()`; `collectStream()`; `createTestContext()`; `MockResponse`; `MockServiceRegistry`; `FixtureManager` |
+| **Extension Points** | N/A (testing utility)                                                                                                                                  |
+| **Rules**            | No real external dependencies; in-memory adapters only                                                                                                 |
 
 #### @hono-enterprise/cli
 
@@ -2205,6 +2205,10 @@ The `@hono-enterprise/testing` package provides:
 - `createMockPlugin()` — Mock a plugin's service.
 - `inject()` — Send HTTP requests without a server.
 - `createTestContext()` — Create a mock request context.
+- `MockServiceRegistry` — Mock service registry implementation.
+- `MockResponse` — Mock response builder.
+- `FixtureManager` — Manage fixture setup and reset.
+- `collectStream()` — Read streaming response bodies incrementally.
 
 ---
 

@@ -3358,6 +3358,9 @@ const testApp = await createTestApp({
 - `inject` — HTTP request injection without network
 - `createTestContext` — Create a mock request context
 - `MockServiceRegistry` — Mock service registry
+- `MockResponse` — Mock response builder with `snapshot()` and `ended`
+- `FixtureManager` — Assemble mock plugins per test and reset between them
+- `collectStream` — Read a streaming `Response` body incrementally
 
 **Implementation Files:**
 
@@ -3378,10 +3381,10 @@ const testApp = await createTestApp({
 
 ### Deliverables
 
-- [ ] Test app factory
-- [ ] Mock plugin utility
-- [ ] Request injection
-- [ ] Full test coverage
+- [x] Test app factory
+- [x] Mock plugin utility
+- [x] Request injection
+- [x] Full test coverage
 
 ---
 
@@ -4330,7 +4333,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 30        | ✅     | notification-plugin  |
 | 31        | ✅     | feature-flags-plugin |
 | 32        | ✅     | multi-tenancy-plugin |
-| 33        | ⬜     | testing              |
+| 33        | ✅     | testing              |
 | 34        | ⬜     | cli                  |
 | 35        | ⬜     | sdk                  |
 | 36        | ⬜     | starters             |
