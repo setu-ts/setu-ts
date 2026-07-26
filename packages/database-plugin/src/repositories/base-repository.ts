@@ -7,13 +7,9 @@
  */
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
 import {
-  applyOrderBy,
-  applyPagination,
-  matchesWhere,
   normalizeCountOptions,
   type NormalizedQuery,
   normalizeQuery,
-  projectFields,
 } from '../query/query-builder.ts';
 import type { IRepository } from '../interfaces/index.ts';
 
@@ -71,22 +67,18 @@ export abstract class BaseRepository<Entity, Id = string> implements IRepository
   }
 
   async findAll(options?: FindOptions): Promise<Entity[]> {
+    // The DataSource owns query evaluation — every adapter applies `where`,
+    // `orderBy`, `offset`/`limit` and `select` itself (Prisma and Drizzle push
+    // down or evaluate; the memory adapter uses the shared helpers). Re-applying
+    // any of it here corrupted the result:
+    //
+    //   `offset` was applied TWICE, so `{ limit: 3, offset: 3 }` sliced index 3
+    //   of an already-offset 3-row page and every page after the first came back
+    //   EMPTY — through the public `repository.findAll()` surface, on all three
+    //   adapters. `where` was re-checked with strict equality too, which drops
+    //   rows a database matched on a non-primitive value (a `Date`, a Decimal).
     const query = normalizeQuery(options);
-
-    let results = await this._dataSource.findAll(query);
-
-    // Apply filter (may already be done by adapter; this is a safety net).
-    if (Object.keys(query.where).length > 0) {
-      results = results.filter((row) => matchesWhere(row, query.where));
-    }
-
-    results = applyOrderBy(results, query.orderBy);
-    results = applyPagination(results, query.offset, query.limit);
-
-    if (query.select.length > 0) {
-      return results.map((row) => this.toEntity(projectFields(row, query.select)));
-    }
-
+    const results = await this._dataSource.findAll(query);
     return results.map((row) => this.toEntity(row));
   }
 

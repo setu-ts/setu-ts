@@ -197,8 +197,9 @@ export interface DatabasePluginOptions {
    * Named connection for multi-database support. Defaults to `'default'`.
    *
    * When a name is provided, the service registers under
-   * `database:<name>` (e.g., `database:primary`); otherwise it uses the
-   * canonical `CAPABILITIES.DATABASE` token.
+   * `database.<name>` (e.g. `database.primary`); otherwise it uses the
+   * canonical `CAPABILITIES.DATABASE` token. Dot notation, not a colon:
+   * `createCapabilityToken` rejects colons.
    *
    * @since 0.1.0
    */

@@ -7,6 +7,12 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { BaseRepository, type DataSource } from '../../src/repositories/base-repository.ts';
+import {
+  applyOrderBy,
+  applyPagination,
+  matchesWhere,
+  projectFields,
+} from '../../src/query/query-builder.ts';
 
 interface TestEntity {
   id: string;
@@ -14,17 +20,30 @@ interface TestEntity {
   active: boolean;
 }
 
-/** Create a simple in-memory data source for testing. */
+/**
+ * Create a simple in-memory data source for testing.
+ *
+ * `findAll` evaluates the WHOLE `NormalizedQuery` — where, orderBy, offset/limit
+ * and select — because that is what a real DataSource does (all three adapters
+ * do). The previous double honored only `where`, so the `limit` / `offset` /
+ * `select` tests were really exercising BaseRepository's duplicate pass, which
+ * hid that applying `offset` twice emptied every page after the first.
+ */
 function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] } {
   const records: Partial<TestEntity>[] = [];
   return {
     records,
     async findAll(query) {
-      let result = [...records];
-      for (const [key, value] of Object.entries(query.where)) {
-        result = result.filter((r) => r[key as keyof TestEntity] === value);
+      let result = [...records] as unknown as Record<string, unknown>[];
+      if (Object.keys(query.where).length > 0) {
+        result = result.filter((row) => matchesWhere(row, query.where));
       }
-      return result as unknown as Record<string, unknown>[];
+      result = applyOrderBy(result, query.orderBy);
+      result = applyPagination(result, query.offset, query.limit);
+      if (query.select.length > 0) {
+        return result.map((row) => projectFields(row, query.select) as Record<string, unknown>);
+      }
+      return result;
     },
     async findById(id: string | number) {
       const found = records.find((r) => r.id === id);
