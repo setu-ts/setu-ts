@@ -66,6 +66,10 @@ const req = new Request('http://localhost/users', {
 const res3 = await inject(app, req);
 ```
 
+> A `Request` body is a one-shot stream. Injecting one consumes it, so the same `Request` cannot be
+> injected twice or injected and then handed to `app.fetch()` — the second call throws and names the
+> cause rather than quietly sending no body. Build a separate `Request` per call.
+
 ### createMockPlugin
 
 Creates an `IPlugin` that registers a mock service under a capability token.

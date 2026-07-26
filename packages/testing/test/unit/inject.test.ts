@@ -101,6 +101,64 @@ describe('inject (free function)', () => {
     // original Request.body is non-null — real kernel path would parse it.
     expect(recorded[0].request).toHaveProperty('body', '');
   });
+
+  it('POST with no body at all omits the body key', async () => {
+    const { app, recorded } = createFakeApp();
+    await inject(app, new Request('http://localhost/data', { method: 'POST' }));
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].request).not.toHaveProperty('body');
+  });
+
+  // A Request body is a one-shot stream. Reusing one used to be swallowed by an
+  // empty catch, which injected NO body and left the handler seeing an empty
+  // payload with nothing explaining why. Fail fast and name the cause instead.
+  it('re-injecting a consumed Request throws instead of silently dropping the body', async () => {
+    const { app, recorded } = createFakeApp();
+    const req = new Request('http://localhost/data', { method: 'POST', body: 'once' });
+
+    // First inject succeeds and reads the body.
+    await inject(app, req);
+    expect(recorded[0].request.body).toBe('once');
+
+    // The same Request a second time — its body is now consumed.
+    let message = '';
+    try {
+      await inject(app, req);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('its body has already been consumed');
+    expect(message).toContain('build a separate Request for each call');
+    // Crucially: it threw rather than delivering a second bodyless request.
+    expect(recorded).toHaveLength(1);
+  });
+
+  it('a Request already read by the caller throws on inject', async () => {
+    const { app, recorded } = createFakeApp();
+    const req = new Request('http://localhost/data', { method: 'POST', body: 'x' });
+    await req.text(); // caller consumed it themselves
+    expect(req.bodyUsed).toBe(true);
+
+    let message = '';
+    try {
+      await inject(app, req);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('its body has already been consumed');
+    expect(recorded).toHaveLength(0);
+  });
+
+  it('a consumed GET Request still injects — GET carries no body to re-read', async () => {
+    const { app, recorded } = createFakeApp();
+    const req = new Request('http://localhost/users');
+    await inject(app, req);
+    await inject(app, req);
+
+    expect(recorded).toHaveLength(2);
+    expect(recorded[1].request.method).toBe('GET');
+  });
 });
 
 describe('collectStream', () => {

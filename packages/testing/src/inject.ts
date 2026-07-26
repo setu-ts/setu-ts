@@ -80,30 +80,44 @@ function isWebRequest(value: unknown): value is Request {
 /**
  * Normalizes a web `Request` to an `InjectRequest`.
  *
- * Extracts `method`, `url`, `headers`, and — when the method is not `GET`/`HEAD`
- * and the body has not been consumed — reads the body via `await request.text()`.
+ * Extracts `method`, `url` and `headers`, and reads the body via
+ * `await request.text()` when the request carries one — that is, when the method
+ * is not `GET`/`HEAD` **and** `request.body` is non-null. A `POST` with an empty
+ * string body still carries a body (`''`), and the distinction is preserved: the
+ * `body` key is present and empty rather than absent.
  *
  * @param request - A web-standard Request
  * @returns An equivalent InjectRequest
+ * @throws {Error} If the request's body has already been consumed
  */
 async function normalizeWebRequest(request: Request): Promise<InjectRequest> {
   const headers = Object.fromEntries(request.headers.entries());
-  let body: string | undefined;
-
-  if (!['GET', 'HEAD'].includes(request.method.toUpperCase())) {
-    try {
-      body = await request.text();
-    } catch {
-      // Body may have already been consumed; leave body undefined.
-    }
-  }
-
-  return {
+  const base: InjectRequest = {
     method: request.method,
     url: request.url,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    ...(request.body !== null && request.body !== undefined ? { body } : {}),
   };
+
+  const carriesBody = !['GET', 'HEAD'].includes(request.method.toUpperCase()) &&
+    request.body !== null;
+  if (!carriesBody) {
+    return base;
+  }
+
+  // Fail fast, with the actual cause named. A `Request` body is a one-shot
+  // stream, so reusing one across two calls (or across inject() and fetch())
+  // makes the second read throw. Swallowing that and injecting no body instead
+  // turned an obvious mistake into a confusing downstream failure — the handler
+  // saw an empty payload and the test author had no clue why.
+  if (request.bodyUsed) {
+    throw new Error(
+      'inject() cannot read this Request: its body has already been consumed. ' +
+        'A Request body is one-shot — build a separate Request for each call ' +
+        'rather than reusing one across inject() and fetch().',
+    );
+  }
+
+  return { ...base, body: await request.text() };
 }
 
 /**
@@ -113,7 +127,10 @@ async function normalizeWebRequest(request: Request): Promise<InjectRequest> {
  * A `string` is a URL-only shorthand (`{ method: 'GET', url: request }`).
  * For non-GET methods, use the `InjectRequest` object form directly.
  * A web-standard `Request` is normalized field-by-field and delegated to
- * `app.inject()` after reading its body (one-shot — the body is consumed).
+ * `app.inject()` after reading its body. That read **consumes** the request, so a
+ * `Request` cannot be injected twice, nor injected and then passed to
+ * `app.fetch()` — the second call throws rather than silently sending no body.
+ * Build a separate `Request` per call.
  *
  * @example
  * ```typescript

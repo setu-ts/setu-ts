@@ -5517,6 +5517,10 @@ console.log(stream.text); // → "hello world"
   `http-adapter`; without it `app.fetch()` throws `No HTTP adapter registered.` `inject()` needs
   only `runtime`, so unit tests use `inject()` and `fetch()` assertions belong to integration/e2e
   tests on the real `RuntimePlugin()`.
+- The free-function `inject()` accepts a web `Request`, and reading its body **consumes** it. The
+  same `Request` cannot be injected twice, nor injected and then passed to `app.fetch()` — the
+  second call throws and names the cause instead of silently sending no body. Build a separate
+  `Request` per call.
 - `inject()` returns `body: string | null`, where a byte body from `response.send(bytes)` is UTF-8
   decoded and `null` means the response genuinely had no body. A **streaming** response cannot be
   rendered as a string without draining the live stream, so `inject()` throws for one — read those
