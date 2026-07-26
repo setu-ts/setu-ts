@@ -11,9 +11,22 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 [![Node.js](https://img.shields.io/badge/Node.js-supported-green.svg)](https://nodejs.org/)
 [![Deno](https://img.shields.io/badge/Deno-supported-green.svg)](https://deno.land/)
 [![Bun](https://img.shields.io/badge/Bun-supported-green.svg)](https://bun.sh/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare_Workers-supported-green.svg)](https://workers.cloudflare.com/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
 </div>
+
+---
+
+> [!IMPORTANT]
+> **Status: `v0.1.0-alpha.1` — publishing to JSR is in progress.**
+>
+> The kernel, the runtime layer, and 30 plugins are implemented, tested, and documented (604 tests,
+> 97%+ coverage). The packages are **not yet installable** — the first publish is partway through
+> JSR's package-creation quota. Until it completes, use the repository directly.
+>
+> This is an alpha: the public API is not frozen and may break in any prerelease. See
+> [CHANGELOG.md](CHANGELOG.md) for what ships and its known limitations.
 
 ---
 
@@ -34,8 +47,7 @@ opinion vs. flexibility.**
 **Hono Enterprise resolves this compromise.** It combines:
 
 - ⚡ **Hono's performance** — One of the fastest TypeScript routers available.
-- 🌍 **Runtime independence** — Write once, run on Node.js, Deno, and Bun. Cloudflare Workers
-  support is planned.
+- 🌍 **Runtime independence** — Write once, run on Node.js, Deno, Bun, and Cloudflare Workers.
 - 🧩 **Plugin-first architecture** — Every capability is a plugin. Start minimal, add what you need,
   replace what you do not like.
 - 🏢 **Enterprise capabilities** — Authentication, RBAC, CQRS, event sourcing, multi-tenancy, audit
@@ -63,47 +75,115 @@ Without becoming heavyweight. Without forcing opinions. Without locking you in.
 
 ## Features
 
-> **Status legend:** 📋 Designed — specified in the roadmap, not yet implemented · 🚧 Planned —
-> future design work. The framework is in the design phase; no feature is implemented yet (see
-> [Roadmap](#roadmap)).
+> **Status legend:** ✅ Implemented — shipped, tested, and documented · 📋 Designed — specified in
+> the roadmap, not yet built · 🚧 Planned — future design work.
 
-| Feature             | Status      | Description                                                              |
-| ------------------- | ----------- | ------------------------------------------------------------------------ |
-| Runtime abstraction | 📋 Designed | Node.js, Deno, Bun support with auto-detection                           |
-| Plugin system       | 📋 Designed | Capability-token-based plugin architecture                               |
-| Middleware pipeline | 📋 Designed | ASP.NET Core-style ordered middleware                                    |
-| Validation          | 📋 Designed | Zod-based validation with RFC 7807 error format                          |
-| Authentication      | 📋 Designed | JWT, API keys, local strategy, refresh tokens                            |
-| Authorization       | 📋 Designed | RBAC with role hierarchy and permission guards                           |
-| OpenAPI             | 📋 Designed | Auto-generation from route schemas with Swagger UI                       |
-| Database adapters   | 📋 Designed | Prisma and Drizzle with repository pattern and Unit of Work              |
-| Caching             | 📋 Designed | Memory and Redis stores with cache middleware                            |
-| Events              | 📋 Designed | In-memory event bus for domain events                                    |
-| CQRS                | 📋 Designed | Command and query buses with pipeline behaviors                          |
-| Messaging           | 📋 Designed | RabbitMQ, NATS, Kafka, Redis Streams adapters; pub/sub + request-reply   |
-| Queue               | 📋 Designed | Background jobs with Redis, RabbitMQ, and memory adapters                |
-| Scheduler           | 📋 Designed | Cron, delayed, and recurring jobs with distributed locking               |
-| Health checks       | 📋 Designed | `/health`, `/live`, `/ready` with pluggable indicators                   |
-| Metrics             | 📋 Designed | Prometheus counters, gauges, histograms, summaries                       |
-| Telemetry           | 📋 Designed | OpenTelemetry distributed tracing                                        |
-| CLI                 | 📋 Designed | Plugin-aware scaffolding and code generation                             |
-| Testing             | 📋 Designed | Test app factory, mock plugins, request injection                        |
-| HTTP security       | 📋 Designed | CORS, security headers, CSRF, rate limiting, IP security                 |
-| Secrets management  | 📋 Designed | AWS KMS, GCP Secret Manager, Azure Key Vault, Vault                      |
-| Audit logging       | 📋 Designed | Immutable audit trail with pluggable storage                             |
-| Resilience          | 📋 Designed | Circuit breaker, retry, timeout, bulkhead                                |
-| Storage             | 📋 Designed | S3, GCS, local, memory providers with upload middleware                  |
-| Mail                | 📋 Designed | SMTP, SES, SendGrid with template engine                                 |
-| Notifications       | 📋 Designed | Multi-channel: email, SMS, push, Slack                                   |
-| Feature flags       | 📋 Designed | Percentage rollout, user targeting, multiple providers                   |
-| Multi-tenancy       | 📋 Designed | Subdomain, header, path resolution with schema/database/column isolation |
-| SDK                 | 📋 Designed | HTTP client with retry, circuit breaker, OpenAPI codegen                 |
-| Starter bundles     | 📋 Designed | REST, microservice, and full-stack starters                              |
-| GraphQL             | 🚧 Planned  | Schema-first and code-first GraphQL plugin                               |
-| gRPC                | 🚧 Planned  | Client and server support for microservice communication                 |
-| Cloudflare Workers  | 🚧 Planned  | Edge runtime adapter with D1/KV support                                  |
-| WebSocket           | 🚧 Planned  | Real-time communication with runtime portability                         |
-| Server-Sent Events  | 🚧 Planned  | Streaming responses for real-time data                                   |
+Every ✅ row is a package in this repository with 90%+ test coverage on branch, function, and line.
+
+### Core
+
+| Feature             | Status | Package              | Description                                            |
+| ------------------- | ------ | -------------------- | ------------------------------------------------------ |
+| Plugin system       | ✅     | `kernel`             | Capability-token-based plugin architecture             |
+| Middleware pipeline | ✅     | `kernel`             | ASP.NET Core-style ordered middleware                  |
+| Routing             | ✅     | `kernel`             | Hono `LinearRouter` under the framework's own pipeline |
+| Runtime abstraction | ✅     | `runtime`            | Node.js, Deno, Bun, Cloudflare Workers with detection  |
+| Streaming responses | ✅     | `kernel` + `runtime` | `IResponse.stream()` with request `AbortSignal`        |
+| Exceptions          | ✅     | `exceptions`         | Error hierarchy, RFC 7807 Problem Details, handler     |
+| Testing             | ✅     | `testing`            | Test app factory, mock plugins, request injection      |
+
+### Request path
+
+| Feature        | Status | Package                | Description                                                                      |
+| -------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
+| Logging        | ✅     | `logger-plugin`        | Console, pino, noop; request/response middleware                                 |
+| Configuration  | ✅     | `config-plugin`        | Env loading, variable expansion, schema validation                               |
+| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 7807 / NestJS / default error shapes                         |
+| HTTP security  | ✅     | `http-security-plugin` | CORS, security headers, CSRF, request size, IP rules                             |
+| Authentication | ✅     | `auth-plugin`          | JWT (HS256/RS256 via Web Crypto), API keys, local, refresh tokens, rate limiting |
+| Authorization  | ✅     | `auth-plugin`          | RBAC with transitive role hierarchy and permission guards                        |
+
+### Data
+
+| Feature       | Status | Package                | Description                                                            |
+| ------------- | ------ | ---------------------- | ---------------------------------------------------------------------- |
+| Database      | ✅     | `database-plugin`      | Prisma, Drizzle, memory — repository pattern and Unit of Work          |
+| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                |
+| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware              |
+| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; schema/database/column isolation |
+
+### Messaging and background work
+
+| Feature     | Status | Package              | Description                                                    |
+| ----------- | ------ | -------------------- | -------------------------------------------------------------- |
+| Events      | ✅     | `events-plugin`      | In-process domain event bus                                    |
+| CQRS        | ✅     | `cqrs-plugin`        | Command and query buses with pipeline behaviors                |
+| Messaging   | ✅     | `messaging-plugin`   | In-memory, Redis Streams, RabbitMQ, NATS, Kafka; request-reply |
+| Queue       | ✅     | `queue-plugin`       | Background jobs over memory, Redis, RabbitMQ; retries, cron    |
+| Scheduler   | ✅     | `scheduler-plugin`   | Cron, interval, delayed jobs with distributed locking          |
+| Worker pool | ✅     | `worker-pool-plugin` | CPU-bound work on real worker threads, off the event loop      |
+
+### Real-time and rendering
+
+| Feature            | Status | Package               | Description                                                   |
+| ------------------ | ------ | --------------------- | ------------------------------------------------------------- |
+| Server-Sent Events | ✅     | `sse-plugin`          | One-way streaming, named channels, heartbeat, `Last-Event-ID` |
+| WebSocket          | ✅     | `websocket-plugin`    | Full-duplex on all four runtimes; rooms, heartbeat, limits    |
+| React SSR          | ✅     | `react-router-plugin` | React Router v7 framework mode with file-based routing        |
+
+### Operations
+
+| Feature       | Status | Package             | Description                                                  |
+| ------------- | ------ | ------------------- | ------------------------------------------------------------ |
+| Health checks | ✅     | `health-plugin`     | `/health`, `/live`, `/ready` with pluggable indicators       |
+| Metrics       | ✅     | `metrics-plugin`    | Prometheus counters, gauges, histograms, summaries           |
+| Telemetry     | ✅     | `telemetry-plugin`  | OpenTelemetry tracing, W3C propagation, auto-instrumentation |
+| OpenAPI       | ✅     | `openapi-plugin`    | OpenAPI 3.1 from routes, Zod transform, Swagger UI           |
+| Audit logging | ✅     | `audit-plugin`      | Immutable trail over memory, log, database, or file          |
+| Resilience    | ✅     | `resilience-plugin` | Circuit breaker, retry, timeout, bulkhead                    |
+| Secrets       | ✅     | `secrets-plugin`    | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault     |
+
+### Delivery and ergonomics
+
+| Feature              | Status | Package                | Description                                                     |
+| -------------------- | ------ | ---------------------- | --------------------------------------------------------------- |
+| Mail                 | ✅     | `mail-plugin`          | Log, SMTP, SES, SendGrid with a template engine                 |
+| Notifications        | ✅     | `notification-plugin`  | Email, SMS, push, Slack over one HTTP seam                      |
+| Feature flags        | ✅     | `feature-flags-plugin` | Percentage rollout, user targeting, pluggable providers         |
+| Dependency injection | ✅     | `di-plugin`            | **Optional.** Singleton/scoped/transient, constructor injection |
+| Decorators           | ✅     | `decorator-plugin`     | **Optional.** NestJS-style, no `reflect-metadata`               |
+
+### Not yet built
+
+| Feature         | Status      | Description                                              |
+| --------------- | ----------- | -------------------------------------------------------- |
+| CLI             | 📋 Designed | Plugin-aware scaffolding and code generation (next up)   |
+| SDK             | 📋 Designed | HTTP client with retry, circuit breaker, OpenAPI codegen |
+| Starter bundles | 📋 Designed | REST, microservice, and full-stack starters              |
+| GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin               |
+| gRPC            | 🚧 Planned  | Client and server support for microservice communication |
+
+---
+
+## Installation
+
+> Not yet installable — the first publish to JSR is in progress. These are the commands that will
+> work once `v0.1.0-alpha.1` lands.
+
+```bash
+# Deno
+deno add jsr:@hono-enterprise/kernel jsr:@hono-enterprise/runtime
+
+# Node
+npx jsr add @hono-enterprise/kernel @hono-enterprise/runtime
+
+# Bun
+bunx jsr add @hono-enterprise/kernel @hono-enterprise/runtime
+```
+
+Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
+nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
+options or imported lazily, so an application pays only for the capabilities it configures.
 
 ---
 
@@ -138,14 +218,14 @@ Add capabilities as you need them:
 import { ConfigPlugin } from '@hono-enterprise/config-plugin';
 import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
 import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { AuthenticationPlugin } from '@hono-enterprise/auth-plugin';
+import { AuthPlugin } from '@hono-enterprise/auth-plugin';
 import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
 
 app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 app.register(ValidationPlugin());
 app.register(DatabasePlugin({ type: 'prisma' }));
 // Secrets come from the config capability — never process.env (runtime independence)
-app.register(AuthenticationPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
+app.register(AuthPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
 app.register(OpenApiPlugin({ title: 'My API', version: '1.0.0' }));
 ```
 
@@ -196,35 +276,38 @@ graph TB
 
 ## Repository Structure
 
+A Deno 2 workspace. Every package is published independently to JSR.
+
 ```
 hono-enterprise/
-├── apps/                  # Example applications
-│   ├── minimal/           # Minimal app (kernel + runtime only)
-│   ├── rest-api/          # Full REST API example
-│   ├── microservices/     # Microservices example
-│   ├── cqrs-example/      # CQRS pattern example
-│   └── multi-tenant/      # Multi-tenancy example
-├── packages/              # Framework packages
-│   ├── kernel/            # Plugin kernel, pipeline, router
-│   ├── common/            # Shared types and interfaces
-│   ├── runtime/           # Runtime adapters (Node, Deno, Bun)
-│   ├── exceptions/        # Exception factories and error handler middleware
-│   ├── *-plugin/          # Capability plugins
+├── packages/              # 40 workspace members — 35 published, 5 stubs
+│   ├── common/            # Shared contracts, capability tokens (no dependencies)
+│   ├── kernel/            # Plugin kernel, middleware pipeline, router
+│   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
+│   ├── exceptions/        # Exception factories and error-handler middleware
 │   ├── testing/           # Test utilities
-│   ├── cli/               # CLI tool
-│   ├── sdk/               # Client SDK
-│   └── starters/          # Opinionated plugin bundles
-├── examples/              # Additional examples
-├── docs/                  # Generated documentation
-├── docker/                # Docker configurations
+│   ├── *-plugin/          # 30 capability plugins
+│   ├── cli/               # CLI tool — stub, Milestone 34
+│   ├── sdk/               # Client SDK — stub, Milestone 35
+│   └── starters/          # Plugin bundles — stubs, Milestone 36
+├── scripts/               # Coverage, plan linting, JSR release tooling
+├── docs/                  # Operator guides (releasing, telemetry fan-out, …)
+├── docker/                # Docker and OpenTelemetry Collector configurations
 ├── kubernetes/            # Kubernetes manifests
-├── plans/                 # Archived planning documents
+├── plans/                 # One plan per milestone, archived on completion
+├── apps/                  # Example applications — empty, Milestone 37
+├── examples/              # Additional examples — empty, Milestone 37
 ├── ARCHITECTURE.md        # Technical architecture guide
 ├── PUBLIC_API.md          # Public API contract
 ├── AI_GUIDELINES.md       # Engineering guidelines
-├── ROADMAP.md             # 38-milestone implementation roadmap
+├── ROADMAP.md             # 46-milestone implementation roadmap
+├── CHANGELOG.md           # Release notes
 └── README.md              # This file
 ```
+
+**Dependency rule:** no plugin imports another plugin. Plugins communicate only through capability
+tokens resolved from the service registry (`ctx.services.get<T>(CAPABILITIES.X)`), so any plugin can
+be replaced without touching the others.
 
 ---
 
@@ -235,8 +318,12 @@ hono-enterprise/
 | [**ARCHITECTURE.md**](ARCHITECTURE.md)                                           | Framework contributors  | How the framework works internally and why it was designed this way      |
 | [**PUBLIC_API.md**](PUBLIC_API.md)                                               | Application developers  | How to use the framework — complete examples for every plugin            |
 | [**AI_GUIDELINES.md**](AI_GUIDELINES.md)                                         | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
-| [**ROADMAP.md**](ROADMAP.md)                                                     | Implementation tracking | 38-milestone implementation roadmap with package details                 |
+| [**ROADMAP.md**](ROADMAP.md)                                                     | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
+| [**CHANGELOG.md**](CHANGELOG.md)                                                 | Everyone                | What each release contains, and its known limitations                    |
+| [**docs/releasing.md**](docs/releasing.md)                                       | Maintainers             | JSR release runbook — setup, quotas, and the per-release sequence        |
 | [**plans/archive/architecture-review.md**](plans/archive/architecture-review.md) | Architects              | Critical analysis of the original design with recommendations (archived) |
+
+Each package also carries its own README with options, semantics, and a worked example.
 
 **Start here:**
 
@@ -248,31 +335,35 @@ hono-enterprise/
 
 ## Roadmap
 
-The framework is in the **design and planning phase**. No packages have been published yet.
+**46 of 53 milestones are complete** (numbered 0–46, some with lettered follow-ups such as 14b and
+24c). The framework itself is built; what remains is tooling, examples, and release engineering.
 
-The implementation is organized into **38 milestones**, from monorepo foundation to final release:
+| Phase               | Milestones | Status | Focus                                                            |
+| ------------------- | ---------- | ------ | ---------------------------------------------------------------- |
+| Foundation          | 0–2        | ✅     | Monorepo, common contracts, plugin kernel                        |
+| Core plugins        | 3–9        | ✅     | Runtime, logger, config, validation, exceptions, DI, decorators  |
+| Data plugins        | 10–15      | ✅     | Database, cache, events, CQRS, messaging, queue                  |
+| Security            | 16–17      | ✅     | Authentication, authorization, HTTP security                     |
+| Scheduling          | 18         | ✅     | Scheduler with distributed locking                               |
+| Observability       | 19–21, 24  | ✅     | Metrics, health, OpenAPI, telemetry                              |
+| Hono migration      | 22–23      | ✅     | Kernel routing and serving on Hono; Cloudflare Workers           |
+| Enterprise          | 25–27      | ✅     | Secrets, audit, resilience                                       |
+| Features            | 28–32      | ✅     | Storage, mail, notifications, feature flags, multi-tenancy       |
+| Real-time & SSR     | 41–46      | ✅     | HTTP adapters, streaming, SSE, React SSR, worker pool, WebSocket |
+| Testing             | 33         | ✅     | Test utilities                                                   |
+| Tooling             | 34–36      | ⬜     | CLI, SDK, starter bundles                                        |
+| Release engineering | 37–40      | ⬜     | Examples, documentation, Docker/K8s, final release               |
 
-| Phase         | Milestones | Focus                                                                             |
-| ------------- | ---------- | --------------------------------------------------------------------------------- |
-| Foundation    | 0-2        | Monorepo, common types, plugin kernel                                             |
-| Core plugins  | 3-9        | Runtime, logger, config, validation, exceptions, optional DI, optional decorators |
-| Data plugins  | 10-15      | Database, cache, events, CQRS, messaging, queue                                   |
-| Security      | 16-17      | Authentication, HTTP security                                                     |
-| Scheduling    | 18         | Scheduler with distributed locking                                                |
-| Observability | 19-22      | Metrics, health, OpenAPI, telemetry                                               |
-| Enterprise    | 23-25      | Secrets, audit, resilience                                                        |
-| Features      | 26-30      | Storage, mail, notifications, feature flags, multi-tenancy                        |
-| Tooling       | 31-33      | Testing, CLI, SDK                                                                 |
-| Release       | 34-38      | Starters, examples, docs, Docker/K8s, final release                               |
-
-Detailed milestones, file structures, and interface definitions are documented in
-[`ROADMAP.md`](ROADMAP.md).
+Next up is **Milestone 34** (`packages/cli`). Detailed milestones, file structures, and interface
+definitions are documented in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
 ## Contributing
 
-Contributions are welcome once the foundation milestones are complete.
+Contributions are welcome. The foundation is complete, so the most useful contributions right now
+are the remaining milestones (CLI, SDK, starters, examples), bug reports against the alpha, and
+plugins built on the capability model.
 
 ### Before You Write Code
 
@@ -317,8 +408,8 @@ The goal is straightforward:
 Practical means:
 
 - **Runtime freedom** — Applications written today on Node.js should run on Deno or Bun tomorrow
-  without code changes. Deno applications can be shipped as standalone binaries via `deno compile`.
-  Cloudflare Workers support is planned for edge deployment.
+  without code changes. Node, Deno, Bun, and Cloudflare Workers are all supported today. Deno
+  applications can be shipped as standalone binaries via `deno compile`.
 - **Enterprise scale** — The framework should support large-scale production systems with
   multi-tenancy, distributed tracing, audit trails, and resilience patterns.
 - **Plugin ecosystem** — The framework should foster an ecosystem where the community can build and
