@@ -201,7 +201,7 @@ Cheap sweeps already run, so no part wastes time re-deriving them:
 |    2 | `fix/review-p2-kernel-runtime` | merge-ready | #73 |
 |    3 | `fix/review-p3-request-path`   | merge-ready | #74 |
 |    4 | `fix/review-p4-data`           | merge-ready | #75 |
-|    5 | `fix/review-p5-async`          | merge-ready | —   |
+|    5 | `fix/review-p5-async`          | merge-ready | #76 |
 |    6 | —                              | not started | —   |
 
 ## Follow-ups surfaced by a part but outside its scope
