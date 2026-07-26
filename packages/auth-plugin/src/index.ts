@@ -38,7 +38,7 @@ export { PasswordHasher } from './services/password-hasher.ts';
 
 // Middleware
 export { authMiddleware } from './middleware/auth-middleware.ts';
-export { rateLimitMiddleware } from './middleware/rate-limit-middleware.ts';
+export { defaultRateLimitKey, rateLimitMiddleware } from './middleware/rate-limit-middleware.ts';
 export type { RateLimitOptions } from './middleware/rate-limit-middleware.ts';
 
 // Guards

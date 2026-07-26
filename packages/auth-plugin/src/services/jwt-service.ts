@@ -155,6 +155,25 @@ export class JwtService implements IJwtService {
 
     const [headerB64, payloadB64, signatureB64] = parts;
 
+    // Reject a header whose `alg` is not the algorithm this service is
+    // configured for. Verification already uses the CONFIGURED algorithm (never
+    // the header's — that is what defeats the classic RS256→HS256 confusion
+    // attack), so this is defense in depth: it turns a mismatched token into a
+    // clear error instead of an opaque signature failure, and refuses `alg:
+    // none` explicitly.
+    let header: unknown;
+    try {
+      header = JSON.parse(new TextDecoder().decode(decodeBase64Url(headerB64)));
+    } catch {
+      throw new Error('Invalid token header');
+    }
+    const headerAlg = (header as { alg?: unknown }).alg;
+    if (headerAlg !== this.options.algorithm) {
+      throw new Error(
+        `Unexpected token algorithm: expected ${this.options.algorithm}, got ${String(headerAlg)}`,
+      );
+    }
+
     // Verify signature
     const message = `${headerB64}.${payloadB64}`;
     const messageBytes = toBuffer(new TextEncoder().encode(message));
@@ -192,9 +211,14 @@ export class JwtService implements IJwtService {
       throw new Error('Token not yet valid');
     }
 
-    // Validate audience
+    // Validate audience. RFC 7519 §4.1.3 allows `aud` to be a single string OR
+    // an array of strings — a strict `!==` rejected every multi-audience token,
+    // which is what Auth0/Cognito/Entra issue.
     if (this.options.expectedAudience) {
-      if (payloadObj.aud !== this.options.expectedAudience) {
+      const expected = this.options.expectedAudience;
+      const aud = payloadObj.aud;
+      const matches = Array.isArray(aud) ? aud.includes(expected) : aud === expected;
+      if (!matches) {
         throw new Error('Invalid token audience');
       }
     }

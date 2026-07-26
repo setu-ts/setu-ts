@@ -202,7 +202,13 @@ Cheap sweeps already run, so no part wastes time re-deriving them:
 |    3 | `fix/review-p3-request-path`   | merge-ready | #74 |
 |    4 | `fix/review-p4-data`           | merge-ready | #75 |
 |    5 | `fix/review-p5-async`          | merge-ready | #76 |
-|    6 | —                              | not started | —   |
+|    6 | `fix/review-p6-identity`       | merge-ready | #77 |
+
+**Campaign complete.** All six parts reviewed: 17 packages, 212 `src` files, ~29k lines, 30 findings
+fixed and 19 recorded below. The recurring root cause across Parts 3–6 was a **test double that did
+not honor the contract it stood in for** — no-op response headers, a data source that ignored its
+query, an adapter named `ThrowingAdapter` that never threw, a fixture whose two clocks returned the
+same number. Each one made a real defect look correct.
 
 ## Follow-ups surfaced by a part but outside its scope
 
@@ -230,6 +236,7 @@ expands. Each entry names who should own it.
 | 17 | If a STORED recurring job carries an unparseable cron, `#processRecurring` enqueues the job, then catches the `cronNextMs` failure and skips `advanceRecurring` — leaving `nextRunAtMs` in the past, so the job re-enqueues on EVERY poll tick forever. `addRecurring` validates upfront, so this needs a corrupted store to reach; the safe repair (drop or park the schedule) is a behavior decision.                                                                                                                                        | maintainer decision                                   |
 | 18 | `RequestReplyCore.close()` rejects in-flight requests with a bare `Error`, while the package otherwise exports typed errors for `instanceof` (`RequestTimeoutError`, `RemoteHandlerError`, `MessagingNotSupportedError`). A caller cannot tell a disconnect from a genuine failure. Fixing it means a new exported error class.                                                                                                                                                                                                                | follow-up (`messaging-plugin`)                        |
 | 19 | `packages/queue-plugin`'s `processRecurring catches cron calculation errors` test is timing-dependent: it failed once under the coverage-instrumented whole-suite run and passed on three re-runs. Flaky tests erode the gate.                                                                                                                                                                                                                                                                                                                 | follow-up (`queue-plugin` tests)                      |
+| 20 | `rateLimitMiddleware`'s key now prefers `ctx.state.get('clientIp')`, which only `ipSecurityMiddleware` sets and only with `trustProxy`. Documented, but the composition is easy to miss: a deployment behind a proxy that registers neither auth nor ip-security still gets one global bucket. A startup warning when the resolved key is constant would surface it.                                                                                                                                                                           | maintainer decision                                   |
 
 ## Risks
 
