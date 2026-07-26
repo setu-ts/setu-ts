@@ -55,7 +55,7 @@ export interface IHealthIndicator {
 /**
  * The aggregated health report returned by {@linkcode IHealthService.check()}.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export interface HealthReport {
   /** Overall health status (worst of all participating indicators). */
@@ -80,7 +80,7 @@ export interface HealthReport {
  * const report = await health.check();
  * ```
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export interface IHealthService {
   /**

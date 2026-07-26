@@ -178,20 +178,41 @@ describe('corsMiddleware', () => {
       expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     });
 
-    it('credentials: true reflects specific origin (never *)', async () => {
+    it('credentials: true echoes the configured origin (never *)', async () => {
       const { ctx, nextCalled, response } = createFakeContext({
         request: {
           method: 'GET',
           headers: { Origin: 'https://example.com' },
         },
       });
-      const mw = corsMiddleware({ origin: true, credentials: true });
+      const mw = corsMiddleware({ origin: ['https://example.com'], credentials: true });
       await mw(ctx, async () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
       expect(response.headers.get('access-control-allow-origin')).toBe('https://example.com');
       expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
+      expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+    });
+
+    it('refuses `origin: true` combined with credentials at construction time', () => {
+      // Reflecting an arbitrary Origin while allowing credentials lets any site
+      // the user visits read credentialed responses — the reflected concrete
+      // origin sidesteps the browser's `*`-with-credentials prohibition.
+      expect(() => corsMiddleware({ origin: true, credentials: true })).toThrow(
+        /cannot be combined with/,
+      );
+    });
+
+    it('still allows `origin: true` without credentials', async () => {
+      const { ctx, response } = createFakeContext({
+        request: { method: 'GET', headers: { Origin: 'https://anywhere.test' } },
+      });
+      const mw = corsMiddleware({ origin: true });
+      await mw(ctx, async () => {});
+      expect(response.headers.get('access-control-allow-origin')).toBe('https://anywhere.test');
+      // The fixture records headers in a Map, so an unset header is `undefined`.
+      expect(response.headers.get('access-control-allow-credentials')).toBeUndefined();
     });
   });
 
@@ -330,6 +351,48 @@ describe('corsMiddleware', () => {
       await mw(ctx, async () => {});
       const varyValues = response.appendedHeaders.get('vary');
       expect(varyValues).toContain('Origin');
+    });
+  });
+
+  describe('Vary', () => {
+    it('sets Vary: Origin even when the origin is DENIED', async () => {
+      const { ctx, nextCalled, response } = createFakeContext({
+        request: { method: 'GET', headers: { Origin: 'https://evil.test' } },
+      });
+      const mw = corsMiddleware({ origin: ['https://good.test'] });
+      await mw(ctx, async () => {
+        nextCalled.push(true);
+      });
+      // The response body is produced without CORS headers, so a shared cache
+      // must not reuse it for an allowed origin (or the reverse).
+      expect(nextCalled).toHaveLength(1);
+      expect(response.headers.get('access-control-allow-origin')).toBeUndefined();
+      expect(response.appendedHeaders.get('vary')).toEqual(['Origin']);
+    });
+
+    it('sets Vary: Origin exactly once on an allowed request', async () => {
+      const { ctx, response } = createFakeContext({
+        request: { method: 'GET', headers: { Origin: 'https://good.test' } },
+      });
+      const mw = corsMiddleware({ origin: ['https://good.test'] });
+      await mw(ctx, async () => {});
+      expect(response.appendedHeaders.get('vary')).toEqual(['Origin']);
+    });
+
+    it('sets Vary: Origin on a denied preflight', async () => {
+      const { ctx, response } = createFakeContext({
+        request: {
+          method: 'OPTIONS',
+          headers: {
+            Origin: 'https://evil.test',
+            'Access-Control-Request-Method': 'POST',
+          },
+        },
+      });
+      const mw = corsMiddleware({ origin: ['https://good.test'] });
+      await mw(ctx, async () => {});
+      expect(response.statuses).toContain(204);
+      expect(response.appendedHeaders.get('vary')).toEqual(['Origin']);
     });
   });
 });

@@ -32,6 +32,9 @@ interface JobRunnerAdapter {
  * @param adapter - The queue adapter for ack/requeue/deadLetter
  * @param storedJob - The stored job with attempts and maxAttempts
  * @param processor - The user-provided processor function
+ * @param report - Optional sink for the processor's failure. Without it a
+ * failing job is completely silent: the error was caught to drive
+ * requeue/dead-letter and then discarded, so nothing logged it anywhere.
  * @since 0.1.0
  */
 export async function runJob<T>(
@@ -39,6 +42,7 @@ export async function runJob<T>(
   adapter: JobRunnerAdapter,
   storedJob: StoredJob<T>,
   processor: (job: IJob<T>) => void | Promise<void>,
+  report?: (message: string, error: unknown, meta?: Record<string, unknown>) => void,
 ): Promise<void> {
   const job: IJob<T> = {
     id: storedJob.id,
@@ -50,16 +54,30 @@ export async function runJob<T>(
   // Execute the processor - if it fails, requeue or dead-letter
   try {
     await processor(job);
-  } catch {
-    // Failure: requeue or dead-letter
+  } catch (error) {
+    // Failure: requeue or dead-letter — and say so, rather than discarding the
+    // reason the job failed.
     if (storedJob.attempts < storedJob.maxAttempts) {
       const nextAttempts = storedJob.attempts + 1;
       const backoffMs = computeBackoffMs(nextAttempts);
       const availableAtMs = runtime.now() + backoffMs;
+      report?.('queue job failed — retrying', error, {
+        job: storedJob.id,
+        name: storedJob.name,
+        attempts: storedJob.attempts,
+        maxAttempts: storedJob.maxAttempts,
+        retryInMs: backoffMs,
+      });
       await adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts);
       return;
     } else {
       // At max attempts: dead-letter
+      report?.('queue job failed — dead-lettered', error, {
+        job: storedJob.id,
+        name: storedJob.name,
+        attempts: storedJob.attempts,
+        maxAttempts: storedJob.maxAttempts,
+      });
       await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now());
       return;
     }

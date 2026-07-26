@@ -50,14 +50,6 @@ export interface IMiddlewareApi {
 }
 
 /**
- * Router registration surface exposed to plugins and applications.
- *
- * Every verb method accepts either a bare handler or a full
- * {@linkcode RouteDefinition} with middleware and schemas.
- *
- * @since 0.1.0
- */
-/**
  * Route information returned by {@linkcode IRouterApi.listRoutes}.
  *
  * @since 0.1.0
@@ -71,6 +63,14 @@ export interface RouteInfo {
   readonly definition: RouteDefinition;
 }
 
+/**
+ * Router registration surface exposed to plugins and applications.
+ *
+ * Every verb method accepts either a bare handler or a full
+ * {@linkcode RouteDefinition} with middleware and schemas.
+ *
+ * @since 0.1.0
+ */
 export interface IRouterApi {
   /**
    * Registers a GET route.
@@ -165,6 +165,11 @@ export interface EnvVarSpec {
 export interface IEnvironmentApi {
   /**
    * Declares and validates environment variables.
+   *
+   * Call this from {@linkcode IPlugin.register}. The kernel validates every
+   * declared spec once, after all plugins have registered and before the `init`
+   * hooks run, so a spec declared later (e.g. from an `onInit` hook) is never
+   * checked.
    *
    * @param spec - Variable specifications keyed by variable name
    * @throws {Error} At startup when a required variable is missing or mistyped

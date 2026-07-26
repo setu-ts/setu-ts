@@ -8,7 +8,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { rateLimitMiddleware } from '../../src/middleware/rate-limit-middleware.ts';
+import {
+  defaultRateLimitKey,
+  rateLimitMiddleware,
+} from '../../src/middleware/rate-limit-middleware.ts';
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
@@ -254,7 +257,9 @@ describe('rateLimitMiddleware', () => {
 
     await middleware(ctx, () => Promise.resolve());
 
-    expect(calls).toEqual([{ key: '9.9.9.9', windowMs: 12345 }]);
+    // The default key namespaces its source (`ip:` / `user:`) so an id that
+    // happens to equal an address cannot share a bucket with it.
+    expect(calls).toEqual([{ key: 'ip:9.9.9.9', windowMs: 12345 }]);
     expect(captured.status).toBe(429); // injected store's count drives the decision
     expect(captured.headers.get('Retry-After')).toBe('5'); // ceil(5000/1000)
   });
@@ -275,5 +280,55 @@ describe('rateLimitMiddleware', () => {
     expect(r1.captured.status).toBe(200);
     expect(r2.captured.status).toBe(200);
     expect(r3.captured.status).toBe(429);
+  });
+
+  // Retro review (Part 6): the default key went straight from `ctx.request.ip`
+  // to 'anonymous', and no first-party adapter populates `ip` (M23) — so the
+  // limiter was ONE GLOBAL counter: `max` requests per window across all
+  // callers, starving legitimate traffic and limiting no individual client.
+  describe('defaultRateLimitKey', () => {
+    it('prefers the authenticated principal', () => {
+      const { ctx } = createContext(createFakeRuntime(0), {
+        ip: '1.2.3.4',
+        user: { id: 'u-42' },
+      });
+      expect(defaultRateLimitKey(ctx)).toBe('user:u-42');
+    });
+
+    it('falls back to the clientIp published by ipSecurityMiddleware', () => {
+      const { ctx } = createContext(createFakeRuntime(0));
+      ctx.state.set('clientIp', '9.9.9.9');
+      expect(defaultRateLimitKey(ctx)).toBe('ip:9.9.9.9');
+    });
+
+    it('falls back to request.ip when a custom adapter sets it', () => {
+      const { ctx } = createContext(createFakeRuntime(0), { ip: '1.2.3.4' });
+      expect(defaultRateLimitKey(ctx)).toBe('ip:1.2.3.4');
+    });
+
+    it("returns 'anonymous' only when nothing identifies the caller", () => {
+      const { ctx } = createContext(createFakeRuntime(0));
+      expect(defaultRateLimitKey(ctx)).toBe('anonymous');
+    });
+
+    it('counts two different users separately by default', async () => {
+      const runtime = createFakeRuntime(0);
+      const mw = rateLimitMiddleware({ windowMs: 60_000, max: 1 });
+
+      const alice = createContext(runtime, { user: { id: 'alice' } });
+      const bob = createContext(runtime, { user: { id: 'bob' } });
+      let bobRan = false;
+
+      await mw(alice.ctx, () => Promise.resolve());
+      await mw(bob.ctx, () => {
+        bobRan = true;
+        return Promise.resolve();
+      });
+
+      // With the old 'anonymous' default, Alice's single request would have
+      // exhausted Bob's budget too.
+      expect(bobRan).toBe(true);
+      expect(bob.captured.status).toBe(200);
+    });
   });
 });

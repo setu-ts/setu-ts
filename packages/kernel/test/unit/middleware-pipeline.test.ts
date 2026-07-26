@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction, NextFunction } from '@hono-enterprise/common';
 import { MiddlewarePipeline } from '../../src/pipeline/middleware-pipeline.ts';
 
 function emptyCtx(): IRequestContext {
@@ -83,6 +83,40 @@ describe('MiddlewarePipeline', () => {
     await pipeline.execute(emptyCtx(), async () => {});
     // After execute, next() was already called once — calling again throws
     expect(() => nextFn!()).toThrow('next() called multiple times');
+  });
+
+  it('names the offending stage from MiddlewareOptions.name on double next()', async () => {
+    const pipeline = new MiddlewarePipeline();
+    pipeline.add((_ctx, next) => {
+      next();
+      // `MiddlewareOptions.name` was stored and never read before this: the
+      // message used `fn.name`, which is '' for an anonymous arrow.
+      expect(() => next()).toThrow('next() called multiple times in middleware auth-guard');
+    }, { name: 'auth-guard' });
+
+    await pipeline.execute(emptyCtx(), async () => {});
+  });
+
+  it('falls back to <anonymous> when neither a registered nor a function name exists', async () => {
+    const pipeline = new MiddlewarePipeline();
+    // No `name` option, and an anonymous arrow assigned inline has `fn.name === ''`.
+    pipeline.add(
+      ((_ctx: IRequestContext, next: NextFunction) => {
+        next();
+        expect(() => next()).toThrow('next() called multiple times in middleware <anonymous-0>');
+      }) as MiddlewareFunction,
+    );
+
+    await pipeline.execute(emptyCtx(), async () => {});
+  });
+
+  it('exposes the compiled diagnostic names in execution order', () => {
+    const pipeline = new MiddlewarePipeline();
+    expect(pipeline.compiledNames()).toEqual([]);
+    pipeline.add(() => {}, { name: 'late', priority: 900 });
+    pipeline.add(() => {}, { name: 'early', priority: 100 });
+    pipeline.compile();
+    expect(pipeline.compiledNames()).toEqual(['early', 'late']);
   });
 
   it('should throw on double next() during execution', async () => {

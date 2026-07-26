@@ -17,7 +17,6 @@ import type {
   RouteInfo,
 } from '@hono-enterprise/common';
 
-import type { Segment } from './route-matcher.ts';
 import { parsePattern, staticSegmentCount } from './route-matcher.ts';
 
 export interface RouteEntry {
@@ -25,9 +24,14 @@ export interface RouteEntry {
   method: HttpMethod;
   definition: RouteDefinition;
   index: number;
-  /** Parsed pattern segments — hoisted to registration time (AI_GUIDELINES §14). */
-  segments: readonly Segment[];
-  /** Static-segment count — hoisted to registration time. */
+  /**
+   * Static-segment count — hoisted to registration time (AI_GUIDELINES §14) and
+   * read by the tie-break in {@linkcode Router.match}.
+   *
+   * The parsed `Segment[]` it is derived from is deliberately NOT retained: it
+   * was stored on every entry and read by nothing once Hono took over matching
+   * in M22.
+   */
   statics: number;
 }
 
@@ -57,16 +61,14 @@ export class Router implements IRouterApi {
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
-    // Hoist per-request work to registration time (AI_GUIDELINES §14):
-    // parse the pattern once and cache its segments + static count.
-    const segments = parsePattern(path);
+    // Hoist per-request work to registration time (AI_GUIDELINES §14): parse
+    // the pattern once here and keep only the static count the tie-break reads.
     const entry: RouteEntry = {
       pattern: path,
       method,
       definition,
       index: this.#index++,
-      segments,
-      statics: staticSegmentCount(segments),
+      statics: staticSegmentCount(parsePattern(path)),
     };
     this.#routes.push(entry);
     this.#entryMap.set(`${method} ${path}`, entry);
@@ -223,7 +225,14 @@ export class Router implements IRouterApi {
     return { definition: best.entry.definition, params: best.params };
   }
 
-  /** Returns all registered route definitions (for introspection). */
+  /**
+   * Returns all registered route entries, including the registration
+   * bookkeeping (`index`, `statics`) that drives the tie-break.
+   *
+   * @returns The route entries in registration order
+   * @internal Test/diagnostics seam — `Router` is not exported from the package
+   * barrel, and plugins read routes through the contract's `listRoutes()`.
+   */
   getAll(): readonly RouteEntry[] {
     return this.#routes;
   }

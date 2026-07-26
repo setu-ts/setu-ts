@@ -49,7 +49,7 @@ export interface IMetric {
  * Ergonomic options for the typed factory methods. `type` is injected by the
  * method name; `help` defaults to the metric name.
  *
- * @since 0.19.0
+ * @since 0.2.0
  */
 export interface MetricOptions {
   /** Human-readable description (Prometheus `HELP`). Defaults to the metric name. */
@@ -71,7 +71,7 @@ export interface MetricOptions {
 /**
  * Monotonically increasing counter. `observe` / `inc` add a non-negative value.
  *
- * @since 0.19.0
+ * @since 0.2.0
  */
 export interface ICounter extends IMetric {
   /**
@@ -86,7 +86,7 @@ export interface ICounter extends IMetric {
 /**
  * Gauge: arbitrary set / inc / dec. `observe` sets the value.
  *
- * @since 0.19.0
+ * @since 0.2.0
  */
 export interface IGauge extends IMetric {
   /**
@@ -115,7 +115,7 @@ export interface IGauge extends IMetric {
 /**
  * Histogram: bucketed observation distribution plus sum and count.
  *
- * @since 0.19.0
+ * @since 0.2.0
  */
 export interface IHistogram extends IMetric {
   /**
@@ -132,7 +132,7 @@ export interface IHistogram extends IMetric {
 /**
  * Summary: per-quantile observations plus sum and count.
  *
- * @since 0.19.0
+ * @since 0.2.0
  */
 export interface ISummary extends IMetric {
   /**
@@ -149,7 +149,7 @@ export interface ISummary extends IMetric {
 /**
  * Metrics service resolved via `ctx.services.get<IMetricsService>('metrics')`.
  *
- * @since 0.19.0
+ * @since 0.2.0
  */
 export interface IMetricsService {
   /**

@@ -428,4 +428,47 @@ describe('DatabasePlugin integration', () => {
     await plugin.register!(ctx);
     expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
   });
+
+  // Retro review (Part 4). `BaseRepository.findAll` re-applied where/orderBy/
+  // offset/limit that the DataSource had already applied, so `offset` ran twice
+  // and every page after the first came back EMPTY through this exact surface.
+  describe('paginated reads through the repository', () => {
+    async function seeded() {
+      const ctx = createFakeContext();
+      const plugin = DatabasePlugin();
+      await plugin.register!(ctx);
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const repo = db.getRepository<{ id: string; n: number }>('User');
+      for (let i = 1; i <= 10; i++) {
+        await repo.create({ id: `u${i}`, n: i });
+      }
+      return repo;
+    }
+
+    it('returns every page, not just the first', async () => {
+      const repo = await seeded();
+      const page = async (offset: number) =>
+        (await repo.findAll({ orderBy: { n: 'asc' }, limit: 3, offset }))
+          .map((r) => r.n);
+
+      expect(await page(0)).toEqual([1, 2, 3]);
+      expect(await page(3)).toEqual([4, 5, 6]);
+      expect(await page(6)).toEqual([7, 8, 9]);
+      expect(await page(9)).toEqual([10]);
+      expect(await page(10)).toEqual([]);
+    });
+
+    it('applies select through the adapter, dropping unlisted fields', async () => {
+      const repo = await seeded();
+      const rows = await repo.findAll({ orderBy: { n: 'asc' }, limit: 2, select: ['n'] });
+      expect(rows).toEqual([{ n: 1 }, { n: 2 }]);
+    });
+
+    it('still filters and counts correctly', async () => {
+      const repo = await seeded();
+      expect(await repo.findAll({ where: { n: 7 } })).toEqual([{ id: 'u7', n: 7 }]);
+      expect(await repo.count({ where: { n: 7 } })).toBe(1);
+      expect(await repo.count()).toBe(10);
+    });
+  });
 });

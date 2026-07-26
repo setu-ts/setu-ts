@@ -523,20 +523,17 @@ interface ValidationPluginOptions {
   readonly errorFormat?: ErrorFormat | ValidationErrorFormatter;
 
   /**
-   * Strip unknown properties not defined in the schema.
-   *
-   * **Limitation:** Cannot be enforced at the middleware layer because schemas
-   * are duck-typed via `safeParse()`. Configure on the schema instead:
-   * `z.object({ ... }).strip()`.
+   * Strip properties the schema does not declare. Applied once per middleware
+   * at registration time via the schema's own `.strip()` (Zod-style). A schema
+   * without `.strip()` is used unchanged.
    */
   readonly whitelist?: boolean;
 
   /**
-   * Reject requests with properties not defined in the schema.
-   *
-   * **Limitation:** Cannot be enforced at the middleware layer because schemas
-   * are duck-typed via `safeParse()`. Configure on the schema instead:
-   * `z.object({ ... }).strict()`.
+   * Reject payloads carrying properties the schema does not declare. Applied
+   * once per middleware at registration time via the schema's own `.strict()`
+   * (Zod-style), and takes precedence over `whitelist` when both are set. A
+   * schema without `.strict()` is used unchanged.
    */
   readonly forbidNonWhitelisted?: boolean;
 }
@@ -1203,6 +1200,14 @@ Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTION
 `Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
 origins call `next()` without CORS headers (browser enforces block).
 
+`Vary: Origin` is appended to **every** response for a request carrying an `Origin` header —
+including a denied one — so a shared cache cannot serve an allowed origin's response to a denied
+origin or the reverse.
+
+`origin: true` (reflect any origin) combined with `credentials: true` **throws at construction**:
+reflecting an arbitrary origin while allowing credentials lets any site the user visits read
+credentialed responses. List the origins, or pass a `CorsOriginMatcher`.
+
 #### Security Headers (`securityHeadersMiddleware`)
 
 Sets headers **before** `next()` so they persist through handler and downstream short-circuits.
@@ -1228,6 +1233,11 @@ without reading body. Absent or malformed `Content-Length` → pass through.
 Resolves client IP and publishes to `ctx.state.set('clientIp', ip)`. When `trustProxy: true`, reads
 the configured `ipHeader` (default `X-Forwarded-For`) and takes the leftmost address. Never
 short-circuits.
+
+**`trustProxy` is the only working source on the first-party adapters.** The fallback to
+`request.ip` is vestigial since M23: a web `Request` carries no peer address, so the shared `fetch`
+mapping cannot populate `IRequest.ip` and `clientIp` is `undefined` unless the proxy header is
+present. The fallback is retained for a custom `IHttpAdapter` that does set it.
 
 ---
 
@@ -1508,8 +1518,8 @@ Omitting an option disables that behaviour (no timer created).
   messaging capability.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
-- The `inject()` method discards streaming bodies; SSE integration tests must use a real socket
-  (`app.start({ port })` + `fetch()`).
+- The `inject()` method cannot read a streaming body and throws when it meets one; SSE integration
+  tests must use a real socket (`app.start({ port })` + `fetch()`).
 
 ---
 
@@ -2428,6 +2438,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`AddJobOptions`** — Options for `queue.add()` (re-exported)
 - **`ProcessOptions`** — Options for `queue.process()` (re-exported)
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
+- **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
+  through (structurally compatible with `ILogger`)
 
 ### Registration
 
@@ -2535,6 +2547,14 @@ await queue.addRecurring('cleanup-old-sessions', {}, hourlyOptions);
 // Every day at 9 AM
 await queue.addRecurring('daily-report', { type: 'summary' }, { cron: '0 9 * * *' });
 ```
+
+### Failure Reporting
+
+The worker loop, the recurring-schedule loop, and the job runner all report failures through the
+`logger` capability when one is registered — a failing job logs at `error` with the job id, name,
+attempt count and the retry delay (or the dead-letter decision), and an adapter outage logs the poll
+failure. Nothing is required: with no `LoggerPlugin` registered the queue keeps running and reports
+nowhere, and a throwing logger can never take the worker loop down.
 
 ### Dead-Lettered Jobs
 
@@ -3889,6 +3909,16 @@ app.router.post('/users', {
 });
 ```
 
+### Notes
+
+- Every `RouteSchema` position the generator reads becomes part of the operation: `body` becomes the
+  `application/json` request body, `response` becomes the responses map, `tags`/`summary` become the
+  operation metadata, and `params`, `query`, and `headers` become `parameters` with `in: 'path'`,
+  `in: 'query'`, and `in: 'header'` respectively. Path parameters are always `required: true` (they
+  come from the path template); query and header parameters take their `required` flag from the
+  schema. Header parameters are emitted verbatim — per OpenAPI 3.1, tooling ignores definitions
+  named `Accept`, `Content-Type`, and `Authorization`, so the generator does not filter them out.
+
 ### Accessing the Spec
 
 ```typescript
@@ -4964,6 +4994,13 @@ Contract notes:
   `{ error: 'Internal Server Error' }` → `500`; `{ error: 'Service Unavailable' }` for a request
   arriving while `stop()` is draining → `503`). Error formatting belongs to the exceptions package,
   not the kernel.
+- **`inject()` body semantics.** `InjectResponse.body` is text: a byte body written with
+  `response.send(bytes)` is UTF-8 decoded rather than reported as `null`, and `json()` parses it. A
+  **streaming** response cannot be presented as text without draining the live stream, so `inject()`
+  throws and points at `app.fetch()` with a web `Request` instead.
+- **`app.fetch()` rejects rather than throwing synchronously** when no `http-adapter` capability is
+  registered, so the Workers `export default { fetch: app.fetch }` entry point sees a failed promise
+  instead of an unhandled exception.
 - **Contribution-token pattern**: `ctx.health.register()`, `ctx.metrics.register()`,
   `ctx.openapi.addSchema()`, `ctx.cli.register()`, and `ctx.decorators.register()` funnel
   contributions into multi-provider services under the Step-1 tokens; consumers retrieve them with
@@ -4992,6 +5029,7 @@ Cloudflare Workers.
 | `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
 | `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
 | `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
+| `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to `node:` built-ins)              |
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
 | `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
 | `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
@@ -5044,12 +5082,13 @@ Per-runtime upgrade seams:
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
 | `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
-| `DenoDirEntry`                      | type | Directory entry returned by `DenoHost.readdir()`                               |
+| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`)           |
 | `NodeHost`                          | type | Host interface for the Node adapter (extension point)                          |
 | `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                        |
 | `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                   |
 | `BunHost`                           | type | Host interface for the Bun adapter (extension point)                           |
 | `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                         |
+| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (testing seam)                         |
 | `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                     |
 | `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                     |
 | `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                      |
@@ -5082,6 +5121,17 @@ Per-runtime upgrade seams:
 
 Contract notes:
 
+- **The Bun and Deno host defaults are backed by real APIs (retro review, Part 2).**
+  `buildBunHost()` builds the default `BunHost` from `node:fs` (sync), `node:os`, and `node:process`
+  — which Bun implements — NOT from members of the `Bun` global: Bun's file API is `Bun.file()` /
+  `Bun.write()`, and it has no
+  `readFile`/`stat`/`readdir`/`mkdir`/`rm`/`realPath`/`hostname`/`exit`. Only `Bun.version` is read
+  from the global. On the Deno side, `DenoHost.readDir()` is named and shaped after the real
+  `Deno.readDir` — an **`AsyncIterable`**, consumed with `for await`. Both defaults are exercised
+  against their real APIs by the test suite, not only through injected fakes.
+- **`IRuntimeServices.env` is a snapshot on Deno and Workers**, taken when the services were created
+  (`Deno.env.toObject()`, the per-invocation Workers bindings object), and a live pass-through of
+  `process.env` on Node and Bun. Nothing in the framework mutates the environment at runtime.
 - **M23 replaced M39's HTTP server adapters.** The `IHttpAdapter` contract now exposes the
   web-standard `fetch` entry: `setHandler` installs the framework handler, `fetch` is the universal
   entry point callable without `listen` (Cloudflare Workers), `listen` binds a real TCP socket, and
@@ -5166,7 +5216,9 @@ Contract notes:
 - **RFC 7807 compliance**: when `format: 'rfc7807'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (RFC 7807
-  uses `detail`).
+  uses `detail`). The media type follows the RESOLVED formatter, so passing the exported
+  `rfc7807Formatter` function as `format` produces the same body **and** the same content type as
+  the `'rfc7807'` alias.
 - **Logger is optional**: `errorHandler` logs via `ILogger` resolved from
   `ctx.services.get(CAPABILITIES.LOGGER)` only when a logger is registered; otherwise logging is
   silently skipped.

@@ -122,8 +122,9 @@ export interface ICommandBus {
    * @typeParam TResult - The expected result type
    * @param command - The command to execute
    * @returns The handler's result
-   * @throws {HandlerNotFoundError} (from the plugin) if no handler is registered for `command.type`
-   * @throws {TypeError} if `command.type` is not a string
+   * @throws {HandlerNotFoundError} (from the plugin) — as a REJECTION — if no
+   * handler is registered for `command.type`
+   * @throws {TypeError} — as a REJECTION — if `command.type` is not a string
    */
   execute<TResult = unknown>(command: CqrsCommand): Promise<TResult>;
 }
@@ -153,8 +154,9 @@ export interface IQueryBus {
    * @typeParam TResult - The expected result type
    * @param query - The query to execute
    * @returns The handler's result
-   * @throws {HandlerNotFoundError} (from the plugin) if no handler is registered for `query.type`
-   * @throws {TypeError} if `query.type` is not a string
+   * @throws {HandlerNotFoundError} (from the plugin) — as a REJECTION — if no
+   * handler is registered for `query.type`
+   * @throws {TypeError} — as a REJECTION — if `query.type` is not a string
    */
   execute<TResult = unknown>(query: CqrsQuery): Promise<TResult>;
 }

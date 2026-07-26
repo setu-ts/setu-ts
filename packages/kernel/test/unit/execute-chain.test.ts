@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction, NextFunction } from '@hono-enterprise/common';
 
 import { executeChain } from '../../src/pipeline/execute-chain.ts';
 import { ResponseBuilder } from '../../src/context/response.ts';
@@ -117,5 +117,37 @@ describe('executeChain', () => {
       },
     ];
     await expect(executeChain(chain, bareCtx(), () => Promise.resolve())).rejects.toThrow('boom');
+  });
+
+  // Route-level chains pass no `names` array, so the label falls back to the
+  // function's own name — and to '<anonymous>' when that is the empty string.
+  it('labels a double next() with the function name when no names are supplied', async () => {
+    async function authGuard(_ctx: IRequestContext, next: NextFunction): Promise<void> {
+      await next();
+      expect(() => next()).toThrow('next() called multiple times in middleware authGuard');
+    }
+
+    await executeChain([authGuard], ctxWithResponse(), () => Promise.resolve());
+  });
+
+  it('labels a double next() <anonymous> for a function with an empty name', async () => {
+    const anonymous = ((_ctx: IRequestContext, next: NextFunction) => {
+      next();
+      expect(() => next()).toThrow('next() called multiple times in middleware <anonymous>');
+    }) as MiddlewareFunction;
+    // An inline arrow assigned to a `const` inherits that name, so strip it to
+    // reach the '' case a route middleware built by `.bind()` or a factory hits.
+    Object.defineProperty(anonymous, 'name', { value: '' });
+
+    await executeChain([anonymous], ctxWithResponse(), () => Promise.resolve());
+  });
+
+  it('prefers a supplied diagnostic name over the function name', async () => {
+    async function inner(_ctx: IRequestContext, next: NextFunction): Promise<void> {
+      await next();
+      expect(() => next()).toThrow('next() called multiple times in middleware registered-label');
+    }
+
+    await executeChain([inner], ctxWithResponse(), () => Promise.resolve(), ['registered-label']);
   });
 });

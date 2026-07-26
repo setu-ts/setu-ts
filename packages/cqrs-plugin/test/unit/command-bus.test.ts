@@ -50,18 +50,24 @@ describe('CommandBus', () => {
     expect(result).toBe('async: test');
   });
 
-  it('should throw HandlerNotFoundError for unregistered type', () => {
+  it('should REJECT with HandlerNotFoundError for unregistered type', async () => {
     const bus = new CommandBus();
     const cmd = new TestCommand({ value: 'test' });
 
-    expect(() => bus.execute(cmd)).toThrow(HandlerNotFoundError);
+    // A synchronous throw from a promise-returning method escapes
+    // `execute(...).catch(...)` entirely — it must reject.
+    const call = bus.execute(cmd);
+    expect(call instanceof Promise).toBe(true);
+    await expect(call).rejects.toThrow(HandlerNotFoundError);
   });
 
-  it('should throw TypeError if command.type is not a string', () => {
+  it('should REJECT with TypeError if command.type is not a string', async () => {
     const bus = new CommandBus();
     const badCmd = { type: 123 as unknown as string, data: {} };
 
-    expect(() => bus.execute(badCmd)).toThrow(TypeError);
+    const call = bus.execute(badCmd);
+    expect(call instanceof Promise).toBe(true);
+    await expect(call).rejects.toThrow(TypeError);
   });
 
   it('should run behaviors around the handler', async () => {

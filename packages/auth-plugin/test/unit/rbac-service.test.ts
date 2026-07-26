@@ -253,4 +253,74 @@ describe('RbacService', () => {
       expect(rbac.hasRole(principal, 'a')).toBe(true);
     });
   });
+
+  // Retro review (Part 6): one `visited` set was threaded through the whole
+  // recursion AND whatever came back was memoized, so a role resolved as a
+  // side-effect of another role's traversal could be cached INCOMPLETE — the
+  // result depended on `Object.keys` order.
+  describe('closure completeness', () => {
+    it('resolves mutually-inheriting roles completely, in either key order', () => {
+      const forward = new RbacService({
+        roles: {
+          a: { permissions: ['pa'], inherits: ['b'] },
+          b: { permissions: ['pb'], inherits: ['a'] },
+        },
+      });
+      const reverse = new RbacService({
+        roles: {
+          b: { permissions: ['pb'], inherits: ['a'] },
+          a: { permissions: ['pa'], inherits: ['b'] },
+        },
+      });
+
+      for (const svc of [forward, reverse]) {
+        for (const role of ['a', 'b']) {
+          const principal = { id: 'u', roles: [role] };
+          expect(svc.hasPermission(principal, 'pa')).toBe(true);
+          expect(svc.hasPermission(principal, 'pb')).toBe(true);
+        }
+      }
+    });
+
+    it('resolves a diamond hierarchy for every role', () => {
+      const svc = new RbacService({
+        roles: {
+          admin: { inherits: ['editor', 'moderator'] },
+          editor: { permissions: ['write'], inherits: ['viewer'] },
+          moderator: { permissions: ['ban'], inherits: ['viewer'] },
+          viewer: { permissions: ['read'] },
+        },
+      });
+
+      const admin = { id: 'u', roles: ['admin'] };
+      expect(svc.hasPermission(admin, 'read')).toBe(true);
+      expect(svc.hasPermission(admin, 'write')).toBe(true);
+      expect(svc.hasPermission(admin, 'ban')).toBe(true);
+      expect(svc.hasRole(admin, 'viewer')).toBe(true);
+
+      const moderator = { id: 'm', roles: ['moderator'] };
+      expect(svc.hasPermission(moderator, 'read')).toBe(true);
+      expect(svc.hasPermission(moderator, 'write')).toBe(false);
+    });
+
+    it('ignores an inherited role that is not configured', () => {
+      const svc = new RbacService({
+        roles: { editor: { permissions: ['write'], inherits: ['ghost'] } },
+      });
+      const principal = { id: 'u', roles: ['editor'] };
+      // The undefined parent contributes nothing and must not abort the walk.
+      expect(svc.hasPermission(principal, 'write')).toBe(true);
+      expect(svc.hasRole(principal, 'ghost')).toBe(true);
+      expect(svc.hasPermission(principal, 'anything-else')).toBe(false);
+    });
+
+    it('terminates on a self-inheriting role', () => {
+      const svc = new RbacService({
+        roles: { loop: { permissions: ['p'], inherits: ['loop'] } },
+      });
+      const principal = { id: 'u', roles: ['loop'] };
+      expect(svc.hasPermission(principal, 'p')).toBe(true);
+      expect(svc.hasRole(principal, 'loop')).toBe(true);
+    });
+  });
 });

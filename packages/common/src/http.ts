@@ -57,7 +57,7 @@ export interface IRequest {
    * from the native `Request.signal`; optional because injected / test
    * requests may not carry one.
    *
-   * When absent, {@linkcode createRequestContext} falls back to a
+   * When absent, the kernel's request-context factory falls back to a
    * non-aborting sentinel so that producers reading
    * {@linkcode IRequestContext.signal} always have a live signal to listen on.
    */
@@ -174,9 +174,15 @@ export interface IResponse {
    */
   stream(body: ReadableStream<Uint8Array>): HandlerResult;
   /**
-   * Returns an immutable snapshot of the current response state (status,
-   * headers, body). Enables middleware to inspect the response after
-   * `next()` returns — required for transparent response caching.
+   * Returns a snapshot of the current response state (status, headers, body).
+   * Enables middleware to inspect the response after `next()` returns —
+   * required for transparent response caching.
+   *
+   * The returned object is a READ view, not a defensive copy: `headers` is the
+   * live `Headers` instance backing the response. Treat it as read-only —
+   * mutating it mutates the response. (No copy is taken deliberately: cloning a
+   * `Headers` collapses repeated `Set-Cookie` values into one comma-joined
+   * header, which would corrupt multi-cookie responses.)
    *
    * Returns a **discriminated union** keyed on `streaming`: when `false`,
    * `body` is `Uint8Array | string | null` (buffered); when `true`,
@@ -215,9 +221,9 @@ export interface IRequestContext {
   readonly startTime: number;
   /**
    * An abort signal that fires when the underlying HTTP connection is severed
-   * (client disconnect, timeout). Populated by {@linkcode createRequestContext}
-   * from the native `Request.signal`; falls back to a non-aborting sentinel so
-   * handlers always have a live signal to listen on.
+   * (client disconnect, timeout). Populated by the kernel's request-context
+   * factory from the native `Request.signal`; falls back to a non-aborting
+   * sentinel so handlers always have a live signal to listen on.
    *
    * Used by streaming producers (SSE heartbeats, channel cleanup) to stop
    * work on client disconnect and avoid leaking producers.

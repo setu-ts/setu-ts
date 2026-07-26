@@ -55,6 +55,20 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
 
   const origin = options.origin ?? [];
   const credentials = options.credentials ?? false;
+
+  // `origin: true` reflects whatever Origin the request carries. Combined with
+  // credentials that is the classic CORS hole: every site the user visits can
+  // read credentialed responses, because a reflected concrete origin bypasses
+  // the browser's `*`-with-credentials prohibition. Fail at registration rather
+  // than serving it — this package promises to be secure-by-default when
+  // enabled. Name the origins, or use a matcher, when credentials are needed.
+  if (origin === true && credentials) {
+    throw new TypeError(
+      'corsMiddleware: `origin: true` (reflect any origin) cannot be combined with ' +
+        '`credentials: true` — every site could then read credentialed responses. ' +
+        'List the allowed origins explicitly, or pass a CorsOriginMatcher.',
+    );
+  }
   const methods = options.methods ?? ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
   const allowedHeaders = options.allowedHeaders ?? [];
   const exposedHeaders = options.exposedHeaders ?? [];
@@ -71,6 +85,12 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
       await next();
       return;
     }
+
+    // The response depends on the Origin header from here on — including when
+    // the origin is DENIED and no CORS headers are added. Without `Vary` a
+    // shared cache can serve an allowed origin's response (with
+    // `Allow-Origin`) to a denied one, or the reverse.
+    ctx.response.appendHeader('Vary', 'Origin');
 
     // Determine if the origin is allowed
     const allowedOrigin = await resolveOrigin(origin, requestOrigin, ctx);
@@ -97,7 +117,6 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
     ) {
       ctx.response.status(204);
       ctx.response.header('Access-Control-Allow-Origin', allowedOrigin);
-      ctx.response.appendHeader('Vary', 'Origin');
 
       if (credentials) {
         ctx.response.header('Access-Control-Allow-Credentials', 'true');
@@ -116,7 +135,6 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
 
     // Non-preflight CORS request — set headers and proceed
     ctx.response.header('Access-Control-Allow-Origin', allowedOrigin);
-    ctx.response.appendHeader('Vary', 'Origin');
 
     if (credentials) {
       ctx.response.header('Access-Control-Allow-Credentials', 'true');

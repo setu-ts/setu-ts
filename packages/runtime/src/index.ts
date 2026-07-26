@@ -23,8 +23,8 @@ export type { DenoDirEntry, DenoFileInfo, DenoHost } from './adapters/deno/deno-
 export { buildNodeHost, createNodeRuntimeServices } from './adapters/node/node-runtime.ts';
 export type { NodeFsInfo, NodeHost, NodeModules } from './adapters/node/node-runtime.ts';
 
-export { createBunRuntimeServices } from './adapters/bun/bun-runtime.ts';
-export type { BunFileInfo, BunHost } from './adapters/bun/bun-runtime.ts';
+export { buildBunHost, createBunRuntimeServices } from './adapters/bun/bun-runtime.ts';
+export type { BunFileInfo, BunHost, BunModules } from './adapters/bun/bun-runtime.ts';
 
 export { createCloudflareRuntimeServices } from './adapters/workers/cf-runtime.ts';
 export type { CloudflareEnv, CloudflareRuntimeOptions } from './adapters/workers/cf-runtime.ts';

@@ -26,6 +26,8 @@ export type {
 } from './interfaces/index.ts';
 
 // Export adapter classes
+export type { QueueLogger } from './services/queue-service.ts';
+
 export { MemoryQueue } from './adapters/memory-queue.ts';
 export { RedisQueue } from './adapters/redis-queue.ts';
 export { RabbitMqQueue } from './adapters/rabbitmq-queue.ts';

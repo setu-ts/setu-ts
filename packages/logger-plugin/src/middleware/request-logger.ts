@@ -125,14 +125,17 @@ function resolveRuntime(ctx: IRequestContext): IRuntimeServices {
 }
 
 /**
- * Best-effort extraction of the response status from the context. The
- * kernel's `IResponse` is write-only, so we read from a well-known state
- * slot when a prior middleware has stored it, falling back to `0`.
+ * Reads the response status from the response builder.
+ *
+ * `IResponse.snapshot()` (added in M11, widened in M42) exposes the status, so
+ * this is the real value. It previously read a `'responseStatus'` state slot
+ * that nothing in the framework ever set — the comment claimed `IResponse` was
+ * write-only, which stopped being true once `snapshot()` landed — so every
+ * "request completed" entry logged `status: 0`.
  *
  * @param ctx - The request context
- * @returns The status code, or `0` if unknown
+ * @returns The response status code
  */
 function readStatus(ctx: IRequestContext): number {
-  const stored = ctx.state.get('responseStatus');
-  return typeof stored === 'number' ? stored : 0;
+  return ctx.response.snapshot().status;
 }

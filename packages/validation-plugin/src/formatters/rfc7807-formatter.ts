@@ -23,7 +23,10 @@ export const rfc7807Formatter: ValidationErrorFormatter = (
     title: 'Validation Error',
     status: 400,
     detail: `The request contains ${issues.length} validation error(s).`,
-    instance: ctx?.request.path ?? '',
+    // RFC 7807 §3.1: `instance` is a URI reference. Omit it when there is no
+    // request context rather than emitting an empty string, matching the
+    // exceptions package's formatter for the same spec.
+    ...(ctx !== undefined && { instance: ctx.request.path }),
     errors: issues.map((issue) => ({
       field: issue.path,
       message: issue.message,

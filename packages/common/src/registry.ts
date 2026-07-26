@@ -85,6 +85,9 @@ export interface IServiceRegistry {
   /**
    * Resolves a service by capability token.
    *
+   * On a multi-provider token this returns the FIRST registered provider; use
+   * {@linkcode IServiceRegistry.getAll} to reach all of them.
+   *
    * @typeParam T - The expected service type
    * @param token - The capability token to resolve
    * @returns The registered service
@@ -110,7 +113,8 @@ export interface IServiceRegistry {
   has(token: CapabilityToken): boolean;
 
   /**
-   * Removes a registration.
+   * Removes a registration. On a multi-provider token this removes EVERY
+   * provider registered under it, not just the first.
    *
    * @param token - The capability token to remove
    * @returns `true` if a registration was removed

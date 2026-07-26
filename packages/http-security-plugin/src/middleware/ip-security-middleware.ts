@@ -4,6 +4,13 @@
  * Resolves the client IP address and publishes it to
  * `ctx.state.set('clientIp', ip)`. Does not short-circuit.
  *
+ * **`trustProxy` is the only working source since M23.** The web-standard
+ * `fetch` mapping the HTTP adapters use cannot populate `IRequest.ip` — a web
+ * `Request` carries no peer address — so the `request.ip` fallback below is
+ * vestigial and `clientIp` is `undefined` unless `trustProxy` is on and the
+ * configured header is present. The fallback is retained for a custom adapter
+ * that does set `IRequest.ip`.
+ *
  * @module
  */
 import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
@@ -15,7 +22,10 @@ export interface IpSecurityOptions {
   /**
    * When `true`, read the client IP from the proxy header instead of
    * `request.ip`. Requires a trusted reverse proxy. Default: `false`.
-   * WARNING: Only enable behind a trusted proxy that validates the header.
+   *
+   * WARNING: only enable behind a trusted proxy that overwrites the header —
+   * a client can otherwise spoof it. Note that with `false`, `clientIp` is
+   * `undefined` on all first-party adapters (see the module note).
    */
   readonly trustProxy?: boolean;
   /**
@@ -58,7 +68,9 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
       }
     }
 
-    // Fallback to request.ip when trustProxy is false or the header is absent/empty
+    // Fallback to request.ip when trustProxy is false or the header is absent
+    // or empty. The first-party adapters never set it (see the module note), so
+    // this resolves to `undefined` there.
     if (!ip) {
       ip = ctx.request.ip;
     }

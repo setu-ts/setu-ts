@@ -49,7 +49,13 @@ export class RequestBus {
    * @throws {TypeError} if `request.type` is not a string
    * @throws {HandlerNotFoundError} if no handler is registered for the type
    */
-  execute<TResult>(request: CqrsRequest): Promise<TResult> {
+  // Declared `async` so BOTH failure modes reject rather than throwing
+  // synchronously. `execute` returns a promise, so a caller writing
+  // `bus.execute(cmd).catch(handle)` — or `Promise.allSettled([...])` over a
+  // batch — would otherwise never see these errors: the throw escapes the
+  // promise chain entirely. Same correction M14c applied to
+  // `KafkaBroker.request`/`respond`.
+  async execute<TResult>(request: CqrsRequest): Promise<TResult> {
     if (typeof request.type !== 'string') {
       throw new TypeError('CQRS request must have a string `type`.');
     }
@@ -59,7 +65,11 @@ export class RequestBus {
       throw new HandlerNotFoundError(request.type);
     }
 
-    return composePipeline(request, this.behaviors, () => handler(request)) as Promise<TResult>;
+    return await (composePipeline(
+      request,
+      this.behaviors,
+      () => handler(request),
+    ) as Promise<TResult>);
   }
 
   /**

@@ -283,4 +283,45 @@ describe('MemoryAdapter', () => {
       expect(found).toBeNull();
     });
   });
+
+  // Retro review (Part 4): `select` is now honored by the DataSource (both the
+  // plain and the transaction-overlay one) instead of being re-projected by
+  // BaseRepository, which also re-applied `offset` and emptied every page but
+  // the first.
+  describe('select projection', () => {
+    it('projects fields on the plain data source', async () => {
+      const adapter = new MemoryAdapter();
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', secret: 'x' });
+
+      const rows = await adapter.queryEntities('User', {
+        where: {},
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: ['name'],
+      });
+      expect(rows).toEqual([{ name: 'Alice' }]);
+    });
+
+    it('projects fields on the transaction overlay data source', async () => {
+      const adapter = new MemoryAdapter();
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', secret: 'x' });
+
+      const tx = await adapter.beginTransaction();
+      const ds = tx.createDataSource('User');
+      await ds.create({ id: '2', name: 'Bob', secret: 'y' });
+
+      const rows = await ds.findAll({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: -1,
+        offset: 0,
+        select: ['name'],
+      });
+      expect(rows).toEqual([{ name: 'Alice' }, { name: 'Bob' }]);
+      await tx.rollback();
+    });
+  });
 });

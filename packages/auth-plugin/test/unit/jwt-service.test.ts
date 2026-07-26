@@ -268,6 +268,64 @@ describe('JwtService', () => {
       expect(payload.exp).toBe(payload.iat + 3600);
     });
   });
+
+  // Retro review (Part 6).
+  describe('audience and header validation', () => {
+    const audSecret = 'test-secret-key-for-audience-checks';
+
+    it('accepts a token whose `aud` is an ARRAY containing the expected value', async () => {
+      const rt = createFakeRuntime(1000000);
+      const issuer = new JwtService(rt, { secret: audSecret, algorithm: 'HS256' });
+      const verifier = new JwtService(rt, {
+        secret: audSecret,
+        algorithm: 'HS256',
+        expectedAudience: 'api',
+      });
+
+      // RFC 7519 §4.1.3 allows `aud` to be a string OR an array of strings —
+      // Auth0/Cognito/Entra all issue arrays, and a strict `!==` rejected them.
+      const token = await issuer.sign({ sub: 'u1', aud: ['api', 'web'] });
+      const payload = await verifier.verify<{ sub: string }>(token);
+      expect(payload.sub).toBe('u1');
+    });
+
+    it('rejects an array `aud` that does not contain the expected value', async () => {
+      const rt = createFakeRuntime(1000000);
+      const issuer = new JwtService(rt, { secret: audSecret, algorithm: 'HS256' });
+      const verifier = new JwtService(rt, {
+        secret: audSecret,
+        algorithm: 'HS256',
+        expectedAudience: 'api',
+      });
+
+      const token = await issuer.sign({ sub: 'u1', aud: ['web', 'mobile'] });
+      await expect(verifier.verify(token)).rejects.toThrow('Invalid token audience');
+    });
+
+    it('rejects a token whose header algorithm is not the configured one', async () => {
+      const rt = createFakeRuntime(1000000);
+      const jwtSvc = new JwtService(rt, { secret: audSecret, algorithm: 'HS256' });
+      const token = await jwtSvc.sign({ sub: 'u1' });
+
+      // Re-label the header as RS256, keeping the valid HS256 signature.
+      const [, payloadB64, signatureB64] = token.split('.');
+      const forgedHeader = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      await expect(jwtSvc.verify(`${forgedHeader}.${payloadB64}.${signatureB64}`))
+        .rejects.toThrow('Unexpected token algorithm');
+    });
+
+    it('rejects a token whose header is not valid JSON', async () => {
+      const rt = createFakeRuntime(1000000);
+      const jwtSvc = new JwtService(rt, { secret: audSecret, algorithm: 'HS256' });
+      const token = await jwtSvc.sign({ sub: 'u1' });
+      const [, payloadB64, signatureB64] = token.split('.');
+      await expect(jwtSvc.verify(`bm90LWpzb24.${payloadB64}.${signatureB64}`))
+        .rejects.toThrow('Invalid token header');
+    });
+  });
 });
 
 /**

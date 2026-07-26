@@ -265,6 +265,76 @@ describe('OpenApiGenerator', () => {
       );
     });
 
+    it('should generate parameters from headers schema', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+      });
+
+      const routes: readonly RouteInfo[] = [
+        {
+          method: 'GET',
+          path: '/users',
+          definition: {
+            handler: () => {
+              throw new Error('not used');
+            },
+            schema: {
+              headers: z.object({
+                'x-request-id': z.string(),
+                'x-trace-flags': z.string().optional(),
+              }),
+            },
+          },
+        },
+      ];
+
+      const result = generator.generate(routes);
+
+      const params = result.paths['/users']?.get?.parameters;
+      expect(params).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'x-request-id',
+            in: 'header',
+            required: true,
+          }),
+          expect.objectContaining({
+            name: 'x-trace-flags',
+            in: 'header',
+            required: false,
+          }),
+        ]),
+      );
+    });
+
+    it('should emit no header parameters when the headers schema has no properties', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+      });
+
+      const routes: readonly RouteInfo[] = [
+        {
+          method: 'GET',
+          path: '/users',
+          definition: {
+            handler: () => {
+              throw new Error('not used');
+            },
+            // A non-object schema transforms to `{ type: 'string' }` — no
+            // `properties`, no `required` — which must yield no parameters
+            // rather than throwing.
+            schema: { headers: z.string() },
+          },
+        },
+      ];
+
+      const result = generator.generate(routes);
+
+      expect(result.paths['/users']?.get?.parameters).toBeUndefined();
+    });
+
     it('should generate responses from response schema', () => {
       const generator = new OpenApiGenerator({
         title: 'Test API',

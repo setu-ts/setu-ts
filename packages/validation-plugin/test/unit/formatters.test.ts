@@ -122,9 +122,9 @@ describe('rfc7807Formatter', () => {
     expect('message' in result).toBe(false);
   });
 
-  it('uses empty string for instance when ctx is absent', () => {
+  it('omits instance when ctx is absent (RFC 7807 wants a URI reference)', () => {
     const result = rfc7807Formatter(ISSUES);
-    expect(result.instance).toBe('');
+    expect('instance' in result).toBe(false);
   });
 
   it('instance equals ctx.request.path', () => {
