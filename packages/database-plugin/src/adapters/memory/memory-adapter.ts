@@ -15,6 +15,7 @@ import {
   applyPagination,
   matchesWhere,
   type NormalizedQuery,
+  projectFields,
 } from '../../query/query-builder.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
@@ -190,6 +191,14 @@ export class MemoryAdapter implements IOrmAdapter {
         }
         results = applyOrderBy(results, query.orderBy);
         results = applyPagination(results, query.offset, query.limit);
+        // `select` is applied HERE, like every other adapter: the DataSource is
+        // the single place a query is evaluated, so BaseRepository does not need
+        // to re-project (and must not re-paginate).
+        if (query.select.length > 0) {
+          return Promise.resolve(
+            results.map((r) => projectFields(r, query.select) as Record<string, unknown>),
+          );
+        }
         return Promise.resolve(results.map((r) => ({ ...r })));
       },
 
@@ -283,6 +292,16 @@ export class MemoryAdapter implements IOrmAdapter {
 
     // Paginate.
     results = applyPagination(results, query.offset, query.limit);
+
+    // Project. The DataSource is the single place a query is evaluated, so
+    // `select` is honored here rather than re-projected by BaseRepository
+    // (which must not re-apply any of these steps — re-applying `offset` made
+    // every page after the first come back empty).
+    if (query.select.length > 0) {
+      return Promise.resolve(
+        results.map((r) => projectFields(r, query.select) as Record<string, unknown>),
+      );
+    }
 
     return Promise.resolve(results.map((r) => ({ ...r })));
   }

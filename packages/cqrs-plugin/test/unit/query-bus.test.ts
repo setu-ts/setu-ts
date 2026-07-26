@@ -50,18 +50,24 @@ describe('QueryBus', () => {
     expect(result).toBe('async: 123');
   });
 
-  it('should throw HandlerNotFoundError for unregistered type', () => {
+  it('should REJECT with HandlerNotFoundError for unregistered type', async () => {
     const bus = new QueryBus();
     const qry = new TestQuery({ id: '123' });
 
-    expect(() => bus.execute(qry)).toThrow(HandlerNotFoundError);
+    // A synchronous throw from a promise-returning method escapes
+    // `execute(...).catch(...)` entirely — it must reject.
+    const call = bus.execute(qry);
+    expect(call instanceof Promise).toBe(true);
+    await expect(call).rejects.toThrow(HandlerNotFoundError);
   });
 
-  it('should throw TypeError if query.type is not a string', () => {
+  it('should REJECT with TypeError if query.type is not a string', async () => {
     const bus = new QueryBus();
     const badQry = { type: 123 as unknown as string, data: {} };
 
-    expect(() => bus.execute(badQry)).toThrow(TypeError);
+    const call = bus.execute(badQry);
+    expect(call instanceof Promise).toBe(true);
+    await expect(call).rejects.toThrow(TypeError);
   });
 
   it('should run behaviors around the handler', async () => {
