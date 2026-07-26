@@ -195,14 +195,14 @@ Cheap sweeps already run, so no part wastes time re-deriving them:
 
 ## Status
 
-| Part | Branch                 | Verdict     | PR |
-| ---: | ---------------------- | ----------- | -- |
-|    1 | `fix/review-p1-common` | merge-ready | —  |
-|    2 | —                      | not started | —  |
-|    3 | —                      | not started | —  |
-|    4 | —                      | not started | —  |
-|    5 | —                      | not started | —  |
-|    6 | —                      | not started | —  |
+| Part | Branch                 | Verdict     | PR  |
+| ---: | ---------------------- | ----------- | --- |
+|    1 | `fix/review-p1-common` | merge-ready | #72 |
+|    2 | —                      | not started | —   |
+|    3 | —                      | not started | —   |
+|    4 | —                      | not started | —   |
+|    5 | —                      | not started | —   |
+|    6 | —                      | not started | —   |
 
 ## Follow-ups surfaced by a part but outside its scope
 
