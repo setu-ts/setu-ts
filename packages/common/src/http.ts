@@ -10,6 +10,7 @@
 import type { HttpMethod } from './types.ts';
 import type { IServiceRegistry } from './registry.ts';
 import type { IPrincipal } from './services/auth.ts';
+import type { ITenant } from './services/tenancy.ts';
 
 /**
  * Opaque marker returned by {@linkcode IResponse} terminal methods and
@@ -45,6 +46,11 @@ export interface IRequest {
    * Absent when the request is unauthenticated.
    */
   user?: IPrincipal;
+  /**
+   * The resolved tenant, populated by the multi-tenancy middleware.
+   * Absent when no tenant could be resolved or multi-tenancy is not enabled.
+   */
+  tenant?: ITenant;
   /**
    * An abort signal that fires when the underlying HTTP connection is
    * severed (client disconnect, timeout). Populated by the HTTP adapter

@@ -1104,8 +1104,9 @@ app.router.get('/health', {
 
 ### Accessing the Current User
 
-`authMiddleware` writes the authenticated principal to `ctx.request.user` (`user` is the one
-writable field on `IRequest`, so the shipped `@CurrentUser` decorator resolves it).
+`authMiddleware` writes the authenticated principal to `ctx.request.user` (one of the two
+middleware-written fields on `IRequest` — the other is `tenant`, written by the multi-tenancy plugin
+— so the shipped `@CurrentUser` decorator resolves it).
 
 ```typescript
 app.router.get('/me', {
@@ -3336,6 +3337,118 @@ app.router.get('/beta', {
 
 ---
 
+## Multi-Tenancy Plugin
+
+Provides multi-tenancy support: tenant resolution, tenant context, tenant-scoped repositories,
+cache-key isolation, and pluggable database-isolation strategies.
+
+### Registration
+
+```typescript
+import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
+
+app.register(MultiTenancyPlugin({
+  resolver: 'header',
+  header: { name: 'x-tenant-id' },
+  database: 'column-per-tenant',
+  cache: { prefix: true },
+}));
+```
+
+### Usage
+
+```typescript
+app.router.get('/users', async (ctx) => {
+  const tenancy = ctx.services.get<IMultiTenancyService>('multi-tenancy');
+  const tenant = ctx.request.tenant;
+
+  // Tenant-aware repository — reads ctx.request.tenant set by middleware
+  const userRepo = tenancy.getRepository<User>(ctx, 'User');
+  const users = await userRepo.findAll(); // Scoped to current tenant
+
+  // Cache-key prefixing
+  const prefixed = tenancy.prefixCacheKey(tenant!.id, 'users:list'); // 'acme:users:list'
+
+  return ctx.response.json(users);
+});
+```
+
+**Note:** `getRepository` requires `ctx` because the framework has no ambient request context (no
+`AsyncLocalStorage`). The middleware resolves the tenant first; `getRepository` reads it from
+`ctx.request.tenant`. Calling `getRepository` before the middleware runs throws
+`TenantNotResolvedError`.
+
+### Options
+
+| Option                  | Type                                                                                              | Required | Description                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| `resolver`              | `'subdomain' \| 'header' \| 'path' \| 'jwt' \| ITenantResolver \| ITenantResolver[]`              | yes      | Discriminant for tenant resolution method, or a custom resolver / array of resolvers |
+| `subdomain.baseDomain?` | `string`                                                                                          | no       | Stripped from host to isolate tenant label; absent → first host label is tenant id   |
+| `header.name?`          | `string`                                                                                          | no       | Header to read; default `'x-tenant-id'`                                              |
+| `path.segment?`         | `number`                                                                                          | no       | Path segment index to read; default `0`                                              |
+| `jwt.claim?`            | `string`                                                                                          | no       | JWT claim to read; default `'tenant_id'`                                             |
+| `jwt.headerName?`       | `string`                                                                                          | no       | Authorization header name; default `'authorization'`                                 |
+| `jwt.decode?`           | `(token: string) => Record<string, unknown> \| null`                                              | no       | Custom decoder; falls back to `IJwtService.decode` from `CAPABILITIES.JWT` if absent |
+| `database`              | `'column-per-tenant' \| 'schema-per-tenant' \| 'database-per-tenant' \| ITenantIsolationStrategy` | no       | Isolation strategy; default `'column-per-tenant'`                                    |
+| `dataStore?`            | `ITenantDataStore`                                                                                | no       | Injected CRUD backend; default `MemoryTenantDataStore`                               |
+| `cache.prefix?`         | `boolean`                                                                                         | no       | When `true`, stamps resolved prefix into `ctx.state` via `getTenantCachePrefix()`    |
+| `cache.separator?`      | `string`                                                                                          | no       | Default `':'` — used by `prefixCacheKey` and the `ctx.state` stamp                   |
+| `required?`             | `boolean`                                                                                         | no       | When `true`, short-circuits unresolved requests at 400 without calling `next()`      |
+| `rejectionStatus?`      | `number`                                                                                          | no       | Status code for required-tenant short-circuit; default `400`                         |
+| `middlewarePriority?`   | `number`                                                                                          | no       | Priority for auto-added middleware; default `40`                                     |
+
+### Exports
+
+| Symbol                                                                                                             | Kind        | Description                                                                                |
+| ------------------------------------------------------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------ |
+| `MultiTenancyPlugin`                                                                                               | function    | Plugin factory — registers `IMultiTenancyService` under `CAPABILITIES.MULTI_TENANCY`       |
+| `tenantMiddleware`                                                                                                 | function    | Middleware factory — resolve tenant, set `ctx.request.tenant`, short-circuit when required |
+| `getTenantCachePrefix`                                                                                             | function    | Accessor reading the tenant cache prefix from `ctx.state`                                  |
+| `TENANT_CACHE_PREFIX_STATE_KEY`                                                                                    | const       | Module-level key constant (`'multi-tenancy-plugin:cache-prefix'`)                          |
+| `SubdomainResolver`                                                                                                | class       | Resolves tenant from URL host subdomain                                                    |
+| `HeaderResolver`                                                                                                   | class       | Resolves tenant from configurable HTTP header                                              |
+| `PathResolver`                                                                                                     | class       | Resolves tenant from configurable path segment index                                       |
+| `JwtResolver`                                                                                                      | class       | Resolves tenant from JWT claim (uses unverified decode)                                    |
+| `ColumnPerTenant`                                                                                                  | class       | Column-per-tenant isolation strategy (default)                                             |
+| `SchemaPerTenant`                                                                                                  | class       | Schema-per-tenant isolation strategy                                                       |
+| `DatabasePerTenant`                                                                                                | class       | Database-per-tenant isolation strategy                                                     |
+| `MemoryTenantDataStore`                                                                                            | class       | Zero-dependency in-process default store with cross-tenant isolation                       |
+| `TenantNotResolvedError`                                                                                           | class       | Thrown by `getRepository` when tenant has not been resolved                                |
+| `MultiTenancyPluginOptions`                                                                                        | interface   | The argument type of `MultiTenancyPlugin(...)`                                             |
+| `ResolverConfig`                                                                                                   | type        | The `resolver` option's type — discriminant string, custom resolver, or chain              |
+| `DatabaseStrategyKind`                                                                                             | type        | The `database` option's discriminant strings                                               |
+| `SubdomainResolverOptions`, `HeaderResolverOptions`, `PathResolverOptions`, `JwtResolverOptions`                   | interfaces  | Per-resolver option shapes, also the resolver constructors' argument types                 |
+| `TenantCacheOptions`                                                                                               | interface   | The `cache` option shape (`prefix`, `separator`)                                           |
+| `MemoryTenantDataStoreOptions`                                                                                     | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                 |
+| `ITenantDataStore`                                                                                                 | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                  |
+| `ITenantIsolationStrategy`                                                                                         | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`       |
+| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@hono-enterprise/common`           |
+
+### Notes
+
+- **No npm dependencies.** All resolvers parse strings; strategies are pure derivation; memory store
+  is in-process maps; cache prefixing is concatenation.
+- **`JwtResolver` uses unverified decode.** Tenant identity comes from an unsigned token claim. This
+  is acceptable only alongside auth middleware which separately verifies the token.
+- **`PathResolver` reads path segments by index, not router `:param` values.** The resolver receives
+  `IRequest` (not `IRequestContext`), so it cannot access `ctx.params`.
+- **`SubdomainResolver`'s `baseDomain` constrains resolution, it does not merely strip.** With
+  `baseDomain: 'example.com'`, only a strict subdomain resolves (`acme.example.com` → `acme`,
+  left-most label for deeper hosts, port ignored). The apex (`example.com`), an unrelated host
+  (`evil.com`), and a bare suffix match (`notexample.com`) all resolve to no tenant. Without
+  `baseDomain`, the first label of any multi-label host is the tenant and a single-label host
+  (`localhost`) resolves to none.
+- **`MemoryTenantDataStore` hands out detached snapshots.** Every entity returned by
+  `create`/`findAll`/`find`/`findById`/`update` is a shallow copy, so mutating a returned object
+  never rewrites the stored record. Read paths (`findAll`/`find`/`findById`/`delete`/a missing
+  `update`) allocate no partition, so requests carrying unknown tenant ids cannot grow the store.
+- **Strategy-derived partitioning.** The strategy passed to `register()` is handed to the data store
+  via `useIsolation()`. `MemoryTenantDataStore` derives its partition scope from it
+  (column-stamping, schema/database scoping). A store that never receives `useIsolation` partitions
+  by raw tenant id.
+- **Auto-added at priority 40.** Runs after observability (metrics 20 / telemetry 30), before auth
+  (300). Exported for manual re-ordering.
+
 ## Health
 
 Provides health check endpoints with pluggable indicators.
@@ -4756,7 +4869,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                          |
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                    |
-| Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                      |
+| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                         |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                     |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                       |
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |

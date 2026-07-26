@@ -1558,6 +1558,8 @@ last outbound).
 | -------- | ------------------------- | ------------------------ |
 | 0        | ErrorHandler              | Outermost error handler  |
 | 20       | MetricsMiddleware         | Record metrics           |
+| 30       | TelemetryMiddleware       | Propagate trace context  |
+| 40       | TenantMiddleware          | Resolve request tenant   |
 | 50       | LoggingMiddleware         | Log incoming request     |
 | 100      | RequestIdMiddleware       | Generate request ID      |
 | 150      | CorrelationIdMiddleware   | Propagate correlation ID |

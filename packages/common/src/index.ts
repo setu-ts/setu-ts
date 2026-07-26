@@ -167,7 +167,12 @@ export type { IStorage, SignedUrlOptions } from './services/storage.ts';
 export type { IMailer, MailMessage } from './services/mail.ts';
 export type { INotifier, NotificationMessage } from './services/notification.ts';
 export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
-export type { ITenant, ITenantResolver } from './services/tenancy.ts';
+export type {
+  IMultiTenancyService,
+  ITenant,
+  ITenantRepository,
+  ITenantResolver,
+} from './services/tenancy.ts';
 export type {
   CqrsCommand,
   CqrsQuery,
