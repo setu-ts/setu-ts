@@ -5366,7 +5366,12 @@ const app = await createTestApp({
 ### Programmatic Testing
 
 ```typescript
-import { createMockPlugin, createTestContext, inject } from '@hono-enterprise/testing';
+import {
+  collectStream,
+  createMockPlugin,
+  createTestContext,
+  inject,
+} from '@hono-enterprise/testing';
 import { FixtureManager, MockServiceRegistry } from '@hono-enterprise/testing';
 
 // Mock a plugin service
@@ -5389,10 +5394,22 @@ const response = await inject(app, {
 const ctx = createTestContext();
 const mockRegistry = new MockServiceRegistry();
 
+// Register a streaming route so collectStream has data to read
+app.router.get('/stream', (c) => {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('hello'));
+      controller.enqueue(new TextEncoder().encode(' world'));
+      controller.close();
+    },
+  });
+  return c.response.stream(stream);
+});
+
 // Collect a streaming body — use fetch() which returns a real web Response
 const fetchRes = await app.fetch(new Request('http://localhost/stream'));
 const stream = await collectStream(fetchRes);
-console.log(stream.text);
+console.log(stream.text); // → "hello world"
 ```
 
 ### Notes

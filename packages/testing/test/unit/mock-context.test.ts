@@ -398,4 +398,57 @@ describe('MockResponse', () => {
     });
     expect((ctx.request as unknown as Record<string, unknown>).tenant).toEqual({ id: 't1' });
   });
+
+  // --- P1-1: request.signal propagation to ctx.signal ---
+
+  it('options.request.signal propagates to ctx.signal', () => {
+    const controller = new AbortController();
+    const ctx = createTestContext({
+      request: { method: 'GET', url: 'http://localhost/', signal: controller.signal },
+    });
+    expect(ctx.signal).toBe(controller.signal);
+  });
+
+  it('aborting options.request.signal is observable on ctx.signal', async () => {
+    const controller = new AbortController();
+    const ctx = createTestContext({
+      request: { method: 'GET', url: 'http://localhost/', signal: controller.signal },
+    });
+    let aborted = false;
+    ctx.signal?.addEventListener('abort', () => {
+      aborted = true;
+    });
+    controller.abort();
+    // Give the event loop a tick to fire the abort event
+    await Promise.resolve();
+    expect(aborted).toBe(true);
+    expect(ctx.signal?.aborted).toBe(true);
+  });
+
+  it('top-level options.signal is used when options.request.signal is absent', () => {
+    const controller = new AbortController();
+    const ctx = createTestContext({ signal: controller.signal });
+    expect(ctx.signal).toBe(controller.signal);
+  });
+
+  // --- P1-2: Uint8Array body readers (bytes() and text()) ---
+
+  it('MockRequest.bytes() returns Uint8Array body directly', async () => {
+    const raw = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
+    const ctx = createTestContext({ body: raw });
+    const result = await ctx.request.bytes();
+    expect(result).toBe(raw);
+  });
+
+  it('MockRequest.text() decodes Uint8Array body as UTF-8', async () => {
+    const raw = new TextEncoder().encode('Hello world');
+    const ctx = createTestContext({ body: raw });
+    expect(await ctx.request.text()).toBe('Hello world');
+  });
+
+  it('MockRequest.json() still works with object body', async () => {
+    const obj = { key: 'val' };
+    const ctx = createTestContext({ body: obj });
+    expect(await ctx.request.json<{ key: string }>()).toEqual(obj);
+  });
 });

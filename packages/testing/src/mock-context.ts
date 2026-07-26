@@ -152,10 +152,16 @@ class MockRequest implements IRequest {
   }
 
   text(): Promise<string> {
+    if (this.#body instanceof Uint8Array) {
+      return Promise.resolve(new TextDecoder().decode(this.#body));
+    }
     return Promise.resolve(typeof this.#body === 'string' ? this.#body : '');
   }
 
   bytes(): Promise<Uint8Array> {
+    if (this.#body instanceof Uint8Array) {
+      return Promise.resolve(this.#body);
+    }
     const str = typeof this.#body === 'string' ? this.#body : '';
     return Promise.resolve(new TextEncoder().encode(str));
   }
@@ -288,9 +294,8 @@ export class MockResponse implements IResponse {
  */
 export function createTestContext(options?: TestContextOptions): IRequestContext {
   const runtime = options?.runtime ?? DEFAULT_TEST_RUNTIME;
-  const signal = options?.signal ?? new AbortController().signal;
 
-  // Build the mock request
+  // Build the mock request first so we can derive signal from request.signal
   const reqOptions = options?.request ?? {};
   const method = reqOptions.method ?? 'GET';
   const url = reqOptions.url ?? 'http://localhost/';
@@ -302,11 +307,16 @@ export function createTestContext(options?: TestContextOptions): IRequestContext
     path: resolvedPath,
     headers,
     body: options?.body,
-    signal,
+    ...(reqOptions.signal !== undefined ? { signal: reqOptions.signal } : {}),
     ...(reqOptions.ip !== undefined ? { ip: reqOptions.ip } : {}),
     ...(reqOptions.user !== undefined ? { user: reqOptions.user } : {}),
     ...(reqOptions.tenant !== undefined ? { tenant: reqOptions.tenant } : {}),
   });
+
+  // Signal precedence: options.request.signal (propagated via mockRequest) >
+  // options.signal (top-level override) > live never-aborting AbortController.
+  // Matches the kernel's: request.signal ?? NEVER_ABORT_CONTROLLER.signal
+  const signal = reqOptions.signal ?? options?.signal ?? new AbortController().signal;
 
   // Parse query from URL when not provided
   let query = options?.query;
