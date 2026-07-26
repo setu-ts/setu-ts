@@ -128,6 +128,16 @@ function makeMockContext(): MockContext {
 // ---------------------------------------------------------------------------
 
 describe('multi tenancy plugin', () => {
+  /** A structurally complete `ITenantDataStore` — the shape `register()` validates. */
+  const makeCompleteFakeStore = (): ITenantDataStore => ({
+    findAll: () => Promise.resolve([]),
+    findById: () => Promise.resolve(null),
+    find: () => Promise.resolve([]),
+    create: <E>() => Promise.resolve({} as E),
+    update: () => Promise.resolve(null),
+    delete: () => Promise.resolve(false),
+  });
+
   it('plugin — metadata correct', () => {
     const plugin = MultiTenancyPlugin({ resolver: new HeaderResolver() });
     expect(plugin.name).toEqual('multi-tenancy-plugin');
@@ -242,12 +252,25 @@ describe('multi tenancy plugin', () => {
     const ctx = makeMockContext();
     const plugin = MultiTenancyPlugin({
       resolver: 'header',
-      dataStore: {} as ITenantDataStore,
+      dataStore: makeCompleteFakeStore(),
     });
     await plugin.register(ctxAsPlugin(ctx));
 
     const result = await ctx.healthRegistrations[0].checkFn();
     expect((result as { data: { store: string } }).data.store).toEqual('custom');
+  });
+
+  it('plugin — an injected store missing ITenantDataStore methods throws at register', () => {
+    const ctx = makeMockContext();
+    const plugin = MultiTenancyPlugin({
+      resolver: 'header',
+      // Previously this registered cleanly and only failed on the first request
+      // that touched the store (`store.create is not a function`).
+      dataStore: { findAll: () => Promise.resolve([]) } as unknown as ITenantDataStore,
+    });
+    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow(
+      'missing required ITenantDataStore method(s): findById, find, create, update, delete',
+    );
   });
 
   it('plugin — onClose calls store.close()', async () => {
@@ -525,13 +548,20 @@ describe('multi tenancy plugin', () => {
     expect(service.prefixCacheKey('t1', 'k')).toEqual('t1/k');
   });
 
-  it('plugin — unknown resolver discriminant defaults to empty chain', async () => {
+  it('plugin — an unknown resolver discriminant throws instead of registering an empty chain', () => {
     const ctx = makeMockContext();
     const plugin = MultiTenancyPlugin({ resolver: 'unknown-strategy' as 'header' });
-    await plugin.register(ctxAsPlugin(ctx));
+    // An empty chain resolves no tenant for any request, forever — it must not
+    // register cleanly and degrade silently.
+    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow('empty resolver chain');
+    expect(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY)).toBe(false);
+    expect(ctx.addedMiddlewares.length).toEqual(0);
+  });
 
-    expect(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY)).toBeTruthy();
-    expect(ctx.addedMiddlewares.length).toEqual(1);
+  it('plugin — an explicitly empty resolver array throws at register', () => {
+    const ctx = makeMockContext();
+    const plugin = MultiTenancyPlugin({ resolver: [] });
+    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow('empty resolver chain');
   });
 
   it('plugin — custom strategy object bypasses buildStrategy switch', async () => {
@@ -559,15 +589,10 @@ describe('multi tenancy plugin', () => {
     expect((result as { data: { resolver: string } }).data.resolver).toEqual('chain');
   });
 
-  it('plugin — health indicator resolver type for unknown/null', async () => {
+  it('plugin — an absent resolver throws at register', () => {
     const ctx = makeMockContext();
-    const plugin = MultiTenancyPlugin({
-      resolver: undefined as unknown as 'header',
-    });
-    await plugin.register(ctxAsPlugin(ctx));
-
-    const result = await ctx.healthRegistrations[0].checkFn();
-    expect((result as { data: { resolver: string } }).data.resolver).toEqual('unknown');
+    const plugin = MultiTenancyPlugin({ resolver: undefined as unknown as 'header' });
+    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow('empty resolver chain');
   });
 
   // ---------------------------------------------------------------------------

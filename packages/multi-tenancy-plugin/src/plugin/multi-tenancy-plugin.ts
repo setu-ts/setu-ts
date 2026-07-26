@@ -12,6 +12,7 @@ import {
   PLUGIN_PRIORITY,
 } from '@hono-enterprise/common';
 import type {
+  ITenantDataStore,
   ITenantIsolationStrategy,
   JwtResolverOptions,
   MultiTenancyPluginOptions,
@@ -93,13 +94,44 @@ function buildStrategy(
   }
 }
 
+/** The `ITenantDataStore` methods every store must provide (`useIsolation`/`close` are optional). */
+const REQUIRED_STORE_METHODS = [
+  'findAll',
+  'findById',
+  'find',
+  'create',
+  'update',
+  'delete',
+] as const;
+
+/**
+ * Validate an injected data store's shape at registration time.
+ *
+ * A store is an injection seam, so a wrong shape otherwise registers cleanly
+ * and only fails per request (`this.store.create is not a function`) — long
+ * after the misconfiguration was introduced.
+ *
+ * @throws {Error} When a required `ITenantDataStore` method is missing
+ */
+function assertUsableStore(store: ITenantDataStore): void {
+  const missing = REQUIRED_STORE_METHODS.filter(
+    (method) => typeof store[method] !== 'function',
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `MultiTenancyPlugin: the injected dataStore is missing required ITenantDataStore ` +
+        `method(s): ${missing.join(', ')}.`,
+    );
+  }
+}
+
 /** Determine the health-indicator resolver type name. */
 function getResolverType(resolverConfig: MultiTenancyPluginOptions['resolver']): string {
   if (Array.isArray(resolverConfig)) return 'chain';
   if (typeof resolverConfig === 'object') {
     return resolverConfig.constructor.name.toLowerCase().replace('resolver', '');
   }
-  return resolverConfig ?? 'unknown';
+  return resolverConfig;
 }
 
 /**
@@ -167,6 +199,15 @@ export function MultiTenancyPlugin(
         jwtDecode,
       );
 
+      // An empty chain resolves no tenant for any request, forever — reject it
+      // at startup rather than 400-ing (or silently degrading) every request.
+      if (resolvers.length === 0) {
+        throw new Error(
+          'MultiTenancyPlugin: the `resolver` option produced an empty resolver chain; ' +
+            'configure at least one resolver.',
+        );
+      }
+
       // Build isolation strategy.
       const strategy = buildStrategy(database);
 
@@ -174,6 +215,7 @@ export function MultiTenancyPlugin(
       const store = providedStore ?? new MemoryTenantDataStore({
         generateId: () => ctx.runtime.uuid(),
       });
+      assertUsableStore(store);
 
       // Hand off isolation metadata.
       if (store.useIsolation) {

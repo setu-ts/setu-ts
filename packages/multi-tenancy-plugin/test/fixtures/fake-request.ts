@@ -9,6 +9,7 @@ export function createFakeRequest(overrides?: {
   tenant?: { id: string; name?: string; metadata?: Record<string, unknown> };
 }): import('@hono-enterprise/common').IRequest {
   let storedTenant: { id: string; name?: string; metadata?: Record<string, unknown> } | undefined;
+  let storedUser: import('@hono-enterprise/common').IPrincipal | undefined;
   const baseHeaders = new Headers(overrides?.headers ?? {});
   return {
     method: overrides?.method ?? 'GET',
@@ -28,11 +29,15 @@ export function createFakeRequest(overrides?: {
     bytes(): Promise<Uint8Array> {
       return Promise.resolve(new Uint8Array());
     },
-    // Writable fields — shadowed via closure variable.
+    // Writable fields — genuinely readable back, as on the real `IRequest`:
+    // a no-op setter here would let a middleware bug that never writes the
+    // field pass its own test.
     get user(): import('@hono-enterprise/common').IPrincipal | undefined {
-      return undefined;
+      return storedUser;
     },
-    set user(_v: import('@hono-enterprise/common').IPrincipal | undefined) {/* no-op */},
+    set user(v: import('@hono-enterprise/common').IPrincipal | undefined) {
+      storedUser = v;
+    },
     get tenant(): { id: string; name?: string; metadata?: Record<string, unknown> } | undefined {
       return storedTenant ?? overrides?.tenant;
     },

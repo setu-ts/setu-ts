@@ -15,26 +15,18 @@ export interface FakeContextOptions {
 export function createFakeContext(
   opts?: FakeContextOptions,
 ): IRequestContext {
-  const request = createFakeRequest(
-    opts?.tenant
-      ? {
-        tenant: opts.tenant,
-      }
-      : undefined,
-  );
+  const request = createFakeRequest(opts?.tenant ? { tenant: opts.tenant } : undefined);
   const state = new Map<string, unknown>();
-
-  if (opts?.tenant) {
-    (request as unknown as Record<string, unknown>).tenant = opts.tenant;
-  }
 
   const services = opts?.services ?? new Map<string, unknown>();
   if (!services.has(CAPABILITIES.MULTI_TENANCY)) {
-    // Default no-op service stub if none provided
+    // Default service stub. Its `prefixCacheKey` mirrors the COMMITTED
+    // two-argument contract — a stub carrying an extra parameter would encode a
+    // surface `IMultiTenancyService` does not have.
     services.set(CAPABILITIES.MULTI_TENANCY, {
       getCurrentTenant: () => opts?.tenant,
       getRepository: () => null as unknown,
-      prefixCacheKey: (tid: string, key: string, sep?: string) => `${tid}${sep ?? ':'}${key}`,
+      prefixCacheKey: (tid: string, key: string) => `${tid}:${key}`,
     } as unknown as IMultiTenancyService);
   }
 
