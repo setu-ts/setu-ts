@@ -8,7 +8,7 @@ import type { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common'
 /**
  * Options for configuring the fake runtime.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export interface FakeRuntimeOptions {
   /** Initial wall-clock time in ms since epoch. Defaults to a fixed value. */
@@ -39,7 +39,7 @@ export interface FakeRuntimeOptions {
  * const healthService = new HealthService(runtime);
  * ```
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export function createFakeRuntime(options?: FakeRuntimeOptions): IRuntimeServices {
   const nowValue = options?.now ?? 1_000_000_000_000;

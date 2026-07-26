@@ -4,32 +4,32 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import * as metricsPlugin from '../../src/index.ts';
 
 describe('barrel exports', () => {
   it('MetricsPlugin is exported', () => {
-    assertEquals(typeof metricsPlugin.MetricsPlugin, 'function');
+    expect(typeof metricsPlugin.MetricsPlugin).toEqual('function');
   });
 
   it('MetricsService is exported', () => {
-    assertEquals(typeof metricsPlugin.MetricsService, 'function');
+    expect(typeof metricsPlugin.MetricsService).toEqual('function');
   });
 
   it('Counter is exported', () => {
-    assertEquals(typeof metricsPlugin.Counter, 'function');
+    expect(typeof metricsPlugin.Counter).toEqual('function');
   });
 
   it('Gauge is exported', () => {
-    assertEquals(typeof metricsPlugin.Gauge, 'function');
+    expect(typeof metricsPlugin.Gauge).toEqual('function');
   });
 
   it('Histogram is exported', () => {
-    assertEquals(typeof metricsPlugin.Histogram, 'function');
+    expect(typeof metricsPlugin.Histogram).toEqual('function');
   });
 
   it('Summary is exported', () => {
-    assertEquals(typeof metricsPlugin.Summary, 'function');
+    expect(typeof metricsPlugin.Summary).toEqual('function');
   });
 
   it('MetricsPluginOptions type is exported', () => {
@@ -38,43 +38,43 @@ describe('barrel exports', () => {
       endpoint: '/metrics',
       defaultMetrics: true,
     };
-    assertEquals(_options.endpoint, '/metrics');
+    expect(_options.endpoint).toEqual('/metrics');
   });
 
   it('IMetricsService type is re-exported from common', () => {
     // Type-only export, verified at compile time
     const _service: import('../../src/index.ts').IMetricsService | undefined = undefined;
-    assertEquals(_service, undefined);
+    expect(_service).toEqual(undefined);
   });
 
   it('ICounter type is re-exported from common', () => {
     // Type-only export, verified at compile time
     const _counter: import('../../src/index.ts').ICounter | undefined = undefined;
-    assertEquals(_counter, undefined);
+    expect(_counter).toEqual(undefined);
   });
 
   it('IGauge type is re-exported from common', () => {
     // Type-only export, verified at compile time
     const _gauge: import('../../src/index.ts').IGauge | undefined = undefined;
-    assertEquals(_gauge, undefined);
+    expect(_gauge).toEqual(undefined);
   });
 
   it('IHistogram type is re-exported from common', () => {
     // Type-only export, verified at compile time
     const _histogram: import('../../src/index.ts').IHistogram | undefined = undefined;
-    assertEquals(_histogram, undefined);
+    expect(_histogram).toEqual(undefined);
   });
 
   it('ISummary type is re-exported from common', () => {
     // Type-only export, verified at compile time
     const _summary: import('../../src/index.ts').ISummary | undefined = undefined;
-    assertEquals(_summary, undefined);
+    expect(_summary).toEqual(undefined);
   });
 
   it('IMetric type is re-exported from common', () => {
     // Type-only export, verified at compile time
     const _metric: import('../../src/index.ts').IMetric | undefined = undefined;
-    assertEquals(_metric, undefined);
+    expect(_metric).toEqual(undefined);
   });
 
   it('MetricConfig type is re-exported from common', () => {
@@ -83,7 +83,7 @@ describe('barrel exports', () => {
       type: 'counter',
       help: 'Test',
     };
-    assertEquals(_config.type, 'counter');
+    expect(_config.type).toEqual('counter');
   });
 
   it('MetricOptions type is re-exported from common', () => {
@@ -92,30 +92,14 @@ describe('barrel exports', () => {
       help: 'Test',
       labels: ['method'],
     };
-    assertEquals(_options.help, 'Test');
+    expect(_options.help).toEqual('Test');
   });
 
   it('internal modules are not leaked', () => {
     // Internal modules should NOT be exported from the public barrel
-    assertEquals(
-      'MetricsRegistry' in metricsPlugin,
-      false,
-      'MetricsRegistry should not be exported',
-    );
-    assertEquals(
-      'MetricBase' in metricsPlugin,
-      false,
-      'MetricBase should not be exported',
-    );
-    assertEquals(
-      'renderPrometheus' in metricsPlugin,
-      false,
-      'renderPrometheus should not be exported',
-    );
-    assertEquals(
-      'HttpCollector' in metricsPlugin,
-      false,
-      'HttpCollector should not be exported',
-    );
+    expect('MetricsRegistry' in metricsPlugin).toEqual(false);
+    expect('MetricBase' in metricsPlugin).toEqual(false);
+    expect('renderPrometheus' in metricsPlugin).toEqual(false);
+    expect('HttpCollector' in metricsPlugin).toEqual(false);
   });
 });

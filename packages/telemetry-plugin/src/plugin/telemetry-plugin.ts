@@ -5,7 +5,7 @@
  * `CAPABILITIES.TELEMETRY` (`'telemetry'`).
  *
  * @module
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 import type {
@@ -61,7 +61,7 @@ const MIDDLEWARE_PRIORITY = {
  *   endpoint: 'http://otel:4318/v1/traces',
  * }));
  * ```
- * @since 0.24.0
+ * @since 0.2.0
  */
 export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
   const middlewareEnabled = options.middleware !== false;

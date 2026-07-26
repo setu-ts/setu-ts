@@ -4,7 +4,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals, assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import { Counter } from '../../src/metrics/counter.ts';
 
 describe('Counter', () => {
@@ -16,10 +16,10 @@ describe('Counter', () => {
     const counter = new Counter('test_counter', config);
 
     counter.observe();
-    assertEquals(counter.getValue(), 1);
+    expect(counter.getValue()).toEqual(1);
 
     counter.inc();
-    assertEquals(counter.getValue(), 2);
+    expect(counter.getValue()).toEqual(2);
   });
 
   it('inc(n, labels) adds per label-set', () => {
@@ -33,8 +33,8 @@ describe('Counter', () => {
     counter.inc(5, { method: 'GET' });
     counter.inc(3, { method: 'POST' });
 
-    assertEquals(counter.getValue({ method: 'GET' }), 5);
-    assertEquals(counter.getValue({ method: 'POST' }), 3);
+    expect(counter.getValue({ method: 'GET' })).toEqual(5);
+    expect(counter.getValue({ method: 'POST' })).toEqual(3);
   });
 
   it('observe(v, labels) equals inc(v, labels)', () => {
@@ -45,10 +45,10 @@ describe('Counter', () => {
     const counter = new Counter('test_counter', config);
 
     counter.observe(10);
-    assertEquals(counter.getValue(), 10);
+    expect(counter.getValue()).toEqual(10);
 
     counter.observe(5, { method: 'GET' });
-    assertEquals(counter.getValue({ method: 'GET' }), 5);
+    expect(counter.getValue({ method: 'GET' })).toEqual(5);
   });
 
   it('counts are monotonic', () => {
@@ -62,7 +62,7 @@ describe('Counter', () => {
     counter.inc(5);
     counter.inc(3);
 
-    assertEquals(counter.getValue(), 18);
+    expect(counter.getValue()).toEqual(18);
   });
 
   it('negative inc is rejected', () => {
@@ -72,11 +72,8 @@ describe('Counter', () => {
     };
     const counter = new Counter('test_counter', config);
 
-    assertThrows(
-      () => counter.inc(-1),
-      Error,
-      'cannot be decremented',
-    );
+    expect(() => counter.inc(-1)).toThrow(Error);
+    expect(() => counter.inc(-1)).toThrow('cannot be decremented');
   });
 
   it('values are stored per label-set', () => {
@@ -91,10 +88,10 @@ describe('Counter', () => {
     counter.inc(2, { method: 'GET', status: '404' });
     counter.inc(3, { method: 'POST', status: '200' });
 
-    assertEquals(counter.getValue({ method: 'GET', status: '200' }), 1);
-    assertEquals(counter.getValue({ method: 'GET', status: '404' }), 2);
-    assertEquals(counter.getValue({ method: 'POST', status: '200' }), 3);
-    assertEquals(counter.getValue({ method: 'DELETE', status: '200' }), 0);
+    expect(counter.getValue({ method: 'GET', status: '200' })).toEqual(1);
+    expect(counter.getValue({ method: 'GET', status: '404' })).toEqual(2);
+    expect(counter.getValue({ method: 'POST', status: '200' })).toEqual(3);
+    expect(counter.getValue({ method: 'DELETE', status: '200' })).toEqual(0);
   });
 
   it('values Map is readonly', () => {
@@ -107,8 +104,8 @@ describe('Counter', () => {
     counter.inc(10);
     const values = counter.values;
 
-    assertEquals(values instanceof Map, true);
-    assertEquals(values.get(''), 10);
+    expect(values instanceof Map).toEqual(true);
+    expect(values.get('')).toEqual(10);
   });
 
   it('N1: undefined ≡ {} for no-label metrics (sums correctly)', () => {
@@ -125,10 +122,10 @@ describe('Counter', () => {
     counter.inc(7, {});
 
     // Both should access the same series (key = ''), values should sum
-    assertEquals(counter.getValue(), 12);
+    expect(counter.getValue()).toEqual(12);
 
     // The internal values map should have only ONE entry
-    assertEquals(counter.values.size, 1);
-    assertEquals(counter.values.get(''), 12);
+    expect(counter.values.size).toEqual(1);
+    expect(counter.values.get('')).toEqual(12);
   });
 });

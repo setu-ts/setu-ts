@@ -5,7 +5,7 @@
  * imports and verifies the constructors resolve. When absent, it skips.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';

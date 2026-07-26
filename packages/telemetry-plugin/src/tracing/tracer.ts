@@ -2,7 +2,7 @@
  * OTel tracer provider loader and TracerHost seam.
  *
  * @module
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';

@@ -4,7 +4,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals, assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import { MetricsRegistry } from '../../src/registry/metrics-registry.ts';
 import type { MetricConfig } from '@hono-enterprise/common';
 
@@ -19,11 +19,11 @@ describe('MetricsRegistry', () => {
     registry.insert('test_metric', config, { name: 'test_metric' });
 
     const entry = registry.get('test_metric');
-    assertEquals(entry?.name, 'test_metric');
-    assertEquals(entry?.config.type, 'counter');
+    expect(entry?.name).toEqual('test_metric');
+    expect(entry?.config.type).toEqual('counter');
 
-    assertEquals(registry.has('test_metric'), true);
-    assertEquals(registry.has('other'), false);
+    expect(registry.has('test_metric')).toEqual(true);
+    expect(registry.has('other')).toEqual(false);
   });
 
   it('duplicate name with conflicting type throws', () => {
@@ -39,9 +39,8 @@ describe('MetricsRegistry', () => {
 
     registry.insert('test_metric', config1, { name: 'test_metric' });
 
-    assertThrows(
-      () => registry.insert('test_metric', config2, { name: 'test_metric' }),
-      Error,
+    expect(() => registry.insert('test_metric', config2, { name: 'test_metric' })).toThrow(Error);
+    expect(() => registry.insert('test_metric', config2, { name: 'test_metric' })).toThrow(
       'already registered with type "counter"',
     );
   });
@@ -57,8 +56,8 @@ describe('MetricsRegistry', () => {
     registry.insert('test_metric', config, instance);
     registry.insert('test_metric', config, instance);
 
-    assertEquals(registry.size, 1);
-    assertEquals(registry.get('test_metric')?.instance, instance);
+    expect(registry.size).toEqual(1);
+    expect(registry.get('test_metric')?.instance).toEqual(instance);
   });
 
   it('entries iterator', () => {
@@ -70,7 +69,7 @@ describe('MetricsRegistry', () => {
     registry.insert('metric2', config2, { name: 'metric2' });
 
     const entries = Array.from(registry.entries());
-    assertEquals(entries.length, 2);
+    expect(entries.length).toEqual(2);
   });
 
   it('names array', () => {
@@ -81,22 +80,22 @@ describe('MetricsRegistry', () => {
     registry.insert('metric2', config, { name: 'metric2' });
 
     const names = registry.names;
-    assertEquals(names.length, 2);
-    assertEquals(names.includes('metric1'), true);
-    assertEquals(names.includes('metric2'), true);
+    expect(names.length).toEqual(2);
+    expect(names.includes('metric1')).toEqual(true);
+    expect(names.includes('metric2')).toEqual(true);
   });
 
   it('size', () => {
     const registry = new MetricsRegistry();
     const config: MetricConfig = { type: 'counter', help: 'Test' };
 
-    assertEquals(registry.size, 0);
+    expect(registry.size).toEqual(0);
 
     registry.insert('metric1', config, { name: 'metric1' });
-    assertEquals(registry.size, 1);
+    expect(registry.size).toEqual(1);
 
     registry.insert('metric2', config, { name: 'metric2' });
-    assertEquals(registry.size, 2);
+    expect(registry.size).toEqual(2);
   });
 
   it('clear', () => {
@@ -106,7 +105,7 @@ describe('MetricsRegistry', () => {
     registry.insert('metric1', config, { name: 'metric1' });
     registry.clear();
 
-    assertEquals(registry.size, 0);
-    assertEquals(registry.has('metric1'), false);
+    expect(registry.size).toEqual(0);
+    expect(registry.has('metric1')).toEqual(false);
   });
 });

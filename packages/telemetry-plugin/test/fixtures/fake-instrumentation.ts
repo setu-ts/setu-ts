@@ -2,7 +2,7 @@
  * Fake OTel instrumentation and dynamic-import map for testing.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 
 /**

@@ -4,7 +4,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import { MetricsPlugin } from '../../src/plugin/metrics-plugin.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IPlugin } from '@hono-enterprise/common';
@@ -116,27 +116,27 @@ describe('MetricsPlugin', () => {
   it('factory returns IPlugin', () => {
     const plugin = MetricsPlugin();
 
-    assertEquals(typeof plugin, 'object');
-    assertEquals(typeof plugin.name, 'string');
-    assertEquals(typeof plugin.provides, 'object');
+    expect(typeof plugin).toEqual('object');
+    expect(typeof plugin.name).toEqual('string');
+    expect(typeof plugin.provides).toEqual('object');
   });
 
   it('name is metrics-plugin', () => {
     const plugin = MetricsPlugin();
 
-    assertEquals(plugin.name, 'metrics-plugin');
+    expect(plugin.name).toEqual('metrics-plugin');
   });
 
   it('provides metrics capability', () => {
     const plugin = MetricsPlugin();
 
-    assertEquals(plugin.provides?.includes(CAPABILITIES.METRICS), true);
+    expect(plugin.provides?.includes(CAPABILITIES.METRICS)).toEqual(true);
   });
 
   it('priority is 100', () => {
     const plugin = MetricsPlugin();
 
-    assertEquals(plugin.priority, 100);
+    expect(plugin.priority).toEqual(100);
   });
 
   it('register places service under metrics token', async () => {
@@ -146,7 +146,7 @@ describe('MetricsPlugin', () => {
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
     // The service should be registered
-    assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+    expect(ctx.services.has(CAPABILITIES.METRICS)).toEqual(true);
   });
 
   it('default endpoint is /metrics', async () => {
@@ -156,7 +156,7 @@ describe('MetricsPlugin', () => {
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
     const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
-    assertEquals(metricsRoute !== undefined, true);
+    expect(metricsRoute !== undefined).toEqual(true);
   });
 
   it('custom endpoint is used', async () => {
@@ -166,7 +166,7 @@ describe('MetricsPlugin', () => {
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
     const customRoute = ctx.routeList.find((r) => r.path === '/custom-metrics');
-    assertEquals(customRoute !== undefined, true);
+    expect(customRoute !== undefined).toEqual(true);
   });
 
   it('middleware registered at priority 20', async () => {
@@ -176,7 +176,7 @@ describe('MetricsPlugin', () => {
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
     const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
-    assertEquals(metricsMiddleware !== undefined, true);
+    expect(metricsMiddleware !== undefined).toEqual(true);
   });
 
   it('onInit hook drains METRIC_REGISTRATION', async () => {
@@ -191,7 +191,7 @@ describe('MetricsPlugin', () => {
     }
 
     // The service should be registered
-    assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+    expect(ctx.services.has(CAPABILITIES.METRICS)).toEqual(true);
   });
 
   it('route handler executes and returns metrics', async () => {
@@ -202,8 +202,8 @@ describe('MetricsPlugin', () => {
 
     // Find the metrics route handler
     const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
-    assertEquals(metricsRoute !== undefined, true);
-    assertEquals(metricsRoute?.handler !== undefined, true);
+    expect(metricsRoute !== undefined).toEqual(true);
+    expect(metricsRoute?.handler !== undefined).toEqual(true);
 
     // Create a fake context whose response builder records header + status +
     // body, mirroring the kernel's `text()` which sets a default text/plain
@@ -234,13 +234,10 @@ describe('MetricsPlugin', () => {
     const handler = metricsRoute?.handler as (ctx: unknown) => unknown;
     await handler(fakeHandlerContext);
 
-    assertEquals(statusCode, 200);
-    assertEquals(typeof bodyText, 'string');
+    expect(statusCode).toEqual(200);
+    expect(typeof bodyText).toEqual('string');
     // The Prometheus version parameter must survive text()'s clobber.
-    assertEquals(
-      headers.get('content-type'),
-      'text/plain; version=0.0.4; charset=utf-8',
-    );
+    expect(headers.get('content-type')).toEqual('text/plain; version=0.0.4; charset=utf-8');
   });
 
   it('onInit hook with METRIC_REGISTRATION contributions executes registration loop', async () => {
@@ -265,7 +262,7 @@ describe('MetricsPlugin', () => {
     }
 
     // The service should be registered
-    assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+    expect(ctx.services.has(CAPABILITIES.METRICS)).toEqual(true);
   });
 
   it('onInit hook materializes custom metrics from options', async () => {
@@ -284,7 +281,7 @@ describe('MetricsPlugin', () => {
     }
 
     // The service should be registered
-    assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+    expect(ctx.services.has(CAPABILITIES.METRICS)).toEqual(true);
   });
 
   it('httpMetrics disabled skips middleware', async () => {
@@ -295,7 +292,7 @@ describe('MetricsPlugin', () => {
 
     // No middleware should be registered at priority 20
     const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
-    assertEquals(metricsMiddleware, undefined);
+    expect(metricsMiddleware).toEqual(undefined);
   });
 
   it('defaultMetrics disabled skips collectors + middleware but keeps the scrape route', async () => {
@@ -306,11 +303,11 @@ describe('MetricsPlugin', () => {
 
     // No metrics middleware registered.
     const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
-    assertEquals(metricsMiddleware, undefined);
+    expect(metricsMiddleware).toEqual(undefined);
 
     // The scrape route is registered independently of defaultMetrics.
     const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
-    assertEquals(metricsRoute !== undefined, true);
+    expect(metricsRoute !== undefined).toEqual(true);
   });
 
   it('customQuantiles option is accepted', async () => {
@@ -322,7 +319,7 @@ describe('MetricsPlugin', () => {
 
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
-    assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+    expect(ctx.services.has(CAPABILITIES.METRICS)).toEqual(true);
   });
 
   it('all options disabled still registers route', async () => {
@@ -337,11 +334,11 @@ describe('MetricsPlugin', () => {
 
     // Route should still be registered
     const metricsRoute = ctx.routeList.find((r) => r.path === '/metrics');
-    assertEquals(metricsRoute !== undefined, true);
+    expect(metricsRoute !== undefined).toEqual(true);
 
     // No middleware should be registered
     const metricsMiddleware = ctx.middlewareList.find((m) => m.priority === 20);
-    assertEquals(metricsMiddleware, undefined);
+    expect(metricsMiddleware).toEqual(undefined);
   });
 
   it('defaultBuckets option is accepted', async () => {
@@ -352,6 +349,6 @@ describe('MetricsPlugin', () => {
 
     await plugin.register(ctx as unknown as Parameters<IPlugin['register']>[0]);
 
-    assertEquals(ctx.services.has(CAPABILITIES.METRICS), true);
+    expect(ctx.services.has(CAPABILITIES.METRICS)).toEqual(true);
   });
 });

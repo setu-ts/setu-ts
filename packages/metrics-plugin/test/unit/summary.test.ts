@@ -4,8 +4,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { assertExists } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import { Summary } from '../../src/metrics/summary.ts';
 
 describe('Summary', () => {
@@ -22,9 +21,9 @@ describe('Summary', () => {
     }
 
     const quantiles = summary.getQuantiles();
-    assertEquals(quantiles.has(0.5), true);
-    assertEquals(quantiles.has(0.9), true);
-    assertEquals(quantiles.has(0.99), true);
+    expect(quantiles.has(0.5)).toEqual(true);
+    expect(quantiles.has(0.9)).toEqual(true);
+    expect(quantiles.has(0.99)).toEqual(true);
   });
 
   it('window is bounded (maxSamples: 4)', () => {
@@ -40,8 +39,8 @@ describe('Summary', () => {
     }
 
     // Should have only 4 samples in the window (3, 4, 5, 6)
-    assertEquals(summary.getSampleCount(), 4);
-    assertEquals(summary.getCount(), 6); // Total count is still 6
+    expect(summary.getSampleCount()).toEqual(4);
+    expect(summary.getCount()).toEqual(6); // Total count is still 6
   });
 
   it('default maxSamples is 512', () => {
@@ -57,7 +56,7 @@ describe('Summary', () => {
     }
 
     // Should be capped at 512
-    assertEquals(summary.getSampleCount(), 512);
+    expect(summary.getSampleCount()).toEqual(512);
   });
 
   it('_sum and _count are accurate', () => {
@@ -71,8 +70,8 @@ describe('Summary', () => {
     summary.observe(2);
     summary.observe(3);
 
-    assertEquals(summary.getSum(), 6);
-    assertEquals(summary.getCount(), 3);
+    expect(summary.getSum()).toEqual(6);
+    expect(summary.getCount()).toEqual(3);
   });
 
   it('per label-set tracking', () => {
@@ -90,8 +89,8 @@ describe('Summary', () => {
     void summary.getQuantiles({ method: 'GET' });
     void summary.getQuantiles({ method: 'POST' });
 
-    assertEquals(summary.getSum({ method: 'GET' }), 3);
-    assertEquals(summary.getSum({ method: 'POST' }), 10);
+    expect(summary.getSum({ method: 'GET' })).toEqual(3);
+    expect(summary.getSum({ method: 'POST' })).toEqual(10);
   });
 
   it('default quantiles are [0.5, 0.9, 0.99]', () => {
@@ -101,10 +100,10 @@ describe('Summary', () => {
     };
     const summary = new Summary('test_summary', config);
 
-    assertEquals(summary.quantiles.length, 3);
-    assertEquals(summary.quantiles[0], 0.5);
-    assertEquals(summary.quantiles[1], 0.9);
-    assertEquals(summary.quantiles[2], 0.99);
+    expect(summary.quantiles.length).toEqual(3);
+    expect(summary.quantiles[0]).toEqual(0.5);
+    expect(summary.quantiles[1]).toEqual(0.9);
+    expect(summary.quantiles[2]).toEqual(0.99);
   });
 
   it('custom quantiles', () => {
@@ -114,9 +113,9 @@ describe('Summary', () => {
     };
     const summary = new Summary('test_summary', config, [0.25, 0.75], 100);
 
-    assertEquals(summary.quantiles.length, 2);
-    assertEquals(summary.quantiles[0], 0.25);
-    assertEquals(summary.quantiles[1], 0.75);
+    expect(summary.quantiles.length).toEqual(2);
+    expect(summary.quantiles[0]).toEqual(0.25);
+    expect(summary.quantiles[1]).toEqual(0.75);
   });
 
   it('invalid quantile throws', () => {
@@ -128,10 +127,10 @@ describe('Summary', () => {
     try {
       new Summary('test_summary', config, [1.5], 100);
       // Should not reach here
-      assertEquals(true, false);
+      expect(true).toEqual(false);
     } catch (e) {
-      assertEquals(e instanceof Error, true);
-      assertEquals((e as Error).message.includes('invalid quantile'), true);
+      expect(e instanceof Error).toEqual(true);
+      expect((e as Error).message.includes('invalid quantile')).toEqual(true);
     }
   });
 
@@ -143,10 +142,10 @@ describe('Summary', () => {
 
     try {
       new Summary('test_summary', config, [-0.1], 100);
-      assertEquals(true, false);
+      expect(true).toEqual(false);
     } catch (e) {
-      assertEquals(e instanceof Error, true);
-      assertEquals((e as Error).message.includes('invalid quantile'), true);
+      expect(e instanceof Error).toEqual(true);
+      expect((e as Error).message.includes('invalid quantile')).toEqual(true);
     }
   });
 
@@ -163,16 +162,16 @@ describe('Summary', () => {
     summary.observe(10, { method: 'POST' });
 
     const allData = summary.getAllQuantiles();
-    assertEquals(allData.size, 2);
+    expect(allData.size).toEqual(2);
 
     // New JSON.stringify-based key format
     const getData = allData.get('[["method","GET"]]');
     const postData = allData.get('[["method","POST"]]');
 
-    assertEquals(getData?.count, 2);
-    assertEquals(getData?.sum, 3);
-    assertEquals(postData?.count, 1);
-    assertEquals(postData?.sum, 10);
+    expect(getData?.count).toEqual(2);
+    expect(getData?.sum).toEqual(3);
+    expect(postData?.count).toEqual(1);
+    expect(postData?.sum).toEqual(10);
   });
 
   it('empty quantiles when no samples', () => {
@@ -183,7 +182,7 @@ describe('Summary', () => {
     const summary = new Summary('test_summary', config);
 
     const quantiles = summary.getQuantiles();
-    assertEquals(quantiles.size, 0);
+    expect(quantiles.size).toEqual(0);
   });
 
   it('getQuantiles returns empty for unknown label set', () => {
@@ -197,7 +196,7 @@ describe('Summary', () => {
     summary.observe(1, { method: 'GET' });
 
     const quantiles = summary.getQuantiles({ method: 'POST' });
-    assertEquals(quantiles.size, 0);
+    expect(quantiles.size).toEqual(0);
   });
 
   it('getSum returns 0 for unknown label set', () => {
@@ -208,7 +207,7 @@ describe('Summary', () => {
     };
     const summary = new Summary('test_summary', config, [0.5], 100);
 
-    assertEquals(summary.getSum({ method: 'UNKNOWN' }), 0);
+    expect(summary.getSum({ method: 'UNKNOWN' })).toEqual(0);
   });
 
   it('getCount returns 0 for unknown label set', () => {
@@ -219,7 +218,7 @@ describe('Summary', () => {
     };
     const summary = new Summary('test_summary', config, [0.5], 100);
 
-    assertEquals(summary.getCount({ method: 'UNKNOWN' }), 0);
+    expect(summary.getCount({ method: 'UNKNOWN' })).toEqual(0);
   });
 
   it('getSampleCount returns 0 for unknown label set', () => {
@@ -230,7 +229,7 @@ describe('Summary', () => {
     };
     const summary = new Summary('test_summary', config, [0.5], 100);
 
-    assertEquals(summary.getSampleCount({ method: 'UNKNOWN' }), 0);
+    expect(summary.getSampleCount({ method: 'UNKNOWN' })).toEqual(0);
   });
 
   it('getAllQuantiles with multiple label sets', () => {
@@ -248,18 +247,18 @@ describe('Summary', () => {
     summary.observe(5, { method: 'POST' });
 
     const allData = summary.getAllQuantiles();
-    assertEquals(allData.size, 2);
+    expect(allData.size).toEqual(2);
 
     // New JSON.stringify-based key format
     const getData = allData.get('[["method","GET"]]');
-    assertExists(getData);
-    assertEquals(getData.sum, 3);
-    assertEquals(getData.count, 2);
+    expect(getData).toBeDefined();
+    expect(getData!.sum).toEqual(3);
+    expect(getData!.count).toEqual(2);
 
     const postData = allData.get('[["method","POST"]]');
-    assertExists(postData);
-    assertEquals(postData.sum, 12);
-    assertEquals(postData.count, 3);
+    expect(postData).toBeDefined();
+    expect(postData!.sum).toEqual(12);
+    expect(postData!.count).toEqual(3);
   });
 
   it('computeQuantile with single sample', () => {
@@ -272,9 +271,9 @@ describe('Summary', () => {
     summary.observe(42);
 
     const quantiles = summary.getQuantiles();
-    assertEquals(quantiles.get(0.5), 42);
-    assertEquals(quantiles.get(0.9), 42);
-    assertEquals(quantiles.get(0.99), 42);
+    expect(quantiles.get(0.5)).toEqual(42);
+    expect(quantiles.get(0.9)).toEqual(42);
+    expect(quantiles.get(0.99)).toEqual(42);
   });
 
   it('computeQuantile with two samples uses interpolation', () => {
@@ -289,6 +288,6 @@ describe('Summary', () => {
 
     const quantiles = summary.getQuantiles();
     // With 2 samples, p50 should interpolate to 15
-    assertEquals(quantiles.get(0.5), 15);
+    expect(quantiles.get(0.5)).toEqual(15);
   });
 });

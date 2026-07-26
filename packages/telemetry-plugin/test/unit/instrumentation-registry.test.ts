@@ -2,7 +2,7 @@
  * Tests for the instrumentation registry.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';

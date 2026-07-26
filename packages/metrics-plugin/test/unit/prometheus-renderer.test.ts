@@ -4,15 +4,14 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { assertStringIncludes } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import { renderPrometheus } from '../../src/renderers/prometheus-renderer.ts';
 import type { MetricSnapshot } from '../../src/interfaces/index.ts';
 
 describe('renderPrometheus', () => {
   it('empty snapshots returns empty string', () => {
     const result = renderPrometheus([]);
-    assertEquals(result, '');
+    expect(result).toEqual('');
   });
 
   it('escapes newline and backslash in HELP text (no line splitting)', () => {
@@ -27,11 +26,11 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // The raw newline must NOT survive — it would split the HELP directive.
-    assertEquals(result.includes('# HELP weird line1\\nline2 with a \\\\ backslash'), true);
-    assertEquals(result.includes('line1\nline2'), false);
+    expect(result.includes('# HELP weird line1\\nline2 with a \\\\ backslash')).toEqual(true);
+    expect(result.includes('line1\nline2')).toEqual(false);
     // The HELP + TYPE + one value line — HELP stays a single physical line.
     const helpLines = result.split('\n').filter((l) => l.startsWith('# HELP'));
-    assertEquals(helpLines.length, 1);
+    expect(helpLines.length).toEqual(1);
   });
 
   it('counter emits # HELP / # TYPE / value', () => {
@@ -45,9 +44,9 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('# HELP test_counter Test counter help'), true);
-    assertEquals(result.includes('# TYPE test_counter counter'), true);
-    assertEquals(result.includes('test_counter 42'), true);
+    expect(result.includes('# HELP test_counter Test counter help')).toEqual(true);
+    expect(result.includes('# TYPE test_counter counter')).toEqual(true);
+    expect(result.includes('test_counter 42')).toEqual(true);
   });
 
   it('gauge emits # HELP / # TYPE / value', () => {
@@ -61,9 +60,9 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('# HELP test_gauge Test gauge help'), true);
-    assertEquals(result.includes('# TYPE test_gauge gauge'), true);
-    assertEquals(result.includes('test_gauge 10'), true);
+    expect(result.includes('# HELP test_gauge Test gauge help')).toEqual(true);
+    expect(result.includes('# TYPE test_gauge gauge')).toEqual(true);
+    expect(result.includes('test_gauge 10')).toEqual(true);
   });
 
   it('histogram emits buckets + sum + count', () => {
@@ -90,13 +89,13 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('# HELP test_histogram Test histogram help'), true);
-    assertEquals(result.includes('# TYPE test_histogram histogram'), true);
-    assertEquals(result.includes('_bucket{'), true);
-    assertEquals(result.includes('le="1"'), true);
-    assertEquals(result.includes('le="+Inf"'), true);
-    assertEquals(result.includes('_sum'), true);
-    assertEquals(result.includes('_count'), true);
+    expect(result.includes('# HELP test_histogram Test histogram help')).toEqual(true);
+    expect(result.includes('# TYPE test_histogram histogram')).toEqual(true);
+    expect(result.includes('_bucket{')).toEqual(true);
+    expect(result.includes('le="1"')).toEqual(true);
+    expect(result.includes('le="+Inf"')).toEqual(true);
+    expect(result.includes('_sum')).toEqual(true);
+    expect(result.includes('_count')).toEqual(true);
   });
 
   it('summary emits quantiles + sum + count', () => {
@@ -123,13 +122,13 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('# HELP test_summary Test summary help'), true);
-    assertEquals(result.includes('# TYPE test_summary summary'), true);
-    assertEquals(result.includes('quantile="0.5"'), true);
-    assertEquals(result.includes('quantile="0.9"'), true);
-    assertEquals(result.includes('quantile="0.99"'), true);
-    assertEquals(result.includes('_sum'), true);
-    assertEquals(result.includes('_count'), true);
+    expect(result.includes('# HELP test_summary Test summary help')).toEqual(true);
+    expect(result.includes('# TYPE test_summary summary')).toEqual(true);
+    expect(result.includes('quantile="0.5"')).toEqual(true);
+    expect(result.includes('quantile="0.9"')).toEqual(true);
+    expect(result.includes('quantile="0.99"')).toEqual(true);
+    expect(result.includes('_sum')).toEqual(true);
+    expect(result.includes('_count')).toEqual(true);
   });
 
   it('label escaping handles backslash and newline', () => {
@@ -144,7 +143,7 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should contain the label
-    assertEquals(result.includes('method="GET"'), true);
+    expect(result.includes('method="GET"')).toEqual(true);
   });
 
   it('multiple metrics are separated', () => {
@@ -166,10 +165,10 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([counter, gauge]);
 
-    assertEquals(result.includes('counter1'), true);
-    assertEquals(result.includes('gauge1'), true);
+    expect(result.includes('counter1')).toEqual(true);
+    expect(result.includes('gauge1')).toEqual(true);
     // Metrics should be separated by blank lines
-    assertEquals(result.match(/\n\n/g)?.length, 1);
+    expect(result.match(/\n\n/g)?.length).toEqual(1);
   });
 
   it('histogram with labels emits correct format', () => {
@@ -197,13 +196,13 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('http_duration_bucket'), true);
-    assertEquals(result.includes('method="GET"'), true);
-    assertEquals(result.includes('status="200"'), true);
-    assertEquals(result.includes('le="0.1"'), true);
-    assertEquals(result.includes('le="+Inf"'), true);
-    assertEquals(result.includes('http_duration_sum'), true);
-    assertEquals(result.includes('http_duration_count'), true);
+    expect(result.includes('http_duration_bucket')).toEqual(true);
+    expect(result.includes('method="GET"')).toEqual(true);
+    expect(result.includes('status="200"')).toEqual(true);
+    expect(result.includes('le="0.1"')).toEqual(true);
+    expect(result.includes('le="+Inf"')).toEqual(true);
+    expect(result.includes('http_duration_sum')).toEqual(true);
+    expect(result.includes('http_duration_count')).toEqual(true);
   });
 
   it('counter with labels', () => {
@@ -220,13 +219,13 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('http_requests'), true);
-    assertEquals(result.includes('method="GET"'), true);
-    assertEquals(result.includes('status="200"'), true);
-    assertEquals(result.includes('10'), true);
-    assertEquals(result.includes('method="POST"'), true);
-    assertEquals(result.includes('status="201"'), true);
-    assertEquals(result.includes('5'), true);
+    expect(result.includes('http_requests')).toEqual(true);
+    expect(result.includes('method="GET"')).toEqual(true);
+    expect(result.includes('status="200"')).toEqual(true);
+    expect(result.includes('10')).toEqual(true);
+    expect(result.includes('method="POST"')).toEqual(true);
+    expect(result.includes('status="201"')).toEqual(true);
+    expect(result.includes('5')).toEqual(true);
   });
 
   it('gauge with labels', () => {
@@ -243,11 +242,11 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('active_connections'), true);
-    assertEquals(result.includes('host="server1"'), true);
-    assertEquals(result.includes('100'), true);
-    assertEquals(result.includes('host="server2"'), true);
-    assertEquals(result.includes('200'), true);
+    expect(result.includes('active_connections')).toEqual(true);
+    expect(result.includes('host="server1"')).toEqual(true);
+    expect(result.includes('100')).toEqual(true);
+    expect(result.includes('host="server2"')).toEqual(true);
+    expect(result.includes('200')).toEqual(true);
   });
 
   it('summary with labels', () => {
@@ -274,11 +273,11 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertEquals(result.includes('response_time'), true);
-    assertEquals(result.includes('endpoint="/api/users"'), true);
-    assertEquals(result.includes('quantile="0.5"'), true);
-    assertEquals(result.includes('response_time_sum'), true);
-    assertEquals(result.includes('response_time_count'), true);
+    expect(result.includes('response_time')).toEqual(true);
+    expect(result.includes('endpoint="/api/users"')).toEqual(true);
+    expect(result.includes('quantile="0.5"')).toEqual(true);
+    expect(result.includes('response_time_sum')).toEqual(true);
+    expect(result.includes('response_time_count')).toEqual(true);
   });
 
   it('histogram cumulative buckets', () => {
@@ -307,16 +306,16 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Check that bucket values are present (cumulative based on histogram implementation)
-    assertEquals(result.includes('_bucket'), true);
-    assertEquals(result.includes('le="1"'), true);
-    assertEquals(result.includes('le="5"'), true);
-    assertEquals(result.includes('le="10"'), true);
-    assertEquals(result.includes('le="+Inf"'), true);
+    expect(result.includes('_bucket')).toEqual(true);
+    expect(result.includes('le="1"')).toEqual(true);
+    expect(result.includes('le="5"')).toEqual(true);
+    expect(result.includes('le="10"')).toEqual(true);
+    expect(result.includes('le="+Inf"')).toEqual(true);
     // Verify bucket values appear in output
-    assertEquals(result.includes(' 2'), true);
-    assertEquals(result.includes(' 5'), true);
-    assertEquals(result.includes(' 8'), true);
-    assertEquals(result.includes(' 10'), true);
+    expect(result.includes(' 2')).toEqual(true);
+    expect(result.includes(' 5')).toEqual(true);
+    expect(result.includes(' 8')).toEqual(true);
+    expect(result.includes(' 10')).toEqual(true);
   });
 
   it('counter with zero value', () => {
@@ -332,9 +331,9 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, '# HELP test_counter Test counter');
-    assertStringIncludes(result, '# TYPE test_counter counter');
-    assertStringIncludes(result, 'test_counter 0');
+    expect(result).toContain('# HELP test_counter Test counter');
+    expect(result).toContain('# TYPE test_counter counter');
+    expect(result).toContain('test_counter 0');
   });
 
   it('gauge with zero value', () => {
@@ -350,9 +349,9 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, '# HELP test_gauge Test gauge');
-    assertStringIncludes(result, '# TYPE test_gauge gauge');
-    assertStringIncludes(result, 'test_gauge 0');
+    expect(result).toContain('# HELP test_gauge Test gauge');
+    expect(result).toContain('# TYPE test_gauge gauge');
+    expect(result).toContain('test_gauge 0');
   });
 
   it('histogram with labels and sum/count', () => {
@@ -379,12 +378,12 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_histogram_bucket');
-    assertStringIncludes(result, 'method="GET"');
-    assertStringIncludes(result, 'le="1"');
-    assertStringIncludes(result, 'le="+Inf"');
-    assertStringIncludes(result, 'test_histogram_sum');
-    assertStringIncludes(result, 'test_histogram_count');
+    expect(result).toContain('test_histogram_bucket');
+    expect(result).toContain('method="GET"');
+    expect(result).toContain('le="1"');
+    expect(result).toContain('le="+Inf"');
+    expect(result).toContain('test_histogram_sum');
+    expect(result).toContain('test_histogram_count');
   });
 
   it('summary with labels', () => {
@@ -411,12 +410,12 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_summary');
-    assertStringIncludes(result, 'method="POST"');
-    assertStringIncludes(result, 'quantile="0.5"');
-    assertStringIncludes(result, 'quantile="0.9"');
-    assertStringIncludes(result, 'test_summary_sum');
-    assertStringIncludes(result, 'test_summary_count');
+    expect(result).toContain('test_summary');
+    expect(result).toContain('method="POST"');
+    expect(result).toContain('quantile="0.5"');
+    expect(result).toContain('quantile="0.9"');
+    expect(result).toContain('test_summary_sum');
+    expect(result).toContain('test_summary_count');
   });
 
   it('label rendering from MetricValue.labels handles partial labels', () => {
@@ -434,12 +433,12 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
     // Should still render even with missing labels (returns {} for empty labels)
-    assertStringIncludes(result, 'test_counter{} 1');
+    expect(result).toContain('test_counter{} 1');
   });
 
   it('empty snapshot array returns empty string', () => {
     const result = renderPrometheus([]);
-    assertEquals(result, '');
+    expect(result).toEqual('');
   });
 
   it('summary with empty quantiles', () => {
@@ -462,8 +461,8 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_summary_sum');
-    assertStringIncludes(result, 'test_summary_count');
+    expect(result).toContain('test_summary_sum');
+    expect(result).toContain('test_summary_count');
   });
 
   it('histogram with empty buckets', () => {
@@ -486,10 +485,10 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_histogram_sum');
-    assertStringIncludes(result, 'test_histogram_count');
+    expect(result).toContain('test_histogram_sum');
+    expect(result).toContain('test_histogram_count');
     // Should not have any bucket lines
-    assertEquals(result.includes('_bucket'), false);
+    expect(result.includes('_bucket')).toEqual(false);
   });
 
   it('counter with multiple label sets', () => {
@@ -506,10 +505,10 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'method="GET"');
-    assertStringIncludes(result, 'method="POST"');
-    assertStringIncludes(result, 'test_counter{method="GET"} 10');
-    assertStringIncludes(result, 'test_counter{method="POST"} 20');
+    expect(result).toContain('method="GET"');
+    expect(result).toContain('method="POST"');
+    expect(result).toContain('test_counter{method="GET"} 10');
+    expect(result).toContain('test_counter{method="POST"} 20');
   });
 
   it('gauge with negative value', () => {
@@ -525,7 +524,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_gauge -42');
+    expect(result).toContain('test_gauge -42');
   });
 
   it('counter with undefined value uses 0', () => {
@@ -541,7 +540,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_counter 0');
+    expect(result).toContain('test_counter 0');
   });
 
   it('histogram with undefined sum/count', () => {
@@ -565,7 +564,7 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should still render buckets even without sum/count
-    assertStringIncludes(result, 'test_histogram_bucket');
+    expect(result).toContain('test_histogram_bucket');
   });
 
   it('summary with undefined quantiles', () => {
@@ -588,8 +587,8 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_summary_sum');
-    assertStringIncludes(result, 'test_summary_count');
+    expect(result).toContain('test_summary_sum');
+    expect(result).toContain('test_summary_count');
   });
 
   it('histogram with single bucket', () => {
@@ -612,10 +611,10 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_histogram_bucket');
-    assertStringIncludes(result, 'le="+Inf"');
-    assertStringIncludes(result, 'test_histogram_sum 10');
-    assertStringIncludes(result, 'test_histogram_count 1');
+    expect(result).toContain('test_histogram_bucket');
+    expect(result).toContain('le="+Inf"');
+    expect(result).toContain('test_histogram_sum 10');
+    expect(result).toContain('test_histogram_count 1');
   });
 
   it('label values with pipe character are rendered correctly', () => {
@@ -630,7 +629,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'name="a|b"');
+    expect(result).toContain('name="a|b"');
   });
 
   it('label values with equals character are rendered correctly', () => {
@@ -645,7 +644,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'q="x=y"');
+    expect(result).toContain('q="x=y"');
   });
 
   it('no-label histogram bucket format (no leading comma)', () => {
@@ -672,13 +671,13 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should NOT contain leading comma
-    assertEquals(result.includes('{,le='), false, 'Should not have leading comma in bucket labels');
+    expect(result.includes('{,le=')).toEqual(false);
 
     // Should have correct format: name_bucket{le="0.1"}
-    assertStringIncludes(result, 'test_hist_bucket{le="0.1"}');
-    assertStringIncludes(result, 'test_hist_bucket{le="+Inf"}');
-    assertStringIncludes(result, 'test_hist_sum 10');
-    assertStringIncludes(result, 'test_hist_count 3');
+    expect(result).toContain('test_hist_bucket{le="0.1"}');
+    expect(result).toContain('test_hist_bucket{le="+Inf"}');
+    expect(result).toContain('test_hist_sum 10');
+    expect(result).toContain('test_hist_count 3');
   });
 
   it('no-label counter renders line (not zero lines)', () => {
@@ -693,14 +692,10 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should render as "name value" with no braces
-    assertStringIncludes(result, 'test_counter 10');
+    expect(result).toContain('test_counter 10');
 
     // Should NOT have empty braces for no-label case
-    assertEquals(
-      result.includes('test_counter{}'),
-      false,
-      'Should not have empty braces for no-label counter',
-    );
+    expect(result.includes('test_counter{}')).toEqual(false);
   });
 
   it('no-label gauge renders line (not zero lines)', () => {
@@ -715,14 +710,10 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should render as "name value" with no braces
-    assertStringIncludes(result, 'test_gauge 42');
+    expect(result).toContain('test_gauge 42');
 
     // Should NOT have empty braces for no-label case
-    assertEquals(
-      result.includes('test_gauge{}'),
-      false,
-      'Should not have empty braces for no-label gauge',
-    );
+    expect(result.includes('test_gauge{}')).toEqual(false);
   });
 
   it('no-label summary quantile format (no leading comma)', () => {
@@ -749,15 +740,11 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should NOT contain leading comma
-    assertEquals(
-      result.includes('{,quantile='),
-      false,
-      'Should not have leading comma in quantile labels',
-    );
+    expect(result.includes('{,quantile=')).toEqual(false);
 
     // Should have correct format: name{quantile="0.5"}
-    assertStringIncludes(result, 'test_summary{quantile="0.5"} 5');
-    assertStringIncludes(result, 'test_summary{quantile="0.9"} 9');
+    expect(result).toContain('test_summary{quantile="0.5"} 5');
+    expect(result).toContain('test_summary{quantile="0.9"} 9');
   });
 
   it('one-label counter format', () => {
@@ -772,8 +759,8 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{label="value"}
-    assertStringIncludes(result, 'test_counter{method="GET"} 10');
-    assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+    expect(result).toContain('test_counter{method="GET"} 10');
+    expect(result.includes('{,method=')).toEqual(false);
   });
 
   it('one-label gauge format', () => {
@@ -788,8 +775,8 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{label="value"}
-    assertStringIncludes(result, 'test_gauge{host="server1"} 100');
-    assertEquals(result.includes('{,host='), false, 'Should not have leading comma');
+    expect(result).toContain('test_gauge{host="server1"} 100');
+    expect(result.includes('{,host=')).toEqual(false);
   });
 
   it('one-label histogram bucket format', () => {
@@ -817,9 +804,9 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{method="GET",le="0.1"}
-    assertStringIncludes(result, 'test_hist_bucket{method="GET",le="0.1"}');
-    assertStringIncludes(result, 'test_hist_bucket{method="GET",le="+Inf"}');
-    assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+    expect(result).toContain('test_hist_bucket{method="GET",le="0.1"}');
+    expect(result).toContain('test_hist_bucket{method="GET",le="+Inf"}');
+    expect(result.includes('{,method=')).toEqual(false);
   });
 
   it('one-label summary quantile format', () => {
@@ -846,8 +833,8 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{endpoint="/api",quantile="0.5"}
-    assertStringIncludes(result, 'test_summary{endpoint="/api",quantile="0.5"} 5');
-    assertEquals(result.includes('{,endpoint='), false, 'Should not have leading comma');
+    expect(result).toContain('test_summary{endpoint="/api",quantile="0.5"} 5');
+    expect(result.includes('{,endpoint=')).toEqual(false);
   });
 
   it('two-labels counter format', () => {
@@ -865,8 +852,8 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{label1="v1",label2="v2"}
-    assertStringIncludes(result, 'test_counter{method="GET",status="200"} 10');
-    assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+    expect(result).toContain('test_counter{method="GET",status="200"} 10');
+    expect(result.includes('{,method=')).toEqual(false);
   });
 
   it('two-labels histogram bucket format', () => {
@@ -895,10 +882,10 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{method="GET",status="200",le="0.005"}
-    assertStringIncludes(result, 'http_duration_bucket{method="GET",status="200",le="0.005"}');
-    assertStringIncludes(result, 'http_duration_bucket{method="GET",status="200",le="0.1"}');
-    assertStringIncludes(result, 'http_duration_bucket{method="GET",status="200",le="+Inf"}');
-    assertEquals(result.includes('{,method='), false, 'Should not have leading comma');
+    expect(result).toContain('http_duration_bucket{method="GET",status="200",le="0.005"}');
+    expect(result).toContain('http_duration_bucket{method="GET",status="200",le="0.1"}');
+    expect(result).toContain('http_duration_bucket{method="GET",status="200",le="+Inf"}');
+    expect(result.includes('{,method=')).toEqual(false);
   });
 
   it('two-labels summary quantile format', () => {
@@ -926,9 +913,9 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should have correct format: name{endpoint="/api",method="GET",quantile="0.5"}
-    assertStringIncludes(result, 'response_time{endpoint="/api",method="GET",quantile="0.5"} 5');
-    assertStringIncludes(result, 'response_time{endpoint="/api",method="GET",quantile="0.9"} 9');
-    assertEquals(result.includes('{,endpoint='), false, 'Should not have leading comma');
+    expect(result).toContain('response_time{endpoint="/api",method="GET",quantile="0.5"} 5');
+    expect(result).toContain('response_time{endpoint="/api",method="GET",quantile="0.9"} 9');
+    expect(result.includes('{,endpoint=')).toEqual(false);
   });
 
   it('customBuckets option has observable effect', () => {
@@ -957,14 +944,14 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Custom bucket boundaries should be observable
-    assertStringIncludes(result, 'custom_hist_bucket{le="0.01"}');
-    assertStringIncludes(result, 'custom_hist_bucket{le="0.1"}');
-    assertStringIncludes(result, 'custom_hist_bucket{le="10"}');
-    assertStringIncludes(result, 'custom_hist_bucket{le="+Inf"}');
+    expect(result).toContain('custom_hist_bucket{le="0.01"}');
+    expect(result).toContain('custom_hist_bucket{le="0.1"}');
+    expect(result).toContain('custom_hist_bucket{le="10"}');
+    expect(result).toContain('custom_hist_bucket{le="+Inf"}');
 
     // Should NOT have default bucket boundaries
-    assertEquals(result.includes('le="0.005"'), false, 'Should not have default bucket 0.005');
-    assertEquals(result.includes('le="0.025"'), false, 'Should not have default bucket 0.025');
+    expect(result.includes('le="0.005"')).toEqual(false);
+    expect(result.includes('le="0.025"')).toEqual(false);
   });
 
   it('formatValue handles NaN', () => {
@@ -979,7 +966,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_gauge NaN');
+    expect(result).toContain('test_gauge NaN');
   });
 
   it('formatValue handles +Inf', () => {
@@ -994,7 +981,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_gauge +Inf');
+    expect(result).toContain('test_gauge +Inf');
   });
 
   it('formatValue handles -Inf', () => {
@@ -1009,7 +996,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_gauge -Inf');
+    expect(result).toContain('test_gauge -Inf');
   });
 
   it('formatLabels with key but no labels in value returns {}', () => {
@@ -1025,7 +1012,7 @@ describe('renderPrometheus', () => {
     const result = renderPrometheus([snapshot]);
 
     // Should return {} for no-label case even when labels array is defined
-    assertStringIncludes(result, 'test_counter{} 1');
+    expect(result).toContain('test_counter{} 1');
   });
 
   it('renderCounter with undefined value uses 0', () => {
@@ -1040,7 +1027,7 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_counter 0');
+    expect(result).toContain('test_counter 0');
   });
 
   it('renderGauge with undefined value uses 0', () => {
@@ -1055,6 +1042,6 @@ describe('renderPrometheus', () => {
 
     const result = renderPrometheus([snapshot]);
 
-    assertStringIncludes(result, 'test_gauge 0');
+    expect(result).toContain('test_gauge 0');
   });
 });

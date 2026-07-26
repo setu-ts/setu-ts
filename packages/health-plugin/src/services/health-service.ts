@@ -15,7 +15,7 @@ import type {
 /**
  * Internal representation of a registered indicator.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 interface RegisteredIndicator {
   readonly name: string;
@@ -34,7 +34,7 @@ const STATUS_RANK: Readonly<Record<HealthStatus, number>> = {
  *
  * Manages indicator registration and aggregation for health checks.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export class HealthService implements IHealthService {
   #indicators = new Map<string, RegisteredIndicator>();

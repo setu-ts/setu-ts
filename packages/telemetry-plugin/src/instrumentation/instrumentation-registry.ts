@@ -2,7 +2,7 @@
  * Instrumentation registry — builds, enables, and tracks auto-instrumentations.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 
 import type {
@@ -56,7 +56,7 @@ export function isInstrumentationSupported(
  * @param runtime - Runtime services providing the platform gate.
  * @param provider - The OTel TracerProvider (from `TracerHost.otelProvider`); absent = no-op.
  * @returns An instrumentation handle (resolved after all lazy loads settle).
- * @since 0.24.1
+ * @since 0.2.0
  */
 export async function buildInstrumentationRegistry(
   config: InstrumentationsConfig | undefined,

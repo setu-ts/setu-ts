@@ -8,7 +8,7 @@ import type { IHealthIndicator } from '@hono-enterprise/common';
 /**
  * Options for configuring the health plugin endpoints.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export interface EndpointsOptions {
   /**
@@ -36,7 +36,7 @@ export interface EndpointsOptions {
 /**
  * Options for configuring the health plugin.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export interface HealthPluginOptions {
   /**

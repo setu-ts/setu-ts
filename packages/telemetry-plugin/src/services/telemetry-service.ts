@@ -2,7 +2,7 @@
  * Telemetry service implementations — real (OTel-backed) and noop.
  *
  * @module
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 import type {
@@ -213,7 +213,7 @@ const NOOP_SPAN: NoopSpan = new NoopSpan();
  * `withSpan` still runs the callback and returns its value, but all span
  * operations are no-ops.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export class NoopTelemetryService implements ITelemetryService {
   async withSpan<T>(
