@@ -27,14 +27,17 @@ const fakeRuntime: IRuntimeServices = {
 
 describe('createTestApp', () => {
   it('rejects with kernel mandatory-runtime message when plugins lacks runtime capability', async () => {
-    // Empty plugin list — no runtime provider
+    // Empty plugin list — no runtime provider. Capture the error rather than
+    // asserting inside the catch: an `expect` in the try block would be caught
+    // by this very catch, turning a "did not throw" failure into a confusing
+    // message-mismatch failure.
+    let message: string | undefined;
     try {
       await createTestApp({ plugins: [] });
-      expect(false).toBe(true); // should not reach here
     } catch (e) {
-      const err = e as Error;
-      expect(err.message).toContain("No plugin provides the mandatory 'runtime' capability");
+      message = (e as Error).message;
     }
+    expect(message).toContain("No plugin provides the mandatory 'runtime' capability");
   });
 
   it('autoStart: false with empty list resolves without calling start()', async () => {
@@ -72,15 +75,18 @@ describe('createTestApp', () => {
     });
 
     const app = await createTestApp({ plugins: [runtimeMock] });
-    let threw = false;
+    // Pin the actual message: a bare `threw = true` would also be satisfied by
+    // an unrelated TypeError, so the test would keep passing if this stopped
+    // being the pipeline-compiled guard it claims to exercise.
+    let message: string | undefined;
     try {
       app.middleware.add(async (_ctx, next) => {
         await next();
       });
-    } catch {
-      threw = true;
+    } catch (e) {
+      message = (e as Error).message;
     }
-    expect(threw).toBe(true);
+    expect(message).toBe('Cannot add middleware after the pipeline has been compiled.');
     await app.stop();
   });
 
@@ -92,13 +98,15 @@ describe('createTestApp', () => {
     });
 
     const app = await createTestApp({ plugins: [runtimeMock] });
-    let threw = false;
+    // The test name quotes an exact message — assert it, rather than merely
+    // that something threw.
+    let message: string | undefined;
     try {
       await app.start();
-    } catch {
-      threw = true;
+    } catch (e) {
+      message = (e as Error).message;
     }
-    expect(threw).toBe(true);
+    expect(message).toBe('Application has already been started.');
     await app.stop();
   });
 

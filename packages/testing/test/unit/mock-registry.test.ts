@@ -29,16 +29,23 @@ describe('MockServiceRegistry', () => {
     );
   });
 
-  it('second register without options throws', () => {
+  it('second register without options throws the kernel duplicate message', () => {
     const registry = new MockServiceRegistry();
     registry.register('t', { a: 1 });
-    let threw = false;
+    // Assert the message verbatim — it must match the kernel ServiceRegistry's,
+    // or a test that pins the text would pass here and fail against the real
+    // registry. A bare "something threw" check cannot catch that drift.
+    let message: string | undefined;
     try {
       registry.register('t', { b: 2 });
-    } catch {
-      threw = true;
+    } catch (e) {
+      message = (e as Error).message;
     }
-    expect(threw).toBe(true);
+    expect(message).toBe(
+      "Capability 't' is already registered. Use { override: true } to replace it.",
+    );
+    // The original registration survives a rejected duplicate.
+    expect(registry.get('t')).toEqual({ a: 1 });
   });
 
   it('register with override: true replaces', () => {
