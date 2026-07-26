@@ -2,7 +2,7 @@
  * Factory for creating span processors from the loaded OTel SDK module.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 
 import type { SpanProcessorKind } from '../interfaces/index.ts';
@@ -28,7 +28,7 @@ export interface SpanProcessorSdkModule {
  * @param exporter - The span exporter instance to attach to the processor.
  * @param sdkMod - The loaded OTel SDK module providing processor constructors.
  * @returns A new span processor instance.
- * @since 0.24.1
+ * @since 0.2.0
  */
 export function createSpanProcessor(
   kind: SpanProcessorKind,

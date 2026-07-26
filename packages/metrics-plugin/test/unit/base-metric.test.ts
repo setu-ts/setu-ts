@@ -4,11 +4,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
-import {
-  assertEquals,
-  assertNotEquals,
-  assertThrows,
-} from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect } from '@std/expect';
 import { MetricBase } from '../../src/metrics/base-metric.ts';
 
 /**
@@ -36,9 +32,9 @@ describe('MetricBase', () => {
     };
     const metric = new TestMetric('test_metric', config);
 
-    assertEquals(metric.name, 'test_metric'); // Uses class name as default
-    assertEquals(metric.type, 'counter');
-    assertEquals(metric.help, 'Test help');
+    expect(metric.name).toEqual('test_metric'); // Uses class name as default
+    expect(metric.type).toEqual('counter');
+    expect(metric.help).toEqual('Test help');
   });
 
   it('labelKey is deterministic and order-independent', () => {
@@ -55,9 +51,9 @@ describe('MetricBase', () => {
     const key1 = metric.getLabelKey(labels1);
     const key2 = metric.getLabelKey(labels2);
 
-    assertEquals(key1, key2);
+    expect(key1).toEqual(key2);
     // New JSON.stringify-based format: sorted entries as JSON
-    assertEquals(key1, '[["method","GET"],["status","200"]]');
+    expect(key1).toEqual('[["method","GET"],["status","200"]]');
   });
 
   it('unknown label names are rejected', () => {
@@ -68,9 +64,8 @@ describe('MetricBase', () => {
     };
     const metric = new TestMetric('test_metric', config);
 
-    assertThrows(
-      () => metric.validateLabelsPublic({ method: 'GET', unknown: 'value' }),
-      Error,
+    expect(() => metric.validateLabelsPublic({ method: 'GET', unknown: 'value' })).toThrow(Error);
+    expect(() => metric.validateLabelsPublic({ method: 'GET', unknown: 'value' })).toThrow(
       'does not have a label',
     );
   });
@@ -83,11 +78,8 @@ describe('MetricBase', () => {
     };
     const metric = new TestMetric('test_metric', config);
 
-    assertThrows(
-      () => metric.validateLabelsPublic({ method: 'GET' }),
-      Error,
-      'missing required label',
-    );
+    expect(() => metric.validateLabelsPublic({ method: 'GET' })).toThrow(Error);
+    expect(() => metric.validateLabelsPublic({ method: 'GET' })).toThrow('missing required label');
   });
 
   it('no labels is valid when config has no labels', () => {
@@ -124,7 +116,7 @@ describe('MetricBase', () => {
     const metric = new TestMetric('test_metric', config);
 
     const key = metric.getLabelKey(undefined);
-    assertEquals(key, '');
+    expect(key).toEqual('');
   });
 
   it('labelKey works with empty labels object', () => {
@@ -138,7 +130,7 @@ describe('MetricBase', () => {
     // Empty object but labels are required - this should throw in validateLabels
     // but labelKey itself now returns '' (N1 fix: {} ≡ undefined for no-label metrics)
     const key = metric.getLabelKey({});
-    assertEquals(key, '');
+    expect(key).toEqual('');
   });
 
   it('help defaults to name when not provided', () => {
@@ -149,7 +141,7 @@ describe('MetricBase', () => {
     const metric = new TestMetric('my_metric', config);
 
     // help should be 'Test' from config
-    assertEquals(metric.help, 'Test');
+    expect(metric.help).toEqual('Test');
   });
 
   it('empty labels object throws when labels are required', () => {
@@ -161,11 +153,8 @@ describe('MetricBase', () => {
     const metric = new TestMetric('test_metric', config);
 
     // Empty labels object when labels required should throw
-    assertThrows(
-      () => metric.validateLabelsPublic({}),
-      Error,
-      'missing required label',
-    );
+    expect(() => metric.validateLabelsPublic({})).toThrow(Error);
+    expect(() => metric.validateLabelsPublic({})).toThrow('missing required label');
   });
 
   it('labelKey with all labels present', () => {
@@ -178,7 +167,7 @@ describe('MetricBase', () => {
 
     const key = metric.getLabelKey({ method: 'GET', status: '200' });
     // New JSON.stringify-based format: sorted entries as JSON
-    assertEquals(key, '[["method","GET"],["status","200"]]');
+    expect(key).toEqual('[["method","GET"],["status","200"]]');
   });
 
   it('labelKey is injective: multi-label values with | do not collide', () => {
@@ -202,13 +191,13 @@ describe('MetricBase', () => {
     const key2 = metric.getLabelKey(labels2);
 
     // Keys must be distinct (no collision)
-    assertNotEquals(key1, key2);
+    expect(key1).not.toEqual(key2);
 
     // Each key must uniquely encode its label set
     // key1 should encode [["a","1|b=2"],["b","3"]]
-    assertEquals(key1, '[["a","1|b=2"],["b","3"]]');
+    expect(key1).toEqual('[["a","1|b=2"],["b","3"]]');
     // key2 should encode [["a","1"],["b","2|b=3"]]
-    assertEquals(key2, '[["a","1"],["b","2|b=3"]]');
+    expect(key2).toEqual('[["a","1"],["b","2|b=3"]]');
   });
 
   it('labelKey is order-independent (same labels, different order → same key)', () => {
@@ -225,8 +214,8 @@ describe('MetricBase', () => {
     const key1 = metric.getLabelKey(labels1);
     const key2 = metric.getLabelKey(labels2);
 
-    assertEquals(key1, key2);
-    assertEquals(key1, '[["a","1"],["b","2"]]');
+    expect(key1).toEqual(key2);
+    expect(key1).toEqual('[["a","1"],["b","2"]]');
   });
 
   it('labelKey handles special characters in label values correctly', () => {
@@ -239,15 +228,15 @@ describe('MetricBase', () => {
 
     // Single label with | character
     const key1 = metric.getLabelKey({ x: 'a|b' });
-    assertEquals(key1, '[["x","a|b"]]');
+    expect(key1).toEqual('[["x","a|b"]]');
 
     // Single label with = character
     const key2 = metric.getLabelKey({ x: 'a=b' });
-    assertEquals(key2, '[["x","a=b"]]');
+    expect(key2).toEqual('[["x","a=b"]]');
 
     // Single label with \ character
     const key3 = metric.getLabelKey({ x: 'a\\b' });
-    assertEquals(key3, '[["x","a\\\\b"]]');
+    expect(key3).toEqual('[["x","a\\\\b"]]');
   });
 
   it('labelKey normalizes undefined and {} to empty string (N1 fix)', () => {
@@ -263,9 +252,9 @@ describe('MetricBase', () => {
     const keyEmptyObj = metric.getLabelKey({});
 
     // Both must be '' (the empty key for no-label metrics)
-    assertEquals(keyUndefined, '');
-    assertEquals(keyEmptyObj, '');
-    assertEquals(keyUndefined, keyEmptyObj);
+    expect(keyUndefined).toEqual('');
+    expect(keyEmptyObj).toEqual('');
+    expect(keyUndefined).toEqual(keyEmptyObj);
   });
 
   it('labelKey preserves F1 injectivity for non-empty labels', () => {
@@ -285,9 +274,9 @@ describe('MetricBase', () => {
     const key2 = metric.getLabelKey(labels2);
 
     // Keys must be distinct (no collision)
-    assertNotEquals(key1, key2);
-    assertEquals(key1, '[["a","1|b=2"],["b","3"]]');
-    assertEquals(key2, '[["a","1"],["b","2|b=3"]]');
+    expect(key1).not.toEqual(key2);
+    expect(key1).toEqual('[["a","1|b=2"],["b","3"]]');
+    expect(key2).toEqual('[["a","1"],["b","2|b=3"]]');
   });
 
   it('labelKey is order-independent for non-empty labels', () => {
@@ -305,8 +294,8 @@ describe('MetricBase', () => {
     const key1 = metric.getLabelKey(labels1);
     const key2 = metric.getLabelKey(labels2);
 
-    assertEquals(key1, key2);
-    assertEquals(key1, '[["a","1"],["b","2"]]');
+    expect(key1).toEqual(key2);
+    expect(key1).toEqual('[["a","1"],["b","2"]]');
   });
 
   it('labelKey handles special characters (B1)', () => {
@@ -319,12 +308,12 @@ describe('MetricBase', () => {
     const metric = new TestMetric('test_metric', config);
 
     const key1 = metric.getLabelKey({ x: 'a|b' });
-    assertEquals(key1, '[["x","a|b"]]');
+    expect(key1).toEqual('[["x","a|b"]]');
 
     const key2 = metric.getLabelKey({ x: 'c=d' });
-    assertEquals(key2, '[["x","c=d"]]');
+    expect(key2).toEqual('[["x","c=d"]]');
 
     const key3 = metric.getLabelKey({ x: 'e"f' });
-    assertEquals(key3, '[["x","e\\"f"]]');
+    expect(key3).toEqual('[["x","e\\"f"]]');
   });
 });

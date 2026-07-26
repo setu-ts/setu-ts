@@ -2,7 +2,7 @@
  * Lazy loader for the OTLP HTTP trace exporter.
  *
  * @module
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 /**

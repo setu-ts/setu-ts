@@ -6,7 +6,7 @@
  * `npm:` imports. Honors the inject-or-lazy seam.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 
 /** Result of loading an instrumentation. */
@@ -40,7 +40,7 @@ export function createHttpInstrumentation(
  *
  * @param configArg - Opaque config forwarded to the constructor (or `undefined` for defaults).
  * @returns A promise resolving to the constructed instrumentation.
- * @since 0.24.1
+ * @since 0.2.0
  */
 export async function loadHttpInstrumentation(
   configArg: unknown | undefined,
@@ -74,7 +74,7 @@ export function createFetchInstrumentation(
  *
  * @param configArg - Opaque config forwarded to the constructor (or `undefined` for defaults).
  * @returns A promise resolving to the constructed instrumentation.
- * @since 0.24.1
+ * @since 0.2.0
  */
 export async function loadFetchInstrumentation(
   configArg: unknown | undefined,

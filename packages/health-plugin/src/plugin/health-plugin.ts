@@ -44,7 +44,7 @@ import { createSelfIndicator } from '../indicators/self-indicator.ts';
  * }));
  * ```
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
   const endpoints = options?.endpoints ?? {

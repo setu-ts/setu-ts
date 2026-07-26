@@ -26,7 +26,7 @@
  * }));
  * ```
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 
 // Plugin factory

@@ -6,7 +6,7 @@
  * Provides `ITelemetryService` registration under `CAPABILITIES.TELEMETRY`,
  * a request-span middleware at priority 30, and lazy-loaded OTel SDK support.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 export { TelemetryPlugin } from './plugin/telemetry-plugin.ts';

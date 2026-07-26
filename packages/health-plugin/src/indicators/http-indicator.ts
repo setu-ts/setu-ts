@@ -8,7 +8,7 @@ import type { HealthCheckResult, IHealthIndicator } from '@hono-enterprise/commo
 /**
  * Options for creating an HTTP probe indicator.
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export interface HttpIndicatorOptions {
   /** The URL to probe. */
@@ -57,7 +57,7 @@ export interface HttpIndicatorOptions {
  * }));
  * ```
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export function createHttpIndicator(
   name: string,

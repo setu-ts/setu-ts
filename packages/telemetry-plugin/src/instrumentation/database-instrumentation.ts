@@ -5,7 +5,7 @@
  * Honors the inject-or-lazy seam.
  *
  * @module
- * @since 0.24.1
+ * @since 0.2.0
  */
 
 const defaultImport = (spec: string) => import(spec);
@@ -30,7 +30,7 @@ export function createIORedisInstrumentation(
  *
  * @param configArg - Opaque config forwarded to the constructor (or `undefined` for defaults).
  * @returns A promise resolving to the constructed instrumentation.
- * @since 0.24.1
+ * @since 0.2.0
  */
 export async function loadIORedisInstrumentation(
   configArg: unknown | undefined,

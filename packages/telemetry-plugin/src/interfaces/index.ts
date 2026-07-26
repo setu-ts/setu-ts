@@ -2,7 +2,7 @@
  * Plugin-specific interfaces and constants.
  *
  * @module
- * @since 0.24.0
+ * @since 0.2.0
  */
 
 import type { TelemetryContext } from '@hono-enterprise/common';
@@ -13,28 +13,28 @@ import type { TelemetryContext } from '@hono-enterprise/common';
  * Downstream handlers and middleware can read the active span via
  * `ctx.state.get(TELEMETRY_SPAN_KEY)` and cast to {@linkcode ISpan}.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export const TELEMETRY_SPAN_KEY = '__he_telemetry_span';
 
 /**
  * Which span exporter to use.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export type SpanExporterKind = 'otlp' | 'console';
 
 /**
  * Which span processor to use.
  *
- * @since 0.24.1
+ * @since 0.2.0
  */
 export type SpanProcessorKind = 'simple' | 'batch';
 
 /**
  * The kind of instrumentation to enable.
  *
- * @since 0.24.1
+ * @since 0.2.0
  */
 export type InstrumentationKind =
   | 'http'
@@ -46,7 +46,7 @@ export type InstrumentationKind =
 /**
  * Sampling configuration.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface SamplingConfig {
   /** Currently only `'traceidratio'` is supported. */
@@ -61,7 +61,7 @@ export interface SamplingConfig {
  * Consumers (the plugin factory, tests) can supply a pre-built host via
  * `tracerProviderFactory` to bypass the lazy OTel import.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface TracerHost {
   /** Starts a new span. */
@@ -85,7 +85,7 @@ export interface TracerHost {
    * The underlying OTel TracerProvider; undefined for noop/custom hosts
    * (instrumentations then no-op).
    *
-   * @since 0.24.1
+   * @since 0.2.0
    */
   readonly otelProvider?: unknown;
 }
@@ -93,7 +93,7 @@ export interface TracerHost {
 /**
  * Options for the {@linkcode TelemetryPlugin}.
  *
- * @since 0.24.0
+ * @since 0.2.0
  */
 export interface TelemetryPluginOptions {
   /** Service name reported to the exporter (required when exporter is configured). */
@@ -115,7 +115,7 @@ export interface TelemetryPluginOptions {
   /**
    * Span processor to use (`'simple'` by default, `'batch'` as an option).
    *
-   * @since 0.24.1
+   * @since 0.2.0
    */
   spanProcessor?: SpanProcessorKind;
   /**
@@ -124,7 +124,7 @@ export interface TelemetryPluginOptions {
    * Each key enables one instrumentation on supported runtimes (Node only).
    * Omitting a key leaves that instrumentation off.
    *
-   * @since 0.24.1
+   * @since 0.2.0
    */
   instrumentations?: InstrumentationsConfig;
 }
@@ -132,7 +132,7 @@ export interface TelemetryPluginOptions {
 /**
  * Per-instrumentation entry. Presence of the parent key enables; this configures or injects.
  *
- * @since 0.24.1
+ * @since 0.2.0
  */
 export interface InstrumentationConfig {
   /**
@@ -153,7 +153,7 @@ export interface InstrumentationConfig {
 /**
  * Configuration for auto-instrumentations.
  *
- * @since 0.24.1
+ * @since 0.2.0
  */
 export interface InstrumentationsConfig {
   /** node:http/https via @opentelemetry/instrumentation-http. Node-only; no-op elsewhere. */

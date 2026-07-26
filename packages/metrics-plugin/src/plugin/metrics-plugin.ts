@@ -29,7 +29,7 @@ import { HttpCollector, MIDDLEWARE_PRIORITY } from '../collectors/http-collector
  *   customMetrics: [...],
  * }));
  * ```
- * @since 0.19.0
+ * @since 0.2.0
  */
 export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
   const endpoint = options?.endpoint ?? '/metrics';

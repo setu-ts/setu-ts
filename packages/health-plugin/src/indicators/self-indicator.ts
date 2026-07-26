@@ -25,7 +25,7 @@ import type {
  * // { status: 'up', data: { platform: 'node', version: '18.0.0', hostname: 'my-host' } }
  * ```
  *
- * @since 0.20.0
+ * @since 0.2.0
  */
 export function createSelfIndicator(runtime: IRuntimeServices): IHealthIndicator {
   return {
