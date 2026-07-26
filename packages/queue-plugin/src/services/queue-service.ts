@@ -22,6 +22,18 @@ import { runJob } from '../processors/job-processor.ts';
 import { cronNextMs } from '../scheduler/cron-calculator.ts';
 
 /**
+ * Minimal logger surface the service reports through — structurally compatible
+ * with `ILogger` so the plugin can pass the resolved logger capability without
+ * this package depending on the logger plugin.
+ *
+ * @since 0.1.0
+ */
+export interface QueueLogger {
+  /** Logs at `error` severity. */
+  error(message: string, metadata?: Record<string, unknown>): void;
+}
+
+/**
  * Internal processor registration.
  */
 interface ProcessorRegistration<T> {
@@ -53,17 +65,53 @@ export class QueueService implements IQueue {
   #workerHandle: number | null = null;
   #recurringHandle: number | null = null;
   #connected = false;
+  #logger: QueueLogger | undefined;
 
   constructor(
     adapter: QueueAdapter,
     runtime: IRuntimeServices,
-    options?: { defaultMaxAttempts?: number; pollIntervalMs?: number },
+    options?: {
+      defaultMaxAttempts?: number;
+      pollIntervalMs?: number;
+      /** Optional logger; when absent, failures are reported nowhere (see #report). */
+      logger?: QueueLogger | undefined;
+    },
   ) {
     this.#adapter = adapter;
     this.#runtime = runtime;
     this.#defaultMaxAttempts = options?.defaultMaxAttempts ?? 3;
     this.#pollIntervalMs = options?.pollIntervalMs ?? 1000;
     this.#processors = new Map();
+    this.#logger = options?.logger;
+  }
+
+  /**
+   * Reports a background failure through the logger when one is available.
+   *
+   * The poll loop, the recurring loop, and the job runner all used to discard
+   * their errors into an empty `catch` — an adapter outage or a failing job
+   * produced NO signal anywhere, and the code comments said "in production,
+   * consider injecting a logger". This is that logger. Reporting itself is
+   * guarded so a broken logger cannot take the loop down.
+   *
+   * @param message - What failed
+   * @param error - The thrown value
+   * @param meta - Extra context (job id, name, attempt)
+   */
+  #report(message: string, error: unknown, meta?: Record<string, unknown>): void {
+    if (this.#logger === undefined) {
+      return;
+    }
+    const err = error instanceof Error ? error : new Error(String(error));
+    try {
+      this.#logger.error(message, {
+        error: err.message,
+        ...(err.stack !== undefined && { stack: err.stack }),
+        ...meta,
+      });
+    } catch {
+      // A broken logger must not escalate into a dead worker loop.
+    }
   }
 
   async connect(): Promise<void> {
@@ -160,20 +208,18 @@ export class QueueService implements IQueue {
 
   #startWorkerLoop(): void {
     this.#workerHandle = this.#runtime.setInterval(() => {
-      this.#poll().catch((_error) => {
-        // Log transient errors but don't crash the loop
-        // Errors are silently swallowed to prevent unhandled rejections
-        // In production, consider injecting a logger for error reporting
+      // The loop must survive a transient adapter failure, but the failure is
+      // reported rather than discarded.
+      this.#poll().catch((error: unknown) => {
+        this.#report('queue poll failed', error);
       });
     }, this.#pollIntervalMs) as unknown as number;
   }
 
   #startRecurringLoop(): void {
     this.#recurringHandle = this.#runtime.setInterval(() => {
-      this.#processRecurring().catch((_error) => {
-        // Log transient errors but don't crash the loop
-        // Errors are silently swallowed to prevent unhandled rejections
-        // In production, consider injecting a logger for error reporting
+      this.#processRecurring().catch((error: unknown) => {
+        this.#report('queue recurring scheduling failed', error);
       });
     }, this.#pollIntervalMs) as unknown as number;
   }
@@ -226,7 +272,13 @@ export class QueueService implements IQueue {
   ): void {
     const processor = async () => {
       try {
-        await runJob<T>(this.#runtime, this.#adapter, storedJob, reg.processor);
+        await runJob<T>(
+          this.#runtime,
+          this.#adapter,
+          storedJob,
+          reg.processor,
+          (message, error, meta) => this.#report(message, error, meta),
+        );
       } finally {
         // Decrement in-flight when the job settles
         reg.inFlight--;
@@ -237,7 +289,12 @@ export class QueueService implements IQueue {
     // call (ack / requeue / deadLetter) still rejects, and this promise is not
     // awaited: without a catch that rejection escapes and terminates the process.
     // The catch must NOT decrement inFlight — the finally above already did.
-    processor().catch(() => {});
+    processor().catch((error: unknown) => {
+      this.#report('queue job settlement failed', error, {
+        job: storedJob.id,
+        name: storedJob.name,
+      });
+    });
   }
 
   async #processRecurring(): Promise<void> {

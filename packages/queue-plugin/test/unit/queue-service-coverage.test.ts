@@ -441,4 +441,68 @@ describe('QueueService - coverage', () => {
       await throwingService.disconnect();
     });
   });
+
+  // Retro review (Part 5): both background loops discarded their errors into an
+  // empty catch, so an adapter outage produced no signal at all. Note the
+  // existing `ThrowingAdapter` above never actually rejects — this one does.
+  describe('background loop failures are reported', () => {
+    /** An adapter whose reads REJECT, standing in for a broker/Redis outage. */
+    class RejectingAdapter extends ThrowingAdapter {
+      override reserve<T>(): Promise<
+        readonly {
+          id: string;
+          name: string;
+          data: T;
+          attempts: number;
+          maxAttempts: number;
+          availableAtMs: number;
+        }[]
+      > {
+        return Promise.reject(new Error('redis connection lost'));
+      }
+
+      override fetchRecurringDue(): Promise<readonly StoredRecurring[]> {
+        return Promise.reject(new Error('redis connection lost'));
+      }
+    }
+
+    it('reports a failing reserve from the worker loop', async () => {
+      const reported: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+      const throwing = new RejectingAdapter();
+      // Own runtime: the shared `runtime` from beforeEach also drives the outer
+      // `service`'s loops, and advancing it here would tick both.
+      const ownRuntime = new FakeRuntimeServices();
+      const svc = new QueueService(throwing, ownRuntime as unknown as never, {
+        pollIntervalMs: 100,
+        logger: {
+          error: (message, meta) => reported.push({ message, ...(meta && { meta }) }),
+        },
+      });
+      await svc.connect();
+      svc.process('anything', () => {});
+
+      await ownRuntime.advanceMs(200);
+
+      const entry = reported.find((e) => e.message === 'queue poll failed');
+      expect(entry).toBeDefined();
+      expect(typeof entry!.meta?.error).toBe('string');
+      await svc.disconnect();
+    });
+
+    it('reports a failing recurring fetch from the recurring loop', async () => {
+      const reported: string[] = [];
+      const throwing = new RejectingAdapter();
+      const ownRuntime = new FakeRuntimeServices();
+      const svc = new QueueService(throwing, ownRuntime as unknown as never, {
+        pollIntervalMs: 100,
+        logger: { error: (message) => reported.push(message) },
+      });
+      await svc.connect();
+
+      await ownRuntime.advanceMs(200);
+
+      expect(reported).toContain('queue recurring scheduling failed');
+      await svc.disconnect();
+    });
+  });
 });

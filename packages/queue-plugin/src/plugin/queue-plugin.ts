@@ -6,8 +6,14 @@
  * @module
  */
 
-import type { HealthIndicatorFn, IPlugin, IQueue } from '@hono-enterprise/common';
-import { createCapabilityToken } from '@hono-enterprise/common';
+import type {
+  HealthIndicatorFn,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+  IQueue,
+} from '@hono-enterprise/common';
+import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
 import type { QueueAdapterType, QueuePluginOptions } from '../interfaces/index.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
 import { RedisQueue, validateClient as isRedisQueueClient } from '../adapters/redis-queue.ts';
@@ -16,6 +22,7 @@ import {
   validateClient as isAmqpQueueConnection,
 } from '../adapters/rabbitmq-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
+import type { QueueLogger } from '../services/queue-service.ts';
 
 /**
  * Creates a queue plugin.
@@ -83,10 +90,14 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // Create runtime services from context
       const runtime = ctx.runtime;
 
-      // Create queue service
+      // Create queue service. The logger is optional: without it, a failing job
+      // or a broken adapter is reported nowhere, which is how the worker loop
+      // used to behave unconditionally.
+      const logger = resolveLogger(ctx);
       const service = new QueueService(adapter, runtime, {
         defaultMaxAttempts,
         pollIntervalMs,
+        ...(logger !== undefined && { logger }),
       });
 
       // Connect the service
@@ -105,4 +116,20 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       });
     },
   };
+}
+
+/**
+ * Resolves the optional logger capability so background failures have somewhere
+ * to go. Returns `undefined` when no logger is registered — the queue never
+ * requires one (AI_GUIDELINES: no plugin depends on another plugin).
+ *
+ * @param ctx - The plugin context
+ * @returns A logger surface, or `undefined`
+ */
+function resolveLogger(ctx: IPluginContext): QueueLogger | undefined {
+  if (!ctx.services.has(CAPABILITIES.LOGGER)) {
+    return undefined;
+  }
+  const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+  return { error: (message, metadata) => logger.error(message, metadata) };
 }

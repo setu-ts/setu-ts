@@ -203,13 +203,24 @@ export class RequestReplyCore {
     this.#inboxInit = null;
   }
 
-  /** Lazily subscribes the per-instance reply inbox exactly once. */
+  /**
+   * Lazily subscribes the per-instance reply inbox exactly once.
+   *
+   * A FAILED subscribe must not be cached: the promise was memoized
+   * unconditionally, so if the very first `request()` hit a broker that was
+   * down, `#inboxInit` stayed a rejected promise and every later request failed
+   * with that same stale error — forever, even after the broker recovered. On
+   * rejection the memo is cleared so the next call retries.
+   */
   #ensureInbox(): Promise<void> {
     if (!this.#inboxInit) {
       this.#inboxInit = this.#deps.subscribe(this.#inboxTopic, (message) => {
         this.#onReply(message);
       }).then((sub) => {
         this.#inboxSub = sub;
+      }).catch((error: unknown) => {
+        this.#inboxInit = null;
+        throw error;
       });
     }
     return this.#inboxInit;
