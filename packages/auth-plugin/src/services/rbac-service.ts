@@ -15,81 +15,88 @@ const WILDCARD = '*';
 export class RbacService implements IAuthorizationService {
   private readonly roleDefinitions: Readonly<Record<string, RoleDefinition>>;
   private readonly resolvedPermissions: Map<string, Set<string>>;
+  private readonly resolvedInheritance: Map<string, Set<string>>;
 
   constructor(config: RbacConfig) {
     this.roleDefinitions = config.roles;
     this.resolvedPermissions = new Map();
+    this.resolvedInheritance = new Map();
     this.buildPermissionCache();
   }
 
   /**
-   * Build a cache of all permissions for each role (including inherited).
+   * Build the permission closure for every configured role up front, so a
+   * request-time check is a map lookup (AI_GUIDELINES §14).
    */
   private buildPermissionCache(): void {
     for (const roleName of Object.keys(this.roleDefinitions)) {
-      this.resolveRolePermissions(roleName, new Set());
+      this.resolvedPermissions.set(roleName, this.computeClosure(roleName).permissions);
     }
   }
 
   /**
-   * Recursively resolve permissions for a role (with cycle detection).
+   * Computes a role's full transitive closure — every permission it grants and
+   * every role it inherits — starting from that role.
+   *
+   * Each role is resolved from its OWN starting point with its own `seen` set.
+   * The previous implementation threaded one `visited` set through the whole
+   * recursion AND memoized whatever came back, so a role resolved as a
+   * side-effect of another role's traversal could be cached with an INCOMPLETE
+   * set: in a cyclic configuration (`a` inherits `b`, `b` inherits `a`), the
+   * inner resolution of `b` hit `a` in `visited`, cut it to empty, and cached
+   * `b` without `a`'s permissions — so the result depended on `Object.keys`
+   * order. Under-granting fails closed, but it is still wrong.
+   *
+   * @param roleName - The role to resolve
+   * @returns Its permission set and its inherited-role set
    */
-  private resolveRolePermissions(roleName: string, visited: Set<string>): Set<string> {
-    if (this.resolvedPermissions.has(roleName)) {
-      return this.resolvedPermissions.get(roleName)!;
-    }
+  private computeClosure(roleName: string): {
+    permissions: Set<string>;
+    inherited: Set<string>;
+  } {
+    const permissions = new Set<string>();
+    const inherited = new Set<string>();
+    const seen = new Set<string>([roleName]);
+    const stack: string[] = [roleName];
 
-    if (visited.has(roleName)) {
-      // Cycle detected, return empty set to avoid infinite loop
-      return new Set();
-    }
-
-    visited.add(roleName);
-
-    const roleDef = this.roleDefinitions[roleName];
-    if (!roleDef) {
-      return new Set();
-    }
-
-    const permissions = new Set<string>(roleDef.permissions ?? []);
-
-    // Add permissions from inherited roles
-    for (const inheritedRole of roleDef.inherits ?? []) {
-      const inheritedPermissions = this.resolveRolePermissions(inheritedRole, visited);
-      for (const perm of inheritedPermissions) {
-        permissions.add(perm);
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      const definition = this.roleDefinitions[current];
+      if (definition === undefined) {
+        continue;
+      }
+      for (const permission of definition.permissions ?? []) {
+        permissions.add(permission);
+      }
+      for (const parent of definition.inherits ?? []) {
+        inherited.add(parent);
+        if (!seen.has(parent)) {
+          seen.add(parent);
+          stack.push(parent);
+        }
       }
     }
 
-    this.resolvedPermissions.set(roleName, permissions);
-    return permissions;
+    return { permissions, inherited };
   }
 
   /**
-   * Get all roles that a given role inherits (transitively).
+   * Returns every role a given role inherits, transitively.
+   *
+   * Memoized: this used to recompute the closure on every `hasRole` call, i.e.
+   * per request per guard.
+   *
+   * @param roleName - The role to expand
+   * @returns The transitive inherited-role set
    */
-  private getInheritedRoles(roleName: string, visited: Set<string> = new Set()): Set<string> {
-    if (visited.has(roleName)) {
-      return new Set();
+  private getInheritedRoles(roleName: string): Set<string> {
+    const cached = this.resolvedInheritance.get(roleName);
+    if (cached !== undefined) {
+      return cached;
     }
-
-    visited.add(roleName);
-
-    const roleDef = this.roleDefinitions[roleName];
-    if (!roleDef || !roleDef.inherits) {
-      return new Set();
-    }
-
-    const allInherited = new Set<string>();
-    for (const inheritedRole of roleDef.inherits) {
-      allInherited.add(inheritedRole);
-      const nestedInherited = this.getInheritedRoles(inheritedRole, visited);
-      for (const role of nestedInherited) {
-        allInherited.add(role);
-      }
-    }
-
-    return allInherited;
+    const { inherited } = this.computeClosure(roleName);
+    this.resolvedInheritance.set(roleName, inherited);
+    return inherited;
   }
 
   /**
