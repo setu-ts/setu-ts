@@ -17,22 +17,25 @@ import {
   tenantMiddleware,
   TenantNotResolvedError,
 } from '../../src/index.ts';
-import { assertEquals } from 'jsr:@std/assert@^1.0.19';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 
-Deno.test('barrel — all §4 exports are present', () => {
-  assertEquals(typeof MultiTenancyPlugin, 'function');
-  assertEquals(typeof tenantMiddleware, 'function');
-  assertEquals(typeof getTenantCachePrefix, 'function');
-  assertEquals(typeof TENANT_CACHE_PREFIX_STATE_KEY, 'string');
-  assertEquals(typeof SubdomainResolver.prototype.resolve, 'function');
-  assertEquals(typeof HeaderResolver.prototype.resolve, 'function');
-  assertEquals(typeof PathResolver.prototype.resolve, 'function');
-  assertEquals(typeof JwtResolver.prototype.resolve, 'function');
-  assertEquals(typeof ColumnPerTenant.prototype.getTenantColumn, 'function');
-  assertEquals(typeof SchemaPerTenant.prototype.resolveSchema, 'function');
-  assertEquals(typeof DatabasePerTenant.prototype.resolveDatabase, 'function');
-  assertEquals(typeof MemoryTenantDataStore.prototype.create, 'function');
-  assertEquals(TenantNotResolvedError.prototype instanceof Error, true);
-  assertEquals(typeof CAPABILITIES.MULTI_TENANCY, 'string');
-  assertEquals(CAPABILITIES.MULTI_TENANCY, 'multi-tenancy');
+describe('barrel exports', () => {
+  it('barrel — all §4 exports are present', () => {
+    expect(typeof MultiTenancyPlugin).toEqual('function');
+    expect(typeof tenantMiddleware).toEqual('function');
+    expect(typeof getTenantCachePrefix).toEqual('function');
+    expect(typeof TENANT_CACHE_PREFIX_STATE_KEY).toEqual('string');
+    expect(typeof SubdomainResolver.prototype.resolve).toEqual('function');
+    expect(typeof HeaderResolver.prototype.resolve).toEqual('function');
+    expect(typeof PathResolver.prototype.resolve).toEqual('function');
+    expect(typeof JwtResolver.prototype.resolve).toEqual('function');
+    expect(typeof ColumnPerTenant.prototype.getTenantColumn).toEqual('function');
+    expect(typeof SchemaPerTenant.prototype.resolveSchema).toEqual('function');
+    expect(typeof DatabasePerTenant.prototype.resolveDatabase).toEqual('function');
+    expect(typeof MemoryTenantDataStore.prototype.create).toEqual('function');
+    expect(TenantNotResolvedError.prototype instanceof Error).toEqual(true);
+    expect(typeof CAPABILITIES.MULTI_TENANCY).toEqual('string');
+    expect(CAPABILITIES.MULTI_TENANCY).toEqual('multi-tenancy');
+  });
 });

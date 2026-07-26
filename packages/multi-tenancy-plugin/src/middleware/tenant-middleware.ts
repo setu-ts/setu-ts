@@ -7,6 +7,7 @@ import type {
   ILogger,
   IMultiTenancyService,
   IRequestContext,
+  ITenant,
   ITenantResolver,
   MiddlewareFunction,
   NextFunction,
@@ -72,7 +73,7 @@ export function tenantMiddleware({
 
   return async (ctx: IRequestContext, next: NextFunction) => {
     // Resolve tenant by chaining resolvers; first `Some` wins.
-    let resolved: import('@hono-enterprise/common').ITenant | undefined;
+    let resolved: ITenant | undefined;
 
     for (let i = 0; i < resolvers.length; i++) {
       const resolver = resolvers[i];

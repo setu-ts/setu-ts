@@ -172,15 +172,14 @@ export interface ITenantDataStore {
 // Isolation strategies (public — apps implement this)
 // ---------------------------------------------------------------------------
 
-/** Discriminated union of database-isolation kinds. */
-export type TenantIsolationKind = 'column' | 'schema' | 'database';
-
 /**
  * Pluggable database-isolation strategy.
  *
  * The plugin hands the resolved strategy to the data store via
  * {@linkcode ITenantDataStore.useIsolation} so the store can derive its
- * partition scope.
+ * partition scope. Narrow on `kind` to reach an arm's method; a standalone
+ * kind alias is deliberately not exported, since `ITenantIsolationStrategy['kind']`
+ * already names it without a second symbol to keep in sync.
  */
 export type ITenantIsolationStrategy =
   | { readonly kind: 'column'; getTenantColumn(): string }

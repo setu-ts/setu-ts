@@ -1,20 +1,23 @@
 /**
  * DatabasePerTenant strategy tests.
  */
-import { assertEquals } from 'jsr:@std/assert@^1.0.19';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { DatabasePerTenant } from '../../src/strategies/database-strategy.ts';
 
-Deno.test('DatabasePerTenant — kind is database', () => {
-  const s = new DatabasePerTenant();
-  assertEquals(s.kind, 'database');
-});
+describe('database strategy', () => {
+  it('DatabasePerTenant — kind is database', () => {
+    const s = new DatabasePerTenant();
+    expect(s.kind).toEqual('database');
+  });
 
-Deno.test('DatabasePerTenant — default prefix', () => {
-  const s = new DatabasePerTenant();
-  assertEquals(s.resolveDatabase('acme'), 'tenant_acme');
-});
+  it('DatabasePerTenant — default prefix', () => {
+    const s = new DatabasePerTenant();
+    expect(s.resolveDatabase('acme')).toEqual('tenant_acme');
+  });
 
-Deno.test('DatabasePerTenant — custom prefix', () => {
-  const s = new DatabasePerTenant('db_');
-  assertEquals(s.resolveDatabase('acme'), 'db_acme');
+  it('DatabasePerTenant — custom prefix', () => {
+    const s = new DatabasePerTenant('db_');
+    expect(s.resolveDatabase('acme')).toEqual('db_acme');
+  });
 });

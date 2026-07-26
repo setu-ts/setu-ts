@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ITenant, ITenantResolver } from '@hono-enterprise/common';
+import type { IRequest, ITenant, ITenantResolver } from '@hono-enterprise/common';
 import { none, type Option, some } from '@hono-enterprise/common';
 import type { HeaderResolverOptions } from '../interfaces/index.ts';
 
@@ -42,11 +42,10 @@ export class HeaderResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from the configured request header.
    */
-  // deno-lint-ignore require-await
-  async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
+  resolve(request: IRequest): Promise<Option<ITenant>> {
     const raw = request.headers.get(this.headerName);
-    if (!raw) return none();
+    if (!raw) return Promise.resolve(none());
     const result = normalizeHeaderTenant(raw);
-    return result !== null ? some({ id: result }) : none();
+    return Promise.resolve(result !== null ? some({ id: result }) : none());
   }
 }

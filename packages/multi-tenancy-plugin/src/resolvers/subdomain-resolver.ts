@@ -3,9 +3,51 @@
  *
  * @module
  */
-import type { ITenant, ITenantResolver } from '@hono-enterprise/common';
+import type { IRequest, ITenant, ITenantResolver } from '@hono-enterprise/common';
 import { none, type Option, some } from '@hono-enterprise/common';
 import type { SubdomainResolverOptions } from '../interfaces/index.ts';
+
+/**
+ * Extracts the tenant label from a host, honouring an optional base domain.
+ *
+ * This is the decidable core of {@linkcode SubdomainResolver.resolve}, split
+ * out so every branch is unit-testable without constructing a request.
+ *
+ * When `baseDomain` is configured it **constrains** resolution: only hosts that
+ * are a strict subdomain of it yield a tenant. A host outside the base domain
+ * (`evil.com`), or the apex itself (`example.com`), yields `null` — otherwise a
+ * request to an unrelated domain would silently resolve a tenant.
+ *
+ * When `baseDomain` is absent, the first label of a multi-label host is the
+ * tenant; a single-label host (`localhost`) yields `null`.
+ *
+ * @internal
+ */
+export function extractSubdomainTenant(
+  host: string,
+  baseDomain?: string,
+): string | null {
+  if (!host) return null;
+  // Hosts may carry a port (`acme.example.com:8080`) — it is never part of the
+  // domain comparison.
+  const hostname = host.split(':')[0] ?? '';
+  if (!hostname) return null;
+
+  if (baseDomain !== undefined && baseDomain !== '') {
+    const suffix = `.${baseDomain}`;
+    // The apex domain itself carries no tenant, and neither does any host that
+    // is not under the configured base domain.
+    if (!hostname.endsWith(suffix)) return null;
+    const label = hostname.slice(0, -suffix.length);
+    if (!label) return null;
+    // `a.b.example.com` → take the left-most label as the tenant.
+    return label.split('.')[0] || null;
+  }
+
+  const parts = hostname.split('.');
+  if (parts.length < 2) return null; // e.g. 'localhost'
+  return parts[0] || null;
+}
 
 /**
  * Resolves the tenant id from the first subdomain label of `request.url`.
@@ -13,7 +55,7 @@ import type { SubdomainResolverOptions } from '../interfaces/index.ts';
  * @example
  * ```typescript
  * const resolver = new SubdomainResolver({ baseDomain: 'example.com' });
- * const result = await resolver.resolve({ url: 'https://acme.example.com' });
+ * const result = await resolver.resolve(request); // url: https://acme.example.com
  * // => some({ id: 'acme' })
  * ```
  */
@@ -26,37 +68,19 @@ export class SubdomainResolver implements ITenantResolver {
 
   /**
    * Resolve the tenant id from the request's subdomain.
+   *
+   * @param request - The incoming request
+   * @returns `Some` with the tenant, or `None` when the host carries no tenant
    */
-  // deno-lint-ignore require-await
-  async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
+  resolve(request: IRequest): Promise<Option<ITenant>> {
     let host: string;
     try {
       host = new URL(request.url).host;
     } catch {
-      return none();
+      return Promise.resolve(none());
     }
 
-    // Strip base domain if configured.
-    if (this.baseDomain && host.endsWith(`.${this.baseDomain}`)) {
-      host = host.slice(0, -(this.baseDomain.length + 1));
-    }
-
-    // Split the remaining host and check if there's a subdomain label.
-    const parts = host.split('.');
-    // When we had a baseDomain strip, `host` is now just the subdomain (one part).
-    // When no baseDomain was set, `host` has 2+ parts like 'acme.example.com'.
-    if (parts.length === 0) return none();
-
-    // With baseDomain stripped: single part IS the subdomain.
-    // Without baseDomain: first part of multi-part host is the subdomain.
-    // No subdomain when the first label equals the full host (single-label host).
-    if (parts.length === 1 && !this.baseDomain) {
-      return none(); // e.g. 'localhost'
-    }
-
-    const label = parts[0];
-    if (!label) return none();
-
-    return some({ id: label });
+    const label = extractSubdomainTenant(host, this.baseDomain);
+    return Promise.resolve(label === null ? none() : some({ id: label }));
   }
 }

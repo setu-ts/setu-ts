@@ -1104,8 +1104,9 @@ app.router.get('/health', {
 
 ### Accessing the Current User
 
-`authMiddleware` writes the authenticated principal to `ctx.request.user` (`user` is the one
-writable field on `IRequest`, so the shipped `@CurrentUser` decorator resolves it).
+`authMiddleware` writes the authenticated principal to `ctx.request.user` (one of the two
+middleware-written fields on `IRequest` — the other is `tenant`, written by the multi-tenancy plugin
+— so the shipped `@CurrentUser` decorator resolves it).
 
 ```typescript
 app.router.get('/me', {
@@ -3337,10 +3338,14 @@ app.router.get('/users', async (ctx) => {
 | `DatabasePerTenant`                                                                                                | class       | Database-per-tenant isolation strategy                                                     |
 | `MemoryTenantDataStore`                                                                                            | class       | Zero-dependency in-process default store with cross-tenant isolation                       |
 | `TenantNotResolvedError`                                                                                           | class       | Thrown by `getRepository` when tenant has not been resolved                                |
-| `MultiTenancyPluginOptions`                                                                                        | type        | Discriminated union of all plugin option shapes                                            |
+| `MultiTenancyPluginOptions`                                                                                        | interface   | The argument type of `MultiTenancyPlugin(...)`                                             |
+| `ResolverConfig`                                                                                                   | type        | The `resolver` option's type — discriminant string, custom resolver, or chain              |
+| `DatabaseStrategyKind`                                                                                             | type        | The `database` option's discriminant strings                                               |
+| `SubdomainResolverOptions`, `HeaderResolverOptions`, `PathResolverOptions`, `JwtResolverOptions`                   | interfaces  | Per-resolver option shapes, also the resolver constructors' argument types                 |
+| `TenantCacheOptions`                                                                                               | interface   | The `cache` option shape (`prefix`, `separator`)                                           |
+| `MemoryTenantDataStoreOptions`                                                                                     | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                 |
 | `ITenantDataStore`                                                                                                 | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                  |
-| `ITenantIsolationStrategy`                                                                                         | type        | Discriminated union: `'column' \| 'schema' \| 'database'` arms                             |
-| `TenantIsolationKind`                                                                                              | type        | `'column' \| 'schema' \| 'database'`                                                       |
+| `ITenantIsolationStrategy`                                                                                         | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`       |
 | Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@hono-enterprise/common`           |
 
 ### Notes
@@ -3351,6 +3356,16 @@ app.router.get('/users', async (ctx) => {
   is acceptable only alongside auth middleware which separately verifies the token.
 - **`PathResolver` reads path segments by index, not router `:param` values.** The resolver receives
   `IRequest` (not `IRequestContext`), so it cannot access `ctx.params`.
+- **`SubdomainResolver`'s `baseDomain` constrains resolution, it does not merely strip.** With
+  `baseDomain: 'example.com'`, only a strict subdomain resolves (`acme.example.com` → `acme`,
+  left-most label for deeper hosts, port ignored). The apex (`example.com`), an unrelated host
+  (`evil.com`), and a bare suffix match (`notexample.com`) all resolve to no tenant. Without
+  `baseDomain`, the first label of any multi-label host is the tenant and a single-label host
+  (`localhost`) resolves to none.
+- **`MemoryTenantDataStore` hands out detached snapshots.** Every entity returned by
+  `create`/`findAll`/`find`/`findById`/`update` is a shallow copy, so mutating a returned object
+  never rewrites the stored record. Read paths (`findAll`/`find`/`findById`/`delete`/a missing
+  `update`) allocate no partition, so requests carrying unknown tenant ids cannot grow the store.
 - **Strategy-derived partitioning.** The strategy passed to `register()` is handed to the data store
   via `useIsolation()`. `MemoryTenantDataStore` derives its partition scope from it
   (column-stamping, schema/database scoping). A store that never receives `useIsolation` partitions
@@ -4778,7 +4793,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                          |
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                    |
-| Multi-tenancy       | `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                      |
+| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                         |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                     |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                       |
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |

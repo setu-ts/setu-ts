@@ -8,21 +8,20 @@
  * Isolates tenants by assigning each a separate database schema.
  *
  * The default schema prefix is `'tenant_'`, configurable at construction.
- */
-/**
- * Implements the `'schema'` arm of {@linkcode ITenantIsolationStrategy}.
+ *
+ * Implements the `'schema'` arm of `ITenantIsolationStrategy`.
  */
 export class SchemaPerTenant {
-  public readonly kind: 'schema' = 'schema' as const;
+  public readonly kind = 'schema' as const;
 
-  private readonly _prefix: string;
+  private readonly prefix: string;
 
   constructor(prefix?: string) {
-    this._prefix = prefix ?? 'tenant_';
+    this.prefix = prefix ?? 'tenant_';
   }
 
   /** Derive the schema name for a tenant id. */
   resolveSchema(tenantId: string): string {
-    return `${this._prefix}${tenantId}`;
+    return `${this.prefix}${tenantId}`;
   }
 }

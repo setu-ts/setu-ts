@@ -8,21 +8,20 @@
  * Isolates tenants by assigning each a separate database.
  *
  * The default database prefix is `'tenant_'`, configurable at construction.
- */
-/**
- * Implements the `'database'` arm of {@linkcode ITenantIsolationStrategy}.
+ *
+ * Implements the `'database'` arm of `ITenantIsolationStrategy`.
  */
 export class DatabasePerTenant {
-  public readonly kind: 'database' = 'database' as const;
+  public readonly kind = 'database' as const;
 
-  private readonly _prefix: string;
+  private readonly prefix: string;
 
   constructor(prefix?: string) {
-    this._prefix = prefix ?? 'tenant_';
+    this.prefix = prefix ?? 'tenant_';
   }
 
   /** Derive the database name for a tenant id. */
   resolveDatabase(tenantId: string): string {
-    return `${this._prefix}${tenantId}`;
+    return `${this.prefix}${tenantId}`;
   }
 }

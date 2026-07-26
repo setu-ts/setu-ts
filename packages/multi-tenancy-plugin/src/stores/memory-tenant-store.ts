@@ -57,6 +57,20 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     }
   }
 
+  /**
+   * Look up an entity map WITHOUT creating it. Read paths use this so that a
+   * request carrying an unknown (or attacker-supplied) tenant id never
+   * allocates a partition — otherwise arbitrary `x-tenant-id` headers would
+   * grow the map unboundedly with zero writes.
+   */
+  private peekEntityMap(
+    scope: ScopeKey,
+    entity: string,
+  ): Map<string, Row> | undefined {
+    return this.store.get(scope)?.get(entity);
+  }
+
+  /** Look up an entity map, creating it on demand. Write paths only. */
   private getEntityMap(
     scope: ScopeKey,
     entity: string,
@@ -74,16 +88,28 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     return entityMap;
   }
 
+  /**
+   * Copy a stored row on the way out. Rows are handed to callers as detached
+   * snapshots: without this, mutating a returned entity would silently rewrite
+   * the stored record (and `create` would hand back the live object).
+   */
+  private static snapshot(row: Row): Row {
+    return { ...row };
+  }
+
   findAll<E>(tenantId: string, entity: string): Promise<readonly E[]> {
     const scope = this.deriveScope(tenantId);
-    const entityMap = this.getEntityMap(scope, entity);
-    return Promise.resolve(Array.from(entityMap.values()) as readonly E[]);
+    const entityMap = this.peekEntityMap(scope, entity);
+    if (!entityMap) return Promise.resolve([] as readonly E[]);
+    return Promise.resolve(
+      Array.from(entityMap.values(), MemoryTenantDataStore.snapshot) as readonly E[],
+    );
   }
 
   findById<E, Id>(tenantId: string, entity: string, id: Id): Promise<E | null> {
     const scope = this.deriveScope(tenantId);
-    const entityMap = this.getEntityMap(scope, entity);
-    return Promise.resolve((entityMap.get(String(id)) ?? null) as E | null);
+    const row = this.peekEntityMap(scope, entity)?.get(String(id));
+    return Promise.resolve((row ? MemoryTenantDataStore.snapshot(row) : null) as E | null);
   }
 
   find<E>(
@@ -92,13 +118,13 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     filter: Readonly<Record<string, unknown>>,
   ): Promise<readonly E[]> {
     const scope = this.deriveScope(tenantId);
-    const entityMap = this.getEntityMap(scope, entity);
+    const entityMap = this.peekEntityMap(scope, entity);
+    if (!entityMap) return Promise.resolve([] as readonly E[]);
 
-    // If filtering on the tenant column (column strategy), we need to check scope too.
     const results: Row[] = [];
     for (const row of entityMap.values()) {
       if (this.matchesFilter(row, filter)) {
-        results.push(row);
+        results.push(MemoryTenantDataStore.snapshot(row));
       }
     }
     return Promise.resolve(results as readonly E[]);
@@ -128,7 +154,7 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     }
 
     entityMap.set(idKey, rowData);
-    return Promise.resolve(rowData as E);
+    return Promise.resolve(MemoryTenantDataStore.snapshot(rowData) as E);
   }
 
   update<E, Id>(
@@ -138,25 +164,25 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     data: Readonly<Record<string, unknown>>,
   ): Promise<E | null> {
     const scope = this.deriveScope(tenantId);
-    const entityMap = this.getEntityMap(scope, entity);
-    const existing = entityMap.get(String(id));
+    const existing = this.peekEntityMap(scope, entity)?.get(String(id));
     if (!existing) return Promise.resolve(null);
 
     // Ignore an `id` field in the update payload — the key is authoritative;
     // mutating it would create a key/field split that breaks findById.
-    const { id: _ignored, ...safeData } = data;
+    const safeData = { ...data };
+    delete safeData.id;
     const updated = { ...existing, ...safeData };
     if (typeof updated.id !== 'string' && typeof updated.id !== 'number') {
       updated.id = id;
     }
-    entityMap.set(String(id), updated);
-    return Promise.resolve(updated as E);
+    // `existing` came from an allocated map, so this lookup cannot allocate.
+    this.getEntityMap(scope, entity).set(String(id), updated);
+    return Promise.resolve(MemoryTenantDataStore.snapshot(updated) as E);
   }
 
   delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
     const scope = this.deriveScope(tenantId);
-    const entityMap = this.getEntityMap(scope, entity);
-    return Promise.resolve(entityMap.delete(String(id)));
+    return Promise.resolve(this.peekEntityMap(scope, entity)?.delete(String(id)) ?? false);
   }
 
   close(): Promise<void> {

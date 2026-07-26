@@ -1,20 +1,23 @@
 /**
  * ColumnPerTenant strategy tests.
  */
-import { assertEquals } from 'jsr:@std/assert@^1.0.19';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { ColumnPerTenant } from '../../src/strategies/column-strategy.ts';
 
-Deno.test('ColumnPerTenant — kind is column', () => {
-  const s = new ColumnPerTenant();
-  assertEquals(s.kind, 'column');
-});
+describe('column strategy', () => {
+  it('ColumnPerTenant — kind is column', () => {
+    const s = new ColumnPerTenant();
+    expect(s.kind).toEqual('column');
+  });
 
-Deno.test('ColumnPerTenant — default column name', () => {
-  const s = new ColumnPerTenant();
-  assertEquals(s.getTenantColumn(), 'tenant_id');
-});
+  it('ColumnPerTenant — default column name', () => {
+    const s = new ColumnPerTenant();
+    expect(s.getTenantColumn()).toEqual('tenant_id');
+  });
 
-Deno.test('ColumnPerTenant — custom column name', () => {
-  const s = new ColumnPerTenant('org_id');
-  assertEquals(s.getTenantColumn(), 'org_id');
+  it('ColumnPerTenant — custom column name', () => {
+    const s = new ColumnPerTenant('org_id');
+    expect(s.getTenantColumn()).toEqual('org_id');
+  });
 });

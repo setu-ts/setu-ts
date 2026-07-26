@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ITenant, ITenantResolver } from '@hono-enterprise/common';
+import type { IRequest, ITenant, ITenantResolver } from '@hono-enterprise/common';
 import { none, type Option, some } from '@hono-enterprise/common';
 import type { PathResolverOptions } from '../interfaces/index.ts';
 
@@ -35,11 +35,9 @@ export class PathResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from a segment of `request.path`.
    */
-  // deno-lint-ignore require-await
-  async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
+  resolve(request: IRequest): Promise<Option<ITenant>> {
     const parts = request.path.split('/').filter(Boolean);
     const tenantId = extractPathTenant(parts, this.segmentIndex);
-    if (tenantId === null) return none();
-    return some({ id: tenantId });
+    return Promise.resolve(tenantId === null ? none() : some({ id: tenantId }));
   }
 }

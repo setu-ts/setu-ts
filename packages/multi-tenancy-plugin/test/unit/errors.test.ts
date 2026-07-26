@@ -1,23 +1,26 @@
 /**
  * TenantNotResolvedError — basic verification.
  */
-import { assert, assertEquals } from 'jsr:@std/assert@^1.0.19';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { TenantNotResolvedError } from '../../src/errors.ts';
 
-Deno.test('TenantNotResolvedError is an Error', () => {
-  const err = new TenantNotResolvedError();
-  assert(err instanceof Error);
-  assert(err instanceof TenantNotResolvedError);
-  assertEquals(err.name, 'TenantNotResolvedError');
-});
+describe('errors', () => {
+  it('TenantNotResolvedError is an Error', () => {
+    const err = new TenantNotResolvedError();
+    expect(err instanceof Error).toBeTruthy();
+    expect(err instanceof TenantNotResolvedError).toBeTruthy();
+    expect(err.name).toEqual('TenantNotResolvedError');
+  });
 
-Deno.test('TenantNotResolvedError carries a message', () => {
-  const msg = 'Custom message';
-  const err = new TenantNotResolvedError(msg);
-  assertEquals(err.message, msg);
-});
+  it('TenantNotResolvedError carries a message', () => {
+    const msg = 'Custom message';
+    const err = new TenantNotResolvedError(msg);
+    expect(err.message).toEqual(msg);
+  });
 
-Deno.test('default message when none provided', () => {
-  const err = new TenantNotResolvedError();
-  assertEquals(err.message, 'Tenant not resolved');
+  it('default message when none provided', () => {
+    const err = new TenantNotResolvedError();
+    expect(err.message).toEqual('Tenant not resolved');
+  });
 });

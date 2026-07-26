@@ -11,7 +11,11 @@ import {
   type ITenantResolver,
   PLUGIN_PRIORITY,
 } from '@hono-enterprise/common';
-import type { JwtResolverOptions, MultiTenancyPluginOptions } from '../interfaces/index.ts';
+import type {
+  ITenantIsolationStrategy,
+  JwtResolverOptions,
+  MultiTenancyPluginOptions,
+} from '../interfaces/index.ts';
 import { SubdomainResolver } from '../resolvers/subdomain-resolver.ts';
 import { HeaderResolver } from '../resolvers/header-resolver.ts';
 import { PathResolver } from '../resolvers/path-resolver.ts';
@@ -73,7 +77,7 @@ function buildResolverChain(
 /** Build the isolation strategy from the `database` option. */
 function buildStrategy(
   database: MultiTenancyPluginOptions['database'],
-): import('../interfaces/index.ts').ITenantIsolationStrategy {
+): ITenantIsolationStrategy {
   if (database && typeof database === 'object' && 'kind' in database) {
     return database;
   }
@@ -186,7 +190,6 @@ export function MultiTenancyPlugin(
       ctx.services.register(CAPABILITIES.MULTI_TENANCY, service);
 
       // Auto-add middleware.
-      const mwPriority = options.middlewarePriority ?? middlewarePriority;
       const logger = ctx.logger;
       ctx.middleware.add(
         tenantMiddleware({
@@ -195,7 +198,7 @@ export function MultiTenancyPlugin(
           options,
           ...(logger != null && { logger }),
         }),
-        { priority: mwPriority, name: 'tenant' },
+        { priority: middlewarePriority, name: 'tenant' },
       );
 
       // Determine store type for health indicator.
@@ -219,5 +222,3 @@ export function MultiTenancyPlugin(
     },
   };
 }
-
-export { TenantNotResolvedError } from '../errors.ts';

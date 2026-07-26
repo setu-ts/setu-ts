@@ -53,5 +53,4 @@ export type {
   ResolverConfig,
   SubdomainResolverOptions,
   TenantCacheOptions,
-  TenantIsolationKind,
 } from './interfaces/index.ts';

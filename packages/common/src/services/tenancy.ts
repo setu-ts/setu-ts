@@ -21,8 +21,9 @@ export interface ITenant {
 }
 
 /**
- * Tenant-scoped repository — delegates CRUD to an injected
- * {@linkcode ITenantDataStore} while threading the resolved tenant id.
+ * Tenant-scoped repository — delegates CRUD to the data store the
+ * multi-tenancy plugin was configured with (`ITenantDataStore`, declared in
+ * that plugin), while threading the resolved tenant id.
  *
  * @since 0.1.0
  */
@@ -63,14 +64,17 @@ export interface IMultiTenancyService {
     entity: string,
   ): ITenantRepository<Entity, Id>;
   /**
-   * Build a cache key that includes the tenant id and separator.
+   * Build a cache key that includes the tenant id, joined by the separator
+   * the plugin was configured with (`cache.separator`, default `':'`). The
+   * separator is deliberately NOT a per-call argument: this method is the
+   * single home for separator resolution, so the middleware's `ctx.state`
+   * prefix and a caller's key can never disagree.
    *
    * @param tenantId - The resolved tenant id
    * @param key - The base cache key
-   * @param separator - Separator between tenant id and key (defaults to `:`)
    * @returns The prefixed cache key
    */
-  prefixCacheKey(tenantId: string, key: string, separator?: string): string;
+  prefixCacheKey(tenantId: string, key: string): string;
 }
 
 /**

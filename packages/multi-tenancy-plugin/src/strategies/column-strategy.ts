@@ -5,24 +5,23 @@
  */
 
 /**
- * Isolates tenants by adding a tenant-specific column to rows.
+ * Isolates tenants by stamping a tenant column on every row.
  *
  * The default column name is `'tenant_id'`, configurable at construction.
- */
-/**
- * Implements the `'column'` arm of {@linkcode ITenantIsolationStrategy}.
+ *
+ * Implements the `'column'` arm of `ITenantIsolationStrategy`.
  */
 export class ColumnPerTenant {
-  public readonly kind: 'column' = 'column' as const;
+  public readonly kind = 'column' as const;
 
-  private readonly _columnName: string;
+  private readonly columnName: string;
 
   constructor(columnName?: string) {
-    this._columnName = columnName ?? 'tenant_id';
+    this.columnName = columnName ?? 'tenant_id';
   }
 
   /** Return the column name used to stamp tenant ids on rows. */
   getTenantColumn(): string {
-    return this._columnName;
+    return this.columnName;
   }
 }

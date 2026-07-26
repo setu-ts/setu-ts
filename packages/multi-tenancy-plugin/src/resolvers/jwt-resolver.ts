@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ITenant, ITenantResolver } from '@hono-enterprise/common';
+import type { IRequest, ITenant, ITenantResolver } from '@hono-enterprise/common';
 import { none, type Option, some } from '@hono-enterprise/common';
 import type { JwtResolverOptions } from '../interfaces/index.ts';
 
@@ -37,10 +37,9 @@ export class JwtResolver implements ITenantResolver {
   /**
    * Resolve the tenant id from the configured JWT claim.
    */
-  // deno-lint-ignore require-await
-  async resolve(request: import('@hono-enterprise/common').IRequest): Promise<Option<ITenant>> {
+  resolve(request: IRequest): Promise<Option<ITenant>> {
     const rawHeader = request.headers.get(this.headerName);
-    if (!rawHeader) return none();
+    if (!rawHeader) return Promise.resolve(none());
 
     // Extract the token from "Bearer <token>" or use the raw header value.
     let token: string;
@@ -50,14 +49,14 @@ export class JwtResolver implements ITenantResolver {
       token = rawHeader;
     }
 
-    if (!token) return none();
+    if (!token) return Promise.resolve(none());
 
     const payload = this.decode(token);
-    if (!payload) return none();
+    if (!payload) return Promise.resolve(none());
 
     const tenantId = payload[this.claimName];
-    if (typeof tenantId !== 'string' || !tenantId) return none();
+    if (typeof tenantId !== 'string' || !tenantId) return Promise.resolve(none());
 
-    return some({ id: tenantId });
+    return Promise.resolve(some({ id: tenantId }));
   }
 }

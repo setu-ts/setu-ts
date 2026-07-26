@@ -1,20 +1,23 @@
 /**
  * SchemaPerTenant strategy tests.
  */
-import { assertEquals } from 'jsr:@std/assert@^1.0.19';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { SchemaPerTenant } from '../../src/strategies/schema-strategy.ts';
 
-Deno.test('SchemaPerTenant — kind is schema', () => {
-  const s = new SchemaPerTenant();
-  assertEquals(s.kind, 'schema');
-});
+describe('schema strategy', () => {
+  it('SchemaPerTenant — kind is schema', () => {
+    const s = new SchemaPerTenant();
+    expect(s.kind).toEqual('schema');
+  });
 
-Deno.test('SchemaPerTenant — default prefix', () => {
-  const s = new SchemaPerTenant();
-  assertEquals(s.resolveSchema('acme'), 'tenant_acme');
-});
+  it('SchemaPerTenant — default prefix', () => {
+    const s = new SchemaPerTenant();
+    expect(s.resolveSchema('acme')).toEqual('tenant_acme');
+  });
 
-Deno.test('SchemaPerTenant — custom prefix', () => {
-  const s = new SchemaPerTenant('db_');
-  assertEquals(s.resolveSchema('acme'), 'db_acme');
+  it('SchemaPerTenant — custom prefix', () => {
+    const s = new SchemaPerTenant('db_');
+    expect(s.resolveSchema('acme')).toEqual('db_acme');
+  });
 });

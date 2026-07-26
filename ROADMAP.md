@@ -3273,13 +3273,18 @@ const users = await userRepo.findAll(); // Scoped to current tenant
 
 - `src/plugin/multi-tenancy-plugin.ts`
 - `src/services/multi-tenancy-service.ts`
+- `src/repositories/tenant-repository.ts`
+- `src/stores/memory-tenant-store.ts`
 - `src/resolvers/subdomain-resolver.ts`
 - `src/resolvers/header-resolver.ts`
 - `src/resolvers/path-resolver.ts`
+- `src/resolvers/jwt-resolver.ts`
 - `src/strategies/schema-strategy.ts`
 - `src/strategies/database-strategy.ts`
 - `src/strategies/column-strategy.ts`
 - `src/middleware/tenant-middleware.ts`
+- `src/interfaces/index.ts`
+- `src/errors.ts`
 - `src/index.ts`
 
 ### Tests
