@@ -140,3 +140,61 @@ failure so dependents never publish against a missing version.
 
 Nothing needs undoing. Already-published versions are skipped on a re-run, so fix the cause and run
 `deno task release:publish` again — it resumes from where it stopped.
+
+A publish that stops because a package does not exist is the quota case above, not a defect: the
+packages already published are complete and resolvable, provided nothing in the published set
+depends on something in the unpublished set. Only `common` and `kernel` are depended upon in-repo,
+and the publish order puts them first, so a partial run is always internally consistent.
+
+## Prerelease gotchas
+
+Both of these bite on any `-alpha`/`-beta`/`-rc` release and neither is a defect.
+
+### `latest` is not set, so bare installs fail
+
+JSR does not point a package's `latest` at a prerelease. `meta.json` shows `"latest": null` even
+though the version is live, and consumers get:
+
+```
+error: jsr:@hono-enterprise/kernel has only pre-release versions available.
+Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1
+```
+
+Every install instruction for a prerelease must carry an explicit version. Check the README and
+CHANGELOG before announcing a prerelease — unpinned examples are the easiest thing to get wrong.
+
+### Deno refuses versions younger than 24 hours
+
+Deno's minimum-dependency-age policy (default 24h) blocks freshly published versions:
+
+```
+A newer matching version was found, but it was not used because it was newer than the
+specified minimum dependency date ... pass the --minimum-dependency-age flag
+```
+
+To smoke-test a release immediately, pass `--min-dep-age 0`. This resolves itself after a day, so it
+affects only the maintainer verifying the release, not ordinary users — but it will surprise you
+every time if it is not written down.
+
+## Verifying a release actually works
+
+A green publish is not proof the artifact is usable. After publishing, install from JSR into a
+throwaway directory — never the workspace, whose import map resolves locally and would mask a broken
+published dependency — and serve one request:
+
+```fish
+mkdir /tmp/relcheck; and cd /tmp/relcheck; and echo '{}' > deno.json
+deno add --min-dep-age 0 jsr:@hono-enterprise/kernel@^0.1.0-alpha.1 jsr:@hono-enterprise/runtime@^0.1.0-alpha.1
+```
+
+```typescript
+import { createApplication } from '@hono-enterprise/kernel';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
+
+const app = createApplication({ plugins: [RuntimePlugin()] });
+app.router.get('/hello', (ctx) => ctx.response.json({ ok: true }));
+await app.start();
+const res = await app.inject({ method: 'GET', url: '/hello' });
+console.log(res.statusCode, res.body); // 200 {"ok":true}
+await app.stop();
+```

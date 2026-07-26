@@ -6,13 +6,46 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.1.0-alpha.1] — 2026-07-26
 
-**First public prerelease.** The framework's kernel, runtime layer, and 30 plugins are implemented,
-tested, and published to [JSR](https://jsr.io) under the `@hono-enterprise` scope.
+**First public prerelease.** The framework's kernel, runtime layer, and 30 plugins are implemented
+and tested; they publish to [JSR](https://jsr.io) under the `@hono-enterprise` scope.
 
 This is an **alpha**. The public API is not frozen, and breaking changes may land in any subsequent
 prerelease without a major-version bump. Do not use it in production.
 
-### Published packages
+### This release ships in two phases
+
+A JSR scope may create only **20 new packages per rolling 7-day window**, and this release needs 35.
+The first 20 — in dependency order, so the entire core is included — published on 2026-07-26. The
+remaining 15 publish at the same `0.1.0-alpha.1` version once the quota clears (a request for an
+increase is pending; otherwise the window rolls over around 2026-08-02).
+
+Nothing about the published 20 is provisional: each is complete, and every cross-package dependency
+they declare (`common`, `kernel`) is itself published, so they resolve and run today. Verified by
+installing `kernel` + `runtime` from JSR into a clean project and serving a request.
+
+**Live now (20):** `common`, `kernel`, `runtime`, `exceptions`, `testing`, `audit-plugin`,
+`auth-plugin`, `cache-plugin`, `config-plugin`, `cqrs-plugin`, `database-plugin`,
+`decorator-plugin`, `di-plugin`, `events-plugin`, `feature-flags-plugin`, `health-plugin`,
+`http-security-plugin`, `logger-plugin`, `mail-plugin`, `messaging-plugin`
+
+**Pending the quota (15):** `metrics-plugin`, `multi-tenancy-plugin`, `notification-plugin`,
+`openapi-plugin`, `queue-plugin`, `react-router-plugin`, `resilience-plugin`, `scheduler-plugin`,
+`secrets-plugin`, `sse-plugin`, `storage-plugin`, `telemetry-plugin`, `validation-plugin`,
+`websocket-plugin`, `worker-pool-plugin`
+
+### Installing a prerelease
+
+JSR does not tag a prerelease as `latest`, so **every specifier must be version-pinned**:
+
+```bash
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1
+```
+
+A bare `deno add jsr:@hono-enterprise/kernel` fails with _"has only pre-release versions
+available"_. Within 24 hours of a release, Deno's minimum-dependency-age policy additionally refuses
+the version unless you pass `--min-dep-age 0`.
+
+### All packages in this release
 
 35 packages, all at `0.1.0-alpha.1`:
 
@@ -35,12 +68,13 @@ prerelease without a major-version bump. Do not use it in production.
 
 **Optional ergonomics** — `di-plugin`, `decorator-plugin`, `openapi-plugin`
 
-### Not published
+### Deliberately excluded — not merely pending
 
-`@hono-enterprise/cli`, `@hono-enterprise/sdk`, and the three starter bundles (`rest-starter`,
-`microservice-starter`, `full-stack-starter`) are **not** part of this release. They are stubs that
-export nothing; publishing them would put empty pages on JSR. They ship when their milestones land
-(CLI is Milestone 34).
+Distinct from the 15 above, which are written and waiting on a quota: `@hono-enterprise/cli`,
+`@hono-enterprise/sdk`, and the three starter bundles (`rest-starter`, `microservice-starter`,
+`full-stack-starter`) are **not part of this release at all**. They are stubs that export nothing;
+publishing them would put empty pages on JSR. They ship when their milestones land (CLI is Milestone
+34).
 
 ### Runtime support
 
