@@ -70,9 +70,17 @@ export interface InjectResponse {
   readonly statusCode: number;
   /** Response headers. */
   readonly headers: Headers;
-  /** Raw response body. */
+  /**
+   * Raw response body as text. A byte body (from `response.send(bytes)`) is
+   * UTF-8 decoded; `null` only when the response genuinely has no body.
+   */
   readonly body: string | null;
-  /** Parse response body as JSON. */
+  /**
+   * Parses the response body as JSON.
+   *
+   * @throws {Error} If the response has no body
+   * @throws {SyntaxError} If the body is not valid JSON
+   */
   json<T>(): T;
 }
 
@@ -157,6 +165,11 @@ class Application implements IKernelApplication {
     // touches ctx.runtime. Arrow functions below capture `this` lexically.
     const registry = this.#registry;
     const envSpecs = this.#envSpecs;
+    // Name of the plugin whose `register()` is currently running — read by
+    // `environment.validate` to attribute each env-var declaration. `undefined`
+    // outside the registration loop (e.g. a `validate` call from a lifecycle
+    // hook), which the fallback message covers.
+    let registeringPlugin: string | undefined;
     const base: Omit<IPluginContext, 'config' | 'logger' | 'metadata' | 'container' | 'runtime'> = {
       services: registry,
       middleware: this.#pipeline,
@@ -209,7 +222,11 @@ class Application implements IKernelApplication {
       },
       environment: {
         validate(spec: Readonly<Record<string, EnvVarSpec>>): void {
-          envSpecs.push({ name: 'environment', spec });
+          // Attribute the declaration to the plugin currently registering, so a
+          // violation message names the plugin that asked for the variable. One
+          // context object is shared by every plugin, so the declaring plugin is
+          // read from the registration cursor rather than captured per context.
+          envSpecs.push({ name: registeringPlugin ?? 'the application', spec });
         },
       },
       options: {},
@@ -274,9 +291,11 @@ class Application implements IKernelApplication {
     //    registration" (after that plugin, before the next), distinct from
     //    the onInit hooks that run once all plugins have registered.
     for (const plugin of ordered) {
+      registeringPlugin = plugin.name;
       await plugin.register(ctx);
       await this.#lifecycle.runRegister();
     }
+    registeringPlugin = undefined;
 
     // 4. Validate collected env specs against runtime.env
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
@@ -360,14 +379,19 @@ class Application implements IKernelApplication {
   }
 
   /** Delegates a web-standard Request to the registered IHttpAdapter. */
-  fetch(request: Request): Promise<Response> {
+  // Declared `async` so the no-adapter case REJECTS rather than throwing
+  // synchronously: this method returns a promise, and a sync throw escapes a
+  // caller's `.catch(…)` — including the `export default { fetch: app.fetch }`
+  // Workers entry point, where it would surface as an unhandled exception
+  // instead of a failed request.
+  async fetch(request: Request): Promise<Response> {
     if (!this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
       throw new Error(
         'No HTTP adapter registered. Call register(RuntimePlugin) or provide a custom IHttpAdapter.',
       );
     }
     const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
-    return adapter.fetch(request);
+    return await adapter.fetch(request);
   }
 
   /** Synthesizes an inject request and runs it through the full pipeline. */
@@ -413,15 +437,35 @@ class Application implements IKernelApplication {
     const response = await this.#handleRequest(syntheticRequest);
     const snapshot = response.snapshot();
 
+    // A streaming response cannot be presented as a `string` body without
+    // draining the live stream, which would consume it. Say so explicitly
+    // rather than reporting `body: null`, which reads as "empty response".
+    if (snapshot.streaming) {
+      throw new Error(
+        'inject() cannot read a streaming response body. Call app.fetch() with a web Request ' +
+          'and read the returned Response body stream instead.',
+      );
+    }
+
+    // Decode a byte body (from `response.send(bytes)`) rather than dropping it:
+    // reporting `null` made a non-empty response look empty, and made `json()`
+    // throw "No JSON body available" for a perfectly valid JSON payload sent
+    // as bytes.
+    const body = snapshot.body === null
+      ? null
+      : typeof snapshot.body === 'string'
+      ? snapshot.body
+      : new TextDecoder().decode(snapshot.body);
+
     return {
       statusCode: snapshot.status,
       headers: snapshot.headers,
-      body: typeof snapshot.body === 'string' ? snapshot.body : null,
+      body,
       json<T>(): T {
-        if (snapshot.body === null || typeof snapshot.body !== 'string') {
+        if (body === null) {
           throw new Error('No JSON body available');
         }
-        return JSON.parse(snapshot.body);
+        return JSON.parse(body);
       },
     };
   }
@@ -653,14 +697,17 @@ class Application implements IKernelApplication {
 
   async #drainRequests(): Promise<void> {
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    const deadline = runtime.now() + 10_000;
+    // Monotonic clock: this is a duration budget, so it must not be measured
+    // with `now()` (wall clock), which an NTP step can move backwards — cutting
+    // the drain short or extending it past the intended 10s.
+    const deadline = runtime.hrtime() + 10_000;
     // Iteration cap: a manual test clock that never advances would otherwise
     // spin forever (the deadline never arrives). 200 polls × 50ms ≈ 10s of
     // real polling under a normal clock, and a hard ceiling regardless.
     let polls = 0;
     const MAX_POLLS = 200;
 
-    while (this.#inFlight > 0 && runtime.now() < deadline && polls < MAX_POLLS) {
+    while (this.#inFlight > 0 && runtime.hrtime() < deadline && polls < MAX_POLLS) {
       polls++;
       // Poll via runtime.setTimeout (max 10s)
       await new Promise<void>((resolve) => {

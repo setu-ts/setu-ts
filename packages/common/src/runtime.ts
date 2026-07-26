@@ -253,7 +253,15 @@ export interface IRuntimeServices {
    */
   clearInterval(handle: TimerHandle): void;
 
-  /** Environment variables. Always read env through this, never `process.env`. */
+  /**
+   * Environment variables. Always read env through this, never `process.env`.
+   *
+   * Treat it as a snapshot taken when the runtime services were created: the
+   * Deno adapter materializes `Deno.env.toObject()` and the Workers adapter
+   * receives a per-invocation bindings object, so neither reflects a variable
+   * set after startup. (The Node and Bun adapters pass `process.env` through,
+   * which does.) Nothing in the framework mutates the environment at runtime.
+   */
   readonly env: Readonly<Record<string, string | undefined>>;
   /**
    * Terminates the process.

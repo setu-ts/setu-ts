@@ -1728,4 +1728,90 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
     await app.start();
     await app.stop();
   });
+
+  // ---- Retro review (Part 2) ----
+
+  it('attributes an env-var violation to the plugin that declared it', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({}),
+        {
+          name: 'billing-plugin',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.environment.validate({ STRIPE_KEY: { required: true } });
+          },
+        },
+      ],
+    });
+    // Previously every message read "(declared by environment)" — the kernel
+    // hardcoded the name, so the field could not identify the real declarer.
+    await expect(app.start()).rejects.toThrow(/declared by billing-plugin/);
+  });
+
+  it('inject() decodes a byte body instead of reporting it as null', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({}),
+        {
+          name: 'bytes-route',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/bytes', (rctx) =>
+              rctx.response
+                .header('content-type', 'application/json')
+                .send(new TextEncoder().encode('{"ok":true}')));
+          },
+        },
+      ],
+    });
+    await app.start();
+    const res = await app.inject({ method: 'GET', url: '/bytes' });
+    expect(res.body).toBe('{"ok":true}');
+    expect(res.json()).toEqual({ ok: true });
+    await app.stop();
+  });
+
+  it('inject() reports a clear error for a streaming response instead of an empty body', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin({}),
+        {
+          name: 'stream-route',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/stream', (rctx) =>
+              rctx.response.stream(
+                new ReadableStream<Uint8Array>({
+                  start(controller) {
+                    controller.enqueue(new TextEncoder().encode('chunk'));
+                    controller.close();
+                  },
+                }),
+              ));
+          },
+        },
+      ],
+    });
+    await app.start();
+    await expect(app.inject({ method: 'GET', url: '/stream' })).rejects.toThrow(
+      /cannot read a streaming response body/,
+    );
+    await app.stop();
+  });
+
+  it('fetch() rejects rather than throwing synchronously with no adapter', async () => {
+    const app = createApplication({ plugins: [runtimePlugin({})] });
+    await app.start();
+    // A synchronous throw would escape this `.catch` and surface as an
+    // unhandled exception on the Workers `export default { fetch }` path.
+    let caught: unknown = null;
+    const result = app.fetch(new Request('http://localhost/'));
+    expect(result instanceof Promise).toBe(true);
+    await result.catch((error: unknown) => {
+      caught = error;
+    });
+    expect((caught as Error).message).toContain('No HTTP adapter registered');
+    await app.stop();
+  });
 });

@@ -166,6 +166,11 @@ export interface IEnvironmentApi {
   /**
    * Declares and validates environment variables.
    *
+   * Call this from {@linkcode IPlugin.register}. The kernel validates every
+   * declared spec once, after all plugins have registered and before the `init`
+   * hooks run, so a spec declared later (e.g. from an `onInit` hook) is never
+   * checked.
+   *
    * @param spec - Variable specifications keyed by variable name
    * @throws {Error} At startup when a required variable is missing or mistyped
    */

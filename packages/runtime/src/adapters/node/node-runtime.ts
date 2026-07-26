@@ -138,9 +138,6 @@ export function buildNodeHost(
   };
 }
 
-/** Default {@linkcode NodeHost} backed by static `node:` imports. */
-const defaultNodeHost: NodeHost = buildNodeHost();
-
 // ---------------------------------------------------------------------------
 // Public adapter factory
 // ---------------------------------------------------------------------------
@@ -153,7 +150,11 @@ const defaultNodeHost: NodeHost = buildNodeHost();
  * @returns Complete runtime services for Node.js
  */
 export function createNodeRuntimeServices(
-  host: NodeHost = defaultNodeHost,
+  // Built per call rather than once at module load: `buildNodeHost()` calls
+  // `os.hostname()` and reads `process.env`, and doing that at import time made
+  // merely importing this package require `--allow-sys=hostname` on Deno, on
+  // every platform, even when the Node adapter is never constructed.
+  host: NodeHost = buildNodeHost(),
   workers: IWorkerHost = createNodeWorkerHost(),
 ): IRuntimeServices {
   const fsImpl: IFileSystem = {

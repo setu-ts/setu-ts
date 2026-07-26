@@ -29,6 +29,10 @@ import type { ResponseBuilder } from '../context/response.ts';
  * @param chain - The ordered middleware functions to execute
  * @param ctx - The request context (its `response` is a {@linkcode ResponseBuilder})
  * @param terminal - Called when every middleware has called `next()`
+ * @param names - Optional diagnostic names, positionally matching `chain`, used
+ * to identify the offending stage in the double-`next()` error. The global
+ * pipeline supplies the names registered through `MiddlewareOptions.name`;
+ * route-level chains have none and fall back to the function's own name.
  * @throws {Error} If `next()` is called multiple times within a single middleware
  * @since 0.1.0
  */
@@ -36,6 +40,7 @@ export async function executeChain(
   chain: readonly MiddlewareFunction[],
   ctx: IRequestContext,
   terminal: () => Promise<void>,
+  names?: readonly string[],
 ): Promise<void> {
   let index = 0;
 
@@ -63,12 +68,18 @@ export async function executeChain(
       return;
     }
     const fn = chain[index];
+    const position = index;
     index++;
     let nextCalled = false;
     const next: () => Promise<void> = () => {
       if (nextCalled) {
+        // Prefer the name registered via `MiddlewareOptions.name`, then the
+        // function's own name. `fn.name` is ALWAYS a string — `''` for an
+        // anonymous function — so `??` never fell back and the message read
+        // "…in middleware " with a blank name. `||` is the correct operator.
+        const label = names?.[position] || fn.name || '<anonymous>';
         throw new Error(
-          `next() called multiple times in middleware ${fn.name ?? '<anonymous>'}`,
+          `next() called multiple times in middleware ${label}`,
         );
       }
       nextCalled = true;

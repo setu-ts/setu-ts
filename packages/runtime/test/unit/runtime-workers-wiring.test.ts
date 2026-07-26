@@ -44,7 +44,8 @@ const fakeDenoHost: DenoHost = {
   realPath: (path: string) => Promise.resolve(path),
   writeFile: () => Promise.resolve(),
   stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0, mtime: null }),
-  readdir: () => [],
+  // Async generator, mirroring the real `Deno.readDir` (an AsyncIterable).
+  readDir: async function* () {},
   mkdir: () => Promise.resolve(),
   remove: () => Promise.resolve(),
 };
