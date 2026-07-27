@@ -33,12 +33,58 @@ const dryRun = Deno.args.includes('--dry-run');
 // variable is left unset: the runner's OIDC identity authenticates instead.
 const token = Deno.env.get('JSR_TOKEN');
 
+/** `packages/foo-plugin` → `foo-plugin`. */
+function packageName(dir: string): string {
+  return dir.slice(dir.lastIndexOf('/') + 1);
+}
+
+/** The version this workspace member declares. */
+async function declaredVersion(dir: string): Promise<string> {
+  const config = JSON.parse(await Deno.readTextFile(`${dir}/deno.json`)) as { version?: string };
+  return config.version ?? '';
+}
+
+/**
+ * Whether `version` is already live on JSR.
+ *
+ * JSR versions are immutable, so re-publishing one is not merely wasteful — it
+ * is an error that aborts the run. A release that stopped partway (this one
+ * stopped at 20 of 35 on the weekly package-creation quota) therefore cannot be
+ * resumed by simply re-running: the first already-published package would kill
+ * it before reaching the ones that still need publishing. Checking the registry
+ * first makes a resume genuinely idempotent.
+ *
+ * A registry lookup that fails for any other reason returns `false` — publish
+ * and let `deno publish` be the authority, rather than silently skipping a
+ * package because of a transient network error.
+ */
+async function alreadyPublished(dir: string, version: string): Promise<boolean> {
+  try {
+    const response = await fetch(`https://jsr.io/@hono-enterprise/${packageName(dir)}/meta.json`);
+    if (!response.ok) return false;
+    const meta = (await response.json()) as { versions?: Record<string, unknown> };
+    return Object.hasOwn(meta.versions ?? {}, version);
+  } catch {
+    return false;
+  }
+}
+
 console.log(
   `${dryRun ? 'Simulating' : 'Publishing'} ${PUBLISHED_PACKAGES.length} packages to JSR…\n`,
 );
 
+let skipped = 0;
+
 for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
   const position = `[${index + 1}/${PUBLISHED_PACKAGES.length}]`;
+  const version = await declaredVersion(dir);
+
+  if (!dryRun && await alreadyPublished(dir, version)) {
+    console.log(`${position} ${dir} — already at ${version}, skipping`);
+    skipped++;
+    continue;
+  }
+
   console.log(`${position} ${dir}`);
 
   const args = ['publish', '--config', `${dir}/deno.json`];
@@ -59,4 +105,12 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
   }
 }
 
-console.log(`\nAll ${PUBLISHED_PACKAGES.length} packages ${dryRun ? 'simulated' : 'published'}.`);
+if (dryRun) {
+  console.log(`\nAll ${PUBLISHED_PACKAGES.length} packages simulated.`);
+} else {
+  const published = PUBLISHED_PACKAGES.length - skipped;
+  console.log(
+    `\nDone: ${published} published, ${skipped} already at this version. ` +
+      `${PUBLISHED_PACKAGES.length} total.`,
+  );
+}
