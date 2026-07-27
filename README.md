@@ -19,17 +19,16 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: `v0.1.0-alpha.1` — 20 of 35 packages are live on JSR.**
+> **Status: `v0.1.0-alpha.1` is published — all 35 packages are live on JSR.**
 >
 > The kernel, the runtime layer, and 30 plugins are implemented, tested, and documented (604 tests,
-> 97%+ coverage). The core — `common`, `kernel`, `runtime`, `exceptions`, `testing` — is published
-> and working. The remaining 15 plugins are waiting on JSR's 20-new-packages-per-week quota and
-> publish as soon as it clears; see [CHANGELOG.md](CHANGELOG.md) for the exact split.
+> 97%+ coverage).
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
 > `deno add jsr:@hono-enterprise/kernel` fails with _"has only pre-release versions available"_.
 >
-> This is an alpha: the public API is not frozen and may break in any prerelease.
+> This is an alpha: the public API is not frozen and may break in any prerelease. See
+> [CHANGELOG.md](CHANGELOG.md) for known limitations.
 
 ---
 
@@ -192,15 +191,8 @@ Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
 younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 
-### What is installable today
-
-The core (`common`, `kernel`, `runtime`, `exceptions`, `testing`) plus these plugins: `audit`,
-`auth`, `cache`, `config`, `cqrs`, `database`, `decorator`, `di`, `events`, `feature-flags`,
-`health`, `http-security`, `logger`, `mail`, `messaging`.
-
-Still pending the quota: `metrics`, `multi-tenancy`, `notification`, `openapi`, `queue`,
-`react-router`, `resilience`, `scheduler`, `secrets`, `sse`, `storage`, `telemetry`, `validation`,
-`websocket`, `worker-pool`.
+All 35 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`) and
+every plugin in the tables above.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
