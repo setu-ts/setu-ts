@@ -1,10 +1,22 @@
 /**
- * @module
- *
  * CLI tool with plugin-aware scaffolding and code generation.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * This package provides the `honoe` command-line interface for project scaffolding
+ * (`honoe new`) and code generation (`honoe generate`).
+ *
+ * @module
  */
-export {};
+
+// Re-export core symbols for programmatic use
+export { runCli } from './cli.ts';
+export { deriveNames } from './utils/names.ts';
+export type { DerivedNames } from './utils/names.ts';
+export { SCHEMATICS } from './constants.ts';
+export { PROGRAM_NAME } from './constants.ts';
+export type { CliDependencies } from './cli.ts';
+
+// Types from schematics registry
+export type { GeneratedFile, Schematic, SchematicOptions } from './schematics/registry.ts';
+
+// Detection utility
+export { detectPlugins } from './utils/plugin-detector.ts';
