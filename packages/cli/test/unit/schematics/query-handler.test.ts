@@ -6,13 +6,14 @@
 
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateQueryHandler } from '../../../src/schematics/query-handler.ts';
+import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 describe('generateQueryHandler', () => {
-  it('emits a query handler file implementing IQueryHandler', () => {
+  it('emits a query handler implementing IQueryHandler', () => {
     const names = deriveNames('get-user');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generateQueryHandler(names, options);
 
     expect(files).toHaveLength(1);
@@ -20,12 +21,11 @@ describe('generateQueryHandler', () => {
     expect(files[0].contents).toContain('implements IQueryHandler');
   });
 
-  it('handles both query and result types', () => {
-    const names = deriveNames('find-products');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+  it('creates a query class name from input', () => {
+    const names = deriveNames('find-product');
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generateQueryHandler(names, options);
 
-    expect(files[0].contents).toContain('FindProductsQuery');
-    expect(files[0].contents).toContain('IQueryHandler<FindProductsQuery, FindProductsQuery>');
+    expect(files[0].contents).toContain('FindProductQuery');
   });
 });

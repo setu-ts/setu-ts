@@ -16,7 +16,7 @@ describe('runCli', () => {
     console.log = (...args: unknown[]) => logMessages.push(args.join(' '));
 
     const deps: CliDependencies = {
-      readVersion: () => '0.1.0',
+      readVersion: () => Promise.resolve('0.1.0'),
       parseArgs: () => ({ positionals: [], flags: { help: true }, endOfOptions: false }),
     };
 
@@ -95,14 +95,14 @@ describe('runCli', () => {
     let capturedArgs: readonly string[] | null = null;
     let capturedOptions: unknown = null;
 
-    const mockRunGenerate = (args: readonly string[], opts: unknown) => {
+    const mockRunGenerate = async (args: readonly string[], opts: unknown) => {
       capturedArgs = args;
       capturedOptions = opts;
       return 0;
     };
 
     const deps: CliDependencies = {
-      readVersion: () => '0.1.0',
+      readVersion: () => Promise.resolve('0.1.0'),
       parseArgs: () => ({
         positionals: ['generate', 'controller', 'user'],
         flags: { 'dry-run': true, dir: './test' },

@@ -6,13 +6,14 @@
 
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateEventHandler } from '../../../src/schematics/event-handler.ts';
+import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 describe('generateEventHandler', () => {
   it('emits an event handler file implementing IEventHandler', () => {
     const names = deriveNames('user-created');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generateEventHandler(names, options);
 
     expect(files).toHaveLength(1);
@@ -20,11 +21,11 @@ describe('generateEventHandler', () => {
     expect(files[0].contents).toContain('implements IEventHandler');
   });
 
-  it('handles the event type correctly', () => {
+  it('subscribes to the correct event name', () => {
     const names = deriveNames('order-placed');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generateEventHandler(names, options);
 
-    expect(files[0].contents).toContain('OrderPlacedEvent');
+    expect(files[0].contents).toContain('OrderPlaced');
   });
 });

@@ -65,7 +65,7 @@ export async function runCli(
         opt.runtime = runtimeFlag as 'deno' | 'node' | 'bun' | 'cloudflare-workers';
       }
       const runNew = deps.runNewCommand ?? runNewCommand;
-      return await runNew(args.positionals.slice(1), opt);
+      return runNew(args.positionals.slice(1), opt);
     }
 
     case 'generate':

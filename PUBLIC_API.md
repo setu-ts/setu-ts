@@ -3940,39 +3940,35 @@ Provides scaffolding and code generation.
 
 ```bash
 # Create a new project
-hono-enterprise new my-app
-hono-enterprise new my-app --template rest
-hono-enterprise new my-app --template microservice
-
-# Generate code
-hono-enterprise generate plugin my-plugin
-hono-enterprise generate controller UserController
-hono-enterprise generate service UserService
-hono-enterprise generate route users
-hono-enterprise generate middleware rate-limit
-hono-enterprise generate guard admin-only
-hono-enterprise generate health-indicator external-api
-hono-enterprise generate command-handler CreateUser
-hono-enterprise generate query-handler GetUser
-hono-enterprise generate event-handler UserCreatedHandler
-hono-enterprise generate job send-welcome-email
-hono-enterprise generate migration add_users_table
+honoe new my-app
+honoe generate plugin my-plugin
+honoe generate controller UserController
+honoe generate service UserService
+honoe generate route users
+honoe generate middleware rate-limit
+honoe generate guard admin-only
+honoe generate health-indicator external-api
+honoe generate command-handler CreateUser
+honoe generate query-handler GetUser
+honoe generate event-handler UserCreatedHandler
+honoe generate job send-welcome-email
+honoe generate migration add_users_table
 
 # Aliases
-hono-enterprise g controller UserController
-hono-enterprise g service UserService
+honoe g controller UserController
+honoe g service UserService
 
 # Dry run
-hono-enterprise g controller UserController --dry-run
+honoe g controller UserController --dry-run
 
 # Custom schematics
-hono-enterprise g custom my-schematic
+honoe g custom my-schematic
 ```
 
 ### Generated Plugin Example
 
 ```bash
-hono-enterprise g plugin my-plugin
+honoe g plugin my-plugin
 ```
 
 Generates:

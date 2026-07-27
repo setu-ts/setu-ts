@@ -6,13 +6,14 @@
 
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generatePlugin } from '../../../src/schematics/plugin.ts';
+import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 describe('generatePlugin', () => {
   it('emits a plugin file with correct structure', () => {
     const names = deriveNames('auth');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generatePlugin(names, options);
 
     expect(files).toHaveLength(1);
@@ -24,7 +25,7 @@ describe('generatePlugin', () => {
 
   it('uses the kebab name for the plugin name field', () => {
     const names = deriveNames('cache');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generatePlugin(names, options);
 
     expect(files[0].contents).toContain('name: "cache-plugin"');
@@ -32,7 +33,7 @@ describe('generatePlugin', () => {
 
   it('exports the plugin as a constant', () => {
     const names = deriveNames('logger');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generatePlugin(names, options);
 
     expect(files[0].contents).toContain('export const LoggerPlugin: IPlugin = {');

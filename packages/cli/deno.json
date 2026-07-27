@@ -7,5 +7,12 @@
     "rules": {
       "exclude": ["no-console"]
     }
+  },
+  "test": {
+    "permissions": {
+      "read": true,
+      "env": true,
+      "sys": ["hostname", "cpus"]
+    }
   }
 }

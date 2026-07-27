@@ -6,13 +6,14 @@
 
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateCommandHandler } from '../../../src/schematics/command-handler.ts';
+import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 describe('generateCommandHandler', () => {
   it('emits a command handler file implementing ICommandHandler', () => {
     const names = deriveNames('create-user');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generateCommandHandler(names, options);
 
     expect(files).toHaveLength(1);
@@ -22,7 +23,7 @@ describe('generateCommandHandler', () => {
 
   it('creates a command class name from input', () => {
     const names = deriveNames('update-profile');
-    const options = { runtime: {} as unknown, plugins: new Set<string>() };
+    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
     const files = generateCommandHandler(names, options);
 
     expect(files[0].contents).toContain('UpdateProfileCommand');

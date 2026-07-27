@@ -14,8 +14,8 @@ export function generateMigration(
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const timestamp = Math.floor(Date.now() / 1000);
-  const fileName = `src/migrations/${timestamp}-${names.kebab}.migration.ts`;
+  const fileName = `src/migrations/${timestamp}-${names.kebab}.up.ts`;
   const contents =
-    `export interface Migration {\n  up(): Promise<void>;\n  down(): Promise<void>\n}\n\nexport const migration: Migration = {\n  async up() {\n    // Migration up logic\n  },\n  async down() {\n    // Migration down logic\n  },\n};\n`;
+    `// Requires database-plugin\nexport interface Migration {\n  up(): Promise<void>;\n  down(): Promise<void>\n}\n\nexport const migration: Migration = {\n  async up() {\n    // Migration up logic\n  },\n  async down() {\n    // Migration down logic\n  },\n};\n`;
   return [{ path: fileName, contents }];
 }

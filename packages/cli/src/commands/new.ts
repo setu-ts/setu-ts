@@ -25,10 +25,10 @@ interface NewCommandOptions {
  * @param options - Optional configuration (dir, runtime, dryRun)
  * @returns Exit code (0 for success)
  */
-export async function runNewCommand(
+export function runNewCommand(
   args: readonly string[],
   options: NewCommandOptions = {},
-): Promise<number> {
+): number {
   const parsed = parseArgs(args);
   if (parsed.positionals.length === 0) {
     throw new Error('Project name is required');
@@ -39,7 +39,7 @@ export async function runNewCommand(
   const runtime = options.runtime ?? 'deno';
 
   // Build project files based on runtime
-  const files: GeneratedFile[] = await generateProjectFiles(projectName, names, runtime, options);
+  const files: GeneratedFile[] = generateProjectFiles(projectName, names, runtime, options);
 
   // Write files (dry run only prints)
   if (options.dryRun) {
