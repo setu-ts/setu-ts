@@ -138,8 +138,23 @@ failure so dependents never publish against a missing version.
 
 ## If a publish fails partway
 
-Nothing needs undoing. Already-published versions are skipped on a re-run, so fix the cause and run
-`deno task release:publish` again — it resumes from where it stopped.
+Nothing needs undoing — re-run `deno task release:publish` and it resumes from where it stopped.
+
+This works because the script asks the registry whether each package already carries the version
+being released, and skips the ones that do:
+
+```
+[1/35] packages/common — already at 0.1.0-alpha.1, skipping
+...
+[21/35] packages/metrics-plugin
+```
+
+That check is load-bearing, not an optimisation. **JSR versions are immutable, so re-publishing an
+existing one is an error, not a no-op** — without the skip, a resumed run would die on the first
+already-published package and never reach the ones that still need publishing. A registry lookup
+that fails for any other reason (network, 5xx) does _not_ skip: the package is published and
+`deno publish` is left to be the authority, so a transient error can never silently drop a package
+from a release.
 
 A publish that stops because a package does not exist is the quota case above, not a defect: the
 packages already published are complete and resolvable, provided nothing in the published set
