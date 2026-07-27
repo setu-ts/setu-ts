@@ -66,8 +66,27 @@ for (const dir of PUBLISHED_PACKAGES) {
   }
 
   for (const [alias, specifier] of Object.entries(config.imports ?? {})) {
+    // Only in-repo packages are checked; a third-party specifier is not ours.
+    if (!alias.startsWith('@hono-enterprise/')) continue;
+
     const match = CROSS_PACKAGE.exec(specifier);
-    if (!match) continue;
+    if (!match) {
+      // A cross-package import that is not a `jsr:` specifier — typically a
+      // relative path like `../common/src/index.ts`. It resolves inside the
+      // workspace and therefore survives `deno check`, the test suite, AND
+      // `deno publish --dry-run`, because all three resolve from the repo. It
+      // does NOT survive a real publish: JSR builds the module graph from the
+      // package tarball, where `../common` is outside the root, and the
+      // publish fails with `Module not found "file:///common/src/index.ts"`.
+      // metrics-plugin and telemetry-plugin both shipped this way and were
+      // caught only when the release reached them.
+      problems.push(
+        `${dir}: import "${alias}" is "${specifier}", not a jsr: specifier — ` +
+          `it resolves in the workspace but breaks on publish. Use ` +
+          `"jsr:${alias}@^${expected}".`,
+      );
+      continue;
+    }
 
     // A caret range on a prerelease (`^0.1.0-alpha.1`) matches that prerelease
     // and later versions of the same tuple. A caret range on the plain version
