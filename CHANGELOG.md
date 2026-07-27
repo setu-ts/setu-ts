@@ -12,26 +12,17 @@ and tested; they publish to [JSR](https://jsr.io) under the `@hono-enterprise` s
 This is an **alpha**. The public API is not frozen, and breaking changes may land in any subsequent
 prerelease without a major-version bump. Do not use it in production.
 
-### This release ships in two phases
+All 35 packages are live on JSR at `0.1.0-alpha.1`.
 
-A JSR scope may create only **20 new packages per rolling 7-day window**, and this release needs 35.
-The first 20 — in dependency order, so the entire core is included — published on 2026-07-26. The
-remaining 15 publish at the same `0.1.0-alpha.1` version once the quota clears (a request for an
-increase is pending; otherwise the window rolls over around 2026-08-02).
+Verified after publishing by installing `kernel`, `runtime`, `metrics-plugin`, and
+`telemetry-plugin` from JSR into a clean project — not the workspace, whose import map resolves
+locally — starting an application, serving a request (`200`), and scraping the `/metrics` endpoint.
 
-Nothing about the published 20 is provisional: each is complete, and every cross-package dependency
-they declare (`common`, `kernel`) is itself published, so they resolve and run today. Verified by
-installing `kernel` + `runtime` from JSR into a clean project and serving a request.
-
-**Live now (20):** `common`, `kernel`, `runtime`, `exceptions`, `testing`, `audit-plugin`,
-`auth-plugin`, `cache-plugin`, `config-plugin`, `cqrs-plugin`, `database-plugin`,
-`decorator-plugin`, `di-plugin`, `events-plugin`, `feature-flags-plugin`, `health-plugin`,
-`http-security-plugin`, `logger-plugin`, `mail-plugin`, `messaging-plugin`
-
-**Pending the quota (15):** `metrics-plugin`, `multi-tenancy-plugin`, `notification-plugin`,
-`openapi-plugin`, `queue-plugin`, `react-router-plugin`, `resilience-plugin`, `scheduler-plugin`,
-`secrets-plugin`, `sse-plugin`, `storage-plugin`, `telemetry-plugin`, `validation-plugin`,
-`websocket-plugin`, `worker-pool-plugin`
+The release took two attempts. A JSR scope may create only 20 new packages per rolling 7-day window
+by default; the first run created 20 and stopped. JSR raised the quota to 40 on request, and the
+remaining 15 followed. Both halves carry the same version, and the publish order guarantees `common`
+and `kernel` land before anything that depends on them, so the intermediate state was never
+inconsistent.
 
 ### Installing a prerelease
 
@@ -68,13 +59,12 @@ the version unless you pass `--min-dep-age 0`.
 
 **Optional ergonomics** — `di-plugin`, `decorator-plugin`, `openapi-plugin`
 
-### Deliberately excluded — not merely pending
+### Deliberately excluded
 
-Distinct from the 15 above, which are written and waiting on a quota: `@hono-enterprise/cli`,
-`@hono-enterprise/sdk`, and the three starter bundles (`rest-starter`, `microservice-starter`,
-`full-stack-starter`) are **not part of this release at all**. They are stubs that export nothing;
-publishing them would put empty pages on JSR. They ship when their milestones land (CLI is Milestone
-34).
+`@hono-enterprise/cli`, `@hono-enterprise/sdk`, and the three starter bundles (`rest-starter`,
+`microservice-starter`, `full-stack-starter`) are **not part of this release**. They are stubs that
+export nothing; publishing them would put empty pages on JSR, where versions are immutable. They
+ship when their milestones land (the CLI is Milestone 34).
 
 ### Runtime support
 
