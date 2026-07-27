@@ -1767,6 +1767,11 @@
           "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
         ]
       },
+      "packages/metrics-plugin": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
+        ]
+      },
       "packages/openapi-plugin": {
         "dependencies": [
           "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
@@ -1778,6 +1783,11 @@
         "dependencies": [
           "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
           "jsr:@hono-enterprise/kernel@~0.1.0-alpha.1"
+        ]
+      },
+      "packages/telemetry-plugin": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1"
         ]
       },
       "packages/testing": {

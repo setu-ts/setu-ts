@@ -4,7 +4,7 @@
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "@hono-enterprise/common": "../common/src/index.ts"
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.1"
   },
   "tests": {
     "permissions": {

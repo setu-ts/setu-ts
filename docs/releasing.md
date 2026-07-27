@@ -99,6 +99,21 @@ deno task release:publish --dry-run
 packages, cross-package specifier resolvability, that the published and unpublished lists together
 account for every workspace member, and that no stub is in the publish list.
 
+> **A green `--dry-run` is not proof the publish will succeed.** The dry run resolves modules from
+> the workspace; a real publish builds the graph from the package tarball, where a sibling package
+> is not on disk. A cross-package import written as a relative path —
+> `"@hono-enterprise/common": "../common/src/index.ts"` — therefore passes `deno check`, the full
+> test suite, and `deno publish --dry-run`, then fails on the real publish with:
+>
+> ```
+> failed to build module graph: Module not found "file:///common/src/index.ts".
+> ```
+>
+> `metrics-plugin` and `telemetry-plugin` both shipped this way and were caught only when the
+> release reached package 21 of 35. `release:verify` now rejects any `@hono-enterprise/*` import
+> that is not a `jsr:` specifier, so this class cannot reach a publish again — but only if you
+> actually run it.
+
 ### 3. Merge, then publish
 
 Open a PR, let CI pass, merge to `main`. Then from `main`:
