@@ -52,7 +52,8 @@ describe('createDefaultClientTiming', () => {
   it('sleep rejects immediately when given already-aborted signal', async () => {
     const timing = createDefaultClientTiming();
     const controller = new AbortController();
-    controller.abort(new Error('already aborted'));
+    const err = new Error('already aborted');
+    controller.abort(err);
 
     await expect(timing.sleep(100, controller.signal)).rejects.toThrow('already aborted');
   });
@@ -124,5 +125,48 @@ describe('createDefaultClientTiming', () => {
     } catch (err: unknown) {
       expect(err).toBe(customReason);
     }
+  });
+
+  // ============================================================================
+  // Fallback branch tests: cover the ?? new DOMException('Aborted', 'AbortError')
+  // paths that only trigger when signal.reason is truly nullish on an aborted signal.
+  // A spec-compliant runtime never produces this, so we use a fake signal.
+  // ============================================================================
+
+  it('sleep rejects with AbortError when early-aborted signal has nullish reason (fallback)', async () => {
+    const timing = createDefaultClientTiming();
+
+    // Create a fake AbortSignal with aborted: true and reason: undefined.
+    // This simulates a scenario where the fallback ?? new DOMException(...) would fire.
+    const fakeSignal = {
+      aborted: true,
+      reason: undefined,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    } as unknown as AbortSignal;
+
+    await expect(timing.sleep(100, fakeSignal)).rejects.toThrow();
+  });
+
+  it('sleep rejects with AbortError when mid-wait abort triggers fallback (nullish reason)', async () => {
+    const timing = createDefaultClientTiming();
+
+    // Create a fake AbortSignal that is NOT initially aborted.
+    // The addEventListener immediately invokes the handler to simulate abort.
+    // This triggers the onAbort callback in sleep, which reads signal!.reason
+    // (which is undefined) and uses the fallback.
+    const fakeSignal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener: (_type: string, handler: () => void) => {
+        // Simulate abort by immediately invoking the handler.
+        handler();
+      },
+      removeEventListener: () => {},
+    } as unknown as AbortSignal;
+
+    const sleepPromise = timing.sleep(100, fakeSignal);
+
+    await expect(sleepPromise).rejects.toThrow();
   });
 });
