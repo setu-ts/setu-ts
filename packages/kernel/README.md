@@ -66,5 +66,8 @@ console.log(res.statusCode, res.json());
 - A runtime provider is mandatory — `start()` fails fast if no plugin provides
   `CAPABILITIES.RUNTIME`.
 
-See the repository's [`PUBLIC_API.md`](../../PUBLIC_API.md) for the full API contract and
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md) for how this package fits the plugin architecture.
+See the repository's
+[`PUBLIC_API.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) for the full
+API contract and
+[`ARCHITECTURE.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) for how
+this package fits the plugin architecture.

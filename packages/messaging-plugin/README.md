@@ -53,7 +53,8 @@ Kafka's consumer-group and auto-commit model does not fit the pattern, so `Kafka
 ## Bridging in-process events
 
 `EventsMessagingBridge` forwards selected events from
-[`@hono-enterprise/events-plugin`](../events-plugin) onto the broker:
+[`@hono-enterprise/events-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/events-plugin)
+onto the broker:
 
 ```typescript
 app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] }));
@@ -61,4 +62,5 @@ app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'
 
 ## Full API
 
-Every export and option is documented in [PUBLIC_API.md](../../PUBLIC_API.md).
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).

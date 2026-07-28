@@ -187,7 +187,7 @@ though the version is live, and consumers get:
 
 ```
 error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1
+Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2
 ```
 
 Every install instruction for a prerelease must carry an explicit version. Check the README and
@@ -214,7 +214,7 @@ published dependency — and serve one request:
 
 ```fish
 mkdir /tmp/relcheck; and cd /tmp/relcheck; and echo '{}' > deno.json
-deno add --min-dep-age 0 jsr:@hono-enterprise/kernel@^0.1.0-alpha.1 jsr:@hono-enterprise/runtime@^0.1.0-alpha.1
+deno add --min-dep-age 0 jsr:@hono-enterprise/kernel@^0.1.0-alpha.2 jsr:@hono-enterprise/runtime@^0.1.0-alpha.2
 ```
 
 ```typescript

@@ -12,7 +12,7 @@ socket upgrade, and browsers reconnect automatically. Reach for it whenever traf
 server → client — notifications, progress feeds, log tailing, metric ticks.
 
 When the client also needs to **send**, use
-[`@hono-enterprise/websocket-plugin`](../websocket-plugin).
+[`@hono-enterprise/websocket-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/websocket-plugin).
 
 ## Installation
 
@@ -62,4 +62,5 @@ resume from where it dropped.
 
 ## Full API
 
-Every export and option is documented in [PUBLIC_API.md](../../PUBLIC_API.md).
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).

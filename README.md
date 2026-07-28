@@ -19,7 +19,8 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: `v0.1.0-alpha.1` is published — all 35 packages are live on JSR.**
+> **Status: `v0.1.0-alpha.2` is the next release — it adds `cli` and publishes 36 packages.**
+> `v0.1.0-alpha.1` (35 packages) is what is live on JSR right now.
 >
 > The kernel, the runtime layer, and 30 plugins are implemented, tested, and documented (604 tests,
 > 97%+ coverage).
@@ -176,21 +177,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1 jsr:@hono-enterprise/runtime@^0.1.0-alpha.1
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2 jsr:@hono-enterprise/runtime@^0.1.0-alpha.2
 
 # Node
-npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.1 @hono-enterprise/runtime@^0.1.0-alpha.1
+npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.2 @hono-enterprise/runtime@^0.1.0-alpha.2
 
 # Bun
-bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.1 @hono-enterprise/runtime@^0.1.0-alpha.1
+bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.2 @hono-enterprise/runtime@^0.1.0-alpha.2
 ```
 
-**The `@^0.1.0-alpha.1` is required, not decorative.** JSR does not point `latest` at a prerelease,
+**The `@^0.1.0-alpha.2` is required, not decorative.** JSR does not point `latest` at a prerelease,
 so omitting the version fails outright:
 
 ```
 error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1
+Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2
 ```
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
@@ -199,7 +200,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.1/main
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.2/main
 
 honoe new my-app
 cd my-app && honoe generate service billing
@@ -207,8 +208,8 @@ cd my-app && honoe generate service billing
 
 The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 35 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`) and
-every plugin in the tables above.
+`v0.1.0-alpha.1` published 35 packages: the core (`common`, `kernel`, `runtime`, `exceptions`,
+`testing`) and every plugin in the tables above. `v0.1.0-alpha.2` adds `cli`, for 36.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
