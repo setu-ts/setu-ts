@@ -72,7 +72,21 @@ jobs:
       #
       # No JSR_TOKEN here: the runner's OIDC identity authenticates, which is
       # why `id-token: write` is requested above.
+      # Permissions, and why each is needed:
+      #   read           — every package's deno.json, for its declared version
+      #   env=JSR_TOKEN  — read once at startup; left UNSET here so the runner's
+      #                    OIDC identity authenticates instead. Without this the
+      #                    script dies before publishing anything.
+      #   net=jsr.io     — the already-published check that makes a resumed
+      #                    release idempotent. Skipped under --dry-run, which is
+      #                    why a passing dry run does NOT prove a real run works.
+      #   run=deno       — spawns `deno publish` per package
       - name: Publish
         run: |
-          deno run --allow-read --allow-run=deno scripts/publish-packages.ts \
+          deno run \
+            --allow-read \
+            --allow-env=JSR_TOKEN \
+            --allow-net=jsr.io \
+            --allow-run=deno \
+            scripts/publish-packages.ts \
             ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}

@@ -141,6 +141,13 @@ and publishes with OIDC provenance. No token secret is needed.
 Note that a tag-triggered run uses the workflow and scripts **as they exist at the tagged commit**,
 not on `main`.
 
+> **The tag-triggered workflow could not publish until `v0.1.0-alpha.2`.** Its publish step ran
+> `publish-packages.ts` with only `--allow-read --allow-run=deno`, so the script died on
+> `Deno.env.get('JSR_TOKEN')` before touching a single package. All three runs before that fix
+> failed the same way, and `v0.1.0-alpha.1` was published by hand from a terminal. A passing
+> `--dry-run` does not catch it: the registry lookup that needs `--allow-net` is skipped under
+> `--dry-run`, so the dry run exercises neither missing permission.
+
 ## Why publishing goes through a script
 
 `deno publish` from the workspace root publishes **all 40 members**, including the `sdk` and starter
