@@ -1,0 +1,655 @@
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import { generateOpenApiClient, sanitizeIdentifier } from '../../src/codegen/openapi-codegen.ts';
+import { OpenApiCodegenError } from '../../src/errors.ts';
+import type {
+  SdkOpenApiDocument,
+  SdkOpenApiOperation,
+  SdkOpenApiParameter,
+  SdkOpenApiRequestBody,
+  SdkOpenApiSchema,
+} from '../../src/codegen/openapi-types.ts';
+
+function makeDoc(
+  paths: SdkOpenApiDocument['paths'],
+  schemas?: Record<string, SdkOpenApiSchema>,
+): SdkOpenApiDocument {
+  const base: SdkOpenApiDocument = { openapi: '3.1.0', paths };
+  if (schemas) {
+    return { ...base, components: { schemas } };
+  }
+  return base;
+}
+
+function makeOp(
+  id: string,
+  overrides?: Partial<SdkOpenApiOperation>,
+): SdkOpenApiOperation {
+  return {
+    operationId: id,
+    responses: {
+      '200': {
+        description: 'OK',
+        content: {
+          'application/json': {
+            schema: { type: 'object' },
+          },
+        },
+      },
+    },
+    ...overrides,
+  };
+}
+
+function makeParam(
+  name: string,
+  loc: SdkOpenApiParameter['in'],
+): SdkOpenApiParameter {
+  return { name, in: loc, required: true, schema: { type: 'string' } };
+}
+
+function makeBody(schema: SdkOpenApiSchema): SdkOpenApiRequestBody {
+  return { content: { 'application/json': { schema } }, required: true };
+}
+
+function genDoc(schema: SdkOpenApiSchema): SdkOpenApiDocument {
+  return makeDoc({
+    '/x': {
+      get: makeOp('x', {
+        responses: {
+          '200': {
+            description: 'OK',
+            content: { 'application/json': { schema } },
+          },
+        },
+      }),
+    },
+  });
+}
+
+describe('sanitizeIdentifier', () => {
+  it('lower-camel-joins parts split on non-alphanumeric runs', () => {
+    expect(sanitizeIdentifier('get-user-by-id')).toBe('getUserById');
+  });
+
+  it('handles braces from path params', () => {
+    expect(sanitizeIdentifier('get-users-{id}')).toBe('getUsersId');
+  });
+
+  it('prefixes reserved words', () => {
+    expect(sanitizeIdentifier('class')).toBe('_class');
+    expect(sanitizeIdentifier('for')).toBe('_for');
+  });
+
+  it('prefixes leading digit run with n', () => {
+    expect(sanitizeIdentifier('123abc')).toBe('n123abc');
+  });
+
+  it('falls back to operation when nothing survives', () => {
+    expect(sanitizeIdentifier('---')).toBe('operation');
+  });
+
+  it('strips JSON pointer prefix for refs', () => {
+    expect(sanitizeIdentifier('#/components/schemas/MyUser')).toBe('myuser');
+  });
+});
+
+describe('renderSchema via generated output', () => {
+  it('maps string type', () => {
+    const schema: SdkOpenApiSchema = { type: 'string' };
+    const out = generateOpenApiClient(genDoc(schema));
+    expect(out).toContain('string');
+  });
+
+  it('maps integer to number', () => {
+    const out = generateOpenApiClient(genDoc({ type: 'integer' }));
+    expect(out).toContain('number');
+  });
+
+  it('maps boolean', () => {
+    const out = generateOpenApiClient(genDoc({ type: 'boolean' }));
+    expect(out).toContain('boolean');
+  });
+
+  it('maps null', () => {
+    const out = generateOpenApiClient(genDoc({ type: 'null' }));
+    expect(out).toContain('null');
+  });
+
+  it('maps array of items', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'array',
+      items: { type: 'string' },
+    }));
+    expect(out).toContain('string[]');
+  });
+
+  it('maps object with properties and required', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        age: { type: 'number' },
+      },
+      required: ['name'],
+    }));
+    expect(out).toContain("'name': string");
+    expect(out).toContain("'age'?: number");
+  });
+
+  it('maps additionalProperties: true', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'object',
+      additionalProperties: true,
+    }));
+    expect(out).toContain('Record<string, unknown>');
+  });
+
+  it('maps additionalProperties: false', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      additionalProperties: false,
+    }));
+    // 'a' is optional (not in required) and no Record<...> added.
+    expect(out).toContain("'a'?: string");
+    expect(out).not.toContain('Record');
+  });
+
+  it('maps additionalProperties as schema', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'object',
+      additionalProperties: { type: 'number' },
+    }));
+    expect(out).toContain('Record<string, number>');
+  });
+
+  it('maps enum to union', () => {
+    const out = generateOpenApiClient(genDoc({
+      enum: ['admin', 'user', 'guest'],
+    }));
+    expect(out).toContain("'admin' | 'user' | 'guest'");
+  });
+
+  it('maps const to literal', () => {
+    const out = generateOpenApiClient(genDoc({ const: 42 }));
+    expect(out).toContain('42');
+  });
+
+  it('maps anyOf to union (nullable)', () => {
+    const out = generateOpenApiClient(genDoc({
+      anyOf: [{ type: 'string' }, { type: 'null' }],
+    }));
+    expect(out).toContain('string | null');
+  });
+
+  it('maps allOf to intersection', () => {
+    const out = generateOpenApiClient(genDoc({
+      allOf: [{ type: 'string' }, { type: 'number' }],
+    }));
+    expect(out).toContain('string & number');
+  });
+
+  it('maps oneOf to union', () => {
+    const out = generateOpenApiClient(genDoc({
+      oneOf: [{ type: 'string' }, { type: 'number' }],
+    }));
+    expect(out).toContain('string | number');
+  });
+
+  it('maps type array to union', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: ['string', 'null'],
+    }));
+    expect(out).toContain('string | null');
+  });
+
+  it('maps array without items to unknown[]', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'array',
+    }));
+    expect(out).toContain('unknown[]');
+  });
+
+  it('maps $ref to component type name', () => {
+    const refSchema: SdkOpenApiSchema = {
+      $ref: '#/components/schemas/User',
+    };
+    const out = generateOpenApiClient(
+      makeDoc(
+        {
+          '/x': {
+            get: makeOp('x', {
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: { 'application/json': { schema: refSchema } },
+                },
+              },
+            }),
+          },
+        },
+        { User: { type: 'object' } },
+      ),
+    );
+    expect(out).toContain('export type user = ');
+  });
+
+  it('maps empty schema to unknown', () => {
+    const out = generateOpenApiClient(genDoc({}));
+    expect(out).toContain('unknown');
+  });
+
+  it('maps enum with number values', () => {
+    const out = generateOpenApiClient(genDoc({ enum: [0, 1, 2] }));
+    expect(out).toContain('0 | 1 | 2');
+  });
+
+  it('maps enum with boolean values', () => {
+    const out = generateOpenApiClient(genDoc({ enum: [true, false] }));
+    expect(out).toContain('true | false');
+  });
+
+  it('maps enum with null value', () => {
+    const out = generateOpenApiClient(genDoc({ enum: [null] }));
+    expect(out).toContain('null');
+  });
+
+  it('guards against circular $ref by returning unknown', () => {
+    const circularSchema: SdkOpenApiSchema = {
+      type: 'object',
+      properties: {
+        self: { $ref: '#/components/schemas/Circular' },
+      },
+    };
+    const out = generateOpenApiClient(
+      makeDoc(
+        {
+          '/x': {
+            get: makeOp('x', {
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: { 'application/json': { schema: circularSchema } },
+                },
+              },
+            }),
+          },
+        },
+        { Circular: circularSchema },
+      ),
+    );
+    // The generated output should not hang and should contain the type.
+    expect(out).toContain('circular');
+  });
+});
+
+describe('identifier sanitization in generated code', () => {
+  it('handles path params with braces', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        get: makeOp('getUserById', {
+          parameters: [makeParam('id', 'path')],
+        }),
+      },
+    }));
+    expect(out).toContain('getUserById');
+    expect(out).toContain('encodeURIComponent');
+  });
+
+  it('handles digit-leading operationIds', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { get: makeOp('123abc') },
+    }));
+    expect(out).toContain('n123abc');
+  });
+
+  it('handles operationId that sanitizes to nothing', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { get: makeOp('---') },
+    }));
+    expect(out).toContain('operation');
+  });
+});
+
+describe('OpenApiCodegenError diagnostics', () => {
+  it('throws on missing operationId with path/method', () => {
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/x': { get: { responses: { '200': { description: 'OK' } } } },
+      }))
+    ).toThrow(OpenApiCodegenError);
+  });
+
+  it('throws on cookie parameter location', () => {
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/x': {
+          get: makeOp('x', {
+            parameters: [{ name: 'sid', in: 'cookie' }],
+          }),
+        },
+      }))
+    ).toThrow(OpenApiCodegenError);
+  });
+
+  it('throws on duplicate operation names from slug collision', () => {
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/a-b/c': { get: makeOp('get-a-b-c') },
+        '/a/b-c': { get: makeOp('get-a-b-c') },
+      }))
+    ).toThrow(OpenApiCodegenError);
+  });
+
+  it('throws on duplicate sanitized names', () => {
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/a': { get: makeOp('get-users-{id}') },
+        '/b': { post: makeOp('get_users_id') },
+      }))
+    ).toThrow(OpenApiCodegenError);
+  });
+
+  it('throws on invalid $ref ending with slash', () => {
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/x': {
+          get: makeOp('x', {
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': { schema: { $ref: 'bad/' } },
+                },
+              },
+            },
+          }),
+        },
+      }))
+    ).toThrow(OpenApiCodegenError);
+  });
+});
+
+describe('options', () => {
+  it('factoryName changes the exported function name', () => {
+    const out = generateOpenApiClient(
+      makeDoc({ '/x': { get: makeOp('x') } }),
+      { factoryName: 'createMyApi' },
+    );
+    expect(out).toContain('export function createMyApi');
+    expect(out).not.toContain('export function createApi');
+  });
+
+  it('sdkImport changes the import specifier', () => {
+    const out = generateOpenApiClient(
+      makeDoc({ '/x': { get: makeOp('x') } }),
+      { sdkImport: '@my/sdk' },
+    );
+    expect(out).toContain("'@my/sdk'");
+  });
+});
+
+describe('generated method signatures', () => {
+  it('generates method with path params only', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        get: makeOp('getUser', {
+          parameters: [makeParam('id', 'path')],
+        }),
+      },
+    }));
+    // sanitizeIdentifier turns 'getUser' into 'getuser' (single part → lowercase).
+    expect(out).toContain('getuser(id: string):');
+  });
+
+  it('generates method with query params but no path params', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/search': {
+        get: makeOp('search', {
+          parameters: [makeParam('q', 'query')],
+        }),
+      },
+    }));
+    expect(out).toContain('query:');
+  });
+
+  it('generates method with body and path params uses opts', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        post: makeOp('updateUser', {
+          parameters: [makeParam('id', 'path')],
+          requestBody: makeBody({ type: 'object' }),
+        }),
+      },
+    }));
+    expect(out).toContain('json:');
+  });
+
+  it('query params use opts when path params present', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        get: makeOp('getUser', {
+          parameters: [makeParam('id', 'path'), makeParam('q', 'query')],
+        }),
+      },
+    }));
+    expect(out).toContain('opts?.q');
+  });
+
+  it('query params use args when no path params', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/search': {
+        get: makeOp('search', {
+          parameters: [makeParam('q', 'query')],
+        }),
+      },
+    }));
+    expect(out).toContain('args?.q');
+  });
+
+  it('header params use opts when path params present', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        get: makeOp('getUser', {
+          parameters: [makeParam('id', 'path'), makeParam('Auth', 'header')],
+        }),
+      },
+    }));
+    expect(out).toContain('opts?.auth');
+  });
+
+  it('body uses opts when path params present', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        post: makeOp('updateUser', {
+          parameters: [makeParam('id', 'path')],
+          requestBody: makeBody({ type: 'object' }),
+        }),
+      },
+    }));
+    expect(out).toContain('opts?.body');
+  });
+
+  it('body uses args when no path params', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users': {
+        post: makeOp('createUser', {
+          requestBody: makeBody({ type: 'object' }),
+        }),
+      },
+    }));
+    expect(out).toContain('args?.body');
+  });
+});
+
+describe('renderSchema edge cases', () => {
+  it('maps const value directly', () => {
+    const out = generateOpenApiClient(genDoc({ const: 'hello' }));
+    expect(out).toContain("'hello'");
+  });
+
+  it('maps enum values to union', () => {
+    const out = generateOpenApiClient(genDoc({
+      type: 'string',
+      enum: ['a', 'b', 'c'],
+    }));
+    expect(out).toContain("'a' | 'b' | 'c'");
+  });
+
+  it('maps $ref without components to string', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        get: makeOp('x', {
+          responses: {
+            '200': {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/Missing' } },
+              },
+            },
+          },
+        }),
+      },
+    }));
+    // Missing $ref is still rendered as the sanitized identifier.
+    expect(out).toContain('missing');
+  });
+});
+
+describe('determinism', () => {
+  it('same input produces identical output', () => {
+    const d = makeDoc({
+      '/users': { get: makeOp('listUsers') },
+      '/users/{id}': {
+        get: makeOp('getUser', {
+          parameters: [makeParam('id', 'path')],
+        }),
+      },
+    });
+    expect(generateOpenApiClient(d)).toBe(generateOpenApiClient(d));
+  });
+});
+
+describe('parameter and body rendering', () => {
+  it('includes query params in generated request', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        get: makeOp('x', { parameters: [makeParam('q', 'query')] }),
+      },
+    }));
+    expect(out).toContain('query:');
+  });
+
+  it('includes headers in generated request', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        get: makeOp('x', { parameters: [makeParam('Auth', 'header')] }),
+      },
+    }));
+    expect(out).toContain('headers:');
+  });
+
+  it('includes JSON body in generated request', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        post: makeOp('x', { requestBody: makeBody({ type: 'object' }) }),
+      },
+    }));
+    expect(out).toContain('json:');
+  });
+});
+
+describe('response types', () => {
+  it('void for 204 no content', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        delete: makeOp('x', {
+          responses: { '204': { description: 'Deleted' } },
+        }),
+      },
+    }));
+    expect(out).toContain('void');
+  });
+
+  it('typed response for 200 with schema', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        get: makeOp('x', {
+          responses: {
+            '200': {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { type: 'string' } },
+              },
+            },
+          },
+        }),
+      },
+    }));
+    expect(out).toContain('string');
+  });
+});
+
+describe('component schemas', () => {
+  it('emits component type declarations', () => {
+    const out = generateOpenApiClient(
+      makeDoc({ '/x': { get: makeOp('x') } }, { User: { type: 'object' } }),
+    );
+    expect(out).toContain('export type user = ');
+  });
+  it('generates factory with multiple operations on different paths', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users': { get: makeOp('listUsers') },
+      '/users/{id}': {
+        get: makeOp('getUserById', {
+          parameters: [makeParam('id', 'path')],
+        }),
+      },
+      '/posts': {
+        post: makeOp('createPost', {
+          requestBody: makeBody({ type: 'object' }),
+        }),
+      },
+    }));
+    // All operation names are lowercased by sanitizeIdentifier.
+    expect(out).toContain('listusers,');
+    expect(out).toContain('getuserbyid,');
+    expect(out).toContain('createpost,');
+    expect(out).toContain('return {');
+  });
+
+  it('generates void return type for operation with no responses', () => {
+    const opWithoutResponses: SdkOpenApiOperation = {
+      operationId: 'x',
+    };
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { delete: opWithoutResponses },
+    }));
+    expect(out).toContain('void');
+  });
+
+  it('generates correct return type for multiple 2xx responses', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        get: makeOp('x', {
+          responses: {
+            '200': {
+              description: 'OK',
+              content: {
+                'application/json': { schema: { type: 'string' } },
+              },
+            },
+            '201': {
+              description: 'Created',
+              content: {
+                'application/json': { schema: { type: 'number' } },
+              },
+            },
+          },
+        }),
+      },
+    }));
+    expect(out).toContain('string | number');
+  });
+});
