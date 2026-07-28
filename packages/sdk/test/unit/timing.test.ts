@@ -1,0 +1,96 @@
+/**
+ * Tests for `createDefaultClientTiming()`.
+ *
+ * Covers monotonic `now()`, `sleep` resolution, and abort behavior.
+ */
+
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import { createDefaultClientTiming } from '../../src/http/timing.ts';
+
+describe('createDefaultClientTiming', () => {
+  it('now() returns a positive number', () => {
+    const timing = createDefaultClientTiming();
+    const now = timing.now();
+    expect(now).toBeGreaterThanOrEqual(0);
+  });
+
+  it('now() is monotonic non-decreasing', () => {
+    const timing = createDefaultClientTiming();
+    const a = timing.now();
+    const b = timing.now();
+    expect(b).toBeGreaterThanOrEqual(a);
+  });
+
+  it('sleep(0) resolves', async () => {
+    const timing = createDefaultClientTiming();
+    await timing.sleep(0);
+    // resolved without throwing
+  });
+
+  it('sleep resolves after delay', async () => {
+    const timing = createDefaultClientTiming();
+    const start = timing.now();
+    await timing.sleep(10);
+    const elapsed = timing.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(8); // allow small jitter
+  });
+
+  it('sleep rejects when signal aborts mid-wait', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+
+    const sleepPromise = timing.sleep(1000, controller.signal);
+
+    // Abort after a short delay.
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort(new Error('custom abort'));
+
+    await expect(sleepPromise).rejects.toThrow('custom abort');
+  });
+
+  it('sleep rejects immediately when given already-aborted signal', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+    controller.abort(new Error('already aborted'));
+
+    await expect(timing.sleep(100, controller.signal)).rejects.toThrow('already aborted');
+  });
+
+  it('sleep rejects with default AbortError when already-aborted has no reason', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+    controller.abort(); // no custom reason — triggers signal.reason ?? new DOMException(...)
+
+    await expect(timing.sleep(100, controller.signal)).rejects.toThrow();
+  });
+
+  it('sleep rejects with AbortError when no custom reason', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(timing.sleep(100, controller.signal)).rejects.toThrow();
+  });
+
+  it('sleep rejects with AbortError when signal aborts mid-wait (no reason)', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+
+    const sleepPromise = timing.sleep(1000, controller.signal);
+
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort(); // no custom reason
+
+    await expect(sleepPromise).rejects.toThrow();
+  });
+
+  it('sleep with signal present resolves when timer fires first', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+
+    // Signal exists but is never aborted — timer fires and cleanup runs.
+    await timing.sleep(0, controller.signal);
+    // resolved without throwing — covers addEventListener + cleanup path
+  });
+});
