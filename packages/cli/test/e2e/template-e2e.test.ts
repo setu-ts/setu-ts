@@ -1,11 +1,22 @@
 /**
  * The drift gate: scaffolds each template into a REAL temp directory, generates
- * over the §6.1 hostile name set, and runs `deno check` on the result against
- * the real published packages.
+ * over the §6.1 hostile name set, and runs `deno check` on the result.
  *
  * A gate that exercises one input proves one input — M34's version ran only
  * `order-item` and still shipped `(class) => {` and `class 2faService`, both
  * unparseable.
+ *
+ * The check resolves `@hono-enterprise/*` to THIS workspace, not to JSR. That
+ * is both more correct and necessary:
+ *
+ * - More correct: drift means "the template disagrees with the framework as it
+ *   is now". Checking against a published snapshot would pass a template that
+ *   is stale relative to HEAD, and fail one correctly updated for an unreleased
+ *   API change.
+ * - Necessary: `honoe new` pins generated projects to the CLI's OWN version, so
+ *   during a version bump the pinned version is not published yet. Checking
+ *   against JSR would deadlock — the release workflow runs the test suite
+ *   BEFORE publishing, so the gate would block the publish that would fix it.
  *
  * @module
  */
@@ -43,11 +54,32 @@ const UNGATED = ['plugin', 'service', 'route', 'middleware', 'job'] as const;
 /** Every schematic the `rest` template's plugin set makes available. */
 const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
 
+/** This repository's root, four levels up from `packages/cli/test/e2e/`. */
+const REPO_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/, '');
+
+/**
+ * Repoints a scaffolded project's `@hono-enterprise/*` imports at this
+ * workspace, so the check measures drift against HEAD rather than against a
+ * published snapshot.
+ *
+ * @param root - The project directory
+ */
+async function useWorkspacePackages(root: string): Promise<void> {
+  const manifestPath = `${root}/deno.json`;
+  const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as {
+    imports?: Record<string, string>;
+  };
+  const imports: Record<string, string> = {};
+  for (const specifier of Object.keys(manifest.imports ?? {})) {
+    const pkg = specifier.slice('@hono-enterprise/'.length);
+    imports[specifier] = `${REPO_ROOT}/packages/${pkg}/src/index.ts`;
+  }
+  manifest.imports = imports;
+  await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
 /**
  * Runs `deno check` over a scaffolded project.
- *
- * `--min-dep-age 0` is required: JSR refuses versions younger than a day by
- * default, which would fail the gate for reasons unrelated to drift.
  *
  * @param root - The project directory
  * @param files - Files to check
@@ -55,7 +87,7 @@ const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
  */
 async function denoCheck(root: string, files: readonly string[]) {
   const command = new Deno.Command(Deno.execPath(), {
-    args: ['check', '--min-dep-age', '0', '--config', `${root}/deno.json`, ...files],
+    args: ['check', '--config', `${root}/deno.json`, ...files],
     stdout: 'piped',
     stderr: 'piped',
   });
@@ -159,6 +191,7 @@ describe('template scaffolding — end to end', () => {
     const accepted = HOSTILE_NAMES.filter((n) => n.accepted).length;
     expect(sources.length).toBe(REST_AVAILABLE.length * accepted + 2);
 
+    await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
     expect(code).toBe(0);

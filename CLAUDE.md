@@ -526,8 +526,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `main`**: `g controller` emitted a `decorator-plugin` import while ungated, so a fresh project got
   source whose own import could not resolve — M34's drift gate missed it because the manifest was
   hand-patched to make it pass. Now gated, and `rest` installs `DecoratorPlugin`. That gate spawns
-  `deno check` against the real published packages, so `packages/cli/deno.json` grants `run`+`net`
-  to this package's tests and the suite needs network in CI) — complete (PR pending)
+  `deno check` in a subprocess (so `packages/cli/deno.json` grants `run`) and repoints the generated
+  project's imports at THIS workspace rather than JSR — which is both more correct (drift means
+  disagreement with HEAD, not with a published snapshot) and necessary: `honoe new` pins generated
+  projects to the CLI's own version, so during a version bump the pinned version is not published
+  yet, and checking against JSR would deadlock the release workflow's own test step against the
+  publish that would fix it) — complete (PR pending)
 - **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); M35–M40 follow unless
   reprioritized.
 
