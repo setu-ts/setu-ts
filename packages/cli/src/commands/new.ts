@@ -145,12 +145,10 @@ let booted: Promise<IApplication> | undefined;
  * Workers have no socket to bind, so start() takes no port: it registers the
  * plugins and the platform drives the app through fetch().
  */
-function boot(): Promise<IApplication> {
-  return (async () => {
-    const app = await ${CONFIG_EXPORT}();
-    await app.start();
-    return app;
-  })();
+async function boot(): Promise<IApplication> {
+  const app = await ${CONFIG_EXPORT}();
+  await app.start();
+  return app;
 }
 
 export default {
@@ -174,7 +172,11 @@ export default {
  * @returns Bare package names, deduplicated
  */
 function frameworkPackages(...wirings: readonly (readonly Wiring[])[]): readonly string[] {
-  return packagesOf([{ pkg: 'kernel', symbol: '' }, { pkg: 'common', symbol: '' }], ...wirings);
+  // `kernel` and `common` are unconditional: the config module imports
+  // createApplication and IApplication regardless of the template.
+  const packages = new Set<string>(['kernel', 'common']);
+  for (const pkg of packagesOf(...wirings)) packages.add(pkg);
+  return [...packages];
 }
 
 /**

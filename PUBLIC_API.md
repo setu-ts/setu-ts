@@ -4062,6 +4062,13 @@ honoe commands          # list what this application's plugins provide
 honoe db:migrate up 3   # positionals after the name reach the handler
 ```
 
+Handlers receive positionals only. `honoe` consumes its own flags, so pass a plugin command's flags
+after `--`:
+
+```bash
+honoe db:migrate -- --verbose --dry
+```
+
 Built-in verbs (`new`, `n`, `generate`, `g`, `commands`, `help`) are matched **first** and always
 win, so a plugin cannot shadow them — and those paths never import your project. Only an unmatched
 first positional triggers a boot.
@@ -4159,7 +4166,7 @@ testable without terminating the runner.
 - **Starter-backed templates.** `--template` emits inline wiring; templates resolving to
   `@hono-enterprise/*-starter` wait on Milestone 36, which owns those packages.
 - **Flags for plugin commands.** `CliCommandHandler` receives positionals only; giving handlers a
-  parsed flag record would widen a committed `common` contract.
+  parsed flag record would widen a committed `common` contract. Forward flags with `--` instead.
 - **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
 
 ---

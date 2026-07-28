@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { CliCommandHandler, IApplication, IFileSystem } from '@hono-enterprise/common';
+import type { CliCommandHandler, IFileSystem } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -69,37 +69,63 @@ export interface PluginCommandDependencies {
  * @param use - Receives the discovered commands
  * @returns Whatever `use` returns
  */
-async function withPluginCommands<T>(
+async function withPluginCommands(
   deps: PluginCommandDependencies,
   dir: string,
   config: string | undefined,
-  use: (commands: readonly RegisteredCommand[], app: IApplication) => Promise<T> | T,
-): Promise<T> {
+  use: (commands: readonly RegisteredCommand[]) => Promise<number> | number,
+): Promise<number> {
   const app = await loadApp(dir, config, deps.loadApp);
   try {
     await app.start();
     const commands = app.services.getAll<RegisteredCommand>(CAPABILITIES.CLI_COMMAND);
-    return await use(commands, app);
+
+    // Detected here rather than in each caller: both refuse identically, and
+    // neither should have to remember to.
+    const duplicates = duplicateCounts(commands);
+    if (duplicates.size > 0) {
+      reportDuplicates(duplicates, deps.error);
+      return EXIT_ERROR;
+    }
+
+    return await use(commands);
   } finally {
-    // Safe on every path: stop() no-ops when start() never completed, and is
-    // idempotent. Without it, a bootstrap hook's timer or pool keeps the
-    // process alive after the command finishes.
-    await app.stop();
+    // Teardown is attempted on every path: stop() no-ops when start() never
+    // completed, and is idempotent. Without it, a bootstrap hook's timer or
+    // pool keeps the process alive after the command finishes.
+    //
+    // A FAILING teardown is reported but must NOT change the outcome: masking
+    // a successful `db:migrate` as exit 1 would invite the user to re-run a
+    // non-idempotent command. When the body already threw, that error wins and
+    // this one is reported alongside it.
+    try {
+      await app.stop();
+    } catch (cause) {
+      deps.error(
+        `Warning: the application did not shut down cleanly: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
   }
 }
 
 /**
- * Returns the command names registered more than once.
+ * Counts how many times each command name was registered, keeping only the
+ * names registered more than once.
  *
  * @param commands - The discovered commands
- * @returns Duplicated names, in first-seen order
+ * @returns Duplicated name → registration count
  */
-function duplicateNames(commands: readonly RegisteredCommand[]): readonly string[] {
+function duplicateCounts(commands: readonly RegisteredCommand[]): ReadonlyMap<string, number> {
   const counts = new Map<string, number>();
   for (const command of commands) {
     counts.set(command.name, (counts.get(command.name) ?? 0) + 1);
   }
-  return [...counts].filter(([, count]) => count > 1).map(([name]) => name);
+  for (const [name, count] of counts) {
+    if (count < 2) counts.delete(name);
+  }
+  return counts;
 }
 
 /**
@@ -110,17 +136,14 @@ function duplicateNames(commands: readonly RegisteredCommand[]): readonly string
  * the winner depend on dependency-resolution order — unpredictable, so this is
  * a refusal rather than a race.
  *
- * @param duplicates - The duplicated names
- * @param commands - Every discovered command
+ * @param duplicates - Duplicated name → registration count
  * @param error - Error sink
  */
 function reportDuplicates(
-  duplicates: readonly string[],
-  commands: readonly RegisteredCommand[],
+  duplicates: ReadonlyMap<string, number>,
   error: (message: string) => void,
 ): void {
-  for (const name of duplicates) {
-    const count = commands.filter((command) => command.name === name).length;
+  for (const [name, count] of duplicates) {
     error(`Command "${name}" is registered ${count} times by different plugins.`);
   }
   error('Refusing to run: which registration wins would depend on plugin load order.');
@@ -168,12 +191,6 @@ export async function runCommandsListing(
 
   try {
     return await withPluginCommands(deps, dir, config, (commands) => {
-      const duplicates = duplicateNames(commands);
-      if (duplicates.length > 0) {
-        reportDuplicates(duplicates, commands, deps.error);
-        return EXIT_ERROR;
-      }
-
       if (commands.length === 0) {
         deps.log('No plugin commands are registered by this application.');
         deps.log(
@@ -222,12 +239,6 @@ export async function dispatchPluginCommand(
 
   try {
     return await withPluginCommands(deps, dir, config, async (commands) => {
-      const duplicates = duplicateNames(commands);
-      if (duplicates.length > 0) {
-        reportDuplicates(duplicates, commands, deps.error);
-        return EXIT_ERROR;
-      }
-
       const match = commands.find((command) => command.name === name);
       if (match === undefined) {
         deps.error(`Unknown command: ${name}`);

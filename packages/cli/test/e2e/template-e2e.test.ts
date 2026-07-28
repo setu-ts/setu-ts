@@ -155,8 +155,9 @@ describe('template scaffolding — end to end', () => {
         sources.push(`${project}/src/${entry.name}/${file.name}`);
       }
     }
-    // 6 schematics × 6 accepted names, plus the two entry files.
-    expect(sources.length).toBe(REST_AVAILABLE.length * 6 + 2);
+    // one file per schematic × accepted name, plus the two entry files.
+    const accepted = HOSTILE_NAMES.filter((n) => n.accepted).length;
+    expect(sources.length).toBe(REST_AVAILABLE.length * accepted + 2);
 
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');

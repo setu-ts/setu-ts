@@ -47,12 +47,12 @@ export interface FakeApp extends IApplication {
  * Creates a fake application exposing the given CLI commands.
  *
  * @param commands - Commands to return from `getAll(CLI_COMMAND)`
- * @param options - Set `failStart` to make `start()` reject
+ * @param options - Set `failStart` / `failStop` to make that call reject
  * @returns The fake application
  */
 export function createFakeApp(
   commands: readonly FakeCommand[] = [],
-  options: { readonly failStart?: string } = {},
+  options: { readonly failStart?: string; readonly failStop?: string } = {},
 ): FakeApp {
   const startCalls: (StartOptions | undefined)[] = [];
   let started = false;
@@ -101,7 +101,9 @@ export function createFakeApp(
       if (!started) return Promise.resolve();
       started = false;
       stops++;
-      return Promise.resolve();
+      return options.failStop === undefined
+        ? Promise.resolve()
+        : Promise.reject(new Error(options.failStop));
     },
 
     fetch(): Promise<Response> {

@@ -136,12 +136,93 @@ describe('the no-socket boot', () => {
     expect(h.app.stopCount()).toBe(1);
   });
 
+  describe('a failing teardown', () => {
+    const failing = (name: string, handler: () => void) =>
+      createFakeApp([{ name, handler }], { failStop: 'pool drain timed out' });
+
+    it('does NOT mask a successful command', async () => {
+      // Reporting exit 1 here would invite the user to re-run a
+      // non-idempotent command that already succeeded.
+      let ran = false;
+      const h = harness(failing('db:migrate', () => {
+        ran = true;
+      }));
+      expect(await h.dispatch('db:migrate')).toBe(0);
+      expect(ran).toBe(true);
+    });
+
+    it('still reports the shutdown problem on stderr', async () => {
+      const h = harness(failing('db:migrate', () => {}));
+      await h.dispatch('db:migrate');
+      expect(h.err.text()).toContain('did not shut down cleanly');
+      expect(h.err.text()).toContain('pool drain timed out');
+    });
+
+    it('does not mask a successful listing either', async () => {
+      const h = harness(failing('db:migrate', () => {}));
+      expect(await h.list()).toBe(0);
+      expect(h.out.text()).toContain('db:migrate');
+    });
+
+    it('lets the original failure win when the handler also threw', async () => {
+      const h = harness(createFakeApp([
+        {
+          name: 'db:migrate',
+          handler: () => {
+            throw new Error('migration failed');
+          },
+        },
+      ], { failStop: 'pool drain timed out' }));
+      expect(await h.dispatch('db:migrate')).toBe(1);
+      expect(h.err.text()).toContain('migration failed');
+    });
+  });
+
   it('does not leave a half-started application after a failed start', async () => {
     const h = harness(createFakeApp([], { failStart: 'boom' }));
     await h.list();
     // stop() is still called; the kernel makes it a no-op when start() threw.
     expect(h.app.isStarted()).toBe(false);
     expect(h.app.stopCount()).toBe(0);
+  });
+});
+
+describe('non-Error failures', () => {
+  /** An app whose lifecycle rejects with a bare value rather than an Error. */
+  function rawFailing(stage: 'start' | 'stop') {
+    const app = {
+      services: { getAll: () => [{ name: 'db:migrate', handler: () => {} }] },
+      start: () => stage === 'start' ? Promise.reject('EPERM') : Promise.resolve(),
+      stop: () => stage === 'stop' ? Promise.reject('EBUSY') : Promise.resolve(),
+    };
+    const err = createRecorder();
+    const deps = {
+      fs: createFakeFs({ [CONFIG]: 'x' }),
+      cwd: '/app',
+      log: () => {},
+      error: err.sink,
+      loadApp: () => Promise.resolve({ createApp: () => app as unknown as FakeApp }),
+    };
+    return { err, deps };
+  }
+
+  it('stringifies a non-Error start rejection in the listing', async () => {
+    const { err, deps } = rawFailing('start');
+    expect(await runCommandsListing(parseArgs([]), deps)).toBe(1);
+    expect(err.text()).toContain('EPERM');
+  });
+
+  it('stringifies a non-Error start rejection in dispatch', async () => {
+    const { err, deps } = rawFailing('start');
+    expect(await dispatchPluginCommand('db:migrate', parseArgs([]), deps)).toBe(1);
+    expect(err.text()).toContain('EPERM');
+  });
+
+  it('stringifies a non-Error teardown rejection without masking success', async () => {
+    const { err, deps } = rawFailing('stop');
+    expect(await dispatchPluginCommand('db:migrate', parseArgs([]), deps)).toBe(0);
+    expect(err.text()).toContain('did not shut down cleanly');
+    expect(err.text()).toContain('EBUSY');
   });
 });
 

@@ -115,6 +115,13 @@ register(ctx: IPluginContext): void {
 }
 ```
 
+Handlers receive positionals only. `honoe` consumes its own flags, so pass a plugin command's flags
+after `--`:
+
+```bash
+honoe db:migrate -- --verbose --dry
+```
+
 Built-in verbs (`new`, `generate`, `commands`, `help`) match **first**, so a plugin cannot shadow
 them — and those paths never import your project. Only an unmatched first positional boots it.
 
@@ -173,7 +180,7 @@ purpose: `src/main.ts` owns the process boundary, so every other path stays test
 
 - **Starter-backed templates.** `--template` emits inline wiring; templates that resolve to
   `@hono-enterprise/*-starter` wait on Milestone 36, which owns those packages.
-- **Flags for plugin commands.** Handlers receive positionals only.
+- **Flags for plugin commands.** Handlers receive positionals only; use `--` to forward flags.
 - **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
 
 ## License

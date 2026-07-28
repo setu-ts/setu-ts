@@ -81,8 +81,8 @@ function isApplication(value: unknown): value is IApplication {
 /**
  * Imports the project's config module and calls its factory.
  *
- * The returned application is NOT started — {@linkcode withPluginCommands} owns
- * that, so the caller controls the no-socket boot and the teardown.
+ * The returned application is NOT started: the caller owns the no-socket boot
+ * and the guaranteed teardown (see `commands/plugin-commands.ts`).
  *
  * @param dir - The project root (absolute)
  * @param config - The `--config` override, when supplied
