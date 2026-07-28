@@ -1440,14 +1440,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/sdk
 
-| Aspect               | Detail                                                                  |
-| -------------------- | ----------------------------------------------------------------------- |
-| **Purpose**          | Client SDK for external consumers                                       |
-| **Responsibilities** | HTTP client; auth interceptors; retry; circuit breaker; OpenAPI codegen |
-| **Dependencies**     | `common`, `kernel`                                                      |
-| **Public API**       | `HttpClient`; `createClient()`                                          |
-| **Extension Points** | Custom interceptors                                                     |
-| **Rules**            | Runtime-independent; works in browsers and servers                      |
+| Aspect               | Detail                                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Portable, zero-npm-dependency client SDK for consuming Hono Enterprise APIs from browsers and servers                                                                                                                                                                                                                                       |
+| **Responsibilities** | Injectable HTTP client (`IHttpClient`); bearer/API-key auth interceptors; per-origin retry with backoff, circuit breaker, sliding-window rate limiting; pure OpenAPI 3.1 → TypeScript codegen                                                                                                                                               |
+| **Dependencies**     | `common` only (type-level imports of `RetryPolicy`, `CircuitBreakerPolicy`, `BackoffStrategy`; no kernel, no runtime, no plugins, no npm dependencies)                                                                                                                                                                                      |
+| **Public API**       | Interfaces + factory functions + error classes (`IHttpClient`, `createClient()`, interceptor types, `IClientTiming`, `createDefaultClientTiming()`, `ClientRateLimitPolicy`, re-exported policy types, auth factories, errors, `generateOpenApiClient`, `SdkOpenApi*` types, `OpenApiCodegenOptions`) — NOT the concrete `HttpClient` class |
+| **Extension Points** | Custom request/response interceptors (`ClientRequestInterceptor`, `ClientResponseInterceptor`); injected `fetch` and `IClientTiming` seams                                                                                                                                                                                                  |
+| **Rules**            | Not a plugin; does not register capabilities or resolve tokens; runtime-independent (web `URL`, `Headers`, `AbortSignal`, `performance.now()` only); zero npm dependencies                                                                                                                                                                  |
 
 ---
 
