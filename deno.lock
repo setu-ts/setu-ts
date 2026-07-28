@@ -1792,6 +1792,11 @@
           "jsr:@hono-enterprise/kernel@~0.1.0-alpha.2"
         ]
       },
+      "packages/sdk": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@0.1.0-alpha.2"
+        ]
+      },
       "packages/telemetry-plugin": {
         "dependencies": [
           "jsr:@hono-enterprise/common@~0.1.0-alpha.2"
