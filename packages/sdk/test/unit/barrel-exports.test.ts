@@ -15,7 +15,6 @@ describe('@hono-enterprise/sdk barrel', () => {
 
   it('exports the codegen surface from Part B', () => {
     expect(typeof barrel.generateOpenApiClient).toBe('function');
-    expect(typeof barrel.sanitizeIdentifier).toBe('function');
   });
 
   it('does not leak internal implementation classes', () => {
@@ -34,7 +33,6 @@ describe('@hono-enterprise/sdk barrel', () => {
       'ClientCircuitOpenError',
       'OpenApiCodegenError',
       'generateOpenApiClient',
-      'sanitizeIdentifier',
     ];
     for (const name of expected) {
       expect(Object.keys(barrel)).toContain(name);

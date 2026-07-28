@@ -43,7 +43,7 @@ export {
 export { ClientCircuitOpenError, HttpClientError, OpenApiCodegenError } from './errors.ts';
 
 // Codegen
-export { generateOpenApiClient, sanitizeIdentifier } from './codegen/openapi-codegen.ts';
+export { generateOpenApiClient } from './codegen/openapi-codegen.ts';
 export type { OpenApiCodegenOptions } from './codegen/openapi-codegen.ts';
 export type {
   SdkOpenApiDocument,
