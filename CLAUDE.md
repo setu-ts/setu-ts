@@ -168,6 +168,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `MessagingNotSupportedError` (consumer-group/auto-commit model); exported
   `RequestTimeoutError`/`RemoteHandlerError`/ `MessagingNotSupportedError`; developed in parallel
   with M28 in an isolated worktree off `main`) — complete (PR #60)
+- **Milestone 14d** (`packages/messaging-plugin` — reply-transport seam + Kafka RPC: restores the
+  per-broker `openInbox` seam the M14c plan specified but whose implementation collapsed into a
+  `publish`/`subscribe`/`uuid`/timers delegation object that all four reply-capable brokers passed
+  **byte-identically** — nothing named `IReplyTransport`/`openInbox` ever existed in `packages/`.
+  That generic path works only because in-memory/redis/rabbitmq/nats treat a topic as cheap and
+  per-instance-addressable, which is the real reason Kafka shipped a throw — not anything about
+  consumer groups being inherently unable to do RPC. `RequestReplyDeps` gains `openInbox` returning
+  a `ReplyInbox` (`address` + `close`); the four existing brokers pass the shared internal
+  `createTopicInbox` and are behaviour-identical, while `KafkaBroker` supplies its own — a shared
+  `replyTopic` (default `'messaging.replies'`) read under a per-instance consumer group
+  `rr-inbox-<uuid>`. Chosen because `IKafkaFactory` exposes only `producer()`/`consumer({groupId})`
+  and **no `admin()`**, so per-instance reply-topic creation is unreachable without widening an
+  option-referenced facade; the topic must therefore pre-exist, and cross-instance replies are
+  dropped by the existing correlation-id lookup so no envelope change was needed. Two defects fixed:
+  RPC moved to a derived `rr.req.<topic>` channel (a deliberate **breaking wire change** vs
+  `0.1.0-alpha.2`, recorded in CHANGELOG) so request envelopes stop leaking into plain `subscribe()`
+  consumers and a responder sharing a topic AND a queue with an ordinary subscriber no longer
+  swallows that subscriber's messages (fan-out consumers were never affected — the defect was
+  narrower than the raw envelope leak); and the reply inbox now claims its own queue name, since
+  `KafkaBroker.subscribe` otherwise falls back to the shared `'messaging-consumers'` group and
+  misroutes replies. `MessagingNotSupportedError` is **deprecated, not removed** — AI_GUIDELINES
+  §9.2 governs a published export and beats the dead-surface rule, which targets newly invented
+  surface. No `common` contract change (JSDoc only); developed in an isolated worktree off `main`) —
+  complete (PR pending)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:

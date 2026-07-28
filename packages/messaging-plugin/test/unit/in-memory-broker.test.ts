@@ -234,6 +234,45 @@ describe('InMemoryBroker request-reply', () => {
     await broker.disconnect();
   });
 
+  it('never leaks a request envelope to a plain subscriber on the same topic', async () => {
+    const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+    await broker.connect();
+
+    const seen: unknown[] = [];
+    await broker.subscribe('orders', (message) => {
+      seen.push(message);
+    });
+    await broker.respond<{ id: number }, string>('orders', (req) => `got ${req.id}`);
+
+    await broker.request<{ id: number }, string>('orders', { id: 7 });
+
+    // RPC rides rr.req.orders, so the pub/sub consumer sees nothing at all —
+    // certainly not a raw { kind: 'rr-request', … } envelope.
+    expect(seen).toEqual([]);
+    await broker.disconnect();
+  });
+
+  it('does not let a responder swallow a competing consumer’s message', async () => {
+    const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+    await broker.connect();
+
+    // Same queue = competing consumers, so exactly one of them receives each
+    // message. Before RPC moved to its own channel the responder shared this
+    // queue, and whenever it won the round-robin its envelope guard discarded
+    // the payload outright — the message was simply gone, with no signal.
+    const seen: unknown[] = [];
+    await broker.subscribe('orders', (message) => {
+      seen.push(message);
+    }, { queue: 'workers' });
+    await broker.respond('orders', () => 'rpc', { queue: 'workers' });
+
+    await broker.publish('orders', { n: 1 });
+    await broker.publish('orders', { n: 2 });
+
+    expect(seen).toEqual([{ n: 1 }, { n: 2 }]);
+    await broker.disconnect();
+  });
+
   it('propagates a responder throw as RemoteHandlerError', async () => {
     const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
     await broker.connect();

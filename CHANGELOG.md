@@ -4,6 +4,49 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Kafka now supports brokered request-reply.** `KafkaBroker.request`/`respond` previously rejected
+  outright; all five brokers are now reply-capable. Replies travel on a shared reply topic — the new
+  `replyTopic` option, default `'messaging.replies'` — read by a consumer group unique to each
+  broker instance, so delivery is exclusive to the caller rather than load-balanced across the
+  shared default group. **The reply topic must already exist**: `IKafkaFactory` exposes no admin
+  surface, so the broker creates no topics. Every instance receives every reply and discards those
+  it did not originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+- Each broker now supplies its own reply inbox through an internal seam, rather than having a topic
+  string imposed on it by the shared request-reply core. This is what made Kafka expressible, and it
+  is where a future native AMQP `replyTo` / NATS JetStream reply-subject transport would plug in.
+
+### Changed
+
+- **BREAKING (wire format): request-reply traffic moved to a derived channel.** `request(topic, …)`
+  now publishes to, and `respond(topic, …)` subscribes to, `rr.req.<topic>` instead of `<topic>`. A
+  `0.1.0-alpha.2` responder and a later requester **do not interoperate** — during an upgrade,
+  restart RPC responders and callers together rather than rolling them one at a time.
+  Fire-and-forget `publish`/`subscribe` are unaffected.
+
+### Fixed
+
+- **Request envelopes leaked into plain subscribers.** A responder shared the raw topic with
+  pub/sub, so a `subscribe('orders', …)` handler received the raw `rr-request` envelope instead of
+  the payload. Separate channels fix this at the routing layer.
+- **A responder could swallow a competing consumer's message.** Where a responder and an ordinary
+  subscriber shared a topic _and_ a queue (competing-consumer delivery), the responder consumed its
+  share of the round-robin and its envelope guard discarded anything that was not a request — the
+  message vanished with no signal. Fan-out subscribers were unaffected.
+- **The reply inbox subscribed without a queue name**, so on a broker that falls back to a shared
+  consumer group (Kafka) replies could be delivered to a different instance than the caller, which
+  then discarded them by correlation-id lookup — surfacing as an unexplained timeout. Each inbox now
+  claims its own queue.
+
+### Deprecated
+
+- **`MessagingNotSupportedError`** — no broker throws it now that Kafka implements request-reply.
+  The export is retained so `instanceof` checks written against `alpha.1`/`alpha.2` keep compiling,
+  and will be removed in the next major. Nothing replaces it; delete the branch.
+
 ## [0.1.0-alpha.2] — 2026-07-28
 
 **Adds the CLI.** `@hono-enterprise/cli` publishes for the first time, bringing the total to **36

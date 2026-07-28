@@ -1,8 +1,10 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISubscription, MessageMetadata } from '@hono-enterprise/common';
+import type { ISubscription, MessageMetadata, SubscribeOptions } from '@hono-enterprise/common';
 import { RequestReplyCore } from '../../src/brokers/request-reply-core.ts';
 import type { RequestReplyDeps } from '../../src/brokers/request-reply-core.ts';
+import { createTopicInbox } from '../../src/brokers/inbox.ts';
+import type { ReplyInbox } from '../../src/brokers/inbox.ts';
 import { RemoteHandlerError, RequestTimeoutError } from '../../src/errors.ts';
 
 type Handler = (message: unknown, metadata: MessageMetadata) => void | Promise<void>;
@@ -19,9 +21,11 @@ const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 
 class FakeTransport implements RequestReplyDeps {
   subscribers = new Map<string, Handler[]>();
   published: Array<{ topic: string; message: unknown }> = [];
+  subscribeOptions: Array<{ topic: string; queue?: string }> = [];
   autoDeliver = true;
   clearTimeoutCalls = 0;
   unsubscribeCalls = 0;
+  openInboxCalls = 0;
   publishError: Error | null = null;
   #uuidN = 0;
 
@@ -35,16 +39,34 @@ class FakeTransport implements RequestReplyDeps {
     }
   }
 
-  subscribe(topic: string, handler: Handler): Promise<ISubscription> {
+  subscribe(topic: string, handler: Handler, options?: SubscribeOptions): Promise<ISubscription> {
     const arr = this.subscribers.get(topic) ?? [];
     arr.push(handler);
     this.subscribers.set(topic, arr);
+    this.subscribeOptions.push({
+      topic,
+      ...(options?.queue !== undefined && { queue: options.queue }),
+    });
     return Promise.resolve({
       unsubscribe: (): Promise<void> => {
         this.unsubscribeCalls++;
         return Promise.resolve();
       },
     });
+  }
+
+  /**
+   * Opens the inbox through the REAL `createTopicInbox` helper — the same one
+   * the four generic brokers pass — so this suite exercises the shipped seam
+   * rather than a bespoke stand-in. `subscribe` is resolved at call time so a
+   * test that monkey-patches it still intercepts the inbox subscription.
+   */
+  openInbox(onReply: (message: unknown) => void): Promise<ReplyInbox> {
+    this.openInboxCalls++;
+    return createTopicInbox({
+      subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
+      uuid: () => this.uuid(),
+    })(onReply);
   }
 
   uuid(): string {
@@ -122,7 +144,8 @@ describe('RequestReplyCore', () => {
     const t = new FakeTransport();
     const core = new RequestReplyCore(t);
 
-    // uuid #0 was consumed by the constructor for the inbox topic.
+    // uuid #0 is consumed lazily by openInbox on the first request, #1 by the
+    // correlation id — the inbox is no longer minted in the constructor.
     const inboxTopic = 'rr.inbox.id-0';
 
     let caught: unknown;
@@ -190,7 +213,7 @@ describe('RequestReplyCore', () => {
       return 'ok';
     });
 
-    await t.deliver('topic', { not: 'an-envelope' });
+    await t.deliver('rr.req.topic', { not: 'an-envelope' });
     expect(called).toBe(false);
   });
 
@@ -247,6 +270,74 @@ describe('RequestReplyCore', () => {
     // Inbox topic subscribed once (plus the one responder subscription).
     const inboxSubs = t.subscribers.get('rr.inbox.id-0') ?? [];
     expect(inboxSubs.length).toBe(1);
+    // And the seam itself was entered exactly once, not merely deduped downstream.
+    expect(t.openInboxCalls).toBe(1);
+  });
+
+  it('publishes requests to the derived rr.req channel, never the caller topic', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore(t);
+
+    await core.respond('user.lookup', () => 'ok');
+    await core.request('user.lookup', { id: 1 });
+
+    const requestPublish = t.published.find((p) => p.topic.startsWith('rr.req.'));
+    expect(requestPublish?.topic).toBe('rr.req.user.lookup');
+    // Nothing was ever published to the bare caller topic.
+    expect(t.published.some((p) => p.topic === 'user.lookup')).toBe(false);
+  });
+
+  it('subscribes responders to the derived rr.req channel, never the caller topic', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore(t);
+
+    await core.respond('user.lookup', () => 'ok');
+
+    expect(t.subscribers.has('rr.req.user.lookup')).toBe(true);
+    expect(t.subscribers.has('user.lookup')).toBe(false);
+  });
+
+  it('stamps the inbox address returned by openInbox as the request replyTo', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore(t);
+    t.autoDeliver = false;
+
+    const pending = core.request('q', { a: 1 }, { timeoutMs: 20 });
+    await flush();
+
+    const envelope = t.published[0]?.message as { replyTo?: string };
+    // createTopicInbox minted rr.inbox.id-0; the envelope must carry exactly it.
+    expect(envelope.replyTo).toBe('rr.inbox.id-0');
+
+    await expect(pending).rejects.toBeInstanceOf(RequestTimeoutError);
+  });
+
+  it('opens the inbox with its own queue name so delivery is not load-balanced', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore(t);
+    t.autoDeliver = false;
+
+    const pending = core.request('q', {}, { timeoutMs: 20 });
+    await flush();
+
+    const inboxSub = t.subscribeOptions.find((s) => s.topic.startsWith('rr.inbox.'));
+    expect(inboxSub?.queue).toBe(inboxSub?.topic);
+
+    await expect(pending).rejects.toBeInstanceOf(RequestTimeoutError);
+  });
+
+  it('close() then a later request reopens the inbox rather than reusing a closed one', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore(t);
+    await core.respond('echo', (n) => n);
+
+    await expect(core.request<number>('echo', 1)).resolves.toBe(1);
+    await core.close();
+    expect(t.unsubscribeCalls).toBe(1);
+
+    // A second cycle must open a FRESH inbox (memo cleared by close()).
+    await expect(core.request<number>('echo', 2)).resolves.toBe(2);
+    expect(t.openInboxCalls).toBe(2);
   });
 
   it('recovers when the first inbox subscribe fails', async () => {

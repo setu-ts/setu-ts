@@ -179,6 +179,16 @@ export interface MessagingPluginOptions {
    * @defaultValue `'messaging-client'`
    */
   clientId?: string;
+
+  /**
+   * Topic carrying request-reply responses (used when broker is `'kafka'`).
+   *
+   * Must already exist — the broker creates no topics. See
+   * {@linkcode KafkaOptions.replyTopic}.
+   *
+   * @defaultValue `'messaging.replies'`
+   */
+  replyTopic?: string;
 }
 
 /**
@@ -251,6 +261,18 @@ export interface KafkaOptions {
   clientId?: string;
   /** Default consumer group name. */
   defaultQueue?: string;
+  /**
+   * Topic every request-reply response is published to and read back from.
+   *
+   * Kafka topics are durable cluster resources and this broker creates none, so
+   * the topic must already exist (or `auto.create.topics.enable` must be on).
+   * Each broker instance reads it under its own consumer group, so every
+   * instance sees every reply and discards those it did not originate — give a
+   * high-traffic service its own reply topic to bound that fan-out.
+   *
+   * @defaultValue `'messaging.replies'`
+   */
+  replyTopic?: string;
   /** Optional logger for error reporting. */
   logger?: { error: (msg: string) => void };
 }
