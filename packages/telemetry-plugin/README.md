@@ -67,9 +67,11 @@ services without extra configuration.
 
 The plugin exports to **one** endpoint. To fan a single trace stream out to several vendors, point
 it at an OpenTelemetry Collector — see
-[docs/telemetry-collector-fanout.md](../../docs/telemetry-collector-fanout.md) and the reference
-config in [docker/otel-collector/](../../docker/otel-collector/).
+[docs/telemetry-collector-fanout.md](https://github.com/dkpaul91/hono-enterprise/blob/main/docs/telemetry-collector-fanout.md)
+and the reference config in
+[docker/otel-collector/](https://github.com/dkpaul91/hono-enterprise/tree/main/docker/otel-collector).
 
 ## Full API
 
-Every export and option is documented in [PUBLIC_API.md](../../PUBLIC_API.md).
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).

@@ -3939,7 +3939,7 @@ generation. Install it with an explicit binary name, because Deno's default infe
 after the package (`cli`):
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.1/main
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.2/main
 ```
 
 ### Commands

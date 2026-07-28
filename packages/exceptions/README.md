@@ -41,4 +41,4 @@ app.router.get('/users/:id', async (ctx) => {
 ## Full API
 
 Every export, its signature, and the exact response shapes are documented in
-[PUBLIC_API.md](../../PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).

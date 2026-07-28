@@ -142,22 +142,23 @@ afterEach(() => fixtures.reset());
 `runtime.hrtime()` and must be a monotonic reading — never `Date.now()`. `signal` precedence is
 `request.signal` > `signal` > a live never-aborting signal, matching the kernel.
 
-See [Testing Package](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) in PUBLIC_API.md
-for the full option tables and notes.
+See
+[Testing Package](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+in PUBLIC_API.md for the full option tables and notes.
 
 ## API Reference
 
-- [`createTestApp`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) — Test application
-  factory
-- [`createMockPlugin`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) — Mock plugin
-  builder
-- [`inject`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) — Free-function request
-  injector
-- [`createTestContext`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) — Mock request
-  context builder
-- [`MockServiceRegistry` / `MockResponse`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`createTestApp`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+  — Test application factory
+- [`createMockPlugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+  — Mock plugin builder
+- [`inject`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+  — Free-function request injector
+- [`createTestContext`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+  — Mock request context builder
+- [`MockServiceRegistry` / `MockResponse`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
   — Kernel-faithful doubles
-- [`FixtureManager`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) — Multi-mock
-  fixture manager
-- [`collectStream`](../../PUBLIC_API.md#testing-package-hono-enterprisetesting) — Streaming response
-  reader
+- [`FixtureManager`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+  — Multi-mock fixture manager
+- [`collectStream`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+  — Streaming response reader

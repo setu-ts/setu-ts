@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.2] — unreleased
+
+**Adds the CLI.** `@hono-enterprise/cli` publishes for the first time, bringing the total to **36
+packages**. Every other package is version-bumped so the scope stays on one version — the CLI needs
+this, because `honoe new` stamps generated projects with its OWN version as the range for `kernel`,
+`runtime`, `common`, and every template plugin. A CLI at `alpha.2` alongside a framework at
+`alpha.1` would scaffold projects pinning versions that do not exist.
+
+### Added
+
+- **`@hono-enterprise/cli`** — the `honoe` command: project scaffolding (`honoe new`, with
+  `--template rest|microservice` and `--runtime deno|node|bun|cloudflare-workers`), 13 plugin-aware
+  code-generation schematics, custom schematics, and dispatch of plugin-registered commands
+  (`honoe commands`, `honoe db:migrate`).
+
+### Fixed
+
+- **Package READMEs linked `PUBLIC_API.md` relatively** (`../../PUBLIC_API.md`). JSR resolves a
+  README's relative links against `jsr.io/@hono-enterprise/`, so every such link 400'd with
+  _"package name must contain only lowercase ascii alphanumeric characters and hyphens"_. All 44
+  relative links across 28 package READMEs now use absolute GitHub URLs.
+- **`ICliApi`'s JSDoc** described a contract with no consumer; the CLI now reads it.
+
+### Installing
+
+```bash
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.2/main
+```
+
+Within 24 hours of a release, Deno's minimum-dependency-age policy refuses the version unless you
+pass `--min-dep-age 0`.
+
 ## [0.1.0-alpha.1] — 2026-07-26
 
 **First public prerelease.** The framework's kernel, runtime layer, and 30 plugins are implemented

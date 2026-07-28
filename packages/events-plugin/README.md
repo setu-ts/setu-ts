@@ -4,8 +4,8 @@ In-process domain events. Registers an `IEventBus` under `CAPABILITIES.EVENTS` (
 by `InMemoryEventBus`.
 
 For events that must cross a process boundary, use
-[`@hono-enterprise/messaging-plugin`](../messaging-plugin) — or bridge the two with its
-`EventsMessagingBridge`.
+[`@hono-enterprise/messaging-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/messaging-plugin)
+— or bridge the two with its `EventsMessagingBridge`.
 
 ## Installation
 
@@ -55,4 +55,5 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 
 ## Full API
 
-Every export and option is documented in [PUBLIC_API.md](../../PUBLIC_API.md).
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).

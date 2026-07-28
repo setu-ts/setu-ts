@@ -56,4 +56,5 @@ mistake, not a silent no-op.
 
 ## Full API
 
-Every export and option is documented in [PUBLIC_API.md](../../PUBLIC_API.md).
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).

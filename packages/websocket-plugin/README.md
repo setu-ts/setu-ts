@@ -13,9 +13,11 @@ Reach for WebSockets when the **client also sends**: chat, collaborative editing
 live cursors, interactive dashboards with client-driven subscriptions.
 
 When traffic only flows server → client — notifications, progress feeds, log tailing, metric ticks —
-prefer [`@hono-enterprise/sse-plugin`](../sse-plugin). Server-Sent Events run over ordinary HTTP,
-survive proxies and corporate middleboxes far more reliably, and reconnect automatically in the
-browser. A WebSocket buys you an upstream channel at the cost of all of that.
+prefer
+[`@hono-enterprise/sse-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/sse-plugin).
+Server-Sent Events run over ordinary HTTP, survive proxies and corporate middleboxes far more
+reliably, and reconnect automatically in the browser. A WebSocket buys you an upstream channel at
+the cost of all of that.
 
 ## Runtime support
 

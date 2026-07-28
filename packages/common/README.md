@@ -70,5 +70,8 @@ function parsePort(raw: string): Result<number, RangeError> {
 - Every export is public API: documented in the repository's `PUBLIC_API.md`, JSDoc'd, and covered
   by the backward-compatibility policy.
 
-See the repository's [`PUBLIC_API.md`](../../PUBLIC_API.md) for the full API contract and
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md) for how this package fits the plugin architecture.
+See the repository's
+[`PUBLIC_API.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) for the full
+API contract and
+[`ARCHITECTURE.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) for how
+this package fits the plugin architecture.

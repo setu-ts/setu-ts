@@ -51,8 +51,10 @@ the document metadata).
 
 At registration the plugin drains `CAPABILITIES.OPENAPI_SCHEMA` contributions, so other plugins —
 and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
-[`@hono-enterprise/decorator-plugin`](../decorator-plugin) — can enrich the document.
+[`@hono-enterprise/decorator-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/decorator-plugin)
+— can enrich the document.
 
 ## Full API
 
-Every export and option is documented in [PUBLIC_API.md](../../PUBLIC_API.md).
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
