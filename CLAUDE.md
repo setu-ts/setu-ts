@@ -500,9 +500,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     `experimentalDecorators`. Doc deliverables C1–C6 shipped: `honoe` everywhere, ARCHITECTURE deps
     corrected to `common` + `runtime` (not `kernel`), the `ICliApi` JSDoc no longer claims a
     consumer that does not exist, `metric`/`migration` added to the ROADMAP file list, `--template`
-    dropped to M36) — complete (PR pending)
-- **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); continues the main sequence
-  (M35–M40 follow) unless reprioritized.
+    dropped to M36. Post-implementation code review found and fixed six correctness bugs the gates
+    passed: a relative `--dir` resolved custom schematics to the FILESYSTEM ROOT while built-in
+    schematics resolved against the CWD (fixed by `resolveDir` at both command boundaries);
+    `generate` silently swallowed an invalid `--runtime` that `new` rejected; a name normalizing to
+    nothing wrote a hidden `src/services/.service.ts`; `g route class` emitted `(class) => {` — a
+    SyntaxError, fixed in the TEMPLATE with a fixed `routes` identifier rather than by rejecting the
+    name, since `/class` is a legal route path; a digit-leading name emitted `class 2faService`; and
+    `new --help` exited 2. The last two slipped through because the drift gate only ever used the
+    name `order-item` — M34b's e2e gate takes a hostile-name set) — complete (PR #88)
+- **Milestone 34b** (`packages/cli` — `--template rest|microservice` and plugin-contributed CLI
+  commands via `ICliApi`/`CAPABILITIES.CLI_COMMAND`) — PLANNED, not implemented. Plan lints clean at
+  `plans/milestone-34-b-cli-extensions.md` on `feat/m34b-cli-extensions` (cut from `feat/m34-cli` at
+  `f5ee8bd`, so it needs a rebase onto `main` after PR #88 merges to pick up the review fixes). Key
+  plan findings: the starter packages export NOTHING today, so `--template` emits inline plugin
+  wiring rather than starter imports (no M36 dependency); `start()` skips `listen` with no port but
+  DOES run init/bootstrap hooks, so discovery boots the user's app; M34's generated `main.ts` calls
+  `start({port})` at module scope, hence a `honoe.config.ts` exporting `createApp()`.
+- **Next milestone** — **Milestone 34b** (above) or **Milestone 35** (`packages/sdk` — client SDK);
+  M35–M40 follow unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
