@@ -1,4 +1,6 @@
 /**
+ * @module
+ *
  * `@hono-enterprise/cli` — the `honoe` command-line tool.
  *
  * Provides project scaffolding (`honoe new`) and plugin-aware code generation

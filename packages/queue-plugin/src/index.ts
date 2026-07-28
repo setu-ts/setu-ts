@@ -1,9 +1,9 @@
 /**
+ * @module
+ *
  * Queue plugin for Hono Enterprise.
  *
  * Provides background job queue capability with Memory and Redis adapters.
- *
- * @module
  */
 
 // Re-export the IQueue contract from common
