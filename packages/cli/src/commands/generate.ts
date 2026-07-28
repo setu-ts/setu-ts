@@ -13,11 +13,18 @@ import {
   EXIT_USAGE,
   isTargetRuntime,
   PROGRAM_NAME,
+  TARGET_RUNTIMES,
   type TargetRuntime,
 } from '../constants.ts';
-import { deriveNames } from '../utils/names.ts';
+import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
-import { findExisting, type GeneratedFile, joinPath, writeFiles } from '../utils/file-writer.ts';
+import {
+  findExisting,
+  type GeneratedFile,
+  joinPath,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 import {
   CUSTOM_SCHEMATIC,
   getSchematic,
@@ -89,16 +96,32 @@ export async function runGenerateCommand(
   args: ParsedArgs,
   deps: GenerateDependencies,
 ): Promise<number> {
-  const dir = stringFlag(args.flags, 'dir') ?? deps.cwd;
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const installed = await detectPlugins(deps.fs, dir);
 
-  const schematicName = args.positionals[0];
-  if (schematicName === undefined || args.flags['help'] === true || args.flags['h'] === true) {
+  // `--help` is never an error, with or without a schematic named.
+  if (args.flags['help'] === true || args.flags['h'] === true) {
     printSchematics(installed, deps.log);
-    return schematicName === undefined && args.flags['help'] !== true && args.flags['h'] !== true
-      ? EXIT_USAGE
-      : EXIT_OK;
+    return EXIT_OK;
   }
+
+  const schematicName = args.positionals[0];
+  if (schematicName === undefined) {
+    printSchematics(installed, deps.log);
+    return EXIT_USAGE;
+  }
+
+  const runtimeFlag = stringFlag(args.flags, 'runtime');
+  if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
+    // Rejected rather than defaulted: a custom schematic branches on
+    // `options.runtime`, so silently swallowing a typo would change the
+    // generated output with no diagnostic. `new` rejects it the same way.
+    deps.error(
+      `Unknown runtime "${runtimeFlag}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+    );
+    return EXIT_USAGE;
+  }
+  const runtime: TargetRuntime = runtimeFlag ?? 'deno';
 
   let schematic: Schematic;
   let name: string | undefined;
@@ -142,16 +165,21 @@ export async function runGenerateCommand(
     schematic = metadata.factory;
   }
 
-  const runtimeFlag = stringFlag(args.flags, 'runtime');
-  const runtime: TargetRuntime = runtimeFlag !== undefined && isTargetRuntime(runtimeFlag)
-    ? runtimeFlag
-    : 'deno';
+  const names = deriveNames(name);
+  if (!isIdentifierSafe(names)) {
+    // Schematics interpolate these forms into declarations, so a name that
+    // cannot begin an identifier would emit source that does not parse.
+    deps.error(
+      `Invalid name "${name}": it must contain a letter and must not start with a digit.`,
+    );
+    return EXIT_USAGE;
+  }
 
   const options: SchematicOptions = { runtime, plugins: installed, now: deps.now };
 
   let generated: readonly GeneratedFile[];
   try {
-    generated = schematic(deriveNames(name), options);
+    generated = schematic(names, options);
   } catch (cause) {
     deps.error(
       `Schematic "${schematicName}" failed: ${

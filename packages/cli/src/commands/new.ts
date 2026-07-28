@@ -18,7 +18,13 @@ import {
   VERSION,
 } from '../constants.ts';
 import { deriveNames } from '../utils/names.ts';
-import { findExisting, type GeneratedFile, joinPath, writeFiles } from '../utils/file-writer.ts';
+import {
+  findExisting,
+  type GeneratedFile,
+  joinPath,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -232,9 +238,21 @@ export async function runNewCommand(
   args: ParsedArgs,
   deps: NewDependencies,
 ): Promise<number> {
+  const usage = `Usage: ${PROGRAM_NAME} new <project-name> [--runtime <target>] [--dir <path>]`;
+
+  // `--help` is never an error.
+  if (args.flags['help'] === true || args.flags['h'] === true) {
+    deps.log(usage);
+    deps.log('');
+    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
+    deps.log('  --dir <path>        Create the project under this directory');
+    deps.log('  --dry-run           Print what would be created, write nothing');
+    return EXIT_OK;
+  }
+
   const rawName = args.positionals[0];
   if (rawName === undefined) {
-    deps.error(`Usage: ${PROGRAM_NAME} new <project-name> [--runtime <target>] [--dir <path>]`);
+    deps.error(usage);
     return EXIT_USAGE;
   }
 
@@ -253,7 +271,7 @@ export async function runNewCommand(
     return EXIT_USAGE;
   }
 
-  const root = joinPath(stringFlag(args.flags, 'dir') ?? deps.cwd, projectName);
+  const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), projectName);
   const files = projectFiles(projectName, runtime).map((file) => ({
     path: joinPath(root, file.path),
     contents: file.contents,

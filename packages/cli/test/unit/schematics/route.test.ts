@@ -42,4 +42,13 @@ describe('route schematic', () => {
     expect(file.contents).toContain("ctx.params['id']");
     expect(file.contents).not.toContain('ctx.request.params');
   });
+
+  it('binds the group callback to a fixed identifier, not the derived name', () => {
+    // A resource legitimately called `class` must not land in a binding
+    // position — `(class) => {}` does not parse.
+    const reserved = generateRoute(deriveNames('class'), options())[0];
+    expect(reserved.contents).toContain("router.group('/class', (routes) => {");
+    expect(reserved.contents).toContain('routes.get(');
+    expect(reserved.contents).not.toContain('(class)');
+  });
 });

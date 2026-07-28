@@ -62,16 +62,19 @@ package to install, and `honoe generate --help` lists only what is available her
 
 ## Options
 
-| Option               | Behavior                                                              |
-| -------------------- | --------------------------------------------------------------------- |
-| `--dry-run`          | Prints `would create <path>` per file and writes absolutely nothing.  |
-| `--dir <path>`       | Operate on this directory instead of the working directory.           |
-| `--runtime <target>` | `new` only: selects the entry shape and manifest. Defaults to `deno`. |
-| `--help`, `-h`       | Prints usage.                                                         |
-| `--version`, `-v`    | Prints the version.                                                   |
+| Option               | Behavior                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| `--dry-run`          | Prints `would create <path>` per file and writes absolutely nothing.                            |
+| `--dir <path>`       | Operate on this directory instead of the working directory.                                     |
+| `--runtime <target>` | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`. |
+| `--help`, `-h`       | Prints usage.                                                                                   |
+| `--version`, `-v`    | Prints the version.                                                                             |
 
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
-error (unknown command or schematic, missing argument).
+error (unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot
+form an identifier — empty after normalization, or digit-leading such as `2fa`).
+
+A relative `--dir` is resolved against the working directory.
 
 **Nothing is ever overwritten.** A generate that would clobber any existing file writes none of them
 — every planned path is checked before the first write, so a multi-file schematic cannot leave a

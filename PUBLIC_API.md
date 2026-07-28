@@ -3980,21 +3980,21 @@ Any casing of the name produces identical output: `honoe g controller user-profi
 
 ### Options
 
-| Option                                          | Commands          | Behavior                                                                                           |
-| ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
-| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`             | Selects the entry shape and manifest. Defaults to `deno`. An unknown value is a usage error (`2`). |
-| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory.                                        |
-| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.       |
-| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `honoe generate --help` lists only the schematics available here.      |
-| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                          |
+| Option                                          | Commands          | Behavior                                                                                                                                                                                                               |
+| ----------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both. |
+| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                 |
+| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                           |
+| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `honoe generate --help` lists only the schematics available here.                                                                                                                          |
+| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                              |
 
 ### Exit codes
 
-| Code | Meaning                                                                                    |
-| ---- | ------------------------------------------------------------------------------------------ |
-| `0`  | Success (including `--help` and `--version`).                                              |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed. |
-| `2`  | Usage error: unknown command, unknown schematic, missing argument, unknown `--runtime`.    |
+| Code | Meaning                                                                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success (including `--help` and `--version`).                                                                                                                             |
+| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed.                                                                                |
+| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
 
 ### Plugin gating
 

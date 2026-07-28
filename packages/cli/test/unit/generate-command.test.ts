@@ -172,6 +172,12 @@ describe('runGenerateCommand', () => {
       expect(await h.run(['-h'])).toBe(0);
     });
 
+    it('returns 0 for --help even when a schematic is named', async () => {
+      const h = harness();
+      expect(await h.run(['service', 'billing', '--help'])).toBe(0);
+      expect(h.fs.writes).toEqual([]);
+    });
+
     it('marks a gated schematic unavailable in --help when its plugin is absent', async () => {
       const h = harness();
       await h.run(['--help']);
@@ -289,7 +295,7 @@ describe('runGenerateCommand', () => {
       expect(seen).toEqual({ runtime: 'bun', plugins: ['cache-plugin'] });
     });
 
-    it('defaults the runtime target to deno for an unrecognised value', async () => {
+    it('defaults the runtime target to deno when the flag is absent', async () => {
       let seen: string | undefined;
       const load = () =>
         Promise.resolve({
@@ -302,8 +308,21 @@ describe('runGenerateCommand', () => {
           },
         });
       const h = harness();
-      await h.run(['custom', 'probe', 'thing', '--runtime', 'solaris'], load);
+      await h.run(['custom', 'probe', 'thing'], load);
       expect(seen).toBe('deno');
+    });
+
+    it('resolves the schematic module against the cwd for a relative --dir', async () => {
+      // Regression: a relative --dir produced file:///proj/... — the filesystem
+      // ROOT — so custom schematics were unreachable outside an absolute --dir.
+      let seenUrl: string | undefined;
+      const load = (url: string) => {
+        seenUrl = url;
+        return Promise.resolve({ schematic: () => [{ path: 'x.txt', contents: 'x' }] });
+      };
+      const h = harness();
+      expect(await h.run(['custom', 'probe', 'thing', '--dir', 'proj'], load)).toBe(0);
+      expect(seenUrl).toBe('file:///app/proj/.hono-enterprise/schematics/probe.ts');
     });
   });
 
@@ -319,6 +338,47 @@ describe('runGenerateCommand', () => {
     });
     expect(code).toBe(1);
     expect(err.text()).toContain('Failed to write: read-only fs');
+  });
+
+  describe('--runtime validation', () => {
+    it('rejects an unknown runtime with exit 2 and zero writes', async () => {
+      const h = harness();
+      expect(await h.run(['service', 'billing', '--runtime', 'solaris'])).toBe(2);
+      expect(h.err.text()).toContain('Unknown runtime "solaris"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('accepts every supported runtime', async () => {
+      for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers']) {
+        const h = harness();
+        expect(await h.run(['service', 'billing', '--runtime', runtime])).toBe(0);
+      }
+    });
+  });
+
+  describe('name validation', () => {
+    it('rejects a name that normalises to nothing, writing nothing', async () => {
+      // Previously emitted src/services/.service.ts containing `class Service`.
+      const h = harness();
+      expect(await h.run(['service', '___'])).toBe(2);
+      expect(h.err.text()).toContain('Invalid name "___"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('rejects a digit-leading name, writing nothing', async () => {
+      // Previously emitted `class 2faService`, which does not parse.
+      const h = harness();
+      expect(await h.run(['service', '2fa'])).toBe(2);
+      expect(h.err.text()).toContain('Invalid name "2fa"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('accepts a reserved word, which schematics always affix', async () => {
+      const h = harness();
+      expect(await h.run(['route', 'class'])).toBe(0);
+      expect(h.fs.read('/app/src/routes/class.routes.ts'))
+        .toContain('export function registerClassRoutes');
+    });
   });
 
   it('reports a non-Error write failure', async () => {

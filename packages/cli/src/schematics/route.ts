@@ -9,6 +9,11 @@ import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.t
 /**
  * Generates a route registration module.
  *
+ * The group callback's parameter is the fixed identifier `routes`, never the
+ * derived name: a resource legitimately called `class` (or `new`, `for`, …)
+ * would otherwise be interpolated into a binding position and emit source that
+ * does not parse.
+ *
  * @param names - Naming forms derived from the user's input
  * @param _options - Unused: routes are runtime-agnostic
  * @returns One file at `src/routes/<kebab>.routes.ts`
@@ -28,12 +33,12 @@ export function generateRoute(
  * @param router - The router to register on
  */
 export function register${names.pascal}Routes(router: IRouterApi): void {
-  router.group('/${names.kebab}', (${names.camel}) => {
-    ${names.camel}.get('/', (ctx) => ctx.response.json({ items: [] }));
+  router.group('/${names.kebab}', (routes) => {
+    routes.get('/', (ctx) => ctx.response.json({ items: [] }));
 
-    ${names.camel}.get('/:id', (ctx) => ctx.response.json({ id: ctx.params['id'] }));
+    routes.get('/:id', (ctx) => ctx.response.json({ id: ctx.params['id'] }));
 
-    ${names.camel}.post('/', (ctx) => ctx.response.status(201).json({ created: true }));
+    routes.post('/', (ctx) => ctx.response.status(201).json({ created: true }));
   });
 }
 `;

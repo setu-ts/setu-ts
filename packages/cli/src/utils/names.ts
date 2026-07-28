@@ -65,3 +65,25 @@ export function deriveNames(raw: string): DerivedNames {
     screaming,
   };
 }
+
+/**
+ * Reports whether these names can form valid TypeScript identifiers.
+ *
+ * Schematics interpolate the derived forms into declarations
+ * (`class <Pascal>Service`, `const <SCREAMING>_JOB`), so a name that cannot
+ * begin an identifier emits source that does not parse. Two inputs fail:
+ *
+ * - one that normalizes to nothing (`___`), which would emit `class Service`
+ *   at the hidden path `src/services/.service.ts`;
+ * - one starting with a digit (`2fa`), which would emit `class 2faService`.
+ *
+ * Reserved words (`class`, `new`) are NOT rejected: every schematic prefixes or
+ * suffixes the derived form, so `class` yields the perfectly valid
+ * `ClassService`, and `/class` is a legitimate route path.
+ *
+ * @param names - The derived naming forms to test
+ * @returns True when every schematic can safely interpolate these names
+ */
+export function isIdentifierSafe(names: DerivedNames): boolean {
+  return names.kebab !== '' && !/^[0-9]/.test(names.pascal);
+}

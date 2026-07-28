@@ -1,7 +1,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
-import { dirName, findExisting, joinPath, writeFiles } from '../../src/utils/file-writer.ts';
+import {
+  dirName,
+  findExisting,
+  joinPath,
+  resolveDir,
+  writeFiles,
+} from '../../src/utils/file-writer.ts';
 
 describe('joinPath', () => {
   it('joins relative segments', () => {
@@ -22,6 +28,30 @@ describe('joinPath', () => {
 
   it('returns an empty string for no segments', () => {
     expect(joinPath()).toBe('');
+  });
+});
+
+describe('resolveDir', () => {
+  it('returns the cwd when no --dir was supplied', () => {
+    expect(resolveDir('/work')).toBe('/work');
+  });
+
+  it('returns the cwd for an empty --dir', () => {
+    expect(resolveDir('/work', '')).toBe('/work');
+  });
+
+  it('passes an absolute --dir through, normalized', () => {
+    expect(resolveDir('/work', '/tmp//sandbox/')).toBe('/tmp/sandbox');
+  });
+
+  it('anchors a relative --dir to the cwd', () => {
+    // Regression: a relative --dir used to reach `import()` as `/proj/...`,
+    // resolving against the filesystem ROOT instead of the cwd.
+    expect(resolveDir('/work', 'proj')).toBe('/work/proj');
+  });
+
+  it('anchors a dot-relative --dir to the cwd', () => {
+    expect(resolveDir('/work', './proj/nested')).toBe('/work/./proj/nested');
   });
 });
 

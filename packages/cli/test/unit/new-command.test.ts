@@ -34,10 +34,16 @@ describe('runNewCommand', () => {
     expect(h.fs.has('/work/my-app/.gitignore')).toBe(true);
   });
 
-  it('roots the project at --dir', async () => {
+  it('roots the project at an absolute --dir', async () => {
     const h = harness();
     expect(await h.run(['my-app', '--dir', '/tmp/sandbox'])).toBe(0);
     expect(h.fs.has('/tmp/sandbox/my-app/deno.json')).toBe(true);
+  });
+
+  it('anchors a relative --dir to the working directory', async () => {
+    const h = harness();
+    expect(await h.run(['my-app', '--dir', 'sandbox'])).toBe(0);
+    expect(h.fs.has('/work/sandbox/my-app/deno.json')).toBe(true);
   });
 
   it('normalises the project name to kebab-case', async () => {
@@ -164,6 +170,18 @@ describe('runNewCommand', () => {
       expect(await h.run(['___'])).toBe(2);
       expect(h.err.text()).toContain('Invalid project name');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    it('returns 0 for --help, never a usage error', async () => {
+      const h = harness();
+      expect(await h.run(['--help'])).toBe(0);
+      expect(h.out.text()).toContain('new <project-name>');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('returns 0 for -h', async () => {
+      const h = harness();
+      expect(await h.run(['-h'])).toBe(0);
     });
 
     it('treats a leading-dash name as a flag, not a project name', async () => {

@@ -38,6 +38,25 @@ export function joinPath(...segments: readonly string[]): string {
 }
 
 /**
+ * Resolves a command's target directory to an absolute path.
+ *
+ * A relative `--dir` must be anchored to the CLI's working directory here, at
+ * the command boundary, so that EVERY downstream consumer agrees on the same
+ * location. Filesystem calls would resolve a relative path against the process
+ * CWD on their own, but `import()` of a custom schematic would not: prefixing
+ * `/` to a relative path resolves it against the filesystem ROOT, which made
+ * `--dir some/project` look for schematics in `/some/project`.
+ *
+ * @param cwd - The CLI's working directory (absolute)
+ * @param dir - The `--dir` value, when supplied
+ * @returns An absolute, separator-normalized directory
+ */
+export function resolveDir(cwd: string, dir?: string): string {
+  if (dir === undefined || dir === '') return joinPath(cwd);
+  return dir.startsWith('/') ? joinPath(dir) : joinPath(cwd, dir);
+}
+
+/**
  * Returns the parent directory of a path, or `''` when it has no parent.
  *
  * @param path - The path to inspect
