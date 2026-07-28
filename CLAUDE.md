@@ -509,16 +509,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     name, since `/class` is a legal route path; a digit-leading name emitted `class 2faService`; and
     `new --help` exited 2. The last two slipped through because the drift gate only ever used the
     name `order-item` — M34b's e2e gate takes a hostile-name set) — complete (PR #88)
-- **Milestone 34b** (`packages/cli` — `--template rest|microservice` and plugin-contributed CLI
-  commands via `ICliApi`/`CAPABILITIES.CLI_COMMAND`) — PLANNED, not implemented. Plan lints clean at
-  `plans/milestone-34-b-cli-extensions.md` on `feat/m34b-cli-extensions` (cut from `feat/m34-cli` at
-  `f5ee8bd`, so it needs a rebase onto `main` after PR #88 merges to pick up the review fixes). Key
-  plan findings: the starter packages export NOTHING today, so `--template` emits inline plugin
-  wiring rather than starter imports (no M36 dependency); `start()` skips `listen` with no port but
-  DOES run init/bootstrap hooks, so discovery boots the user's app; M34's generated `main.ts` calls
-  `start({port})` at module scope, hence a `honoe.config.ts` exporting `createApp()`.
-- **Next milestone** — **Milestone 34b** (above) or **Milestone 35** (`packages/sdk` — client SDK);
-  M35–M40 follow unless reprioritized.
+- **Milestone 34b** (`packages/cli` — `honoe new --template rest|microservice`, a `honoe.config.ts`
+  application seam, and discovery/dispatch of plugin-contributed CLI commands via
+  `ICliApi`/`CAPABILITIES.CLI_COMMAND`, committed since M1 with no reader until now. Every
+  scaffolded project — templated or not — exports `createApp()` from `honoe.config.ts`; `main.ts`
+  imports it to start the server and the CLI imports it to find commands, so the plugin list has ONE
+  home. The factory must NOT start the app: M34's `main.ts` called `start({port})` at module scope,
+  so importing that would bind a socket. Templates emit INLINE wiring, never `*-starter` imports —
+  those packages still `export {}` and M36 owns them — with `rest` = 9 plugins + `errorHandler()`
+  MIDDLEWARE (`exceptions` ships middleware, not a plugin) and `microservice` = rest +
+  messaging/queue/resilience/telemetry, refused on `cloudflare-workers` because brokers need raw
+  sockets. Discovery calls `start()` with NO port (the kernel skips `listen` without one), but
+  init/bootstrap hooks DO run — a database plugin connects — so teardown is unconditional; built-in
+  verbs match first and never boot the project; duplicate command names are refused rather than
+  resolved by plugin load order. **The hostile-name e2e gate found an M34 defect already merged to
+  `main`**: `g controller` emitted a `decorator-plugin` import while ungated, so a fresh project got
+  source whose own import could not resolve — M34's drift gate missed it because the manifest was
+  hand-patched to make it pass. Now gated, and `rest` installs `DecoratorPlugin`. That gate spawns
+  `deno check` against the real published packages, so `packages/cli/deno.json` grants `run`+`net`
+  to this package's tests and the suite needs network in CI) — complete (PR pending)
+- **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); M35–M40 follow unless
+  reprioritized.
 
 ## Verification (run before declaring any work done)
 

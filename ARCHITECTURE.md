@@ -1429,14 +1429,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/cli
 
-| Aspect               | Detail                                                                                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | CLI tool with generators                                                                                                                        |
-| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                   |
-| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text, never builds an app)                                                             |
-| **Public API**       | The `honoe` command; `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                   |
-| **Extension Points** | Custom schematics loaded from `.hono-enterprise/schematics/` by real dynamic import                                                             |
-| **Rules**            | Plugin-aware: reads the target project's manifest, never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing |
+| Aspect               | Detail                                                                                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | CLI tool with generators                                                                                                                                                                                                                                                       |
+| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                                                                                                                                                  |
+| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text and loads the user's app through `IApplication`, never constructing one itself)                                                                                                                                  |
+| **Public API**       | The `honoe` command (`new`, `generate`, `commands`); `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                                                                                                                  |
+| **Extension Points** | Custom schematics from `.hono-enterprise/schematics/`; plugin commands via `ICliApi`, read by loading the project's `honoe.config.ts`                                                                                                                                          |
+| **Rules**            | Generation reads the target project's manifest and never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing. Plugin-command discovery is the one path that DOES boot the app — via `honoe.config.ts`, with no port and guaranteed teardown |
 
 #### @hono-enterprise/sdk
 

@@ -3948,6 +3948,12 @@ deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.1/main
 # Scaffold a project (creates ./my-app)
 honoe new my-app
 honoe new my-app --runtime node                 # deno | node | bun | cloudflare-workers
+honoe new my-app --template rest                # rest | microservice
+honoe new my-app --template microservice --runtime bun
+
+# Commands this application's plugins provide
+honoe commands
+honoe db:migrate up 3                           # runs a plugin-registered command
 
 # Generate code
 honoe generate plugin my-plugin
@@ -3990,11 +3996,11 @@ Any casing of the name produces identical output: `honoe g controller user-profi
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                                                                   |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success (including `--help` and `--version`).                                                                                                                             |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed.                                                                                |
-| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| Code | Meaning                                                                                                                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success (including `--help` and `--version`).                                                                                                                                                       |
+| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice. |
+| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot form an identifier (empty after normalization, or digit-leading).                           |
 
 ### Plugin gating
 
@@ -4007,6 +4013,61 @@ code `1`, naming the package to install, and `honoe generate --help` marks it un
 
 A generate that would overwrite ANY existing file writes NOTHING at all — every planned path is
 checked before the first write, so a multi-file schematic can never leave a half-written tree.
+
+### Project templates
+
+`honoe new` always emits a `honoe.config.ts` exporting `createApp()` — one place the project's
+plugin list lives. `main.ts` imports it to start the server, and `honoe` imports it to discover
+plugin commands, so the two can never disagree. The factory deliberately does NOT start the
+application.
+
+```typescript
+// honoe.config.ts (--template rest)
+import { createApplication } from '@hono-enterprise/kernel';
+import type { IApplication } from '@hono-enterprise/common';
+import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { ConfigPlugin } from '@hono-enterprise/config-plugin';
+// … logging, validation, security, health, metrics, OpenAPI, decorators
+import { errorHandler } from '@hono-enterprise/exceptions';
+
+export function createApp(): IApplication {
+  const app = createApplication({ plugins: [RuntimePlugin(), ConfigPlugin()] });
+  app.middleware.add(errorHandler());
+  app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+  return app;
+}
+```
+
+| Template       | Plugin set                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| _(none)_       | `RuntimePlugin` only.                                                                                      |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
+| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+
+Templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter` packages — those
+export nothing today and are owned by Milestone 36.
+`--template microservice --runtime
+cloudflare-workers` is refused (`2`): the messaging and queue
+plugins need raw sockets, which Workers does not provide.
+
+### Plugin-contributed commands
+
+A plugin publishes commands with `ctx.cli.register(name, handler)`; the CLI discovers them by
+loading `honoe.config.ts` and starting the application with **no port**, so registration happens
+without binding a socket. The application is always stopped afterwards, including when a handler
+throws.
+
+```bash
+honoe commands          # list what this application's plugins provide
+honoe db:migrate up 3   # positionals after the name reach the handler
+```
+
+Built-in verbs (`new`, `n`, `generate`, `g`, `commands`, `help`) are matched **first** and always
+win, so a plugin cannot shadow them — and those paths never import your project. Only an unmatched
+first positional triggers a boot.
+
+Two plugins registering the same command name is an error (`1`) that runs neither: which
+registration wins would otherwise depend on plugin load order.
 
 ### Generated plugin example
 
@@ -4084,6 +4145,9 @@ they return, which is what makes `--dry-run` exact.
 | `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                              |
 | `SchematicOptions` | type     | The second parameter of every schematic.                                     |
 | `PROGRAM_NAME`     | const    | `'honoe'` — interpolated into every usage string.                            |
+| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically.    |
+| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                        |
+| `AppLoader`        | type     | The seam `honoe.config.ts` is loaded through (`CliDependencies.loadApp`).    |
 | `detectPlugins`    | function | Reads a project manifest and returns the installed `@hono-enterprise` names. |
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
@@ -4092,10 +4156,11 @@ testable without terminating the runner.
 
 ### Not in this release
 
-- **Plugin-contributed CLI commands.** `ICliApi` / `CAPABILITIES.CLI_COMMAND` let a plugin register
-  commands, but the CLI does not yet discover them — that requires booting the user's application
-  and is deferred to a follow-up milestone.
-- **`new --template rest|microservice`.** The starter packages arrive in Milestone 36.
+- **Starter-backed templates.** `--template` emits inline wiring; templates resolving to
+  `@hono-enterprise/*-starter` wait on Milestone 36, which owns those packages.
+- **Flags for plugin commands.** `CliCommandHandler` receives positionals only; giving handlers a
+  parsed flag record would widen a committed `common` contract.
+- **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
 
 ---
 

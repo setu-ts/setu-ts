@@ -40,6 +40,8 @@ export type { Schematic, SchematicOptions } from './schematics/registry.ts';
 
 /** The contract a `.hono-enterprise/schematics/*.ts` module is loaded through. */
 export type { ModuleLoader } from './schematics/custom.ts';
+/** The contract the target project's `honoe.config.ts` is loaded through. */
+export type { AppLoader } from './app-loader.ts';
 
 /** The installed name of the CLI executable, interpolated into all help text. */
 export { PROGRAM_NAME } from './constants.ts';
