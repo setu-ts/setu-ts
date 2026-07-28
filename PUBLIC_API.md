@@ -3934,75 +3934,168 @@ const spec = openapi.getSpec();
 
 ## CLI
 
-Provides scaffolding and code generation.
+`@hono-enterprise/cli` ships the `honoe` executable: project scaffolding and plugin-aware code
+generation. Install it with an explicit binary name, because Deno's default inference would name it
+after the package (`cli`):
+
+```bash
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.1/main
+```
 
 ### Commands
 
 ```bash
-# Create a new project
+# Scaffold a project (creates ./my-app)
 honoe new my-app
+honoe new my-app --runtime node                 # deno | node | bun | cloudflare-workers
+
+# Generate code
 honoe generate plugin my-plugin
-honoe generate controller UserController
-honoe generate service UserService
+honoe generate controller user-profile
+honoe generate service user-profile
 honoe generate route users
 honoe generate middleware rate-limit
-honoe generate guard admin-only
-honoe generate health-indicator external-api
-honoe generate command-handler CreateUser
-honoe generate query-handler GetUser
-honoe generate event-handler UserCreatedHandler
+honoe generate guard admin-only                 # requires @hono-enterprise/auth-plugin
+honoe generate health-indicator external-api    # requires @hono-enterprise/health-plugin
+honoe generate metric orders-placed             # requires @hono-enterprise/metrics-plugin
+honoe generate command-handler create-user      # requires @hono-enterprise/cqrs-plugin
+honoe generate query-handler get-user           # requires @hono-enterprise/cqrs-plugin
+honoe generate event-handler user-created       # requires @hono-enterprise/events-plugin
 honoe generate job send-welcome-email
-honoe generate migration add_users_table
+honoe generate migration add-users-table        # requires @hono-enterprise/database-plugin
+
+# Custom schematics, loaded from .hono-enterprise/schematics/<schematic>.ts
+honoe generate custom my-schematic order-item
 
 # Aliases
-honoe g controller UserController
-honoe g service UserService
+honoe n my-app
+honoe g service user-profile
 
-# Dry run
-honoe g controller UserController --dry-run
-
-# Custom schematics
-honoe g custom my-schematic
+# Print the plan, write nothing
+honoe g controller user-profile --dry-run
 ```
 
-### Generated Plugin Example
+Any casing of the name produces identical output: `honoe g controller user-profile` and
+`honoe g controller UserProfile` emit the same file.
+
+### Options
+
+| Option                                          | Commands          | Behavior                                                                                           |
+| ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`             | Selects the entry shape and manifest. Defaults to `deno`. An unknown value is a usage error (`2`). |
+| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory.                                        |
+| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.       |
+| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `honoe generate --help` lists only the schematics available here.      |
+| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                          |
+
+### Exit codes
+
+| Code | Meaning                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------ |
+| `0`  | Success (including `--help` and `--version`).                                              |
+| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed. |
+| `2`  | Usage error: unknown command, unknown schematic, missing argument, unknown `--runtime`.    |
+
+### Plugin gating
+
+`honoe generate` reads the target project's `deno.json` `imports` (falling back to `package.json`
+`dependencies` + `devDependencies`) to learn which `@hono-enterprise` packages are installed. It
+never imports or boots the project. A schematic whose backing plugin is absent is refused with exit
+code `1`, naming the package to install, and `honoe generate --help` marks it unavailable.
+
+### Overwrite protection
+
+A generate that would overwrite ANY existing file writes NOTHING at all — every planned path is
+checked before the first write, so a multi-file schematic can never leave a half-written tree.
+
+### Generated plugin example
 
 ```bash
 honoe g plugin my-plugin
 ```
 
-Generates:
+Generates `src/plugins/my-plugin.ts`:
 
 ```typescript
-// src/plugins/my-plugin.ts
-import type { IPlugin } from '@hono-enterprise/common';
+import { createCapabilityToken } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
 
-export interface MyPluginOptions {
-  // Add your options here
+/** Capability token this plugin provides. */
+export const MY_PLUGIN = createCapabilityToken('my-plugin');
+
+/** The service registered under {@linkcode MY_PLUGIN}. */
+export interface IMyPluginService {
+  /** Replace with the capability this plugin publishes. */
+  describe(): string;
 }
 
-export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
+/**
+ * Registers the my-plugin capability.
+ *
+ * @returns The plugin to pass to `createApplication({ plugins: [...] })`
+ */
+export function MyPluginPlugin(): IPlugin {
   return {
     name: 'my-plugin',
-    version: '1.0.0',
-    register(ctx) {
-      // Register services
-      // ctx.services.register('my-service', new MyService(options));
-
-      // Register routes
-      // ctx.router.get('/my-route', (ctx) => ctx.response.json({ ok: true }));
-
-      // Register health checks
-      // ctx.health.register('my-service', async () => ({ status: 'up' }));
-
-      // Register lifecycle hooks
-      ctx.lifecycle.onShutdown(() => {
-        console.log('My plugin shutting down');
-      });
+    version: '0.1.0',
+    provides: [MY_PLUGIN],
+    register(ctx: IPluginContext): void {
+      const service: IMyPluginService = {
+        describe: () => 'my-plugin',
+      };
+      ctx.services.register(MY_PLUGIN, service);
     },
   };
 }
 ```
+
+### Custom schematics
+
+`honoe generate custom <schematic> <name>` resolves `.hono-enterprise/schematics/<schematic>.ts` and
+loads it with a real dynamic `import()`. The module must export a `schematic` function (or a default
+export that is a function):
+
+```typescript
+// .hono-enterprise/schematics/readme.ts
+import type { DerivedNames, GeneratedFile, SchematicOptions } from '@hono-enterprise/cli';
+
+export function schematic(
+  names: DerivedNames,
+  options: SchematicOptions,
+): readonly GeneratedFile[] {
+  return [{ path: `docs/${names.kebab}.md`, contents: `# ${names.pascal}\n` }];
+}
+```
+
+`DerivedNames` carries `raw`, `kebab`, `camel`, `pascal`, and `screaming`. `SchematicOptions`
+carries the target `runtime`, the detected `plugins` set, and `now()` — an injected clock, so
+timestamped output stays deterministic. Schematics perform no I/O; the command layer writes what
+they return, which is what makes `--dry-run` exact.
+
+### Programmatic API
+
+| Export             | Kind     | Purpose                                                                      |
+| ------------------ | -------- | ---------------------------------------------------------------------------- |
+| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.              |
+| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.         |
+| `deriveNames`      | function | Produces the five naming forms every schematic uses.                         |
+| `DerivedNames`     | type     | The result of `deriveNames`.                                                 |
+| `GeneratedFile`    | type     | `{ path, contents }` — one file a schematic asks to create.                  |
+| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                              |
+| `SchematicOptions` | type     | The second parameter of every schematic.                                     |
+| `PROGRAM_NAME`     | const    | `'honoe'` — interpolated into every usage string.                            |
+| `detectPlugins`    | function | Reads a project manifest and returns the installed `@hono-enterprise` names. |
+
+`CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
+`Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is
+testable without terminating the runner.
+
+### Not in this release
+
+- **Plugin-contributed CLI commands.** `ICliApi` / `CAPABILITIES.CLI_COMMAND` let a plugin register
+  commands, but the CLI does not yet discover them — that requires booting the user's application
+  and is deferred to a follow-up milestone.
+- **`new --template rest|microservice`.** The starter packages arrive in Milestone 36.
 
 ---
 

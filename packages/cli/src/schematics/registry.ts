@@ -1,12 +1,17 @@
 /**
- * Schematic registry — maps names to schematic functions with plugin requirements.
+ * The schematic contract and the built-in schematic registry.
+ *
+ * This module is the single source `honoe generate` and the help text read —
+ * schematic names, their factories, and their plugin gates are declared here
+ * and nowhere else.
  *
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { TargetRuntime } from '../constants.ts';
+import type { GeneratedFile } from '../utils/file-writer.ts';
+import type { DerivedNames } from '../utils/names.ts';
 
-// Import individual schematic factories
 import { generatePlugin } from './plugin.ts';
 import { generateController } from './controller.ts';
 import { generateService } from './service.ts';
@@ -21,11 +26,31 @@ import { generateEventHandler } from './event-handler.ts';
 import { generateJob } from './job.ts';
 import { generateMigration } from './migration.ts';
 
+export type { GeneratedFile } from '../utils/file-writer.ts';
+export type { DerivedNames } from '../utils/names.ts';
+
 /**
- * The contract a schematic must satisfy.
+ * Options handed to every schematic.
+ */
+export interface SchematicOptions {
+  /** The project's runtime target, so a schematic can shape platform-specific output. */
+  readonly runtime: TargetRuntime;
+  /** The `@hono-enterprise` packages detected in the target project. */
+  readonly plugins: ReadonlySet<string>;
+  /**
+   * Wall-clock milliseconds, injected so timestamped output (the migration
+   * schematic) is deterministic under test.
+   */
+  readonly now: () => number;
+}
+
+/**
+ * The contract every schematic satisfies — a pure function from a name to the
+ * files to create. Schematics perform no I/O; the command layer writes.
  *
- * A schematic is a pure function that returns an array of GeneratedFile objects.
- * It receives the derived names (kebab, camel, pascal, etc.) and options.
+ * @param names - The naming forms derived from the user's input
+ * @param options - Runtime target, detected plugins, and the clock
+ * @returns The files to create
  */
 export type Schematic = (
   names: DerivedNames,
@@ -33,107 +58,64 @@ export type Schematic = (
 ) => readonly GeneratedFile[];
 
 /**
- * Options passed to every schematic. Carries runtime services and detected plugins.
- */
-export interface SchematicOptions {
-  /** Runtime services (for uuid, now, etc.). */
-  readonly runtime: IRuntimeServices;
-  /** Set of installed plugin names (e.g., "auth-plugin", "cqrs-plugin"). */
-  readonly plugins: ReadonlySet<string>;
-}
-
-/**
- * Derived names — all five naming forms from the input.
- */
-export interface DerivedNames {
-  readonly raw: string;
-  readonly kebab: string;
-  readonly camel: string;
-  readonly pascal: string;
-  readonly screaming: string;
-}
-
-/**
- * Represents a generated file with path and contents.
- */
-export interface GeneratedFile {
-  /** The relative or absolute path where the file should be written. */
-  readonly path: string;
-  /** The file contents as a string. */
-  readonly contents: string;
-}
-
-/**
- * Metadata about a schematic, including its required plugin (if any).
+ * A registry entry: the schematic plus the plugin it requires, if any.
  */
 export interface SchematicMetadata {
-  /** The function implementing the schematic. */
+  /** The schematic's implementation. */
   readonly factory: Schematic;
-  /** The name of the plugin this schematic requires (or undefined if ungated). */
+  /** The `@hono-enterprise` package that must be installed, when gated. */
   readonly requiresPlugin?: string;
 }
 
 /**
- * The schematic registry — a map from name to metadata.
+ * The built-in schematics, keyed by the name `honoe generate` accepts.
+ *
+ * A `Map` rather than an object literal so that a lookup of an inherited
+ * property name (`constructor`, `__proto__`, `toString`) misses cleanly
+ * instead of returning something from `Object.prototype`.
  */
-export const SCHEMATICS_REGISTRY: ReadonlyRecord<string, SchematicMetadata> = {
-  plugin: {
-    factory: generatePlugin,
-  },
-  controller: {
-    factory: generateController,
-  },
-  service: {
-    factory: generateService,
-  },
-  route: {
-    factory: generateRoute,
-  },
-  middleware: {
-    factory: generateMiddleware,
-  },
-  guard: {
-    factory: generateGuard,
-    requiresPlugin: 'auth-plugin', // gated
-  },
-  'health-indicator': {
-    factory: generateHealthIndicator,
-    requiresPlugin: 'health-plugin', // gated
-  },
-  metric: {
-    factory: generateMetric,
-    requiresPlugin: 'metrics-plugin', // gated
-  },
-  'command-handler': {
-    factory: generateCommandHandler,
-    requiresPlugin: 'cqrs-plugin', // gated
-  },
-  'query-handler': {
-    factory: generateQueryHandler,
-    requiresPlugin: 'cqrs-plugin', // gated
-  },
-  'event-handler': {
-    factory: generateEventHandler,
-    requiresPlugin: 'events-plugin', // gated
-  },
-  job: {
-    factory: generateJob,
-  },
-  migration: {
-    factory: generateMigration,
-    requiresPlugin: 'database-plugin', // gated
-  },
-} as const;
+const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, SchematicMetadata>([
+  ['plugin', { factory: generatePlugin }],
+  ['controller', { factory: generateController }],
+  ['service', { factory: generateService }],
+  ['route', { factory: generateRoute }],
+  ['middleware', { factory: generateMiddleware }],
+  ['guard', { factory: generateGuard, requiresPlugin: 'auth-plugin' }],
+  ['health-indicator', { factory: generateHealthIndicator, requiresPlugin: 'health-plugin' }],
+  ['metric', { factory: generateMetric, requiresPlugin: 'metrics-plugin' }],
+  ['command-handler', { factory: generateCommandHandler, requiresPlugin: 'cqrs-plugin' }],
+  ['query-handler', { factory: generateQueryHandler, requiresPlugin: 'cqrs-plugin' }],
+  ['event-handler', { factory: generateEventHandler, requiresPlugin: 'events-plugin' }],
+  ['job', { factory: generateJob }],
+  ['migration', { factory: generateMigration, requiresPlugin: 'database-plugin' }],
+]);
 
-// Define a type alias for ReadonlyRecord (since it's not a standard TypeScript type)
-type ReadonlyRecord<K extends string | symbol, T> = { readonly [P in K]: T };
+/** The name of the pseudo-schematic that loads a user-authored module. */
+export const CUSTOM_SCHEMATIC = 'custom';
 
 /**
- * Look up a schematic by name.
+ * Looks up a built-in schematic.
  *
- * @param name - The schematic name (e.g., "controller", "service")
- * @returns The schematic metadata, or undefined if not found
+ * @param name - The schematic name (e.g. `controller`)
+ * @returns Its metadata, or undefined when no such schematic exists
  */
 export function getSchematic(name: string): SchematicMetadata | undefined {
-  return SCHEMATICS_REGISTRY[name];
+  return REGISTRY.get(name);
+}
+
+/**
+ * Lists the built-in schematics in registration order.
+ *
+ * Consumed by the help text so the documented list can never drift from the
+ * registry, and by `generate --help` to show only the available ones.
+ *
+ * @returns Each schematic's name and the plugin it requires, if any
+ */
+export function listSchematics(): readonly {
+  readonly name: string;
+  readonly requiresPlugin?: string;
+}[] {
+  return [...REGISTRY].map(([name, meta]) =>
+    meta.requiresPlugin === undefined ? { name } : { name, requiresPlugin: meta.requiresPlugin }
+  );
 }

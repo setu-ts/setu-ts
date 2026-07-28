@@ -1,5 +1,5 @@
 /**
- * File writing utility that handles overwrite checks and directory creation.
+ * Path joining and the ordered, overwrite-safe write of generated files.
  *
  * @module
  */
@@ -7,77 +7,94 @@
 import type { IFileSystem } from '@hono-enterprise/common';
 
 /**
- * Represents a generated file with path and contents.
+ * One file a schematic asks the command layer to create.
  */
 export interface GeneratedFile {
-  /** The relative or absolute path where the file should be written. */
+  /** Path to write, relative to the command's target directory. */
   readonly path: string;
-  /** The file contents as a string. */
+  /** The file contents. */
   readonly contents: string;
 }
 
 /**
- * Options for the file writer.
+ * Joins path segments with `/`, collapsing repeated and trailing separators.
+ *
+ * Generated paths are always relative and always `/`-separated, so this is
+ * sufficient and keeps the package free of a `node:path` import (which would
+ * be a runtime-specific API outside `packages/runtime`).
+ *
+ * @param segments - Path segments; empty segments are ignored
+ * @returns The joined path
  */
-interface FileWriterOptions {
-  readonly fs: IFileSystem;
-  readonly dryRun?: boolean;
+export function joinPath(...segments: readonly string[]): string {
+  const parts: string[] = [];
+  for (const segment of segments) {
+    for (const part of segment.split('/')) {
+      if (part !== '') parts.push(part);
+    }
+  }
+  const joined = parts.join('/');
+  return segments[0]?.startsWith('/') ? `/${joined}` : joined;
 }
 
 /**
- * Creates a file writer function.
+ * Returns the parent directory of a path, or `''` when it has no parent.
  *
- * @param options - Configuration including the filesystem and dry-run mode
- * @returns A function that writes generated files in order, creating parent directories
+ * @param path - The path to inspect
+ * @returns The parent directory
  */
-export function createWriter(
-  { fs, dryRun = false }: FileWriterOptions,
-): (files: readonly GeneratedFile[]) => Promise<void> {
-  return async (files: readonly GeneratedFile[]) => {
-    // Check for existing files first (prevent overwrites)
-    const existingPaths: string[] = [];
-    for (const file of files) {
-      try {
-        const stat = await fs.stat(file.path);
-        if (stat.isFile) {
-          existingPaths.push(file.path);
-        }
-      } catch {
-        // File doesn't exist, which is fine
-      }
-    }
+export function dirName(path: string): string {
+  const index = path.lastIndexOf('/');
+  if (index <= 0) return index === 0 ? '/' : '';
+  return path.slice(0, index);
+}
 
-    if (existingPaths.length > 0) {
-      throw new Error(
-        `The following files already exist and would be overwritten:\n${
-          existingPaths.map((p) => `  ${p}`).join('\n')
-        }`,
-      );
+/**
+ * Returns the paths in `files` that already exist on `fs`.
+ *
+ * @param fs - The filesystem to probe
+ * @param files - The planned files
+ * @returns The subset of paths that already exist, in plan order
+ */
+export async function findExisting(
+  fs: IFileSystem,
+  files: readonly GeneratedFile[],
+): Promise<readonly string[]> {
+  const existing: string[] = [];
+  for (const file of files) {
+    try {
+      await fs.stat(file.path);
+      existing.push(file.path);
+    } catch {
+      // Absent (or unreadable) — nothing to overwrite.
     }
+  }
+  return existing;
+}
 
-    // Collect unique directories to create
-    const dirsToCreate = new Set<string>();
-    for (const file of files) {
-      const parts = file.path.split('/').filter((p) => p !== '');
-      for (let i = 1; i < parts.length; i++) {
-        dirsToCreate.add(parts.slice(0, i).join('/'));
-      }
-    }
+/**
+ * Writes every file in order, creating parent directories first.
+ *
+ * The caller is responsible for the overwrite check ({@linkcode findExisting});
+ * this function writes unconditionally so that the "check everything, then
+ * write everything" ordering lives in exactly one place — the command layer.
+ *
+ * @param fs - The filesystem to write through
+ * @param files - The files to create
+ */
+export async function writeFiles(
+  fs: IFileSystem,
+  files: readonly GeneratedFile[],
+): Promise<void> {
+  const encoder = new TextEncoder();
+  const created = new Set<string>();
 
-    // Create directories
-    for (const dir of dirsToCreate) {
-      if (!dryRun) {
-        await fs.mkdir(dir, { recursive: true });
-      }
+  for (const file of files) {
+    const dir = dirName(file.path);
+    if (dir !== '' && !created.has(dir)) {
+      await fs.mkdir(dir, { recursive: true });
+      created.add(dir);
     }
-
-    // Write files (dry run only prints)
-    for (const file of files) {
-      if (dryRun) {
-        console.log(`would create ${file.path}`);
-      } else {
-        await fs.writeFile(file.path, new TextEncoder().encode(file.contents));
-      }
-    }
-  };
+    await fs.writeFile(file.path, encoder.encode(file.contents));
+  }
 }

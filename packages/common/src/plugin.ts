@@ -261,8 +261,14 @@ export interface IDecoratorApi {
 export type CliCommandHandler = (args: readonly string[]) => void | Promise<void>;
 
 /**
- * CLI command registration surface, consumed by the CLI tool to discover
- * plugin-provided commands.
+ * CLI command registration surface: a plugin publishes commands here, and the
+ * kernel registers each under {@linkcode CAPABILITIES.CLI_COMMAND} as a
+ * multi-provider token that any consumer can read with `getAll`.
+ *
+ * Note that `@hono-enterprise/cli` does NOT yet consume this. Discovering
+ * plugin-contributed commands requires the CLI to import and boot the user's
+ * application, which is deferred to a follow-up milestone; until then this
+ * surface is registration-only.
  *
  * @since 0.1.0
  */

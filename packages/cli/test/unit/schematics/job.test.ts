@@ -1,31 +1,41 @@
-/**
- * Unit tests for the job schematic.
- *
- * @module
- */
-
-import { deriveNames } from '../../../src/utils/names.ts';
-import { generateJob } from '../../../src/schematics/job.ts';
-import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { deriveNames } from '../../../src/utils/names.ts';
+import { generateJob } from '../../../src/schematics/job.ts';
+import { gateOf, options } from './_shared.ts';
 
-describe('generateJob', () => {
-  it('emits a job file with named handler', () => {
-    const names = deriveNames('cleanup');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateJob(names, options);
+describe('job schematic', () => {
+  const files = generateJob(deriveNames('order-item'), options());
+  const [file] = files;
 
+  it('emits exactly one file', () => {
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('src/jobs/cleanup.job.ts');
-    expect(files[0].contents).toContain('CleanupJob');
   });
 
-  it('includes the execute method', () => {
-    const names = deriveNames('email');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateJob(names, options);
+  it('emits it at src/jobs/order-item.job.ts', () => {
+    expect(file.path).toBe('src/jobs/order-item.job.ts');
+  });
 
-    expect(files[0].contents).toContain('execute');
+  it('produces non-empty contents ending in a newline', () => {
+    expect(file.contents.length).toBeGreaterThan(0);
+    expect(file.contents.endsWith('\n')).toBe(true);
+  });
+
+  it('is ungated', () => {
+    expect(gateOf('job')).toBe(undefined);
+  });
+
+  it('derives identical output from any casing of the same name', () => {
+    const pascal = generateJob(deriveNames('OrderItem'), options());
+    expect(pascal).toEqual(files);
+  });
+
+  it('declares the job name constant and handler', () => {
+    expect(file.contents).toContain("export const ORDER_ITEM_JOB = 'order-item';");
+    expect(file.contents).toContain('export async function runOrderItemJob');
+  });
+
+  it('declares the payload type the handler accepts', () => {
+    expect(file.contents).toContain('export interface OrderItemJobData');
   });
 });

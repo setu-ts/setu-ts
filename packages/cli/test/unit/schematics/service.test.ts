@@ -1,31 +1,40 @@
-/**
- * Unit tests for the service schematic.
- *
- * @module
- */
-
-import { deriveNames } from '../../../src/utils/names.ts';
-import { generateService } from '../../../src/schematics/service.ts';
-import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { deriveNames } from '../../../src/utils/names.ts';
+import { generateService } from '../../../src/schematics/service.ts';
+import { gateOf, options } from './_shared.ts';
 
-describe('generateService', () => {
-  it('emits a service file with correct class name', () => {
-    const names = deriveNames('auth');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateService(names, options);
+describe('service schematic', () => {
+  const files = generateService(deriveNames('order-item'), options());
+  const [file] = files;
 
+  it('emits exactly one file', () => {
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('src/services/auth.service.ts');
-    expect(files[0].contents).toContain('AuthService');
   });
 
-  it('includes a default get method', () => {
-    const names = deriveNames('user');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateService(names, options);
+  it('emits it at src/services/order-item.service.ts', () => {
+    expect(file.path).toBe('src/services/order-item.service.ts');
+  });
 
-    expect(files[0].contents).toContain('get()');
+  it('produces non-empty contents ending in a newline', () => {
+    expect(file.contents.length).toBeGreaterThan(0);
+    expect(file.contents.endsWith('\n')).toBe(true);
+  });
+
+  it('is ungated', () => {
+    expect(gateOf('service')).toBe(undefined);
+  });
+
+  it('derives identical output from any casing of the same name', () => {
+    const pascal = generateService(deriveNames('OrderItem'), options());
+    expect(pascal).toEqual(files);
+  });
+
+  it('declares the service class', () => {
+    expect(file.contents).toContain('export class OrderItemService');
+  });
+
+  it('needs no framework import', () => {
+    expect(file.contents).not.toContain('import');
   });
 });

@@ -1,78 +1,90 @@
 /**
- * Detects installed @hono-enterprise plugins by reading manifest files.
+ * Detects installed `@hono-enterprise` packages by reading a project manifest.
  *
  * @module
  */
 
 import type { IFileSystem } from '@hono-enterprise/common';
+import { joinPath } from './file-writer.ts';
+
+const SCOPE = '@hono-enterprise/';
 
 /**
- * Detects installed @hono-enterprise plugins by reading the project's manifest.
+ * Reads and parses a JSON manifest.
  *
- * Reads deno.json (imports) or package.json (dependencies + devDependencies) to identify
- * installed @hono-enterprise package names. Does not bootstrap the application.
+ * @param fs - The filesystem to read through
+ * @param path - The manifest path
+ * @returns The parsed object, or undefined when missing or malformed
+ */
+async function readManifest(
+  fs: IFileSystem,
+  path: string,
+): Promise<Record<string, unknown> | undefined> {
+  let raw: Uint8Array;
+  try {
+    raw = await fs.readFile(path);
+  } catch {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(raw));
+    return typeof parsed === 'object' && parsed !== null
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    // Malformed manifest: treated as "no plugins detected", never a throw.
+    return undefined;
+  }
+}
+
+/**
+ * Collects the bare package names of every `@hono-enterprise/*` key in a record.
  *
- * @param fs - The filesystem interface (must contain readFile and stat)
- * @param dir - The directory to scan (defaults to current working directory)
- * @returns A ReadonlySet of plugin package names (e.g., "auth-plugin", "cache-plugin")
+ * @param source - A record whose keys are package specifiers
+ * @param into - The set to add to
+ */
+function collectScoped(source: unknown, into: Set<string>): void {
+  if (typeof source !== 'object' || source === null) return;
+  for (const key of Object.keys(source)) {
+    if (key.startsWith(SCOPE)) {
+      const name = key.slice(SCOPE.length);
+      if (name !== '' && !name.includes('/')) into.add(name);
+    }
+  }
+}
+
+/**
+ * Detects the `@hono-enterprise` packages a project depends on.
+ *
+ * Reads `deno.json` (its `imports` map) and, when that is absent or carries no
+ * scoped entries, `package.json` (`dependencies` + `devDependencies`).
+ * Detection never boots or imports the target project.
+ *
+ * A missing or malformed manifest yields an empty set rather than a throw, so
+ * running the CLI outside a project is a plain "plugin not installed" gate
+ * rather than a crash.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project directory to scan
+ * @returns The bare package names found (e.g. `auth-plugin`, `cqrs-plugin`)
  */
 export async function detectPlugins(
   fs: IFileSystem,
-  dir = Deno.cwd(),
+  dir: string,
 ): Promise<ReadonlySet<string>> {
-  // Try deno.json first (imports map)
-  const denoPath = `${dir}/deno.json`;
-  try {
-    const content = await fs.readFile(denoPath);
-    const deno = JSON.parse(new TextDecoder().decode(content));
-    const imports = deno?.imports || {};
-    const plugins = new Set<string>();
+  const plugins = new Set<string>();
 
-    for (const [key, value] of Object.entries(imports)) {
-      if (
-        typeof key === 'string' && key.startsWith('@hono-enterprise/') && typeof value === 'string'
-      ) {
-        // Extract package name from the import path
-        const pkgName = key.split('/').pop()?.replace('@hono-enterprise/', '') ||
-          key.replace('@hono-enterprise/', '');
-        plugins.add(pkgName);
-      }
-    }
-
-    return new FreezeSet(plugins);
-  } catch {
-    // deno.json not found or malformed, continue to package.json
+  const denoJson = await readManifest(fs, joinPath(dir, 'deno.json'));
+  if (denoJson !== undefined) {
+    collectScoped(denoJson['imports'], plugins);
+    if (plugins.size > 0) return plugins;
   }
 
-  // Fallback to package.json
-  const pkgPath = `${dir}/package.json`;
-  try {
-    const content = await fs.readFile(pkgPath);
-    const pkg = JSON.parse(new TextDecoder().decode(content));
-    const plugins = new Set<string>();
-
-    const deps = pkg.dependencies || {};
-    const devDeps = pkg.devDependencies || {};
-
-    for (const [name] of Object.entries({ ...deps, ...devDeps })) {
-      if (typeof name === 'string' && name.startsWith('@hono-enterprise/')) {
-        const pkgName = name.replace('@hono-enterprise/', '');
-        plugins.add(pkgName);
-      }
-    }
-
-    return new FreezeSet(plugins);
-  } catch {
-    // package.json not found or malformed, return empty set
+  const packageJson = await readManifest(fs, joinPath(dir, 'package.json'));
+  if (packageJson !== undefined) {
+    collectScoped(packageJson['dependencies'], plugins);
+    collectScoped(packageJson['devDependencies'], plugins);
   }
 
-  return new FreezeSet(new Set<string>());
-}
-
-// A FreezeSet returns a frozen set that behaves like ReadonlySet
-class FreezeSet<T> extends Set<T> {
-  constructor(source: Iterable<T> = []) {
-    super(source);
-    Object.freeze(this);
-  }
+  return plugins;
 }

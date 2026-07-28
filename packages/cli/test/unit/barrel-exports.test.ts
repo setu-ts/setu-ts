@@ -1,53 +1,40 @@
-/**
- * Unit tests for the barrel exports in src/index.ts.
- *
- * @module
- */
-
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import * as barrel from '../../src/index.ts';
 
-// Import the module to trigger side effects (type checking)
-import '../../src/index.ts';
+/** The runtime-visible surface §4 of the milestone plan commits to. */
+const EXPECTED_VALUES = ['runCli', 'deriveNames', 'PROGRAM_NAME', 'detectPlugins'] as const;
 
-describe('barrel exports', () => {
-  it('exports runCli function', () => {
-    // This tests that runCli is importable from the barrel
-    // The actual check will be done by deno check and the type system
-    expect(true).toBe(true);
+describe('@hono-enterprise/cli barrel', () => {
+  it('exports exactly the committed runtime symbols', () => {
+    expect(Object.keys(barrel).sort()).toEqual([...EXPECTED_VALUES].sort());
   });
 
-  it('exports deriveNames function', () => {
-    expect(true).toBe(true);
+  it('exports runCli as a function', () => {
+    expect(typeof barrel.runCli).toBe('function');
   });
 
-  it('exports DerivedNames type', () => {
-    expect(true).toBe(true);
+  it('exports deriveNames as a function', () => {
+    expect(typeof barrel.deriveNames).toBe('function');
   });
 
-  it('exports GeneratedFile type', () => {
-    expect(true).toBe(true);
+  it('exports detectPlugins as a function', () => {
+    expect(typeof barrel.detectPlugins).toBe('function');
   });
 
-  it('exports Schematic type', () => {
-    expect(true).toBe(true);
+  it('exports PROGRAM_NAME as the installed binary name', () => {
+    expect(barrel.PROGRAM_NAME).toBe('honoe');
   });
 
-  it('exports SchematicOptions type', () => {
-    expect(true).toBe(true);
+  it('does not leak internal schematic factories', () => {
+    for (const name of ['generateService', 'getSchematic', 'listSchematics', 'parseArgs']) {
+      expect(Object.keys(barrel)).not.toContain(name);
+    }
   });
 
-  it('exports PROGRAM_NAME constant', () => {
-    expect(true).toBe(true);
-  });
-
-  it('exports detectPlugins function', () => {
-    expect(true).toBe(true);
-  });
-
-  it('does not export schematic implementation functions', () => {
-    // These should not be accessible from the barrel
-    // This is verified by the fact that they're not re-exported in index.ts
-    expect(true).toBe(true);
+  it('does not leak the command implementations', () => {
+    for (const name of ['runNewCommand', 'runGenerateCommand', 'writeFiles']) {
+      expect(Object.keys(barrel)).not.toContain(name);
+    }
   });
 });

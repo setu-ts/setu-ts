@@ -1,31 +1,40 @@
-/**
- * Unit tests for the middleware schematic.
- *
- * @module
- */
-
-import { deriveNames } from '../../../src/utils/names.ts';
-import { generateMiddleware } from '../../../src/schematics/middleware.ts';
-import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { deriveNames } from '../../../src/utils/names.ts';
+import { generateMiddleware } from '../../../src/schematics/middleware.ts';
+import { gateOf, options } from './_shared.ts';
 
-describe('generateMiddleware', () => {
-  it('emits a middleware factory', () => {
-    const names = deriveNames('auth');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateMiddleware(names, options);
+describe('middleware schematic', () => {
+  const files = generateMiddleware(deriveNames('order-item'), options());
+  const [file] = files;
 
+  it('emits exactly one file', () => {
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('src/middleware/auth.middleware.ts');
-    expect(files[0].contents).toContain('AuthMiddleware');
   });
 
-  it('calls next in middleware', () => {
-    const names = deriveNames('cache');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateMiddleware(names, options);
+  it('emits it at src/middleware/order-item.middleware.ts', () => {
+    expect(file.path).toBe('src/middleware/order-item.middleware.ts');
+  });
 
-    expect(files[0].contents).toContain('next()');
+  it('produces non-empty contents ending in a newline', () => {
+    expect(file.contents.length).toBeGreaterThan(0);
+    expect(file.contents.endsWith('\n')).toBe(true);
+  });
+
+  it('is ungated', () => {
+    expect(gateOf('middleware')).toBe(undefined);
+  });
+
+  it('derives identical output from any casing of the same name', () => {
+    const pascal = generateMiddleware(deriveNames('OrderItem'), options());
+    expect(pascal).toEqual(files);
+  });
+
+  it('exports a camelCase factory returning a MiddlewareFunction', () => {
+    expect(file.contents).toContain('export function orderItemMiddleware(): MiddlewareFunction');
+  });
+
+  it('calls next()', () => {
+    expect(file.contents).toContain('await next();');
   });
 });

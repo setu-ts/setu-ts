@@ -1,144 +1,197 @@
 /**
- * Implementation of the `honoe generate` command — code generation.
+ * The `honoe generate` command — plugin-aware code generation.
  *
  * @module
  */
 
+import type { IFileSystem } from '@hono-enterprise/common';
+import type { ParsedArgs } from '../args.ts';
+import { stringFlag } from '../args.ts';
+import {
+  EXIT_ERROR,
+  EXIT_OK,
+  EXIT_USAGE,
+  isTargetRuntime,
+  PROGRAM_NAME,
+  type TargetRuntime,
+} from '../constants.ts';
 import { deriveNames } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
-import { createWriter } from '../utils/file-writer.ts';
-import { getSchematic, type Schematic, type SchematicOptions } from '../schematics/registry.ts';
-import { loadCustomSchematic } from '../schematics/custom.ts';
-import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
-import { parseArgs } from '../args.ts';
-import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import { findExisting, type GeneratedFile, joinPath, writeFiles } from '../utils/file-writer.ts';
+import {
+  CUSTOM_SCHEMATIC,
+  getSchematic,
+  listSchematics,
+  type Schematic,
+  type SchematicOptions,
+} from '../schematics/registry.ts';
+import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
 
 /**
- * Handles the `honoe generate` command.
- *
- * Generates a file (or multiple files) based on the specified schematic.
- * Schematics can be built-in or custom (from .hono-enterprise/schematics/).
- *
- * @param args - Array of command-line arguments (excluding command name)
- * @param options - Optional configuration (dir, runtime, dryRun)
- * @returns Exit code (0 for success, 1 for error, 2 for usage)
+ * Everything `runGenerateCommand` reaches the outside world through.
  */
-interface GenerateCommandOptions {
-  runtime?: IRuntimeServices;
-  dir?: string;
-  dryRun?: boolean;
+export interface GenerateDependencies {
+  /** The filesystem to detect plugins on and write generated files through. */
+  readonly fs: IFileSystem;
+  /** The project directory to operate on (absolute). */
+  readonly cwd: string;
+  /** Wall-clock milliseconds, for timestamped output. */
+  readonly now: () => number;
+  /** Writes a line of normal output. */
+  readonly log: (message: string) => void;
+  /** Writes a line of error output. */
+  readonly error: (message: string) => void;
+  /** Loads a custom schematic module; defaults to a real dynamic `import()`. */
+  readonly load?: ModuleLoader;
 }
 
+/**
+ * Prints the schematics available in the target project.
+ *
+ * Gated schematics whose plugin is absent are listed as unavailable, naming the
+ * package to install.
+ *
+ * @param installed - The `@hono-enterprise` packages detected in the project
+ * @param log - Output sink
+ */
+function printSchematics(installed: ReadonlySet<string>, log: (message: string) => void): void {
+  log(`Usage: ${PROGRAM_NAME} generate <schematic> <name> [options]`);
+  log('');
+  log('Schematics:');
+  for (const { name, requiresPlugin } of listSchematics()) {
+    if (requiresPlugin === undefined) {
+      log(`  ${name}`);
+    } else if (installed.has(requiresPlugin)) {
+      log(`  ${name}`);
+    } else {
+      log(`  ${name}  (unavailable — install @hono-enterprise/${requiresPlugin})`);
+    }
+  }
+  log(`  ${CUSTOM_SCHEMATIC} <schematic-name>  (from .hono-enterprise/schematics/)`);
+  log('');
+  log('Options:');
+  log('  --dry-run          Print what would be created, write nothing');
+  log('  --dir <path>       Generate into this directory instead of the CWD');
+}
+
+/**
+ * Runs `honoe generate`.
+ *
+ * Resolves the schematic (built-in or custom), refuses a gated schematic whose
+ * plugin is not installed, checks every planned path for an existing file
+ * BEFORE the first write, and writes nothing at all under `--dry-run`.
+ *
+ * @param args - Arguments after the `generate` verb, already parsed
+ * @param deps - Filesystem, clock, and output sinks
+ * @returns `0` on success, `1` on a runtime error, `2` on a usage error
+ */
 export async function runGenerateCommand(
-  args: readonly string[],
-  options: GenerateCommandOptions = {},
+  args: ParsedArgs,
+  deps: GenerateDependencies,
 ): Promise<number> {
-  const parsed = parseArgs(args);
-  if (parsed.positionals.length < 2) {
-    console.error(`Usage: ${PROGRAM_NAME} generate <schematic> <name>`);
-    return EXIT_USAGE;
+  const dir = stringFlag(args.flags, 'dir') ?? deps.cwd;
+  const installed = await detectPlugins(deps.fs, dir);
+
+  const schematicName = args.positionals[0];
+  if (schematicName === undefined || args.flags['help'] === true || args.flags['h'] === true) {
+    printSchematics(installed, deps.log);
+    return schematicName === undefined && args.flags['help'] !== true && args.flags['h'] !== true
+      ? EXIT_USAGE
+      : EXIT_OK;
   }
 
-  const schematicName = parsed.positionals[0];
-  const name = parsed.positionals[1];
-  const names = deriveNames(name);
-
-  // Get schematic - built-in or custom
   let schematic: Schematic;
-  if (schematicName === 'custom') {
-    if (parsed.positionals.length < 3) {
-      console.error('Usage: honoe generate custom <name>');
+  let name: string | undefined;
+
+  if (schematicName === CUSTOM_SCHEMATIC) {
+    const customName = args.positionals[1];
+    name = args.positionals[2];
+    if (customName === undefined || name === undefined) {
+      deps.error(`Usage: ${PROGRAM_NAME} generate custom <schematic-name> <name>`);
       return EXIT_USAGE;
     }
-    const customName = parsed.positionals[2];
-    const fs = options.runtime?.fs || ({} as IFileSystem);
     try {
-      schematic = await loadCustomSchematic(customName, {
-        fs,
-        ...(options.dir ? { dir: options.dir } : {}),
-        runtime: options.runtime!,
-      });
-    } catch (e) {
-      console.error(`Error loading custom schematic: ${(e as Error).message}`);
+      schematic = await loadCustomSchematic(dir, customName, deps.load);
+    } catch (cause) {
+      deps.error(cause instanceof Error ? cause.message : String(cause));
       return EXIT_ERROR;
     }
   } else {
     const metadata = getSchematic(schematicName);
-    if (!metadata) {
-      console.error(`Unknown built-in schematic: ${schematicName}`);
+    if (metadata === undefined) {
+      deps.error(`Unknown schematic: ${schematicName}`);
+      printSchematics(installed, deps.log);
       return EXIT_USAGE;
     }
+
+    name = args.positionals[1];
+    if (name === undefined) {
+      deps.error(`Usage: ${PROGRAM_NAME} generate ${schematicName} <name>`);
+      return EXIT_USAGE;
+    }
+
+    if (metadata.requiresPlugin !== undefined && !installed.has(metadata.requiresPlugin)) {
+      deps.error(
+        `The "${schematicName}" schematic requires @hono-enterprise/${metadata.requiresPlugin}, ` +
+          `which is not installed in ${dir}.`,
+      );
+      deps.error(`Install it, then run this command again.`);
+      return EXIT_ERROR;
+    }
+
     schematic = metadata.factory;
-
-    if (metadata.requiresPlugin) {
-      const fsForDetect = options.runtime?.fs;
-      if (!fsForDetect) {
-        console.error('File system access required for plugin detection');
-        return EXIT_ERROR;
-      }
-      const plugins = await detectPlugins(fsForDetect, options.dir);
-      if (!plugins.has(metadata.requiresPlugin)) {
-        console.error(
-          `Schematic "${schematicName}" requires the "${metadata.requiresPlugin}" plugin. Please install it and try again.`,
-        );
-        return EXIT_ERROR;
-      }
-    }
   }
 
-  const fsForPlugins = options.runtime?.fs;
-  if (!fsForPlugins) {
-    console.error('File system access required');
-    return EXIT_ERROR;
-  }
-  const pluginSet = await detectPlugins(fsForPlugins, options.dir);
-  const schematicOptions: SchematicOptions = {
-    runtime: options.runtime!,
-    plugins: pluginSet,
-  };
+  const runtimeFlag = stringFlag(args.flags, 'runtime');
+  const runtime: TargetRuntime = runtimeFlag !== undefined && isTargetRuntime(runtimeFlag)
+    ? runtimeFlag
+    : 'deno';
 
-  // The schematic returns a readonly array; we only iterate over it
-  const generatedFiles = schematic(names, schematicOptions);
+  const options: SchematicOptions = { runtime, plugins: installed, now: deps.now };
 
-  // Overwrite check before writing
-  const existingPaths: string[] = [];
-  for (const file of generatedFiles) {
-    try {
-      const stat = await options.runtime!.fs!.stat(file.path);
-      if (stat.isFile) {
-        existingPaths.push(file.path);
-      }
-    } catch {
-      // File doesn't exist or is inaccessible - continue checking other files
-    }
-  }
-
-  if (existingPaths.length > 0) {
-    console.error(
-      `The following files already exist and would be overwritten:\n${
-        existingPaths.map((p) => `  ${p}`).join('\n')
+  let generated: readonly GeneratedFile[];
+  try {
+    generated = schematic(deriveNames(name), options);
+  } catch (cause) {
+    deps.error(
+      `Schematic "${schematicName}" failed: ${
+        cause instanceof Error ? cause.message : String(cause)
       }`,
     );
     return EXIT_ERROR;
   }
 
-  if (options.dryRun) {
-    for (const file of generatedFiles) {
-      console.log(`would create ${file.path}`);
-    }
-    return EXIT_OK;
-  }
+  // Root every path at the target directory before touching the filesystem, so
+  // the overwrite check and the write agree on exactly the same paths.
+  const files: readonly GeneratedFile[] = generated.map((file) => ({
+    path: joinPath(dir, file.path),
+    contents: file.contents,
+  }));
 
-  const writer = createWriter({
-    fs: options.runtime!.fs!,
-    dryRun: false,
-  });
-
-  try {
-    await writer(generatedFiles);
-    return EXIT_OK;
-  } catch (e) {
-    console.error(`Error writing files: ${(e as Error).message}`);
+  if (files.length === 0) {
+    deps.error(`Schematic "${schematicName}" produced no files.`);
     return EXIT_ERROR;
   }
+
+  if (args.flags['dry-run'] === true) {
+    for (const file of files) deps.log(`would create ${file.path}`);
+    return EXIT_OK;
+  }
+
+  const existing = await findExisting(deps.fs, files);
+  if (existing.length > 0) {
+    deps.error('Refusing to overwrite existing files:');
+    for (const path of existing) deps.error(`  ${path}`);
+    return EXIT_ERROR;
+  }
+
+  try {
+    await writeFiles(deps.fs, files);
+  } catch (cause) {
+    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return EXIT_ERROR;
+  }
+
+  for (const file of files) deps.log(`created ${file.path}`);
+  return EXIT_OK;
 }

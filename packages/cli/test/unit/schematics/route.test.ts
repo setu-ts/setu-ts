@@ -1,32 +1,45 @@
-/**
- * Unit tests for the route schematic.
- *
- * @module
- */
-
-import { deriveNames } from '../../../src/utils/names.ts';
-import { generateRoute } from '../../../src/schematics/route.ts';
-import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { deriveNames } from '../../../src/utils/names.ts';
+import { generateRoute } from '../../../src/schematics/route.ts';
+import { gateOf, options } from './_shared.ts';
 
-describe('generateRoute', () => {
-  it('emits a routes file with registration function', () => {
-    const names = deriveNames('user');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateRoute(names, options);
+describe('route schematic', () => {
+  const files = generateRoute(deriveNames('order-item'), options());
+  const [file] = files;
 
+  it('emits exactly one file', () => {
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('src/routes/user.routes.ts');
-    expect(files[0].contents).toContain('registerUserRoutes');
-    expect(files[0].contents).toContain('ctx.router.get');
   });
 
-  it('registers route at the kebab path', () => {
-    const names = deriveNames('post-article');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateRoute(names, options);
+  it('emits it at src/routes/order-item.routes.ts', () => {
+    expect(file.path).toBe('src/routes/order-item.routes.ts');
+  });
 
-    expect(files[0].contents).toContain('/post-article');
+  it('produces non-empty contents ending in a newline', () => {
+    expect(file.contents.length).toBeGreaterThan(0);
+    expect(file.contents.endsWith('\n')).toBe(true);
+  });
+
+  it('is ungated', () => {
+    expect(gateOf('route')).toBe(undefined);
+  });
+
+  it('derives identical output from any casing of the same name', () => {
+    const pascal = generateRoute(deriveNames('OrderItem'), options());
+    expect(pascal).toEqual(files);
+  });
+
+  it('exports the register function', () => {
+    expect(file.contents).toContain('export function registerOrderItemRoutes(router: IRouterApi)');
+  });
+
+  it('groups the routes under the kebab path', () => {
+    expect(file.contents).toContain("router.group('/order-item'");
+  });
+
+  it('reads path params from the request context, not the request', () => {
+    expect(file.contents).toContain("ctx.params['id']");
+    expect(file.contents).not.toContain('ctx.request.params');
   });
 });

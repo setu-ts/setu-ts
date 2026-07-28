@@ -3,7 +3,7 @@
  *
  * This is an EXPLICIT allow-list rather than a scan of the `workspace` array in
  * the root `deno.json`, because the workspace also contains stub packages
- * (`cli`, `sdk`, and the three starters) that export nothing. A workspace-wide
+ * (`sdk` and the three starters) that export nothing. A workspace-wide
  * `deno publish` would push those empty packages to JSR, where versions are
  * immutable and cannot be withdrawn — only yanked.
  *
@@ -56,6 +56,9 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/validation-plugin',
   'packages/websocket-plugin',
   'packages/worker-pool-plugin',
+
+  // Tier 5 — tooling. Depends on `common` and `runtime`.
+  'packages/cli',
 ];
 
 /**
@@ -68,7 +71,6 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
  * fails the check instead of silently going unpublished.
  */
 export const UNPUBLISHED_PACKAGES: readonly string[] = [
-  'packages/cli',
   'packages/sdk',
   'packages/starters/rest-starter',
   'packages/starters/microservice-starter',

@@ -1,70 +1,107 @@
-/**
- * Unit tests for the file writer utility.
- *
- * @module
- */
-
-import { createWriter, type GeneratedFile } from '../../src/utils/file-writer.ts';
-import type { IFileSystem } from '@hono-enterprise/common';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { createFakeFs } from '../fixtures/fake-fs.ts';
+import { dirName, findExisting, joinPath, writeFiles } from '../../src/utils/file-writer.ts';
 
-// Simple mock filesystem implementation for testing
-class MockFileSystem implements IFileSystem {
-  readFile = (_path: string): Promise<Uint8Array> => Promise.resolve(new Uint8Array());
-  writeFile = (_path: string, _data: Uint8Array) => Promise.resolve();
-  readdir = (_path: string) => Promise.resolve([]);
-  mkdir = (_path: string, _options?: { recursive?: boolean }) => Promise.resolve();
-  rm = (_path: string) => Promise.resolve();
+describe('joinPath', () => {
+  it('joins relative segments', () => {
+    expect(joinPath('src', 'services', 'a.ts')).toBe('src/services/a.ts');
+  });
 
-  stat = (
-    _path: string,
-  ): Promise<
-    { readonly isFile: boolean; readonly isDirectory: boolean; size: number; mtime?: Date }
-  > => {
-    // For overwrite test, pretend the file exists
-    if (_path === 'existing.txt' || _path === 'new.txt') {
-      return Promise.resolve({ isFile: true, isDirectory: false, size: 0 });
-    }
-    return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
-  };
-}
+  it('preserves a leading slash', () => {
+    expect(joinPath('/tmp/app', 'src/a.ts')).toBe('/tmp/app/src/a.ts');
+  });
 
-describe('createWriter', () => {
-  it('writes files in order and creates parent directories', async () => {
-    const mockFs = new MockFileSystem();
+  it('collapses repeated separators', () => {
+    expect(joinPath('/tmp//app/', '/src/a.ts')).toBe('/tmp/app/src/a.ts');
+  });
 
-    const writer = createWriter({ fs: mockFs, dryRun: false });
-    await writer([
-      { path: 'src/controllers/user.controller.ts', contents: 'export class UserController {}' },
-      { path: 'services/user.service.ts', contents: 'export class UserService {}' },
+  it('ignores empty segments', () => {
+    expect(joinPath('', 'src', '', 'a.ts')).toBe('src/a.ts');
+  });
+
+  it('returns an empty string for no segments', () => {
+    expect(joinPath()).toBe('');
+  });
+});
+
+describe('dirName', () => {
+  it('returns the parent of a nested path', () => {
+    expect(dirName('/tmp/app/src/a.ts')).toBe('/tmp/app/src');
+  });
+
+  it('returns an empty string when there is no parent', () => {
+    expect(dirName('a.ts')).toBe('');
+  });
+
+  it('returns / for a root-level path', () => {
+    expect(dirName('/a.ts')).toBe('/');
+  });
+});
+
+describe('findExisting', () => {
+  it('returns an empty list when nothing exists', async () => {
+    const fs = createFakeFs();
+    const found = await findExisting(fs, [{ path: 'a.ts', contents: 'x' }]);
+    expect(found).toEqual([]);
+  });
+
+  it('returns only the paths that already exist, in plan order', async () => {
+    const fs = createFakeFs({ 'b.ts': 'old' });
+    const found = await findExisting(fs, [
+      { path: 'a.ts', contents: 'x' },
+      { path: 'b.ts', contents: 'y' },
+      { path: 'c.ts', contents: 'z' },
     ]);
+    expect(found).toEqual(['b.ts']);
+  });
+});
 
-    // This test verifies the writer works without errors
-    // Full integration tests verify actual file system behavior
+describe('writeFiles', () => {
+  it('writes every file in order', async () => {
+    const fs = createFakeFs();
+    await writeFiles(fs, [
+      { path: 'src/a.ts', contents: 'A' },
+      { path: 'src/b.ts', contents: 'B' },
+    ]);
+    expect(fs.writes).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(fs.read('src/a.ts')).toBe('A');
+    expect(fs.read('src/b.ts')).toBe('B');
   });
 
-  it('dry run prints what would be created without writing', async () => {
-    const mockFs = new MockFileSystem();
-
-    const writer = createWriter({ fs: mockFs, dryRun: true });
-    await writer([{ path: 'test.ts', contents: 'console.log("test")' }]);
-
-    // Dry run doesn't throw, simply logs to console
+  it('creates each parent directory recursively, once', async () => {
+    const fs = createFakeFs();
+    let recursive = false;
+    const spy = {
+      ...fs,
+      mkdir: (path: string, options?: { readonly recursive?: boolean }) => {
+        recursive = options?.recursive === true;
+        return fs.mkdir(path, options);
+      },
+    };
+    await writeFiles(spy, [
+      { path: 'src/services/a.ts', contents: 'A' },
+      { path: 'src/services/b.ts', contents: 'B' },
+      { path: 'src/routes/c.ts', contents: 'C' },
+    ]);
+    expect(fs.mkdirs).toEqual(['src/services', 'src/routes']);
+    expect(recursive).toBe(true);
   });
 
-  it('fails when any file would overwrite existing', async () => {
-    const mockFs = new MockFileSystem();
+  it('does not mkdir for a file with no parent directory', async () => {
+    const fs = createFakeFs();
+    await writeFiles(fs, [{ path: 'deno.json', contents: '{}' }]);
+    expect(fs.mkdirs).toEqual([]);
+    expect(fs.read('deno.json')).toBe('{}');
+  });
 
-    const files: GeneratedFile[] = [
-      { path: 'existing.txt', contents: 'new content' },
-      { path: 'new.txt', contents: 'new content' },
-    ];
-
-    const writer = createWriter({ fs: mockFs, dryRun: false });
-
-    await expect(writer(files)).rejects.toThrow(
-      'The following files already exist and would be overwritten:',
-    );
+  it('propagates a filesystem failure', async () => {
+    const fs = createFakeFs();
+    const failing = {
+      ...fs,
+      writeFile: () => Promise.reject(new Error('disk full')),
+    };
+    await expect(writeFiles(failing, [{ path: 'a.ts', contents: 'A' }]))
+      .rejects.toThrow('disk full');
   });
 });

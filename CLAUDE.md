@@ -476,8 +476,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   agreement, specifier resolvability, full workspace coverage, no stub in the list). Added a
   `CHANGELOG.md`, a tag-triggered `.github/workflows/release.yml`, and the 23 missing package
   READMEs. **JSR versions are immutable** — yankable, never deletable or replaceable.
-- **Next milestone** — **Milestone 34** (`packages/cli` — CLI scaffolding and management tooling);
-  continues the main plugin sequence (M34–M40 follow) unless reprioritized.
+- **Milestone 34** (`packages/cli` — the `honoe` CLI: `new` project scaffolding and plugin-aware
+  `generate` code generation. `runCli(argv, deps)` returns an exit code and never calls `Deno.exit`;
+  `src/main.ts` is the sole process boundary (`Deno.args`, `Deno.cwd()`, `console`, the Deno
+  filesystem, the one `Deno.exit`) and `CliDependencies` deliberately has NO default — a defaulted
+  `fs` is exactly what let the first draft ship a CLI that printed "Created README.md" while writing
+  nothing. Zero-dependency `parseArgs` supporting `--key=value` AND `--key value` for the declared
+  value flags (`--dir`, `--runtime`); one `deriveNames` producing five casings that all 13
+  schematics share; schematics are PURE `(names, options) => GeneratedFile[]` so `--dry-run` is
+  exact and the overwrite check ("check every planned path, then write") lives in one place.
+  Registry is a `Map`, not an object literal, so `honoe g constructor x` misses cleanly instead of
+  resolving `Object.prototype`. `--runtime deno|node|bun|cloudflare-workers`: Deno gets
+  `deno.json` + `main.ts` binding via `app.start({port})`; node/bun get `package.json` (npm-compat
+  `@jsr/…` deps) + `.npmrc`
+  - `tsconfig.json`; Workers get `wrangler.toml` + a `fetch` export and NO `listen`. Seven
+    schematics are gated on their backing plugin, detected by reading the target project's manifest
+    — never by booting it. Custom schematics load through a real `await import()` behind an
+    injectable `ModuleLoader` seam, with a guarded real-import integration test. `VERSION` is a
+    static JSON import of the package's own `deno.json` (no drift, and `deno publish` includes the
+    file). **The generated code is verified, not assumed**: a drift gate scaffolds a project,
+    generates all 13 schematics into it, and runs `deno check` against the real published JSR
+    packages — it caught `ctx.request.params` (params live on `IRequestContext`) and missing
+    `experimentalDecorators`. Doc deliverables C1–C6 shipped: `honoe` everywhere, ARCHITECTURE deps
+    corrected to `common` + `runtime` (not `kernel`), the `ICliApi` JSDoc no longer claims a
+    consumer that does not exist, `metric`/`migration` added to the ROADMAP file list, `--template`
+    dropped to M36) — complete (PR pending)
+- **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); continues the main sequence
+  (M35–M40 follow) unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

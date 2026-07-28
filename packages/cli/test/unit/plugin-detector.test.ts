@@ -1,91 +1,81 @@
-/**
- * Unit tests for the plugin detection utility.
- *
- * @module
- */
-
-import type { IFileSystem } from '@hono-enterprise/common';
-import { detectPlugins } from '../../src/utils/plugin-detector.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { createFakeFs } from '../fixtures/fake-fs.ts';
+import { detectPlugins } from '../../src/utils/plugin-detector.ts';
 
 describe('detectPlugins', () => {
-  it('reads deno.json and extracts plugin names from imports', async () => {
-    const mockFs: IFileSystem = {
-      readFile: (_path: string) =>
-        Promise.resolve(
-          new TextEncoder().encode(
-            '{ "imports": { "@hono-enterprise/auth-plugin": "./plugins/auth", "@hono-enterprise/cache-plugin": "./plugins/cache" } }',
-          ),
-        ),
-      stat: (_path: string) => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
-      readdir: () => Promise.resolve([]),
-      mkdir: () => Promise.resolve(),
-      rm: () => Promise.resolve(),
-      realPath: (path) => Promise.resolve(path),
-      writeFile: () => Promise.resolve(),
-    };
-
-    const result = await detectPlugins(mockFs);
-    expect(result.has('auth-plugin')).toBe(true);
-    expect(result.has('cache-plugin')).toBe(true);
-    expect(result.size).toBe(2);
+  it('reads the imports map of a Deno project', async () => {
+    const fs = createFakeFs({
+      '/app/deno.json': JSON.stringify({
+        imports: {
+          '@hono-enterprise/kernel': 'jsr:@hono-enterprise/kernel@^0.1.0-alpha.1',
+          '@hono-enterprise/auth-plugin': 'jsr:@hono-enterprise/auth-plugin@^0.1.0-alpha.1',
+          '@std/expect': 'jsr:@std/expect@^1',
+        },
+      }),
+    });
+    const plugins = await detectPlugins(fs, '/app');
+    expect([...plugins].sort()).toEqual(['auth-plugin', 'kernel']);
   });
 
-  it('reads package.json and extracts plugin names from dependencies', async () => {
-    const mockFs: IFileSystem = {
-      readFile: (path: string) => {
-        if (path.includes('deno.json')) {
-          throw new Error('Not found');
-        }
-        return Promise.resolve(
-          new TextEncoder().encode(
-            '{ "dependencies": { "@hono-enterprise/auth-plugin": "^1.0.0", "@hono-enterprise/cache-plugin": "^1.0.0" } }',
-          ),
-        );
-      },
-      stat: (_path: string) => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
-      readdir: () => Promise.resolve([]),
-      mkdir: () => Promise.resolve(),
-      rm: () => Promise.resolve(),
-      realPath: (path) => Promise.resolve(path),
-      writeFile: () => Promise.resolve(),
-    };
-
-    const result = await detectPlugins(mockFs);
-    expect(result.has('auth-plugin')).toBe(true);
-    expect(result.has('cache-plugin')).toBe(true);
-    expect(result.size).toBe(2);
+  it('reads dependencies and devDependencies of an npm project', async () => {
+    const fs = createFakeFs({
+      '/app/package.json': JSON.stringify({
+        dependencies: { '@hono-enterprise/kernel': '*', hono: '^4' },
+        devDependencies: { '@hono-enterprise/testing': '*' },
+      }),
+    });
+    const plugins = await detectPlugins(fs, '/app');
+    expect([...plugins].sort()).toEqual(['kernel', 'testing']);
   });
 
-  it('returns empty set when neither manifest exists', async () => {
-    const mockFs: IFileSystem = {
-      readFile: (_path: string) => Promise.reject(new Error('Not found')),
-      stat: (_path: string) => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
-      readdir: () => Promise.resolve([]),
-      mkdir: () => Promise.resolve(),
-      rm: () => Promise.resolve(),
-      realPath: (path) => Promise.resolve(path),
-      writeFile: () => Promise.resolve(),
-    };
-
-    const result = await detectPlugins(mockFs);
-    expect(result.size).toBe(0);
+  it('falls back to package.json when deno.json has no scoped imports', async () => {
+    const fs = createFakeFs({
+      '/app/deno.json': JSON.stringify({ imports: { '@std/expect': 'jsr:@std/expect@^1' } }),
+      '/app/package.json': JSON.stringify({
+        dependencies: { '@hono-enterprise/cqrs-plugin': '*' },
+      }),
+    });
+    expect([...await detectPlugins(fs, '/app')]).toEqual(['cqrs-plugin']);
   });
 
-  it('handles malformed JSON by returning empty set', async () => {
-    const mockFs: IFileSystem = {
-      readFile: (_path: string) =>
-        Promise.resolve(new TextEncoder().encode('{ invalid json')) as Promise<Uint8Array>,
-      stat: (_path: string) => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
-      readdir: () => Promise.resolve([]),
-      mkdir: () => Promise.resolve(),
-      rm: () => Promise.resolve(),
-      realPath: (path) => Promise.resolve(path),
-      writeFile: () => Promise.resolve(),
-    };
+  it('returns an empty set when neither manifest exists', async () => {
+    expect((await detectPlugins(createFakeFs(), '/app')).size).toBe(0);
+  });
 
-    const result = await detectPlugins(mockFs);
-    expect(result.size).toBe(0);
+  it('returns an empty set for a malformed manifest without throwing', async () => {
+    const fs = createFakeFs({ '/app/deno.json': '{ not json' });
+    expect((await detectPlugins(fs, '/app')).size).toBe(0);
+  });
+
+  it('returns an empty set when a manifest parses to a non-object', async () => {
+    const fs = createFakeFs({ '/app/deno.json': '"a string"' });
+    expect((await detectPlugins(fs, '/app')).size).toBe(0);
+  });
+
+  it('tolerates a manifest with no imports or dependencies key', async () => {
+    const fs = createFakeFs({
+      '/app/deno.json': JSON.stringify({ tasks: {} }),
+      '/app/package.json': JSON.stringify({ name: 'app' }),
+    });
+    expect((await detectPlugins(fs, '/app')).size).toBe(0);
+  });
+
+  it('ignores a non-object imports value', async () => {
+    const fs = createFakeFs({ '/app/deno.json': JSON.stringify({ imports: 'nope' }) });
+    expect((await detectPlugins(fs, '/app')).size).toBe(0);
+  });
+
+  it('ignores subpath and empty specifiers', async () => {
+    const fs = createFakeFs({
+      '/app/deno.json': JSON.stringify({
+        imports: {
+          '@hono-enterprise/runtime/worker': 'jsr:@hono-enterprise/runtime@^0.1.0-alpha.1/worker',
+          '@hono-enterprise/': 'jsr:@hono-enterprise/',
+          '@hono-enterprise/cache-plugin': 'jsr:@hono-enterprise/cache-plugin@^0.1.0-alpha.1',
+        },
+      }),
+    });
+    expect([...await detectPlugins(fs, '/app')]).toEqual(['cache-plugin']);
   });
 });

@@ -1742,6 +1742,12 @@
       "jsr:@std/testing@^1.0.19"
     ],
     "members": {
+      "packages/cli": {
+        "dependencies": [
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.1",
+          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.1"
+        ]
+      },
       "packages/config-plugin": {
         "dependencies": [
           "jsr:@hono-enterprise/common@~0.1.0-alpha.1"

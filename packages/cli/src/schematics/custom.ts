@@ -1,60 +1,87 @@
 /**
- * Custom schematic loader with injectable loadSchematic seam for real import testing.
+ * Loading of user-authored schematics from `.hono-enterprise/schematics/`.
  *
  * @module
  */
 
-import type { IFileSystem } from '@hono-enterprise/common';
-import { join } from 'path';
-import type { Schematic, SchematicOptions } from './registry.ts';
+import type { Schematic } from './registry.ts';
+import { joinPath } from '../utils/file-writer.ts';
+
+/** Directory, relative to the project root, holding custom schematics. */
+export const CUSTOM_SCHEMATIC_DIR = '.hono-enterprise/schematics';
 
 /**
- * Loads a custom schematic from a user-provided module file.
+ * Loads an ES module by absolute URL.
  *
- * The custom schematic must be located in .hono-enterprise/schematics/<name>.ts and export a
- * function matching the Schematic signature.
+ * This is the seam unit tests replace. The default implementation performs a
+ * REAL dynamic `import()`, so the production path is the one exercised by
+ * `test/integration/custom-schematic-real-import.test.ts`.
  *
- * @param name - The name of the custom schematic (basename without extension)
- * @param options - Options including filesystem and runtime context
- * @returns The loaded schematic function
- * @throws {Error} If the file does not exist or does not export a valid schematic function
+ * @param url - Absolute module URL to import
+ * @returns The module's exports
  */
-export async function loadCustomSchematic(
-  name: string,
-  options: { fs: IFileSystem; dir?: string; runtime: SchematicOptions['runtime'] },
-): Promise<Schematic> {
-  const dir = options.dir ?? join(Deno.cwd(), '.hono-enterprise', 'schematics');
-  const schematicFile = join(dir, `${name}.ts`);
+export type ModuleLoader = (url: string) => Promise<Record<string, unknown>>;
 
-  // Check if file exists via fs
-  try {
-    await options.fs.stat(schematicFile);
-  } catch {
-    throw new Error(`Custom schematic not found: ${schematicFile}`);
-  }
+/**
+ * The default {@linkcode ModuleLoader}: a real dynamic import.
+ *
+ * @param url - Absolute module URL to import
+ * @returns The module's exports
+ */
+export const importModule: ModuleLoader = async (url) =>
+  await import(url) as Record<string, unknown>;
 
-  // Real dynamic import — this is the guarded lazy import path that CLAUDE.md requires
-  const mod = await import(`file://${schematicFile}`);
-
-  // Validate the export shape
-  const schematic = mod.schematic || mod.default;
-  if (typeof schematic !== 'function') {
-    throw new Error(
-      `Custom schematic must export a 'schematic' function or default export that is a function`,
-    );
-  }
-
-  return schematic;
+/**
+ * Resolves the module URL a custom schematic is loaded from.
+ *
+ * @param dir - The project root the CLI is operating on (absolute)
+ * @param name - The schematic name
+ * @returns An absolute `file:` URL
+ */
+export function customSchematicUrl(dir: string, name: string): string {
+  const path = joinPath(dir, CUSTOM_SCHEMATIC_DIR, `${name}.ts`);
+  return new URL(path.startsWith('/') ? path : `/${path}`, 'file://').href;
 }
 
 /**
- * Validates whether a custom schematic module exports a function matching the Schematic contract.
+ * Loads a custom schematic and validates its exported shape.
  *
- * This is used for type-checking without actually executing the schematic.
+ * The module must export a `schematic` function (or a default export that is a
+ * function) matching {@linkcode Schematic}.
  *
- * @param schematic - The candidate schematic function
- * @returns True if the schematic has the correct shape, false otherwise
+ * @param dir - The project root the CLI is operating on (absolute)
+ * @param name - The schematic name, without the `.ts` extension
+ * @param load - The module loader; defaults to a real dynamic `import()`
+ * @returns The loaded schematic function
+ * @throws {Error} If the module cannot be imported, or exports no `schematic`
+ * function — the message names the expected path and export
  */
-export function validateSchematic(schematic: unknown): schematic is Schematic {
-  return typeof schematic === 'function';
+export async function loadCustomSchematic(
+  dir: string,
+  name: string,
+  load: ModuleLoader = importModule,
+): Promise<Schematic> {
+  const url = customSchematicUrl(dir, name);
+
+  let module: Record<string, unknown>;
+  try {
+    module = await load(url);
+  } catch (cause) {
+    throw new Error(
+      `Cannot load custom schematic "${name}" from ${url}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+      { cause },
+    );
+  }
+
+  const exported = module['schematic'] ?? module['default'];
+  if (typeof exported !== 'function') {
+    throw new Error(
+      `Custom schematic "${name}" (${url}) must export a 'schematic' function ` +
+        `of type (names, options) => GeneratedFile[]; found ${typeof exported}.`,
+    );
+  }
+
+  return exported as Schematic;
 }

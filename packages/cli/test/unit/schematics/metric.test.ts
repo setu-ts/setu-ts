@@ -1,32 +1,40 @@
-/**
- * Unit tests for the metric schematic (gated on metrics-plugin).
- *
- * @module
- */
-
-import { deriveNames } from '../../../src/utils/names.ts';
-import { generateMetric } from '../../../src/schematics/metric.ts';
-import { createFakeRuntime } from '../../../test/fixtures/fake-runtime.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { deriveNames } from '../../../src/utils/names.ts';
+import { generateMetric } from '../../../src/schematics/metric.ts';
+import { gateOf, options } from './_shared.ts';
 
-describe('generateMetric', () => {
-  it('emits a metric registration using IMetricsService', () => {
-    const names = deriveNames('request');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateMetric(names, options);
+describe('metric schematic', () => {
+  const files = generateMetric(deriveNames('order-item'), options());
+  const [file] = files;
 
+  it('emits exactly one file', () => {
     expect(files).toHaveLength(1);
-    expect(files[0].path).toBe('src/metrics/request.metric.ts');
-    expect(files[0].contents).toContain('Counter');
-    expect(files[0].contents).toContain('registerRequestMetric');
   });
 
-  it('uses the correct metric name format', () => {
-    const names = deriveNames('api-call');
-    const options = { runtime: createFakeRuntime(), plugins: new Set<string>() };
-    const files = generateMetric(names, options);
+  it('emits it at src/metrics/order-item.metric.ts', () => {
+    expect(file.path).toBe('src/metrics/order-item.metric.ts');
+  });
 
-    expect(files[0].contents).toContain('ApiCallMetric');
+  it('produces non-empty contents ending in a newline', () => {
+    expect(file.contents.length).toBeGreaterThan(0);
+    expect(file.contents.endsWith('\n')).toBe(true);
+  });
+
+  it('is gated on metrics-plugin', () => {
+    expect(gateOf('metric')).toBe('metrics-plugin');
+  });
+
+  it('derives identical output from any casing of the same name', () => {
+    const pascal = generateMetric(deriveNames('OrderItem'), options());
+    expect(pascal).toEqual(files);
+  });
+
+  it('resolves IMetricsService from the metrics capability token', () => {
+    expect(file.contents).toContain('services.get<IMetricsService>(CAPABILITIES.METRICS)');
+  });
+
+  it('uses a Prometheus snake_case metric name', () => {
+    expect(file.contents).toContain("export const ORDER_ITEM_TOTAL = 'order_item_total';");
   });
 });

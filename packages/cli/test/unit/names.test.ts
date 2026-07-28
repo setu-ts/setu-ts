@@ -1,50 +1,26 @@
-/**
- * Unit tests for the name normalization utilities.
- *
- * @module
- */
-
-import { deriveNames } from '../../src/utils/names.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { deriveNames } from '../../src/utils/names.ts';
 
 describe('deriveNames', () => {
-  it('derives all naming forms from kebab input', () => {
-    const result = deriveNames('user-profile');
-    expect(result).toEqual({
-      raw: 'user-profile',
-      kebab: 'user-profile',
-      camel: 'userProfile',
-      pascal: 'UserProfile',
-      screaming: 'USER_PROFILE',
+  const inputs = ['user-profile', 'UserProfile', 'userProfile', 'user_profile', 'user profile'];
+
+  for (const input of inputs) {
+    it(`derives identical forms from "${input}"`, () => {
+      const names = deriveNames(input);
+      expect(names.kebab).toBe('user-profile');
+      expect(names.camel).toBe('userProfile');
+      expect(names.pascal).toBe('UserProfile');
+      expect(names.screaming).toBe('USER_PROFILE');
     });
+  }
+
+  it('preserves the raw input verbatim', () => {
+    expect(deriveNames('  UserProfile ').raw).toBe('  UserProfile ');
   });
 
-  it('derives all naming forms from camel input', () => {
-    const result = deriveNames('userProfile');
-    expect(result).toEqual({
-      raw: 'userProfile',
-      kebab: 'user-profile',
-      camel: 'userProfile',
-      pascal: 'UserProfile',
-      screaming: 'USER_PROFILE',
-    });
-  });
-
-  it('derives all naming forms from Pascal input', () => {
-    const result = deriveNames('UserProfile');
-    expect(result).toEqual({
-      raw: 'UserProfile',
-      kebab: 'user-profile',
-      camel: 'userProfile',
-      pascal: 'UserProfile',
-      screaming: 'USER_PROFILE',
-    });
-  });
-
-  it('derives all naming forms from single word', () => {
-    const result = deriveNames('user');
-    expect(result).toEqual({
+  it('handles a single lowercase word', () => {
+    expect(deriveNames('user')).toEqual({
       raw: 'user',
       kebab: 'user',
       camel: 'user',
@@ -53,20 +29,43 @@ describe('deriveNames', () => {
     });
   });
 
-  it('handles input with spaces and underscores', () => {
-    const result = deriveNames('user profile');
-    expect(result.kebab).toBe('user-profile');
-    expect(result.camel).toBe('userProfile');
-    expect(result.pascal).toBe('UserProfile');
-    expect(result.screaming).toBe('USER_PROFILE');
+  it('handles a single Pascal word', () => {
+    const names = deriveNames('User');
+    expect(names.kebab).toBe('user');
+    expect(names.camel).toBe('user');
+    expect(names.pascal).toBe('User');
   });
 
-  it('returns empty forms for empty input', () => {
-    const result = deriveNames('');
-    expect(result.raw).toBe('');
-    expect(result.kebab).toBe('');
-    expect(result.camel).toBe('');
-    expect(result.pascal).toBe('');
-    expect(result.screaming).toBe('');
+  it('splits three or more words', () => {
+    const names = deriveNames('createUserProfileCommand');
+    expect(names.kebab).toBe('create-user-profile-command');
+    expect(names.pascal).toBe('CreateUserProfileCommand');
+    expect(names.screaming).toBe('CREATE_USER_PROFILE_COMMAND');
+  });
+
+  it('collapses repeated separators', () => {
+    expect(deriveNames('user--profile__name').kebab).toBe('user-profile-name');
+  });
+
+  it('returns empty forms for an empty input', () => {
+    expect(deriveNames('')).toEqual({
+      raw: '',
+      kebab: '',
+      camel: '',
+      pascal: '',
+      screaming: '',
+    });
+  });
+
+  it('returns empty forms for a separator-only input', () => {
+    expect(deriveNames('---').kebab).toBe('');
+  });
+
+  it('lowercases the tail of an all-caps segment', () => {
+    expect(deriveNames('API').pascal).toBe('Api');
+  });
+
+  it('keeps digits attached to their word', () => {
+    expect(deriveNames('oauth2-client').pascal).toBe('Oauth2Client');
   });
 });

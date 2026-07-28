@@ -2,7 +2,14 @@
   "name": "@hono-enterprise/cli",
   "version": "0.1.0-alpha.1",
   "license": "MIT",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./main": "./src/main.ts"
+  },
+  "imports": {
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.1",
+    "@hono-enterprise/runtime": "jsr:@hono-enterprise/runtime@^0.1.0-alpha.1"
+  },
   "lint": {
     "rules": {
       "exclude": ["no-console"]
@@ -11,6 +18,7 @@
   "test": {
     "permissions": {
       "read": true,
+      "write": true,
       "env": true,
       "sys": ["hostname", "cpus"]
     }
