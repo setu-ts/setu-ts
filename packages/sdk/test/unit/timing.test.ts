@@ -93,4 +93,36 @@ describe('createDefaultClientTiming', () => {
     await timing.sleep(0, controller.signal);
     // resolved without throwing — covers addEventListener + cleanup path
   });
+
+  it('sleep already-aborted propagates custom reason via signal.reason', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+    const customReason = new Error('my reason');
+    controller.abort(customReason);
+
+    try {
+      await timing.sleep(100, controller.signal);
+      throw new Error('should not reach');
+    } catch (err: unknown) {
+      expect(err).toBe(customReason);
+    }
+  });
+
+  it('sleep mid-wait abort propagates custom reason via signal!.reason', async () => {
+    const timing = createDefaultClientTiming();
+    const controller = new AbortController();
+    const customReason = new Error('mid-wait reason');
+
+    const sleepPromise = timing.sleep(1000, controller.signal);
+
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort(customReason);
+
+    try {
+      await sleepPromise;
+      throw new Error('should not reach');
+    } catch (err: unknown) {
+      expect(err).toBe(customReason);
+    }
+  });
 });

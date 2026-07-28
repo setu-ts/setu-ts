@@ -24,7 +24,7 @@ export function createDefaultClientTiming(): IClientTiming {
     sleep(ms: number, signal?: AbortSignal): Promise<void> {
       return new Promise((resolve, reject) => {
         if (signal?.aborted) {
-          reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+          reject(signal.reason);
           return;
         }
 
@@ -35,7 +35,7 @@ export function createDefaultClientTiming(): IClientTiming {
 
         const onAbort = () => {
           cleanup();
-          reject(signal!.reason ?? new DOMException('Aborted', 'AbortError'));
+          reject(signal!.reason);
         };
 
         const cleanup = () => {

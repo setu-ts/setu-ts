@@ -120,4 +120,55 @@ describe('createRateLimiter', () => {
     await limiterA.acquire(); // fills A
     await limiterB.acquire(); // fills B independently
   });
+
+  it('propagates custom abort reason from signal.reason', async () => {
+    const timeNow = 0;
+    const timing: IClientTiming = {
+      now: () => timeNow,
+      sleep: () => Promise.resolve(),
+    };
+    const limiter = createRateLimiter(1, 1000, timing);
+    const controller = new AbortController();
+    const customReason = new Error('custom limiter abort');
+    controller.abort(customReason);
+
+    try {
+      await limiter.acquire(controller.signal);
+      throw new Error('should not reach');
+    } catch (err: unknown) {
+      expect(err).toBe(customReason);
+    }
+  });
+
+  it('retries after sleep throws (admission loop)', async () => {
+    let timeNow = 0;
+    let sleepCall = 0;
+    let sleepReject: ((err: unknown) => void) | undefined;
+
+    const timing: IClientTiming = {
+      now: () => timeNow,
+      sleep: () => {
+        sleepCall++;
+        return new Promise<void>((_resolve, reject) => {
+          sleepReject = reject;
+        });
+      },
+    };
+
+    const limiter = createRateLimiter(1, 1000, timing);
+    await limiter.acquire(); // t=0, fills slot
+
+    // Trigger wait.
+    timeNow = 100;
+    const promise = limiter.acquire();
+
+    // Sleep rejects (simulating abort during wait).
+    sleepReject!(new Error('interrupted'));
+
+    // After sleep rejects, loop retries. Advance time past window.
+    timeNow = 1100;
+
+    // The loop should now evict the old timestamp and admit.
+    await promise;
+  });
 });

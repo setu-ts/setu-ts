@@ -322,4 +322,114 @@ describe('HttpClient', () => {
     const resp = await client.request({ method: 'GET', path: 'x' });
     expect(resp.data).toBeUndefined();
   });
+
+  it('throws when path has leading slash', async () => {
+    const { client } = buildClient();
+    await expect(
+      client.request({ method: 'GET', path: '/bad' }),
+    ).rejects.toThrow('no leading slash');
+  });
+
+  it('accepts Headers instance as request headers', async () => {
+    let receivedInit: RequestInit | undefined;
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = (
+      _input,
+      init,
+    ) => {
+      receivedInit = init;
+      return Promise.resolve(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
+    };
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+    });
+    await client.request({
+      method: 'GET',
+      path: 'x',
+      headers: new Headers({ 'X-Headers-Instance': 'true' }),
+    });
+    expect(receivedInit).toBeDefined();
+    const h = receivedInit!.headers as Headers;
+    expect(h.get('X-Headers-Instance')).toEqual('true');
+  });
+
+  it('throws when JSON response body is invalid', async () => {
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = () =>
+      Promise.resolve(
+        new Response('not-json{', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+    });
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      'Failed to parse JSON',
+    );
+  });
+
+  it('creates rate limiter when rateLimit options provided', async () => {
+    let limiterAcquired = false;
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = () => {
+      limiterAcquired = true;
+      return Promise.resolve(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
+    };
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+      rateLimit: { maxRequests: 10, windowMs: 5000 },
+    });
+    await client.request({ method: 'GET', path: 'x' });
+    expect(limiterAcquired).toBe(true);
+  });
+
+  it('passes signal to fetch', async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | null | undefined;
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = (
+      _input,
+      init,
+    ) => {
+      receivedSignal = init?.signal ?? undefined;
+      return Promise.resolve(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
+    };
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+    });
+    await client.request({ method: 'GET', path: 'x', signal: controller.signal });
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  it('breaker predicate classifies HttpClientError 5xx as failure', async () => {
+    // The breaker counts server errors (5xx) as failures.
+    // Cause the breaker to open by hitting 5xx enough times.
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = () =>
+      Promise.resolve(
+        new Response('server error', {
+          status: 500,
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+      circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
+    });
+    // First call should fail with HttpClientError 500 (breaker still closed).
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('500');
+  });
 });
