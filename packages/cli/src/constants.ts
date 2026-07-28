@@ -45,13 +45,30 @@ export const TARGET_RUNTIMES = ['deno', 'node', 'bun', 'cloudflare-workers'] as 
 export type TargetRuntime = (typeof TARGET_RUNTIMES)[number];
 
 /**
+ * The project templates `honoe new --template` accepts.
+ *
+ * A template selects the plugin set written into the generated
+ * `honoe.config.ts`. Omitting the flag yields the minimal set (the runtime
+ * plugin alone), which is still emitted through the same config seam.
+ */
+export const TEMPLATES = ['rest', 'microservice'] as const;
+
+/** A project template accepted by `honoe new --template`. */
+export type TemplateName = (typeof TEMPLATES)[number];
+
+/**
  * Flags that consume the following token as their value (`--dir /tmp`).
  *
  * Every other flag is boolean. {@linkcode parseArgs} needs this because
  * `--dir /tmp` and `--dry-run generate` are indistinguishable without knowing
  * which flags take a value.
  */
-export const VALUE_FLAGS: ReadonlySet<string> = new Set(['dir', 'runtime']);
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  'dir',
+  'runtime',
+  'template',
+  'config',
+]);
 
 /**
  * Narrows an arbitrary string to a {@linkcode TargetRuntime}.
@@ -62,3 +79,22 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set(['dir', 'runtime']);
 export function isTargetRuntime(value: string): value is TargetRuntime {
   return (TARGET_RUNTIMES as readonly string[]).includes(value);
 }
+
+/**
+ * Narrows an arbitrary string to a {@linkcode TemplateName}.
+ *
+ * @param value - The raw `--template` flag value
+ * @returns True when the value names a supported template
+ */
+export function isTemplateName(value: string): value is TemplateName {
+  return (TEMPLATES as readonly string[]).includes(value);
+}
+
+/**
+ * The project-root module a scaffolded project exports its application factory
+ * from, and that `honoe` imports to discover plugin-contributed commands.
+ */
+export const CONFIG_MODULE = 'honoe.config.ts';
+
+/** The factory export {@linkcode CONFIG_MODULE} must provide. */
+export const CONFIG_EXPORT = 'createApp';

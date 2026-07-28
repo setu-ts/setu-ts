@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { listTemplates } from '../../src/templates/registry.ts';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -28,10 +29,145 @@ describe('runNewCommand', () => {
   it('creates a deno project under the working directory by default', async () => {
     const h = harness();
     expect(await h.run(['my-app'])).toBe(0);
-    expect(h.fs.has('/work/my-app/deno.json')).toBe(true);
-    expect(h.fs.has('/work/my-app/main.ts')).toBe(true);
-    expect(h.fs.has('/work/my-app/README.md')).toBe(true);
-    expect(h.fs.has('/work/my-app/.gitignore')).toBe(true);
+    for (const file of ['deno.json', 'main.ts', 'honoe.config.ts', 'README.md', '.gitignore']) {
+      expect(h.fs.has(`/work/my-app/${file}`)).toBe(true);
+    }
+  });
+
+  describe('the honoe.config.ts seam', () => {
+    it('is emitted even without --template', async () => {
+      // Plugin-command discovery needs one seam that always exists.
+      const h = harness();
+      await h.run(['app']);
+      expect(h.fs.read('/work/app/honoe.config.ts')).toContain('export function createApp()');
+    });
+
+    it('carries only the runtime plugin without --template', async () => {
+      const h = harness();
+      await h.run(['app']);
+      const config = h.fs.read('/work/app/honoe.config.ts');
+      expect(config).toContain('RuntimePlugin()');
+      expect(config).not.toContain('ConfigPlugin');
+      expect(config).not.toContain('errorHandler');
+    });
+
+    it('does not start the application — main.ts owns that', async () => {
+      // Importing this module must never bind a socket.
+      const h = harness();
+      await h.run(['app']);
+      expect(h.fs.read('/work/app/honoe.config.ts')).not.toContain('.start(');
+    });
+
+    it('is the only place main.ts gets its plugin list from', async () => {
+      const h = harness();
+      await h.run(['app']);
+      const main = h.fs.read('/work/app/main.ts');
+      expect(main).toContain("import { createApp } from './honoe.config.ts'");
+      expect(main).toContain('app.start({ port: 3000 })');
+      expect(main).not.toContain('RuntimePlugin');
+      expect(main).not.toContain('createApplication');
+    });
+  });
+
+  describe('--template', () => {
+    it('writes the rest plugin set into honoe.config.ts', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest'])).toBe(0);
+      const config = h.fs.read('/work/app/honoe.config.ts');
+      for (
+        const symbol of [
+          'RuntimePlugin',
+          'ConfigPlugin',
+          'LoggerPlugin',
+          'ValidationPlugin',
+          'HttpSecurityPlugin',
+          'HealthPlugin',
+          'MetricsPlugin',
+          'OpenApiPlugin',
+        ]
+      ) {
+        expect(config).toContain(`${symbol}()`);
+      }
+    });
+
+    it('adds errorHandler through middleware.add, not the plugin list', async () => {
+      const h = harness();
+      await h.run(['app', '--template', 'rest']);
+      const config = h.fs.read('/work/app/honoe.config.ts');
+      expect(config).toContain('app.middleware.add(errorHandler());');
+      expect(config).toContain("import { errorHandler } from '@hono-enterprise/exceptions';");
+      expect(config).not.toContain('ExceptionsPlugin');
+    });
+
+    it('declares a manifest import for every package the config references', async () => {
+      const h = harness();
+      await h.run(['app', '--template', 'rest']);
+      const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
+      const config = h.fs.read('/work/app/honoe.config.ts');
+      for (const specifier of Object.keys(manifest.imports)) {
+        expect(typeof manifest.imports[specifier]).toBe('string');
+      }
+      // Every import in the generated source must be declared in the manifest.
+      for (const match of config.matchAll(/from '(@hono-enterprise\/[a-z-]+)'/g)) {
+        expect(Object.keys(manifest.imports)).toContain(match[1]);
+      }
+    });
+
+    it('makes microservice a superset of rest in the emitted config', async () => {
+      const rest = harness();
+      await rest.run(['app', '--template', 'rest']);
+      const micro = harness();
+      await micro.run(['app', '--template', 'microservice']);
+      const microConfig = micro.fs.read('/work/app/honoe.config.ts');
+      for (const symbol of ['ConfigPlugin', 'OpenApiPlugin', 'errorHandler']) {
+        expect(microConfig).toContain(symbol);
+      }
+      for (
+        const symbol of ['MessagingPlugin', 'QueuePlugin', 'ResiliencePlugin', 'TelemetryPlugin']
+      ) {
+        expect(microConfig).toContain(`${symbol}()`);
+        expect(rest.fs.read('/work/app/honoe.config.ts')).not.toContain(symbol);
+      }
+    });
+
+    it('never emits a starter import', async () => {
+      for (const template of ['rest', 'microservice']) {
+        const h = harness();
+        await h.run(['app', '--template', template]);
+        for (const path of h.fs.writes) {
+          expect(h.fs.read(path)).not.toContain('-starter');
+        }
+      }
+    });
+
+    it('returns 2 for an unknown template, writing nothing', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'graphql'])).toBe(2);
+      expect(h.err.text()).toContain('Unknown template "graphql"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses microservice on cloudflare-workers, naming the reason', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'microservice', '--runtime', 'cloudflare-workers']))
+        .toBe(2);
+      expect(h.err.text()).toContain('does not support --runtime cloudflare-workers');
+      expect(h.err.text()).toContain('sockets');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('allows rest on cloudflare-workers', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest', '--runtime', 'cloudflare-workers'])).toBe(0);
+      expect(h.fs.has('/work/app/wrangler.toml')).toBe(true);
+    });
+
+    it('allows microservice on every socket-capable runtime', async () => {
+      for (const runtime of ['deno', 'node', 'bun']) {
+        const h = harness();
+        expect(await h.run(['app', '--template', 'microservice', '--runtime', runtime])).toBe(0);
+      }
+    });
   });
 
   it('roots the project at an absolute --dir', async () => {
@@ -68,7 +204,9 @@ describe('runNewCommand', () => {
       await h.run(['app', '--runtime', 'deno']);
       const main = h.fs.read('/work/app/main.ts');
       expect(main).toContain('await app.start({ port: 3000 })');
-      expect(main).toContain('RuntimePlugin()');
+      // The plugin list lives in honoe.config.ts, not here.
+      expect(main).toContain("from './honoe.config.ts'");
+      expect(h.fs.read('/work/app/honoe.config.ts')).toContain('RuntimePlugin()');
     });
 
     it('emits no package.json', async () => {
@@ -107,6 +245,16 @@ describe('runNewCommand', () => {
         expect(h.fs.read('/work/app/main.ts')).toContain('app.start({ port: 3000 })');
         expect(h.fs.has('/work/app/deno.json')).toBe(false);
       });
+
+      it('declares an npm dependency for every template package', async () => {
+        const h = harness();
+        await h.run(['app', '--runtime', runtime, '--template', 'rest']);
+        const manifest = JSON.parse(h.fs.read('/work/app/package.json'));
+        for (const pkg of ['kernel', 'common', 'runtime', 'openapi-plugin', 'exceptions']) {
+          expect(manifest.dependencies[`@hono-enterprise/${pkg}`])
+            .toMatch(new RegExp(`^npm:@jsr/hono-enterprise__${pkg}@\\^`));
+        }
+      });
     });
   }
 
@@ -127,6 +275,24 @@ describe('runNewCommand', () => {
       expect(entry).toContain('async fetch(request: Request)');
       expect(entry).not.toContain('listen');
       expect(entry).not.toContain('port: 3000');
+    });
+
+    it('reads its plugin list from the shared config module', async () => {
+      const h = harness();
+      await h.run(['app', '--runtime', 'cloudflare-workers']);
+      const entry = h.fs.read('/work/app/src/index.ts');
+      expect(entry).toContain("import { createApp } from '../honoe.config.ts'");
+      expect(entry).not.toContain('createApplication');
+    });
+
+    it('defers start to the first request so no rejection goes unhandled', async () => {
+      // A module-scope start() whose promise is awaited only later leaves a
+      // window in which a rejection has no handler attached.
+      const h = harness();
+      await h.run(['app', '--runtime', 'cloudflare-workers']);
+      const entry = h.fs.read('/work/app/src/index.ts');
+      expect(entry).toContain('booted ??= boot();');
+      expect(entry).toContain('const app = await booted;');
     });
 
     it('emits no root main.ts', async () => {
@@ -177,6 +343,15 @@ describe('runNewCommand', () => {
       expect(await h.run(['--help'])).toBe(0);
       expect(h.out.text()).toContain('new <project-name>');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    it('lists every template in --help, from the registry', async () => {
+      const h = harness();
+      await h.run(['--help']);
+      for (const template of listTemplates()) {
+        expect(h.out.text()).toContain(template.name);
+        expect(h.out.text()).toContain(template.description);
+      }
     });
 
     it('returns 0 for -h', async () => {

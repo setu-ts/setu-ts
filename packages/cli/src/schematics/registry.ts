@@ -76,7 +76,9 @@ export interface SchematicMetadata {
  */
 const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, SchematicMetadata>([
   ['plugin', { factory: generatePlugin }],
-  ['controller', { factory: generateController }],
+  // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
+  // the decorator plugin gets source that cannot resolve its own import.
+  ['controller', { factory: generateController, requiresPlugin: 'decorator-plugin' }],
   ['service', { factory: generateService }],
   ['route', { factory: generateRoute }],
   ['middleware', { factory: generateMiddleware }],

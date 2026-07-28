@@ -8,15 +8,26 @@ import type { IFileSystem } from '@hono-enterprise/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import {
+  CONFIG_EXPORT,
+  CONFIG_MODULE,
   EXIT_ERROR,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
+  isTemplateName,
   PROGRAM_NAME,
   TARGET_RUNTIMES,
   type TargetRuntime,
+  TEMPLATES,
   VERSION,
 } from '../constants.ts';
+import {
+  getTemplate,
+  listTemplates,
+  MINIMAL_PLUGINS,
+  packagesOf,
+  type Wiring,
+} from '../templates/registry.ts';
 import { deriveNames } from '../utils/names.ts';
 import {
   findExisting,
@@ -44,22 +55,70 @@ export interface NewDependencies {
 const RANGE = `^${VERSION}`;
 
 /**
+ * Renders the project's `honoe.config.ts` — the single place its plugin list
+ * lives.
+ *
+ * The factory deliberately does NOT start the application: `main.ts` owns that,
+ * and `honoe` imports this module to discover plugin-contributed commands, so
+ * importing it must never bind a socket.
+ *
+ * @param plugins - Plugins to pass to `createApplication`
+ * @param middleware - Middleware to add after construction
+ * @returns The `honoe.config.ts` contents
+ */
+function configModule(
+  plugins: readonly Wiring[],
+  middleware: readonly Wiring[],
+): string {
+  const imports = [
+    `import { createApplication } from '@hono-enterprise/kernel';`,
+    `import type { IApplication } from '@hono-enterprise/common';`,
+    ...plugins.map((p) => `import { ${p.symbol} } from '@hono-enterprise/${p.pkg}';`),
+    ...middleware.map((m) => `import { ${m.symbol} } from '@hono-enterprise/${m.pkg}';`),
+  ].join('\n');
+
+  const pluginList = plugins.map((p) => `      ${p.symbol}(),`).join('\n');
+  const middlewareLines = middleware.length === 0
+    ? ''
+    : `\n${middleware.map((m) => `  app.middleware.add(${m.symbol}());`).join('\n')}\n`;
+
+  return `${imports}
+
+/**
+ * Builds the application.
+ *
+ * \`honoe\` imports this factory to discover plugin-contributed CLI commands, so
+ * it must NOT start the server — \`main.ts\` owns that.
+ *
+ * @returns The configured, unstarted application
+ */
+export function ${CONFIG_EXPORT}(): IApplication {
+  const app = createApplication({
+    plugins: [
+${pluginList}
+    ],
+  });
+${middlewareLines}
+  app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+
+  return app;
+}
+`;
+}
+
+/**
  * The application entry shared by the Deno, Node, and Bun targets.
  *
  * All three bind a socket through `app.start({ port })`, which delegates to the
- * runtime's Hono serve adapter (M23).
+ * runtime's Hono serve adapter (M23). The plugin list lives in
+ * {@linkcode configModule}, not here.
  *
  * @returns The `main.ts` contents
  */
 function serveEntry(): string {
-  return `import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+  return `import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
 
-const app = createApplication({
-  plugins: [RuntimePlugin()],
-});
-
-app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+const app = await ${CONFIG_EXPORT}();
 
 await app.start({ port: 3000 });
 `;
@@ -68,25 +127,36 @@ await app.start({ port: 3000 });
 /**
  * The Cloudflare Workers entry: a `fetch` export, never a `listen`.
  *
+ * Startup is deferred to the first request and memoized, rather than kicked off
+ * at module scope. A module-scope `start()` whose promise is only awaited later
+ * leaves a window in which a rejection has no handler attached.
+ *
  * @returns The `src/index.ts` contents
  */
 function workersEntry(): string {
-  return `import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+  return `import type { IApplication } from '@hono-enterprise/common';
+import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 
-const app = createApplication({
-  plugins: [RuntimePlugin()],
-});
+let booted: Promise<IApplication> | undefined;
 
-app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
-
-// Workers have no socket to bind: start() registers the plugins and the
-// platform drives the app through fetch().
-const ready = app.start();
+/**
+ * Builds and starts the application once, on the first request.
+ *
+ * Workers have no socket to bind, so start() takes no port: it registers the
+ * plugins and the platform drives the app through fetch().
+ */
+function boot(): Promise<IApplication> {
+  return (async () => {
+    const app = await ${CONFIG_EXPORT}();
+    await app.start();
+    return app;
+  })();
+}
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    await ready;
+    booted ??= boot();
+    const app = await booted;
     return await app.fetch(request);
   },
 };
@@ -94,13 +164,63 @@ export default {
 }
 
 /**
- * Builds the file set for one runtime target.
+ * Every framework package a generated project depends on.
+ *
+ * Always includes `kernel` and `common` (the config module imports both) plus
+ * one entry per wiring, so the manifest can never omit a package the generated
+ * source references.
+ *
+ * @param wirings - The template's plugin and middleware wirings
+ * @returns Bare package names, deduplicated
+ */
+function frameworkPackages(...wirings: readonly (readonly Wiring[])[]): readonly string[] {
+  return packagesOf([{ pkg: 'kernel', symbol: '' }, { pkg: 'common', symbol: '' }], ...wirings);
+}
+
+/**
+ * Builds the Deno `imports` map for a generated project.
+ *
+ * @param wirings - The template's plugin and middleware wirings
+ * @returns Specifier → `jsr:` URL
+ */
+function jsrImports(...wirings: readonly (readonly Wiring[])[]): Record<string, string> {
+  const imports: Record<string, string> = {};
+  for (const pkg of frameworkPackages(...wirings)) {
+    imports[`@hono-enterprise/${pkg}`] = `jsr:@hono-enterprise/${pkg}@${RANGE}`;
+  }
+  return imports;
+}
+
+/**
+ * Builds the npm `dependencies` map for a generated project, using JSR's npm
+ * compatibility names.
+ *
+ * @param wirings - The template's plugin and middleware wirings
+ * @returns Specifier → `npm:@jsr/…` range
+ */
+function npmDependencies(...wirings: readonly (readonly Wiring[])[]): Record<string, string> {
+  const deps: Record<string, string> = {};
+  for (const pkg of frameworkPackages(...wirings)) {
+    deps[`@hono-enterprise/${pkg}`] = `npm:@jsr/hono-enterprise__${pkg}@${RANGE}`;
+  }
+  return deps;
+}
+
+/**
+ * Builds the file set for one runtime target and plugin set.
  *
  * @param projectName - The project directory and manifest name
  * @param runtime - The selected runtime target
+ * @param plugins - Plugins the generated `honoe.config.ts` registers
+ * @param middleware - Middleware the generated `honoe.config.ts` adds
  * @returns The files to create, relative to the project root
  */
-function projectFiles(projectName: string, runtime: TargetRuntime): readonly GeneratedFile[] {
+function projectFiles(
+  projectName: string,
+  runtime: TargetRuntime,
+  plugins: readonly Wiring[],
+  middleware: readonly Wiring[],
+): readonly GeneratedFile[] {
   const readme = `# ${projectName}
 
 A [Hono Enterprise](https://github.com/dkpaul91/hono-enterprise) project targeting \`${runtime}\`.
@@ -145,11 +265,7 @@ ${PROGRAM_NAME} generate --help
             // The decorator and OpenAPI plugins ship legacy decorators, so a
             // generated @Controller class only type-checks with this enabled.
             compilerOptions: { experimentalDecorators: true },
-            imports: {
-              '@hono-enterprise/kernel': `jsr:@hono-enterprise/kernel@${RANGE}`,
-              '@hono-enterprise/runtime': `jsr:@hono-enterprise/runtime@${RANGE}`,
-              '@hono-enterprise/common': `jsr:@hono-enterprise/common@${RANGE}`,
-            },
+            imports: jsrImports(plugins, middleware),
           },
           null,
           2,
@@ -170,11 +286,7 @@ ${PROGRAM_NAME} generate --help
                 ? 'bun run main.ts'
                 : 'node --experimental-strip-types main.ts',
             },
-            dependencies: {
-              '@hono-enterprise/kernel': `npm:@jsr/hono-enterprise__kernel@${RANGE}`,
-              '@hono-enterprise/runtime': `npm:@jsr/hono-enterprise__runtime@${RANGE}`,
-              '@hono-enterprise/common': `npm:@jsr/hono-enterprise__common@${RANGE}`,
-            },
+            dependencies: npmDependencies(plugins, middleware),
           },
           null,
           2,
@@ -205,6 +317,8 @@ ${PROGRAM_NAME} generate --help
       }\n`,
     });
   }
+
+  files.push({ path: CONFIG_MODULE, contents: configModule(plugins, middleware) });
 
   if (runtime === 'cloudflare-workers') {
     files.push({ path: 'src/index.ts', contents: workersEntry() });
@@ -238,12 +352,21 @@ export async function runNewCommand(
   args: ParsedArgs,
   deps: NewDependencies,
 ): Promise<number> {
-  const usage = `Usage: ${PROGRAM_NAME} new <project-name> [--runtime <target>] [--dir <path>]`;
+  const usage =
+    `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] [--runtime <target>] [--dir <path>]`;
 
   // `--help` is never an error.
   if (args.flags['help'] === true || args.flags['h'] === true) {
     deps.log(usage);
     deps.log('');
+    deps.log('Templates:');
+    deps.log('  (none)              Minimal — the runtime plugin alone');
+    for (const template of listTemplates()) {
+      deps.log(`  ${template.name.padEnd(18)}${template.description}`);
+    }
+    deps.log('');
+    deps.log('Options:');
+    deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
     deps.log('  --dir <path>        Create the project under this directory');
     deps.log('  --dry-run           Print what would be created, write nothing');
@@ -265,6 +388,28 @@ export async function runNewCommand(
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'deno';
 
+  const templateFlag = stringFlag(args.flags, 'template');
+  if (templateFlag !== undefined && !isTemplateName(templateFlag)) {
+    deps.error(
+      `Unknown template "${templateFlag}". Expected one of: ${TEMPLATES.join(', ')}.`,
+    );
+    return EXIT_USAGE;
+  }
+  const template = templateFlag === undefined ? undefined : getTemplate(templateFlag);
+
+  // Refuse a template/runtime pairing that would deploy and then fail at first
+  // use, naming the reason rather than scaffolding a broken project.
+  const blocked = template?.unsupported[runtime];
+  if (template !== undefined && blocked !== undefined) {
+    deps.error(
+      `The "${template.name}" template does not support --runtime ${runtime}: ${blocked}.`,
+    );
+    return EXIT_USAGE;
+  }
+
+  const plugins = template?.plugins ?? MINIMAL_PLUGINS;
+  const middleware = template?.middleware ?? [];
+
   const projectName = deriveNames(rawName).kebab;
   if (projectName === '') {
     deps.error(`Invalid project name: "${rawName}".`);
@@ -272,7 +417,7 @@ export async function runNewCommand(
   }
 
   const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), projectName);
-  const files = projectFiles(projectName, runtime).map((file) => ({
+  const files = projectFiles(projectName, runtime, plugins, middleware).map((file) => ({
     path: joinPath(root, file.path),
     contents: file.contents,
   }));
