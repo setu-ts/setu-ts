@@ -1429,14 +1429,14 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/cli
 
-| Aspect               | Detail                                                                 |
-| -------------------- | ---------------------------------------------------------------------- |
-| **Purpose**          | CLI tool with generators                                               |
-| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators          |
-| **Dependencies**     | `common`, `kernel`                                                     |
-| **Public API**       | `hono-enterprise` CLI command                                          |
-| **Extension Points** | Custom schematics                                                      |
-| **Rules**            | Plugin-aware: detects installed plugins and offers relevant generators |
+| Aspect               | Detail                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | CLI tool with generators                                                                                                                        |
+| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                   |
+| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text, never builds an app)                                                             |
+| **Public API**       | The `honoe` command; `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                   |
+| **Extension Points** | Custom schematics loaded from `.hono-enterprise/schematics/` by real dynamic import                                                             |
+| **Rules**            | Plugin-aware: reads the target project's manifest, never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing |
 
 #### @hono-enterprise/sdk
 

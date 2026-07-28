@@ -155,15 +155,20 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Dependency injection | ✅     | `di-plugin`            | **Optional.** Singleton/scoped/transient, constructor injection |
 | Decorators           | ✅     | `decorator-plugin`     | **Optional.** NestJS-style, no `reflect-metadata`               |
 
+### Tooling
+
+| Feature | Status | Package | Description                                                    |
+| ------- | ------ | ------- | -------------------------------------------------------------- |
+| CLI     | ✅     | `cli`   | `honoe` — project scaffolding and plugin-aware code generation |
+
 ### Not yet built
 
-| Feature         | Status      | Description                                              |
-| --------------- | ----------- | -------------------------------------------------------- |
-| CLI             | 📋 Designed | Plugin-aware scaffolding and code generation (next up)   |
-| SDK             | 📋 Designed | HTTP client with retry, circuit breaker, OpenAPI codegen |
-| Starter bundles | 📋 Designed | REST, microservice, and full-stack starters              |
-| GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin               |
-| gRPC            | 🚧 Planned  | Client and server support for microservice communication |
+| Feature         | Status      | Description                                                        |
+| --------------- | ----------- | ------------------------------------------------------------------ |
+| SDK             | 📋 Designed | HTTP client with retry, circuit breaker, OpenAPI codegen (next up) |
+| Starter bundles | 📋 Designed | REST, microservice, and full-stack starters                        |
+| GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin                         |
+| gRPC            | 🚧 Planned  | Client and server support for microservice communication           |
 
 ---
 
@@ -190,6 +195,17 @@ Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.1
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
 younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
+
+### The CLI
+
+```bash
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.1/main
+
+honoe new my-app
+cd my-app && honoe generate service billing
+```
+
+The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
 All 35 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`) and
 every plugin in the tables above.

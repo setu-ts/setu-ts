@@ -3401,26 +3401,35 @@ const testApp = await createTestApp({
 
 **Commands:**
 
+The installed binary is **`honoe`** (`deno install -g -n honoe`), not `hono-enterprise`.
+
 ```
-hono-enterprise new <project-name>
-hono-enterprise generate plugin <name>
-hono-enterprise generate controller <name>
-hono-enterprise generate service <name>
-hono-enterprise generate route <name>
-hono-enterprise generate middleware <name>
-hono-enterprise generate guard <name>
-hono-enterprise generate health-indicator <name>
-hono-enterprise generate metric <name>
-hono-enterprise generate command-handler <name>
-hono-enterprise generate query-handler <name>
-hono-enterprise generate event-handler <name>
-hono-enterprise generate job <name>
-hono-enterprise generate migration <name>
+honoe new <project-name> [--runtime deno|node|bun|cloudflare-workers]
+honoe generate plugin <name>
+honoe generate controller <name>
+honoe generate service <name>
+honoe generate route <name>
+honoe generate middleware <name>
+honoe generate guard <name>              # requires auth-plugin
+honoe generate health-indicator <name>   # requires health-plugin
+honoe generate metric <name>             # requires metrics-plugin
+honoe generate command-handler <name>    # requires cqrs-plugin
+honoe generate query-handler <name>      # requires cqrs-plugin
+honoe generate event-handler <name>      # requires events-plugin
+honoe generate job <name>
+honoe generate migration <name>          # requires database-plugin
+honoe generate custom <schematic> <name> # from .hono-enterprise/schematics/
 ```
 
-**Scaffolding Is Deno-First:** `hono-enterprise new` generates a Deno project (`deno.json` with
-tasks, JSR imports). A `--runtime node|bun` flag generates an npm-based variant that consumes the
-packages via JSR's npm compatibility layer.
+Aliases: `n` for `new`, `g` for `generate`. Global flags: `--dry-run` (print the plan, write
+nothing), `--dir <path>` (operate on that directory instead of the CWD), `--help`/`-h`,
+`--version`/`-v`.
+
+**Scaffolding Is Deno-First:** `honoe new` generates a Deno project (`deno.json` with tasks, JSR
+imports). A `--runtime node|bun` flag generates an npm-based variant that consumes the packages via
+JSR's npm compatibility layer (`package.json` + `.npmrc` mapping the `@jsr` scope +
+`tsconfig.json`); `--runtime cloudflare-workers` generates the `fetch` entry plus a `wrangler.toml`
+and no `listen`.
 
 **Plugin-Aware Generation:** The CLI detects installed plugins and offers relevant generators:
 
@@ -3447,6 +3456,15 @@ packages via JSR's npm compatibility layer.
 - `src/schematics/query-handler.ts`
 - `src/schematics/event-handler.ts`
 - `src/schematics/job.ts`
+- `src/schematics/metric.ts`
+- `src/schematics/migration.ts`
+- `src/schematics/custom.ts`
+- `src/schematics/registry.ts`
+- `src/args.ts`
+- `src/constants.ts`
+- `src/main.ts`
+- `src/utils/names.ts`
+- `src/utils/file-writer.ts`
 - `src/utils/plugin-detector.ts`
 - `src/index.ts`
 
@@ -3459,10 +3477,10 @@ packages via JSR's npm compatibility layer.
 
 ### Deliverables
 
-- [ ] CLI tool
-- [ ] All generators
-- [ ] Plugin-aware detection
-- [ ] Full test coverage
+- [x] CLI tool
+- [x] All generators
+- [x] Plugin-aware detection
+- [x] Full test coverage
 
 ---
 
@@ -4334,7 +4352,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 31        | ✅     | feature-flags-plugin |
 | 32        | ✅     | multi-tenancy-plugin |
 | 33        | ✅     | testing              |
-| 34        | ⬜     | cli                  |
+| 34        | ✅     | cli                  |
 | 35        | ⬜     | sdk                  |
 | 36        | ⬜     | starters             |
 | 37        | ⬜     | examples             |
