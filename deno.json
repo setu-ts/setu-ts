@@ -51,6 +51,7 @@
     "release:verify": "deno run --allow-read scripts/verify-release.ts",
     "release:create-packages": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/create-jsr-packages.ts",
     "release:publish": "deno run --allow-read --allow-env=JSR_TOKEN --allow-net=jsr.io --allow-run=deno scripts/publish-packages.ts",
+    "release:link-repos": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE,JSR_REPO_OWNER,JSR_REPO_NAME --allow-net=api.jsr.io scripts/link-jsr-repos.ts",
     "lint": "deno lint",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"

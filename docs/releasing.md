@@ -148,6 +148,32 @@ not on `main`.
 > `--dry-run` does not catch it: the registry lookup that needs `--allow-net` is skipped under
 > `--dry-run`, so the dry run exercises neither missing permission.
 
+## Tokenless CI publishing needs each package linked to the repository
+
+JSR accepts a GitHub Actions OIDC identity only for a package it knows belongs to the repository:
+
+> To publish from GitHub Actions, you must first link your package to your GitHub repository from
+> your package settings in JSR.
+
+Without the link, `deno publish` gets as far as uploading and then fails with
+
+```
+error: Failed to publish @hono-enterprise/common@0.1.0-alpha.2
+Caused by:
+    The actor that this request was authenticated for is not authorized to
+    access this resource. (actorNotAuthorized)
+```
+
+`v0.1.0-alpha.1` never hit this because it was published from a terminal with a token, where the
+link is irrelevant. Linking is one web form per package, so:
+
+```bash
+env JSR_TOKEN=jsrp_… deno task release:link-repos
+```
+
+Idempotent, and it prints a settings URL for anything it could not link. Run it once; after that the
+tag-triggered workflow is self-sufficient.
+
 ## Why publishing goes through a script
 
 `deno publish` from the workspace root publishes **all 40 members**, including the `sdk` and starter
