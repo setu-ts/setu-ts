@@ -476,6 +476,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   agreement, specifier resolvability, full workspace coverage, no stub in the list). Added a
   `CHANGELOG.md`, a tag-triggered `.github/workflows/release.yml`, and the 23 missing package
   READMEs. **JSR versions are immutable** — yankable, never deletable or replaceable.
+- **Alpha release `v0.1.0-alpha.2`** — on `release/v0.1.0-alpha.2`, published 2026-07-28. **36
+  packages** (adds `cli`); only `sdk` and the three starters remain unpublished. The whole scope
+  moves as ONE version because the CLI forces it: `honoe new` stamps generated projects with the
+  CLI's OWN version as the range for `kernel`/`runtime`/`common`/every template plugin, so a CLI at
+  `alpha.2` beside a framework at `alpha.1` would scaffold projects pinning versions that do not
+  exist. Also fixed 44 relative links across 28 package READMEs — JSR resolves a README's relative
+  links against `jsr.io/@hono-enterprise/`, so `../../PUBLIC_API.md` returned a 400
+  `malformedRequest` on every package page; package READMEs must use absolute GitHub URLs. **This
+  was the first release CI published.** `alpha.1` went out by hand because the workflow failed every
+  time, in three distinct ways, none reproducible locally: (1) the publish step lacked
+  `--allow-env`, because the workflow inlined its own `deno run` instead of calling the
+  `release:publish` task and the copy drifted — it now calls the task; (2) it also lacked
+  `--allow-net`, needed by the already-published check, which `--dry-run` SKIPS, so a green dry run
+  proves nothing about a real run; (3) no package was linked to the GitHub repo, which tokenless
+  OIDC requires and token publishing does not — hence `alpha.1` never hit it.
+  `deno task
+  release:link-repos` links all 36 through the API. Do NOT read
+  `githubRepository: null` on already-published packages as evidence the link is optional; those
+  were published with a token.
 - **Milestone 34** (`packages/cli` — the `honoe` CLI: `new` project scaffolding and plugin-aware
   `generate` code generation. `runCli(argv, deps)` returns an exit code and never calls `Deno.exit`;
   `src/main.ts` is the sole process boundary (`Deno.args`, `Deno.cwd()`, `console`, the Deno

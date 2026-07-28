@@ -19,11 +19,10 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: `v0.1.0-alpha.2` is the next release — it adds `cli` and publishes 36 packages.**
-> `v0.1.0-alpha.1` (35 packages) is what is live on JSR right now.
+> **Status: `v0.1.0-alpha.2` is published — all 36 packages are live on JSR.**
 >
-> The kernel, the runtime layer, and 30 plugins are implemented, tested, and documented (604 tests,
-> 97%+ coverage).
+> The kernel, the runtime layer, 30 plugins, the test utilities, and the `honoe` CLI are
+> implemented, tested, and documented (655 tests, 97%+ coverage).
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
 > `deno add jsr:@hono-enterprise/kernel` fails with _"has only pre-release versions available"_.
@@ -208,8 +207,8 @@ cd my-app && honoe generate service billing
 
 The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
-`v0.1.0-alpha.1` published 35 packages: the core (`common`, `kernel`, `runtime`, `exceptions`,
-`testing`) and every plugin in the tables above. `v0.1.0-alpha.2` adds `cli`, for 36.
+All 36 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`),
+every plugin in the tables above, and the `cli`.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
