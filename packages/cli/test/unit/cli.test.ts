@@ -122,6 +122,7 @@ describe('runCli', () => {
       const h = harness();
       expect(await h.run(['frobnicate'])).toBe(2);
       expect(h.err.text()).toContain('Unknown command: frobnicate');
+      expect(h.fs.writes).toEqual([]);
     });
 
     it('returns 2 for a usage error inside a command', async () => {
@@ -132,6 +133,123 @@ describe('runCli', () => {
     it('returns 1 for a runtime error inside a command', async () => {
       const h = harness({ '/work/src/services/billing.service.ts': 'MINE' });
       expect(await h.run(['generate', 'service', 'billing'])).toBe(1);
+    });
+  });
+
+  describe('plugin-command dispatch', () => {
+    const appModule =
+      (commands: readonly { name: string; handler: () => void }[]) => (_url: string) =>
+        Promise.resolve({
+          createApp: () => ({
+            services: { getAll: () => commands },
+            start: () => Promise.resolve(),
+            stop: () => Promise.resolve(),
+          }),
+        });
+
+    /** A harness whose project has a config module registering `commands`. */
+    function withApp(commands: readonly { name: string; handler: () => void }[]) {
+      const fs = createFakeFs({ '/work/honoe.config.ts': 'export function createApp() {}' });
+      const out = createRecorder();
+      const err = createRecorder();
+      let booted = false;
+      return {
+        fs,
+        out,
+        err,
+        wasBooted: () => booted,
+        run: (argv: readonly string[]) =>
+          runCli(argv, {
+            fs,
+            cwd: '/work',
+            now: () => 0,
+            log: out.sink,
+            error: err.sink,
+            loadApp: (url) => {
+              booted = true;
+              return appModule(commands)(url);
+            },
+          }),
+      };
+    }
+
+    it('routes an unmatched first positional to the plugin commands', async () => {
+      let ran = false;
+      const h = withApp([{
+        name: 'db:migrate',
+        handler: () => {
+          ran = true;
+        },
+      }]);
+      expect(await h.run(['db:migrate'])).toBe(0);
+      expect(ran).toBe(true);
+    });
+
+    it('lists commands via the commands verb', async () => {
+      const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
+      expect(await h.run(['commands'])).toBe(0);
+      expect(h.out.text()).toContain('db:migrate');
+    });
+
+    it('exits 0 from commands when the app registers none', async () => {
+      const h = withApp([]);
+      expect(await h.run(['commands'])).toBe(0);
+    });
+
+    describe('built-in precedence', () => {
+      it('does not let a plugin shadow new', async () => {
+        let shadowed = false;
+        const h = withApp([{
+          name: 'new',
+          handler: () => {
+            shadowed = true;
+          },
+        }]);
+        expect(await h.run(['new', 'app'])).toBe(0);
+        expect(shadowed).toBe(false);
+        expect(h.fs.has('/work/app/deno.json')).toBe(true);
+      });
+
+      it('does not let a plugin shadow generate', async () => {
+        let shadowed = false;
+        const h = withApp([{
+          name: 'generate',
+          handler: () => {
+            shadowed = true;
+          },
+        }]);
+        expect(await h.run(['generate', 'service', 'billing'])).toBe(0);
+        expect(shadowed).toBe(false);
+      });
+
+      it('does not boot the application for a built-in verb', async () => {
+        // The common path must stay fast: `honoe g service x` never imports
+        // the user's project.
+        const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
+        await h.run(['g', 'service', 'billing']);
+        expect(h.wasBooted()).toBe(false);
+      });
+
+      it('does not boot for new, help, or --version either', async () => {
+        for (const argv of [['new', 'app'], ['help'], ['--version'], ['-h']]) {
+          const h = withApp([]);
+          await h.run(argv);
+          expect(h.wasBooted()).toBe(false);
+        }
+      });
+
+      it('does boot for an unmatched command', async () => {
+        const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
+        await h.run(['db:migrate']);
+        expect(h.wasBooted()).toBe(true);
+      });
+    });
+
+    it('exits 2 naming honoe.config.ts when an unknown command is typed in a bare dir', async () => {
+      const h = harness();
+      expect(await h.run(['frobnicate'])).toBe(2);
+      expect(h.err.text()).toContain('Unknown command: frobnicate');
+      expect(h.err.text()).toContain('honoe.config.ts');
     });
   });
 

@@ -12,7 +12,9 @@
   },
   "lint": {
     "rules": {
-      "exclude": ["no-console"]
+      "exclude": [
+        "no-console"
+      ]
     }
   },
   "test": {
@@ -20,7 +22,14 @@
       "read": true,
       "write": true,
       "env": true,
-      "sys": ["hostname", "cpus"]
+      "sys": [
+        "hostname",
+        "cpus"
+      ],
+      "run": [
+        "deno"
+      ],
+      "net": true
     }
   }
 }

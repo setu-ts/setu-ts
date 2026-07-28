@@ -5,7 +5,7 @@
  */
 
 import type { Schematic } from './registry.ts';
-import { joinPath } from '../utils/file-writer.ts';
+import { joinPath, toFileUrl } from '../utils/file-writer.ts';
 
 /** Directory, relative to the project root, holding custom schematics. */
 export const CUSTOM_SCHEMATIC_DIR = '.hono-enterprise/schematics';
@@ -39,8 +39,7 @@ export const importModule: ModuleLoader = async (url) =>
  * @returns An absolute `file:` URL
  */
 export function customSchematicUrl(dir: string, name: string): string {
-  const path = joinPath(dir, CUSTOM_SCHEMATIC_DIR, `${name}.ts`);
-  return new URL(path.startsWith('/') ? path : `/${path}`, 'file://').href;
+  return toFileUrl(joinPath(dir, CUSTOM_SCHEMATIC_DIR, `${name}.ts`));
 }
 
 /**
