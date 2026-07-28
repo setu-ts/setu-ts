@@ -1,8 +1,9 @@
 # Milestone 34b — CLI extensions (`@hono-enterprise/cli`)
 
-> **Status:** Planning. Branch: `feat/m34b-cli-extensions`, cut from `feat/m34-cli` because this
-> milestone extends M34 code that has not yet merged to `main`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Planning. Branch: `feat/m34b-cli-extensions`, rebased onto `main` after M34 merged (PR
+> #88, merge commit `004f49f`), so it carries M34's six code-review fixes — notably `resolveDir`,
+> which §3.4/§3.5 build on. `main` is protected — all work (implementation + fixes) stays on this
+> one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
@@ -252,10 +253,31 @@ No option is stored without a reader; each row names the file that branches on i
 | `test/unit/barrel-exports.test.ts` (extended)     | `src/index.ts`                                  | The three §4 additions are importable and nothing beyond the committed set is exported.                                                                                                                                                                                                |
 | `test/integration/app-loader-real-import.test.ts` | `src/app-loader.ts` (default loader)            | Writes a real `honoe.config.ts` to a temp directory and loads it via the **real** `import()` — the guarded real-path test CLAUDE.md requires for a lazy import.                                                                                                                        |
 | `test/integration/plugin-commands.test.ts`        | discovery against a real kernel app             | Boots a REAL `createApplication` carrying a plugin that calls `ctx.cli.register`, asserts the handler runs with the right args, that no socket was bound, and that `stop()` ran.                                                                                                       |
-| `test/e2e/template-e2e.test.ts`                   | `new --template` end-to-end                     | Scaffolds each template into a real temp directory, reads the files back, and runs `deno check` on the generated project against the real published packages — the §8 drift gate, automated.                                                                                           |
+| `test/e2e/template-e2e.test.ts`                   | `new --template` end-to-end                     | Scaffolds each template into a real temp directory, reads the files back, and runs `deno check` on the generated project against the real published packages — the §8 drift gate, automated. Generation runs over the **hostile name set** of §6.1, never one happy-path name.         |
 
 Every new `src/` file above has a named test file. `src/main.ts` remains excluded from the bar for
 the M34 reason: it is the process-terminating wrapper §3.12 of the M34 plan exists to isolate.
+
+### 6.1 The hostile name set — generation is exercised over all of it
+
+Every `deno check` in the e2e gate runs generation over this set, not a single name:
+
+| Name            | What it would have caught                                                          |
+| --------------- | ---------------------------------------------------------------------------------- |
+| `order-item`    | The ordinary multi-word path.                                                      |
+| `class`         | A reserved word in a binding position — M34 emitted `(class) => {`, a SyntaxError. |
+| `new`           | A reserved word that is also a CLI verb.                                           |
+| `2fa`           | A digit-leading name — M34 emitted `class 2faService`, an invalid identifier.      |
+| `API`           | An all-caps segment, whose Pascal form is `Api` rather than `API`.                 |
+| `oauth2-client` | Digits inside a word, which must not trip the digit-leading guard.                 |
+| `user`          | A single word, the degenerate case of every casing transform.                      |
+
+**Why this is a named plan item rather than an implementation detail.** M34's drift gate ran
+`deno check` against the real packages and still shipped two defects that made generated code fail
+to parse — because it only ever generated the name `order-item`. A gate that exercises one input
+proves one input. The set above is the minimum that would have failed on both M34 defects.
+`isIdentifierSafe` (shipped in M34) makes `2fa` an expected REFUSAL rather than a crash, so the gate
+asserts exit codes alongside `deno check`.
 
 ## 7. Verification gates
 
@@ -290,9 +312,10 @@ deno run --allow-all packages/cli/src/main.ts commands --dir /tmp/m34b/smoke-res
   invocation starts the application.
 - **A template's wiring drifts from the framework's real API.** A stale plugin name or a renamed
   export type-checks fine here — it is a string. → `test/e2e/template-e2e.test.ts` runs `deno check`
-  on the generated project against the real published packages, so drift fails the suite. This is
-  the gate that caught two real defects in M34 (`ctx.request.params`, missing
-  `experimentalDecorators`).
+  on the generated project against the real published packages, over the §6.1 hostile name set, so
+  drift fails the suite. The same gate caught two real defects in M34 (`ctx.request.params`, missing
+  `experimentalDecorators`) — and MISSED two more (a reserved word in a binding position, a
+  digit-leading identifier) precisely because it ran a single name. §6.1 exists to close that.
 - **`honoe.config.ts` changes M34's generated project shape**, so a project scaffolded by M34 has no
   config file and cannot serve plugin commands. → M34 is unreleased, so no published artifact
   depends on the old shape; and the "no config file" case is an explicit, tested exit-`2` message
