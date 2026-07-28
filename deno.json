@@ -82,7 +82,7 @@
     "indentWidth": 2,
     "singleQuote": true,
     "semiColons": true,
-    "exclude": ["docs/api", ".verify", ".verify-milestone"]
+    "exclude": ["docs/api", ".verify", ".verify-milestone", "packages/sdk/test/fixtures/generated-client.ts"]
   },
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",

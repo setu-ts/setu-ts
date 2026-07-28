@@ -291,7 +291,11 @@ function getSuccessTypes(op: SdkOpenApiOperation): string[] {
 }
 
 function buildPathLiteral(path: string): string {
-  const segments = path.split('/').map((seg) => {
+  // Strip a single leading slash so the emitted path is relative (HTTP client
+  // rejects leading-slash paths). Preserve interior `/` separators between
+  // segments.
+  const normalized = path.replace(/^\/+/, '');
+  const segments = normalized.split('/').map((seg) => {
     const m = seg.match(/^\{(.+)\}$/);
     if (m) {
       const safe = sanitizeIdentifier(m[1]);
@@ -322,7 +326,7 @@ export function generateOpenApiClient(
   L(' * Auto-generated SDK client. Do not edit manually.');
   L(' */');
   L('');
-  L(`import type { ClientRequest, ClientResponse, IHttpClient } from '${opts.sdkImport}';`);
+  L(`import type { ClientResponse, IHttpClient } from '${opts.sdkImport}';`);
   L('');
 
   if (schemas) {
@@ -375,7 +379,7 @@ export function generateOpenApiClient(
 
     if (fields.length) {
       L(`export interface ${typeName} {`);
-      L(...fields);
+      fields.forEach((f) => L(f));
       L('}');
     } else {
       L(`export type ${typeName} = void;`);
@@ -412,7 +416,9 @@ export function generateOpenApiClient(
       paramList.push('opts?: Record<string, unknown>');
     }
 
-    L(`    ${op.safeName}(${paramList.join(', ')}): Promise<ClientResponse<${returnType}>> {`);
+    L(`    function ${op.safeName}(${
+      paramList.join(', ')
+    }): Promise<ClientResponse<${returnType}>> {`);
 
     const pathExpr = buildPathLiteral(op.path);
     L(`        return client.request<${returnType}>({`);
@@ -421,21 +427,22 @@ export function generateOpenApiClient(
 
     if (queryParams.length) {
       const qParts = queryParams.map((p) => {
-        const hasPathParams = pathParams.length > 0;
-        return `'${p.name}': ${hasPathParams ? 'opts' : 'args'}?.${sanitizeIdentifier(p.name)}`;
+        const pname = sanitizeIdentifier(p.name);
+        const ptype = renderSchema(p.schema) ?? 'unknown';
+        return `'${pname}': (opts?.${pname} as ${ptype} | undefined)`;
       });
       L(`            query: { ${qParts.join(', ')} },`);
     }
     if (headerParams.length) {
       const hParts = headerParams.map((p) => {
-        const hasPathParams = pathParams.length > 0;
-        return `'${p.name}': ${hasPathParams ? 'opts' : 'args'}?.${sanitizeIdentifier(p.name)}`;
+        const pname = sanitizeIdentifier(p.name);
+        // Header values are strings; cast to string | undefined.
+        return `'${pname}': (opts?.${pname} as string | undefined)`;
       });
       L(`            headers: { ${hParts.join(', ')} },`);
     }
     if (bodySchema) {
-      const hasPathParams = pathParams.length > 0;
-      L(`            json: ${hasPathParams ? 'opts' : 'args'}?.body,`);
+      L(`            json: opts?.body,`);
     }
 
     L('        });');

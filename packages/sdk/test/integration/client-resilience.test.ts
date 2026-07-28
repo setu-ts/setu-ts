@@ -149,4 +149,65 @@ describe('client resilience composition', () => {
       ClientCircuitOpenError,
     );
   });
+
+  it('non-retryable 4xx on GET is NOT retried (exactly 1 fetch)', async () => {
+    const { timing, sleepDelays } = createTiming();
+    let fetchCount = 0;
+    const fetchImpl = () => {
+      fetchCount++;
+      return Promise.resolve(
+        new Response(JSON.stringify({ detail: 'bad request' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    };
+
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: fetchImpl,
+      retry: { limit: 3, delay: 10, backoff: 'fixed' },
+    });
+
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(HttpClientError);
+    expect(fetchCount).toEqual(1);
+    expect(sleepDelays).toEqual([]);
+  });
+
+  it('429 with Retry-After delta-seconds honors the delay', async () => {
+    const { timing, sleepDelays } = createTiming();
+    let attempts = 0;
+    const fetchImpl = () => {
+      attempts++;
+      if (attempts < 2) {
+        return Promise.resolve(
+          new Response('', {
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { 'Retry-After': '30' },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    };
+
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: fetchImpl,
+      retry: { limit: 3, delay: 10, backoff: 'fixed' },
+    });
+
+    const resp = await client.request({ method: 'GET', path: 'x' });
+    expect(resp.data).toEqual({ ok: true });
+    expect(attempts).toEqual(2);
+    // Retry-After: 30 → 30000ms, overrides the base delay of 10.
+    expect(sleepDelays).toEqual([30000]);
+  });
 });

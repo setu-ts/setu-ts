@@ -437,7 +437,7 @@ describe('generated method signatures', () => {
     expect(out).toContain('opts?.q');
   });
 
-  it('query params use args when no path params', () => {
+  it('query params use opts when no path params', () => {
     const out = generateOpenApiClient(makeDoc({
       '/search': {
         get: makeOp('search', {
@@ -445,7 +445,7 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('args?.q');
+    expect(out).toContain('opts?.q');
   });
 
   it('header params use opts when path params present', () => {
@@ -471,7 +471,7 @@ describe('generated method signatures', () => {
     expect(out).toContain('opts?.body');
   });
 
-  it('body uses args when no path params', () => {
+  it('body uses opts when no path params', () => {
     const out = generateOpenApiClient(makeDoc({
       '/users': {
         post: makeOp('createUser', {
@@ -479,7 +479,7 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('args?.body');
+    expect(out).toContain('opts?.body');
   });
 });
 
@@ -651,5 +651,68 @@ describe('component schemas', () => {
       },
     }));
     expect(out).toContain('string | number');
+  });
+});
+
+describe('fixture equality', () => {
+  it('generateOpenApiClient output equals the committed fixture', () => {
+    const doc: SdkOpenApiDocument = {
+      openapi: '3.1.0',
+      paths: {
+        '/users': {
+          get: {
+            operationId: 'listUsers',
+            parameters: [
+              { name: 'page', in: 'query', required: false, schema: { type: 'integer' } },
+              { name: 'limit', in: 'query', required: false, schema: { type: 'integer' } },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'array', items: { $ref: '#/components/schemas/User' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        '/users/{id}': {
+          get: {
+            operationId: 'getUserById',
+            parameters: [
+              { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': { schema: { $ref: '#/components/schemas/User' } },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          User: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              email: { type: 'string' },
+            },
+            required: ['id', 'name'],
+          },
+        },
+      },
+    };
+    const generated = generateOpenApiClient(doc, { sdkImport: '../../src/index.ts' });
+    const fixture = Deno.readTextFileSync(
+      new URL('../fixtures/generated-client.ts', import.meta.url),
+    );
+    expect(generated).toBe(fixture);
   });
 });

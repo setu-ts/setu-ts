@@ -4,11 +4,17 @@
  * Implements retry classification, `Retry-After` delta-seconds parsing, and
  * the fixed/exponential backoff loop using the shared `RetryPolicy` from common.
  *
+ * Classification operates on the real error type emitted by `HttpClient` —
+ * `HttpClientError` for non-2xx responses (carrying `status` and `headers`)
+ * and transport rejections otherwise — rather than a raw `Response`.
+ *
  * @internal
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
 import type { RetryPolicy } from 'jsr:@hono-enterprise/common@^0.1.0-alpha.2';
+
+import { HttpClientError } from '../errors.ts';
 
 // Idempotent/safe methods that may be automatically retried.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
@@ -23,21 +29,30 @@ function isRetryableStatus(status: number): boolean {
   );
 }
 
-/** Parse `Retry-After` header value as delta-seconds (integer). Returns null for HTTP-date or malformed. */
+/**
+ * Parse `Retry-After` header value as delta-seconds (a non-negative integer).
+ *
+ * Returns the delta as milliseconds, or `null` for HTTP-date form, empty,
+ * fractional, or otherwise malformed values. Per plan §3.4 only the
+ * delta-seconds form is honored; the HTTP-date form is intentionally ignored.
+ */
 function parseRetryAfterDelta(headers: Headers): number | null {
   const value = headers.get('Retry-After');
-  if (value === null) return null;
+  if (value === null || value.trim() === '') return null;
   const n = Number(value);
-  if (Number.isFinite(n) && n >= 0) return n;
-  // HTTP-date form is intentionally ignored per plan §3.4.
+  // Gate on a non-negative integer: rejects fractional values and
+  // non-numeric parses. Empty strings are rejected above.
+  if (Number.isInteger(n) && n >= 0) return n * 1000;
   return null;
 }
 
 /**
  * Execute `fn` with retry logic governed by `policy`.
  *
- * Only retries transport rejections (non-Response throws) and responses with
- * retryable status codes, and only for safe/idempotent methods.
+ * Retries transport rejections and `HttpClientError` responses with retryable
+ * status codes, and only for safe/idempotent methods. When a retryable
+ * response carries a `Retry-After` delta-seconds header, that delay replaces
+ * the computed backoff for that attempt.
  *
  * @internal
  */
@@ -61,14 +76,24 @@ export async function runWithRetry<T>(
       // Never retry aborted requests.
       if (signal?.aborted) throw error;
 
-      // Transport rejection (not an HTTP response) — retry if method is safe.
-      if (!(error instanceof Response)) {
-        if (!canRetry || attempt === policy.limit) throw error;
+      let isRetryable = false;
+      let retryAfter: number | null = null;
+
+      if (error instanceof HttpClientError) {
+        // HTTP response error — classify on the real error type.
+        isRetryable = isRetryableStatus(error.status);
+        retryAfter = parseRetryAfterDelta(error.headers);
       } else {
-        // HTTP response error — check status.
-        if (!isRetryableStatus(error.status)) throw error;
-        if (!canRetry || attempt === policy.limit) throw error;
+        // Transport rejection (non-HttpClientError throw) — retryable on
+        // safe methods. No Retry-After header to consider.
+        isRetryable = true;
       }
+      // Transport rejections (non-HttpClientError throws) are retryable on
+      // safe methods; they carry no status or Retry-After.
+
+      if (!isRetryable) throw error;
+      if (!canRetry) throw error;
+      if (attempt === policy.limit) throw error;
 
       // Compute backoff delay.
       let delay = policy.delay;
@@ -76,12 +101,9 @@ export async function runWithRetry<T>(
         delay = policy.delay * (1 << (attempt - 1));
       }
 
-      // Check for Retry-After delta-seconds on the response (if available).
-      if (error instanceof Response) {
-        const retryAfter = parseRetryAfterDelta(error.headers);
-        if (retryAfter !== null) {
-          delay = retryAfter * 1000;
-        }
+      // A Retry-After delta-seconds value replaces the computed backoff.
+      if (retryAfter !== null) {
+        delay = retryAfter;
       }
 
       await timing.sleep(delay, signal);
