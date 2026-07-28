@@ -432,4 +432,56 @@ describe('HttpClient', () => {
     // First call should fail with HttpClientError 500 (breaker still closed).
     await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('500');
   });
+
+  it('HttpClientError carries text body for non-JSON error', async () => {
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = () =>
+      Promise.resolve(
+        new Response('plain text error body', {
+          status: 400,
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+    });
+    try {
+      await client.request({ method: 'GET', path: 'fail' });
+    } catch (err: unknown) {
+      if (err instanceof HttpClientError) {
+        expect(err.status).toEqual(400);
+        expect(err.body).toBe('plain text error body');
+        return;
+      }
+      throw err;
+    }
+    // unreachable
+  });
+
+  it('HttpClientError carries raw text for malformed-JSON error', async () => {
+    const fetchImpl: (input: RequestInfo, init?: RequestInit) => Promise<Response> = () =>
+      Promise.resolve(
+        new Response('{ json: not valid', {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: fetchImpl,
+    });
+    try {
+      await client.request({ method: 'GET', path: 'fail' });
+    } catch (err: unknown) {
+      if (err instanceof HttpClientError) {
+        expect(err.status).toEqual(422);
+        expect(err.body).toBe('{ json: not valid');
+        return;
+      }
+      throw err;
+    }
+    // unreachable
+  });
 });

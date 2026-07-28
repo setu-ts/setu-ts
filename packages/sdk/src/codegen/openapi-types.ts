@@ -168,7 +168,6 @@ export interface SdkOpenApiSchema {
   readonly anyOf?: SdkOpenApiSchema[];
   readonly allOf?: SdkOpenApiSchema[];
   readonly oneOf?: SdkOpenApiSchema[];
-  readonly nullable?: boolean;
   readonly description?: string;
   readonly format?: string;
 }

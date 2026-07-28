@@ -41,7 +41,7 @@ const client = createClient({
 
 const res = await client.request<User>({
   method: 'GET',
-  path: '/users/123',
+  path: 'users/123',
 });
 
 console.log(res.data); // User
@@ -123,7 +123,7 @@ import { createApiKeyAuthInterceptor } from '@hono-enterprise/sdk';
 const client = createClient({
   baseUrl: 'https://api.example.com',
   requestInterceptors: [
-    // Default header: X-Api-Key
+    // Default header: X-API-Key
     createApiKeyAuthInterceptor('my-key'),
     // Custom header
     createApiKeyAuthInterceptor('my-key', 'Authorization'),

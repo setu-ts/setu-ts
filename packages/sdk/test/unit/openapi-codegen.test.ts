@@ -558,6 +558,61 @@ describe('parameter and body rendering', () => {
     }));
     expect(out).toContain('json:');
   });
+
+  // N1 regression: wire key must be the original OpenAPI name, not sanitized
+  it('uses original name as wire key for camelCase query param', () => {
+    const doc = makeDoc({
+      '/x': {
+        get: makeOp('x', {
+          parameters: [{
+            name: 'createdAt',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          }],
+        }),
+      },
+    });
+    const out = generateOpenApiClient(doc);
+    // Wire key should be 'createdAt', access uses opts?.createdat (sanitizeIdentifier lowercases first part)
+    expect(out).toContain("'createdAt': (opts?.createdat as string | undefined)");
+  });
+
+  it('uses original name as wire key for underscore query param', () => {
+    const doc = makeDoc({
+      '/x': {
+        get: makeOp('x', {
+          parameters: [{
+            name: 'user_id',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          }],
+        }),
+      },
+    });
+    const out = generateOpenApiClient(doc);
+    // Wire key should be 'user_id', access uses opts?.userId (sanitizeIdentifier splits on underscore)
+    expect(out).toContain("'user_id': (opts?.userId as string | undefined)");
+  });
+
+  it('uses original name as wire key for hyphenated header', () => {
+    const doc = makeDoc({
+      '/x': {
+        get: makeOp('x', {
+          parameters: [{
+            name: 'X-API-Key',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+          }],
+        }),
+      },
+    });
+    const out = generateOpenApiClient(doc);
+    // Wire key should be 'X-API-Key', access uses opts?.xApiKey (sanitizeIdentifier splits on hyphen)
+    expect(out).toContain("'X-API-Key': (opts?.xApiKey as string | undefined)");
+  });
 });
 
 describe('response types', () => {

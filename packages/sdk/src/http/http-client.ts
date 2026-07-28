@@ -161,16 +161,12 @@ export class HttpClient implements IHttpClient {
 
       // Non-2xx → throw HttpClientError.
       if (response.status < 200 || response.status >= 300) {
+        const text = await response.text();
         let errorBody: unknown;
         try {
-          errorBody = await response.json();
+          errorBody = JSON.parse(text);
         } catch {
-          try {
-            errorBody = await response.text();
-          } catch {
-            // Body already consumed by failed json() parse.
-            errorBody = undefined;
-          }
+          errorBody = text;
         }
         throw new HttpClientError(
           `HTTP ${response.status}: ${response.statusText}`,

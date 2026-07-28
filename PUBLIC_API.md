@@ -5853,14 +5853,14 @@ function createApiKeyAuthInterceptor(
 ```
 
 `createBearerAuthInterceptor` sets `Authorization: Bearer <token>`. `createApiKeyAuthInterceptor`
-sets the header named `X-Api-Key` (default) or `headerName`. Each accepts a literal or an async
+sets the header named `X-API-Key` (default) or `headerName`. Each accepts a literal or an async
 value provider and sets its header only when the request has not already supplied that header.
 
 ### Errors
 
 | Error                    | When thrown                             | Fields                      |
 | ------------------------ | --------------------------------------- | --------------------------- |
-| `HttpClientError`        | Non-2xx HTTP response                   | `status`, `headers`, `data` |
+| `HttpClientError`        | Non-2xx HTTP response                   | `status`, `headers`, `body` |
 | `ClientCircuitOpenError` | Circuit breaker is open for the origin  | (none)                      |
 | `OpenApiCodegenError`    | Invalid OpenAPI document during codegen | (none)                      |
 

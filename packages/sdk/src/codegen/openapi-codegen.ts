@@ -429,7 +429,7 @@ export function generateOpenApiClient(
       const qParts = queryParams.map((p) => {
         const pname = sanitizeIdentifier(p.name);
         const ptype = renderSchema(p.schema) ?? 'unknown';
-        return `'${pname}': (opts?.${pname} as ${ptype} | undefined)`;
+        return `'${escapeSingleQuote(p.name)}': (opts?.${pname} as ${ptype} | undefined)`;
       });
       L(`            query: { ${qParts.join(', ')} },`);
     }
@@ -437,7 +437,7 @@ export function generateOpenApiClient(
       const hParts = headerParams.map((p) => {
         const pname = sanitizeIdentifier(p.name);
         // Header values are strings; cast to string | undefined.
-        return `'${pname}': (opts?.${pname} as string | undefined)`;
+        return `'${escapeSingleQuote(p.name)}': (opts?.${pname} as string | undefined)`;
       });
       L(`            headers: { ${hParts.join(', ')} },`);
     }
