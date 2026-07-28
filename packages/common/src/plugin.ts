@@ -265,11 +265,21 @@ export type CliCommandHandler = (args: readonly string[]) => void | Promise<void
  * kernel registers each under {@linkcode CAPABILITIES.CLI_COMMAND} as a
  * multi-provider token that any consumer can read with `getAll`.
  *
- * Note that `@hono-enterprise/cli` does NOT yet consume this. Discovering
- * plugin-contributed commands requires the CLI to import and boot the user's
- * application, which is deferred to a follow-up milestone; until then this
- * surface is registration-only.
+ * `@hono-enterprise/cli` reads these: `honoe commands` lists them and
+ * `honoe <name>` runs one. Doing so requires importing and booting the
+ * application, so the CLI loads it through the project's `honoe.config.ts`
+ * (`createApp()`) and starts it with no port — which registers plugins without
+ * binding a socket. Two plugins registering the same name is refused rather
+ * than resolved by load order.
  *
+ * @example
+ * ```typescript
+ * register(ctx: IPluginContext): void {
+ *   ctx.cli.register('db:migrate', async (args) => {
+ *     await migrate(args[0] ?? 'latest');
+ *   });
+ * }
+ * ```
  * @since 0.1.0
  */
 export interface ICliApi {

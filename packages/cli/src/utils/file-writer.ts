@@ -57,6 +57,21 @@ export function resolveDir(cwd: string, dir?: string): string {
 }
 
 /**
+ * Converts a filesystem path to an absolute `file:` URL suitable for `import()`.
+ *
+ * Callers must pass an already-absolute path — {@linkcode resolveDir} is what
+ * guarantees that. A relative path would be resolved against the filesystem
+ * root, which is the M34 defect this helper centralizes so it cannot recur in
+ * two places.
+ *
+ * @param path - An absolute filesystem path
+ * @returns The `file:` URL
+ */
+export function toFileUrl(path: string): string {
+  return new URL(path.startsWith('/') ? path : `/${path}`, 'file://').href;
+}
+
+/**
  * Returns the parent directory of a path, or `''` when it has no parent.
  *
  * @param path - The path to inspect

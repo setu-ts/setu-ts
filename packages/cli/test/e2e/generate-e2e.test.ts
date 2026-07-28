@@ -128,14 +128,14 @@ describe('honoe end-to-end on a real filesystem', () => {
     await run(['new', 'shop-api']);
     const project = `${root}/shop-api`;
 
-    for (const schematic of ['plugin', 'controller', 'service', 'route', 'middleware', 'job']) {
+    // `controller` is gated on decorator-plugin, which this project lacks.
+    for (const schematic of ['plugin', 'service', 'route', 'middleware', 'job']) {
       expect(await run([`g`, schematic, 'order-item', '--dir', project])).toBe(0);
     }
 
     const found: string[] = [];
     for await (const entry of Deno.readDir(`${project}/src`)) found.push(entry.name);
     expect(found.sort()).toEqual([
-      'controllers',
       'jobs',
       'middleware',
       'plugins',

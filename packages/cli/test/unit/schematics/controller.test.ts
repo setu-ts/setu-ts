@@ -21,8 +21,9 @@ describe('controller schematic', () => {
     expect(file.contents.endsWith('\n')).toBe(true);
   });
 
-  it('is ungated', () => {
-    expect(gateOf('controller')).toBe(undefined);
+  it('is gated on decorator-plugin', () => {
+    // The emitted class uses @Controller/@Get/@Post.
+    expect(gateOf('controller')).toBe('decorator-plugin');
   });
 
   it('derives identical output from any casing of the same name', () => {

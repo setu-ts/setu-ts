@@ -29,12 +29,13 @@ describe('schematic registry', () => {
     }
   });
 
-  it('gates exactly the seven plugin-dependent schematics', () => {
+  it('gates exactly the eight plugin-dependent schematics', () => {
     const gated = listSchematics()
       .filter((s) => s.requiresPlugin !== undefined)
       .map((s) => s.name);
     expect(gated.sort()).toEqual([
       'command-handler',
+      'controller',
       'event-handler',
       'guard',
       'health-indicator',

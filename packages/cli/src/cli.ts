@@ -6,11 +6,24 @@
 
 import type { IFileSystem } from '@hono-enterprise/common';
 import { parseArgs } from './args.ts';
-import { EXIT_OK, EXIT_USAGE, PROGRAM_NAME, TARGET_RUNTIMES, VERSION } from './constants.ts';
+import {
+  CONFIG_MODULE,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+  TARGET_RUNTIMES,
+  VERSION,
+} from './constants.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runNewCommand } from './commands/new.ts';
 import { listSchematics } from './schematics/registry.ts';
 import type { ModuleLoader } from './schematics/custom.ts';
+import type { AppLoader } from './app-loader.ts';
+import {
+  dispatchPluginCommand,
+  type PluginCommandDependencies,
+  runCommandsListing,
+} from './commands/plugin-commands.ts';
 
 /**
  * Everything the CLI reaches the outside world through.
@@ -33,6 +46,11 @@ export interface CliDependencies {
   readonly error: (message: string) => void;
   /** Loads a custom schematic module; defaults to a real dynamic `import()`. */
   readonly load?: ModuleLoader;
+  /**
+   * Loads the target project's `honoe.config.ts`; defaults to a real dynamic
+   * `import()`. Only the plugin-command paths use it.
+   */
+  readonly loadApp?: AppLoader;
 }
 
 /**
@@ -51,18 +69,24 @@ function printHelp(log: (message: string) => void): void {
   log('Commands:');
   log(`  new, n <project-name>          Scaffold a new project`);
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
+  log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');
   log('  -h, --help          Show this help');
   log('  -v, --version       Show the version');
   log('  --dry-run           Print what would be created, write nothing');
   log('  --dir <path>        Operate on this directory instead of the CWD');
+  log(`  --config <path>     Load the app from this module instead of ./${CONFIG_MODULE}`);
   log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (new; default deno)`);
   log('');
   log('Schematics:');
   log(`  ${listSchematics().map((s) => s.name).join(', ')}, custom`);
   log('');
   log(`Run \`${PROGRAM_NAME} generate --help\` inside a project to see which are available.`);
+  log(
+    `Any other command is looked up among the plugin commands your ${CONFIG_MODULE} registers ` +
+      `(\`${PROGRAM_NAME} commands\` lists them).`,
+  );
 }
 
 /**
@@ -119,13 +143,34 @@ export async function runCli(
         ...(deps.load === undefined ? {} : { load: deps.load }),
       });
 
+    case 'commands':
+      return await runCommandsListing(rest, pluginCommandDeps(deps));
+
     case 'help':
       printHelp(deps.log);
       return EXIT_OK;
 
     default:
-      deps.error(`Unknown command: ${command}`);
-      printHelp(deps.log);
-      return EXIT_USAGE;
+      // Not a built-in: the only remaining possibility is a command one of the
+      // application's plugins registered. Built-ins are matched first and
+      // always win, so a plugin can never shadow `new` or `generate`, and the
+      // common path never boots the user's application.
+      return await dispatchPluginCommand(command, rest, pluginCommandDeps(deps));
   }
+}
+
+/**
+ * Narrows the CLI dependency bundle to what the plugin-command paths need.
+ *
+ * @param deps - The full dependency bundle
+ * @returns The subset those paths consume
+ */
+function pluginCommandDeps(deps: CliDependencies): PluginCommandDependencies {
+  return {
+    fs: deps.fs,
+    cwd: deps.cwd,
+    log: deps.log,
+    error: deps.error,
+    ...(deps.loadApp === undefined ? {} : { loadApp: deps.loadApp }),
+  };
 }

@@ -143,9 +143,9 @@ not on `main`.
 
 ## Why publishing goes through a script
 
-`deno publish` from the workspace root publishes **all 40 members**, including the `cli`, `sdk`, and
-starter stubs that export nothing — and there is no per-package private flag. Since versions are
-immutable, an accidental stub publish is permanent.
+`deno publish` from the workspace root publishes **all 40 members**, including the `sdk` and starter
+stubs that export nothing — and there is no per-package private flag. Since versions are immutable,
+an accidental stub publish is permanent.
 
 `scripts/publish-packages.ts` therefore walks the explicit allow-list in
 `scripts/release-packages.ts`, one package at a time, in dependency order, halting on the first

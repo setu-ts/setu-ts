@@ -3425,6 +3425,9 @@ Aliases: `n` for `new`, `g` for `generate`. Global flags: `--dry-run` (print the
 nothing), `--dir <path>` (operate on that directory instead of the CWD), `--help`/`-h`,
 `--version`/`-v`.
 
+**Milestone 34b adds** `honoe new --template rest|microservice`, a `honoe commands` verb, and
+dispatch of plugin-registered commands (`honoe db:migrate …`) — see the M34b section below.
+
 **Scaffolding Is Deno-First:** `honoe new` generates a Deno project (`deno.json` with tasks, JSR
 imports). A `--runtime node|bun` flag generates an npm-based variant that consumes the packages via
 JSR's npm compatibility layer (`package.json` + `.npmrc` mapping the `@jsr` scope +
@@ -3480,6 +3483,72 @@ and no `listen`.
 - [x] CLI tool
 - [x] All generators
 - [x] Plugin-aware detection
+- [x] Full test coverage
+
+---
+
+## Milestone 34b: CLI — Templates and Plugin Commands ✅ COMPLETE
+
+**Objective:** Ship the two capabilities M34 deferred, as pure additions to the `honoe` binary.
+
+### Package: `@hono-enterprise/cli`
+
+**Commands:**
+
+```
+honoe new <project-name> --template rest|microservice
+honoe commands                      # list what this application's plugins provide
+honoe <plugin>:<command> [args...]  # run a plugin-registered command
+```
+
+**The `honoe.config.ts` seam.** Every scaffolded project — templated or not — exports `createApp()`
+from `honoe.config.ts`. `main.ts` imports it to start the server; the CLI imports it to discover
+plugin commands. The factory does NOT start the application, because M34's `main.ts` called
+`app.start({ port })` at module scope and importing that would bind a socket.
+
+**Templates emit inline wiring**, not `@hono-enterprise/*-starter` imports: those packages export
+nothing today (Milestone 36 owns them), so a generated starter import would not compile. The two
+approaches are complementary — M36 ships `createRestApp()` as a library, this ships editable source.
+
+| Template       | Plugin set                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| _(none)_       | `RuntimePlugin` only.                                                                                      |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
+| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+
+`--template microservice --runtime cloudflare-workers` is refused: messaging and queue need raw
+sockets. `database-plugin` and `auth-plugin` are excluded from `rest` despite M36's list — both need
+credentials before they do anything.
+
+**Plugin commands** are read by loading `honoe.config.ts` and calling `start()` with **no port** —
+the kernel skips `listen` without one, so registration happens with no socket bound. Startup hooks
+DO run (a database plugin will connect), so teardown is guaranteed in a `finally`. Built-in verbs
+match first and never boot the project; two plugins registering one name is refused rather than
+resolved by load order.
+
+**Implementation Files:**
+
+- `src/app-loader.ts`
+- `src/commands/plugin-commands.ts`
+- `src/templates/registry.ts`
+- `src/templates/rest.ts`
+- `src/templates/microservice.ts`
+
+### Tests
+
+- Template plugin sets and runtime compatibility
+- App loading: five distinct failure modes, plus a guarded real-`import()` test
+- Discovery and dispatch against a REAL kernel application
+- Built-in precedence, and that built-ins never boot the project
+- An e2e drift gate generating over a hostile name set (`class`, `new`, `2fa`, `API`,
+  `oauth2-client`) and running `deno check` against the real published packages
+
+### Deliverables
+
+- [x] `--template rest|microservice`
+- [x] `honoe.config.ts` application seam
+- [x] Plugin command discovery and dispatch
+- [x] `honoe commands` listing
 - [x] Full test coverage
 
 ---
@@ -4353,6 +4422,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 32        | ✅     | multi-tenancy-plugin |
 | 33        | ✅     | testing              |
 | 34        | ✅     | cli                  |
+| 34b       | ✅     | cli                  |
 | 35        | ⬜     | sdk                  |
 | 36        | ⬜     | starters             |
 | 37        | ⬜     | examples             |
