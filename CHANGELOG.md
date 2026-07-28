@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0-alpha.2] — unreleased
+## [0.1.0-alpha.2] — 2026-07-28
 
 **Adds the CLI.** `@hono-enterprise/cli` publishes for the first time, bringing the total to **36
 packages**. Every other package is version-bumped so the scope stays on one version — the CLI needs
@@ -26,6 +26,35 @@ this, because `honoe new` stamps generated projects with its OWN version as the 
   _"package name must contain only lowercase ascii alphanumeric characters and hyphens"_. All 44
   relative links across 28 package READMEs now use absolute GitHub URLs.
 - **`ICliApi`'s JSDoc** described a contract with no consumer; the CLI now reads it.
+
+All 36 packages are live on JSR at `0.1.0-alpha.2`.
+
+Verified after publishing by installing `honoe` from JSR into a clean directory — not the workspace,
+whose import map resolves locally — scaffolding a `rest` project with it, generating a controller,
+type-checking the result against the published packages, then starting it and serving `/` (`200`),
+`/health` (`status: up`), and `/metrics`.
+
+### The release pipeline, which had never worked
+
+This was the first release published by CI. `0.1.0-alpha.1` went out by hand from a terminal,
+because the tag-triggered workflow failed on every attempt. Three separate causes, each only visible
+by running it:
+
+1. **The publish step lacked `--allow-env`.** `publish-packages.ts` reads `JSR_TOKEN` at startup
+   (left unset in CI so the runner's OIDC identity authenticates instead) and died before touching a
+   package. The root cause was duplication: `deno.json`'s `release:publish` task always carried the
+   right permissions, but the workflow inlined its own `deno run` and that copy drifted. The
+   workflow now calls the task.
+2. **It also lacked `--allow-net`.** The already-published check that makes a resumed release
+   idempotent fetches jsr.io — and it is skipped under `--dry-run`, so a passing dry run proves
+   nothing about a real run.
+3. **No package was linked to the GitHub repository.** JSR accepts a GitHub Actions OIDC identity
+   only for a package it knows belongs to the repo; without the link, `deno publish` uploads and
+   then fails with `actorNotAuthorized`. Token-based publishing does not need the link, which is why
+   `0.1.0-alpha.1` never surfaced it. `deno task release:link-repos` now does all 36 through the
+   API.
+
+None of the three published anything, so the tag stayed re-runnable throughout.
 
 ### Installing
 
