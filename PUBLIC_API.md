@@ -5862,7 +5862,7 @@ value provider and sets its header only when the request has not already supplie
 | ------------------------ | --------------------------------------- | --------------------------- |
 | `HttpClientError`        | Non-2xx HTTP response                   | `status`, `headers`, `body` |
 | `ClientCircuitOpenError` | Circuit breaker is open for the origin  | (none)                      |
-| `OpenApiCodegenError`    | Invalid OpenAPI document during codegen | (none)                      |
+| `OpenApiCodegenError`    | Invalid OpenAPI document during codegen | `path`, `method`            |
 
 `ClientCircuitOpenError` is named distinctly from the resilience plugin's `CircuitOpenError` to
 avoid a barrel collision.

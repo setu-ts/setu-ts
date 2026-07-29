@@ -16,7 +16,6 @@ export interface listusersArgs {
     limit?: number;
 }
 
-export type getuserbyidArgs = void;
 
 export function createApi(client: IHttpClient) {
 

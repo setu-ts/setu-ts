@@ -392,8 +392,6 @@ export function generateOpenApiClient(
       L(`export interface ${typeName} {`);
       argsFields.forEach((f) => L(f));
       L('}');
-    } else {
-      L(`export type ${typeName} = void;`);
     }
     L('');
   }

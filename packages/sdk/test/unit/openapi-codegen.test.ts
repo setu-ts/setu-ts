@@ -314,45 +314,74 @@ describe('identifier sanitization in generated code', () => {
 
 describe('OpenApiCodegenError diagnostics', () => {
   it('throws on missing operationId with path/method', () => {
-    expect(() =>
+    let error: OpenApiCodegenError | undefined;
+    try {
       generateOpenApiClient(makeDoc({
         '/x': { get: { responses: { '200': { description: 'OK' } } } },
-      }))
-    ).toThrow(OpenApiCodegenError);
+      }));
+    } catch (e) {
+      error = e as OpenApiCodegenError;
+    }
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(OpenApiCodegenError);
+    expect(error!.path).toBe('/x');
+    expect(error!.method).toBe('get');
   });
 
   it('throws on cookie parameter location', () => {
-    expect(() =>
+    let error: OpenApiCodegenError | undefined;
+    try {
       generateOpenApiClient(makeDoc({
         '/x': {
           get: makeOp('x', {
             parameters: [{ name: 'sid', in: 'cookie' }],
           }),
         },
-      }))
-    ).toThrow(OpenApiCodegenError);
+      }));
+    } catch (e) {
+      error = e as OpenApiCodegenError;
+    }
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(OpenApiCodegenError);
+    expect(error!.path).toBe('/x');
+    expect(error!.method).toBe('get');
   });
 
   it('throws on duplicate operation names from slug collision', () => {
-    expect(() =>
+    let error: OpenApiCodegenError | undefined;
+    try {
       generateOpenApiClient(makeDoc({
         '/a-b/c': { get: makeOp('get-a-b-c') },
         '/a/b-c': { get: makeOp('get-a-b-c') },
-      }))
-    ).toThrow(OpenApiCodegenError);
+      }));
+    } catch (e) {
+      error = e as OpenApiCodegenError;
+    }
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(OpenApiCodegenError);
+    expect(error!.path).toBe('/a/b-c');
+    expect(error!.method).toBe('get');
   });
 
   it('throws on duplicate sanitized names', () => {
-    expect(() =>
+    let error: OpenApiCodegenError | undefined;
+    try {
       generateOpenApiClient(makeDoc({
         '/a': { get: makeOp('get-users-{id}') },
         '/b': { post: makeOp('get_users_id') },
-      }))
-    ).toThrow(OpenApiCodegenError);
+      }));
+    } catch (e) {
+      error = e as OpenApiCodegenError;
+    }
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(OpenApiCodegenError);
+    expect(error!.path).toBe('/b');
+    expect(error!.method).toBe('post');
   });
 
   it('throws on invalid $ref ending with slash', () => {
-    expect(() =>
+    let error: OpenApiCodegenError | undefined;
+    try {
       generateOpenApiClient(makeDoc({
         '/x': {
           get: makeOp('x', {
@@ -366,8 +395,14 @@ describe('OpenApiCodegenError diagnostics', () => {
             },
           }),
         },
-      }))
-    ).toThrow(OpenApiCodegenError);
+      }));
+    } catch (e) {
+      error = e as OpenApiCodegenError;
+    }
+    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(OpenApiCodegenError);
+    expect(error!.path).toBe('/x');
+    expect(error!.method).toBe('get');
   });
 });
 
