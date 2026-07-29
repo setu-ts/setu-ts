@@ -191,7 +191,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   misroutes replies. `MessagingNotSupportedError` is **deprecated, not removed** — AI_GUIDELINES
   §9.2 governs a published export and beats the dead-surface rule, which targets newly invented
   surface. No `common` contract change (JSDoc only); developed in an isolated worktree off `main`) —
-  complete (PR pending)
+  complete (PR #94)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
