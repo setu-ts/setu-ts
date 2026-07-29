@@ -9,8 +9,19 @@ import type {
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { MessagingNotSupportedError } from '../errors.ts';
+import type { ReplyInbox } from './inbox.ts';
+import { RequestReplyCore } from './request-reply-core.ts';
 import type { IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
+
+/** Reply topic used when {@link KafkaOptions.replyTopic} is omitted. */
+const DEFAULT_REPLY_TOPIC = 'messaging.replies';
+
+/**
+ * Consumer-group prefix for reply inboxes. Each broker instance derives a
+ * unique group from it so replies are delivered to every instance rather than
+ * load-balanced across the shared default group.
+ */
+const REPLY_GROUP_PREFIX = 'rr-inbox-';
 
 /**
  * Lazily load kafkajs at runtime.
@@ -91,10 +102,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
   #clientId: string;
   #injectedClient: IKafkaFactory | undefined;
   #defaultQueue: string;
+  #replyTopic: string;
   #factory: IKafkaFactory | null = null;
   #producer: unknown | null = null;
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
+  #rr: RequestReplyCore;
 
   /**
    * Creates a new Kafka broker.
@@ -114,7 +127,43 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#clientId = options?.clientId ?? 'messaging-client';
     this.#injectedClient = options?.client;
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
+    this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#activeConsumers = new Map();
+    this.#rr = new RequestReplyCore({
+      publish: (topic, message) => this.publish(topic, message),
+      subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
+      uuid: () => this.#runtime.uuid(),
+      setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimeout: (handle) => this.#runtime.clearTimeout(handle),
+      openInbox: (onReply) => this.#openReplyInbox(onReply),
+    });
+  }
+
+  /**
+   * Opens this broker's reply inbox on the shared reply topic.
+   *
+   * Kafka cannot use the per-instance topic {@link createTopicInbox} mints: a
+   * topic here is a durable, partitioned cluster resource, and `IKafkaFactory`
+   * exposes no admin surface to create or drop one. Instead every instance
+   * reads ONE reply topic under a consumer group unique to itself, so delivery
+   * is exclusive rather than load-balanced across the shared default group.
+   * Replies addressed to other instances arrive here too and are dropped by
+   * correlation-id lookup, which costs O(instances) fan-out but needs no admin
+   * API and leaves no topic behind — only a consumer group, which Kafka expires
+   * on `offsets.retention.minutes`.
+   *
+   * @param onReply - Invoked per message delivered to the reply topic
+   * @returns The open inbox, addressed at the shared reply topic
+   */
+  async #openReplyInbox(onReply: (message: unknown) => void): Promise<ReplyInbox> {
+    const subscription = await this.subscribe(this.#replyTopic, (message) => {
+      onReply(message);
+    }, { queue: `${REPLY_GROUP_PREFIX}${this.#runtime.uuid()}` });
+
+    return {
+      address: this.#replyTopic,
+      close: (): Promise<void> => subscription.unsubscribe(),
+    };
   }
 
   /**
@@ -144,6 +193,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    // Reject in-flight requests and close the reply inbox before the transport
+    // goes away, so no timer or subscription outlives the connection.
+    await this.#rr.close();
+
     // Stop all active consumers
     for (const consumer of this.#activeConsumers.values()) {
       try {
@@ -308,30 +361,50 @@ export class KafkaBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Kafka does not support brokered request-reply: its consumer-group and
-   * auto-commit delivery model makes per-caller reply correlation an
-   * anti-pattern. Use a reply-capable broker instead.
+   * Sends a request and awaits its single correlated reply.
    *
-   * @returns A promise rejected with `MessagingNotSupportedError` (rejected, not
-   * a synchronous throw, so the `Promise`-returning contract holds uniformly
-   * across brokers and a caller's `.catch` / `await` both observe it)
+   * Replies arrive on the shared reply topic ({@link KafkaOptions.replyTopic},
+   * default `'messaging.replies'`), which **must exist** — this broker creates
+   * no topics, because `IKafkaFactory` exposes no admin surface. Either
+   * pre-create it or enable `auto.create.topics.enable`; otherwise the
+   * underlying producer error surfaces from this call rather than hanging until
+   * the timeout.
+   *
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - Destination topic a responder is listening on
+   * @param message - The request payload
+   * @param options - Reply timeout behavior
+   * @returns The reply payload
+   * @throws {RequestTimeoutError} When no reply arrives within `timeoutMs`
+   * @throws {RemoteHandlerError} When the responder throws
    * @since 0.1.0
    */
-  request<TReq, TRes>(_topic: string, _message: TReq, _options?: RequestOptions): Promise<TRes> {
-    return Promise.reject(new MessagingNotSupportedError());
+  request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options);
   }
 
   /**
-   * Kafka does not support brokered request-reply. See {@link KafkaBroker.request}.
+   * Registers a responder for a request topic. The handler's resolved value is
+   * sent back to the caller, correlated to the originating request.
    *
-   * @returns A promise rejected with `MessagingNotSupportedError`
+   * @typeParam TReq - The request payload type
+   * @typeParam TRes - The reply payload type
+   * @param topic - The request topic to respond on
+   * @param handler - Invoked per request; its result is returned to the caller
+   * @param options - Consumer group behavior (load-balance competing responders)
+   * @returns The active subscription
    * @since 0.1.0
    */
   respond<TReq, TRes>(
-    _topic: string,
-    _handler: RequestHandler<TReq, TRes>,
-    _options?: SubscribeOptions,
+    topic: string,
+    handler: RequestHandler<TReq, TRes>,
+    options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    return Promise.reject(new MessagingNotSupportedError());
+    return this.#rr.respond(
+      topic,
+      handler as (message: unknown, metadata: MessageMetadata) => unknown | Promise<unknown>,
+      options,
+    );
   }
 }

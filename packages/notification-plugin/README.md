@@ -60,11 +60,31 @@ await notifier.send({
 - Configuring `email` without a `mail` capability registered **throws during `register`** — fail
   fast, ordered via `optionalDependencies: ['mail']`.
 
-## Known limitation
+## Push (FCM HTTP v1)
 
-`FcmProvider` implements the **legacy FCM `serverKey` API, which Google decommissioned in 2024**.
-FCM HTTP v1 with service-account JWT signing is a follow-up; until then, push delivery via this
-provider will not work against current FCM.
+`FcmProvider` speaks **FCM HTTP v1**, authenticating with a short-lived OAuth2 token minted from a
+service account — it signs an RS256 JWT assertion with `runtime.subtle` (no npm dependency, works on
+Workers) and caches the token until shortly before it expires.
+
+```typescript
+push: {
+  provider: 'fcm',
+  options: {
+    projectId: config.get('FCM_PROJECT_ID'),
+    clientEmail: config.get('FCM_CLIENT_EMAIL'),
+    privateKey: config.get('FCM_PRIVATE_KEY'), // PEM PKCS#8 from the service-account JSON
+  },
+},
+```
+
+The three fields come from the service-account JSON you download from the Firebase console
+(`project_id`, `client_email`, `private_key`). Because the default signer needs Web Crypto and the
+wall clock, a `push` channel configured this way requires `RuntimePlugin` and throws during
+`register` without it.
+
+To source tokens elsewhere — a GCP metadata server, or a broker that holds the key outside the
+application — supply a `tokenSource` implementing `FcmTokenSource`; the credential fields are then
+unused and the runtime requirement does not apply.
 
 ## Full API
 

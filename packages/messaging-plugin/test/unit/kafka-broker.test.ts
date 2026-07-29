@@ -4,7 +4,7 @@ import { KafkaBroker, validateClient } from '../../src/brokers/kafka-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeKafkaFactory } from '../fixtures/fake-kafkajs-client.ts';
-import { MessagingNotSupportedError } from '../../src/errors.ts';
+import { RemoteHandlerError, RequestTimeoutError } from '../../src/errors.ts';
 
 /**
  * KafkaBroker unit tests.
@@ -452,22 +452,148 @@ describe('KafkaBroker', () => {
 });
 
 describe('KafkaBroker request-reply', () => {
-  it('request() rejects with MessagingNotSupportedError', async () => {
+  /** A connected broker over a fake factory that routes produced messages. */
+  const connected = async (
+    factory: FakeKafkaFactory,
+    options: { replyTopic?: string } = {},
+  ): Promise<KafkaBroker> => {
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
-      client: new FakeKafkaFactory(),
+      client: factory,
+      ...(options.replyTopic !== undefined && { replyTopic: options.replyTopic }),
     });
-    // Rejected promise (not a synchronous throw) so `.catch`/`await` both observe it.
-    await expect(broker.request('topic', { a: 1 })).rejects.toBeInstanceOf(
-      MessagingNotSupportedError,
+    await broker.connect();
+    return broker;
+  };
+
+  it('round-trips a request to a responder and resolves with its reply', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = await connected(factory);
+
+    await broker.respond<{ n: number }, { doubled: number }>(
+      'math.double',
+      (req) => ({ doubled: req.n * 2 }),
     );
+    const reply = await broker.request<{ n: number }, { doubled: number }>(
+      'math.double',
+      { n: 21 },
+    );
+
+    expect(reply).toEqual({ doubled: 42 });
+    await broker.disconnect();
   });
 
-  it('respond() rejects with MessagingNotSupportedError', async () => {
-    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
-      client: new FakeKafkaFactory(),
-    });
-    await expect(broker.respond('topic', () => 'x')).rejects.toBeInstanceOf(
-      MessagingNotSupportedError,
+  it('reads its reply inbox under a unique group, never the shared default', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = await connected(factory);
+
+    await broker.respond('t', () => 'ok');
+    await broker.request('t', {});
+
+    const inboxGroups = factory.groupIds.filter((g) => g.startsWith('rr-inbox-'));
+    expect(inboxGroups.length).toBe(1);
+    // The shared default group would hand this instance's replies to whichever
+    // group member owns the partition — the defect this design exists to avoid.
+    expect(inboxGroups[0]).not.toBe('messaging-consumers');
+    await broker.disconnect();
+  });
+
+  it('defaults the reply topic to messaging.replies and honors an override', async () => {
+    const defaultFactory = new FakeKafkaFactory();
+    const defaultBroker = await connected(defaultFactory);
+    await defaultBroker.respond('t', () => 'ok');
+    await defaultBroker.request('t', {});
+
+    const producer = defaultFactory.producer();
+    const sentTopics = producer.calls
+      .filter((c) => c.method === 'send')
+      .map((c) => (c.args[0] as { topic: string }).topic);
+    expect(sentTopics).toContain('messaging.replies');
+    await defaultBroker.disconnect();
+
+    const customFactory = new FakeKafkaFactory();
+    const customBroker = await connected(customFactory, { replyTopic: 'svc.replies' });
+    await customBroker.respond('t', () => 'ok');
+    await customBroker.request('t', {});
+
+    const customTopics = customFactory.producer().calls
+      .filter((c) => c.method === 'send')
+      .map((c) => (c.args[0] as { topic: string }).topic);
+    expect(customTopics).toContain('svc.replies');
+    expect(customTopics).not.toContain('messaging.replies');
+    await customBroker.disconnect();
+  });
+
+  it('publishes requests to the derived rr.req channel, not the caller topic', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = await connected(factory);
+
+    await broker.respond('user.lookup', () => 'ok');
+    await broker.request('user.lookup', {});
+
+    const sentTopics = factory.producer().calls
+      .filter((c) => c.method === 'send')
+      .map((c) => (c.args[0] as { topic: string }).topic);
+    expect(sentTopics).toContain('rr.req.user.lookup');
+    expect(sentTopics).not.toContain('user.lookup');
+    await broker.disconnect();
+  });
+
+  it('rejects with RequestTimeoutError when no responder is listening', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = await connected(factory);
+
+    await expect(broker.request('nobody.home', {}, { timeoutMs: 20 })).rejects.toBeInstanceOf(
+      RequestTimeoutError,
     );
+    await broker.disconnect();
+  });
+
+  it('propagates a responder throw as RemoteHandlerError', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = await connected(factory);
+
+    await broker.respond('boom', () => {
+      throw new Error('handler exploded');
+    });
+
+    let caught: unknown;
+    try {
+      await broker.request('boom', {}, { timeoutMs: 500 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RemoteHandlerError);
+    expect((caught as RemoteHandlerError).remoteMessage).toBe('handler exploded');
+    await broker.disconnect();
+  });
+
+  it('does not resolve a reply belonging to another broker instance', async () => {
+    // Two instances share one reply topic; each must resolve only its own
+    // correlation ids and silently drop the other's.
+    const factory = new FakeKafkaFactory();
+    const responder = await connected(factory);
+    const caller = await connected(factory);
+
+    await responder.respond<{ from: string }, string>('who', (req) => `hi ${req.from}`);
+
+    const reply = await caller.request<{ from: string }, string>('who', { from: 'a' });
+    expect(reply).toBe('hi a');
+
+    await responder.disconnect();
+    await caller.disconnect();
+  });
+
+  it('disconnect() rejects an in-flight request rather than leaking its timer', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = await connected(factory);
+
+    const pending = broker.request('never', {}, { timeoutMs: 60_000 });
+    // Let the inbox open and the request publish, so the pending entry is
+    // actually registered — disconnecting before that races the publish and
+    // fails with "not connected" instead, which tests nothing about close().
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await broker.disconnect();
+
+    await expect(pending).rejects.toThrow('disconnected');
   });
 });

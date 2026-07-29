@@ -1815,6 +1815,50 @@ const res = await broker.request<Req, Res>('user.lookup', { userId: '42' }, { ti
 - [x] 90%+ per-file coverage on every changed `src/` file
 - [x] PUBLIC_API.md + README.md + ROADMAP.md updated in the same PR
 
+> **Superseded in part by Milestone 14d.** Kafka is reply-capable as of M14d, and
+> `MessagingNotSupportedError` is deprecated with no thrower.
+
+---
+
+## Milestone 14d: Messaging Plugin — Reply-Transport Seam & Kafka RPC ✅ COMPLETE
+
+**Objective:** Restore the per-broker reply-inbox seam M14c's plan specified but never built, use it
+to make Kafka reply-capable, and fix the two defects the generic path caused.
+
+> **Why this is a separate milestone.** M14c's plan (§3.2) called for a per-broker `IReplyTransport`
+> with `openInbox`; the implementation collapsed it into a `publish`/`subscribe`/`uuid`/timers
+> delegation object that all four reply-capable brokers passed identically. That works only because
+> those four treat a topic as cheap and per-instance-addressable — which is the actual reason Kafka
+> shipped a throw. No `common` contract change; `IMessageBroker` signatures are untouched.
+
+### Package: `@hono-enterprise/messaging-plugin` (extends M14/M14b/M14c)
+
+`RequestReplyDeps` gains `openInbox`, returning a `ReplyInbox` (`address` + `close`). The four
+existing brokers pass the shared `createTopicInbox` helper and are behaviour-identical.
+`KafkaBroker` supplies its own: a shared `replyTopic` (default `'messaging.replies'`, which must
+already exist — `IKafkaFactory` has no admin surface) read under a per-instance consumer group
+`rr-inbox-<uuid>`, so delivery is exclusive rather than load-balanced across the shared default
+group. Cross-instance replies are dropped by the existing correlation-id lookup, so no envelope
+change was needed.
+
+RPC traffic moves to a derived `rr.req.<topic>` channel — a **breaking wire change** against
+`0.1.0-alpha.2`, taken deliberately pre-1.0 — which fixes both defects at the routing layer: request
+envelopes no longer leak into plain `subscribe()` consumers, and a responder sharing a topic _and a
+queue_ with an ordinary subscriber no longer swallows that subscriber's messages (fan-out consumers
+were never affected).
+
+### Deliverables
+
+- [x] `ReplyInbox`/`OpenInbox` seam + shared `createTopicInbox` (`src/brokers/inbox.ts`, internal)
+- [x] `KafkaBroker.request`/`respond` implemented; both former throws removed
+- [x] `replyTopic` option threaded from `MessagingPluginOptions` through to the broker (tested by
+      round-trip, not by storage)
+- [x] D1 — RPC on `rr.req.<topic>`; regression pair proving pub/sub and RPC coexist on one topic
+- [x] D2 — reply inbox claims its own queue name
+- [x] `MessagingNotSupportedError` deprecated, not removed (AI_GUIDELINES §9.2)
+- [x] `common` JSDoc, PUBLIC_API.md, plugin README, CHANGELOG (BREAKING + Deprecated) in the same PR
+- [x] 90%+ per-file coverage on every changed `src/` file
+
 ---
 
 ## Milestone 15: Queue Plugin — Background Jobs
@@ -3147,6 +3191,47 @@ await notifier.send({
 - [x] Email, SMS, Push, Slack channels
 - [x] Full test coverage
 
+> **Superseded in part by Milestone 30b.** The push channel shipped against the legacy FCM
+> `serverKey` API, which Google had already decommissioned; M30b moves it to FCM HTTP v1.
+
+---
+
+## Milestone 30b: Notification Plugin — FCM HTTP v1 ✅ COMPLETE
+
+**Objective:** Make push delivery actually work by replacing the decommissioned legacy FCM API with
+FCM HTTP v1 and service-account OAuth2.
+
+> **Why this is a separate milestone.** Mirrors the M14b/M15b/M16b/M24b pattern: a scoped follow-up
+> to a shipped plugin, no `common` change and no new capability token. M30 shipped a provider that
+> could never succeed against a live project — the `POST /fcm/send` endpoint it targets was switched
+> off in 2024 — so this is a defect repair, not a feature.
+
+### Package: `@hono-enterprise/notification-plugin` (extends M30)
+
+`FcmProvider` posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted
+from a service account: an RS256 JWT assertion signed with `runtime.subtle` and exchanged at
+Google's token endpoint, cached until shortly before expiry. Zero npm dependencies and
+Workers-portable, the same posture as the other HTTP providers and the same crypto route M16's
+`JwtService` proves.
+
+`FcmProviderOptions.serverKey` is **replaced** (not deprecated) by
+`{ projectId, clientEmail,
+privateKey }` — a breaking change, deliberately, because the option
+addressed a dead endpoint and a compile error is the correct signal. An exported `FcmTokenSource`
+covers sourcing tokens from a GCP metadata server or an external key holder instead.
+
+### Deliverables
+
+- [x] FCM HTTP v1 endpoint, Bearer auth, and `{ message: { token, notification } }` payload
+- [x] `ServiceAccountTokenSource` — RS256 assertion signing, OAuth2 exchange, key + token caching
+- [x] Exported `FcmTokenSource` seam; local `pemToDer` (auth-plugin's copy is internal and
+      cross-plugin imports are forbidden)
+- [x] `createProvider`'s `fcm` arm takes `IPluginContext` and fails fast at `register` without a
+      runtime, mirroring the `mail` arm
+- [x] Real-crypto test: a generated RSA keypair signs an assertion that is then verified
+- [x] 90%+ per-file coverage on every changed `src/` file
+- [x] PUBLIC_API.md, plugin README, CHANGELOG (BREAKING + superseded note), ROADMAP, CLAUDE.md
+
 ---
 
 ## Milestone 31: Feature Flags Plugin
@@ -4323,9 +4408,11 @@ implementation task.
 
 ### Doc Deliverables
 
-- [x] **CHANGELOG.md** — the three entries removed from the `0.1.0-alpha.1` list with a pointer
-      note, and an `[Unreleased]` section covering the additions, the widened contract, and the
-      fixes.
+- [x] **CHANGELOG.md** — the three entries annotated in place in the `0.1.0-alpha.1` list as
+      superseded, each pointing at `[Unreleased]`, and an `[Unreleased]` section covering the
+      additions, the widened contract, and the fixes. (Annotated rather than deleted: `main` had
+      already established that convention for the two limitations closed by M14d and M30b, and the
+      list records what was true of that release. Settled while resolving the merge with `main`.)
 - [x] **PUBLIC_API.md** — a new `RealtimeBackplanePlugin()` section; the Resilience cancellation
       subsection replacing the "does not cancel" note; the LaunchDarkly options, exports, and
       cold-context semantics replacing the "was deferred" note; the WebSocket "rooms are in-process"
@@ -4487,6 +4574,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
 | 14c       | ✅     | messaging-plugin     |
+| 14d       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
 | 16        | ✅     | auth-plugin          |
@@ -4507,6 +4595,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
 | 30        | ✅     | notification-plugin  |
+| 30b       | ✅     | notification-plugin  |
 | 31        | ✅     | feature-flags-plugin |
 | 32        | ✅     | multi-tenancy-plugin |
 | 33        | ✅     | testing              |

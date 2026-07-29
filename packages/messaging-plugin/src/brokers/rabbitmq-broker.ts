@@ -9,6 +9,7 @@ import type {
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
 // amqplib's frame codec requires a Node Buffer for message content (it throws
@@ -130,6 +131,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
       clearTimeout: (handle) => this.#runtime.clearTimeout(handle),
+      openInbox: createTopicInbox({
+        subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
+        uuid: () => this.#runtime.uuid(),
+      }),
     });
   }
 

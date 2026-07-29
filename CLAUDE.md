@@ -168,6 +168,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `MessagingNotSupportedError` (consumer-group/auto-commit model); exported
   `RequestTimeoutError`/`RemoteHandlerError`/ `MessagingNotSupportedError`; developed in parallel
   with M28 in an isolated worktree off `main`) — complete (PR #60)
+- **Milestone 14d** (`packages/messaging-plugin` — reply-transport seam + Kafka RPC: restores the
+  per-broker `openInbox` seam the M14c plan specified but whose implementation collapsed into a
+  `publish`/`subscribe`/`uuid`/timers delegation object that all four reply-capable brokers passed
+  **byte-identically** — nothing named `IReplyTransport`/`openInbox` ever existed in `packages/`.
+  That generic path works only because in-memory/redis/rabbitmq/nats treat a topic as cheap and
+  per-instance-addressable, which is the real reason Kafka shipped a throw — not anything about
+  consumer groups being inherently unable to do RPC. `RequestReplyDeps` gains `openInbox` returning
+  a `ReplyInbox` (`address` + `close`); the four existing brokers pass the shared internal
+  `createTopicInbox` and are behaviour-identical, while `KafkaBroker` supplies its own — a shared
+  `replyTopic` (default `'messaging.replies'`) read under a per-instance consumer group
+  `rr-inbox-<uuid>`. Chosen because `IKafkaFactory` exposes only `producer()`/`consumer({groupId})`
+  and **no `admin()`**, so per-instance reply-topic creation is unreachable without widening an
+  option-referenced facade; the topic must therefore pre-exist, and cross-instance replies are
+  dropped by the existing correlation-id lookup so no envelope change was needed. Two defects fixed:
+  RPC moved to a derived `rr.req.<topic>` channel (a deliberate **breaking wire change** vs
+  `0.1.0-alpha.2`, recorded in CHANGELOG) so request envelopes stop leaking into plain `subscribe()`
+  consumers and a responder sharing a topic AND a queue with an ordinary subscriber no longer
+  swallows that subscriber's messages (fan-out consumers were never affected — the defect was
+  narrower than the raw envelope leak); and the reply inbox now claims its own queue name, since
+  `KafkaBroker.subscribe` otherwise falls back to the shared `'messaging-consumers'` group and
+  misroutes replies. `MessagingNotSupportedError` is **deprecated, not removed** — AI_GUIDELINES
+  §9.2 governs a published export and beats the dead-surface rule, which targets newly invented
+  surface. No `common` contract change (JSDoc only); developed in an isolated worktree off `main`) —
+  complete (PR #94)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
@@ -376,8 +400,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `sendEmail`/`sendSms`/`sendSlack` examples to the committed one-method `send` surface, dropped the
   email `options` bag, fixed the Twilio registration example that omitted the required `from`, and
   added the missing Notifications Options/Exports/Notes sections in the same PR; the legacy FCM
-  `serverKey` API it ships was decommissioned by Google in 2024 — FCM HTTP v1 with service-account
-  JWT signing is a follow-up) — complete (PR #65)
+  `serverKey` API it ships was decommissioned by Google in 2024 — **fixed in M30b**, which moves the
+  provider to FCM HTTP v1) — complete (PR #65)
+- **Milestone 30b** (`packages/notification-plugin` — FCM HTTP v1: M30's `FcmProvider` posted to
+  `POST /fcm/send` with `Authorization: key=<serverKey>`, the API Google switched off in 2024, so
+  the push channel could never succeed against a live project — a defect repair, not a feature. Now
+  posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted from a
+  service account: an internal `ServiceAccountTokenSource` signs an RS256 JWT assertion with
+  `runtime.subtle` (same route as M16's `JwtService`;
+  `importKey('pkcs8', …,
+  { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' })`), exchanges it at
+  `oauth2.googleapis.com/token` over the existing `INotificationHttp` seam, and caches both the
+  imported key and the token until 60 s before expiry — so a send costs one request in the steady
+  state. Zero npm dependencies, Workers-portable. `FcmProviderOptions.serverKey` is **replaced, not
+  deprecated**, by `{ projectId, clientEmail, privateKey }`: §9.2's deprecate-then-remove assumes a
+  working replacement path, and `serverKey` addressed a dead endpoint, so a compile error is the
+  correct signal (maintainer-approved). `createProvider`'s `fcm` arm now takes `IPluginContext` and
+  throws during `register` when `CAPABILITIES.RUNTIME` is absent, mirroring the `mail` arm — unless
+  an exported `FcmTokenSource` is supplied, which carries its own credentials (GCP metadata server,
+  key broker) and lifts the runtime requirement. `pemToDer` is a deliberate local copy:
+  auth-plugin's is internal and AI_GUIDELINES §2.2/§3.3 forbid a plugin importing another plugin. A
+  real-crypto test generates an RSA keypair, signs an assertion and verifies it, so the signing path
+  is exercised for real rather than only behind a fake. No `common` change, no new capability token;
+  developed in an isolated worktree off `main`) — complete (PR #96)
 - **Milestone 46** (`packages/websocket-plugin` — WebSocketPlugin registering an `IWebSocketService`
   under a new `CAPABILITIES.WEBSOCKET = 'websocket'` token; full-duplex bidirectional messaging,
   completing the real-time story M43's SSE plugin covers one-way. The RFC 6455 handshake needs the

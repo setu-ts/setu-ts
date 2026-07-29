@@ -2364,6 +2364,8 @@ interface MessagingPluginOptions {
   brokers?: readonly string[];
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
+  /** Kafka request-reply topic; must already exist. @defaultValue 'messaging.replies' */
+  replyTopic?: string;
 }
 ````
 
@@ -2454,16 +2456,25 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 `request` rejects with one of three exported error classes (import from
 `@hono-enterprise/messaging-plugin` for `instanceof` handling):
 
-| Error                        | Thrown when                                                       |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                              |
-| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message. |
-| `MessagingNotSupportedError` | The broker cannot support request-reply (Kafka — see below).      |
+| Error                        | Thrown when                                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                             |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
+| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-> **Broker support.** Request-reply is available on the **in-memory, Redis Streams, RabbitMQ, and
-> NATS** brokers. The **Kafka** broker's consumer-group / auto-commit model makes per-caller reply
-> correlation an anti-pattern, so `KafkaBroker.request`/`respond` return a promise **rejected** with
-> `MessagingNotSupportedError`; use a reply-capable broker for RPC.
+> **Broker support.** Request-reply is available on **all five** brokers — in-memory, Redis Streams,
+> RabbitMQ, NATS, and Kafka.
+>
+> **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
+> default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
+> either pre-create it or enable `auto.create.topics.enable`. Each broker instance reads that topic
+> under its own consumer group, so every instance receives every reply and discards those it did not
+> originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+
+> **RPC and pub/sub are separate channels.** `request`/`respond` travel on a channel derived from
+> the topic, not on the topic itself. A plain `subscribe('orders', …)` therefore never observes an
+> RPC request, and a plain `publish('orders', …)` is never consumed by a responder on `'orders'`.
+> The two can share a topic name safely.
 
 ### Multiple Broker Instances
 
@@ -3337,7 +3348,14 @@ app.register(NotificationPlugin({
         from: config.get('TWILIO_FROM'), // required — the sender number
       },
     },
-    push: { provider: 'fcm', options: { serverKey: config.get('FCM_SERVER_KEY') } },
+    push: {
+      provider: 'fcm',
+      options: {
+        projectId: config.get('FCM_PROJECT_ID'),
+        clientEmail: config.get('FCM_CLIENT_EMAIL'),
+        privateKey: config.get('FCM_PRIVATE_KEY'), // PEM PKCS#8, from the service-account JSON
+      },
+    },
     slack: { provider: 'slack', options: { webhookUrl: config.get('SLACK_WEBHOOK') } },
   },
 }));
@@ -3379,7 +3397,9 @@ app.router.post('/orders', async (ctx) => {
 | `channels`                                  | —                        | Required map of dispatch name → `ChannelConfig`. Keys are the names a caller passes in `send({ channels: [...] })`. |
 | `channels.*.provider`                       | —                        | `'mail' \| 'twilio' \| 'fcm' \| 'slack'` — selects the channel class and transport.                                 |
 | `options.accountSid` / `authToken` / `from` | `twilio`                 | Twilio credentials and sender number; all three required (construction throws).                                     |
-| `options.serverKey`                         | `fcm`                    | FCM legacy server key; required (construction throws).                                                              |
+| `options.projectId`                         | `fcm`                    | Firebase project id, addressed by the v1 `messages:send` URL; required (construction throws).                       |
+| `options.clientEmail` / `privateKey`        | `fcm`                    | Service-account email and PEM PKCS#8 key that sign the OAuth2 assertion; required unless `tokenSource` is supplied. |
+| `options.tokenSource`                       | `fcm`                    | Overrides token acquisition (e.g. a GCP metadata server); when set the credential fields above are unused.          |
 | `options.webhookUrl`                        | `slack`                  | Slack incoming-webhook URL; required (construction throws).                                                         |
 | `options.http`                              | `twilio`, `fcm`, `slack` | Injected `INotificationHttp` (defaults to `createDefaultNotificationHttp()`, i.e. global `fetch`).                  |
 
@@ -3423,8 +3443,12 @@ through `CAPABILITIES.MAIL`.
   the misconfiguration surfaces at startup rather than at first send.
 - All three HTTP providers are zero-dependency (web-standard `fetch`) and Workers-portable; the
   email channel inherits M29's provider constraints (`SmtpProvider` needs raw sockets).
-  `FcmProvider` targets the legacy `serverKey` API (`POST /fcm/send`); HTTP v1 with OAuth2
-  service-account signing is not implemented.
+  `FcmProvider` targets **FCM HTTP v1** (`POST /v1/projects/{projectId}/messages:send`),
+  authenticating with an OAuth2 bearer token minted from a service account: it signs an RS256 JWT
+  assertion with `runtime.subtle` and caches the resulting token until shortly before it expires, so
+  a send costs one request in the steady state. A `push` channel using the default signer therefore
+  requires `CAPABILITIES.RUNTIME` and throws during `register` without it; supplying `tokenSource`
+  removes that requirement.
 - A `notification` health indicator reports `'up'` with the configured channel names. There is no
   `onClose`: the providers hold no socket, timer, or connection.
 

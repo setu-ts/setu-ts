@@ -7,7 +7,9 @@ import { createApplication } from '@hono-enterprise/kernel';
 import { MessagingPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IMessageBroker, IPlugin } from '@hono-enterprise/common';
+import type { IKafkaFactory } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { FakeKafkaFactory } from '../fixtures/fake-kafkajs-client.ts';
 
 /** Fake runtime plugin for integration tests. */
 function fakeRuntimePlugin(): IPlugin {
@@ -136,5 +138,55 @@ describe('EventsMessagingBridge integration', () => {
 
     expect(forwardedMessage).toBeDefined();
     expect((forwardedMessage as { userId: string }).userId).toBe('456');
+  });
+
+  it('completes a Kafka RPC round trip through the resolved capability', async () => {
+    const app = createApplication({
+      plugins: [
+        fakeRuntimePlugin(),
+        MessagingPlugin({
+          broker: 'kafka',
+          client: new FakeKafkaFactory() as unknown as IKafkaFactory,
+        }),
+      ],
+    });
+    await app.start();
+
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    await broker.respond<{ id: string }, { name: string }>(
+      'user.lookup',
+      (req) => ({ name: `user-${req.id}` }),
+    );
+
+    const reply = await broker.request<{ id: string }, { name: string }>(
+      'user.lookup',
+      { id: '42' },
+    );
+
+    expect(reply).toEqual({ name: 'user-42' });
+    await app.stop();
+  });
+
+  it('keeps a responder and a plain subscriber independent on one topic', async () => {
+    const app = createApplication({
+      plugins: [fakeRuntimePlugin(), MessagingPlugin({ broker: 'memory' })],
+    });
+    await app.start();
+
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    const received: unknown[] = [];
+    await broker.subscribe('orders', (message) => {
+      received.push(message);
+    });
+    await broker.respond<{ id: number }, string>('orders', (req) => `rpc-${req.id}`);
+
+    const reply = await broker.request<{ id: number }, string>('orders', { id: 1 });
+    await broker.publish('orders', { plain: true });
+
+    // RPC resolved, and the pub/sub consumer saw only the plain publish —
+    // never a request envelope, and its message was not swallowed.
+    expect(reply).toBe('rpc-1');
+    expect(received).toEqual([{ plain: true }]);
+    await app.stop();
   });
 });

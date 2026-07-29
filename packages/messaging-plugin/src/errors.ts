@@ -38,12 +38,18 @@ export class RemoteHandlerError extends Error {
 }
 
 /**
- * Thrown by {@link IMessageBroker.request} / {@link IMessageBroker.respond} on a
- * broker whose transport does not support brokered request-reply (Kafka, whose
- * consumer-group / auto-commit model makes per-caller reply correlation an
- * anti-pattern). Use a reply-capable broker — in-memory, Redis Streams,
- * RabbitMQ, or NATS.
+ * Signals that a broker's transport cannot support brokered request-reply.
  *
+ * **No broker throws this as of `0.1.0-alpha.3`.** It was introduced in
+ * `0.1.0-alpha.1` for the Kafka broker, which rejected `request`/`respond`
+ * outright; Kafka now implements both over a shared reply topic read by a
+ * per-instance consumer group, so all five brokers are reply-capable. The class
+ * is retained so consumer `instanceof` checks written against `alpha.1` /
+ * `alpha.2` keep compiling and catching.
+ *
+ * @deprecated No broker throws this. Nothing replaces it — delete the
+ * corresponding `instanceof MessagingNotSupportedError` branch. Will be removed
+ * in the next major version.
  * @since 0.1.0
  */
 export class MessagingNotSupportedError extends Error {
