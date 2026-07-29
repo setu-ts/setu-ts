@@ -208,6 +208,14 @@ export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';
 
 // SSE contracts
 export type { ISseConnection, ISseService, SseChannel, SseMessage } from './services/sse.ts';
+export type {
+  IRealtimeBackplane,
+  RealtimeFrame,
+  RealtimeFrameHandler,
+  RealtimeFrameKind,
+} from './services/realtime.ts';
+export { decodeFrameData, encodeFrameData } from './realtime-codec.ts';
+export type { EncodedPayload } from './realtime-codec.ts';
 
 // WebSocket contracts
 export type {

@@ -9,11 +9,14 @@
  */
 
 import type {
+  IRealtimeBackplane,
   IRequestContext,
   IRuntimeServices,
   ISseConnection,
   ISseService as IService,
+  RealtimeFrame,
   SseChannel,
+  SseMessage,
 } from '@hono-enterprise/common';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseConnection } from '../connection/sse-connection.ts';
@@ -26,20 +29,80 @@ import { ChannelRegistry } from '../channels/channel-registry.ts';
  */
 export class SseService implements IService {
   #connections = new Set<SseConnection>();
-  #registry = new ChannelRegistry();
+  readonly #registry: ChannelRegistry;
   readonly #heartbeatMs: number | undefined;
   readonly #retryMs: number | undefined;
   readonly #runtime: IRuntimeServices;
+  /** The cross-replica transport, when one was registered. */
+  readonly #backplane: IRealtimeBackplane | undefined;
 
   /**
    * @param options - Plugin options (heartbeatMs, retryMs); may be undefined
    * @param runtime - Runtime services (injected from plugin registration)
+   * @param backplane - Optional cross-replica transport. When present, every
+   *   channel publish is also sent to it; when absent, channels stay purely
+   *   in-process, which is the behavior before the backplane existed.
    * @since 0.1.0
    */
-  constructor(options: SsePluginOptions | undefined, runtime: IRuntimeServices) {
+  constructor(
+    options: SsePluginOptions | undefined,
+    runtime: IRuntimeServices,
+    backplane?: IRealtimeBackplane,
+  ) {
     this.#heartbeatMs = options?.heartbeatMs;
     this.#retryMs = options?.retryMs;
     this.#runtime = runtime;
+    this.#backplane = backplane;
+    this.#registry = new ChannelRegistry(
+      backplane === undefined ? undefined : (name, msg): void => {
+        const frame: RealtimeFrame = {
+          kind: 'sse-channel',
+          origin: backplane.origin,
+          name,
+          // An SseMessage is already JSON-serializable, so its JSON encoding is
+          // the wire form; no base64 is involved on this path.
+          data: JSON.stringify(msg),
+        };
+        // Fire-and-forget: a transport failure must never make a local publish
+        // throw for the application that issued it.
+        void backplane.publish(frame).catch(() => {
+          // The SSE service holds no logger; a failed fan-out degrades to
+          // local-only delivery, which the health indicator's transport data
+          // already lets an operator correlate.
+        });
+      },
+    );
+  }
+
+  /**
+   * Delivers a message that arrived from another replica to this replica's
+   * local channel members.
+   *
+   * Called only by the plugin's backplane subscription. It uses the registry's
+   * local-only delivery path, so an arriving message is never re-published —
+   * which would echo it around the cluster forever.
+   *
+   * Frames of another kind, and frames this instance published itself, are
+   * ignored: one backplane topic carries both SSE channels and WebSocket rooms,
+   * and a channel may legitimately share a name with a room.
+   *
+   * @param frame - The arriving frame
+   * @since 0.2.0
+   */
+  deliverRemoteFrame(frame: RealtimeFrame): void {
+    if (frame.kind !== 'sse-channel' || frame.origin === this.#backplane?.origin) {
+      return;
+    }
+    let msg: unknown;
+    try {
+      msg = JSON.parse(frame.data);
+    } catch {
+      return;
+    }
+    if (typeof msg !== 'object' || msg === null || !('data' in msg)) {
+      return;
+    }
+    this.#registry.deliverRemote(frame.name, msg as SseMessage);
   }
 
   /** Open a new SSE connection for the given request context. */

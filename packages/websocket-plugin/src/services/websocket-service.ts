@@ -14,10 +14,12 @@
 
 import type {
   ILogger,
+  IRealtimeBackplane,
   IRuntimeServices,
   IWebSocketConnection,
   IWebSocketService,
   IWebSocketTransport,
+  RealtimeFrame,
   WebSocketConnectionContext,
   WebSocketEventSink,
   WebSocketHandlers,
@@ -25,6 +27,7 @@ import type {
   WebSocketRouteOptions,
   WebSocketUpgradeDecision,
 } from '@hono-enterprise/common';
+import { decodeFrameData, encodeFrameData } from '@hono-enterprise/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
@@ -110,7 +113,7 @@ export class WebSocketService implements IWebSocketService {
   readonly #runtime: IRuntimeServices;
   readonly #options: ResolvedOptions;
   readonly #routes = new WsRouteTable();
-  readonly #rooms = new RoomRegistry();
+  readonly #rooms: RoomRegistry;
   readonly #connections = new Set<WebSocketConnection>();
   readonly #heartbeat: HeartbeatSweeper;
   readonly #available: boolean;
@@ -123,6 +126,8 @@ export class WebSocketService implements IWebSocketService {
    * check and blow through the limit.
    */
   #pending = 0;
+  /** The cross-replica transport, when one was registered. */
+  readonly #backplane: IRealtimeBackplane | undefined;
 
   /**
    * Creates the service.
@@ -132,17 +137,38 @@ export class WebSocketService implements IWebSocketService {
    * @param available - Whether the HTTP adapter can perform upgrades
    * @param logger - Optional logger used to report an upgrade-router failure;
    *   the HTTP adapter that consults the router has no logger of its own
+   * @param backplane - Optional cross-replica transport. When present, every
+   *   room broadcast is also published to it; when absent, rooms stay purely
+   *   in-process, which is the behavior before the backplane existed.
    */
   constructor(
     runtime: IRuntimeServices,
     options: ResolvedOptions,
     available: boolean,
     logger?: ILogger,
+    backplane?: IRealtimeBackplane,
   ) {
     this.#runtime = runtime;
     this.#options = options;
     this.#available = available;
     this.#logger = logger;
+    this.#backplane = backplane;
+    this.#rooms = new RoomRegistry(
+      backplane === undefined ? undefined : (name, data): void => {
+        const payload = encodeFrameData(data);
+        const frame: RealtimeFrame = payload.binary === true
+          ? { kind: 'ws-room', origin: backplane.origin, name, data: payload.data, binary: true }
+          : { kind: 'ws-room', origin: backplane.origin, name, data: payload.data };
+        // Fire-and-forget: a transport failure must never make a local
+        // broadcast throw for the application that issued it.
+        void backplane.publish(frame).catch((error: unknown) => {
+          this.#logger?.warn('websocket: backplane publish failed', {
+            room: name,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      },
+    );
     this.#heartbeat = new HeartbeatSweeper(
       runtime,
       {
@@ -182,6 +208,28 @@ export class WebSocketService implements IWebSocketService {
 
   room(name: string): WebSocketRoom {
     return this.#rooms.get(name);
+  }
+
+  /**
+   * Delivers a frame that arrived from another replica to this replica's local
+   * room members.
+   *
+   * Called only by the plugin's backplane subscription. It uses the room
+   * registry's local-only delivery path, so an arriving frame is never
+   * re-published — which would echo it around the cluster forever.
+   *
+   * Frames of another kind, and frames this instance published itself, are
+   * ignored: one backplane topic carries both WebSocket rooms and SSE
+   * channels, and a room may legitimately share a name with a channel.
+   *
+   * @param frame - The arriving frame
+   * @since 0.2.0
+   */
+  deliverRemoteFrame(frame: RealtimeFrame): void {
+    if (frame.kind !== 'ws-room' || frame.origin === this.#backplane?.origin) {
+      return;
+    }
+    this.#rooms.deliverRemote(frame.name, decodeFrameData(frame));
   }
 
   /**

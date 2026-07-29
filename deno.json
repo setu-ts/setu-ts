@@ -39,7 +39,8 @@
     "./packages/sse-plugin",
     "./packages/react-router-plugin",
     "./packages/worker-pool-plugin",
-    "./packages/websocket-plugin"
+    "./packages/websocket-plugin",
+    "./packages/realtime-backplane-plugin"
   ],
   "tasks": {
     "check": "deno check packages",
