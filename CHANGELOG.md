@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+> **⚠️ Breaking: brokered request-reply changes on the wire.** `request()`/`respond()` move from
+> `<topic>` to a derived `rr.req.<topic>` channel, so a responder running `0.1.0-alpha.2` and a
+> caller running this version **will not talk to each other**. RPC callers and responders must be
+> restarted together, not rolled one at a time. Fire-and-forget `publish`/`subscribe` are
+> unaffected, as is every other plugin. If you do not use `request`/`respond`, nothing here applies
+> to you.
+
+**Kafka gains request-reply, and the seam that makes it possible.** All five brokers are now
+reply-capable. The reason Kafka was excluded turned out not to be Kafka: the shared request-reply
+core minted its own inbox topic and imposed it on every broker, which only works where topics are
+cheap and per-instance-addressable. Brokers now supply their own reply inbox, so Kafka can read a
+shared reply topic under a per-instance consumer group instead. The same seam is where a future
+native AMQP `replyTo` or NATS JetStream reply-subject transport would plug in.
+
+Two defects in the M14c implementation are fixed alongside it, both consequences of RPC sharing a
+topic with ordinary pub/sub.
+
 ### Added
 
 - **Kafka now supports brokered request-reply.** `KafkaBroker.request`/`respond` previously rejected
@@ -16,8 +33,8 @@ All notable changes to this project are documented here. The format follows
   surface, so the broker creates no topics. Every instance receives every reply and discards those
   it did not originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
 - Each broker now supplies its own reply inbox through an internal seam, rather than having a topic
-  string imposed on it by the shared request-reply core. This is what made Kafka expressible, and it
-  is where a future native AMQP `replyTo` / NATS JetStream reply-subject transport would plug in.
+  string imposed on it by the shared request-reply core. The four brokers that were already
+  reply-capable pass a shared helper and are behaviourally unchanged.
 
 ### Changed
 
@@ -190,7 +207,9 @@ are never hard dependencies. Each is injected through plugin options or imported
   `variation`/`allFlagsState` are async and cannot satisfy the synchronous committed `isEnabled`
   contract. Use the provider's `'custom'` arm as a bridge.
 - **`KafkaBroker` does not support request-reply.** Kafka's consumer-group and auto-commit model
-  does not fit the pattern; `request()`/`respond()` throw `MessagingNotSupportedError`.
+  does not fit the pattern; `request()`/`respond()` throw `MessagingNotSupportedError`. _(True of
+  this release. Superseded — see [Unreleased](#unreleased), where Kafka becomes reply-capable; the
+  limitation was in the shared request-reply core, not in Kafka.)_
 - **Rooms and channels are in-process.** `websocket-plugin` rooms and `sse-plugin` channels are not
   shared across replicas; cross-instance fan-out is a later milestone.
 - **`resilience-plugin` timeouts do not cancel.** `timeout` races the promise; the wrapped function
