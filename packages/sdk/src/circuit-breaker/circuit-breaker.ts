@@ -4,6 +4,18 @@
  * Rolling-window failure tracking with closed/open/half-open states and an
  * injected `isFailure` predicate that classifies which errors count.
  *
+ * Design notes:
+ * - On success in CLOSED state, the entire failure window is cleared (reset on success).
+ *   This is a deliberate choice: a single successful request indicates the downstream
+ *   service has recovered, so we reset the failure count to allow immediate traffic.
+ *   This differs from some implementations that only age failures out over time;
+ *   resetting on success provides faster recovery while still respecting the rolling window
+ *   for detecting renewed failures. See comparison with resilience-plugin below.
+ * - In HALF-OPEN state, only one probe is allowed in flight at a time (guarded by
+ *   `halfOpenInFlight`). If the probe succeeds, the circuit closes and failures are cleared.
+ *   If it fails, the circuit reopens. This single-probe strategy prevents stampeding
+ *   multiple concurrent requests against a potentially unstable service.
+ *
  * @internal
  */
 

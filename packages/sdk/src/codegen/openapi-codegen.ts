@@ -132,6 +132,8 @@ function renderLiteral(value: unknown): string {
 function renderSchema(
   schema: SdkOpenApiSchema | undefined,
   seen: Set<SdkOpenApiSchema> = new Set(),
+  path?: string,
+  method?: string,
 ): string {
   if (!schema) return 'unknown';
   if (seen.has(schema)) return 'unknown';
@@ -140,21 +142,35 @@ function renderSchema(
 
   if (schema.$ref) {
     const name = schema.$ref.split('/').pop();
-    if (!name) throw new OpenApiCodegenError(`Invalid $ref: ${schema.$ref}`);
+    if (!name) throw new OpenApiCodegenError(`Invalid $ref: ${schema.$ref}`, path, method);
     return sanitizeIdentifier(name);
   }
   if (schema.enum) return schema.enum.map(renderLiteral).join(' | ') || 'unknown';
   if (schema.const !== undefined) return renderLiteral(schema.const);
-  if (schema.anyOf) return schema.anyOf.map((s) => renderSchema(s, next)).join(' | ') || 'unknown';
-  if (schema.oneOf) return schema.oneOf.map((s) => renderSchema(s, next)).join(' | ') || 'unknown';
-  if (schema.allOf) return schema.allOf.map((s) => renderSchema(s, next)).join(' & ') || 'unknown';
+  if (schema.anyOf) {
+    return schema.anyOf.map((s) => renderSchema(s, next, path, method)).join(' | ') || 'unknown';
+  }
+  if (schema.oneOf) {
+    return schema.oneOf.map((s) => renderSchema(s, next, path, method)).join(' | ') || 'unknown';
+  }
+  if (schema.allOf) {
+    return schema.allOf.map((s) => renderSchema(s, next, path, method)).join(' & ') || 'unknown';
+  }
 
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-  if (types.length > 1) return types.filter(Boolean).map((t) => rtp(t!, schema, next)).join(' | ');
-  return types[0] ? rtp(types[0], schema, next) : 'unknown';
+  if (types.length > 1) {
+    return types.filter(Boolean).map((t) => rtp(t!, schema, next, path, method)).join(' | ');
+  }
+  return types[0] ? rtp(types[0], schema, next, path, method) : 'unknown';
 }
 
-function rtp(type: string, schema: SdkOpenApiSchema, seen: Set<SdkOpenApiSchema>): string {
+function rtp(
+  type: string,
+  schema: SdkOpenApiSchema,
+  seen: Set<SdkOpenApiSchema>,
+  path?: string,
+  method?: string,
+): string {
   switch (type) {
     case 'string':
       return 'string';
@@ -167,21 +183,28 @@ function rtp(type: string, schema: SdkOpenApiSchema, seen: Set<SdkOpenApiSchema>
     case 'null':
       return 'null';
     case 'array':
-      return schema.items ? `${renderSchema(schema.items, seen)}[]` : 'unknown[]';
+      return schema.items ? `${renderSchema(schema.items, seen, path, method)}[]` : 'unknown[]';
     case 'object':
-      return ros(schema, seen);
+      return ros(schema, seen, path, method);
     default:
       return 'unknown';
   }
 }
 
-function ros(schema: SdkOpenApiSchema, seen: Set<SdkOpenApiSchema>): string {
+function ros(
+  schema: SdkOpenApiSchema,
+  seen: Set<SdkOpenApiSchema>,
+  path?: string,
+  method?: string,
+): string {
   if (schema.properties) {
     const req = new Set(schema.required ?? []);
     const propLines: string[] = [];
     for (const [key, val] of Object.entries(schema.properties)) {
       const opt = req.has(key) ? '' : '?';
-      propLines.push(`    '${escapeSingleQuote(key)}'${opt}: ${renderSchema(val, seen)};`);
+      propLines.push(
+        `    '${escapeSingleQuote(key)}'${opt}: ${renderSchema(val, seen, path, method)};`,
+      );
     }
     const body = propLines.join('\n');
     if (schema.additionalProperties !== undefined) {
@@ -189,7 +212,7 @@ function ros(schema: SdkOpenApiSchema, seen: Set<SdkOpenApiSchema>): string {
         if (schema.additionalProperties) return `{\n${body}\n} & Record<string, unknown>`;
         return `{\n${body}\n}`;
       }
-      const ap = renderSchema(schema.additionalProperties, seen);
+      const ap = renderSchema(schema.additionalProperties, seen, path, method);
       return `{\n${body}\n} & Record<string, ${ap}>`;
     }
     return `{\n${body}\n}`;
@@ -198,7 +221,7 @@ function ros(schema: SdkOpenApiSchema, seen: Set<SdkOpenApiSchema>): string {
     if (typeof schema.additionalProperties === 'boolean') {
       return schema.additionalProperties ? 'Record<string, unknown>' : '{}';
     }
-    return `Record<string, ${renderSchema(schema.additionalProperties, seen)}>`;
+    return `Record<string, ${renderSchema(schema.additionalProperties, seen, path, method)}>`;
   }
   return 'Record<string, unknown>';
 }
@@ -276,14 +299,14 @@ function getBodySchema(op: SdkOpenApiOperation): SdkOpenApiSchema | undefined {
   return rb.content?.['application/json']?.schema;
 }
 
-function getSuccessTypes(op: SdkOpenApiOperation): string[] {
+function getSuccessTypes(op: SdkOpenApiOperation, path: string, method: string): string[] {
   if (!op.responses) return ['void'];
   const out: string[] = [];
   for (const [code, resp] of Object.entries(op.responses)) {
     const s = parseInt(code, 10);
     if (s >= 200 && s < 300) {
       const media = resp.content?.['application/json'];
-      if (media?.schema) out.push(renderSchema(media.schema));
+      if (media?.schema) out.push(renderSchema(media.schema, new Set(), path, method));
       else out.push('void');
     }
   }
@@ -337,49 +360,37 @@ export function generateOpenApiClient(
   }
 
   for (const op of operations) {
-    const { pathParams, queryParams, headerParams } = splitParams(
+    const { pathParams: _pathParams, queryParams, headerParams } = splitParams(
       op.operation,
       op.path,
       op.method,
     );
     const bodySchema = getBodySchema(op.operation);
     const typeName = sanitizeIdentifier(op.operationId) + 'Args';
-    const fields: string[] = [];
+    // Args interface contains ONLY query, header, and body parameters (flat, no wrapper).
+    // Path parameters are excluded - they appear as separate function arguments.
+    const argsFields: string[] = [];
 
-    for (const p of pathParams) {
-      const pname = sanitizeIdentifier(p.name);
-      const ptype = renderSchema(p.schema) ?? 'string';
-      fields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
-    }
     if (queryParams.length || headerParams.length || bodySchema) {
-      const optsFields: string[] = [];
       for (const p of queryParams) {
-        optsFields.push(
-          `    ${sanitizeIdentifier(p.name)}${p.required ? '' : '?'}: ${
-            renderSchema(p.schema) ?? 'string'
-          };`,
-        );
+        const pname = sanitizeIdentifier(p.name);
+        const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'string';
+        argsFields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
       }
       for (const p of headerParams) {
-        optsFields.push(
-          `    ${sanitizeIdentifier(p.name)}${p.required ? '' : '?'}: ${
-            renderSchema(p.schema) ?? 'string'
-          };`,
-        );
+        const pname = sanitizeIdentifier(p.name);
+        const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'string';
+        argsFields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
       }
       if (bodySchema) {
-        optsFields.push(`    body: ${renderSchema(bodySchema)};`);
-      }
-      if (optsFields.length) {
-        fields.push(`    options?: {`);
-        fields.push(...optsFields);
-        fields.push(`    };`);
+        const btype = renderSchema(bodySchema, new Set(), op.path, op.method);
+        argsFields.push(`    body?: ${btype};`);
       }
     }
 
-    if (fields.length) {
+    if (argsFields.length) {
       L(`export interface ${typeName} {`);
-      fields.forEach((f) => L(f));
+      argsFields.forEach((f) => L(f));
       L('}');
     } else {
       L(`export type ${typeName} = void;`);
@@ -396,7 +407,7 @@ export function generateOpenApiClient(
       op.method,
     );
     const bodySchema = getBodySchema(op.operation);
-    const successTypes = getSuccessTypes(op.operation);
+    const successTypes = getSuccessTypes(op.operation, op.path, op.method);
     const returnType = successTypes.length === 1 && successTypes[0] === 'void'
       ? 'void'
       : successTypes.join(' | ');
@@ -406,14 +417,14 @@ export function generateOpenApiClient(
 
     const paramList: string[] = [];
     for (const p of pathParams) {
-      paramList.push(
-        `${sanitizeIdentifier(p.name)}${p.required ? '' : '?'}: ${
-          renderSchema(p.schema) ?? 'string'
-        }`,
-      );
+      const pname = sanitizeIdentifier(p.name);
+      const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'string';
+      paramList.push(`${pname}${p.required ? '' : '?'}: ${ptype}`);
     }
+    // Generate the *Args interface name and add typed opts parameter if needed.
+    const typeName = sanitizeIdentifier(op.operationId) + 'Args';
     if (queryParams.length || headerParams.length || bodySchema) {
-      paramList.push('opts?: Record<string, unknown>');
+      paramList.push(`opts?: ${typeName}`);
     }
 
     L(`    function ${op.safeName}(${
@@ -428,7 +439,7 @@ export function generateOpenApiClient(
     if (queryParams.length) {
       const qParts = queryParams.map((p) => {
         const pname = sanitizeIdentifier(p.name);
-        const ptype = renderSchema(p.schema) ?? 'unknown';
+        const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'unknown';
         return `'${escapeSingleQuote(p.name)}': (opts?.${pname} as ${ptype} | undefined)`;
       });
       L(`            query: { ${qParts.join(', ')} },`);

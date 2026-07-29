@@ -141,7 +141,9 @@ export class HttpClient implements IHttpClient {
     }
 
     const execute = async (): Promise<ClientResponse<TResponse>> => {
-      // Rate-limit gate.
+      // Rate-limit gate. Each retry attempt is a real outbound HTTP request,
+      // so acquiring the token here means every attempt consumes one slot.
+      // This is intentional - rate limiting applies per actual request.
       if (limiter) {
         await limiter.acquire(req.signal);
       }

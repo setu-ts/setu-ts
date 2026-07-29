@@ -12,20 +12,16 @@ export type user = {
 };
 
 export interface listusersArgs {
-    options?: {
     page?: number;
     limit?: number;
-    };
 }
 
-export interface getuserbyidArgs {
-    id: string;
-}
+export type getuserbyidArgs = void;
 
 export function createApi(client: IHttpClient) {
 
     /** listUsers */
-    function listusers(opts?: Record<string, unknown>): Promise<ClientResponse<user[]>> {
+    function listusers(opts?: listusersArgs): Promise<ClientResponse<user[]>> {
         return client.request<user[]>({
             method: 'GET',
             path: 'users',
