@@ -660,7 +660,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the template (whose value was dropped). `packages/sdk` moves from `UNPUBLISHED_PACKAGES` to
   `PUBLISHED_PACKAGES` Tier 3, so `release:verify` now reports 38 publishable packages; the next
   release must run `release:create-packages` and `release:link-repos` before the first sdk publish,
-  because tokenless OIDC requires the repo link) — complete (PR pending)
+  because tokenless OIDC requires the repo link) — complete (PR #98)
 - **Next milestone** — **Milestone 36** (`packages/starter-*` — opinionated bundles); M36–M40 follow
   unless reprioritized.
 
