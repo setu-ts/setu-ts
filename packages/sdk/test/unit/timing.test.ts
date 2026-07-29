@@ -22,10 +22,16 @@ describe('createDefaultClientTiming', () => {
     expect(b).toBeGreaterThanOrEqual(a);
   });
 
-  it('sleep(0) resolves', async () => {
+  it('sleep(0) resolves and yields to the event loop', async () => {
     const timing = createDefaultClientTiming();
-    await timing.sleep(0);
-    // resolved without throwing
+    let settled = false;
+    const pending = timing.sleep(0).then(() => {
+      settled = true;
+    });
+    // `setTimeout`-backed, so it must NOT have resolved synchronously.
+    expect(settled).toBe(false);
+    await pending;
+    expect(settled).toBe(true);
   });
 
   it('sleep resolves after delay', async () => {
@@ -86,13 +92,23 @@ describe('createDefaultClientTiming', () => {
     await expect(sleepPromise).rejects.toThrow();
   });
 
-  it('sleep with signal present resolves when timer fires first', async () => {
+  it('sleep with an un-aborted signal resolves and detaches its abort listener', async () => {
     const timing = createDefaultClientTiming();
     const controller = new AbortController();
 
-    // Signal exists but is never aborted — timer fires and cleanup runs.
-    await timing.sleep(0, controller.signal);
-    // resolved without throwing — covers addEventListener + cleanup path
+    let settled = false;
+    await timing.sleep(0, controller.signal).then(() => {
+      settled = true;
+    });
+    expect(settled).toBe(true);
+
+    // The listener must be removed on the resolve path too: aborting afterwards
+    // must not reject an already-settled promise (an unhandled rejection) — this
+    // is what the `cleanup()` call in the timer callback exists for.
+    controller.abort(new Error('too late'));
+    // A further sleep on the now-aborted signal still rejects, proving the signal
+    // itself is live and the previous detach was listener-scoped, not global.
+    await expect(timing.sleep(50, controller.signal)).rejects.toThrow('too late');
   });
 
   it('sleep already-aborted propagates custom reason via signal.reason', async () => {

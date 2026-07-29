@@ -958,3 +958,127 @@ describe('hostile path templates', () => {
     ).toThrow(/Duplicate component type name 'User'.*'User'.*'user'/);
   });
 });
+
+describe('generated-source injection hardening', () => {
+  it('neutralizes a comment terminator in an operationId', () => {
+    // An operationId carrying `*/` closed the emitted JSDoc comment early and the
+    // remainder became EXECUTABLE code in the factory body. The payload
+    // type-checked and ran, so no gate caught it.
+    const payload = 'ok*/Object.assign(globalThis,{PWNED:1});/*';
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { get: makeOp(payload, { responses: { '204': { description: '' } } }) },
+    }));
+    const comment = out.split('\n').find((l) => l.includes('Object.assign'))!;
+    // The terminator is escaped, so the payload stays inside the comment.
+    expect(comment).toContain('ok*\\/Object.assign');
+    expect(comment).not.toContain('ok*/Object.assign');
+    // Nothing between the comment open and the function declaration is a statement.
+    expect(out).not.toMatch(/\*\/\s*Object\.assign/);
+  });
+
+  it('collapses newlines in an operationId so it cannot escape the comment', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': {
+        get: makeOp('line1\nglobalThis.X=1;', { responses: { '204': { description: '' } } }),
+      },
+    }));
+    const comment = out.split('\n').find((l) => l.includes('line1'))!;
+    expect(comment).toContain('line1 globalThis.X=1;');
+    expect(comment.trim().endsWith('*/')).toBe(true);
+  });
+});
+
+describe('path template / parameter agreement', () => {
+  it('throws when a placeholder has no matching path parameter', () => {
+    // Previously emitted `encodeURIComponent(id)` with no `id` argument, so the
+    // generated file failed to compile with TS2304 and no diagnostic named the op.
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/users/{id}': { get: makeOp('getUser') },
+      }))
+    ).toThrow(/placeholder '\{id\}' with no matching 'in: path' parameter/);
+  });
+
+  it('throws when a declared path parameter is absent from the template', () => {
+    // Previously emitted an unused positional argument, silently dropping the value.
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/users': {
+          get: makeOp('getUser', { parameters: [makeParam('id', 'path')] }),
+        },
+      }))
+    ).toThrow(/declared 'in: path' but does not appear in the path template/);
+  });
+
+  it('throws when two placeholders derive onto one argument name', () => {
+    expect(() =>
+      generateOpenApiClient(makeDoc({
+        '/a/{user-id}/{user_id}': {
+          get: makeOp('op', { parameters: [makeParam('user-id', 'path')] }),
+        },
+      }))
+    ).toThrow(/two placeholders deriving onto one argument 'userId'/);
+  });
+
+  it('accepts a placeholder whose name needs sanitizing', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/a/{user-id}': { get: makeOp('op', { parameters: [makeParam('user-id', 'path')] }) },
+    }));
+    expect(out).toContain('function op(userId: string)');
+    expect(out).toContain('path: `a/${encodeURIComponent(userId)}`,');
+  });
+});
+
+describe('path-item level operations and parameters', () => {
+  it('emits a trace operation', () => {
+    // `trace` is declared on SdkOpenApiPathItem but was missing from HTTP_METHODS,
+    // so the operation was dropped with no method and no diagnostic.
+    const out = generateOpenApiClient(makeDoc({
+      '/t': { trace: makeOp('traceIt', { responses: { '204': { description: '' } } }) },
+    }));
+    expect(out).toContain('function traceIt(');
+    expect(out).toContain("method: 'TRACE',");
+    expect(out).toContain('traceIt,');
+  });
+
+  it('merges path-item-level parameters into each operation', () => {
+    // `SdkOpenApiPathItem.parameters` was never read, so a shared PATH parameter
+    // vanished and the emitted source referenced an undeclared identifier.
+    const out = generateOpenApiClient(makeDoc({
+      '/tenants/{tid}/x': {
+        parameters: [makeParam('tid', 'path')],
+        get: makeOp('sharedGet'),
+        delete: makeOp('sharedDelete'),
+      },
+    }));
+    expect(out).toContain('function sharedGet(tid: string)');
+    expect(out).toContain('function sharedDelete(tid: string)');
+    expect(out).toContain('path: `tenants/${encodeURIComponent(tid)}/x`,');
+  });
+
+  it('lets an operation-level parameter override a shared one of the same name and location', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/a/{id}': {
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        get: makeOp('ovr', {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        }),
+      },
+    }));
+    // The operation's `integer` schema wins over the shared `string`.
+    expect(out).toContain('function ovr(id: number)');
+  });
+
+  it('keeps a shared parameter that the operation does not redeclare', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/a': {
+        parameters: [{ name: 'shared', in: 'query', required: false, schema: { type: 'string' } }],
+        get: makeOp('mixed', {
+          parameters: [{ name: 'own', in: 'query', required: false, schema: { type: 'string' } }],
+        }),
+      },
+    }));
+    expect(out).toContain('    shared?: string;');
+    expect(out).toContain('    own?: string;');
+  });
+});

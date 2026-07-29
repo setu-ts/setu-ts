@@ -55,7 +55,7 @@ export class OpenApiCodegenError extends Error {
   constructor(message: string, path?: string, method?: string) {
     super(message);
     this.name = 'OpenApiCodegenError';
-    this.path = path ?? undefined;
-    this.method = method ?? undefined;
+    this.path = path;
+    this.method = method;
   }
 }

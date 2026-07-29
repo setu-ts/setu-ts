@@ -13,15 +13,20 @@ import type { IClientTiming } from '../../src/http/contracts.ts';
 describe('createRateLimiter', () => {
   it('admits immediately within window', async () => {
     const timeNow = 0;
-    const timing: IClientTiming = {
+    let sleepCalls = 0;
+    const counting: IClientTiming = {
       now: () => timeNow,
-      sleep: () => Promise.resolve(),
+      sleep: () => {
+        sleepCalls++;
+        return Promise.resolve();
+      },
     };
-    const limiter = createRateLimiter(3, 1000, timing);
+    const limiter = createRateLimiter(3, 1000, counting);
     await limiter.acquire();
     await limiter.acquire();
     await limiter.acquire();
-    // All three admitted without sleeping.
+    // Admitted without waiting: the window had capacity for all three.
+    expect(sleepCalls).toEqual(0);
   });
 
   it('waits when window is full', async () => {
@@ -61,19 +66,25 @@ describe('createRateLimiter', () => {
 
   it('evicts expired timestamps', async () => {
     let timeNow = 0;
-    const timing: IClientTiming = {
+    let sleepCalls = 0;
+    const counting: IClientTiming = {
       now: () => timeNow,
-      sleep: () => Promise.resolve(),
+      sleep: () => {
+        sleepCalls++;
+        return Promise.resolve();
+      },
     };
-    const limiter = createRateLimiter(2, 1000, timing);
+    const limiter = createRateLimiter(2, 1000, counting);
     await limiter.acquire(); // t=0
     await limiter.acquire(); // t=0
+    expect(sleepCalls).toEqual(0);
 
     // Advance past window.
     timeNow = 1100;
 
-    // Should admit again — old timestamps evicted.
+    // Admits immediately — the two t=0 timestamps aged out, so no wait.
     await limiter.acquire();
+    expect(sleepCalls).toEqual(0);
   });
 
   it('aborts queued wait without consuming a slot', async () => {
@@ -107,18 +118,30 @@ describe('createRateLimiter', () => {
     await expect(limiter.acquire(controller.signal)).rejects.toThrow('already aborted');
   });
 
-  it('per-origin isolation via separate instances', async () => {
-    const timeNow = 0;
-    const timing: IClientTiming = {
+  it('separate limiter instances keep independent state', async () => {
+    let timeNow = 0;
+    // Each origin gets its own limiter instance. Without independent state,
+    // filling A would force B to wait, so count the waits to prove it does not.
+    let sleepCalls = 0;
+    const counting: IClientTiming = {
       now: () => timeNow,
-      sleep: () => Promise.resolve(),
+      sleep: () => {
+        sleepCalls++;
+        return Promise.resolve();
+      },
     };
-    // Each origin gets its own limiter instance — verify they are independent.
-    const limiterA = createRateLimiter(1, 1000, timing);
-    const limiterB = createRateLimiter(1, 1000, timing);
+    const limiterA = createRateLimiter(1, 1000, counting);
+    const limiterB = createRateLimiter(1, 1000, counting);
 
-    await limiterA.acquire(); // fills A
-    await limiterB.acquire(); // fills B independently
+    await limiterA.acquire(); // fills A's single slot
+    await limiterB.acquire(); // B still has its own free slot
+    expect(sleepCalls).toEqual(0);
+
+    // A is now full: the next A acquisition DOES wait, proving the counter works.
+    const pending = limiterA.acquire();
+    timeNow = 1100;
+    await pending;
+    expect(sleepCalls).toEqual(1);
   });
 
   it('propagates custom abort reason from signal.reason', async () => {
@@ -140,35 +163,47 @@ describe('createRateLimiter', () => {
     }
   });
 
-  it('retries after sleep throws (admission loop)', async () => {
+  it('propagates a non-abort sleep rejection instead of looping', async () => {
+    // A non-abort `sleep` rejection means the injected timing seam is faulty.
+    // Swallowing it re-entered the admission loop with the window still full and
+    // no attempt bound, so a persistently rejecting `sleep` span forever and the
+    // cause was lost.
     let timeNow = 0;
-    let sleepCall = 0;
-    let sleepReject: ((err: unknown) => void) | undefined;
-
+    let sleepCalls = 0;
     const timing: IClientTiming = {
       now: () => timeNow,
       sleep: () => {
-        sleepCall++;
-        return new Promise<void>((_resolve, reject) => {
-          sleepReject = reject;
-        });
+        sleepCalls++;
+        return Promise.reject(new Error('timing seam broken'));
       },
     };
 
     const limiter = createRateLimiter(1, 1000, timing);
-    await limiter.acquire(); // t=0, fills slot
+    await limiter.acquire(); // t=0, fills the only slot
 
-    // Trigger wait.
+    timeNow = 100; // still inside the window, so the next acquire must wait
+    await expect(limiter.acquire()).rejects.toThrow('timing seam broken');
+    // Exactly one wait attempt — it did not spin.
+    expect(sleepCalls).toEqual(1);
+  });
+
+  it('retries the admission loop when the wait is interrupted by an abort', async () => {
+    // An abort IS expected mid-wait: the loop falls through to its guard, which
+    // throws the abort reason.
+    let timeNow = 0;
+    const controller = new AbortController();
+    const timing: IClientTiming = {
+      now: () => timeNow,
+      sleep: () => {
+        controller.abort(new Error('caller gave up'));
+        return Promise.reject(controller.signal.reason);
+      },
+    };
+
+    const limiter = createRateLimiter(1, 1000, timing);
+    await limiter.acquire();
+
     timeNow = 100;
-    const promise = limiter.acquire();
-
-    // Sleep rejects (simulating abort during wait).
-    sleepReject!(new Error('interrupted'));
-
-    // After sleep rejects, loop retries. Advance time past window.
-    timeNow = 1100;
-
-    // The loop should now evict the old timestamp and admit.
-    await promise;
+    await expect(limiter.acquire(controller.signal)).rejects.toThrow('caller gave up');
   });
 });

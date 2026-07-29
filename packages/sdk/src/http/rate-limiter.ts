@@ -44,9 +44,14 @@ export function createRateLimiter(maxRequests: number, windowMs: number, timing:
       if (waitMs > 0) {
         try {
           await timing.sleep(waitMs, signal);
-        } catch {
-          // If abort, re-check at the top of the loop (which throws).
-          continue;
+        } catch (error) {
+          // An abort is expected: fall through to the top of the loop, whose
+          // guard throws the abort reason. Anything else is a fault in the
+          // injected timing seam and must propagate — swallowing it re-entered
+          // the loop with the window still full and no attempt bound, so a
+          // persistently rejecting `sleep` span forever with the cause lost.
+          if (signal?.aborted) continue;
+          throw error;
         }
       }
     }

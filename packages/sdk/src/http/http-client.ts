@@ -56,6 +56,13 @@ function isAbortError(error: unknown): boolean {
 }
 
 // Origin-keyed breaker and limiter maps.
+//
+// A single client is single-origin in practice: `baseUrl` is fixed and every
+// `ClientRequest.path` must be relative, so `new URL(path, baseUrl).origin` is
+// invariant and each map holds at most one entry. The keying is kept because the
+// policies are DEFINED as per-origin and it is what makes the absolute-path
+// rejection meaningful — but no test can demonstrate cross-origin isolation
+// through the public surface, so do not read one as proving it.
 interface OriginBreaker {
   execute: <T>(fn: () => Promise<T>) => Promise<T>;
 }
@@ -63,6 +70,21 @@ interface OriginBreaker {
 interface OriginLimiter {
   acquire: (signal?: AbortSignal) => Promise<void>;
 }
+
+/**
+ * `ClientOptions` after `createClient()` has resolved every default.
+ *
+ * `timing` is REQUIRED here. It is optional on the public `ClientOptions` and
+ * defaulted by `createClient()`, and the constructor previously bridged that gap
+ * with `options.timing!` — a non-null assertion that made
+ * `new HttpClient({ baseUrl, retry })` throw
+ * `TypeError: Cannot read properties of undefined (reading 'sleep')` from inside
+ * the retry loop instead of failing at the boundary. Naming the resolved shape
+ * moves the guarantee into the type system.
+ *
+ * @internal
+ */
+export type ResolvedClientOptions = ClientOptions & { readonly timing: IClientTiming };
 
 /**
  * Internal HTTP client implementing `IHttpClient`.
@@ -87,11 +109,11 @@ export class HttpClient implements IHttpClient {
   #breakers = new Map<string, OriginBreaker>();
   #limiters = new Map<string, OriginLimiter>();
 
-  constructor(options: ClientOptions) {
+  constructor(options: ResolvedClientOptions) {
     this.#baseUrl = options.baseUrl;
     this.#defaultHeaders = options.headers;
     this.#fetch = options.fetch ?? fetch;
-    this.#timing = options.timing!; // guaranteed by createClient
+    this.#timing = options.timing;
     this.#retry = options.retry;
     this.#circuitBreaker = options.circuitBreaker;
     this.#maxRequests = options.rateLimit?.maxRequests;
@@ -176,9 +198,13 @@ export class HttpClient implements IHttpClient {
       this.#breakers.set(origin, breaker);
     }
 
-    // Get or create origin limiter.
+    // Get or create origin limiter. Explicit `!== undefined` rather than a
+    // truthiness test: a `maxRequests` or `windowMs` of 0 is invalid, and a
+    // truthy gate silently disabled rate limiting instead of surfacing it
+    // (`createClient` rejects those values, so this only guarded the internal
+    // construction path).
     let limiter = this.#limiters.get(origin);
-    if (this.#maxRequests && this.#windowMs && !limiter) {
+    if (this.#maxRequests !== undefined && this.#windowMs !== undefined && !limiter) {
       limiter = createRateLimiter(this.#maxRequests, this.#windowMs, this.#timing);
       this.#limiters.set(origin, limiter);
     }

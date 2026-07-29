@@ -13,6 +13,7 @@ import type {
   SdkOpenApiDocument,
   SdkOpenApiOperation,
   SdkOpenApiParameter,
+  SdkOpenApiPathItem,
   SdkOpenApiRequestBody,
   SdkOpenApiSchema,
 } from './openapi-types.ts';
@@ -163,6 +164,24 @@ function escapeSingleQuote(s: string): string {
     .replace(/\t/g, '\\t');
 }
 
+/**
+ * Escape document text for emission inside a single-line block comment.
+ *
+ * `escapeSingleQuote` is the wrong escaper here: it neutralizes string-literal
+ * delimiters, which a comment does not care about, and leaves a comment
+ * terminator intact. An `operationId` carrying one therefore closed the comment
+ * early and injected the remainder as executable code into the generated factory
+ * body — a payload that type-checked and ran, so neither `deno check` nor a
+ * glance at the spec caught it.
+ *
+ * Escaping the slash of every terminator is sufficient and keeps the text
+ * legible. Line breaks are collapsed so a multi-line value cannot break out of
+ * the single-line comment either.
+ */
+function escapeBlockComment(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ').replace(/\*\//g, '*\\/');
+}
+
 function renderLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -272,11 +291,37 @@ interface OpEntry {
   readonly path: string;
   readonly method: string;
   readonly operation: SdkOpenApiOperation;
+  /** Path-item-level parameters merged with the operation's own (§`mergeParameters`). */
+  readonly parameters: SdkOpenApiParameter[];
   readonly operationId: string;
   readonly safeName: string;
 }
 
-const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'];
+// Every operation slot declared on `SdkOpenApiPathItem`. `trace` belongs here:
+// omitting it silently dropped a declared operation — no method emitted and no
+// diagnostic — rather than generating it or rejecting it.
+const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+
+/**
+ * Merge path-item-level parameters with an operation's own.
+ *
+ * OpenAPI lets a path item declare parameters shared by all its operations, with
+ * the operation's own entry overriding one that has the same `name` AND `in`.
+ * `SdkOpenApiPathItem.parameters` was declared but never read, so shared
+ * parameters were silently discarded — which, for a shared PATH parameter, then
+ * emitted source referencing an undeclared identifier.
+ */
+function mergeParameters(
+  item: SdkOpenApiPathItem,
+  op: SdkOpenApiOperation,
+): SdkOpenApiParameter[] {
+  const shared = item.parameters ?? [];
+  if (shared.length === 0) return [...(op.parameters ?? [])];
+
+  const own = op.parameters ?? [];
+  const ownKeys = new Set(own.map((p) => `${p.in}:${p.name}`));
+  return [...shared.filter((p) => !ownKeys.has(`${p.in}:${p.name}`)), ...own];
+}
 
 function collectOperations(doc: SdkOpenApiDocument): OpEntry[] {
   const entries: OpEntry[] = [];
@@ -302,14 +347,21 @@ function collectOperations(doc: SdkOpenApiDocument): OpEntry[] {
         );
       }
       used.set(safeName, { orig: op.operationId, path, method });
-      entries.push({ path, method, operation: op, operationId: op.operationId, safeName });
+      entries.push({
+        path,
+        method,
+        operation: op,
+        parameters: mergeParameters(item, op),
+        operationId: op.operationId,
+        safeName,
+      });
     }
   }
   return entries;
 }
 
 function splitParams(
-  op: SdkOpenApiOperation,
+  parameters: readonly SdkOpenApiParameter[],
   path: string,
   method: string,
 ): {
@@ -320,7 +372,7 @@ function splitParams(
   const pathParams: SdkOpenApiParameter[] = [];
   const queryParams: SdkOpenApiParameter[] = [];
   const headerParams: SdkOpenApiParameter[] = [];
-  for (const p of op.parameters ?? []) {
+  for (const p of parameters) {
     if (p.in === 'cookie') {
       throw new OpenApiCodegenError(
         `Unsupported parameter location 'cookie' for '${p.name}'`,
@@ -384,9 +436,73 @@ interface OpShape {
   readonly returnType: string;
 }
 
+/** Every `{placeholder}` name in a path template, in order of appearance. */
+function pathPlaceholders(path: string): string[] {
+  return [...path.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
+}
+
+/**
+ * Reject a path template and its declared `path` parameters disagreeing.
+ *
+ * Both directions are a defect that the generator used to emit silently:
+ *
+ * - A placeholder with NO declared parameter emitted `encodeURIComponent(id)`
+ *   while the method signature had no `id`, so the generated file did not
+ *   compile (`TS2304: Cannot find name 'id'`) — a failure that surfaced in the
+ *   consumer's build with no hint at which operation caused it.
+ * - A declared `in: 'path'` parameter NOT in the template emitted a positional
+ *   argument that is never used, so a caller's value was silently dropped.
+ */
+function assertPathParamsMatchTemplate(
+  path: string,
+  method: string,
+  pathParams: readonly SdkOpenApiParameter[],
+): void {
+  const placeholders = pathPlaceholders(path);
+
+  // Compare on the DERIVED identifier: `buildPathLiteral` sanitizes each
+  // placeholder, so `user-id` in the template is satisfied by a `user-id`
+  // parameter, and two placeholders deriving onto one identifier are a
+  // duplicate-argument defect of their own.
+  const derivedDeclared = new Set(pathParams.map((p) => sanitizeIdentifier(p.name)));
+  const seen = new Set<string>();
+
+  for (const raw of placeholders) {
+    const derived = sanitizeIdentifier(raw);
+    if (!derivedDeclared.has(derived)) {
+      throw new OpenApiCodegenError(
+        `Path template '${path}' declares placeholder '{${raw}}' with no matching ` +
+          `'in: path' parameter; the generated method would reference an undeclared '${derived}'`,
+        path,
+        method,
+      );
+    }
+    if (seen.has(derived)) {
+      throw new OpenApiCodegenError(
+        `Path template '${path}' has two placeholders deriving onto one argument '${derived}'`,
+        path,
+        method,
+      );
+    }
+    seen.add(derived);
+  }
+
+  for (const p of pathParams) {
+    if (!seen.has(sanitizeIdentifier(p.name))) {
+      throw new OpenApiCodegenError(
+        `Parameter '${p.name}' is declared 'in: path' but does not appear in the path ` +
+          `template '${path}'; its value would be silently dropped`,
+        path,
+        method,
+      );
+    }
+  }
+}
+
 function buildOpShape(entry: OpEntry): OpShape {
-  const { operation, path, method } = entry;
-  const split = splitParams(operation, path, method);
+  const { path, method } = entry;
+  const split = splitParams(entry.parameters, path, method);
+  assertPathParamsMatchTemplate(path, method, split.pathParams);
 
   const render = (p: SdkOpenApiParameter, forcedRequired?: boolean): RenderedParam => ({
     name: sanitizeIdentifier(p.name),
@@ -404,11 +520,11 @@ function buildOpShape(entry: OpEntry): OpShape {
   const queryParams = split.queryParams.map((p) => render(p));
   const headerParams = split.headerParams.map((p) => render(p));
 
-  const bodySchema = getBodySchema(operation);
+  const bodySchema = getBodySchema(entry.operation);
   const bodyType = bodySchema ? renderSchema(bodySchema, new Set(), path, method) : undefined;
-  const bodyRequired = bodyType !== undefined && isBodyRequired(operation);
+  const bodyRequired = bodyType !== undefined && isBodyRequired(entry.operation);
 
-  const successTypes = getSuccessTypes(operation, path, method);
+  const successTypes = getSuccessTypes(entry.operation, path, method);
   const returnType = successTypes.length === 1 && successTypes[0] === 'void'
     ? 'void'
     : successTypes.join(' | ');
@@ -560,7 +676,7 @@ export function generateOpenApiClient(
     const optsRef = shape.argsRequired ? 'opts' : 'opts?';
 
     L('');
-    L(`    /** ${escapeSingleQuote(entry.operationId)} */`);
+    L(`    /** ${escapeBlockComment(entry.operationId)} */`);
 
     const paramList = shape.pathParams.map((p) => `${p.name}: ${p.type}`);
     if (shape.hasArgs) {

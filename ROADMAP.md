@@ -3617,7 +3617,10 @@ resolved by load order.
   rendering, JSON escaping, brace-bearing and digit-leading id derivation, both duplicate sources,
   `cookie` location, invalid refs, deterministic output; camelCase-preserving derivation, PascalCase
   type names, required-`opts` rule, and hostile path templates (placeholder plus literal text in one
-  segment, two placeholders in one segment, backtick/backslash/dollar escaping)
+  segment, two placeholders in one segment, backtick/backslash/dollar escaping); comment-terminator
+  and newline neutralization in an `operationId` (a code-injection regression), path-template ↔
+  path-parameter agreement in both directions, `trace` emission, and path-item-level parameter
+  merging with operation-level override
 - `test/integration/client-resilience.test.ts` — Composed policy order, open-circuit skip, retry
   rate-limiting, one-failure-per-exhausted-sequence, `HttpClientError` leaves breaker closed,
   per-origin isolation

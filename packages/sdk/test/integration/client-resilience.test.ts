@@ -115,22 +115,19 @@ describe('client resilience composition', () => {
     await expect(client.request({ method: 'POST', path: 'x' })).rejects.toThrow(HttpClientError);
   });
 
-  it('per-origin isolation — one origin open does not affect another', async () => {
+  it('trips the breaker for the client origin and then fails fast without fetching', async () => {
+    // This test used to be named "per-origin isolation — one origin open does not
+    // affect another" and dispatched a fake fetch on the request URL. That branch
+    // was unreachable: `baseUrl` is fixed, every `path` must be relative, and `..`
+    // traversal cannot change origin, so ONE client only ever reaches ONE origin.
+    // Cross-origin isolation is therefore not demonstrable through the public
+    // surface — the honest claim is fail-fast for this client's own origin, and
+    // the assertion below is that `fetch` stops being called.
     const { timing } = createTiming();
-    const fetchA = () =>
-      Promise.resolve(new Response('', { status: 503, statusText: 'Service Unavailable' }));
-    const fetchB = () =>
-      Promise.resolve(
-        new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
-
-    const fetchImpl = (input: RequestInfo) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('origin-a')) return fetchA();
-      return fetchB();
+    let fetchCount = 0;
+    const fetchImpl = () => {
+      fetchCount++;
+      return Promise.resolve(new Response('', { status: 503, statusText: 'Service Unavailable' }));
     };
 
     const client = new HttpClient({
@@ -141,13 +138,48 @@ describe('client resilience composition', () => {
       circuitBreaker: { threshold: 1, timeout: 10_000, resetTimeout: 5000 },
     });
 
-    // Trip breaker on origin-a.
     await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+    expect(fetchCount).toEqual(1);
 
-    // Breaker should now be open for origin-a.
+    // Open circuit: rejects BEFORE the transport, so the count does not move.
     await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(
       ClientCircuitOpenError,
     );
+    expect(fetchCount).toEqual(1);
+  });
+
+  it('separate clients keep independent breaker state', async () => {
+    // The closest honest analogue of per-origin isolation that the public surface
+    // permits: two clients, two origins, independent breakers.
+    const { timing } = createTiming();
+    const down = new HttpClient({
+      baseUrl: 'https://origin-a.example.com',
+      timing,
+      fetch: () =>
+        Promise.resolve(new Response('', { status: 503, statusText: 'Service Unavailable' })),
+      circuitBreaker: { threshold: 1, timeout: 10_000, resetTimeout: 5000 },
+    });
+    const healthy = new HttpClient({
+      baseUrl: 'https://origin-b.example.com',
+      timing,
+      fetch: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      circuitBreaker: { threshold: 1, timeout: 10_000, resetTimeout: 5000 },
+    });
+
+    await expect(down.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+    await expect(down.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      ClientCircuitOpenError,
+    );
+
+    // The other client is unaffected.
+    const res = await healthy.request<{ ok: boolean }>({ method: 'GET', path: 'x' });
+    expect(res.data).toEqual({ ok: true });
   });
 
   it('non-retryable 4xx on GET is NOT retried (exactly 1 fetch)', async () => {

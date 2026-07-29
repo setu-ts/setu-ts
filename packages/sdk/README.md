@@ -290,6 +290,28 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 - **Wire names are preserved.** The query key and header name sent on the wire are the original
   OpenAPI names (`user_id`, `X-API-Key`); only the TypeScript field identifier is derived. Header
   values are stringified, so a non-`string` header schema still compiles.
+- **All eight operation slots are generated**, including `trace`. Parameters declared at the
+  path-item level are merged into every operation on that path; an operation's own parameter
+  overrides a shared one with the same `name` and `in`.
+- **Document text can never escape into code.** Text emitted into a comment (the `operationId` on
+  each generated method) has comment terminators escaped and line breaks collapsed, and every
+  emitted string literal and path template is escaped for its own context.
+
+### Codegen diagnostics
+
+`generateOpenApiClient` throws `OpenApiCodegenError` — carrying `path` and `method` where they apply
+— rather than emitting a client that misbehaves or does not compile:
+
+| Condition                                                        | Why it is rejected                                    |
+| ---------------------------------------------------------------- | ----------------------------------------------------- |
+| Missing `operationId`                                            | No name to derive a method from                       |
+| Two operations deriving onto one method name                     | Duplicate declaration; both originals are named       |
+| Two component schemas deriving onto one type name                | Duplicate `export type`                               |
+| Parameter with `in: 'cookie'`                                    | Unsupported location                                  |
+| Path placeholder with no matching `in: 'path'` parameter         | Emitted source would reference an undeclared argument |
+| `in: 'path'` parameter absent from the path template             | The caller's value would be silently dropped          |
+| Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature          |
+| Malformed local `$ref`                                           | No component name to resolve                          |
 
 ## Errors
 

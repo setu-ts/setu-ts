@@ -5911,6 +5911,18 @@ required. Query keys and header names keep their original OpenAPI spelling; only
 field identifier is derived, and header values are stringified so a non-`string` header schema
 compiles.
 
+All eight operation slots are generated, including `trace`. Path-item-level `parameters` are merged
+into every operation on that path, with an operation's own entry overriding a shared one of the same
+`name` and `in`. Document text emitted into a comment has comment terminators escaped and line
+breaks collapsed, and every emitted string literal and path template is escaped for its own context,
+so a hostile document cannot inject code into the generated file.
+
+`generateOpenApiClient` throws `OpenApiCodegenError` (carrying `path` and `method` where applicable)
+instead of emitting a client that misbehaves or does not compile, for: a missing `operationId`; two
+operations or two component schemas deriving onto one name; a `cookie` parameter; a path placeholder
+with no matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
+placeholders deriving onto one argument name; and a malformed local `$ref`.
+
 ### SdkOpenApi\* types
 
 `SdkOpenApiDocument`, `SdkOpenApiPathItem`, `SdkOpenApiOperation`, `SdkOpenApiParameter`,
