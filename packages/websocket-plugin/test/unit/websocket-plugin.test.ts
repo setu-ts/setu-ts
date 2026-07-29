@@ -4,9 +4,11 @@ import type {
   HealthCheckResult,
   IHttpAdapter,
   IPluginContext,
+  IRealtimeBackplane,
   IRequest,
   IResponse,
   IWebSocketService,
+  RealtimeFrame,
   ServerHandle,
   WebSocketUpgradeRouter,
 } from '@hono-enterprise/common';
@@ -60,6 +62,7 @@ function createContext(adapter: IHttpAdapter): Harness {
   const ctx = {
     runtime,
     services: {
+      has: (token: string): boolean => token === CAPABILITIES.HTTP_ADAPTER || registered.has(token),
       get: <T>(token: string): T => {
         if (token === CAPABILITIES.HTTP_ADAPTER) {
           return adapter as unknown as T;
@@ -95,17 +98,17 @@ describe('WebSocketPlugin', () => {
 
     expect(plugin.name).toBe('websocket-plugin');
     expect(plugin.provides).toEqual([CAPABILITIES.WEBSOCKET]);
-    expect(plugin.optionalDependencies).toEqual(['logger']);
+    expect(plugin.optionalDependencies).toEqual(['logger', CAPABILITIES.REALTIME_BACKPLANE]);
   });
 
   it('rejects a contradictory configuration at construction, before registration', () => {
     expect(() => WebSocketPlugin({ idleTimeoutMs: 30_000 })).toThrow('requires heartbeatMs');
   });
 
-  it('registers the service under the WEBSOCKET token', () => {
+  it('registers the service under the WEBSOCKET token', async () => {
     const harness = createContext(createUpgradableAdapter());
 
-    WebSocketPlugin().register(harness.ctx);
+    await WebSocketPlugin().register(harness.ctx);
 
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET);
     expect(service).toBeInstanceOf(WebSocketService);
@@ -116,7 +119,7 @@ describe('WebSocketPlugin', () => {
     const adapter = createUpgradableAdapter();
     const harness = createContext(adapter);
 
-    WebSocketPlugin().register(harness.ctx);
+    await WebSocketPlugin().register(harness.ctx);
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
     service.route('/ws', {});
 
@@ -127,10 +130,10 @@ describe('WebSocketPlugin', () => {
     expect(decision?.accept).toBe(true);
   });
 
-  it('still registers on a legacy adapter but reports unavailable and fails route()', () => {
+  it('still registers on a legacy adapter but reports unavailable and fails route()', async () => {
     const harness = createContext(createLegacyAdapter());
 
-    WebSocketPlugin().register(harness.ctx);
+    await WebSocketPlugin().register(harness.ctx);
 
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
     expect(service.available).toBe(false);
@@ -139,7 +142,7 @@ describe('WebSocketPlugin', () => {
 
   it('registers a websocket health indicator reporting availability and counts', async () => {
     const harness = createContext(createUpgradableAdapter());
-    WebSocketPlugin().register(harness.ctx);
+    await WebSocketPlugin().register(harness.ctx);
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
     service.route('/ws', {});
 
@@ -153,7 +156,7 @@ describe('WebSocketPlugin', () => {
 
   it('reports available false in the health indicator on a legacy adapter', async () => {
     const harness = createContext(createLegacyAdapter());
-    WebSocketPlugin().register(harness.ctx);
+    await WebSocketPlugin().register(harness.ctx);
 
     const result = await harness.health.get('websocket')!();
 
@@ -163,7 +166,7 @@ describe('WebSocketPlugin', () => {
   it('closes every live connection with 1001 on shutdown', async () => {
     const adapter = createUpgradableAdapter();
     const harness = createContext(adapter);
-    WebSocketPlugin().register(harness.ctx);
+    await WebSocketPlugin().register(harness.ctx);
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
     service.route('/ws', {});
 
@@ -180,5 +183,103 @@ describe('WebSocketPlugin', () => {
 
     expect(transport.closes).toEqual([{ code: 1001, reason: 'Server shutting down' }]);
     expect(service.connectionCount).toBe(0);
+  });
+});
+
+describe('WebSocketPlugin with a realtime backplane', () => {
+  /** A backplane double recording its subscriptions and publishes. */
+  function fakeBackplane(): IRealtimeBackplane & {
+    readonly published: RealtimeFrame[];
+    readonly handlers: Array<(frame: RealtimeFrame) => void>;
+    unsubscribeCount: number;
+  } {
+    const published: RealtimeFrame[] = [];
+    const handlers: Array<(frame: RealtimeFrame) => void> = [];
+    const backplane = {
+      origin: 'node-a',
+      published,
+      handlers,
+      unsubscribeCount: 0,
+      connect: (): Promise<void> => Promise.resolve(),
+      publish: (frame: RealtimeFrame): Promise<void> => {
+        published.push(frame);
+        return Promise.resolve();
+      },
+      subscribe: (handler: (frame: RealtimeFrame) => void): Promise<() => void> => {
+        handlers.push(handler);
+        return Promise.resolve(() => {
+          backplane.unsubscribeCount++;
+        });
+      },
+      close: (): Promise<void> => Promise.resolve(),
+    };
+    return backplane;
+  }
+
+  it('subscribes to a registered backplane and routes frames into rooms', async () => {
+    const harness = createContext(createUpgradableAdapter());
+    const backplane = fakeBackplane();
+    harness.registered.set(CAPABILITIES.REALTIME_BACKPLANE, backplane);
+
+    await WebSocketPlugin().register(harness.ctx);
+    expect(backplane.handlers.length).toBe(1);
+
+    const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
+    const received: unknown[] = [];
+    service.room('lobby').add(
+      {
+        isOpen: true,
+        send: (payload: string | Uint8Array): void => {
+          received.push(payload);
+        },
+      } as never,
+    );
+
+    // A frame arriving on the backplane reaches the local room member.
+    backplane.handlers[0]?.({
+      kind: 'ws-room',
+      origin: 'node-b',
+      name: 'lobby',
+      data: 'from-peer',
+    });
+    expect(received).toEqual(['from-peer']);
+
+    // And a local broadcast is forwarded to the backplane.
+    service.room('lobby').broadcast('to-peers');
+    await Promise.resolve();
+    expect(backplane.published).toEqual([
+      { kind: 'ws-room', origin: 'node-a', name: 'lobby', data: 'to-peers' },
+    ]);
+  });
+
+  it('unsubscribes from the backplane on shutdown', async () => {
+    const harness = createContext(createUpgradableAdapter());
+    const backplane = fakeBackplane();
+    harness.registered.set(CAPABILITIES.REALTIME_BACKPLANE, backplane);
+
+    await WebSocketPlugin().register(harness.ctx);
+    for (const hook of harness.closeHooks) {
+      hook();
+    }
+    expect(backplane.unsubscribeCount).toBe(1);
+  });
+
+  it('registers no subscription when no backplane capability exists', async () => {
+    const harness = createContext(createUpgradableAdapter());
+    await WebSocketPlugin().register(harness.ctx);
+
+    const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
+    // Rooms still work; they simply never leave the process.
+    const received: unknown[] = [];
+    service.room('lobby').add(
+      {
+        isOpen: true,
+        send: (payload: string | Uint8Array): void => {
+          received.push(payload);
+        },
+      } as never,
+    );
+    service.room('lobby').broadcast('local');
+    expect(received).toEqual(['local']);
   });
 });

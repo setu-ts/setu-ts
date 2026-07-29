@@ -474,11 +474,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   contract and `FEATURE_FLAGS: 'feature-flags'` token were committed in M1. **LaunchDarkly was
   deferred**: the Node server SDK's `variation`/`allFlagsState` are async (verified from
   `@launchdarkly/js-server-sdk-common` `LDClient.d.ts`), so no provider can satisfy the synchronous
-  `isEnabled` without widening `common`; the `'custom'` arm is the documented bridge until then.
-  Corrected the ROADMAP/PUBLIC_API `flags.middleware(...)` examples to `createFlagGuard`, dropped
-  LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules row, added the missing Feature
-  Flags Options/Exports/Notes sections, and fixed the ROADMAP implementation-files list in the same
-  PR) — complete (PR #67)
+  `isEnabled` without widening `common`; the `'custom'` arm was the documented bridge. **Resolved in
+  M47** — `LDFlagsState.getFlagValue` is synchronous, which is the bridge, plus an optional
+  `IFeatureFlags.isEnabledAsync`. Corrected the ROADMAP/PUBLIC_API `flags.middleware(...)` examples
+  to `createFlagGuard`, dropped LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules
+  row, added the missing Feature Flags Options/Exports/Notes sections, and fixed the ROADMAP
+  implementation-files list in the same PR) — complete (PR #67)
 - **Milestone 32** (`packages/multi-tenancy-plugin` — MultiTenancyPlugin factory; four resolvers:
   Subdomain/Header/Path/Jwt; three isolation strategies: Column/Schema/Database; `ITenantDataStore`
   port + `MemoryTenantDataStore` default; `TenantRepository`; cache-key isolation via
@@ -596,6 +597,48 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   projects to the CLI's own version, so during a version bump the pinned version is not published
   yet, and checking against JSR would deadlock the release workflow's own test step against the
   publish that would fix it) — complete (PR pending)
+- **Milestone 47** (alpha-3 limitation closeout — the three `CHANGELOG.md` "Known limitations" from
+  `v0.1.0-alpha.1` that were real capability gaps rather than wording problems. Taken out of order,
+  before M35/M36, because they gate the `v0.1.0-alpha.3` release; delivered on ONE combined branch
+  at the maintainer's direction rather than three, since they share that gate. **A.**
+  `packages/resilience-plugin` timeouts now cancel: `common` gains `ResilientCall`/`HardenedCall`
+  and `IResilienceService.wrap` + `ICircuitBreaker.execute` are widened to use them —
+  source-compatible for CALLERS, breaking for IMPLEMENTORS because `fn` sits in a contravariant
+  position (established with `deno check`, not assumed; the only in-repo implementors were two
+  structural test doubles). A new `patterns/abort.ts` owns `linkAbort`/`throwIfAborted`/
+  `abortReasonOf` with listener disposal, so a long-lived caller signal cannot accumulate one
+  listener per invocation; `timeout` aborts the per-attempt controller with the SAME `TimeoutError`
+  instance it rejects with (one error identity); `retry` checks the signal before each attempt and
+  wakes its backoff early on abort (that sleep also leaked its timer handle on every attempt
+  before); a `bulkhead` waiter cancelled while queued leaves the queue and never runs its call.
+  **B.** `packages/feature-flags-plugin` gains a `LaunchDarklyProvider`. Every evaluation method on
+  the Node server SDK is async, so the bridge is `LDFlagsState.getFlagValue` — the SDK's one
+  SYNCHRONOUS read, verified against the shipped `.d.ts` AND against a real client — behind a
+  per-context snapshot cache whose cold read returns a configured `fallbackValue` and schedules a
+  background refill (coalesced per key, so a hot loop over an uncached user does not stampede).
+  `common` gains an OPTIONAL `IFeatureFlags.isEnabledAsync` carrying no cold-context caveat, and
+  `FeatureFlagService` funnels both entry points through ONE provider. Structural facades keep the
+  SDK's `any`-typed `EventEmitter.on` at the boundary; the load-failure branching is an internal
+  `toLoadFailure` seam so it is unit-tested rather than left uncovered behind the guarded real
+  import. **C.** cross-replica fan-out: `common` gains the `IRealtimeBackplane` port,
+  `RealtimeFrame`, a new `CAPABILITIES.REALTIME_BACKPLANE` token, and the pure `encodeFrameData`/
+  `decodeFrameData` codec — in `common` because three packages need the identical wire shape and no
+  plugin may import another. A NEW `packages/realtime-backplane-plugin` ships `'memory'` (default, a
+  REAL single-process bus rather than a no-op), `'messaging'` (over `CAPABILITIES.MESSAGING`,
+  reusing all five existing brokers with zero new deps), `'redis'`, and `'custom'` transports;
+  `websocket-plugin` and `sse-plugin` resolve the token OPTIONALLY, so absent it nothing changes,
+  and both `register()` become async to await their subscription. Redis uses TWO connections because
+  a subscriber-mode connection refuses every other command — a protocol property invisible to any
+  single-fake test, so the constructor refuses a client injected without its subscriber. Loop
+  prevention is a per-instance origin stamp; an arriving frame is delivered through a local-only
+  path and NEVER re-published, and never creates a room/channel that does not already exist locally.
+  `RoomBroadcastOptions.except` IS honored cluster-wide — connection ids are `runtime.uuid()` and
+  therefore globally unique, so the frame carries `exceptId` and every replica skips the match.
+  `Room.size`/`SseChannel.size` stay LOCAL, and that one is genuine: a cluster-wide count is
+  inherently async (scatter-gather), so it cannot satisfy the synchronous committed `size` getter
+  and wants a separate async method — deferred to a presence milestone as a CONTRACT decision, not
+  an implementation gap. Added the new package to `scripts/release-packages.ts`, so `release:verify`
+  now reports 37 publishable packages) — complete (PR pending)
 - **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); M35–M40 follow unless
   reprioritized.
 

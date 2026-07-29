@@ -11,6 +11,7 @@ import type {
   IHttpAdapter,
   IPlugin,
   IPluginContext,
+  IRealtimeBackplane,
   IWebSocketService,
 } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
@@ -58,18 +59,31 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
     version: '0.1.0',
-    optionalDependencies: ['logger'],
+    optionalDependencies: ['logger', CAPABILITIES.REALTIME_BACKPLANE],
     provides: [CAPABILITIES.WEBSOCKET],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    register(ctx: IPluginContext): void {
+    async register(ctx: IPluginContext): Promise<void> {
       const adapter = ctx.services.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       const canUpgrade = typeof adapter.setUpgradeRouter === 'function';
+
+      // Optional: absent means rooms broadcast in-process only, exactly as
+      // before. `optionalDependencies` orders the backplane plugin ahead of
+      // this one so its transport is connected by the time we subscribe.
+      const backplane = ctx.services.has(CAPABILITIES.REALTIME_BACKPLANE)
+        ? ctx.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE)
+        : undefined;
 
       // `ctx.logger` is undefined when no logger capability is registered;
       // `optionalDependencies` above is what orders the logger plugin ahead of
       // this one so it is resolvable here.
-      const service = new WebSocketService(ctx.runtime, resolved, canUpgrade, ctx.logger);
+      const service = new WebSocketService(
+        ctx.runtime,
+        resolved,
+        canUpgrade,
+        ctx.logger,
+        backplane,
+      );
       ctx.services.register<IWebSocketService>(CAPABILITIES.WEBSOCKET, service);
 
       if (canUpgrade) {
@@ -92,7 +106,17 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
           }),
       );
 
+      const unsubscribe = backplane === undefined
+        ? undefined
+        : await backplane.subscribe((frame) => {
+          service.deliverRemoteFrame(frame);
+        });
+
       ctx.lifecycle.onClose(() => {
+        // Unsubscribed before closing connections so a frame arriving during
+        // shutdown cannot reach a half-torn-down service. The backplane's own
+        // transport is closed by the plugin that owns it.
+        unsubscribe?.();
         service.closeAll();
       });
     },

@@ -79,3 +79,100 @@ describe('Bulkhead', () => {
     expect(b.active).toBe(0);
   });
 });
+
+describe('Bulkhead cancellation', () => {
+  it('rejects without queueing when the signal is already aborted', async () => {
+    const bulkhead = new Bulkhead({ maxConcurrent: 1, maxQueue: 1 });
+    const controller = new AbortController();
+    const reason = new Error('cancelled before start');
+    controller.abort(reason);
+    let calls = 0;
+
+    let caught: unknown;
+    try {
+      await bulkhead.run(() => {
+        calls++;
+        return Promise.resolve('x');
+      }, controller.signal);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(reason);
+    expect(calls).toBe(0);
+    expect(bulkhead.active).toBe(0);
+  });
+
+  it('rejects a queued waiter on abort and never runs its protected call', async () => {
+    const bulkhead = new Bulkhead({ maxConcurrent: 1, maxQueue: 2 });
+    const gate = Promise.withResolvers<string>();
+    let queuedCalls = 0;
+
+    // Occupy the only slot.
+    const holder = bulkhead.run(() => gate.promise);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bulkhead.active).toBe(1);
+
+    const controller = new AbortController();
+    const queued = bulkhead.run(() => {
+      queuedCalls++;
+      return Promise.resolve('should never run');
+    }, controller.signal);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bulkhead.queued).toBe(1);
+
+    const reason = new Error('caller went away');
+    controller.abort(reason);
+
+    let caught: unknown;
+    try {
+      await queued;
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(reason);
+    // The defect this closes: a cancelled waiter used to keep its queue slot
+    // and eventually execute.
+    expect(queuedCalls).toBe(0);
+    expect(bulkhead.queued).toBe(0);
+
+    gate.resolve('done');
+    await holder;
+    expect(bulkhead.active).toBe(0);
+  });
+
+  it('frees queue depth immediately so a later waiter is admitted', async () => {
+    const bulkhead = new Bulkhead({ maxConcurrent: 1, maxQueue: 1 });
+    const gate = Promise.withResolvers<string>();
+    const holder = bulkhead.run(() => gate.promise);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const controller = new AbortController();
+    const abandoned = bulkhead.run(() => Promise.resolve('a'), controller.signal);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bulkhead.queued).toBe(1);
+
+    controller.abort(new Error('gone'));
+    await expect(abandoned).rejects.toThrow('gone');
+
+    // Depth was released synchronously, so this does NOT hit BulkheadFullError.
+    const admitted = bulkhead.run(() => Promise.resolve('b'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bulkhead.queued).toBe(1);
+
+    gate.resolve('done');
+    await holder;
+    expect(await admitted).toBe('b');
+  });
+
+  it('hands the protected call a live signal when none is supplied', async () => {
+    const bulkhead = new Bulkhead({ maxConcurrent: 1 });
+    let seen: boolean | undefined;
+    await bulkhead.run((signal) => {
+      seen = signal.aborted;
+      return Promise.resolve('ok');
+    });
+    expect(seen).toBe(false);
+  });
+});

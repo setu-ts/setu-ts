@@ -23,8 +23,10 @@ import type {
   BulkheadPolicy,
   CircuitBreakerPolicy,
   CircuitState,
+  HardenedCall,
   ICircuitBreaker,
   IResilienceService,
+  ResilientCall,
   RetryPolicy,
   WrapOptions,
 } from '../../src/index.ts';
@@ -102,20 +104,31 @@ describe('@hono-enterprise/common barrel', () => {
     const _retry: RetryPolicy = { limit: 3, delay: 100, backoff: 'fixed' };
     const _bulkhead: BulkheadPolicy = { maxConcurrent: 10 };
     const _opts: WrapOptions = { circuitBreaker: true, retry: _retry, timeout: 2000 };
+    // An implementor must accept the signal parameter: `fn` sits in a
+    // contravariant position, so a zero-argument `() => Promise<T>` no longer
+    // satisfies the contract even though a zero-argument CALLER still does
+    // (asserted below).
     const _service: IResilienceService = {
-      wrap: <T>(fn: () => Promise<T>): () => Promise<T> => fn,
+      wrap: <T>(fn: ResilientCall<T>): HardenedCall<T> => (signal?: AbortSignal) =>
+        fn(signal ?? new AbortController().signal),
     };
     const _state: CircuitState = 'half-open';
     const _breaker: ICircuitBreaker = {
       state: _state,
-      execute: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+      execute: <T>(fn: ResilientCall<T>): Promise<T> => fn(new AbortController().signal),
     };
+    // Backward compatibility: a pre-cancellation caller passing a
+    // zero-argument function, and awaiting the result with no argument, still
+    // type-checks against the widened signature.
+    const _legacyCall: HardenedCall<string> = _service.wrap(() => Promise.resolve('ok'));
+    const _legacyAssignable: () => Promise<string> = _legacyCall;
     expect(_backoff).toBe('exponential');
     expect(_cb.threshold).toBe(5);
     expect(_retry.limit).toBe(3);
     expect(_bulkhead.maxConcurrent).toBe(10);
     expect(_opts.timeout).toBe(2000);
     expect(_service).toBeDefined();
+    expect(_legacyAssignable).toBeDefined();
     expect(_breaker.state).toBe('half-open');
     expect(CAPABILITIES.RESILIENCE).toBe('resilience');
   });

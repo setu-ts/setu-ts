@@ -41,6 +41,28 @@ export class FeatureFlagService implements IFeatureFlags {
   }
 
   /**
+   * Evaluates a flag, awaiting the provider when it can answer asynchronously.
+   *
+   * Both entry points funnel through the SAME provider instance, so a
+   * configured option — `fallbackValue` above all — governs identically whether
+   * a caller reaches for the synchronous or the asynchronous method. A provider
+   * with no async path resolves its synchronous evaluation, which for a purely
+   * local snapshot is already the correct answer.
+   *
+   * @param flag - Flag name.
+   * @param context - Targeting context.
+   * @returns `true` when the flag is on; unknown flags → `false`.
+   * @since 0.2.0
+   */
+  isEnabledAsync(flag: string, context?: FlagContext): Promise<boolean> {
+    const asyncEval = this._provider.isEnabledAsync;
+    if (asyncEval === undefined) {
+      return Promise.resolve(this._provider.isEnabled(flag, context));
+    }
+    return asyncEval.call(this._provider, flag, context);
+  }
+
+  /**
    * Starts the underlying provider (pulls initial state).
    */
   async start(): Promise<void> {

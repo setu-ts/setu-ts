@@ -103,6 +103,12 @@ export const CAPABILITIES = {
   SSE: 'sse',
   /** WebSocket hub for bidirectional real-time messaging. */
   WEBSOCKET: 'websocket',
+  /**
+   * Pub/sub transport carrying real-time broadcasts between application
+   * instances, so WebSocket rooms and SSE channels fan out across replicas.
+   * Consumed optionally — absent means purely in-process broadcasting.
+   */
+  REALTIME_BACKPLANE: 'realtime-backplane',
   /** Server-side rendering (SSR) — React Router or similar framework. */
   SSR: 'ssr',
   /** Health indicator contributions (multi-provider). */

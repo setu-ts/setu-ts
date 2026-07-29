@@ -11,6 +11,7 @@ import type { FeatureFlagsPluginOptions, FlagProvider } from '../interfaces/inde
 import { ConfigProvider } from '../providers/config-provider.ts';
 import { MemoryProvider } from '../providers/memory-provider.ts';
 import { DatabaseProvider } from '../providers/database-provider.ts';
+import { LaunchDarklyProvider } from '../providers/launchdarkly-provider.ts';
 import { FeatureFlagService } from '../services/feature-flags-service.ts';
 
 /** Plugin name — matches the package name without the scope. */
@@ -44,6 +45,11 @@ export function createProvider(
     case 'database': {
       // Narrowed by switch discriminant — no cast needed.
       return new DatabaseProvider(options.options, ctx.runtime, ctx.logger);
+    }
+
+    case 'launchdarkly': {
+      // Narrowed by switch discriminant — no cast needed.
+      return new LaunchDarklyProvider(options.options, ctx.logger);
     }
 
     case 'custom': {

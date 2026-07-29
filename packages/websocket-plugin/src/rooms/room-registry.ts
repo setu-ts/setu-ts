@@ -40,6 +40,38 @@ export interface RoomMembershipListener {
 }
 
 /**
+ * Forwards a local broadcast to peers on other replicas.
+ *
+ * Supplied by a {@linkcode RoomRegistry} that was given a backplane. A room
+ * built without one broadcasts purely in-process, which is the behavior every
+ * application had before the backplane existed.
+ *
+ * @param name - The room the broadcast was addressed to
+ * @param data - The payload, exactly as handed to `broadcast`
+ * @since 0.2.0
+ */
+export type RoomPublisher = (
+  name: string,
+  data: string | Uint8Array,
+  exceptId?: string,
+) => void;
+
+/**
+ * Options for {@linkcode Room.broadcastLocal}.
+ *
+ * Extends the committed broadcast options with exclusion by connection ID,
+ * which is how `except` survives a trip across the backplane: the excluded
+ * connection object exists only on the originating replica, but its
+ * `runtime.uuid()` ID is globally unique and travels on the frame.
+ *
+ * @since 0.2.0
+ */
+export interface LocalBroadcastOptions extends RoomBroadcastOptions {
+  /** Skip the member with this connection ID. */
+  readonly exceptId?: string;
+}
+
+/**
  * A named group of connections that can be addressed as one.
  *
  * @since 0.1.0
@@ -48,6 +80,7 @@ export class Room implements WebSocketRoom {
   readonly #name: string;
   readonly #members = new Set<IWebSocketConnection>();
   readonly #listener: RoomMembershipListener | undefined;
+  readonly #publish: RoomPublisher | undefined;
 
   /**
    * Creates a room.
@@ -55,10 +88,13 @@ export class Room implements WebSocketRoom {
    * @param name - The room name
    * @param listener - Notified on every membership change. Supplied by a
    *   {@linkcode RoomRegistry}; omit for a standalone room.
+   * @param publish - Forwards broadcasts to other replicas. Omit for a room
+   *   that stays in-process.
    */
-  constructor(name: string, listener?: RoomMembershipListener) {
+  constructor(name: string, listener?: RoomMembershipListener, publish?: RoomPublisher) {
     this.#name = name;
     this.#listener = listener;
+    this.#publish = publish;
   }
 
   get name(): string {
@@ -95,9 +131,36 @@ export class Room implements WebSocketRoom {
   }
 
   broadcast(data: string | Uint8Array, options?: RoomBroadcastOptions): void {
+    this.broadcastLocal(data, options);
+    // Published after local delivery so a transport error can never cost local
+    // members their message. The excluded connection travels as its ID, which
+    // is globally unique, so the exclusion is honored on every replica.
+    this.#publish?.(this.#name, data, options?.except?.id);
+  }
+
+  /**
+   * Sends a frame to this replica's own members only, without forwarding it to
+   * the backplane.
+   *
+   * This is the delivery path for a frame that ARRIVED from another replica:
+   * re-publishing it would echo it back around the cluster forever. Applications
+   * call {@linkcode Room.broadcast}; only the plugin's backplane subscriber
+   * calls this.
+   *
+   * Exclusion is honored two ways: `options.except` names a live connection
+   * object (the local path), and `options.exceptId` names one by ID (the path a
+   * frame arriving from another replica takes, since the excluded connection
+   * object does not exist here).
+   *
+   * @param data - Text as `string`, binary as `Uint8Array`
+   * @param options - Broadcast options, including exclusion by ID
+   * @since 0.2.0
+   */
+  broadcastLocal(data: string | Uint8Array, options?: LocalBroadcastOptions): void {
     const except = options?.except;
+    const exceptId = options?.exceptId;
     for (const member of this.#members) {
-      if (member === except) {
+      if (member === except || (exceptId !== undefined && member.id === exceptId)) {
         continue;
       }
       if (!member.isOpen) {
@@ -145,6 +208,17 @@ export class Room implements WebSocketRoom {
  */
 export class RoomRegistry {
   readonly #rooms = new Map<string, Room>();
+  readonly #publish: RoomPublisher | undefined;
+
+  /**
+   * @param publish - Forwards every room broadcast to other replicas. Omit for
+   *   purely in-process rooms, which is the behavior when no backplane
+   *   capability is registered.
+   */
+  constructor(publish?: RoomPublisher) {
+    this.#publish = publish;
+  }
+
   /**
    * Reverse index: which rooms each connection currently belongs to.
    *
@@ -212,7 +286,7 @@ export class RoomRegistry {
           this.#rooms.delete(room.name);
         }
       },
-    });
+    }, this.#publish);
     this.#rooms.set(name, room);
     this.#neverJoined.add(room);
     return room;
@@ -240,6 +314,29 @@ export class RoomRegistry {
       }
     }
     this.#reclaimNeverJoined();
+  }
+
+  /**
+   * Delivers a frame that arrived from another replica to this replica's local
+   * members.
+   *
+   * A room is looked up but never CREATED here. A remote frame naming a room
+   * nobody on this replica has joined has no local audience, and creating one
+   * per arriving name would let a cluster-wide namespace grow this replica's
+   * room map without bound.
+   *
+   * @param name - The room the frame was addressed to
+   * @param data - The decoded payload
+   * @param exceptId - Connection ID the originating replica excluded, if any
+   * @since 0.2.0
+   */
+  deliverRemote(name: string, data: string | Uint8Array, exceptId?: string): void {
+    // `exactOptionalPropertyTypes` forbids handing through an explicit
+    // `undefined`, so the absent case passes no options at all.
+    this.#rooms.get(name)?.broadcastLocal(
+      data,
+      exceptId === undefined ? undefined : { exceptId },
+    );
   }
 
   /** Discards every room. */

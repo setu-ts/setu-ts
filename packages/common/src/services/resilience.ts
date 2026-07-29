@@ -17,6 +17,40 @@
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
 /**
+ * A call protected by the resilience patterns.
+ *
+ * The `signal` is aborted when the attempt is cancelled — on a `timeout`
+ * deadline, or when the caller aborts the signal it passed to the
+ * {@linkcode HardenedCall}. A call that forwards the signal to the I/O it
+ * performs (`fetch(url, { signal })`, an abortable driver) is genuinely
+ * cancelled; a call that ignores it still runs to completion, and only the
+ * caller's `await` rejects.
+ *
+ * Declaring the parameter does not oblige an implementation to accept it: a
+ * zero-argument `() => Promise<T>` remains assignable here, so callers written
+ * against the pre-cancellation signature continue to type-check unchanged.
+ *
+ * @typeParam T - The call's result type
+ * @param signal - Aborted when this attempt is cancelled
+ * @since 0.2.0
+ */
+export type ResilientCall<T> = (signal: AbortSignal) => Promise<T>;
+
+/**
+ * The hardened callable returned by {@linkcode IResilienceService.wrap}.
+ *
+ * The signal is optional: `guarded()` behaves exactly as before, while
+ * `guarded(signal)` additionally lets the caller cancel from outside — the
+ * outer abort propagates into the protected call, stops the retry loop, and
+ * rejects a waiter still queued behind the bulkhead.
+ *
+ * @typeParam T - The call's result type
+ * @param signal - Optional caller-owned signal that cancels the whole call
+ * @since 0.2.0
+ */
+export type HardenedCall<T> = (signal?: AbortSignal) => Promise<T>;
+
+/**
  * Circuit breaker protecting calls to an unreliable dependency.
  *
  * @example
@@ -32,12 +66,13 @@ export interface ICircuitBreaker {
    * Executes a call through the breaker.
    *
    * @typeParam T - The call's result type
-   * @param fn - The protected call
+   * @param fn - The protected call, handed the cancellation signal for this
+   * attempt
    * @returns The call result
    * @throws {Error} Fails fast when the circuit is open; otherwise
    * propagates the call's own error
    */
-  execute<T>(fn: () => Promise<T>): Promise<T>;
+  execute<T>(fn: ResilientCall<T>): Promise<T>;
 }
 
 /**
@@ -126,12 +161,20 @@ export interface WrapOptions {
  * @example
  * ```typescript
  * const resilience = ctx.services.get<IResilienceService>(CAPABILITIES.RESILIENCE);
- * const guarded = resilience.wrap(() => externalApi.fetchRates(), {
+ * const guarded = resilience.wrap((signal) => fetch(url, { signal }), {
  *   circuitBreaker: true,
  *   retry: { limit: 3, delay: 100, backoff: 'exponential' },
  *   timeout: 2000,
  * });
  * const rates = await guarded();
+ *
+ * // A call that ignores the signal is still accepted, unchanged.
+ * const legacy = resilience.wrap(() => externalApi.fetchRates(), { timeout: 2000 });
+ *
+ * // The caller may also cancel from outside.
+ * const controller = new AbortController();
+ * const pending = guarded(controller.signal);
+ * controller.abort();
  * ```
  * @since 0.1.0
  */
@@ -141,10 +184,18 @@ export interface IResilienceService {
    * reuses one shared pattern chain across invocations, so circuit-breaker and
    * bulkhead state persist across calls.
    *
+   * Each attempt is handed an {@linkcode AbortSignal}. The `timeout` layer
+   * aborts it with a `TimeoutError` when the deadline elapses, so a call that
+   * forwards the signal to its I/O is genuinely cancelled rather than left
+   * running in the background. An outer signal passed to the returned callable
+   * is linked into every layer: it stops the retry loop between attempts and
+   * rejects a call still queued behind the bulkhead.
+   *
    * @typeParam T - The protected call's result type
-   * @param fn - The protected call
+   * @param fn - The protected call, handed the cancellation signal for the
+   * current attempt
    * @param options - Which patterns to apply and their policies
-   * @returns A hardened callable with the same signature as `fn`
+   * @returns A hardened callable accepting an optional caller-owned signal
    */
-  wrap<T>(fn: () => Promise<T>, options?: WrapOptions): () => Promise<T>;
+  wrap<T>(fn: ResilientCall<T>, options?: WrapOptions): HardenedCall<T>;
 }

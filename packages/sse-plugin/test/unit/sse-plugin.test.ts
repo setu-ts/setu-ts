@@ -7,7 +7,15 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { SsePlugin } from '../../src/plugin/sse-plugin.ts';
 import { SseService } from '../../src/services/sse-service.ts';
-import type { IPlugin, IPluginContext, ISseService, TimerHandle } from '@hono-enterprise/common';
+import type {
+  IPlugin,
+  IPluginContext,
+  IRealtimeBackplane,
+  ISseService,
+  RealtimeFrame,
+  SseMessage,
+  TimerHandle,
+} from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 
 describe('SsePlugin', () => {
@@ -213,7 +221,7 @@ describe('SsePlugin registration', () => {
 // ---------------------------------------------------------------------------
 
 describe('SsePlugin duplicate registration', () => {
-  it('should throw when registering a second SsePlugin without override/multi', () => {
+  it('should throw when registering a second SsePlugin without override/multi', async () => {
     // The service registry enforces no-duplicate registration for single-instance plugins.
     // Creating two separate fake contexts, each with their own service registry:
     const ctx1 = {
@@ -272,7 +280,7 @@ describe('SsePlugin duplicate registration', () => {
     const plugin = SsePlugin() as IPlugin;
 
     // First registration — succeeds.
-    expect(() => plugin.register(ctx1)).not.toThrow();
+    await plugin.register(ctx1);
 
     // Create a fresh context with a fresh registry where HAS returns true.
     const ctx2 = {
@@ -327,7 +335,144 @@ describe('SsePlugin duplicate registration', () => {
       app: {} as never,
     } as unknown as IPluginContext;
 
-    // Second registration — should throw because the registry rejects duplicates.
-    expect(() => plugin.register(ctx2)).toThrow(/already registered/);
+    // Second registration — should reject because the registry rejects
+    // duplicates. `register` is async (it awaits the optional backplane
+    // subscription), so the failure surfaces as a rejection, not a sync throw.
+    await expect(plugin.register(ctx2)).rejects.toThrow(/already registered/);
+  });
+});
+
+describe('SsePlugin with a realtime backplane', () => {
+  /** A backplane double recording its subscriptions and publishes. */
+  function fakeBackplane(): IRealtimeBackplane & {
+    readonly published: RealtimeFrame[];
+    readonly handlers: Array<(frame: RealtimeFrame) => void>;
+    unsubscribeCount: number;
+  } {
+    const published: RealtimeFrame[] = [];
+    const handlers: Array<(frame: RealtimeFrame) => void> = [];
+    const backplane = {
+      origin: 'node-a',
+      published,
+      handlers,
+      unsubscribeCount: 0,
+      connect: (): Promise<void> => Promise.resolve(),
+      publish: (frame: RealtimeFrame): Promise<void> => {
+        published.push(frame);
+        return Promise.resolve();
+      },
+      subscribe: (handler: (frame: RealtimeFrame) => void): Promise<() => void> => {
+        handlers.push(handler);
+        return Promise.resolve(() => {
+          backplane.unsubscribeCount++;
+        });
+      },
+      close: (): Promise<void> => Promise.resolve(),
+    };
+    return backplane;
+  }
+
+  /** A plugin context exposing the supplied backplane, and capturing hooks. */
+  function contextWith(backplane?: IRealtimeBackplane): {
+    readonly ctx: IPluginContext;
+    service(): ISseService;
+    close(): void;
+  } {
+    let service: ISseService | undefined;
+    let onClose: (() => void) | undefined;
+    const ctx = {
+      runtime: {
+        setInterval: (): TimerHandle => ({} as TimerHandle),
+        clearInterval: (): void => {},
+        uuid: (): string => 'test-uuid',
+      },
+      services: {
+        has: (token: string): boolean =>
+          token === CAPABILITIES.REALTIME_BACKPLANE && backplane !== undefined,
+        get: <T>(): T => backplane as T,
+        register: <T>(token: string, value: T): void => {
+          if (token === CAPABILITIES.SSE) {
+            service = value as ISseService;
+          }
+        },
+      },
+      health: { register: (): void => {} },
+      lifecycle: {
+        onClose: (fn: () => void): void => {
+          onClose = fn;
+        },
+      },
+    } as unknown as IPluginContext;
+
+    return {
+      ctx,
+      service: (): ISseService => service as ISseService,
+      close: (): void => onClose?.(),
+    };
+  }
+
+  it('subscribes to a registered backplane and routes frames into channels', async () => {
+    const backplane = fakeBackplane();
+    const harness = contextWith(backplane);
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    expect(backplane.handlers.length).toBe(1);
+
+    const received: SseMessage[] = [];
+    harness.service().channel('news').add(
+      {
+        isOpen: true,
+        send: (msg: SseMessage): void => {
+          received.push(msg);
+        },
+      } as never,
+    );
+
+    backplane.handlers[0]?.({
+      kind: 'sse-channel',
+      origin: 'node-b',
+      name: 'news',
+      data: JSON.stringify({ data: 'from-peer' }),
+    });
+    expect(received).toEqual([{ data: 'from-peer' }]);
+
+    harness.service().channel('news').publish({ data: 'to-peers' });
+    await Promise.resolve();
+    expect(backplane.published).toEqual([
+      {
+        kind: 'sse-channel',
+        origin: 'node-a',
+        name: 'news',
+        data: JSON.stringify({ data: 'to-peers' }),
+      },
+    ]);
+  });
+
+  it('unsubscribes from the backplane on shutdown', async () => {
+    const backplane = fakeBackplane();
+    const harness = contextWith(backplane);
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    harness.close();
+    expect(backplane.unsubscribeCount).toBe(1);
+  });
+
+  it('registers no subscription when no backplane capability exists', async () => {
+    const harness = contextWith(undefined);
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    const received: SseMessage[] = [];
+    harness.service().channel('news').add(
+      {
+        isOpen: true,
+        send: (msg: SseMessage): void => {
+          received.push(msg);
+        },
+      } as never,
+    );
+    // Channels still work; they simply never leave the process.
+    harness.service().channel('news').publish({ data: 'local' });
+    expect(received).toEqual([{ data: 'local' }]);
+    harness.close();
   });
 });
