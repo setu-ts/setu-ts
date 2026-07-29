@@ -540,7 +540,22 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `deno task
   release:link-repos` links all 36 through the API. Do NOT read
   `githubRepository: null` on already-published packages as evidence the link is optional; those
-  were published with a token.
+  were published with a token. **Six packages went live with no visible README** (`cli`,
+  `feature-flags-plugin`, `multi-tenancy-plugin`, `openapi-plugin`, `queue-plugin`,
+  `storage-plugin`) — not a packaging fault: `/README.md` is in every published tarball manifest. A
+  JSR package's `readmeSource` setting defaults to `jsdoc`, and JSR renders README.md only as a
+  FALLBACK — `render_docs_html` builds the entrypoint's module doc first and substitutes the README
+  only `if index_module_doc.sections.docs.is_none()`. deno_doc DROPS prose that follows a tag, so a
+  block opening with `@module` has no description, the fallback fires, and the README renders; a
+  block whose description comes first and ends with `@module` HAS a description, so that
+  one-paragraph blurb becomes the entire package page. Those six were the only entrypoints written
+  description-first. `deno task release:verify` now enforces `@module`-first as check 5, because
+  nothing else sees this — the README ships in the tarball, so the gates, the coverage bar, and
+  `deno publish --dry-run` are all green and the loss shows up only on jsr.io. Fixing it in source
+  only takes effect on the NEXT version (JSR versions are immutable); to fix an already-published
+  page, PATCH `readmeSource: 'readme'` on the package via the API — but that setting also suppresses
+  the module JSDoc's `@example` "Examples" section, which is why the source fix, not the setting, is
+  the durable one.
 - **Milestone 34** (`packages/cli` — the `honoe` CLI: `new` project scaffolding and plugin-aware
   `generate` code generation. `runCli(argv, deps)` returns an exit code and never calls `Deno.exit`;
   `src/main.ts` is the sole process boundary (`Deno.args`, `Deno.cwd()`, `console`, the Deno
@@ -661,6 +676,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `PUBLISHED_PACKAGES` Tier 3, so `release:verify` now reports 38 publishable packages; the next
   release must run `release:create-packages` and `release:link-repos` before the first sdk publish,
   because tokenless OIDC requires the repo link) — complete (PR #98)
+- **Alpha release `v0.1.0-alpha.3`** — on `release/v0.1.0-alpha.3`. **38 packages** — `sdk` (M35)
+  and `realtime-backplane-plugin` (M47) publish for the first time; only the three starters remain
+  unpublished. All 41 workspace members bumped as one version (the CLI forces it — see alpha.2).
+  Carries the queued JSR README fix (cherry-picked `9a913b8`, which was cut from a pre-M14d `main`
+  and so could not be merged as a branch), whose `release:verify` check 5 enforces `@module`-first;
+  proved live by moving `@module` in `packages/sdk` and confirming the check flagged exactly that
+  package. **Two breaking changes ride together** and the release notes state both in full rather
+  than only linking them: the M14d `rr.req.<topic>` RPC wire change (restart callers and responders
+  together, do not roll) and the M30b FCM `serverKey` → service-account replacement (a deliberate
+  compile error). **FCM HTTP v1 ships unverified against live FCM** — the wire shape is asserted
+  field by field and the RS256 assertion signed with real Web Crypto, but no test reaches Google and
+  CI holds no Firebase project; stated plainly in the release notes as the maintainer's call rather
+  than left implicit. Two version-bump traps this release surfaced, now in `docs/releasing.md`:
+  `packages/sdk` writes its `jsr:` specifier INLINE in four `src/**` files (not through an
+  import-map alias) and its manifest maps that exact specifier string to a pinned version, so source
+  and both sides of the mapping must move together — `grep -rn '<old-version>' packages/*/src` must
+  come back empty; and the cross-package pin count is now 12 manifests (`{common,kernel,runtime}`),
+  not the 11 the runbook claimed. Also corrected the root README, which listed the SDK under "Not
+  yet built" while marking it ✅, had no `realtime-backplane-plugin` row, and claimed 36 packages /
+  30 plugins.
 - **Next milestone** — **Milestone 36** (`packages/starter-*` — opinionated bundles); M36–M40 follow
   unless reprioritized.
 

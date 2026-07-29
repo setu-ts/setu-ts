@@ -1,10 +1,10 @@
 /**
+ * @module
+ *
  * `@hono-enterprise/storage-plugin` — file/object storage with pluggable
  * providers (memory, local FS, S3, GCS, Azure Blob) and an upload middleware.
  *
  * Registers {@linkcode IStorage} under `CAPABILITIES.STORAGE`.
- *
- * @module
  */
 
 // ── Plugin factory ────────────────────────────────────────────────────────

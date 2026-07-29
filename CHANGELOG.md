@@ -4,14 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0-alpha.3] — 2026-07-30
 
-> **⚠️ Breaking: brokered request-reply changes on the wire.** `request()`/`respond()` move from
-> `<topic>` to a derived `rr.req.<topic>` channel, so a responder running `0.1.0-alpha.2` and a
+**Two breaking changes ship in this release.** Both are narrow, but you meet them in production
+rather than in this file, so they are stated here in full and again under _Changed_.
+
+> **⚠️ Breaking 1 of 2: brokered request-reply changes on the wire.** `request()`/`respond()` move
+> from `<topic>` to a derived `rr.req.<topic>` channel, so a responder running `0.1.0-alpha.2` and a
 > caller running this version **will not talk to each other**. RPC callers and responders must be
 > restarted together, not rolled one at a time. Fire-and-forget `publish`/`subscribe` are
 > unaffected, as is every other plugin. If you do not use `request`/`respond`, nothing here applies
 > to you.
+
+> **⚠️ Breaking 2 of 2: the FCM push channel takes service-account credentials.**
+> `FcmProviderOptions.serverKey` is **replaced** by `{ projectId, clientEmail, privateKey }`, so
+> existing config stops compiling. That is deliberate rather than a deprecation: `serverKey`
+> addressed the legacy endpoint Google switched off in 2024, so every push sent through it already
+> failed. A compile error is the only honest signal. If you do not configure a `push` channel,
+> nothing here applies to you.
 
 **Kafka gains request-reply, and five of the known limitations recorded against `0.1.0-alpha.1` are
 closed.** Every entry below was a real capability gap rather than a documentation problem, so each
@@ -135,6 +145,17 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
   looping on abort and wakes its backoff early — that sleep also no longer leaks a timer handle on
   every attempt — and a bulkhead waiter cancelled while queued leaves the queue and never runs its
   call.
+- **Six package pages on jsr.io now show their README.** `cli`, `feature-flags-plugin`,
+  `multi-tenancy-plugin`, `openapi-plugin`, `queue-plugin`, and `storage-plugin` rendered a one-line
+  blurb instead in `0.1.0-alpha.2`. Not a packaging fault — `/README.md` was in every published
+  tarball. JSR's `readmeSource` defaults to `jsdoc` and falls back to README.md only when the
+  entrypoint's module doc has no description; deno_doc drops prose that _follows_ a tag, so a block
+  opening with `@module` has no description and the README renders, while one whose description
+  comes first and ends with `@module` replaces the whole page. Those six were the only
+  description-first entrypoints. `deno task release:verify` now enforces `@module`-first, because
+  nothing else sees this: the README ships in the tarball, so every gate and
+  `deno publish
+  --dry-run` stay green and the loss shows up only on jsr.io.
 
 ### Deprecated
 
@@ -154,6 +175,23 @@ and are globally unique, so the frame carries the excluded ID and every replica 
 
 A call that ignores its `AbortSignal` still runs to completion; cancellation is cooperative, and the
 widened JSDoc says so.
+
+**FCM push has not been exercised against live FCM.** The HTTP v1 rewrite is asserted field by field
+— request URL, headers, and body shape — and its RS256 assertion is signed and verified with real
+Web Crypto, but no test reaches Google: CI holds no Firebase project. The endpoint and auth scheme
+follow Google's documented HTTP v1 contract, and the previous `serverKey` path was provably dead, so
+this is strictly an improvement — but if you depend on push, verify it against your own project
+before you rely on it, and please report what you find.
+
+### Installing
+
+```bash
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
+```
+
+Within 24 hours of a release, Deno's minimum-dependency-age policy refuses the version unless you
+pass `--min-dep-age 0`.
 
 ## [0.1.0-alpha.2] — 2026-07-28
 
@@ -292,29 +330,29 @@ are never hard dependencies. Each is injected through plugin options or imported
 ### Known limitations
 
 > Five entries in this list have since been closed; each is annotated in place rather than deleted,
-> because this section records what was true of **this** release. See **[Unreleased]** for the work
-> that closed them.
+> because this section records what was true of **this** release. See **[0.1.0-alpha.3]** for the
+> work that closed them.
 
 - **`notification-plugin` FCM push is non-functional.** It implements the legacy FCM `serverKey`
   API, which Google decommissioned in 2024. FCM HTTP v1 with service-account JWT signing is a
-  follow-up. _(True of this release. Superseded — see [Unreleased](#unreleased), where the provider
-  moves to HTTP v1 and push delivery works.)_
+  follow-up. _(True of this release. Superseded — see [0.1.0-alpha.3](#010-alpha3--2026-07-30),
+  where the provider moves to HTTP v1 and push delivery works.)_
 - **LaunchDarkly is unsupported** in `feature-flags-plugin`. The LaunchDarkly Node server SDK's
   `variation`/`allFlagsState` are async and cannot satisfy the synchronous committed `isEnabled`
   contract. Use the provider's `'custom'` arm as a bridge. _(True of this release. Superseded — see
-  [Unreleased](#unreleased), which adds a `'launchdarkly'` provider and an optional
+  [0.1.0-alpha.3](#010-alpha3--2026-07-30), which adds a `'launchdarkly'` provider and an optional
   `isEnabledAsync`.)_
 - **`KafkaBroker` does not support request-reply.** Kafka's consumer-group and auto-commit model
   does not fit the pattern; `request()`/`respond()` throw `MessagingNotSupportedError`. _(True of
-  this release. Superseded — see [Unreleased](#unreleased), where Kafka becomes reply-capable; the
-  limitation was in the shared request-reply core, not in Kafka.)_
+  this release. Superseded — see [0.1.0-alpha.3](#010-alpha3--2026-07-30), where Kafka becomes
+  reply-capable; the limitation was in the shared request-reply core, not in Kafka.)_
 - **Rooms and channels are in-process.** `websocket-plugin` rooms and `sse-plugin` channels are not
   shared across replicas; cross-instance fan-out is a later milestone. _(True of this release.
-  Superseded — see [Unreleased](#unreleased), which adds `realtime-backplane-plugin`. `Room.size` /
-  `SseChannel.size` remain local-only.)_
+  Superseded — see [0.1.0-alpha.3](#010-alpha3--2026-07-30), which adds `realtime-backplane-plugin`.
+  `Room.size` / `SseChannel.size` remain local-only.)_
 - **`resilience-plugin` timeouts do not cancel.** `timeout` races the promise; the wrapped function
-  keeps running. _(True of this release. Superseded — see [Unreleased](#unreleased), where `wrap`
-  hands the protected call an `AbortSignal` and the timeout aborts it.)_
+  keeps running. _(True of this release. Superseded — see [0.1.0-alpha.3](#010-alpha3--2026-07-30),
+  where `wrap` hands the protected call an `AbortSignal` and the timeout aborts it.)_
 - **Node and Bun compatibility suites have not run.** They consume the packages through JSR's npm
   compatibility layer and were therefore blocked on this publish — they are unblocked by it, and
   will run before the first stable release. Milestone 40 owns that verification, alongside

@@ -19,10 +19,10 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: `v0.1.0-alpha.2` is published — all 36 packages are live on JSR.**
+> **Status: `v0.1.0-alpha.3` is published — all 38 packages are live on JSR.**
 >
-> The kernel, the runtime layer, 30 plugins, the test utilities, and the `honoe` CLI are
-> implemented, tested, and documented (655 tests, 97%+ coverage).
+> The kernel, the runtime layer, 31 plugins, the test utilities, the client SDK, and the `honoe` CLI
+> are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
 > `deno add jsr:@hono-enterprise/kernel` fails with _"has only pre-release versions available"_.
@@ -127,11 +127,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Real-time and rendering
 
-| Feature            | Status | Package               | Description                                                   |
-| ------------------ | ------ | --------------------- | ------------------------------------------------------------- |
-| Server-Sent Events | ✅     | `sse-plugin`          | One-way streaming, named channels, heartbeat, `Last-Event-ID` |
-| WebSocket          | ✅     | `websocket-plugin`    | Full-duplex on all four runtimes; rooms, heartbeat, limits    |
-| React SSR          | ✅     | `react-router-plugin` | React Router v7 framework mode with file-based routing        |
+| Feature               | Status | Package                     | Description                                                   |
+| --------------------- | ------ | --------------------------- | ------------------------------------------------------------- |
+| Server-Sent Events    | ✅     | `sse-plugin`                | One-way streaming, named channels, heartbeat, `Last-Event-ID` |
+| WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits    |
+| Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas            |
+| React SSR             | ✅     | `react-router-plugin`       | React Router v7 framework mode with file-based routing        |
 
 ### Operations
 
@@ -157,15 +158,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Tooling
 
-| Feature | Status | Package | Description                                                    |
-| ------- | ------ | ------- | -------------------------------------------------------------- |
-| CLI     | ✅     | `cli`   | `honoe` — project scaffolding and plugin-aware code generation |
+| Feature        | Status | Package   | Description                                                    |
+| -------------- | ------ | --------- | -------------------------------------------------------------- |
+| CLI            | ✅     | `cli`     | `honoe` — project scaffolding and plugin-aware code generation |
+| Client SDK     | ✅     | `sdk`     | HTTP client with retry, circuit breaker, OpenAPI codegen       |
+| Test utilities | ✅     | `testing` | `createTestApp`, mock plugins/registry, fixtures, stream reads |
 
 ### Not yet built
 
 | Feature         | Status      | Description                                              |
 | --------------- | ----------- | -------------------------------------------------------- |
-| SDK             | ✅          | HTTP client with retry, circuit breaker, OpenAPI codegen |
 | Starter bundles | 📋 Designed | REST, microservice, and full-stack starters              |
 | GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin               |
 | gRPC            | 🚧 Planned  | Client and server support for microservice communication |
@@ -176,21 +178,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2 jsr:@hono-enterprise/runtime@^0.1.0-alpha.2
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3 jsr:@hono-enterprise/runtime@^0.1.0-alpha.3
 
 # Node
-npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.2 @hono-enterprise/runtime@^0.1.0-alpha.2
+npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.3 @hono-enterprise/runtime@^0.1.0-alpha.3
 
 # Bun
-bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.2 @hono-enterprise/runtime@^0.1.0-alpha.2
+bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.3 @hono-enterprise/runtime@^0.1.0-alpha.3
 ```
 
-**The `@^0.1.0-alpha.2` is required, not decorative.** JSR does not point `latest` at a prerelease,
+**The `@^0.1.0-alpha.3` is required, not decorative.** JSR does not point `latest` at a prerelease,
 so omitting the version fails outright:
 
 ```
 error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2
+Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3
 ```
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
@@ -199,7 +201,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.2/main
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
 
 honoe new my-app
 cd my-app && honoe generate service billing

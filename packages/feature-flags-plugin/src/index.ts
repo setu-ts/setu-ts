@@ -1,11 +1,11 @@
 /**
+ * @module
+ *
  * `@hono-enterprise/feature-flags-plugin` — feature flag evaluation with
  * pluggable backends (config, memory, database) and a free-function route
  * guard.
  *
  * Registers {@linkcode IFeatureFlags} under `CAPABILITIES.FEATURE_FLAGS`.
- *
- * @module
  */
 
 // ── Plugin factory ─────────────────────────────────────────────────────────

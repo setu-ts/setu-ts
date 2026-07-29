@@ -1,7 +1,7 @@
 /**
- * `@hono-enterprise/multi-tenancy-plugin` — multi-tenancy support for Hono Enterprise.
- *
  * @module
+ *
+ * `@hono-enterprise/multi-tenancy-plugin` — multi-tenancy support for Hono Enterprise.
  */
 
 // Re-export types from common for convenience.

@@ -57,7 +57,7 @@ jobs:
 
       # ── Publish ──────────────────────────────────────────────────────────
       # Published one package at a time from an explicit list, NOT with a
-      # workspace-wide `deno publish`: the workspace also contains the `sdk` and
+      # workspace-wide `deno publish`: the workspace also contains the three
       # starter stubs, which export nothing and must not reach JSR.
       #
       # The list is ordered so a dependency is always published before its

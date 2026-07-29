@@ -13,7 +13,7 @@ import type {
   BackoffStrategy,
   CircuitBreakerPolicy,
   RetryPolicy,
-} from 'jsr:@hono-enterprise/common@^0.1.0-alpha.2';
+} from 'jsr:@hono-enterprise/common@^0.1.0-alpha.3';
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };
 

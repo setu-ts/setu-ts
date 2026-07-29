@@ -8,7 +8,7 @@
  * ```
  *
  * Why not a single workspace-wide `deno publish`? Because the workspace also
- * contains the `cli`, `sdk`, and starter stubs, which export nothing. JSR
+ * contains the three starter stubs, which export nothing. JSR
  * versions are immutable — a stub published by accident can be yanked but
  * never removed — so the package set is an explicit allow-list
  * (`scripts/release-packages.ts`) rather than whatever the workspace happens

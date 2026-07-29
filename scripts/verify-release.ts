@@ -8,7 +8,7 @@
  * deno run --allow-read scripts/verify-release.ts 0.1.0-alpha.1
  * ```
  *
- * Verifies four things a green test suite cannot:
+ * Verifies five things a green test suite cannot:
  *
  * 1. Every publishable package carries exactly the expected version — so the
  *    tag, the CHANGELOG entry, and what lands on JSR all agree.
@@ -20,6 +20,10 @@
  * 3. The published and unpublished lists together account for every workspace
  *    member, so a newly added package cannot be silently left out.
  * 4. No publishable package is a stub (`export {}` with nothing else).
+ * 5. Every entrypoint's module JSDoc opens with `@module`, so the package's
+ *    README.md is what renders on jsr.io rather than a one-line JSDoc blurb.
+ *    See the long comment at check 5 — six packages shipped without a visible
+ *    README in `v0.1.0-alpha.2` because of this.
  *
  * Exits non-zero and prints every problem found, rather than stopping at the
  * first — a release is easier to fix in one pass.
@@ -124,7 +128,22 @@ for (const listed of accounted) {
   }
 }
 
-// ── 4: nothing published may be a stub ──────────────────────────────────────
+// ── 4 & 5: entrypoint must be real, and must not hide its README ────────────
+
+/**
+ * The leading `/** … *\/` block of a source file, with the comment delimiters
+ * and each line's ` * ` prefix stripped — i.e. the JSDoc body as deno_doc sees
+ * it. Returns null when the file does not open with a block comment.
+ */
+function leadingJsDoc(source: string): string | null {
+  const match = /^\s*\/\*\*([\s\S]*?)\*\//.exec(source);
+  if (!match) return null;
+  return match[1]
+    .split('\n')
+    .map((line) => line.replace(/^\s*\*\s?/, ''))
+    .join('\n')
+    .trim();
+}
 
 for (const dir of PUBLISHED_PACKAGES) {
   let source: string;
@@ -140,6 +159,36 @@ for (const dir of PUBLISHED_PACKAGES) {
   );
   if (!hasRealExport) {
     problems.push(`${dir}: src/index.ts exports nothing — a stub must not be published`);
+  }
+
+  // The entrypoint's module JSDoc must open with `@module`, so that the prose
+  // after it is NOT parsed as a module description.
+  //
+  // WHY THIS IS LOAD-BEARING. A JSR package has a `readmeSource` setting whose
+  // default is `jsdoc`, and JSR renders the README only as a FALLBACK: in
+  // `render_docs_html`, the entrypoint's module doc is built first, and the
+  // README is substituted only `if index_module_doc.sections.docs.is_none()`.
+  // deno_doc drops prose that FOLLOWS a tag, so a block opening with `@module`
+  // has no description, the fallback fires, and the README renders. A block
+  // whose description comes first and ends with `@module` DOES have a
+  // description — so that one-paragraph blurb becomes the whole package page
+  // and the hand-written README is never shown.
+  //
+  // Six packages (cli, feature-flags-, multi-tenancy-, openapi-, queue-,
+  // storage-plugin) shipped in v0.1.0-alpha.2 with no visible README for
+  // exactly this reason. Nothing else catches it: the README is present in the
+  // published tarball's manifest, so `deno publish --dry-run`, the gates, and
+  // the coverage bar are all green — the loss is only visible on jsr.io.
+  const jsDoc = leadingJsDoc(source);
+  if (jsDoc === null) {
+    problems.push(
+      `${dir}: src/index.ts has no leading module JSDoc — add one opening with \`@module\``,
+    );
+  } else if (!jsDoc.startsWith('@module')) {
+    problems.push(
+      `${dir}: src/index.ts module JSDoc does not open with \`@module\` — its description ` +
+        `would replace README.md on jsr.io. Move \`@module\` to the first line of the block.`,
+    );
   }
 }
 

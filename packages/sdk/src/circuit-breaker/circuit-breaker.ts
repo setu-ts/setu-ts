@@ -27,7 +27,7 @@
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
-import type { CircuitBreakerPolicy } from 'jsr:@hono-enterprise/common@^0.1.0-alpha.2';
+import type { CircuitBreakerPolicy } from 'jsr:@hono-enterprise/common@^0.1.0-alpha.3';
 import { ClientCircuitOpenError } from '../errors.ts';
 
 interface State {

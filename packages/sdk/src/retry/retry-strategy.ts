@@ -12,7 +12,7 @@
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
-import type { RetryPolicy } from 'jsr:@hono-enterprise/common@^0.1.0-alpha.2';
+import type { RetryPolicy } from 'jsr:@hono-enterprise/common@^0.1.0-alpha.3';
 
 import { HttpClientError } from '../errors.ts';
 

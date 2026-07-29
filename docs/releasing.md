@@ -81,10 +81,15 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 ### 1. Prepare, on a `release/…` branch
 
 - Bump `version` in every workspace member's `deno.json`.
-- **Bump the cross-package specifiers to match.** 11 packages pin
-  `jsr:@hono-enterprise/{common,kernel}@^<version>` explicitly. Under semver a `^0.1.0` range does
-  **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these publishes packages
-  whose dependencies cannot resolve — and `deno publish` does not warn.
+- **Bump the cross-package specifiers to match.** 12 packages pin
+  `jsr:@hono-enterprise/{common,kernel,runtime}@^<version>` explicitly. Under semver a `^0.1.0`
+  range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these
+  publishes packages whose dependencies cannot resolve — and `deno publish` does not warn.
+- **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
+  four `src/**` files rather than through an import-map alias, and its manifest maps that exact
+  specifier string to a pinned version — so the range in the source and both sides of the mapping
+  must move together. A missed source specifier resolves against the previous release instead of the
+  one being cut. `grep -rn '<old-version>' packages/*/src` must come back empty.
 - Add the release's `CHANGELOG.md` entry.
 
 ### 2. Verify
@@ -95,9 +100,10 @@ deno task release:verify 0.1.0-alpha.1
 deno task release:publish --dry-run
 ```
 
-`release:verify` checks four things the test suite cannot: version agreement across all publishable
+`release:verify` checks five things the test suite cannot: version agreement across all publishable
 packages, cross-package specifier resolvability, that the published and unpublished lists together
-account for every workspace member, and that no stub is in the publish list.
+account for every workspace member, that no stub is in the publish list, and that every entrypoint's
+module JSDoc opens with `@module` so the package's README is what renders on jsr.io.
 
 > **A green `--dry-run` is not proof the publish will succeed.** The dry run resolves modules from
 > the workspace; a real publish builds the graph from the package tarball, where a sibling package
@@ -220,7 +226,7 @@ though the version is live, and consumers get:
 
 ```
 error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.2
+Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3
 ```
 
 Every install instruction for a prerelease must carry an explicit version. Check the README and
@@ -247,7 +253,7 @@ published dependency — and serve one request:
 
 ```fish
 mkdir /tmp/relcheck; and cd /tmp/relcheck; and echo '{}' > deno.json
-deno add --min-dep-age 0 jsr:@hono-enterprise/kernel@^0.1.0-alpha.2 jsr:@hono-enterprise/runtime@^0.1.0-alpha.2
+deno add --min-dep-age 0 jsr:@hono-enterprise/kernel@^0.1.0-alpha.3 jsr:@hono-enterprise/runtime@^0.1.0-alpha.3
 ```
 
 ```typescript
