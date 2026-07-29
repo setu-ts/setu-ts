@@ -48,11 +48,10 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
   Workers-portable, like the other HTTP providers. A new `FcmTokenSource` export lets you source
   tokens elsewhere (a GCP metadata server, a key-holding broker) instead of from a local key.
 - **`@hono-enterprise/realtime-backplane-plugin`** — cross-replica fan-out for WebSocket rooms and
-  SSE channels, bringing the published total to **37 packages**. It registers an
-  `IRealtimeBackplane` under the new `CAPABILITIES.REALTIME_BACKPLANE` token, which
-  `websocket-plugin` and `sse-plugin` resolve **optionally** — so adding the plugin is the entire
-  change needed to make `ws.room('lobby')` and `sse.channel('news')` reach clients on other
-  replicas, and removing it restores in-process behavior with no application change. Four
+  SSE channels. It registers an `IRealtimeBackplane` under the new `CAPABILITIES.REALTIME_BACKPLANE`
+  token, which `websocket-plugin` and `sse-plugin` resolve **optionally** — so adding the plugin is
+  the entire change needed to make `ws.room('lobby')` and `sse.channel('news')` reach clients on
+  other replicas, and removing it restores in-process behavior with no application change. Four
   transports: `'memory'` (the default, and a real single-process bus rather than a no-op),
   `'messaging'` (over whatever broker is registered under `CAPABILITIES.MESSAGING`, reusing all five
   existing brokers with no new dependency), `'redis'` (pub/sub over an inject-or-lazy `ioredis`),
@@ -62,6 +61,20 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
   await an answer carrying no cold-context caveat.
 - **Real cancellation** in `@hono-enterprise/resilience-plugin`: `wrap` hands the protected call an
   `AbortSignal`, and the returned callable accepts an optional caller-owned one.
+- **`@hono-enterprise/sdk`** — the client SDK publishes for the first time. Together with the
+  realtime backplane above, that brings the published total to **38 packages**. A portable,
+  zero-npm-dependency HTTP client for consuming a Hono Enterprise API from a browser or a server:
+  `createClient()` returns an `IHttpClient` with one `request<TResponse, TBody>()` method, plus
+  bearer and API-key request-interceptor factories, request/response interceptors, retry with
+  fixed/exponential backoff honoring a delta-seconds `Retry-After`, a rolling-window circuit
+  breaker, and a sliding-window rate limiter. Both the transport (`fetch`) and time
+  (`IClientTiming`) are injectable seams, so nothing needs a network or a real clock to test. It
+  registers no plugin and resolves no capability token — its only in-repo import is type-level from
+  `@hono-enterprise/common`, which re-exports `RetryPolicy`, `CircuitBreakerPolicy`, and
+  `BackoffStrategy` through the SDK barrel so consumers need not depend on `common` directly.
+  `generateOpenApiClient(document, options?)` is a pure function turning an OpenAPI 3.1 document
+  into type-checked TypeScript client source; it throws `OpenApiCodegenError` with the offending
+  path and method rather than emitting a client that misbehaves or will not compile.
 
 ### Changed
 

@@ -637,10 +637,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `Room.size`/`SseChannel.size` stay LOCAL, and that one is genuine: a cluster-wide count is
   inherently async (scatter-gather), so it cannot satisfy the synchronous committed `size` getter
   and wants a separate async method — deferred to a presence milestone as a CONTRACT decision, not
-  an implementation gap. Added the new package to `scripts/release-packages.ts`, so `release:verify`
-  now reports 37 publishable packages) — complete (PR pending)
-- **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); M35–M40 follow unless
-  reprioritized.
+  an implementation gap. Added the new package to `scripts/release-packages.ts`) — complete (PR #97)
+- **Milestone 35** (`packages/sdk` — client SDK) — portable, zero-npm-dependency HTTP client with
+  bearer/API-key auth interceptors, client-side resilience (retry with fixed/exponential backoff and
+  delta-seconds `Retry-After`, a rolling-window circuit breaker, a sliding-window rate limiter),
+  request/response interceptors, and a pure OpenAPI 3.1 → TypeScript code generator. The only
+  in-repo import is type-level from `common`; no kernel, no plugin, no npm dependency, so it runs in
+  a browser. Two seams keep it testable without real time or a network: an injected `fetch` and an
+  `IClientTiming` (`performance.now()` + abort-aware `sleep`) that `createClient()` defaults, so
+  `Date.now()` never appears. The breaker's `resetTimeout` is measured from the trip, NOT from the
+  oldest failure in the rolling window — conflating the two silently closed the circuit whenever
+  `timeout < resetTimeout` and made half-open unreachable — and a failed probe restarts the cooldown
+  so a dead dependency is probed once per cooldown rather than on every request. Codegen output is
+  verified by a committed fixture that `deno task check` type-checks (`deno check` covers `test/`),
+  which is what a subprocess check could not do: it compiled a temp file in isolation and could not
+  catch emitted source disagreeing with the SDK's own `IHttpClient`. Review found the generator
+  emitted the raw `operationId` into a JSDoc comment escaped only for string literals, so a document
+  carrying a comment terminator injected EXECUTABLE code into the generated factory — a payload that
+  type-checked and ran; comment text is now escaped for its own context. It also rejected two
+  silent-corruption cases it used to emit: a path placeholder with no declared parameter (which
+  produced source referencing an undeclared identifier) and a declared path parameter absent from
+  the template (whose value was dropped). `packages/sdk` moves from `UNPUBLISHED_PACKAGES` to
+  `PUBLISHED_PACKAGES` Tier 3, so `release:verify` now reports 38 publishable packages; the next
+  release must run `release:create-packages` and `release:link-repos` before the first sdk publish,
+  because tokenless OIDC requires the repo link) — complete (PR #98)
+- **Next milestone** — **Milestone 36** (`packages/starter-*` — opinionated bundles); M36–M40 follow
+  unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

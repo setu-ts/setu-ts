@@ -44,6 +44,7 @@
 35. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
 36. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
 37. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
+38. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
 
 ---
 
@@ -5911,6 +5912,241 @@ console.log(stream.text); // → "hello world"
   (factory caching, single-vs-multi registration and `getAll` merge order, override policy, the
   verbatim not-registered message, `content-type` defaults, and the `snapshot()` discriminated
   union) so a test cannot pass against the double and fail against the real thing.
+
+---
+
+## SDK — Client SDK (`@hono-enterprise/sdk`)
+
+Portable, zero-npm-dependency client SDK for consuming Hono Enterprise APIs from browsers and
+servers. Does not register a plugin or resolve capability tokens — it is an external-consumer
+library.
+
+### Installation
+
+```bash
+deno add jsr:@hono-enterprise/sdk@^0.1.0-alpha.2
+```
+
+### createClient()
+
+Factory that returns an `IHttpClient`. Requires a base URL; accepts default headers, an injectable
+`fetch` seam, a timing seam, resilience policies, rate-limit policy, and interceptor arrays.
+
+```typescript
+import { createClient } from '@hono-enterprise/sdk';
+
+const client = createClient({
+  baseUrl: 'https://api.example.com',
+  headers: { 'X-Trace-Id': 'abc' },
+});
+
+const res = await client.request<User>({
+  method: 'GET',
+  path: '/users/123',
+});
+console.log(res.data); // User
+```
+
+### IHttpClient
+
+The public client interface. Its single generic method is `request<TResponse, TBody>`.
+
+```typescript
+interface IHttpClient {
+  request<TResponse, TBody = unknown>(
+    request: ClientRequest<TBody>,
+  ): Promise<ClientResponse<TResponse>>;
+}
+```
+
+### ClientOptions
+
+```typescript
+interface ClientOptions {
+  baseUrl: string;
+  headers?: Record<string, string>;
+  fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+  timing?: IClientTiming;
+  retry?: RetryPolicy;
+  circuitBreaker?: CircuitBreakerPolicy;
+  rateLimit?: ClientRateLimitPolicy;
+  requestInterceptors?: ClientRequestInterceptor[];
+  responseInterceptors?: ClientResponseInterceptor[];
+}
+```
+
+| Option                 | Consumer                     | Behavior                                                      |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------- |
+| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`         |
+| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win         |
+| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`         |
+| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`           |
+| `retry`                | retry strategy               | `limit < 1` throws at construction                            |
+| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                        |
+| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                  |
+| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution            |
+| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure |
+
+### ClientRequest
+
+```typescript
+interface ClientRequest<TBody = unknown> {
+  method: string;
+  path: string;
+  query?: Record<string, string | string[]>;
+  headers?: Record<string, string>;
+  json?: TBody;
+  signal?: AbortSignal;
+}
+```
+
+### ClientResponse
+
+```typescript
+interface ClientResponse<T> {
+  status: number;
+  headers: Headers;
+  data?: T;
+}
+```
+
+### Interceptors
+
+```typescript
+type ClientRequestInterceptor = (ctx: ClientRequestContext) => void | Promise<void>;
+type ClientResponseInterceptor<T> = (
+  response: ClientResponse<T>,
+  request: ClientRequestContext,
+) => ClientResponse<T> | Promise<ClientResponse<T>>;
+```
+
+Request interceptors receive a mutable `ClientRequestContext` (resolved `URL` and `Headers`) and
+execute once in registration order before the outbound attempt sequence. Response interceptors
+receive a successful `ClientResponse<T>` and its immutable request description; they are skipped
+entirely when the request throws.
+
+### IClientTiming and createDefaultClientTiming()
+
+```typescript
+interface IClientTiming {
+  now(): number;
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
+}
+
+function createDefaultClientTiming(): IClientTiming;
+```
+
+`now()` uses `performance.now()` (monotonic); `sleep()` uses `setTimeout` with an abort listener.
+Inject a deterministic implementation in tests.
+
+### ClientRateLimitPolicy
+
+```typescript
+interface ClientRateLimitPolicy {
+  maxRequests: number;
+  windowMs: number;
+}
+```
+
+Per-origin sliding-window limiter. When the window is full, the client waits until the oldest
+retained timestamp expires.
+
+### Re-exported policy types
+
+`RetryPolicy`, `CircuitBreakerPolicy`, and `BackoffStrategy` are re-exported from
+`@hono-enterprise/common` so consumers can name their types without adding `common` to their own
+manifest.
+
+### Authentication interceptors
+
+```typescript
+function createBearerAuthInterceptor(
+  token: string | (() => string | Promise<string>),
+): ClientRequestInterceptor;
+
+function createApiKeyAuthInterceptor(
+  key: string | (() => string | Promise<string>),
+  headerName?: string,
+): ClientRequestInterceptor;
+```
+
+`createBearerAuthInterceptor` sets `Authorization: Bearer <token>`. `createApiKeyAuthInterceptor`
+sets the header named `X-API-Key` (default) or `headerName`. Each accepts a literal or an async
+value provider and sets its header only when the request has not already supplied that header.
+
+### Errors
+
+| Error                    | When thrown                             | Fields                      |
+| ------------------------ | --------------------------------------- | --------------------------- |
+| `HttpClientError`        | Non-2xx HTTP response                   | `status`, `headers`, `body` |
+| `ClientCircuitOpenError` | Circuit breaker is open for the origin  | (none)                      |
+| `OpenApiCodegenError`    | Invalid OpenAPI document during codegen | `path`, `method`            |
+
+`ClientCircuitOpenError` is named distinctly from the resilience plugin's `CircuitOpenError` to
+avoid a barrel collision.
+
+### generateOpenApiClient()
+
+Pure function that turns an M21-compatible OpenAPI 3.1 document into TypeScript source.
+
+```typescript
+import { generateOpenApiClient } from '@hono-enterprise/sdk';
+
+const source = generateOpenApiClient(document, {
+  sdkImport: '@hono-enterprise/sdk',
+  factoryName: 'createApi',
+});
+```
+
+### OpenApiCodegenOptions
+
+```typescript
+interface OpenApiCodegenOptions {
+  sdkImport?: string;
+  factoryName?: string;
+}
+```
+
+| Option        | Default                  | Description                     |
+| ------------- | ------------------------ | ------------------------------- |
+| `sdkImport`   | `'@hono-enterprise/sdk'` | Generated type-import specifier |
+| `factoryName` | `'createApi'`            | Exported generated factory name |
+
+#### Generated naming contract
+
+| Emitted symbol           | Derivation                                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`) |
+| Component type           | PascalCase from the component name (`User` → `export type User`)                                                              |
+| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                     |
+| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                      |
+| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — for operations AND component schemas                                     |
+
+Path parameters are emitted as positional arguments (each substituted and percent-encoded, including
+a placeholder sharing a segment with literal text such as `/files/{id}.json`); query parameters,
+headers, and the JSON body live on `opts`. `opts` is **required** when any of its fields is
+required. Query keys and header names keep their original OpenAPI spelling; only the TypeScript
+field identifier is derived, and header values are stringified so a non-`string` header schema
+compiles.
+
+All eight operation slots are generated, including `trace`. Path-item-level `parameters` are merged
+into every operation on that path, with an operation's own entry overriding a shared one of the same
+`name` and `in`. Document text emitted into a comment has comment terminators escaped and line
+breaks collapsed, and every emitted string literal and path template is escaped for its own context,
+so a hostile document cannot inject code into the generated file.
+
+`generateOpenApiClient` throws `OpenApiCodegenError` (carrying `path` and `method` where applicable)
+instead of emitting a client that misbehaves or does not compile, for: a missing `operationId`; two
+operations or two component schemas deriving onto one name; a `cookie` parameter; a path placeholder
+with no matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
+placeholders deriving onto one argument name; and a malformed local `$ref`.
+
+### SdkOpenApi\* types
+
+`SdkOpenApiDocument`, `SdkOpenApiPathItem`, `SdkOpenApiOperation`, `SdkOpenApiParameter`,
+`SdkOpenApiRequestBody`, `SdkOpenApiResponse`, and `SdkOpenApiSchema` are the structural OpenAPI 3.1
+subset accepted by the generator. They are intentionally different from the openapi-plugin types
+(which have different shapes) and take the `SdkOpenApi*` prefix to avoid a barrel collision.
 
 ---
 

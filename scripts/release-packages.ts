@@ -3,15 +3,16 @@
  *
  * This is an EXPLICIT allow-list rather than a scan of the `workspace` array in
  * the root `deno.json`, because the workspace also contains stub packages
- * (`sdk` and the three starters) that export nothing. A workspace-wide
+ * (the three starters) that export nothing. A workspace-wide
  * `deno publish` would push those empty packages to JSR, where versions are
  * immutable and cannot be withdrawn — only yanked.
  *
  * ORDER IS LOAD-BEARING. JSR rejects a package whose declared dependency
  * version does not yet exist, so a dependency must be published before its
  * dependents. `common` has no in-repo dependency; `kernel` depends on `common`;
- * `runtime` and `testing` depend on both; every plugin depends on `common`
- * (and `openapi-plugin` additionally on `kernel`).
+ * `runtime`, `testing`, `sdk`, and `exceptions` depend on `common` (only `sdk`
+ * is type-level); every plugin depends on `common` (and `openapi-plugin`
+ * additionally on `kernel`).
  */
 export const PUBLISHED_PACKAGES: readonly string[] = [
   // Tier 1 — no in-repo dependencies.
@@ -24,6 +25,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/runtime',
   'packages/testing',
   'packages/exceptions',
+  'packages/sdk',
 
   // Tier 4 — plugins. Each depends on `common`; `openapi-plugin` also on `kernel`.
   'packages/audit-plugin',
@@ -65,14 +67,13 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
 /**
  * Workspace members deliberately excluded from every release.
  *
- * These are Milestone 0 stubs whose `src/index.ts` is `export {}`. They are
+ * These are starter stubs whose `src/index.ts` is `export {}`. They are
  * listed explicitly (rather than merely omitted) so that
  * `scripts/verify-release.ts` can prove the two lists together account for the
  * entire workspace — a new package added to the workspace and forgotten here
  * fails the check instead of silently going unpublished.
  */
 export const UNPUBLISHED_PACKAGES: readonly string[] = [
-  'packages/sdk',
   'packages/starters/rest-starter',
   'packages/starters/microservice-starter',
   'packages/starters/full-stack-starter',

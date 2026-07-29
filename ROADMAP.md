@@ -382,8 +382,8 @@ notification-plugin ─► common, kernel
 feature-flags-plugin ─► common, kernel
 multi-tenancy-plugin ─► common, kernel
 testing ─► common, kernel
-cli ─► common, kernel
-sdk ─► common, kernel
+cli ─► common, runtime
+sdk ─► common
 ```
 
 **Key rule:** No plugin depends on another plugin — not even at build time. All shared interfaces
@@ -3657,28 +3657,75 @@ resolved by load order.
 
 **Implementation Files:**
 
-- `src/sdk.ts`
-- `src/http/http-client.ts`
-- `src/auth/auth-interceptor.ts`
-- `src/retry/retry-strategy.ts`
-- `src/circuit-breaker/circuit-breaker.ts`
-- `src/codegen/openapi-codegen.ts`
-- `src/index.ts`
+- `src/sdk.ts` — `createClient()` factory, policy validation, timing seam default
+- `src/http/contracts.ts` — Client, interceptor, timing, and rate-limit interfaces; re-exports
+  `common` policy types
+- `src/http/http-client.ts` — Internal `HttpClient`: URL/query construction, interceptor pipeline,
+  response parsing, policy composition
+- `src/http/rate-limiter.ts` — Per-origin sliding-window admission queue using `IClientTiming`
+- `src/http/timing.ts` — Exported `createDefaultClientTiming()` over `performance.now()` and
+  abort-aware `setTimeout`
+- `src/auth/auth-interceptor.ts` — `createBearerAuthInterceptor` and `createApiKeyAuthInterceptor`
+  factories
+- `src/retry/retry-strategy.ts` — Retry classification, `Retry-After` delta-seconds parsing,
+  fixed/exponential backoff
+- `src/circuit-breaker/circuit-breaker.ts` — Per-origin rolling-window breaker with injected
+  `isFailure` predicate
+- `src/errors.ts` — Exported `HttpClientError`, `ClientCircuitOpenError`, `OpenApiCodegenError`
+- `src/codegen/openapi-types.ts` — Public `SdkOpenApi*` structural OpenAPI 3.1 subset
+- `src/codegen/openapi-codegen.ts` — Pure OpenAPI → TypeScript source generator
+- `src/index.ts` — Named public barrel (§4 surface, no internal classes)
 
 ### Tests
 
-- HTTP client
-- Authentication
-- Retry
-- Circuit breaker
-- Code generation
+- `test/unit/barrel-exports.test.ts` — Barrel exports exactly the §4 surface; no internal class
+  leaks; re-exported policy types resolve
+- `test/unit/sdk.test.ts` — `createClient()` factory, defaults, injected fetch/timing, policy
+  validation
+- `test/unit/http-contracts.test.ts` — Compile-time fixture for every public option and generic
+  signature
+- `test/unit/http-client.test.ts` — URL/query construction, header precedence, JSON
+  serialization/parsing, 204, abort, interceptor order, response-interceptor skip on failure
+- `test/unit/rate-limiter.test.ts` — Admission, window expiry, per-origin isolation, queued delay,
+  abort
+- `test/unit/timing.test.ts` — Monotonic `now()`, `sleep(0)`, abort-aware `sleep`
+- `test/unit/auth-interceptor.test.ts` — Literal/async credentials, default/custom API-key headers,
+  supplied-header precedence, provider rejection
+- `test/unit/retry-strategy.test.ts` — Total-attempt semantics, fixed/exponential delays, status
+  classification, safe-method gate, delta-seconds `Retry-After`, ignored HTTP-date, abort non-retry,
+  last-error propagation
+- `test/unit/circuit-breaker.test.ts` — Rolling window, trip/open, half-open transition, recovery,
+  concurrent probe rejection, both `isFailure` arms; cooldown measured from the trip (so `timeout`
+  may be shorter than `resetTimeout`) and a failed probe restarting the cooldown
+- `test/unit/errors.test.ts` — Error names, `instanceof`, HTTP status/header/body fields, codegen
+  diagnostics
+- `test/unit/openapi-codegen.test.ts` — All supported M21 schema shapes, parameter/body/response
+  rendering, JSON escaping, brace-bearing and digit-leading id derivation, both duplicate sources,
+  `cookie` location, invalid refs, deterministic output; camelCase-preserving derivation, PascalCase
+  type names, required-`opts` rule, and hostile path templates (placeholder plus literal text in one
+  segment, two placeholders in one segment, backtick/backslash/dollar escaping); comment-terminator
+  and newline neutralization in an `operationId` (a code-injection regression), path-template ↔
+  path-parameter agreement in both directions, `trace` emission, and path-item-level parameter
+  merging with operation-level override
+- `test/integration/client-resilience.test.ts` — Composed policy order, open-circuit skip, retry
+  rate-limiting, one-failure-per-exhausted-sequence, `HttpClientError` leaves breaker closed,
+  per-origin isolation
+- `test/e2e/generated-client.test.ts` — Generated fixture import, typed `createClient()` usage,
+  path/query/header/body forwarding through injected fetch
+- `test/fixtures/generated-client.ts` — Deterministic generated source fixture (compile-checked)
+- `test/fixtures/params-document.ts` — The OpenAPI document behind the compile-regression fixture,
+  shared by the unit test and the fixture so the two cannot drift
+- `test/fixtures/params-client.ts` — Compile-regression fixture pinning non-string and schemaless
+  parameters, a placeholder sharing a segment with literal text, and the required-`opts` rule.
+  Compiled by `deno task check` (which type-checks `test/`), so an emitted shape that does not
+  compile fails a real gate — no subprocess and no extra test permissions.
 
 ### Deliverables
 
-- [ ] SDK
-- [ ] HTTP client with interceptors
-- [ ] Code generation from OpenAPI
-- [ ] Full test coverage
+- [x] SDK
+- [x] HTTP client with interceptors
+- [x] Code generation from OpenAPI
+- [x] Full test coverage
 
 ---
 
@@ -4423,8 +4470,8 @@ implementation task.
       row names LaunchDarklyProvider.
 - [x] **README** — `packages/realtime-backplane-plugin/README.md`, including the transport table and
       the two structural limitations.
-- [x] **`scripts/release-packages.ts`** — the new package added to the ordered allow-list;
-      `release:verify` reports 37 packages.
+- [x] **`scripts/release-packages.ts`** — the new package added to the ordered allow-list, so
+      `release:verify` accounts for it.
 
 ---
 
@@ -4601,7 +4648,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 33        | ✅     | testing              |
 | 34        | ✅     | cli                  |
 | 34b       | ✅     | cli                  |
-| 35        | ⬜     | sdk                  |
+| 35        | ✅     | sdk                  |
 | 36        | ⬜     | starters             |
 | 37        | ⬜     | examples             |
 | 38        | ⬜     | documentation        |

@@ -163,12 +163,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Not yet built
 
-| Feature         | Status      | Description                                                        |
-| --------------- | ----------- | ------------------------------------------------------------------ |
-| SDK             | 📋 Designed | HTTP client with retry, circuit breaker, OpenAPI codegen (next up) |
-| Starter bundles | 📋 Designed | REST, microservice, and full-stack starters                        |
-| GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin                         |
-| gRPC            | 🚧 Planned  | Client and server support for microservice communication           |
+| Feature         | Status      | Description                                              |
+| --------------- | ----------- | -------------------------------------------------------- |
+| SDK             | ✅          | HTTP client with retry, circuit breaker, OpenAPI codegen |
+| Starter bundles | 📋 Designed | REST, microservice, and full-stack starters              |
+| GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin               |
+| gRPC            | 🚧 Planned  | Client and server support for microservice communication |
 
 ---
 
@@ -309,15 +309,15 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 hono-enterprise/
-├── packages/              # 40 workspace members — 35 published, 5 stubs
+├── packages/              # 41 workspace members — 38 published, 3 stubs
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
 │   ├── exceptions/        # Exception factories and error-handler middleware
 │   ├── testing/           # Test utilities
 │   ├── *-plugin/          # 30 capability plugins
-│   ├── cli/               # CLI tool — stub, Milestone 34
-│   ├── sdk/               # Client SDK — stub, Milestone 35
+│   ├── cli/               # CLI tool — `honoe`, project scaffolding and code generation
+│   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
 │   └── starters/          # Plugin bundles — stubs, Milestone 36
 ├── scripts/               # Coverage, plan linting, JSR release tooling
 ├── docs/                  # Operator guides (releasing, telemetry fan-out, …)
@@ -380,19 +380,19 @@ Each package also carries its own README with options, semantics, and a worked e
 | Features            | 28–32      | ✅     | Storage, mail, notifications, feature flags, multi-tenancy       |
 | Real-time & SSR     | 41–46      | ✅     | HTTP adapters, streaming, SSE, React SSR, worker pool, WebSocket |
 | Testing             | 33         | ✅     | Test utilities                                                   |
-| Tooling             | 34–36      | ⬜     | CLI, SDK, starter bundles                                        |
+| Tooling             | 34–36      | ⬜     | CLI (done), SDK (done), starter bundles                          |
 | Release engineering | 37–40      | ⬜     | Examples, documentation, Docker/K8s, final release               |
 
-Next up is **Milestone 34** (`packages/cli`). Detailed milestones, file structures, and interface
-definitions are documented in [`ROADMAP.md`](ROADMAP.md).
+Detailed milestones, file structures, and interface definitions are documented in
+[`ROADMAP.md`](ROADMAP.md).
 
 ---
 
 ## Contributing
 
 Contributions are welcome. The foundation is complete, so the most useful contributions right now
-are the remaining milestones (CLI, SDK, starters, examples), bug reports against the alpha, and
-plugins built on the capability model.
+are the remaining milestones (starters, examples), bug reports against the alpha, and plugins built
+on the capability model.
 
 ### Before You Write Code
 
