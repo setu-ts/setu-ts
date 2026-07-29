@@ -1815,6 +1815,50 @@ const res = await broker.request<Req, Res>('user.lookup', { userId: '42' }, { ti
 - [x] 90%+ per-file coverage on every changed `src/` file
 - [x] PUBLIC_API.md + README.md + ROADMAP.md updated in the same PR
 
+> **Superseded in part by Milestone 14d.** Kafka is reply-capable as of M14d, and
+> `MessagingNotSupportedError` is deprecated with no thrower.
+
+---
+
+## Milestone 14d: Messaging Plugin — Reply-Transport Seam & Kafka RPC ✅ COMPLETE
+
+**Objective:** Restore the per-broker reply-inbox seam M14c's plan specified but never built, use it
+to make Kafka reply-capable, and fix the two defects the generic path caused.
+
+> **Why this is a separate milestone.** M14c's plan (§3.2) called for a per-broker `IReplyTransport`
+> with `openInbox`; the implementation collapsed it into a `publish`/`subscribe`/`uuid`/timers
+> delegation object that all four reply-capable brokers passed identically. That works only because
+> those four treat a topic as cheap and per-instance-addressable — which is the actual reason Kafka
+> shipped a throw. No `common` contract change; `IMessageBroker` signatures are untouched.
+
+### Package: `@hono-enterprise/messaging-plugin` (extends M14/M14b/M14c)
+
+`RequestReplyDeps` gains `openInbox`, returning a `ReplyInbox` (`address` + `close`). The four
+existing brokers pass the shared `createTopicInbox` helper and are behaviour-identical.
+`KafkaBroker` supplies its own: a shared `replyTopic` (default `'messaging.replies'`, which must
+already exist — `IKafkaFactory` has no admin surface) read under a per-instance consumer group
+`rr-inbox-<uuid>`, so delivery is exclusive rather than load-balanced across the shared default
+group. Cross-instance replies are dropped by the existing correlation-id lookup, so no envelope
+change was needed.
+
+RPC traffic moves to a derived `rr.req.<topic>` channel — a **breaking wire change** against
+`0.1.0-alpha.2`, taken deliberately pre-1.0 — which fixes both defects at the routing layer: request
+envelopes no longer leak into plain `subscribe()` consumers, and a responder sharing a topic _and a
+queue_ with an ordinary subscriber no longer swallows that subscriber's messages (fan-out consumers
+were never affected).
+
+### Deliverables
+
+- [x] `ReplyInbox`/`OpenInbox` seam + shared `createTopicInbox` (`src/brokers/inbox.ts`, internal)
+- [x] `KafkaBroker.request`/`respond` implemented; both former throws removed
+- [x] `replyTopic` option threaded from `MessagingPluginOptions` through to the broker (tested by
+      round-trip, not by storage)
+- [x] D1 — RPC on `rr.req.<topic>`; regression pair proving pub/sub and RPC coexist on one topic
+- [x] D2 — reply inbox claims its own queue name
+- [x] `MessagingNotSupportedError` deprecated, not removed (AI_GUIDELINES §9.2)
+- [x] `common` JSDoc, PUBLIC_API.md, plugin README, CHANGELOG (BREAKING + Deprecated) in the same PR
+- [x] 90%+ per-file coverage on every changed `src/` file
+
 ---
 
 ## Milestone 15: Queue Plugin — Background Jobs
@@ -4398,6 +4442,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
 | 14c       | ✅     | messaging-plugin     |
+| 14d       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
 | 16        | ✅     | auth-plugin          |

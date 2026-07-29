@@ -6,8 +6,14 @@
  * the in-memory and Redis Streams adapters build metadata with none), the core
  * carries correlation *inside a message envelope* that rides each broker's
  * existing `publish`/`subscribe` path and its serializer. A broker gains
- * request-reply by delegating `request`/`respond` here, supplying only its own
- * `publish`, `subscribe`, `uuid`, and timer primitives.
+ * request-reply by delegating `request`/`respond` here, supplying its own
+ * `publish`, `subscribe`, `uuid`, timer primitives, and — because what counts
+ * as a reply inbox is transport-specific — its own {@link OpenInbox}.
+ *
+ * RPC traffic rides a channel derived from the caller's topic
+ * (`rr.req.<topic>`), keeping it disjoint from plain `publish`/`subscribe` on
+ * that topic: a pub/sub consumer never sees a request envelope, and a plain
+ * publish is never swallowed by a responder.
  *
  * @module
  */
@@ -19,10 +25,24 @@ import type {
   SubscribeOptions,
   TimerHandle,
 } from '@hono-enterprise/common';
+import type { OpenInbox, ReplyInbox } from './inbox.ts';
 import { RemoteHandlerError, RequestTimeoutError } from '../errors.ts';
 
 /** Default reply wait budget when {@link RequestOptions.timeoutMs} is omitted. */
 const DEFAULT_TIMEOUT_MS = 5000;
+
+/**
+ * Prefix separating the RPC channel from plain pub/sub on the same topic.
+ *
+ * Requests are published to, and responders subscribe to, `rr.req.<topic>` —
+ * never `<topic>` itself.
+ */
+const RR_REQUEST_PREFIX = 'rr.req.';
+
+/** Derives the RPC channel a request travels on from its caller-facing topic. */
+function requestChannel(topic: string): string {
+  return `${RR_REQUEST_PREFIX}${topic}`;
+}
 
 /** Envelope wrapping a request so its correlation travels with the payload. */
 interface RequestEnvelope {
@@ -60,6 +80,12 @@ export interface RequestReplyDeps {
   setTimeout(fn: () => void, ms: number): TimerHandle;
   /** Timer cancellation (the broker's `runtime.clearTimeout`). */
   clearTimeout(handle: TimerHandle): void;
+  /**
+   * Opens this broker's reply inbox. Transport-specific: brokers with cheap,
+   * per-instance-addressable topics pass `createTopicInbox(...)`, while a
+   * broker whose topics are durable cluster resources supplies its own.
+   */
+  openInbox: OpenInbox;
 }
 
 /** A request awaiting its correlated reply. */
@@ -86,18 +112,15 @@ function isReplyEnvelope(value: unknown): value is ReplyEnvelope {
  */
 export class RequestReplyCore {
   #deps: RequestReplyDeps;
-  #inboxTopic: string;
   #pending: Map<string, PendingRequest> = new Map();
-  #inboxSub: ISubscription | null = null;
-  #inboxInit: Promise<void> | null = null;
+  #inbox: ReplyInbox | null = null;
+  #inboxInit: Promise<ReplyInbox> | null = null;
 
   /**
    * @param deps - The broker primitives to compose over
    */
   constructor(deps: RequestReplyDeps) {
     this.#deps = deps;
-    // Unique per broker instance so replies never cross-talk between instances.
-    this.#inboxTopic = `rr.inbox.${deps.uuid()}`;
   }
 
   /**
@@ -113,7 +136,7 @@ export class RequestReplyCore {
    * @since 0.1.0
    */
   async request<TRes>(topic: string, message: unknown, options?: RequestOptions): Promise<TRes> {
-    await this.#ensureInbox();
+    const inbox = await this.#ensureInbox();
 
     const correlationId = this.#deps.uuid();
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -133,12 +156,12 @@ export class RequestReplyCore {
     const envelope: RequestEnvelope = {
       kind: 'rr-request',
       correlationId,
-      replyTo: this.#inboxTopic,
+      replyTo: inbox.address,
       payload: message,
     };
 
     try {
-      await this.#deps.publish(topic, envelope);
+      await this.#deps.publish(requestChannel(topic), envelope);
     } catch (err) {
       const pending = this.#pending.get(correlationId);
       if (pending) {
@@ -167,7 +190,7 @@ export class RequestReplyCore {
     handler: (message: unknown, metadata: MessageMetadata) => unknown | Promise<unknown>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    return this.#deps.subscribe(topic, async (message, metadata) => {
+    return this.#deps.subscribe(requestChannel(topic), async (message, metadata) => {
       if (!isRequestEnvelope(message)) {
         return;
       }
@@ -196,28 +219,29 @@ export class RequestReplyCore {
       pending.reject(new Error('Broker disconnected before a reply was received'));
     }
     this.#pending.clear();
-    if (this.#inboxSub) {
-      await this.#inboxSub.unsubscribe();
-      this.#inboxSub = null;
+    if (this.#inbox) {
+      await this.#inbox.close();
+      this.#inbox = null;
     }
     this.#inboxInit = null;
   }
 
   /**
-   * Lazily subscribes the per-instance reply inbox exactly once.
+   * Lazily opens the per-instance reply inbox exactly once.
    *
-   * A FAILED subscribe must not be cached: the promise was memoized
+   * A FAILED open must not be cached: the promise was memoized
    * unconditionally, so if the very first `request()` hit a broker that was
    * down, `#inboxInit` stayed a rejected promise and every later request failed
    * with that same stale error — forever, even after the broker recovered. On
    * rejection the memo is cleared so the next call retries.
    */
-  #ensureInbox(): Promise<void> {
+  #ensureInbox(): Promise<ReplyInbox> {
     if (!this.#inboxInit) {
-      this.#inboxInit = this.#deps.subscribe(this.#inboxTopic, (message) => {
+      this.#inboxInit = this.#deps.openInbox((message) => {
         this.#onReply(message);
-      }).then((sub) => {
-        this.#inboxSub = sub;
+      }).then((inbox) => {
+        this.#inbox = inbox;
+        return inbox;
       }).catch((error: unknown) => {
         this.#inboxInit = null;
         throw error;

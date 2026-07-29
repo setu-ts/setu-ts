@@ -138,6 +138,7 @@ export function MessagingPlugin(
         if (options.client !== undefined) kafkaOptions.client = options.client as IKafkaFactory;
         if (options.clientId !== undefined) kafkaOptions.clientId = options.clientId;
         if (options.defaultQueue !== undefined) kafkaOptions.defaultQueue = options.defaultQueue;
+        if (options.replyTopic !== undefined) kafkaOptions.replyTopic = options.replyTopic;
         if (logger !== undefined) kafkaOptions.logger = logger;
         broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
       } else {

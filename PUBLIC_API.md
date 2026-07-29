@@ -2231,6 +2231,8 @@ interface MessagingPluginOptions {
   brokers?: readonly string[];
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
+  /** Kafka request-reply topic; must already exist. @defaultValue 'messaging.replies' */
+  replyTopic?: string;
 }
 ````
 
@@ -2321,16 +2323,25 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 `request` rejects with one of three exported error classes (import from
 `@hono-enterprise/messaging-plugin` for `instanceof` handling):
 
-| Error                        | Thrown when                                                       |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                              |
-| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message. |
-| `MessagingNotSupportedError` | The broker cannot support request-reply (Kafka — see below).      |
+| Error                        | Thrown when                                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                             |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
+| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-> **Broker support.** Request-reply is available on the **in-memory, Redis Streams, RabbitMQ, and
-> NATS** brokers. The **Kafka** broker's consumer-group / auto-commit model makes per-caller reply
-> correlation an anti-pattern, so `KafkaBroker.request`/`respond` return a promise **rejected** with
-> `MessagingNotSupportedError`; use a reply-capable broker for RPC.
+> **Broker support.** Request-reply is available on **all five** brokers — in-memory, Redis Streams,
+> RabbitMQ, NATS, and Kafka.
+>
+> **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
+> default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
+> either pre-create it or enable `auto.create.topics.enable`. Each broker instance reads that topic
+> under its own consumer group, so every instance receives every reply and discards those it did not
+> originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+
+> **RPC and pub/sub are separate channels.** `request`/`respond` travel on a channel derived from
+> the topic, not on the topic itself. A plain `subscribe('orders', …)` therefore never observes an
+> RPC request, and a plain `publish('orders', …)` is never consumed by a responder on `'orders'`.
+> The two can share a topic name safely.
 
 ### Multiple Broker Instances
 
