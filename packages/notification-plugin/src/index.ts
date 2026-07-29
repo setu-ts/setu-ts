@@ -84,11 +84,21 @@ export { SlackChannel } from './channels/slack-channel.ts';
 export { TwilioProvider } from './providers/twilio-provider.ts';
 
 /**
- * `FcmProvider` — `PushTransport` over the legacy FCM server-key API.
+ * `FcmProvider` — `PushTransport` over the FCM HTTP v1 API, authenticated with
+ * a service-account OAuth2 token.
  *
  * @since 0.1.0
  */
 export { FcmProvider } from './providers/fcm-provider.ts';
+
+/**
+ * `FcmTokenSource` — supplies OAuth2 access tokens to {@linkcode FcmProvider}.
+ * Implement it to source tokens somewhere other than a locally held
+ * service-account key.
+ *
+ * @since 0.1.0
+ */
+export type { FcmTokenSource } from './interfaces/index.ts';
 
 /**
  * `SlackProvider` — `SlackTransport` over a Slack incoming webhook.

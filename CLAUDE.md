@@ -400,8 +400,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `sendEmail`/`sendSms`/`sendSlack` examples to the committed one-method `send` surface, dropped the
   email `options` bag, fixed the Twilio registration example that omitted the required `from`, and
   added the missing Notifications Options/Exports/Notes sections in the same PR; the legacy FCM
-  `serverKey` API it ships was decommissioned by Google in 2024 — FCM HTTP v1 with service-account
-  JWT signing is a follow-up) — complete (PR #65)
+  `serverKey` API it ships was decommissioned by Google in 2024 — **fixed in M30b**, which moves the
+  provider to FCM HTTP v1) — complete (PR #65)
+- **Milestone 30b** (`packages/notification-plugin` — FCM HTTP v1: M30's `FcmProvider` posted to
+  `POST /fcm/send` with `Authorization: key=<serverKey>`, the API Google switched off in 2024, so
+  the push channel could never succeed against a live project — a defect repair, not a feature. Now
+  posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted from a
+  service account: an internal `ServiceAccountTokenSource` signs an RS256 JWT assertion with
+  `runtime.subtle` (same route as M16's `JwtService`;
+  `importKey('pkcs8', …,
+  { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' })`), exchanges it at
+  `oauth2.googleapis.com/token` over the existing `INotificationHttp` seam, and caches both the
+  imported key and the token until 60 s before expiry — so a send costs one request in the steady
+  state. Zero npm dependencies, Workers-portable. `FcmProviderOptions.serverKey` is **replaced, not
+  deprecated**, by `{ projectId, clientEmail, privateKey }`: §9.2's deprecate-then-remove assumes a
+  working replacement path, and `serverKey` addressed a dead endpoint, so a compile error is the
+  correct signal (maintainer-approved). `createProvider`'s `fcm` arm now takes `IPluginContext` and
+  throws during `register` when `CAPABILITIES.RUNTIME` is absent, mirroring the `mail` arm — unless
+  an exported `FcmTokenSource` is supplied, which carries its own credentials (GCP metadata server,
+  key broker) and lifts the runtime requirement. `pemToDer` is a deliberate local copy:
+  auth-plugin's is internal and AI_GUIDELINES §2.2/§3.3 forbid a plugin importing another plugin. A
+  real-crypto test generates an RSA keypair, signs an assertion and verifies it, so the signing path
+  is exercised for real rather than only behind a fake. No `common` change, no new capability token;
+  developed in an isolated worktree off `main`) — complete (PR pending)
 - **Milestone 46** (`packages/websocket-plugin` — WebSocketPlugin registering an `IWebSocketService`
   under a new `CAPABILITIES.WEBSOCKET = 'websocket'` token; full-duplex bidirectional messaging,
   completing the real-time story M43's SSE plugin covers one-way. The RFC 6455 handshake needs the

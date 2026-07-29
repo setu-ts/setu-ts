@@ -3190,7 +3190,14 @@ app.register(NotificationPlugin({
         from: config.get('TWILIO_FROM'), // required — the sender number
       },
     },
-    push: { provider: 'fcm', options: { serverKey: config.get('FCM_SERVER_KEY') } },
+    push: {
+      provider: 'fcm',
+      options: {
+        projectId: config.get('FCM_PROJECT_ID'),
+        clientEmail: config.get('FCM_CLIENT_EMAIL'),
+        privateKey: config.get('FCM_PRIVATE_KEY'), // PEM PKCS#8, from the service-account JSON
+      },
+    },
     slack: { provider: 'slack', options: { webhookUrl: config.get('SLACK_WEBHOOK') } },
   },
 }));
@@ -3232,7 +3239,9 @@ app.router.post('/orders', async (ctx) => {
 | `channels`                                  | —                        | Required map of dispatch name → `ChannelConfig`. Keys are the names a caller passes in `send({ channels: [...] })`. |
 | `channels.*.provider`                       | —                        | `'mail' \| 'twilio' \| 'fcm' \| 'slack'` — selects the channel class and transport.                                 |
 | `options.accountSid` / `authToken` / `from` | `twilio`                 | Twilio credentials and sender number; all three required (construction throws).                                     |
-| `options.serverKey`                         | `fcm`                    | FCM legacy server key; required (construction throws).                                                              |
+| `options.projectId`                         | `fcm`                    | Firebase project id, addressed by the v1 `messages:send` URL; required (construction throws).                       |
+| `options.clientEmail` / `privateKey`        | `fcm`                    | Service-account email and PEM PKCS#8 key that sign the OAuth2 assertion; required unless `tokenSource` is supplied. |
+| `options.tokenSource`                       | `fcm`                    | Overrides token acquisition (e.g. a GCP metadata server); when set the credential fields above are unused.          |
 | `options.webhookUrl`                        | `slack`                  | Slack incoming-webhook URL; required (construction throws).                                                         |
 | `options.http`                              | `twilio`, `fcm`, `slack` | Injected `INotificationHttp` (defaults to `createDefaultNotificationHttp()`, i.e. global `fetch`).                  |
 
@@ -3276,8 +3285,12 @@ through `CAPABILITIES.MAIL`.
   the misconfiguration surfaces at startup rather than at first send.
 - All three HTTP providers are zero-dependency (web-standard `fetch`) and Workers-portable; the
   email channel inherits M29's provider constraints (`SmtpProvider` needs raw sockets).
-  `FcmProvider` targets the legacy `serverKey` API (`POST /fcm/send`); HTTP v1 with OAuth2
-  service-account signing is not implemented.
+  `FcmProvider` targets **FCM HTTP v1** (`POST /v1/projects/{projectId}/messages:send`),
+  authenticating with an OAuth2 bearer token minted from a service account: it signs an RS256 JWT
+  assertion with `runtime.subtle` and caches the resulting token until shortly before it expires, so
+  a send costs one request in the steady state. A `push` channel using the default signer therefore
+  requires `CAPABILITIES.RUNTIME` and throws during `register` without it; supplying `tokenSource`
+  removes that requirement.
 - A `notification` health indicator reports `'up'` with the configured channel names. There is no
   `onClose`: the providers hold no socket, timer, or connection.
 

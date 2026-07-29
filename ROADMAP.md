@@ -3191,6 +3191,47 @@ await notifier.send({
 - [x] Email, SMS, Push, Slack channels
 - [x] Full test coverage
 
+> **Superseded in part by Milestone 30b.** The push channel shipped against the legacy FCM
+> `serverKey` API, which Google had already decommissioned; M30b moves it to FCM HTTP v1.
+
+---
+
+## Milestone 30b: Notification Plugin — FCM HTTP v1 ✅ COMPLETE
+
+**Objective:** Make push delivery actually work by replacing the decommissioned legacy FCM API with
+FCM HTTP v1 and service-account OAuth2.
+
+> **Why this is a separate milestone.** Mirrors the M14b/M15b/M16b/M24b pattern: a scoped follow-up
+> to a shipped plugin, no `common` change and no new capability token. M30 shipped a provider that
+> could never succeed against a live project — the `POST /fcm/send` endpoint it targets was switched
+> off in 2024 — so this is a defect repair, not a feature.
+
+### Package: `@hono-enterprise/notification-plugin` (extends M30)
+
+`FcmProvider` posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted
+from a service account: an RS256 JWT assertion signed with `runtime.subtle` and exchanged at
+Google's token endpoint, cached until shortly before expiry. Zero npm dependencies and
+Workers-portable, the same posture as the other HTTP providers and the same crypto route M16's
+`JwtService` proves.
+
+`FcmProviderOptions.serverKey` is **replaced** (not deprecated) by
+`{ projectId, clientEmail,
+privateKey }` — a breaking change, deliberately, because the option
+addressed a dead endpoint and a compile error is the correct signal. An exported `FcmTokenSource`
+covers sourcing tokens from a GCP metadata server or an external key holder instead.
+
+### Deliverables
+
+- [x] FCM HTTP v1 endpoint, Bearer auth, and `{ message: { token, notification } }` payload
+- [x] `ServiceAccountTokenSource` — RS256 assertion signing, OAuth2 exchange, key + token caching
+- [x] Exported `FcmTokenSource` seam; local `pemToDer` (auth-plugin's copy is internal and
+      cross-plugin imports are forbidden)
+- [x] `createProvider`'s `fcm` arm takes `IPluginContext` and fails fast at `register` without a
+      runtime, mirroring the `mail` arm
+- [x] Real-crypto test: a generated RSA keypair signs an assertion that is then verified
+- [x] 90%+ per-file coverage on every changed `src/` file
+- [x] PUBLIC_API.md, plugin README, CHANGELOG (BREAKING + superseded note), ROADMAP, CLAUDE.md
+
 ---
 
 ## Milestone 31: Feature Flags Plugin
@@ -4463,6 +4504,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
 | 30        | ✅     | notification-plugin  |
+| 30b       | ✅     | notification-plugin  |
 | 31        | ✅     | feature-flags-plugin |
 | 32        | ✅     | multi-tenancy-plugin |
 | 33        | ✅     | testing              |

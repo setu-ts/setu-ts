@@ -68,7 +68,18 @@ describe('notification-plugin integration (through a real kernel app)', () => {
                 http: smsHttp,
               },
             },
-            push: { provider: 'fcm', options: { serverKey: 'srv-key', http: pushHttp } },
+            push: {
+              provider: 'fcm',
+              options: {
+                projectId: 'my-project',
+                // A stub token source keeps this test on the send path; the
+                // real RS256 signing is covered in the token-source unit tests.
+                tokenSource: {
+                  getAccessToken: (): Promise<string> => Promise.resolve('ya29.test-token'),
+                },
+                http: pushHttp,
+              },
+            },
             slack: {
               provider: 'slack',
               options: { webhookUrl: 'https://hooks.slack.com/services/T/B/X', http: slackHttp },
@@ -119,14 +130,16 @@ describe('notification-plugin integration (through a real kernel app)', () => {
     expect(smsCall?.headers['Authorization']).toBe(`Basic ${btoa('AC_test:tok')}`);
     expect(smsCall?.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
 
-    // Push — FCM legacy server-key POST.
+    // Push — FCM HTTP v1 POST, bearer-authenticated and project-addressed.
     const pushCall = pushHttp.getLastCall();
-    expect(pushCall?.url).toBe('https://fcm.googleapis.com/fcm/send');
+    expect(pushCall?.url).toBe('https://fcm.googleapis.com/v1/projects/my-project/messages:send');
     expect(JSON.parse(pushCall!.body)).toEqual({
-      to: 'device-token-1',
-      notification: { title: 'Order Confirmed', body: 'Your order 42 has been confirmed.' },
+      message: {
+        token: 'device-token-1',
+        notification: { body: 'Your order 42 has been confirmed.', title: 'Order Confirmed' },
+      },
     });
-    expect(pushCall?.headers['Authorization']).toBe('key=srv-key');
+    expect(pushCall?.headers['Authorization']).toBe('Bearer ya29.test-token');
 
     // Slack — incoming-webhook JSON POST.
     const slackCall = slackHttp.getLastCall();

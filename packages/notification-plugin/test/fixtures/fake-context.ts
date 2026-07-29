@@ -31,9 +31,14 @@ export function createFakeContext(services?: Readonly<Record<string, unknown>>):
   const registered = new Map<string, unknown>(Object.entries(services ?? {}));
   const healthIndicators = new Map<string, () => Promise<HealthCheckResult>>();
 
+  // `subtle` and `now` are real: the FCM provider signs a service-account
+  // assertion with Web Crypto and expires cached tokens against the wall clock,
+  // so a stub that omitted them would let a broken signing path pass.
   const runtime = {
     env: {},
     hrtime: (): number => performance.now(),
+    now: (): number => Date.now(),
+    subtle: crypto.subtle,
   } as unknown as IRuntimeServices;
   registered.set(CAPABILITIES.RUNTIME, runtime);
 
