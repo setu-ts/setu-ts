@@ -4,6 +4,61 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Closes three of the known limitations recorded against `0.1.0-alpha.1`.** Each was a real
+capability gap rather than a documentation problem, so each is fixed in code and its entry removed
+from that release's list rather than reworded.
+
+### Added
+
+- **`@hono-enterprise/realtime-backplane-plugin`** — cross-replica fan-out for WebSocket rooms and
+  SSE channels, bringing the published total to **37 packages**. It registers an
+  `IRealtimeBackplane` under the new `CAPABILITIES.REALTIME_BACKPLANE` token, which
+  `websocket-plugin` and `sse-plugin` resolve **optionally** — so adding the plugin is the entire
+  change needed to make `ws.room('lobby')` and `sse.channel('news')` reach clients on other
+  replicas, and removing it restores in-process behavior with no application change. Four
+  transports: `'memory'` (the default, and a real single-process bus rather than a no-op),
+  `'messaging'` (over whatever broker is registered under `CAPABILITIES.MESSAGING`, reusing all five
+  existing brokers with no new dependency), `'redis'` (pub/sub over an inject-or-lazy `ioredis`),
+  and `'custom'`.
+- **A LaunchDarkly provider** for `@hono-enterprise/feature-flags-plugin`
+  (`provider: 'launchdarkly'`), plus an optional `IFeatureFlags.isEnabledAsync` for callers that can
+  await an answer carrying no cold-context caveat.
+- **Real cancellation** in `@hono-enterprise/resilience-plugin`: `wrap` hands the protected call an
+  `AbortSignal`, and the returned callable accepts an optional caller-owned one.
+
+### Changed
+
+- **`IResilienceService.wrap` and `ICircuitBreaker.execute` widened.** `wrap<T>` now takes a
+  `ResilientCall<T>` (`(signal: AbortSignal) => Promise<T>`) and returns a `HardenedCall<T>`
+  (`(signal?: AbortSignal) => Promise<T>`). **Source-compatible for callers** — a zero-argument
+  `() => Promise<T>` is still accepted and `await guarded()` still works — but **breaking for
+  implementors**, because `fn` sits in a contravariant position, so an object literal declaring
+  `wrap<T>(fn: () => Promise<T>)` no longer satisfies the interface. Implementors add the parameter.
+- **`websocket-plugin` and `sse-plugin` `register()` are now async**, awaiting the optional
+  backplane subscription. The kernel already awaited an async `register`, so applications are
+  unaffected; a test calling `plugin.register(ctx)` directly must now await it.
+
+### Fixed
+
+- **Resilience timeouts cancel the work they bound.** `timeout` raced the protected call against a
+  timer and left it running; it now aborts the call's signal with the same `TimeoutError` instance
+  it rejects with, so a call that forwards the signal to its I/O genuinely stops. Retry stops
+  looping on abort and wakes its backoff early — that sleep also no longer leaks a timer handle on
+  every attempt — and a bulkhead waiter cancelled while queued leaves the queue and never runs its
+  call.
+
+### Notes
+
+Two real-time limitations are structural and remain, documented rather than silently approximated:
+`Room.size` / `SseChannel.size` report **local** membership, and `RoomBroadcastOptions.except` is
+honored only on the originating replica, because it names a live in-process connection with no
+cross-process identity. Cluster-wide presence is a later milestone.
+
+A call that ignores its `AbortSignal` still runs to completion; cancellation is cooperative, and the
+widened JSDoc says so.
+
 ## [0.1.0-alpha.2] — 2026-07-28
 
 **Adds the CLI.** `@hono-enterprise/cli` publishes for the first time, bringing the total to **36
@@ -140,18 +195,14 @@ are never hard dependencies. Each is injected through plugin options or imported
 
 ### Known limitations
 
+> Three entries from this list — LaunchDarkly support, cross-replica rooms and channels, and
+> non-cancelling resilience timeouts — were closed after this release; see **[Unreleased]**.
+
 - **`notification-plugin` FCM push is non-functional.** It implements the legacy FCM `serverKey`
   API, which Google decommissioned in 2024. FCM HTTP v1 with service-account JWT signing is a
   follow-up.
-- **LaunchDarkly is unsupported** in `feature-flags-plugin`. The LaunchDarkly Node server SDK's
-  `variation`/`allFlagsState` are async and cannot satisfy the synchronous committed `isEnabled`
-  contract. Use the provider's `'custom'` arm as a bridge.
 - **`KafkaBroker` does not support request-reply.** Kafka's consumer-group and auto-commit model
   does not fit the pattern; `request()`/`respond()` throw `MessagingNotSupportedError`.
-- **Rooms and channels are in-process.** `websocket-plugin` rooms and `sse-plugin` channels are not
-  shared across replicas; cross-instance fan-out is a later milestone.
-- **`resilience-plugin` timeouts do not cancel.** `timeout` races the promise; the wrapped function
-  keeps running.
 - **Node and Bun compatibility suites have not run.** They consume the packages through JSR's npm
   compatibility layer and were therefore blocked on this publish — they are unblocked by it, and
   will run before the first stable release. Milestone 40 owns that verification, alongside
