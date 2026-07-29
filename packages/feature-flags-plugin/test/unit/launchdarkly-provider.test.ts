@@ -364,3 +364,45 @@ describe('LaunchDarklyProvider', () => {
     });
   });
 });
+
+describe('LaunchDarklyProvider start() rollback', () => {
+  it('does not mark itself started when the client cannot be built', async () => {
+    const client = new FakeLaunchDarklyClient({ values: { __anonymous__: { beta: true } } });
+    const module = new FakeLaunchDarklyModule(client);
+    // First attempt fails: no sdkKey and no injected client.
+    const provider = new LaunchDarklyProvider({ module });
+    await expect(provider.start()).rejects.toThrow('requires options.sdkKey');
+
+    // A retry must actually retry rather than resolve silently and leave every
+    // evaluation stuck on the fallback forever.
+    const fixed = new LaunchDarklyProvider({ sdkKey: 'k', module });
+    await fixed.start();
+    expect(fixed.status().healthy).toBe(true);
+    expect(fixed.isEnabled('beta')).toBe(true);
+    await fixed.stop();
+  });
+
+  it('a second start() after a failure still builds the client', async () => {
+    const client = new FakeLaunchDarklyClient({ values: { __anonymous__: { beta: true } } });
+    let failNext = true;
+    const provider = new LaunchDarklyProvider({
+      sdkKey: 'k',
+      module: {
+        init: (): typeof client => {
+          if (failNext) {
+            failNext = false;
+            throw new Error('transient SDK failure');
+          }
+          return client;
+        },
+      },
+    });
+
+    await expect(provider.start()).rejects.toThrow('transient SDK failure');
+    // Previously this resolved with no client and wedged the provider.
+    await provider.start();
+    expect(provider.status().healthy).toBe(true);
+    expect(provider.isEnabled('beta')).toBe(true);
+    await provider.stop();
+  });
+});

@@ -6,7 +6,7 @@
 import type { ResilientCall } from '@hono-enterprise/common';
 import type { ITimers } from '../interfaces/index.ts';
 import { TimeoutError } from '../errors.ts';
-import { linkAbort } from './abort.ts';
+import { linkAbort, throwIfAborted } from './abort.ts';
 
 /**
  * Runs `fn` under a `ms`-millisecond deadline, aborting the signal it receives
@@ -25,7 +25,10 @@ import { linkAbort } from './abort.ts';
  *
  * An `outer` signal is linked in: aborting it cancels the attempt with the
  * caller's own reason. The link is removed and the deadline timer cleared in a
- * `finally`, so neither a handle nor a listener leaks.
+ * `finally`, so neither a handle nor a listener leaks. An `outer` that is
+ * ALREADY aborted rejects before `fn` is invoked — a cancelled operation must
+ * not start new work, which is the same rule the retry and bulkhead layers
+ * follow.
  *
  * @typeParam T - The protected call's result type
  * @param fn - The protected call
@@ -41,6 +44,8 @@ export async function runWithTimeout<T>(
   timers: ITimers,
   outer?: AbortSignal,
 ): Promise<T> {
+  throwIfAborted(outer);
+
   const controller = new AbortController();
   const unlink = linkAbort(outer, controller);
 

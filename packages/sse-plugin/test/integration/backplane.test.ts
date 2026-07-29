@@ -11,6 +11,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type {
+  ILogger,
   IRealtimeBackplane,
   ISseConnection,
   RealtimeFrame,
@@ -219,5 +220,46 @@ describe('SSE channels across replicas', () => {
     service.channel('news').publish({ data: 'local only' });
 
     expect(member.sent).toEqual([{ data: 'local only' }]);
+  });
+});
+
+describe('SSE backplane failure reporting', () => {
+  it('logs a failed fan-out instead of swallowing it', async () => {
+    const warnings: Array<{ message: string; metadata?: Record<string, unknown> }> = [];
+    const logger: ILogger = {
+      level: 'info',
+      fatal: (): void => {},
+      error: (): void => {},
+      warn: (message: string, metadata?: Record<string, unknown>): void => {
+        warnings.push(metadata === undefined ? { message } : { message, metadata });
+      },
+      info: (): void => {},
+      debug: (): void => {},
+      trace: (): void => {},
+      child: (): ILogger => logger,
+    };
+
+    const failing: IRealtimeBackplane = {
+      origin: 'node-a',
+      connect: () => Promise.resolve(),
+      publish: () => Promise.reject(new Error('redis unreachable')),
+      subscribe: () => Promise.resolve(() => {}),
+      close: () => Promise.resolve(),
+    };
+
+    const service = new SseService(undefined, createFakeRuntime(), failing, logger);
+    const member = fakeConnection('local');
+    service.channel('news').add(member);
+
+    service.channel('news').publish({ data: 'still local' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Local delivery is unaffected...
+    expect(member.sent).toEqual([{ data: 'still local' }]);
+    // ...and the degradation to local-only is visible rather than silent.
+    const failure = warnings.find((w) => w.message.includes('backplane publish failed'));
+    expect(failure).toBeDefined();
+    expect(failure?.metadata?.channel).toBe('news');
+    expect(failure?.metadata?.error).toBe('redis unreachable');
   });
 });

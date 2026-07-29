@@ -270,3 +270,29 @@ describe('RedisBackplane', () => {
     await backplane.publish(FRAME);
   });
 });
+
+describe('RedisBackplane handler isolation', () => {
+  it('continues delivering after a handler throws, and never throws into the driver', async () => {
+    const client = new FakeRedisClient();
+    const subscriber = new FakeRedisClient();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber },
+      'node-a',
+      'realtime',
+    );
+    await backplane.connect();
+
+    const reached: string[] = [];
+    await backplane.subscribe(() => {
+      throw new Error('consumer blew up');
+    });
+    await backplane.subscribe(() => reached.push('second'));
+
+    // `emit` stands in for ioredis dispatching its `message` event; a throw
+    // escaping here would be unhandled inside the driver.
+    expect(() => subscriber.emit('realtime', JSON.stringify(FRAME))).not.toThrow();
+    expect(reached).toEqual(['second']);
+    expect(backplane.handlerErrors.map((e) => e.message)).toEqual(['consumer blew up']);
+    await backplane.close();
+  });
+});

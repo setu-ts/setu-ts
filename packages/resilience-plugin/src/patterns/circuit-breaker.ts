@@ -11,6 +11,7 @@ import type {
   ResilientCall,
 } from '@hono-enterprise/common';
 import { CircuitOpenError } from '../errors.ts';
+import { throwIfAborted } from './abort.ts';
 
 /**
  * A circuit breaker protecting an unreliable dependency.
@@ -64,6 +65,10 @@ export class CircuitBreaker implements ICircuitBreaker {
    * invoking `fn`), or while another half-open probe is already in flight
    */
   async execute<T>(fn: ResilientCall<T>, signal?: AbortSignal): Promise<T> {
+    // A cancelled call must not consume a half-open probe slot or count a
+    // failure against the rolling window.
+    throwIfAborted(signal);
+
     if (this.#state === 'open') {
       if (!this.#cooldownElapsed()) {
         throw new CircuitOpenError();

@@ -192,3 +192,24 @@ describe('MessagingBackplane', () => {
     expect(broker.unsubscribeCount).toBe(1);
   });
 });
+
+describe('MessagingBackplane handler isolation', () => {
+  it('continues delivering after a handler throws, and records the error', async () => {
+    const broker = new FakeBroker();
+    const backplane = new MessagingBackplane(broker, 'node-a', 'realtime');
+    await backplane.connect();
+
+    const reached: string[] = [];
+    await backplane.subscribe(() => {
+      throw new Error('consumer blew up');
+    });
+    await backplane.subscribe(() => reached.push('second'));
+
+    // Runs inside the broker's delivery callback — a throw there is unhandled.
+    broker.deliver(FRAME);
+
+    expect(reached).toEqual(['second']);
+    expect(backplane.handlerErrors.map((e) => e.message)).toEqual(['consumer blew up']);
+    await backplane.close();
+  });
+});

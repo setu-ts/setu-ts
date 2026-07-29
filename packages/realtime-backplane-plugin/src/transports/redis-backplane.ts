@@ -11,6 +11,7 @@ import type {
   RealtimeFrameHandler,
 } from '@hono-enterprise/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
+import { dispatchFrame } from './dispatch.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';
 import { loadRedisModule } from './redis-module.ts';
 
@@ -38,6 +39,8 @@ export class RedisBackplane implements IRealtimeBackplane {
   readonly #topic: string;
   readonly #options: RedisBackplaneOptions;
   readonly #handlers = new Set<RealtimeFrameHandler>();
+  /** Errors thrown by subscribers during delivery, oldest first. */
+  readonly #handlerErrors: Error[] = [];
 
   #publisher: IRedisBackplaneClient | undefined;
   #subscriber: IRedisBackplaneClient | undefined;
@@ -71,6 +74,11 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#options = options;
     this.origin = origin;
     this.#topic = topic;
+  }
+
+  /** Errors thrown by subscribers during delivery, oldest first. */
+  get handlerErrors(): readonly Error[] {
+    return this.#handlerErrors;
   }
 
   /** Builds the client pair when needed, then subscribes. */
@@ -152,8 +160,11 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (!isRealtimeFrame(parsed) || parsed.origin === this.origin) {
       return;
     }
-    for (const handler of this.#handlers) {
-      handler(parsed);
-    }
+    // Isolated per handler: this runs inside ioredis's `message` listener,
+    // where a throw would be unhandled, and the WebSocket and SSE plugins share
+    // this subscription so one must not starve the other.
+    dispatchFrame(this.#handlers, parsed, (error) => {
+      this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+    });
   }
 }

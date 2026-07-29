@@ -236,7 +236,22 @@ export class WebSocketService implements IWebSocketService {
     if (frame.kind !== 'ws-room' || frame.origin === this.#backplane?.origin) {
       return;
     }
-    this.#rooms.deliverRemote(frame.name, decodeFrameData(frame), frame.exceptId);
+    // A backplane topic is shared infrastructure: a frame can be well-SHAPED
+    // (so the transport's guard admits it) while its payload is not valid
+    // base64, and `atob` throws on that. Letting it escape would abort the
+    // transport's fan-out and starve the SSE consumer subscribed alongside us.
+    // The SSE path guards its own `JSON.parse` for the same reason.
+    let data: string | Uint8Array;
+    try {
+      data = decodeFrameData(frame);
+    } catch (error) {
+      this.#logger?.warn('websocket: dropping an undecodable backplane frame', {
+        room: frame.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    this.#rooms.deliverRemote(frame.name, data, frame.exceptId);
   }
 
   /**

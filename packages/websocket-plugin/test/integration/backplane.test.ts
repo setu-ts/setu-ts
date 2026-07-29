@@ -278,3 +278,47 @@ describe('WebSocket rooms across replicas', () => {
     await Promise.resolve();
   });
 });
+
+describe('WebSocket backplane frame robustness', () => {
+  it('drops an undecodable binary frame instead of throwing', async () => {
+    const [, bPlane] = createBackplanePair();
+    const b = await serviceOn(bPlane);
+
+    const member = fakeConnection('member');
+    b.room('lobby').add(member);
+
+    // Well-SHAPED (so the transport guard admits it) but not valid base64.
+    // atob throws on this; letting it escape would abort the transport's
+    // fan-out and starve the SSE consumer subscribed alongside.
+    expect(() =>
+      b.deliverRemoteFrame({
+        kind: 'ws-room',
+        origin: 'node-a',
+        name: 'lobby',
+        data: '!!!not base64!!!',
+        binary: true,
+      })
+    ).not.toThrow();
+
+    expect(member.sent).toEqual([]);
+  });
+
+  it('still delivers a well-formed frame after an undecodable one', async () => {
+    const [, bPlane] = createBackplanePair();
+    const b = await serviceOn(bPlane);
+
+    const member = fakeConnection('member');
+    b.room('lobby').add(member);
+
+    b.deliverRemoteFrame({
+      kind: 'ws-room',
+      origin: 'node-a',
+      name: 'lobby',
+      data: '@@@',
+      binary: true,
+    });
+    b.deliverRemoteFrame({ kind: 'ws-room', origin: 'node-a', name: 'lobby', data: 'good' });
+
+    expect(member.sent).toEqual(['good']);
+  });
+});

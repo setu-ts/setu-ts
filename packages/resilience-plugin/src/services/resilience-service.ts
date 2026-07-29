@@ -15,6 +15,7 @@ import type {
   WrapOptions,
 } from '@hono-enterprise/common';
 import type { ITimers, ResiliencePluginOptions } from '../interfaces/index.ts';
+import { throwIfAborted } from '../patterns/abort.ts';
 import { CircuitBreaker } from '../patterns/circuit-breaker.ts';
 import { Bulkhead } from '../patterns/bulkhead.ts';
 import { runWithRetry } from '../patterns/retry.ts';
@@ -95,7 +96,18 @@ export class ResilienceService implements IResilienceService {
     }
 
     const chain = call;
-    return (signal?: AbortSignal): Promise<T> => chain(signal ?? neverAborted);
+    // `async` is load-bearing: `throwIfAborted` must surface as a REJECTED
+    // promise, never a synchronous throw, or `guarded(sig).catch(...)` would
+    // raise instead of catching and `HardenedCall`'s `Promise<T>` return type
+    // would be a lie.
+    return async (signal?: AbortSignal): Promise<T> => {
+      // Checked here rather than only inside the layers, so EVERY configuration
+      // behaves the same — including a wrap with no layers at all, and the
+      // timeout-only and breaker-only chains, which would otherwise invoke the
+      // call and resolve successfully for a caller that had already cancelled.
+      throwIfAborted(signal);
+      return await chain(signal ?? neverAborted);
+    };
   }
 
   /** Resolves the effective circuit-breaker policy, or `undefined` for none. */

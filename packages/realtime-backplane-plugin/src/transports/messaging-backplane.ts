@@ -12,6 +12,7 @@ import type {
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@hono-enterprise/common';
+import { dispatchFrame } from './dispatch.ts';
 
 /**
  * Narrows an arriving broker payload to a {@linkcode RealtimeFrame}.
@@ -55,6 +56,8 @@ export class MessagingBackplane implements IRealtimeBackplane {
   readonly #broker: IMessageBroker;
   readonly #topic: string;
   readonly #handlers = new Set<RealtimeFrameHandler>();
+  /** Errors thrown by subscribers during delivery, oldest first. */
+  readonly #handlerErrors: Error[] = [];
   #subscription: ISubscription | undefined;
 
   /**
@@ -75,6 +78,11 @@ export class MessagingBackplane implements IRealtimeBackplane {
    * would make each consumer plugin a competing consumer on brokers that
    * load-balance, so only one of them would see any given frame.
    */
+  /** Errors thrown by subscribers during delivery, oldest first. */
+  get handlerErrors(): readonly Error[] {
+    return this.#handlerErrors;
+  }
+
   async connect(): Promise<void> {
     if (this.#subscription !== undefined) {
       return;
@@ -88,9 +96,13 @@ export class MessagingBackplane implements IRealtimeBackplane {
         if (message.origin === this.origin) {
           return;
         }
-        for (const handler of this.#handlers) {
-          handler(message);
-        }
+        // Isolated per handler: the WebSocket and SSE plugins share this
+        // subscription, so one consumer throwing must not starve the other,
+        // and this loop runs inside the broker's delivery callback where
+        // nothing above would catch a throw.
+        dispatchFrame(this.#handlers, message, (error) => {
+          this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+        });
       },
     );
   }

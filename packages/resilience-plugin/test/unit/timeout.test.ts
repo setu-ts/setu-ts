@@ -109,26 +109,33 @@ describe('runWithTimeout cancellation', () => {
     expect(caught).toBe(reason);
   });
 
-  it('aborts immediately when the outer signal was already aborted', async () => {
+  it('rejects without invoking fn when the outer signal was already aborted', async () => {
     const runtime = new FakeRuntime();
     const outer = new AbortController();
-    outer.abort(new Error('already gone'));
-    let seenAbortedAtEntry: boolean | undefined;
+    const reason = new Error('already gone');
+    outer.abort(reason);
+    let started = false;
 
-    const result = await runWithTimeout(
-      (signal) => {
-        seenAbortedAtEntry = signal.aborted;
-        return Promise.resolve('ran anyway');
-      },
-      1000,
-      runtime,
-      outer.signal,
-    );
+    let caught: unknown;
+    try {
+      await runWithTimeout(
+        () => {
+          started = true;
+          return Promise.resolve('ran anyway');
+        },
+        1000,
+        runtime,
+        outer.signal,
+      );
+    } catch (error) {
+      caught = error;
+    }
 
-    // The call is still invoked, but it is handed an already-aborted signal, so
-    // a signal-aware call short-circuits rather than starting real work.
-    expect(seenAbortedAtEntry).toBe(true);
-    expect(result).toBe('ran anyway');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A cancelled operation must not start new work — the same rule the retry
+    // and bulkhead layers already followed.
+    expect(caught).toBe(reason);
+    expect(started).toBe(false);
+    // No deadline was armed either, so nothing is left pending.
+    expect(runtime.armedDelays).toEqual([]);
   });
 });

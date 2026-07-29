@@ -56,7 +56,7 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         : undefined;
 
       // Build and register the SSE service, threading the real runtime in.
-      const sseService = new SseService(options, runtime, backplane);
+      const sseService = new SseService(options, runtime, backplane, ctx.logger);
       ctx.services.register<ISseService>(CAPABILITIES.SSE, sseService);
 
       // Register health indicator (§3.9).

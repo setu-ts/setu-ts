@@ -1511,6 +1511,18 @@ Omitting an option disables that behaviour (no timer created).
 - `ISseConnection.lastEventId` — the value of the `Last-Event-ID` request header (for resume logic).
 - `SseChannel.publish(msg)` — broadcast to every open member, skipping closed ones.
 
+### Exports
+
+| Symbol                                                      | Kind              | Description                                                         |
+| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------- |
+| `SsePlugin`                                                 | function          | Plugin factory — registers `ISseService` under `CAPABILITIES.SSE`   |
+| `SseService`                                                | class             | The `ISseService` implementation                                    |
+| `SseConnection`                                             | class             | A live SSE connection over a `ReadableStream`                       |
+| `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`                                            |
+| `ChannelPublisher`                                          | type              | Forwards a local publish to other replicas; supplied by a backplane |
+| `ISseConnection`, `ISseService`, `SseChannel`, `SseMessage` | type (re-export)  | From `@hono-enterprise/common`                                      |
+| `CAPABILITIES`                                              | const (re-export) | From `@hono-enterprise/common`                                      |
+
 ### Notes
 
 - Built entirely on web-standard `ReadableStream`; no platform-specific server socket APIs.

@@ -141,3 +141,27 @@ describe('MemoryBackplane', () => {
     await a.publish(frame('node-a'));
   });
 });
+
+describe('MemoryBackplane handler isolation', () => {
+  it('continues delivering after a handler throws, and records the error', async () => {
+    const a = new MemoryBackplane('node-a', 'iso-1');
+    const b = new MemoryBackplane('node-b', 'iso-1');
+    await a.connect();
+    await b.connect();
+
+    const reached: string[] = [];
+    await b.subscribe(() => {
+      throw new Error('websocket consumer blew up');
+    });
+    await b.subscribe(() => reached.push('sse consumer'));
+
+    await a.publish(frame('node-a'));
+
+    // Both plugins subscribe to one backplane; one throwing must not starve
+    // the other, and publish() must not reject for the publisher either.
+    expect(reached).toEqual(['sse consumer']);
+    expect(b.handlerErrors.map((e) => e.message)).toEqual(['websocket consumer blew up']);
+    await a.close();
+    await b.close();
+  });
+});

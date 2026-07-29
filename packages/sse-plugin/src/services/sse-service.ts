@@ -9,6 +9,7 @@
  */
 
 import type {
+  ILogger,
   IRealtimeBackplane,
   IRequestContext,
   IRuntimeServices,
@@ -35,6 +36,8 @@ export class SseService implements IService {
   readonly #runtime: IRuntimeServices;
   /** The cross-replica transport, when one was registered. */
   readonly #backplane: IRealtimeBackplane | undefined;
+  /** Optional logger used to report a failed cross-replica fan-out. */
+  readonly #logger: ILogger | undefined;
 
   /**
    * @param options - Plugin options (heartbeatMs, retryMs); may be undefined
@@ -42,17 +45,20 @@ export class SseService implements IService {
    * @param backplane - Optional cross-replica transport. When present, every
    *   channel publish is also sent to it; when absent, channels stay purely
    *   in-process, which is the behavior before the backplane existed.
+   * @param logger - Optional logger used to report a failed fan-out
    * @since 0.1.0
    */
   constructor(
     options: SsePluginOptions | undefined,
     runtime: IRuntimeServices,
     backplane?: IRealtimeBackplane,
+    logger?: ILogger,
   ) {
     this.#heartbeatMs = options?.heartbeatMs;
     this.#retryMs = options?.retryMs;
     this.#runtime = runtime;
     this.#backplane = backplane;
+    this.#logger = logger;
     this.#registry = new ChannelRegistry(
       backplane === undefined ? undefined : (name, msg): void => {
         const frame: RealtimeFrame = {
@@ -64,11 +70,14 @@ export class SseService implements IService {
           data: JSON.stringify(msg),
         };
         // Fire-and-forget: a transport failure must never make a local publish
-        // throw for the application that issued it.
-        void backplane.publish(frame).catch(() => {
-          // The SSE service holds no logger; a failed fan-out degrades to
-          // local-only delivery, which the health indicator's transport data
-          // already lets an operator correlate.
+        // throw for the application that issued it. It is reported rather than
+        // swallowed, because the degradation — local-only delivery — is
+        // otherwise completely invisible to an operator.
+        void backplane.publish(frame).catch((error: unknown) => {
+          this.#logger?.warn('sse: backplane publish failed', {
+            channel: name,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       },
     );

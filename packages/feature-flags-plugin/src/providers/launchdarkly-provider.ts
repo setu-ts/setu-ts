@@ -184,9 +184,14 @@ export class LaunchDarklyProvider implements FlagProvider {
     if (this.#started) {
       return;
     }
-    this.#started = true;
 
+    // Marked started only once a client exists. Setting the flag first would
+    // wedge the provider permanently when `#buildClient` throws: a retry would
+    // return early, resolve successfully, and leave every evaluation stuck on
+    // the fallback. The kernel follows the same rollback rule for a failed
+    // application start.
     this.#client = this.#config.client ?? await this.#buildClient();
+    this.#started = true;
 
     try {
       await this.#client.waitForInitialization({

@@ -277,3 +277,69 @@ describe('ResilienceService cancellation', () => {
     expect(calls).toBe(0);
   });
 });
+
+describe('ResilienceService refuses an already-aborted signal', () => {
+  const CONFIGS: ReadonlyArray<readonly [string, Parameters<ResilienceService['wrap']>[1]]> = [
+    ['no layers', {}],
+    ['timeout only', { timeout: 1000 }],
+    ['retry only', { retry: { limit: 3, delay: 1, backoff: 'fixed' } }],
+    ['bulkhead only', { bulkhead: { maxConcurrent: 1, maxQueue: 1 } }],
+    ['circuitBreaker only', { circuitBreaker: CB }],
+    ['every layer', {
+      timeout: 1000,
+      retry: { limit: 3, delay: 1, backoff: 'fixed' },
+      bulkhead: { maxConcurrent: 1, maxQueue: 1 },
+      circuitBreaker: CB,
+    }],
+  ];
+
+  for (const [label, options] of CONFIGS) {
+    it(`rejects without invoking fn — ${label}`, async () => {
+      const service = new ResilienceService(new FakeRuntime());
+      const controller = new AbortController();
+      const reason = new Error('caller gave up');
+      controller.abort(reason);
+
+      let started = false;
+      const guarded = service.wrap(() => {
+        started = true;
+        return Promise.resolve('ok');
+      }, options);
+
+      // Uniform across every configuration: a caller that already cancelled
+      // must never get a successful result, and the work must never start.
+      let caught: unknown;
+      try {
+        await guarded(controller.signal);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(reason);
+      expect(started).toBe(false);
+    });
+  }
+});
+
+describe('ResilienceService hardened callable is promise-returning', () => {
+  it('rejects rather than throwing synchronously for an aborted signal', () => {
+    // `HardenedCall<T>` declares `Promise<T>`. A synchronous throw would make
+    // `guarded(sig).catch(...)` raise instead of catch.
+    const service = new ResilienceService(new FakeRuntime());
+    const controller = new AbortController();
+    controller.abort(new Error('gone'));
+    const guarded = service.wrap(() => Promise.resolve('ok'), { timeout: 10 });
+
+    let settled: string | undefined;
+    expect(() => {
+      const pending = guarded(controller.signal);
+      expect(pending).toBeInstanceOf(Promise);
+      pending.catch((error: Error) => {
+        settled = error.message;
+      });
+    }).not.toThrow();
+
+    return Promise.resolve().then(() => {
+      expect(settled).toBe('gone');
+    });
+  });
+});

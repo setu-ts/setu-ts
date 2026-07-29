@@ -50,7 +50,7 @@ export type {
   MemoryProviderOptions,
 } from './interfaces/index.ts';
 
-// ── Re-export common contracts ──────────────────────────────────────────────
+// ── LaunchDarkly injection facades ──────────────────────────────────────────
 
 export type {
   ILaunchDarklyClient,

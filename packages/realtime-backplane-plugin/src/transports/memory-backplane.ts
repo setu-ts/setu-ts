@@ -10,6 +10,7 @@ import type {
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@hono-enterprise/common';
+import { dispatchFrame } from './dispatch.ts';
 
 /**
  * A process-wide bus. Named buses stay isolated from one another, so
@@ -42,6 +43,15 @@ export class MemoryBackplane implements IRealtimeBackplane {
   readonly #bus: string;
   readonly #handlers = new Set<RealtimeFrameHandler>();
   #connected = false;
+  /**
+   * Errors thrown by subscribers, oldest first.
+   *
+   * The in-process transport has no logger and no driver callback to surface a
+   * throw to, so it records rather than swallows: a test — or an operator
+   * inspecting the instance — can see that a consumer failed even though the
+   * fan-out correctly continued to the others.
+   */
+  readonly #handlerErrors: Error[] = [];
 
   /**
    * @param origin - This instance's identity
@@ -50,6 +60,11 @@ export class MemoryBackplane implements IRealtimeBackplane {
   constructor(origin: string, bus = 'default') {
     this.origin = origin;
     this.#bus = bus;
+  }
+
+  /** Errors thrown by subscribers during delivery, oldest first. */
+  get handlerErrors(): readonly Error[] {
+    return this.#handlerErrors;
   }
 
   connect(): Promise<void> {
@@ -113,8 +128,8 @@ export class MemoryBackplane implements IRealtimeBackplane {
     if (frame.origin === this.origin) {
       return;
     }
-    for (const handler of this.#handlers) {
-      handler(frame);
-    }
+    dispatchFrame(this.#handlers, frame, (error) => {
+      this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+    });
   }
 }
