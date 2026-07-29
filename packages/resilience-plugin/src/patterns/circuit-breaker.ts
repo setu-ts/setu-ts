@@ -4,7 +4,12 @@
  *
  * @module
  */
-import type { CircuitBreakerPolicy, CircuitState, ICircuitBreaker } from '@hono-enterprise/common';
+import type {
+  CircuitBreakerPolicy,
+  CircuitState,
+  ICircuitBreaker,
+  ResilientCall,
+} from '@hono-enterprise/common';
 import { CircuitOpenError } from '../errors.ts';
 
 /**
@@ -52,12 +57,13 @@ export class CircuitBreaker implements ICircuitBreaker {
    * Executes a call through the breaker.
    *
    * @typeParam T - The call's result type
-   * @param fn - The protected call
+   * @param fn - The protected call, handed the cancellation signal
+   * @param signal - Optional caller-owned signal cancelling the call
    * @returns The call result
    * @throws {CircuitOpenError} When the breaker is open (fails fast without
    * invoking `fn`), or while another half-open probe is already in flight
    */
-  async execute<T>(fn: () => Promise<T>): Promise<T> {
+  async execute<T>(fn: ResilientCall<T>, signal?: AbortSignal): Promise<T> {
     if (this.#state === 'open') {
       if (!this.#cooldownElapsed()) {
         throw new CircuitOpenError();
@@ -70,12 +76,12 @@ export class CircuitBreaker implements ICircuitBreaker {
       if (this.#probing) {
         throw new CircuitOpenError();
       }
-      return await this.#runTrial(fn);
+      return await this.#runTrial(fn, signal);
     }
 
     // closed
     try {
-      return await fn();
+      return await fn(signal ?? new AbortController().signal);
     } catch (error) {
       this.#recordFailure();
       throw error;
@@ -83,10 +89,10 @@ export class CircuitBreaker implements ICircuitBreaker {
   }
 
   /** Runs a single half-open trial call, transitioning on its outcome. */
-  async #runTrial<T>(fn: () => Promise<T>): Promise<T> {
+  async #runTrial<T>(fn: ResilientCall<T>, signal: AbortSignal | undefined): Promise<T> {
     this.#probing = true;
     try {
-      const result = await fn();
+      const result = await fn(signal ?? new AbortController().signal);
       // Success → close and clear the failure window.
       this.#state = 'closed';
       this.#failures = [];

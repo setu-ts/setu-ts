@@ -7,8 +7,10 @@
 import type {
   BulkheadPolicy,
   CircuitBreakerPolicy,
+  HardenedCall,
   IResilienceService,
   IRuntimeServices,
+  ResilientCall,
   RetryPolicy,
   WrapOptions,
 } from '@hono-enterprise/common';
@@ -44,45 +46,56 @@ export class ResilienceService implements IResilienceService {
    * Wraps `fn` with the selected patterns, building the pattern chain once and
    * returning a state-preserving closure (§3.2/§3.7).
    *
+   * Each layer receives and forwards the cancellation signal, so an outer
+   * abort reaches the innermost call and the `timeout` layer's own abort is
+   * scoped to a single attempt.
+   *
    * @typeParam T - The protected call's result type
-   * @param fn - The protected call
+   * @param fn - The protected call, handed the current attempt's signal
    * @param options - Which patterns to apply and their policies
-   * @returns A hardened callable reusing one shared pattern chain
+   * @returns A hardened callable reusing one shared pattern chain, accepting an
+   * optional caller-owned signal
    * @throws {Error} When a pattern is requested as `true` with no matching
    * `default*` policy configured on the plugin
    */
-  wrap<T>(fn: () => Promise<T>, options: WrapOptions = {}): () => Promise<T> {
+  wrap<T>(fn: ResilientCall<T>, options: WrapOptions = {}): HardenedCall<T> {
     const breakerPolicy = this.#resolveCircuitBreaker(options.circuitBreaker);
     const retryPolicy = this.#resolveRetry(options.retry);
     const bulkheadPolicy = this.#resolveBulkhead(options.bulkhead);
     const timeoutMs = options.timeout;
 
+    // Built once per wrap, not per invocation: the stand-in handed to layers
+    // when the caller supplies no signal of their own. It is never aborted, so
+    // sharing it across invocations is safe.
+    const neverAborted = new AbortController().signal;
+
     // Innermost first: timeout(fn).
-    let call: () => Promise<T> = fn;
+    let call: ResilientCall<T> = fn;
 
     if (timeoutMs !== undefined) {
       const innerCall = call;
-      call = () => runWithTimeout(innerCall, timeoutMs, this.#timers);
+      call = (signal) => runWithTimeout(innerCall, timeoutMs, this.#timers, signal);
     }
 
     if (retryPolicy !== undefined) {
       const innerCall = call;
-      call = () => runWithRetry(innerCall, retryPolicy, this.#timers);
+      call = (signal) => runWithRetry(innerCall, retryPolicy, this.#timers, signal);
     }
 
     if (breakerPolicy !== undefined) {
       const breaker = new CircuitBreaker(breakerPolicy, () => this.#runtime.hrtime());
       const innerCall = call;
-      call = () => breaker.execute(innerCall);
+      call = (signal) => breaker.execute(innerCall, signal);
     }
 
     if (bulkheadPolicy !== undefined) {
       const bulkhead = new Bulkhead(bulkheadPolicy);
       const innerCall = call;
-      call = () => bulkhead.run(innerCall);
+      call = (signal) => bulkhead.run(innerCall, signal);
     }
 
-    return call;
+    const chain = call;
+    return (signal?: AbortSignal): Promise<T> => chain(signal ?? neverAborted);
   }
 
   /** Resolves the effective circuit-breaker policy, or `undefined` for none. */

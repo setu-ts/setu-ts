@@ -158,8 +158,10 @@ export type {
   BulkheadPolicy,
   CircuitBreakerPolicy,
   CircuitState,
+  HardenedCall,
   ICircuitBreaker,
   IResilienceService,
+  ResilientCall,
   RetryPolicy,
   WrapOptions,
 } from './services/resilience.ts';

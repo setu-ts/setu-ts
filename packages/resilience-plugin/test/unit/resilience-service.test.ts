@@ -199,3 +199,81 @@ describe('ResilienceService.wrap', () => {
     expect(err instanceof TimeoutError).toBe(true);
   });
 });
+
+describe('ResilienceService cancellation', () => {
+  it('still accepts a zero-argument protected call and a zero-argument invocation', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    // The pre-cancellation call shape, unchanged.
+    const guarded = service.wrap(() => Promise.resolve('legacy'));
+    expect(await guarded()).toBe('legacy');
+  });
+
+  it('aborts the protected call signal when the timeout deadline elapses', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    let observed: AbortSignal | undefined;
+    const guarded = service.wrap((signal) => {
+      observed = signal;
+      return new Promise<string>(() => {});
+    }, { timeout: 5 });
+
+    await expect(guarded()).rejects.toBeInstanceOf(TimeoutError);
+    expect(observed?.aborted).toBe(true);
+    expect(observed?.reason instanceof TimeoutError).toBe(true);
+  });
+
+  it('propagates an outer abort into the protected call', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    const controller = new AbortController();
+    let observed: AbortSignal | undefined;
+
+    const guarded = service.wrap((signal) => {
+      observed = signal;
+      return new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    }, { timeout: 10_000 });
+
+    const pending = guarded(controller.signal);
+    const reason = new Error('caller cancelled');
+    controller.abort(reason);
+
+    await expect(pending).rejects.toThrow('caller cancelled');
+    expect(observed?.aborted).toBe(true);
+  });
+
+  it('gives each invocation a live signal when the caller supplies none', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    const seen: boolean[] = [];
+    const guarded = service.wrap((signal) => {
+      seen.push(signal.aborted);
+      return Promise.resolve('ok');
+    });
+    await guarded();
+    await guarded();
+    expect(seen).toEqual([false, false]);
+  });
+
+  it('threads the outer signal through every configured layer', async () => {
+    const service = new ResilienceService(new FakeRuntime(), {
+      defaultBulkhead: { maxConcurrent: 1, maxQueue: 1 },
+    });
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled up front'));
+
+    let calls = 0;
+    const guarded = service.wrap(() => {
+      calls++;
+      return Promise.resolve('never');
+    }, {
+      bulkhead: true,
+      circuitBreaker: CB,
+      retry: { limit: 3, delay: 10, backoff: 'fixed' },
+      timeout: 1000,
+    });
+
+    // The bulkhead is outermost, so an already-aborted signal is refused there
+    // and no inner layer — and certainly not the call — ever runs.
+    await expect(guarded(controller.signal)).rejects.toThrow('cancelled up front');
+    expect(calls).toBe(0);
+  });
+});
