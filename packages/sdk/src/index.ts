@@ -6,9 +6,6 @@
  *
  * Exports the runtime client surface: interfaces, factories, error classes,
  * re-exported common policy types, and `createDefaultClientTiming`.
- *
- * Codegen exports (`generateOpenApiClient`, `SdkOpenApi*`, `OpenApiCodegenError`)
- * will land in Part B.
  */
 
 // Factory

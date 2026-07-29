@@ -5735,7 +5735,7 @@ The public client interface. Its single generic method is `request<TResponse, TB
 
 ```typescript
 interface IHttpClient {
-  request<TResponse, TBody = never>(
+  request<TResponse, TBody = unknown>(
     request: ClientRequest<TBody>,
   ): Promise<ClientResponse<TResponse>>;
 }
@@ -5772,7 +5772,7 @@ interface ClientOptions {
 ### ClientRequest
 
 ```typescript
-interface ClientRequest<TBody = never> {
+interface ClientRequest<TBody = unknown> {
   method: string;
   path: string;
   query?: Record<string, string | string[]>;
@@ -5798,7 +5798,7 @@ interface ClientResponse<T> {
 type ClientRequestInterceptor = (ctx: ClientRequestContext) => void | Promise<void>;
 type ClientResponseInterceptor<T> = (
   response: ClientResponse<T>,
-  request: { method: string; path: string },
+  request: ClientRequestContext,
 ) => ClientResponse<T> | Promise<ClientResponse<T>>;
 ```
 

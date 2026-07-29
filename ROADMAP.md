@@ -4458,7 +4458,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 33        | ✅     | testing              |
 | 34        | ✅     | cli                  |
 | 34b       | ✅     | cli                  |
-| 35        | ⬜     | sdk                  |
+| 35        | ✅     | sdk                  |
 | 36        | ⬜     | starters             |
 | 37        | ⬜     | examples             |
 | 38        | ⬜     | documentation        |

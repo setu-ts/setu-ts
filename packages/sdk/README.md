@@ -94,8 +94,8 @@ interface ClientResponse<T> {
 }
 ```
 
-Successful JSON or `+json` responses are parsed; a 204 or empty body yields `undefined` as `T`.
-Non-2xx responses throw `HttpClientError`.
+Successful JSON responses are parsed; a 204 or empty body yields `undefined` as `T`. Non-2xx
+responses throw `HttpClientError`.
 
 ## Authentication
 
@@ -253,7 +253,7 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 
 | Error                    | When thrown                                                 |
 | ------------------------ | ----------------------------------------------------------- |
-| `HttpClientError`        | Non-2xx HTTP response (carries `status`, `headers`, `data`) |
+| `HttpClientError`        | Non-2xx HTTP response (carries `status`, `headers`, `body`) |
 | `ClientCircuitOpenError` | Circuit breaker is open for the request origin              |
 | `OpenApiCodegenError`    | Invalid OpenAPI document during code generation             |
 

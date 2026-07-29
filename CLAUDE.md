@@ -551,8 +551,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   projects to the CLI's own version, so during a version bump the pinned version is not published
   yet, and checking against JSR would deadlock the release workflow's own test step against the
   publish that would fix it) — complete (PR pending)
-- **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); M35–M40 follow unless
-  reprioritized.
+- **Milestone 35** (`packages/sdk` — client SDK) — portable, zero-npm-dependency HTTP client with
+  authentication, resilience (retry, circuit breaker, rate limiting), request/response interceptors,
+  and OpenAPI-to-TypeScript code generation; complete (PR pending)
+- **Next milestone** — **Milestone 36** (`packages/starter-*` — opinionated bundles); M36–M40 follow
+  unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
