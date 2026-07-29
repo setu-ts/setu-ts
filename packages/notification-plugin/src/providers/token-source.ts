@@ -88,6 +88,7 @@ export class ServiceAccountTokenSource implements FcmTokenSource {
   #signKey: CryptoKey | null = null;
   #cachedToken: string | null = null;
   #expiresAtMs = 0;
+  #inFlight: Promise<string> | null = null;
 
   /**
    * @param options - Service-account credentials and the runtime/HTTP seams
@@ -108,11 +109,23 @@ export class ServiceAccountTokenSource implements FcmTokenSource {
    * exchange returns a non-OK response or an unrecognized body
    * @since 0.1.0
    */
-  async getAccessToken(): Promise<string> {
+  getAccessToken(): Promise<string> {
     if (this.#cachedToken !== null && this.#runtime.now() < this.#expiresAtMs) {
-      return this.#cachedToken;
+      return Promise.resolve(this.#cachedToken);
     }
+    // Concurrent senders share one refresh. Without this, a burst of N
+    // notifications on a cold cache costs N RSA signatures and N token
+    // exchanges — all but one of them wasted.
+    if (this.#inFlight === null) {
+      this.#inFlight = this.#refresh().finally(() => {
+        this.#inFlight = null;
+      });
+    }
+    return this.#inFlight;
+  }
 
+  /** Signs a fresh assertion and exchanges it for an access token. */
+  async #refresh(): Promise<string> {
     const assertion = await this.#createAssertion();
     const body = `grant_type=${encodeURIComponent(JWT_BEARER_GRANT)}&assertion=${
       encodeURIComponent(assertion)
@@ -137,8 +150,13 @@ export class ServiceAccountTokenSource implements FcmTokenSource {
       throw new Error('FCM token exchange returned no access_token');
     }
 
+    const lifetimeMs = parsed.expires_in * 1000;
+    // Never let the margin consume the whole lifetime: a token valid for less
+    // than the margin would be cached already-expired, so every send would
+    // re-exchange. Cap the margin at half the lifetime instead.
+    const marginMs = Math.min(REFRESH_MARGIN_MS, lifetimeMs / 2);
     this.#cachedToken = parsed.access_token;
-    this.#expiresAtMs = this.#runtime.now() + parsed.expires_in * 1000 - REFRESH_MARGIN_MS;
+    this.#expiresAtMs = this.#runtime.now() + lifetimeMs - marginMs;
     return parsed.access_token;
   }
 

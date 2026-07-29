@@ -134,6 +134,74 @@ describe('ServiceAccountTokenSource', () => {
     expect(http.callsMatching('oauth2.googleapis.com').length).toBe(1);
   });
 
+  it('collapses concurrent callers onto a single exchange', async () => {
+    // A burst of notifications on a cold cache must not cost one RSA signature
+    // and one token exchange each.
+    const { pem } = await generateKeyPair();
+    const { runtime } = createClockRuntime();
+    const http = createFakeFcmHttp();
+    const source = new ServiceAccountTokenSource({
+      clientEmail: 'a@b.iam.gserviceaccount.com',
+      privateKey: pem,
+      runtime,
+      http,
+    });
+
+    const tokens = await Promise.all([
+      source.getAccessToken(),
+      source.getAccessToken(),
+      source.getAccessToken(),
+      source.getAccessToken(),
+    ]);
+
+    expect(tokens).toEqual(['test-token', 'test-token', 'test-token', 'test-token']);
+    expect(http.callsMatching('oauth2.googleapis.com').length).toBe(1);
+  });
+
+  it('retries after a failed refresh rather than caching the rejection', async () => {
+    const { pem } = await generateKeyPair();
+    const { runtime } = createClockRuntime();
+    const http = createFakeFcmHttp({ token: { ok: false, status: 503, text: 'unavailable' } });
+    const source = new ServiceAccountTokenSource({
+      clientEmail: 'a@b.iam.gserviceaccount.com',
+      privateKey: pem,
+      runtime,
+      http,
+    });
+
+    await expect(source.getAccessToken()).rejects.toThrow('503');
+    // The in-flight memo must clear on rejection, or every later call would
+    // fail with the same stale error forever.
+    await expect(source.getAccessToken()).rejects.toThrow('503');
+    expect(http.callsMatching('oauth2.googleapis.com').length).toBe(2);
+  });
+
+  it('still caches a token whose lifetime is shorter than the refresh margin', async () => {
+    // 30s lifetime against a 60s margin would otherwise expire on arrival,
+    // making every send re-exchange.
+    const { pem } = await generateKeyPair();
+    const { runtime, advance } = createClockRuntime();
+    const http = createFakeFcmHttp({
+      token: { text: JSON.stringify({ access_token: 'short', expires_in: 30 }) },
+    });
+    const source = new ServiceAccountTokenSource({
+      clientEmail: 'a@b.iam.gserviceaccount.com',
+      privateKey: pem,
+      runtime,
+      http,
+    });
+
+    await source.getAccessToken();
+    advance(1_000);
+    await source.getAccessToken();
+    expect(http.callsMatching('oauth2.googleapis.com').length).toBe(1);
+
+    // Margin is capped at half the lifetime, so it refreshes past 15s.
+    advance(15_000);
+    await source.getAccessToken();
+    expect(http.callsMatching('oauth2.googleapis.com').length).toBe(2);
+  });
+
   it('refreshes early, before the nominal expiry, to absorb clock skew', async () => {
     const { pem } = await generateKeyPair();
     const { runtime, advance } = createClockRuntime();
