@@ -183,6 +183,19 @@ follow Google's documented HTTP v1 contract, and the previous `serverKey` path w
 this is strictly an improvement — but if you depend on push, verify it against your own project
 before you rely on it, and please report what you find.
 
+All 38 packages are live on JSR at `0.1.0-alpha.3`.
+
+Verified after publishing by querying every package on the registry, then installing `kernel` and
+`runtime` from JSR into a throwaway directory — not the workspace, whose import map resolves locally
+and would mask a broken published dependency — and serving a request (`200 {"ok":true}`). `common`
+resolved transitively at `0.1.0-alpha.3`, which is the only real evidence that the cross-package
+specifier bump landed inside the published tarballs: a dry run resolves those from the workspace and
+so cannot show it.
+
+The six package pages that shipped `0.1.0-alpha.2` without a visible README were re-checked and now
+render theirs. The same check run against their `0.1.0-alpha.2` pages still finds no README content,
+so it distinguishes the two rather than passing vacuously.
+
 ### Installing
 
 ```bash
