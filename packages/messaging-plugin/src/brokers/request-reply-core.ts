@@ -113,7 +113,11 @@ function isReplyEnvelope(value: unknown): value is ReplyEnvelope {
 export class RequestReplyCore {
   #deps: RequestReplyDeps;
   #pending: Map<string, PendingRequest> = new Map();
-  #inbox: ReplyInbox | null = null;
+  /**
+   * The in-flight or settled inbox open. This is the SINGLE handle on the
+   * inbox: tracking a resolved `ReplyInbox` separately meant `close()` could
+   * observe a null one while the open was still pending, and miss it.
+   */
   #inboxInit: Promise<ReplyInbox> | null = null;
 
   /**
@@ -219,11 +223,21 @@ export class RequestReplyCore {
       pending.reject(new Error('Broker disconnected before a reply was received'));
     }
     this.#pending.clear();
-    if (this.#inbox) {
-      await this.#inbox.close();
-      this.#inbox = null;
-    }
+
+    // Await an in-flight open before tearing down. Checking `#inbox` alone
+    // missed the case where `close()` lands while `openInbox` is still
+    // pending: the open then resolved into a live subscription that nothing
+    // owned, and a later `request()` would open a second one on top of it.
+    const init = this.#inboxInit;
     this.#inboxInit = null;
+    if (init) {
+      try {
+        const inbox = await init;
+        await inbox.close();
+      } catch {
+        // The open itself failed, so there is no subscription to release.
+      }
+    }
   }
 
   /**
@@ -239,9 +253,6 @@ export class RequestReplyCore {
     if (!this.#inboxInit) {
       this.#inboxInit = this.#deps.openInbox((message) => {
         this.#onReply(message);
-      }).then((inbox) => {
-        this.#inbox = inbox;
-        return inbox;
       }).catch((error: unknown) => {
         this.#inboxInit = null;
         throw error;

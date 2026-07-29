@@ -340,6 +340,70 @@ describe('RequestReplyCore', () => {
     expect(t.openInboxCalls).toBe(2);
   });
 
+  it('closes an inbox whose open was still in flight when close() ran', async () => {
+    // Disconnecting mid-open used to leave a live subscription nothing owned:
+    // close() saw a null #inbox, and the open then resolved into it.
+    const t = new FakeTransport();
+    let releaseOpen: (() => void) | undefined;
+    let inboxClosed = false;
+
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> =>
+        new Promise<ReplyInbox>((resolve) => {
+          releaseOpen = (): void =>
+            resolve({
+              address: 'rr.inbox.pending',
+              close: (): Promise<void> => {
+                inboxClosed = true;
+                return Promise.resolve();
+              },
+            });
+        }),
+    });
+
+    const pending = core.request('t', {}, { timeoutMs: 50 }).catch(() => {});
+    await flush();
+
+    const closing = core.close();
+    releaseOpen!();
+    await closing;
+    await pending;
+
+    expect(inboxClosed).toBe(true);
+  });
+
+  it('close() tolerates an in-flight open that ends up failing', async () => {
+    // Nothing was allocated, so there is nothing to release — close() must
+    // still resolve rather than surfacing the open's error to the caller.
+    const t = new FakeTransport();
+    let rejectOpen: ((reason: Error) => void) | undefined;
+
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> =>
+        new Promise<ReplyInbox>((_resolve, reject) => {
+          rejectOpen = reject;
+        }),
+    });
+
+    const pending = core.request('t', {}, { timeoutMs: 50 }).catch(() => {});
+    await flush();
+
+    const closing = core.close();
+    rejectOpen!(new Error('broker down'));
+    await expect(closing).resolves.toBeUndefined();
+    await pending;
+  });
+
   it('recovers when the first inbox subscribe fails', async () => {
     const transport = new FakeTransport();
     let failNext = true;
