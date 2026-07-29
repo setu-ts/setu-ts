@@ -21,6 +21,12 @@ export { FeatureFlagService } from './services/feature-flags-service.ts';
 export { ConfigProvider } from './providers/config-provider.ts';
 export { MemoryProvider } from './providers/memory-provider.ts';
 export { DatabaseProvider } from './providers/database-provider.ts';
+export { LaunchDarklyProvider, toLaunchDarklyContext } from './providers/launchdarkly-provider.ts';
+export {
+  adaptLaunchDarklyModule,
+  LaunchDarklyModuleError,
+  loadLaunchDarklyModule,
+} from './providers/launchdarkly-module.ts';
 
 // ── Middleware ──────────────────────────────────────────────────────────────
 
@@ -39,8 +45,19 @@ export type {
   FlagProviderStatus,
   FlagProviderType,
   IFlagStore,
+  LaunchDarklyProviderConfig,
+  LaunchDarklyProviderOptions,
   MemoryProviderOptions,
 } from './interfaces/index.ts';
+
+// ── Re-export common contracts ──────────────────────────────────────────────
+
+export type {
+  ILaunchDarklyClient,
+  ILaunchDarklyFlagsState,
+  ILaunchDarklyModule,
+  LaunchDarklyContext,
+} from './providers/launchdarkly-module.ts';
 
 // ── Re-export common contracts ──────────────────────────────────────────────
 

@@ -5,6 +5,7 @@
  */
 
 import type { FlagContext } from '@hono-enterprise/common';
+import type { ILaunchDarklyClient } from '../providers/launchdarkly-module.ts';
 
 // ── Flag definition ────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ export interface FlagDefinition {
  * can report its own identity honestly rather than masquerading as one of the
  * three built-ins — otherwise the health indicator would name the wrong provider.
  */
-export type FlagProviderType = 'config' | 'memory' | 'database' | 'custom';
+export type FlagProviderType = 'config' | 'memory' | 'database' | 'launchdarkly' | 'custom';
 
 /** Status reported by a flag provider. */
 export interface FlagProviderStatus {
@@ -55,6 +56,21 @@ export interface FlagProvider {
   readonly type: FlagProviderType;
   /** Evaluate whether a flag is enabled. */
   isEnabled(flag: string, context?: FlagContext): boolean;
+  /**
+   * Optionally evaluate a flag asynchronously, when the backing source can
+   * produce a more accurate answer than the cached snapshot.
+   *
+   * Implemented only by providers whose SDK evaluates asynchronously (the
+   * LaunchDarkly provider). A provider that omits it is not deficient: the
+   * service resolves {@linkcode FlagProvider.isEnabled} instead, which for a
+   * purely local snapshot is already the correct answer.
+   *
+   * @param flag - Flag name
+   * @param context - Targeting context
+   * @returns The evaluated value
+   * @since 0.2.0
+   */
+  isEnabledAsync?(flag: string, context?: FlagContext): Promise<boolean>;
   /** Pull initial state into the cache. */
   start(): Promise<void>;
   /** Release timers / connections. */
@@ -104,6 +120,55 @@ export interface DatabaseProviderOptions {
   };
 }
 
+/**
+ * Configuration for the `'launchdarkly'` provider arm.
+ *
+ * Supply `sdkKey` for the normal path, or inject `client` (a prebuilt SDK
+ * client) / `module` (the SDK module) to avoid the lazy `npm:` import — the
+ * seam the provider's unit tests drive.
+ *
+ * @since 0.2.0
+ */
+export interface LaunchDarklyProviderConfig {
+  /**
+   * The LaunchDarkly SDK key. Required unless `client` is injected; a missing
+   * key with no client throws during `register()`.
+   */
+  readonly sdkKey?: string;
+  /**
+   * A prebuilt client. When present the SDK module is never loaded and
+   * `sdkKey` is not read.
+   */
+  readonly client?: ILaunchDarklyClient;
+  /**
+   * The SDK module, adapted rather than imported. Lets a test drive the whole
+   * construction path without the real package installed.
+   */
+  readonly module?: unknown;
+  /**
+   * Value returned by the synchronous `isEnabled` for a context whose snapshot
+   * has not loaded yet, and used as the SDK default in `isEnabledAsync`.
+   * Defaults to `false`.
+   */
+  readonly fallbackValue?: boolean;
+  /**
+   * Seconds to wait for the client's initial connection. Defaults to `5`. A
+   * timeout is logged and tolerated, leaving the provider degraded rather than
+   * failing application startup.
+   */
+  readonly initTimeoutSeconds?: number;
+  /** Options forwarded verbatim as the SDK `init()` second argument. */
+  readonly ldOptions?: Readonly<Record<string, unknown>>;
+}
+
+/** Options for the `'launchdarkly'` provider arm. */
+export interface LaunchDarklyProviderOptions {
+  /** Provider type discriminant. */
+  provider: 'launchdarkly';
+  /** LaunchDarkly configuration. */
+  options: LaunchDarklyProviderConfig;
+}
+
 /** Options for the `'custom'` provider arm. */
 export interface CustomProviderOptions {
   /** Provider type discriminant. */
@@ -121,6 +186,7 @@ export type FeatureFlagsPluginOptions =
   | ConfigProviderOptions
   | MemoryProviderOptions
   | DatabaseProviderOptions
+  | LaunchDarklyProviderOptions
   | CustomProviderOptions;
 
 /**
