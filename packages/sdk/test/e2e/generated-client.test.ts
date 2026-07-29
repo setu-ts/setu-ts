@@ -11,6 +11,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createClient } from '../../src/index.ts';
 import { createApi } from '../fixtures/generated-client.ts';
+import { createApi as createParamsApi } from '../fixtures/params-client.ts';
 import type { ClientResponse } from '../../src/index.ts';
 
 function makeFetch(
@@ -39,7 +40,7 @@ describe('generated-client e2e', () => {
     });
 
     const api = createApi(client);
-    const resp: ClientResponse<{ id: string; name: string }> = await api.getuserbyid('1');
+    const resp: ClientResponse<{ id: string; name: string }> = await api.getUserById('1');
 
     expect(lastMethod).toBe('GET');
     // Path must be relative (no leading slash) — HttpClient rejects leading slash.
@@ -61,7 +62,7 @@ describe('generated-client e2e', () => {
     });
 
     const api = createApi(client);
-    const resp = await api.listusers({ page: 2, limit: 10 });
+    const resp = await api.listUsers({ page: 2, limit: 10 });
 
     expect(lastUrl).toBe('https://api.example.com/users?page=2&limit=10');
     expect(resp.data).toEqual([]);
@@ -79,6 +80,75 @@ describe('generated-client e2e', () => {
     });
 
     const api = createApi(client);
-    await expect(api.getuserbyid('999')).rejects.toThrow();
+    await expect(api.getUserById('999')).rejects.toThrow();
+  });
+
+  it('substitutes a path placeholder that shares a segment with literal text', async () => {
+    let lastUrl = '';
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch((req) => {
+        lastUrl = req.url;
+        return new Response(JSON.stringify({ size: 12 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    });
+
+    const api = createParamsApi(client);
+    // `/tenants/{tenantId}/files/{fileId}.json` — the second placeholder is not a
+    // whole segment, and used to be emitted as the literal text `{fileId}.json`.
+    const resp = await api.downloadFileMetadata('acme', 'report 1');
+
+    expect(lastUrl).toBe('https://api.example.com/tenants/acme/files/report%201.json');
+    expect(resp.data).toEqual({ size: 12 });
+  });
+
+  it('stringifies a non-string header and omits an unset optional header', async () => {
+    let headerNames: string[] = [];
+    let retryCount: string | null = null;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch((req) => {
+        headerNames = [...req.headers.keys()];
+        retryCount = req.headers.get('x-retry-count');
+        return new Response(null, { status: 204 });
+      }),
+    });
+
+    const api = createParamsApi(client);
+    // `X-Retry-Count` has an `integer` schema; only it is supplied.
+    await api.pingService({ xRetryCount: 3 });
+
+    expect(retryCount).toBe('3');
+    expect(headerNames).not.toContain('x-api-key');
+  });
+
+  it('sends a required query parameter and required JSON body', async () => {
+    let lastUrl = '';
+    let lastBody = '';
+    let contentType: string | null = null;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch(async (req) => {
+        lastUrl = req.url;
+        contentType = req.headers.get('content-type');
+        lastBody = await req.text();
+        return new Response(JSON.stringify({ id: 'u1' }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    });
+
+    const api = createParamsApi(client);
+    // `opts` is REQUIRED here because both `format` and the body are required.
+    const resp = await api.createReport({ format: 'csv', body: { id: 'u1', age: 30 } });
+
+    expect(lastUrl).toBe('https://api.example.com/reports?format=csv');
+    expect(contentType).toBe('application/json');
+    expect(JSON.parse(lastBody)).toEqual({ id: 'u1', age: 30 });
+    expect(resp.data).toEqual({ id: 'u1' });
   });
 });

@@ -86,7 +86,8 @@
       "docs/api",
       ".verify",
       ".verify-milestone",
-      "packages/sdk/test/fixtures/generated-client.ts"
+      "packages/sdk/test/fixtures/generated-client.ts",
+      "packages/sdk/test/fixtures/params-client.ts"
     ]
   },
   "imports": {

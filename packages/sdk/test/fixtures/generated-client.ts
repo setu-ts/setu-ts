@@ -1,49 +1,48 @@
-/* eslint-disable */
+// deno-lint-ignore-file
 /**
  * Auto-generated SDK client. Do not edit manually.
  */
 
 import type { ClientResponse, IHttpClient } from '../../src/index.ts';
 
-export type user = {
+export type User = {
     'id': string;
     'name': string;
     'email'?: string;
 };
 
-export interface listusersArgs {
+export interface ListUsersArgs {
     page?: number;
     limit?: number;
-    xApiKey?: string;
+    xAPIKey?: string;
 }
-
 
 export function createApi(client: IHttpClient) {
 
     /** listUsers */
-    function listusers(opts?: listusersArgs): Promise<ClientResponse<user[]>> {
-        return client.request<user[]>({
+    function listUsers(opts?: ListUsersArgs): Promise<ClientResponse<User[]>> {
+        return client.request<User[]>({
             method: 'GET',
             path: 'users',
-            query: { 'page': (opts?.page as number | undefined), 'limit': (opts?.limit as number | undefined) },
+            query: { 'page': opts?.page, 'limit': opts?.limit },
             headers: (() => {
                 const headers: Record<string, string> = {};
-                if (opts?.xApiKey !== undefined) headers['X-API-Key'] = String(opts?.xApiKey);
+                if (opts?.xAPIKey !== undefined) headers['X-API-Key'] = String(opts?.xAPIKey);
                 return headers;
             })(),
         });
     }
 
     /** getUserById */
-    function getuserbyid(id: string): Promise<ClientResponse<user>> {
-        return client.request<user>({
+    function getUserById(id: string): Promise<ClientResponse<User>> {
+        return client.request<User>({
             method: 'GET',
-            path: 'users' + "/" + encodeURIComponent(id),
+            path: `users/${encodeURIComponent(id)}`,
         });
     }
 
     return {
-        listusers,
-        getuserbyid,
+        listUsers,
+        getUserById,
     };
 }

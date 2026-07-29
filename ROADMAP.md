@@ -3609,25 +3609,34 @@ resolved by load order.
   classification, safe-method gate, delta-seconds `Retry-After`, ignored HTTP-date, abort non-retry,
   last-error propagation
 - `test/unit/circuit-breaker.test.ts` — Rolling window, trip/open, half-open transition, recovery,
-  concurrent probe rejection, both `isFailure` arms
+  concurrent probe rejection, both `isFailure` arms; cooldown measured from the trip (so `timeout`
+  may be shorter than `resetTimeout`) and a failed probe restarting the cooldown
 - `test/unit/errors.test.ts` — Error names, `instanceof`, HTTP status/header/body fields, codegen
   diagnostics
 - `test/unit/openapi-codegen.test.ts` — All supported M21 schema shapes, parameter/body/response
   rendering, JSON escaping, brace-bearing and digit-leading id derivation, both duplicate sources,
-  `cookie` location, invalid refs, deterministic output
+  `cookie` location, invalid refs, deterministic output; camelCase-preserving derivation, PascalCase
+  type names, required-`opts` rule, and hostile path templates (placeholder plus literal text in one
+  segment, two placeholders in one segment, backtick/backslash/dollar escaping)
 - `test/integration/client-resilience.test.ts` — Composed policy order, open-circuit skip, retry
   rate-limiting, one-failure-per-exhausted-sequence, `HttpClientError` leaves breaker closed,
   per-origin isolation
 - `test/e2e/generated-client.test.ts` — Generated fixture import, typed `createClient()` usage,
   path/query/header/body forwarding through injected fetch
 - `test/fixtures/generated-client.ts` — Deterministic generated source fixture (compile-checked)
+- `test/fixtures/params-document.ts` — The OpenAPI document behind the compile-regression fixture,
+  shared by the unit test and the fixture so the two cannot drift
+- `test/fixtures/params-client.ts` — Compile-regression fixture pinning non-string and schemaless
+  parameters, a placeholder sharing a segment with literal text, and the required-`opts` rule.
+  Compiled by `deno task check` (which type-checks `test/`), so an emitted shape that does not
+  compile fails a real gate — no subprocess and no extra test permissions.
 
 ### Deliverables
 
-- [ ] SDK
-- [ ] HTTP client with interceptors
-- [ ] Code generation from OpenAPI
-- [ ] Full test coverage
+- [x] SDK
+- [x] HTTP client with interceptors
+- [x] Code generation from OpenAPI
+- [x] Full test coverage
 
 ---
 

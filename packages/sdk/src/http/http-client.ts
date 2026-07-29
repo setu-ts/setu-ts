@@ -23,6 +23,38 @@ import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
 import { runWithRetry } from '../retry/retry-strategy.ts';
 import { createRateLimiter } from './rate-limiter.ts';
 
+/**
+ * Matches a path that carries its own scheme (`https:`, `mailto:`) or is
+ * scheme-relative (`//host/x`), i.e. anything `new URL(path, baseUrl)` would
+ * resolve OFF the configured base origin.
+ */
+const ABSOLUTE_URL = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/;
+
+/**
+ * Whether a `Content-Type` names a JSON payload.
+ *
+ * Accepts `application/json` and any structured `+json` suffix
+ * (`application/problem+json`, `application/vnd.api+json`), per RFC 6839 — a
+ * plain `includes('application/json')` test would silently skip the latter and
+ * hand the caller `undefined` data for a perfectly good JSON body.
+ */
+function isJsonMediaType(contentType: string): boolean {
+  const essence = contentType.split(';', 1)[0]!.trim().toLowerCase();
+  return essence === 'application/json' || essence.endsWith('+json');
+}
+
+/**
+ * Whether an error represents a caller-initiated abort.
+ *
+ * `AbortSignal.reason` defaults to a `DOMException` named `AbortError`, but a
+ * caller may abort with ANY value, so the name is checked structurally rather
+ * than by `instanceof DOMException` alone.
+ */
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error &&
+    error.name === 'AbortError';
+}
+
 // Origin-keyed breaker and limiter maps.
 interface OriginBreaker {
   execute: <T>(fn: () => Promise<T>) => Promise<T>;
@@ -71,9 +103,18 @@ export class HttpClient implements IHttpClient {
   async request<TResponse, TBody = unknown>(
     req: ClientRequest<TBody>,
   ): Promise<ClientResponse<TResponse>> {
-    // Resolve URL from baseUrl + path.
+    // Resolve URL from baseUrl + path. The path must be RELATIVE: a
+    // leading-slash path would discard `baseUrl`'s own path prefix, and an
+    // absolute URL (`https://elsewhere/x`, or scheme-relative `//elsewhere/x`)
+    // would leave `baseUrl`'s origin entirely — which is what makes the
+    // per-origin breaker and rate limiter meaningful in the first place.
     if (req.path.startsWith('/')) {
       throw new Error('ClientRequest.path must be relative (no leading slash).');
+    }
+    if (ABSOLUTE_URL.test(req.path)) {
+      throw new Error(
+        `ClientRequest.path must be relative, received absolute URL: ${req.path}`,
+      );
     }
     const url = new URL(req.path, this.#baseUrl);
 
@@ -124,10 +165,12 @@ export class HttpClient implements IHttpClient {
     let breaker = this.#breakers.get(origin);
     if (this.#circuitBreaker && !breaker) {
       breaker = createCircuitBreaker(this.#circuitBreaker, this.#timing, (error) => {
-        // Only server errors (5xx) and transport failures trip the breaker.
-        // User errors (4xx) do NOT count as circuit-breaking failures.
+        // Dependency failures trip the breaker; user/input errors and caller
+        // aborts do not. A 4xx means the request was wrong, not that the origin
+        // is unhealthy — counting those would let ordinary 404 traffic take an
+        // API offline for every caller sharing this client.
         if (error instanceof HttpClientError) return error.status >= 500;
-        if (error instanceof DOMException && error.name === 'AbortError') return false;
+        if (isAbortError(error)) return false;
         return true;
       });
       this.#breakers.set(origin, breaker);
@@ -182,7 +225,7 @@ export class HttpClient implements IHttpClient {
       let data: TResponse | undefined;
       if (response.status !== 204) {
         const ct = response.headers.get('Content-Type');
-        if (ct && ct.includes('application/json')) {
+        if (ct !== null && isJsonMediaType(ct)) {
           const text = await response.text();
           if (text) {
             try {

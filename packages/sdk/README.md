@@ -79,7 +79,9 @@ interface ClientRequest<TBody = never> {
 }
 ```
 
-- `path` must be relative (absolute paths are rejected).
+- `path` must be relative. A leading slash, a scheme-relative `//host/x`, and a fully absolute
+  `https://host/x` are all rejected — otherwise a request could leave `baseUrl`'s origin and bypass
+  the per-origin circuit breaker and rate limiter.
 - Query values are encoded; arrays repeat the key.
 - `json` is serialized with `JSON.stringify`; `Content-Type: application/json` is set automatically.
 - `signal` aborts fetches, queued waits, and retry attempts.
@@ -94,8 +96,11 @@ interface ClientResponse<T> {
 }
 ```
 
-Successful JSON responses are parsed; a 204 or empty body yields `undefined` as `T`. Non-2xx
-responses throw `HttpClientError`.
+- `data` is parsed when the response `Content-Type` names JSON: `application/json` or any structured
+  `+json` suffix (`application/problem+json`, `application/vnd.api+json`). Media-type parameters and
+  casing are ignored.
+- `data` is `undefined` for `204`, for an empty body, and for a non-JSON content type.
+- Non-2xx responses throw `HttpClientError` rather than resolving.
 
 ## Authentication
 
@@ -171,6 +176,22 @@ const client = createClient({
 Per-origin rolling-window circuit breaker. An open circuit throws `ClientCircuitOpenError` before
 consuming a rate-limit slot. The breaker counts one failure per exhausted transient sequence (not
 one per retry attempt).
+
+The two windows are independent:
+
+- `timeout` is the rolling window used to decide when the circuit **trips** — `threshold` counted
+  failures inside it open the circuit.
+- `resetTimeout` is how long the circuit **stays open**, measured from the moment it tripped. It is
+  not shortened by `timeout` elapsing, so `timeout` may safely be shorter than `resetTimeout`.
+
+After `resetTimeout` elapses, exactly one half-open probe is admitted; concurrent callers get
+`ClientCircuitOpenError`. A successful probe closes the circuit and clears the window. A **failed**
+probe reopens it and restarts `resetTimeout`, so a dead dependency is probed once per cooldown
+rather than on every request.
+
+What counts as a failure: a 5xx response, a transport rejection, or an exhausted retry sequence. A
+4xx `HttpClientError` does **not** — a bad request means the caller was wrong, not that the origin
+is unhealthy — and neither does a caller abort.
 
 ### Rate Limiting
 
@@ -248,6 +269,27 @@ const source = generateOpenApiClient(document, {
 The generated factory accepts an `IHttpClient` and returns typed operation methods. Schema mapping
 covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, `enum`, `const`,
 `anyOf`, `allOf`, `additionalProperties`, `null`, and `integer`.
+
+### Generated names and shapes
+
+- **Operation methods are lower-camelCase and preserve interior casing.** An `operationId` is split
+  on every run of non-alphanumeric characters and re-joined, so `listUsers` stays `listUsers` and
+  `get-users-{id}` becomes `getUsersId`. A leading digit run is prefixed with `n`, a reserved word
+  is prefixed with `_`, and an id that sanitizes to nothing becomes `operation`.
+- **Component schemas and argument interfaces are PascalCase.** Component `User` emits
+  `export type User`, and operation `listUsers` emits `export interface ListUsersArgs`.
+- **Two names that derive onto one identifier throw** `OpenApiCodegenError` rather than emitting a
+  file with a duplicate declaration — for both operations and component schemas, and the diagnostic
+  names both originals.
+- **Path parameters are positional arguments; everything else lives in `opts`.** Each path
+  placeholder is substituted and percent-encoded, including a placeholder that shares a segment with
+  literal text (`/files/{id}.json`).
+- **`opts` is required when any of its fields is required.** A required query parameter or a
+  `requestBody` marked `required` makes the `opts` parameter itself required, so a caller cannot
+  omit it and silently skip a mandatory value.
+- **Wire names are preserved.** The query key and header name sent on the wire are the original
+  OpenAPI names (`user_id`, `X-API-Key`); only the TypeScript field identifier is derived. Header
+  values are stringified, so a non-`string` header schema still compiles.
 
 ## Errors
 

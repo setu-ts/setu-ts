@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { generateOpenApiClient, sanitizeIdentifier } from '../../src/codegen/openapi-codegen.ts';
 import { OpenApiCodegenError } from '../../src/errors.ts';
+import { paramsDocument } from '../fixtures/params-document.ts';
 import type {
   SdkOpenApiDocument,
   SdkOpenApiOperation,
@@ -90,7 +91,7 @@ describe('sanitizeIdentifier', () => {
   });
 
   it('strips JSON pointer prefix for refs', () => {
-    expect(sanitizeIdentifier('#/components/schemas/MyUser')).toBe('myuser');
+    expect(sanitizeIdentifier('#/components/schemas/MyUser')).toBe('myUser');
   });
 });
 
@@ -232,7 +233,7 @@ describe('renderSchema via generated output', () => {
         { User: { type: 'object' } },
       ),
     );
-    expect(out).toContain('export type user = ');
+    expect(out).toContain('export type User = ');
   });
 
   it('maps empty schema to unknown', () => {
@@ -280,7 +281,7 @@ describe('renderSchema via generated output', () => {
       ),
     );
     // The generated output should not hang and should contain the type.
-    expect(out).toContain('circular');
+    expect(out).toContain('Circular');
   });
 });
 
@@ -434,8 +435,8 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    // sanitizeIdentifier turns 'getUser' into 'getuser' (single part → lowercase).
-    expect(out).toContain('getuser(id: string):');
+    // Interior camelCase survives derivation: `getUser`, not `getuser`.
+    expect(out).toContain('getUser(id: string):');
   });
 
   it('generates method with query params but no path params', () => {
@@ -469,7 +470,8 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('opts?.q');
+    // `q` is required, so `opts` itself is required and needs no optional chain.
+    expect(out).toContain('opts.q');
   });
 
   it('query params use opts when no path params', () => {
@@ -480,7 +482,7 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('opts?.q');
+    expect(out).toContain('opts.q');
   });
 
   it('header params use opts when path params present', () => {
@@ -491,7 +493,7 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('opts?.auth');
+    expect(out).toContain('opts.auth');
   });
 
   it('body uses opts when path params present', () => {
@@ -503,7 +505,8 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('opts?.body');
+    // `makeBody` marks the body required, so `opts` is required too.
+    expect(out).toContain('opts.body');
   });
 
   it('body uses opts when no path params', () => {
@@ -514,7 +517,7 @@ describe('generated method signatures', () => {
         }),
       },
     }));
-    expect(out).toContain('opts?.body');
+    expect(out).toContain('opts.body');
   });
 });
 
@@ -547,8 +550,9 @@ describe('renderSchema edge cases', () => {
         }),
       },
     }));
-    // Missing $ref is still rendered as the sanitized identifier.
-    expect(out).toContain('missing');
+    // A dangling $ref still renders as the derived PascalCase type name; the
+    // generated file then fails to compile, which is the actionable outcome.
+    expect(out).toContain('Missing');
   });
 });
 
@@ -609,8 +613,9 @@ describe('parameter and body rendering', () => {
       },
     });
     const out = generateOpenApiClient(doc);
-    // Wire key should be 'createdAt', access uses opts?.createdat (sanitizeIdentifier lowercases first part)
-    expect(out).toContain("'createdAt': (opts?.createdat as string | undefined)");
+    // Wire key stays the original `createdAt`; the field is accessed by its
+    // derived identifier, which preserves the interior casing. No cast is emitted.
+    expect(out).toContain("'createdAt': opts?.createdAt");
   });
 
   it('uses original name as wire key for underscore query param', () => {
@@ -627,8 +632,8 @@ describe('parameter and body rendering', () => {
       },
     });
     const out = generateOpenApiClient(doc);
-    // Wire key should be 'user_id', access uses opts?.userId (sanitizeIdentifier splits on underscore)
-    expect(out).toContain("'user_id': (opts?.userId as string | undefined)");
+    // Wire key stays the original `user_id`; the field is `userId`.
+    expect(out).toContain("'user_id': opts?.userId");
   });
 
   it('uses original name as wire key for hyphenated header', () => {
@@ -645,12 +650,12 @@ describe('parameter and body rendering', () => {
       },
     });
     const out = generateOpenApiClient(doc);
-    // Wire key should be 'X-API-Key', access uses opts?.xApiKey (sanitizeIdentifier splits on hyphen)
+    // Wire key stays the original `X-API-Key`; the acronym survives derivation.
     expect(out).toContain("'X-API-Key'");
-    expect(out).toContain('opts?.xApiKey');
+    expect(out).toContain('opts?.xAPIKey');
     expect(out).toContain('headers:');
-    // Verify the old unsafe pattern is not present
-    expect(out).not.toContain('(opts?.xApiKey as string | undefined)');
+    // No dead cast is emitted around the field access.
+    expect(out).not.toContain('as string | undefined');
   });
 });
 
@@ -690,7 +695,7 @@ describe('component schemas', () => {
     const out = generateOpenApiClient(
       makeDoc({ '/x': { get: makeOp('x') } }, { User: { type: 'object' } }),
     );
-    expect(out).toContain('export type user = ');
+    expect(out).toContain('export type User = ');
   });
   it('generates factory with multiple operations on different paths', () => {
     const out = generateOpenApiClient(makeDoc({
@@ -706,10 +711,10 @@ describe('component schemas', () => {
         }),
       },
     }));
-    // All operation names are lowercased by sanitizeIdentifier.
-    expect(out).toContain('listusers,');
-    expect(out).toContain('getuserbyid,');
-    expect(out).toContain('createpost,');
+    // Operation names keep their interior camelCase.
+    expect(out).toContain('listUsers,');
+    expect(out).toContain('getUserById,');
+    expect(out).toContain('createPost,');
     expect(out).toContain('return {');
   });
 
@@ -812,164 +817,144 @@ describe('fixture equality', () => {
   });
 });
 
-// Compile-regression tests: ensure generated code compiles for various param shapes
-let _tempCounter = 0;
-
+/**
+ * Compile regressions are pinned by a COMMITTED fixture, not by shelling out to
+ * `deno check` on a temp file.
+ *
+ * `packages/sdk/test/fixtures/params-client.ts` is real generator output for
+ * `paramsDocument`, and `deno task check` type-checks `test/` (verified), so any
+ * emitted shape that does not compile fails one of the repo's four gates. The
+ * previous subprocess approach needed `--allow-write` and `--allow-run`, which
+ * the `test` task does not grant, so the whole suite errored out — and a
+ * subprocess `deno check` would not have caught the emitted source disagreeing
+ * with the SDK's own `IHttpClient` contract anyway, because the temp file was
+ * checked in isolation against a bare `@hono-enterprise/sdk` specifier.
+ */
 describe('compile regression', () => {
-  async function compileCheck(source: string): Promise<void> {
-    // Write to /tmp which is typically writable without extra permissions
-    const tmpFilePath = `/tmp/codegen_test_${_tempCounter++}.ts`;
-    await Deno.writeTextFile(tmpFilePath, source);
+  const generated = generateOpenApiClient(paramsDocument, { sdkImport: '../../src/index.ts' });
 
-    // Run deno check via Deno.Command (properly typed in Deno)
-    const command = new Deno.Command(Deno.execPath(), {
-      args: ['check', tmpFilePath],
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const result = await command.output();
-    const code = result.code;
-    if (code !== 0) {
-      throw new Error(`deno check failed for generated client, exit code ${code}`);
-    }
-    // Clean up
-    await Deno.remove(tmpFilePath);
+  it('emits the committed params fixture byte-for-byte', () => {
+    const fixture = Deno.readTextFileSync(
+      new URL('../fixtures/params-client.ts', import.meta.url),
+    );
+    expect(generated).toBe(fixture);
+  });
+
+  it('stringifies a non-string (integer) header parameter', () => {
+    // A header value must reach `Headers` as a string; `String(...)` is what makes
+    // an `integer` header schema compile against `Record<string, string>`.
+    expect(generated).toContain(
+      "if (opts?.xRetryCount !== undefined) headers['X-Retry-Count'] = String(opts?.xRetryCount);",
+    );
+  });
+
+  it('defaults a schemaless path parameter to string', () => {
+    expect(generated).toContain('function getUserById(id: string)');
+  });
+
+  it('defaults schemaless query and header parameters to string', () => {
+    expect(generated).toContain('    q?: string;');
+    expect(generated).toContain('    xCustom?: string;');
+  });
+
+  it('substitutes a placeholder that shares a segment with literal text', () => {
+    // `{fileId}.json` is not a whole segment. An anchored `^\{(.+)\}$` match
+    // emitted it as the LITERAL text `{fileId}.json`, silently dropping the
+    // substitution and requesting a nonexistent path.
+    expect(generated).toContain(
+      'path: `tenants/${encodeURIComponent(tenantId)}/files/${encodeURIComponent(fileId)}.json`,',
+    );
+    expect(generated).not.toContain('{fileId}');
+  });
+
+  it('preserves interior camelCase in derived operation names', () => {
+    expect(generated).toContain('function searchEverything(');
+    expect(generated).toContain('function downloadFileMetadata(');
+    // The whole-part lower-casing this replaced emitted `searcheverything`.
+    expect(generated).not.toContain('searcheverything');
+  });
+
+  it('emits PascalCase type names for components and argument interfaces', () => {
+    expect(generated).toContain('export type User = {');
+    expect(generated).toContain('export interface SearchEverythingArgs {');
+    expect(generated).not.toContain('export type user =');
+  });
+
+  it('makes opts required when a query parameter or the body is required', () => {
+    expect(generated).toContain('function createReport(opts: CreateReportArgs)');
+    expect(generated).toContain('    body: User;');
+    // Required fields are read without an optional chain.
+    expect(generated).toContain("query: { 'format': opts.format },");
+    expect(generated).toContain('json: opts.body,');
+  });
+
+  it('keeps opts optional when every field is optional', () => {
+    expect(generated).toContain('function updateNote(opts?: UpdateNoteArgs)');
+    expect(generated).toContain('    body?: Record<string, unknown>;');
+    expect(generated).toContain('json: opts?.body,');
+  });
+
+  it('emits a plain string literal for a path with no placeholders', () => {
+    expect(generated).toContain("path: 'search',");
+    expect(generated).not.toContain('path: `search`,');
+  });
+});
+
+describe('hostile path templates', () => {
+  function pathLine(template: string, params: string[]): string {
+    const out = generateOpenApiClient(makeDoc({
+      [template]: {
+        get: makeOp('op', {
+          parameters: params.map((n) => makeParam(n, 'path')),
+          responses: { '204': { description: 'No Content' } },
+        }),
+      },
+    }));
+    return out.split('\n').find((l) => l.includes('path:'))!.trim();
   }
 
-  it('compiles with non-string header (integer X-Retry-Count)', async () => {
-    const doc: SdkOpenApiDocument = {
-      openapi: '3.1.0',
-      paths: {
-        '/test': {
-          get: {
-            operationId: 'testOp',
-            parameters: [
-              {
-                name: 'X-Retry-Count',
-                in: 'header',
-                required: false,
-                schema: { type: 'integer' },
-              },
-            ],
-            responses: {
-              '200': {
-                description: 'OK',
-                content: { 'application/json': { schema: { type: 'object' } } },
-              },
-            },
-          },
-        },
-      },
-    };
-    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
-    await compileCheck(source);
+  it('substitutes a placeholder followed by literal text in the same segment', () => {
+    expect(pathLine('/files/{id}.json', ['id'])).toBe(
+      'path: `files/${encodeURIComponent(id)}.json`,',
+    );
   });
 
-  it('compiles with schemaless path param (no schema)', async () => {
-    const doc: SdkOpenApiDocument = {
-      openapi: '3.1.0',
-      paths: {
-        '/users/{id}': {
-          get: {
-            operationId: 'getUser',
-            parameters: [
-              {
-                name: 'id',
-                in: 'path',
-                required: true,
-                // No schema field - this is the schemaless case
-              },
-            ],
-            responses: {
-              '200': {
-                description: 'OK',
-                content: { 'application/json': { schema: { type: 'object' } } },
-              },
-            },
-          },
-        },
-      },
-    };
-    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
-    await compileCheck(source);
+  it('substitutes two placeholders inside one segment', () => {
+    // A greedy `^\{(.+)\}$` match would treat `{x}y{z}` as ONE placeholder named
+    // `x}y{z`, deriving the nonsense identifier `xYZ`.
+    expect(pathLine('/a/{x}y{z}/b', ['x', 'z'])).toBe(
+      'path: `a/${encodeURIComponent(x)}y${encodeURIComponent(z)}/b`,',
+    );
   });
 
-  it('compiles with schemaless query param (no schema)', async () => {
-    const doc: SdkOpenApiDocument = {
-      openapi: '3.1.0',
-      paths: {
-        '/search': {
-          get: {
-            operationId: 'search',
-            parameters: [
-              {
-                name: 'q',
-                in: 'query',
-                required: false,
-                // No schema field
-              },
-            ],
-            responses: {
-              '200': {
-                description: 'OK',
-                content: { 'application/json': { schema: { type: 'array' } } },
-              },
-            },
-          },
-        },
-      },
-    };
-    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
-    await compileCheck(source);
+  it('escapes a backtick in the literal text so the template literal cannot be broken out of', () => {
+    expect(pathLine('/back`tick/{id}', ['id'])).toBe(
+      'path: `back\\`tick/${encodeURIComponent(id)}`,',
+    );
   });
 
-  it('compiles with schemaless header param (no schema)', async () => {
-    const doc: SdkOpenApiDocument = {
-      openapi: '3.1.0',
-      paths: {
-        '/test': {
-          get: {
-            operationId: 'testOp',
-            parameters: [
-              {
-                name: 'X-Custom',
-                in: 'header',
-                required: false,
-                // No schema field
-              },
-            ],
-            responses: {
-              '200': { description: 'OK' },
-            },
-          },
-        },
-      },
-    };
-    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
-    await compileCheck(source);
+  it('escapes a literal dollar sign that precedes a placeholder', () => {
+    // Without escaping, the literal `$` would fuse with the emitted `${` and
+    // inject an unintended substitution.
+    expect(pathLine('/dollar${x}/{id}', ['x', 'id'])).toBe(
+      'path: `dollar\\$${encodeURIComponent(x)}/${encodeURIComponent(id)}`,',
+    );
   });
 
-  it('compiles with string header (F1 regression)', async () => {
-    const doc: SdkOpenApiDocument = {
-      openapi: '3.1.0',
-      paths: {
-        '/test': {
-          get: {
-            operationId: 'testOp',
-            parameters: [
-              {
-                name: 'X-API-Key',
-                in: 'header',
-                required: false,
-                schema: { type: 'string' },
-              },
-            ],
-            responses: { '200': { description: 'OK' } },
-          },
-        },
-      },
-    };
-    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
-    await compileCheck(source);
+  it('escapes a backslash in the literal text', () => {
+    expect(pathLine('/back\\slash/{id}', ['id'])).toBe(
+      'path: `back\\\\slash/${encodeURIComponent(id)}`,',
+    );
+  });
+
+  it('throws on a duplicate component type name naming both originals', () => {
+    expect(() =>
+      generateOpenApiClient(
+        makeDoc({ '/x': { get: makeOp('x') } }, {
+          User: { type: 'object' },
+          user: { type: 'object' },
+        }),
+      )
+    ).toThrow(/Duplicate component type name 'User'.*'User'.*'user'/);
   });
 });

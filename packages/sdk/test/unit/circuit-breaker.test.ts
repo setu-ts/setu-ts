@@ -74,38 +74,146 @@ describe('createCircuitBreaker', () => {
     expect(result2).toEqual('closed');
   });
 
-  it('half-open probe failure keeps breaker open', async () => {
+  it('a failed half-open probe reopens the circuit and RESTARTS the cooldown', async () => {
     let timeNow = 0;
     const timing: IClientTiming = {
       now: () => timeNow,
       sleep: () => Promise.resolve(),
     };
-    // timeout > resetTimeout so that after probe fails, old failures are still in window.
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 5000, resetTimeout: 2000 },
       timing,
       () => true,
     );
+    let calls = 0;
+    const failing = () => {
+      calls++;
+      return Promise.reject(new Error('still down'));
+    };
 
-    // Trip the breaker.
-    await expect(cb.execute(() => Promise.reject(new Error('fail')))).rejects.toThrow('fail');
-    await expect(cb.execute(() => Promise.reject(new Error('fail')))).rejects.toThrow('fail');
+    // Trip the breaker at t=0.
+    await expect(cb.execute(failing)).rejects.toThrow('still down');
+    await expect(cb.execute(failing)).rejects.toThrow('still down');
+    expect(calls).toBe(2);
 
-    // Advance past resetTimeout (2000) but before timeout (5000) → half-open transition.
+    // Advance past resetTimeout → one probe is admitted, and it fails.
     timeNow = 2001;
+    await expect(cb.execute(failing)).rejects.toThrow('still down');
+    expect(calls).toBe(3);
 
-    // Probe fails — adds a new failure at t=2001.
-    await expect(cb.execute(() => Promise.reject(new Error('still down')))).rejects.toThrow(
-      'still down',
-    );
-
-    // failures now = [0, 0, 2001]. All within timeout window (5000ms).
-    // 3 >= threshold(2) → trip. oldest=0, 2002-0=2002 >= resetTimeout(2000) → half-open again.
+    // The failed probe restarted the cooldown from t=2001, so the very next call
+    // must fail FAST rather than probe the dead dependency again. Before this was
+    // fixed the cooldown was measured from the oldest failure (t=0), which had
+    // already elapsed, so every subsequent call re-probed.
     timeNow = 2002;
-    // Another failing probe confirms the breaker keeps reopening after each failed probe.
-    await expect(cb.execute(() => Promise.reject(new Error('still down')))).rejects.toThrow(
-      'still down',
+    await expect(cb.execute(failing)).rejects.toThrow(ClientCircuitOpenError);
+    expect(calls).toBe(3);
+
+    // Once the restarted cooldown elapses, a probe is admitted again.
+    timeNow = 4002;
+    await expect(cb.execute(failing)).rejects.toThrow('still down');
+    expect(calls).toBe(4);
+  });
+
+  it('stays open for resetTimeout even when the failure window is shorter', async () => {
+    let timeNow = 0;
+    const timing: IClientTiming = {
+      now: () => timeNow,
+      sleep: () => Promise.resolve(),
+    };
+    // `timeout` (rolling window) is deliberately SHORTER than `resetTimeout`.
+    const cb = createCircuitBreaker(
+      { threshold: 2, timeout: 1000, resetTimeout: 10_000 },
+      timing,
+      () => true,
     );
+    let calls = 0;
+    const failing = () => {
+      calls++;
+      return Promise.reject(new Error('down'));
+    };
+
+    await expect(cb.execute(failing)).rejects.toThrow('down');
+    await expect(cb.execute(failing)).rejects.toThrow('down');
+    expect(calls).toBe(2);
+
+    // Past the 1000ms failure window but far short of the 10s cooldown. When the
+    // cooldown was measured from the oldest failure, the window expiring here
+    // silently CLOSED the circuit and the half-open state was unreachable.
+    timeNow = 1500;
+    await expect(cb.execute(failing)).rejects.toThrow(ClientCircuitOpenError);
+    expect(calls).toBe(2);
+
+    // Still open just before the cooldown elapses.
+    timeNow = 9999;
+    await expect(cb.execute(failing)).rejects.toThrow(ClientCircuitOpenError);
+    expect(calls).toBe(2);
+
+    // Cooldown elapsed → exactly one probe admitted.
+    timeNow = 10_000;
+    const result = await cb.execute(() => Promise.resolve('recovered'));
+    expect(result).toEqual('recovered');
+  });
+
+  it('a probe rejecting with a non-counting error leaves the circuit probeable', async () => {
+    let timeNow = 0;
+    const timing: IClientTiming = {
+      now: () => timeNow,
+      sleep: () => Promise.resolve(),
+    };
+    const cb = createCircuitBreaker(
+      { threshold: 2, timeout: 5000, resetTimeout: 500 },
+      timing,
+      (err: unknown) => !(err instanceof Error && err.message === 'user-error'),
+    );
+
+    // Trip on two counting failures.
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+
+    // Cooldown elapses; the probe throws a NON-counting error.
+    timeNow = 600;
+    await expect(cb.execute(() => Promise.reject(new Error('user-error')))).rejects.toThrow(
+      'user-error',
+    );
+
+    // The cooldown was not restarted (nothing was counted), and the in-flight
+    // flag was released, so the next call is admitted as a fresh probe.
+    let probed = false;
+    const result = await cb.execute(() => {
+      probed = true;
+      return Promise.resolve('ok');
+    });
+    expect(probed).toBe(true);
+    expect(result).toEqual('ok');
+  });
+
+  it('ages failures out of the rolling window so a slow drip never trips', async () => {
+    let timeNow = 0;
+    const timing: IClientTiming = {
+      now: () => timeNow,
+      sleep: () => Promise.resolve(),
+    };
+    const cb = createCircuitBreaker(
+      { threshold: 3, timeout: 1000, resetTimeout: 5000 },
+      timing,
+      () => true,
+    );
+
+    // One failure every 900ms: never three inside any 1000ms window.
+    for (const t of [0, 900, 1800, 2700, 3600]) {
+      timeNow = t;
+      await expect(cb.execute(() => Promise.reject(new Error('blip')))).rejects.toThrow('blip');
+    }
+
+    // Still closed — the call reaches `fn`.
+    timeNow = 4500;
+    let reached = false;
+    await cb.execute(() => {
+      reached = true;
+      return Promise.resolve('ok');
+    });
+    expect(reached).toBe(true);
   });
 
   it('rejects concurrent calls during half-open', async () => {

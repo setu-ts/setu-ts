@@ -95,10 +95,16 @@ export async function runWithRetry<T>(
       if (!canRetry) throw error;
       if (attempt === policy.limit) throw error;
 
-      // Compute backoff delay.
+      // Compute backoff delay: `delay * 2^(attempt - 1)`, matching
+      // resilience-plugin's server-side schedule.
+      //
+      // `2 **` rather than `1 << (attempt - 1)`: the shift operand is coerced to
+      // int32, so attempt 32 shifts by 31 and yields a NEGATIVE multiplier (and
+      // attempt 33 wraps to 1). A large `limit` would then produce negative or
+      // collapsing delays instead of a growing backoff.
       let delay = policy.delay;
       if (policy.backoff === 'exponential') {
-        delay = policy.delay * (1 << (attempt - 1));
+        delay = policy.delay * 2 ** (attempt - 1);
       }
 
       // A Retry-After delta-seconds value replaces the computed backoff.

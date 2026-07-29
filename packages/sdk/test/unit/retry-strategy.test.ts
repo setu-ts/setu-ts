@@ -72,6 +72,30 @@ describe('runWithRetry', () => {
     expect(sleepCalls[1].ms).toEqual(200); // 100 * 2^1
   });
 
+  it('keeps exponential backoff growing past the int32 shift boundary', async () => {
+    const { timing, sleepCalls } = createTiming();
+    // `1 << (attempt - 1)` coerces its operand to int32: attempt 32 shifts by 31
+    // and yields a NEGATIVE multiplier, and attempt 33 wraps back to 1. `2 **`
+    // keeps growing, so every delay must stay positive and monotonic.
+    await expect(
+      runWithRetry(
+        () => Promise.reject(new Error('network')),
+        { limit: 36, delay: 1, backoff: 'exponential' },
+        'GET',
+        timing,
+      ),
+    ).rejects.toThrow('network');
+
+    expect(sleepCalls.length).toEqual(35);
+    for (const [i, call] of sleepCalls.entries()) {
+      expect(call.ms).toEqual(2 ** i);
+      expect(call.ms).toBeGreaterThan(0);
+    }
+    // The specific values that the shift implementation got wrong.
+    expect(sleepCalls[31]!.ms).toEqual(2 ** 31);
+    expect(sleepCalls[32]!.ms).toEqual(2 ** 32);
+  });
+
   it('does not retry unsafe method (POST)', async () => {
     const { timing } = createTiming();
     let attempts = 0;

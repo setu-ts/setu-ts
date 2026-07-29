@@ -5894,6 +5894,23 @@ interface OpenApiCodegenOptions {
 | `sdkImport`   | `'@hono-enterprise/sdk'` | Generated type-import specifier |
 | `factoryName` | `'createApi'`            | Exported generated factory name |
 
+#### Generated naming contract
+
+| Emitted symbol           | Derivation                                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`) |
+| Component type           | PascalCase from the component name (`User` → `export type User`)                                                              |
+| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                     |
+| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                      |
+| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — for operations AND component schemas                                     |
+
+Path parameters are emitted as positional arguments (each substituted and percent-encoded, including
+a placeholder sharing a segment with literal text such as `/files/{id}.json`); query parameters,
+headers, and the JSON body live on `opts`. `opts` is **required** when any of its fields is
+required. Query keys and header names keep their original OpenAPI spelling; only the TypeScript
+field identifier is derived, and header values are stringified so a non-`string` header schema
+compiles.
+
 ### SdkOpenApi\* types
 
 `SdkOpenApiDocument`, `SdkOpenApiPathItem`, `SdkOpenApiOperation`, `SdkOpenApiParameter`,

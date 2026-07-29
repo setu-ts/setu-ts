@@ -98,18 +98,60 @@ const RESERVED = new Set([
   'yield',
 ]);
 
-/** Derive a safe lower-camelCase TypeScript identifier. */
-export function sanitizeIdentifier(raw: string): string {
-  const cleaned = raw.replace(/^.*\//, '');
-  const parts = cleaned.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  const joined = parts
-    .map((part, i) =>
-      i === 0 ? part.toLowerCase() : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-    )
-    .join('');
+/**
+ * Split a raw name into identifier parts on every run of characters outside
+ * `[A-Za-z0-9]`.
+ *
+ * The leading `.../` strip discards a `$ref` pointer prefix such as
+ * `#/components/schemas/`, keeping only the component name.
+ */
+function identifierParts(raw: string): string[] {
+  return raw.replace(/^.*\//, '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * Prefix a leading digit run so the result is a legal identifier, and escape a
+ * reserved word. Falls back to `fallback` when nothing survives sanitization.
+ */
+function finishIdentifier(joined: string, fallback: string): string {
   let result = joined.replace(/^[0-9]+/, (digits) => `n${digits}`);
   if (RESERVED.has(result)) result = `_${result}`;
-  return result || 'operation';
+  return result || fallback;
+}
+
+/**
+ * Derive a safe lower-camelCase TypeScript identifier for a value (an operation
+ * method, a parameter, a path variable).
+ *
+ * Interior casing of each part is PRESERVED — only the boundary characters are
+ * re-cased — so `listUsers` stays `listUsers` and `get-users-{id}` becomes
+ * `getUsersId`. Lower-casing whole parts would both mangle familiar names and
+ * manufacture false collisions between `getUserId` and `getUserID`.
+ */
+export function sanitizeIdentifier(raw: string): string {
+  const joined = identifierParts(raw)
+    .map((part, i) =>
+      i === 0
+        ? part.charAt(0).toLowerCase() + part.slice(1)
+        : part.charAt(0).toUpperCase() + part.slice(1)
+    )
+    .join('');
+  return finishIdentifier(joined, 'operation');
+}
+
+/**
+ * Derive a safe PascalCase TypeScript identifier for a TYPE (a component schema
+ * or a generated argument interface).
+ *
+ * Types are PascalCase by convention, and using a distinct casing from
+ * {@linkcode sanitizeIdentifier} keeps a component named `User` from reading as
+ * the value `user` in generated source.
+ */
+export function sanitizeTypeName(raw: string): string {
+  const joined = identifierParts(raw)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+  return finishIdentifier(joined, 'Schema');
 }
 
 function escapeSingleQuote(s: string): string {
@@ -143,7 +185,7 @@ function renderSchema(
   if (schema.$ref) {
     const name = schema.$ref.split('/').pop();
     if (!name) throw new OpenApiCodegenError(`Invalid $ref: ${schema.$ref}`, path, method);
-    return sanitizeIdentifier(name);
+    return sanitizeTypeName(name);
   }
   if (schema.enum) return schema.enum.map(renderLiteral).join(' | ') || 'unknown';
   if (schema.const !== undefined) return renderLiteral(schema.const);
@@ -299,6 +341,96 @@ function getBodySchema(op: SdkOpenApiOperation): SdkOpenApiSchema | undefined {
   return rb.content?.['application/json']?.schema;
 }
 
+/** Whether the operation's JSON request body is declared required. */
+function isBodyRequired(op: SdkOpenApiOperation): boolean {
+  if (!op.requestBody) return false;
+  return (op.requestBody as SdkOpenApiRequestBody).required === true;
+}
+
+/** A parameter reduced to the two facts the emitter needs. */
+interface RenderedParam {
+  /** Sanitized identifier used for the arg field and the request key. */
+  readonly name: string;
+  /** Original wire name, preserved for the query key / header name. */
+  readonly wireName: string;
+  /** Rendered TypeScript type. */
+  readonly type: string;
+  readonly required: boolean;
+}
+
+/**
+ * Everything the two emission passes need about one operation, computed ONCE.
+ *
+ * Both the `*Args` interface pass and the method-body pass previously re-derived
+ * parameters, body schema, and the args type name independently, so a change to
+ * one rule had to be mirrored in the other to stay consistent.
+ */
+interface OpShape {
+  readonly entry: OpEntry;
+  readonly pathParams: RenderedParam[];
+  readonly queryParams: RenderedParam[];
+  readonly headerParams: RenderedParam[];
+  readonly bodyType: string | undefined;
+  readonly bodyRequired: boolean;
+  readonly argsTypeName: string;
+  /** True when the operation has any `opts` field at all. */
+  readonly hasArgs: boolean;
+  /**
+   * True when at least one `opts` field is required, which makes the `opts`
+   * parameter itself required — otherwise a caller could omit `opts` entirely
+   * and skip a required query parameter or a required request body.
+   */
+  readonly argsRequired: boolean;
+  readonly returnType: string;
+}
+
+function buildOpShape(entry: OpEntry): OpShape {
+  const { operation, path, method } = entry;
+  const split = splitParams(operation, path, method);
+
+  const render = (p: SdkOpenApiParameter, forcedRequired?: boolean): RenderedParam => ({
+    name: sanitizeIdentifier(p.name),
+    wireName: p.name,
+    // A parameter with no `schema` is treated as a string: that is the only
+    // shape that can be serialized into a URL or a header without guessing.
+    type: renderSchema(p.schema ?? { type: 'string' }, new Set(), path, method),
+    required: forcedRequired ?? p.required === true,
+  });
+
+  // OpenAPI requires `required: true` on a path parameter. Forcing it here also
+  // prevents emitting `a?: string, b: string`, which is a TypeScript error
+  // ("a required parameter cannot follow an optional parameter").
+  const pathParams = split.pathParams.map((p) => render(p, true));
+  const queryParams = split.queryParams.map((p) => render(p));
+  const headerParams = split.headerParams.map((p) => render(p));
+
+  const bodySchema = getBodySchema(operation);
+  const bodyType = bodySchema ? renderSchema(bodySchema, new Set(), path, method) : undefined;
+  const bodyRequired = bodyType !== undefined && isBodyRequired(operation);
+
+  const successTypes = getSuccessTypes(operation, path, method);
+  const returnType = successTypes.length === 1 && successTypes[0] === 'void'
+    ? 'void'
+    : successTypes.join(' | ');
+
+  const hasArgs = queryParams.length > 0 || headerParams.length > 0 || bodyType !== undefined;
+
+  return {
+    entry,
+    pathParams,
+    queryParams,
+    headerParams,
+    bodyType,
+    bodyRequired,
+    argsTypeName: sanitizeTypeName(entry.operationId) + 'Args',
+    hasArgs,
+    argsRequired: bodyRequired ||
+      queryParams.some((p) => p.required) ||
+      headerParams.some((p) => p.required),
+    returnType,
+  };
+}
+
 function getSuccessTypes(op: SdkOpenApiOperation, path: string, method: string): string[] {
   if (!op.responses) return ['void'];
   const out: string[] = [];
@@ -313,20 +445,46 @@ function getSuccessTypes(op: SdkOpenApiOperation, path: string, method: string):
   return out.length ? out : ['void'];
 }
 
+/**
+ * Render an OpenAPI path template as a TypeScript template-literal expression.
+ *
+ * Leading slashes are stripped so the emitted path is relative — `HttpClient`
+ * rejects a leading-slash path. Every `{name}` placeholder is substituted and
+ * percent-encoded, INCLUDING placeholders that share a segment with literal text
+ * (`/files/{id}.json`); an anchored whole-segment match would emit `{id}.json`
+ * as a literal and silently drop the substitution.
+ */
 function buildPathLiteral(path: string): string {
-  // Strip a single leading slash so the emitted path is relative (HTTP client
-  // rejects leading-slash paths). Preserve interior `/` separators between
-  // segments.
   const normalized = path.replace(/^\/+/, '');
-  const segments = normalized.split('/').map((seg) => {
-    const m = seg.match(/^\{(.+)\}$/);
-    if (m) {
-      const safe = sanitizeIdentifier(m[1]);
-      return `encodeURIComponent(${safe})`;
-    }
-    return `'${escapeSingleQuote(seg)}'`;
-  });
-  return segments.length === 1 ? segments[0] : segments.join(' + "/" + ');
+  // `[^}]*` is non-greedy by construction, so `{a}x{b}` yields TWO placeholders
+  // rather than one spanning the interior brace.
+  const placeholder = /\{([^}]*)\}/g;
+  let out = '';
+  let cursor = 0;
+  for (let m = placeholder.exec(normalized); m !== null; m = placeholder.exec(normalized)) {
+    out += escapeTemplateLiteral(normalized.slice(cursor, m.index));
+    out += `\${encodeURIComponent(${sanitizeIdentifier(m[1]!)})}`;
+    cursor = m.index + m[0].length;
+  }
+  // A path with no placeholders needs no interpolation; emit a plain string
+  // literal rather than a template literal that substitutes nothing.
+  if (cursor === 0) return `'${escapeSingleQuote(normalized)}'`;
+  out += escapeTemplateLiteral(normalized.slice(cursor));
+  return `\`${out}\``;
+}
+
+/**
+ * Escape a LITERAL chunk of an emitted template literal.
+ *
+ * Applied only to the non-substitution text, before substitutions are spliced
+ * in, so a backtick, a backslash, or a `${` that came from the source path
+ * cannot break out of or inject into the emitted literal.
+ */
+function escapeTemplateLiteral(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$');
 }
 
 /**
@@ -344,7 +502,9 @@ export function generateOpenApiClient(
   const lines: string[] = [];
   const L = (s: string = '') => lines.push(s);
 
-  L('/* eslint-disable */');
+  // This repo (and a generated file's likely home) lints with `deno lint`, not
+  // ESLint; an `eslint-disable` pragma here would suppress nothing.
+  L('// deno-lint-ignore-file');
   L('/**');
   L(' * Auto-generated SDK client. Do not edit manually.');
   L(' */');
@@ -353,111 +513,95 @@ export function generateOpenApiClient(
   L('');
 
   if (schemas) {
+    // Two component names can sanitize onto ONE type name (`User` / `user`),
+    // which would emit duplicate `export type` declarations — a syntax error in
+    // the generated file. Fail with both originals instead.
+    const usedTypes = new Map<string, string>();
     for (const [name, schema] of Object.entries(schemas)) {
-      L(`export type ${sanitizeIdentifier(name)} = ${renderSchema(schema)};`);
+      const typeName = sanitizeTypeName(name);
+      const clash = usedTypes.get(typeName);
+      if (clash !== undefined) {
+        throw new OpenApiCodegenError(
+          `Duplicate component type name '${typeName}': schemas '${clash}' and '${name}'`,
+        );
+      }
+      usedTypes.set(typeName, name);
+      L(`export type ${typeName} = ${renderSchema(schema)};`);
     }
     L('');
   }
 
-  for (const op of operations) {
-    const { pathParams: _pathParams, queryParams, headerParams } = splitParams(
-      op.operation,
-      op.path,
-      op.method,
-    );
-    const bodySchema = getBodySchema(op.operation);
-    const typeName = sanitizeIdentifier(op.operationId) + 'Args';
-    // Args interface contains ONLY query, header, and body parameters (flat, no wrapper).
-    // Path parameters are excluded - they appear as separate function arguments.
-    const argsFields: string[] = [];
+  const shapes = operations.map(buildOpShape);
 
-    if (queryParams.length || headerParams.length || bodySchema) {
-      for (const p of queryParams) {
-        const pname = sanitizeIdentifier(p.name);
-        const ptype = renderSchema(p.schema ?? { type: 'string' }, new Set(), op.path, op.method);
-        argsFields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
-      }
-      for (const p of headerParams) {
-        const pname = sanitizeIdentifier(p.name);
-        const ptype = renderSchema(p.schema ?? { type: 'string' }, new Set(), op.path, op.method);
-        argsFields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
-      }
-      if (bodySchema) {
-        const btype = renderSchema(bodySchema, new Set(), op.path, op.method);
-        argsFields.push(`    body?: ${btype};`);
-      }
+  // Pass 1 — the `*Args` interface for each operation that takes any.
+  // Path parameters are deliberately excluded: they are positional function
+  // arguments, since a path cannot be built without them.
+  for (const shape of shapes) {
+    // An operation with no args emits nothing here — not even a blank line, which
+    // would leave a run of blank lines between the interfaces that do get emitted.
+    if (!shape.hasArgs) continue;
+    L(`export interface ${shape.argsTypeName} {`);
+    for (const p of [...shape.queryParams, ...shape.headerParams]) {
+      L(`    ${p.name}${p.required ? '' : '?'}: ${p.type};`);
     }
-
-    if (argsFields.length) {
-      L(`export interface ${typeName} {`);
-      argsFields.forEach((f) => L(f));
-      L('}');
+    if (shape.bodyType !== undefined) {
+      L(`    body${shape.bodyRequired ? '' : '?'}: ${shape.bodyType};`);
     }
+    L('}');
     L('');
   }
 
   L(`export function ${opts.factoryName}(client: IHttpClient) {`);
 
-  for (const op of operations) {
-    const { pathParams, queryParams, headerParams } = splitParams(
-      op.operation,
-      op.path,
-      op.method,
-    );
-    const bodySchema = getBodySchema(op.operation);
-    const successTypes = getSuccessTypes(op.operation, op.path, op.method);
-    const returnType = successTypes.length === 1 && successTypes[0] === 'void'
-      ? 'void'
-      : successTypes.join(' | ');
+  // Pass 2 — the method for each operation.
+  for (const shape of shapes) {
+    const { entry, returnType } = shape;
+    // `opts` is accessed unconditionally when required, so no optional chain.
+    const optsRef = shape.argsRequired ? 'opts' : 'opts?';
 
     L('');
-    L(`    /** ${escapeSingleQuote(op.operationId)} */`);
+    L(`    /** ${escapeSingleQuote(entry.operationId)} */`);
 
-    const paramList: string[] = [];
-    for (const p of pathParams) {
-      const pname = sanitizeIdentifier(p.name);
-      const ptype = renderSchema(p.schema ?? { type: 'string' }, new Set(), op.path, op.method);
-      paramList.push(`${pname}${p.required ? '' : '?'}: ${ptype}`);
-    }
-    // Generate the *Args interface name and add typed opts parameter if needed.
-    const typeName = sanitizeIdentifier(op.operationId) + 'Args';
-    if (queryParams.length || headerParams.length || bodySchema) {
-      paramList.push(`opts?: ${typeName}`);
+    const paramList = shape.pathParams.map((p) => `${p.name}: ${p.type}`);
+    if (shape.hasArgs) {
+      paramList.push(`opts${shape.argsRequired ? '' : '?'}: ${shape.argsTypeName}`);
     }
 
-    L(`    function ${op.safeName}(${
+    L(`    function ${entry.safeName}(${
       paramList.join(', ')
     }): Promise<ClientResponse<${returnType}>> {`);
 
-    const pathExpr = buildPathLiteral(op.path);
     L(`        return client.request<${returnType}>({`);
-    L(`            method: '${op.method.toUpperCase()}',`);
-    L(`            path: ${pathExpr},`);
+    L(`            method: '${entry.method.toUpperCase()}',`);
+    L(`            path: ${buildPathLiteral(entry.path)},`);
 
-    if (queryParams.length) {
-      const qParts = queryParams.map((p) => {
-        const pname = sanitizeIdentifier(p.name);
-        const ptype = renderSchema(p.schema ?? { type: 'string' }, new Set(), op.path, op.method);
-        return `'${escapeSingleQuote(p.name)}': (opts?.${pname} as ${ptype} | undefined)`;
-      });
+    if (shape.queryParams.length) {
+      // No cast: the arg field is already declared with this parameter's rendered
+      // type, so it assigns to `ClientRequest.query` directly. A cast here would
+      // silence nothing and would hide a genuinely unassignable query type.
+      const qParts = shape.queryParams.map((p) =>
+        `'${escapeSingleQuote(p.wireName)}': ${optsRef}.${p.name}`
+      );
       L(`            query: { ${qParts.join(', ')} },`);
     }
-    if (headerParams.length) {
-      const hChecks = headerParams.map((p) => {
-        const pname = sanitizeIdentifier(p.name);
-        const origName = escapeSingleQuote(p.name);
-        return `if (opts?.${pname} !== undefined) headers['${origName}'] = String(opts?.${pname});`;
-      });
+    if (shape.headerParams.length) {
+      // Built in an IIFE rather than an object literal so an omitted optional
+      // header is absent entirely instead of present-and-`undefined`, and so a
+      // non-string header value (an `integer` schema) is stringified.
       L(`            headers: (() => {`);
       L(`                const headers: Record<string, string> = {};`);
-      for (const check of hChecks) {
-        L(`                ${check}`);
+      for (const p of shape.headerParams) {
+        L(
+          `                if (${optsRef}.${p.name} !== undefined) headers['${
+            escapeSingleQuote(p.wireName)
+          }'] = String(${optsRef}.${p.name});`,
+        );
       }
       L(`                return headers;`);
       L(`            })(),`);
     }
-    if (bodySchema) {
-      L(`            json: opts?.body,`);
+    if (shape.bodyType !== undefined) {
+      L(`            json: ${optsRef}.body,`);
     }
 
     L('        });');
@@ -466,8 +610,8 @@ export function generateOpenApiClient(
 
   L('');
   L('    return {');
-  for (const op of operations) {
-    L(`        ${op.safeName},`);
+  for (const shape of shapes) {
+    L(`        ${shape.entry.safeName},`);
   }
   L('    };');
   L('}');

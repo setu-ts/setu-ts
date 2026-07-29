@@ -9,7 +9,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { HttpClient } from '../../src/http/http-client.ts';
-import { HttpClientError } from '../../src/errors.ts';
+import { ClientCircuitOpenError, HttpClientError } from '../../src/errors.ts';
 import type { ClientOptions, IClientTiming, IHttpClient } from '../../src/http/contracts.ts';
 
 // Deterministic fake timing.
@@ -483,5 +483,188 @@ describe('HttpClient', () => {
       throw err;
     }
     // unreachable
+  });
+  it('parses a structured +json media type', async () => {
+    // `application/problem+json` (RFC 7807) is JSON. A naive
+    // `includes('application/json')` test missed every `+json` suffix and handed
+    // the caller `undefined` data for a perfectly good body.
+    for (const ct of ['application/problem+json', 'application/vnd.api+json']) {
+      const client = new HttpClient({
+        baseUrl: 'https://api.example.com',
+        timing: fakeTiming,
+        fetch: () =>
+          Promise.resolve(
+            new Response(JSON.stringify({ ok: ct }), {
+              status: 200,
+              headers: { 'Content-Type': ct },
+            }),
+          ),
+      });
+      const res = await client.request<{ ok: string }>({ method: 'GET', path: 'x' });
+      expect(res.data).toEqual({ ok: ct });
+    }
+  });
+
+  it('parses JSON when the media type carries parameters and odd casing', async () => {
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'Application/JSON; charset=utf-8' },
+          }),
+        ),
+    });
+    const res = await client.request<{ ok: boolean }>({ method: 'GET', path: 'x' });
+    expect(res.data).toEqual({ ok: true });
+  });
+
+  it('does NOT parse a media type that merely ends in json without a + separator', async () => {
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      fetch: () =>
+        Promise.resolve(
+          new Response('not json', {
+            status: 200,
+            headers: { 'Content-Type': 'text/notjson' },
+          }),
+        ),
+    });
+    const res = await client.request({ method: 'GET', path: 'x' });
+    expect(res.data).toBeUndefined();
+  });
+
+  it('rejects an absolute URL path so per-origin policy cannot be bypassed', async () => {
+    const { client, calls } = buildClient();
+    for (const path of ['https://evil.example.com/steal', 'http://evil.example.com/x']) {
+      await expect(client.request({ method: 'GET', path })).rejects.toThrow(
+        /must be relative/,
+      );
+    }
+    // Nothing was ever dispatched.
+    expect(calls.length).toBe(0);
+  });
+
+  it('rejects a scheme-relative path', async () => {
+    const { client, calls } = buildClient();
+    // `//evil.example.com/x` also leaves the configured origin. It is caught by
+    // the leading-slash guard, so the message is that one.
+    await expect(
+      client.request({ method: 'GET', path: '//evil.example.com/x' }),
+    ).rejects.toThrow(/must be relative/);
+    expect(calls.length).toBe(0);
+  });
+
+  it('still accepts a relative path containing a colon in a later segment', async () => {
+    // `users/a:b` is relative — the absolute-URL guard must not over-reject it.
+    const { client, calls } = buildClient();
+    await client.request({ method: 'GET', path: 'users/a:b' });
+    expect(calls[0]!.url).toBe('https://api.example.com/users/a:b');
+  });
+
+  it('does not count a caller abort as a circuit-breaker failure', async () => {
+    let calls = 0;
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      // threshold 1: if an abort counted, the circuit would open after the first.
+      circuitBreaker: { threshold: 1, timeout: 10_000, resetTimeout: 10_000 },
+      fetch: () => {
+        calls++;
+        if (calls <= 3) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+        return Promise.resolve(
+          new Response('{"ok":true}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      },
+    });
+
+    for (let i = 0; i < 3; i++) {
+      await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('Aborted');
+    }
+    // Circuit is still closed — the request reaches fetch and succeeds.
+    const res = await client.request<{ ok: boolean }>({ method: 'GET', path: 'x' });
+    expect(res.data).toEqual({ ok: true });
+    expect(calls).toBe(4);
+  });
+
+  it('recognises an abort by name even when it is not a DOMException', async () => {
+    // A caller may abort with ANY reason. A custom/polyfilled abort reason carries
+    // `name: 'AbortError'` without being a `DOMException`, so an
+    // `instanceof DOMException` check would misclassify it as a dependency
+    // failure and let cancellations trip the breaker.
+    const abortLike = Object.assign(new Error('cancelled by caller'), { name: 'AbortError' });
+    let calls = 0;
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      circuitBreaker: { threshold: 1, timeout: 10_000, resetTimeout: 10_000 },
+      fetch: () => {
+        calls++;
+        if (calls <= 2) return Promise.reject(abortLike);
+        return Promise.resolve(
+          new Response('{"ok":true}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      },
+    });
+
+    for (let i = 0; i < 2; i++) {
+      await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+        'cancelled by caller',
+      );
+    }
+    const res = await client.request<{ ok: boolean }>({ method: 'GET', path: 'x' });
+    expect(res.data).toEqual({ ok: true });
+  });
+
+  it('counts a 5xx as a breaker failure but a 4xx as a user error', async () => {
+    const respond = (status: number) => () =>
+      Promise.resolve(
+        new Response('{}', { status, headers: { 'Content-Type': 'application/json' } }),
+      );
+
+    // 4xx: many failures, circuit stays closed.
+    const userErrClient = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      circuitBreaker: { threshold: 2, timeout: 10_000, resetTimeout: 10_000 },
+      fetch: respond(404),
+    });
+    for (let i = 0; i < 5; i++) {
+      await expect(userErrClient.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+        HttpClientError,
+      );
+    }
+
+    // 5xx: the circuit opens once the threshold is reached.
+    let serverCalls = 0;
+    const serverErrClient = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      circuitBreaker: { threshold: 2, timeout: 10_000, resetTimeout: 10_000 },
+      fetch: () => {
+        serverCalls++;
+        return respond(503)();
+      },
+    });
+    for (let i = 0; i < 2; i++) {
+      await expect(serverErrClient.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+        HttpClientError,
+      );
+    }
+    expect(serverCalls).toBe(2);
+    await expect(serverErrClient.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      ClientCircuitOpenError,
+    );
+    // Fail-fast: no further request was dispatched.
+    expect(serverCalls).toBe(2);
   });
 });
