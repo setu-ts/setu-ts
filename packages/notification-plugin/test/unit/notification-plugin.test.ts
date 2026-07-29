@@ -29,7 +29,14 @@ const twilioConfig: ChannelConfig = {
   provider: 'twilio',
   options: { accountSid: 'AC1', authToken: 'tok', from: '+15550000000' },
 };
-const fcmConfig: ChannelConfig = { provider: 'fcm', options: { serverKey: 'srv-key' } };
+/** Stub token source so plugin tests exercise wiring, not RSA signing. */
+const stubTokenSource = {
+  getAccessToken: (): Promise<string> => Promise.resolve('ya29.test-token'),
+};
+const fcmConfig: ChannelConfig = {
+  provider: 'fcm',
+  options: { projectId: 'my-project', tokenSource: stubTokenSource },
+};
 const slackConfig: ChannelConfig = {
   provider: 'slack',
   options: { webhookUrl: 'https://hooks.slack.com/services/T/B/X' },
@@ -118,6 +125,40 @@ describe('createProvider', () => {
     expect(createProvider(twilioConfig)).toBeInstanceOf(TwilioProvider);
     expect(createProvider(fcmConfig)).toBeInstanceOf(FcmProvider);
     expect(createProvider(slackConfig)).toBeInstanceOf(SlackProvider);
+  });
+
+  it('builds an fcm provider from the runtime capability when no tokenSource is given', () => {
+    const fake = createFakeContext();
+    const provider = createProvider({
+      provider: 'fcm',
+      options: {
+        projectId: 'p',
+        clientEmail: 'a@b.iam.gserviceaccount.com',
+        privateKey: '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----',
+      },
+    }, fake.ctx);
+    expect(provider).toBeInstanceOf(FcmProvider);
+  });
+
+  it('throws at registration when a service-account fcm channel has no runtime', () => {
+    // Failing here rather than on the first notification means a misconfigured
+    // push channel is caught while the app is starting, not in production.
+    expect(() =>
+      createProvider({
+        provider: 'fcm',
+        options: {
+          projectId: 'p',
+          clientEmail: 'a@b.iam.gserviceaccount.com',
+          privateKey: 'pem',
+        },
+      })
+    ).toThrow('requires the runtime capability');
+  });
+
+  it('accepts an fcm channel with an explicit tokenSource and no runtime', () => {
+    // A caller-supplied token source carries its own credentials, so the
+    // runtime requirement must not apply to it.
+    expect(createProvider(fcmConfig)).toBeInstanceOf(FcmProvider);
   });
 
   it('passes an injected http seam through to the provider', async () => {

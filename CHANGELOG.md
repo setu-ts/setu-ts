@@ -35,9 +35,38 @@ topic with ordinary pub/sub.
 - Each broker now supplies its own reply inbox through an internal seam, rather than having a topic
   string imposed on it by the shared request-reply core. The four brokers that were already
   reply-capable pass a shared helper and are behaviourally unchanged.
+- **`notification-plugin` push delivery works again, on FCM HTTP v1.** `FcmProvider` now posts to
+  `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted from a service
+  account: it signs an RS256 JWT assertion with `runtime.subtle` and caches the token until shortly
+  before expiry, so a send costs one request in the steady state. Zero npm dependencies and
+  Workers-portable, like the other HTTP providers. A new `FcmTokenSource` export lets you source
+  tokens elsewhere (a GCP metadata server, a key-holding broker) instead of from a local key.
 
 ### Changed
 
+- **BREAKING: `FcmProviderOptions.serverKey` is replaced by service-account fields.** The push
+  channel now takes `{ projectId, clientEmail, privateKey }` (or a `tokenSource`) instead of
+  `serverKey`. This is not a deprecation: `serverKey` addressed an endpoint Google switched off in
+  2024, so every send through it already failed. Existing config becomes a compile error, which is
+  the intended signal.
+
+  ```typescript
+  // Before — never reached a live endpoint
+  push: { provider: 'fcm', options: { serverKey: config.get('FCM_SERVER_KEY') } }
+
+  // After — values come from the service-account JSON
+  push: {
+    provider: 'fcm',
+    options: {
+      projectId: config.get('FCM_PROJECT_ID'),
+      clientEmail: config.get('FCM_CLIENT_EMAIL'),
+      privateKey: config.get('FCM_PRIVATE_KEY'),
+    },
+  }
+  ```
+
+  A `push` channel using the default signer now needs `CAPABILITIES.RUNTIME` (for Web Crypto and the
+  clock) and throws during `register` without it, rather than failing on the first notification.
 - **BREAKING (wire format): request-reply traffic moved to a derived channel.** `request(topic, …)`
   now publishes to, and `respond(topic, …)` subscribes to, `rr.req.<topic>` instead of `<topic>`. A
   `0.1.0-alpha.2` responder and a later requester **do not interoperate** — during an upgrade,
@@ -202,7 +231,8 @@ are never hard dependencies. Each is injected through plugin options or imported
 
 - **`notification-plugin` FCM push is non-functional.** It implements the legacy FCM `serverKey`
   API, which Google decommissioned in 2024. FCM HTTP v1 with service-account JWT signing is a
-  follow-up.
+  follow-up. _(True of this release. Superseded — see [Unreleased](#unreleased), where the provider
+  moves to HTTP v1 and push delivery works.)_
 - **LaunchDarkly is unsupported** in `feature-flags-plugin`. The LaunchDarkly Node server SDK's
   `variation`/`allFlagsState` are async and cannot satisfy the synchronous committed `isEnabled`
   contract. Use the provider's `'custom'` arm as a bridge.

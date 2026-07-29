@@ -8,7 +8,27 @@
  * @module
  */
 
-import type { IMailer, NotificationMessage } from '@hono-enterprise/common';
+import type { IMailer, IRuntimeServices, NotificationMessage } from '@hono-enterprise/common';
+
+/**
+ * Supplies OAuth2 access tokens for FCM HTTP v1.
+ *
+ * Implemented internally by a service-account signer. Supply your own through
+ * {@linkcode FcmProviderOptions.tokenSource} to source tokens differently — for
+ * example from a GCP metadata server, or from a workload-identity broker that
+ * holds the private key outside the application.
+ *
+ * @since 0.1.0
+ */
+export interface FcmTokenSource {
+  /**
+   * Returns a valid access token, minting or refreshing one as needed.
+   *
+   * @returns The bearer token to present to FCM
+   * @throws {Error} If a token cannot be obtained
+   */
+  getAccessToken(): Promise<string>;
+}
 
 // ── NotificationChannel port (internal) ──────────────────────────────────────
 
@@ -261,7 +281,30 @@ export interface TwilioProviderOptions {
  * @since 0.1.0
  */
 export interface FcmProviderOptions {
-  serverKey: string;
+  /** Firebase project id; addressed by the v1 `messages:send` URL. */
+  projectId: string;
+  /**
+   * Service-account email that signs the OAuth2 assertion. Required unless
+   * {@linkcode tokenSource} is supplied.
+   */
+  clientEmail?: string;
+  /**
+   * PEM PKCS#8 private key for the service account. Required unless
+   * {@linkcode tokenSource} is supplied.
+   */
+  privateKey?: string;
+  /**
+   * Runtime services providing Web Crypto and the wall clock, used to sign the
+   * assertion and expire cached tokens. Required unless {@linkcode tokenSource}
+   * is supplied; the plugin passes this automatically.
+   */
+  runtime?: IRuntimeServices;
+  /**
+   * Overrides how access tokens are acquired — e.g. from a GCP metadata server
+   * instead of a locally held key. When set, the three credential fields above
+   * are unused.
+   */
+  tokenSource?: FcmTokenSource;
   http?: INotificationHttp;
 }
 
