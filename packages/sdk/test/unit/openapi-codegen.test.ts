@@ -811,3 +811,165 @@ describe('fixture equality', () => {
     expect(generated).toBe(fixture);
   });
 });
+
+// Compile-regression tests: ensure generated code compiles for various param shapes
+let _tempCounter = 0;
+
+describe('compile regression', () => {
+  async function compileCheck(source: string): Promise<void> {
+    // Write to /tmp which is typically writable without extra permissions
+    const tmpFilePath = `/tmp/codegen_test_${_tempCounter++}.ts`;
+    await Deno.writeTextFile(tmpFilePath, source);
+
+    // Run deno check via Deno.Command (properly typed in Deno)
+    const command = new Deno.Command(Deno.execPath(), {
+      args: ['check', tmpFilePath],
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    const result = await command.output();
+    const code = result.code;
+    if (code !== 0) {
+      throw new Error(`deno check failed for generated client, exit code ${code}`);
+    }
+    // Clean up
+    await Deno.remove(tmpFilePath);
+  }
+
+  it('compiles with non-string header (integer X-Retry-Count)', async () => {
+    const doc: SdkOpenApiDocument = {
+      openapi: '3.1.0',
+      paths: {
+        '/test': {
+          get: {
+            operationId: 'testOp',
+            parameters: [
+              {
+                name: 'X-Retry-Count',
+                in: 'header',
+                required: false,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'object' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
+    await compileCheck(source);
+  });
+
+  it('compiles with schemaless path param (no schema)', async () => {
+    const doc: SdkOpenApiDocument = {
+      openapi: '3.1.0',
+      paths: {
+        '/users/{id}': {
+          get: {
+            operationId: 'getUser',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                // No schema field - this is the schemaless case
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'object' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
+    await compileCheck(source);
+  });
+
+  it('compiles with schemaless query param (no schema)', async () => {
+    const doc: SdkOpenApiDocument = {
+      openapi: '3.1.0',
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'q',
+                in: 'query',
+                required: false,
+                // No schema field
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'array' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
+    await compileCheck(source);
+  });
+
+  it('compiles with schemaless header param (no schema)', async () => {
+    const doc: SdkOpenApiDocument = {
+      openapi: '3.1.0',
+      paths: {
+        '/test': {
+          get: {
+            operationId: 'testOp',
+            parameters: [
+              {
+                name: 'X-Custom',
+                in: 'header',
+                required: false,
+                // No schema field
+              },
+            ],
+            responses: {
+              '200': { description: 'OK' },
+            },
+          },
+        },
+      },
+    };
+    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
+    await compileCheck(source);
+  });
+
+  it('compiles with string header (F1 regression)', async () => {
+    const doc: SdkOpenApiDocument = {
+      openapi: '3.1.0',
+      paths: {
+        '/test': {
+          get: {
+            operationId: 'testOp',
+            parameters: [
+              {
+                name: 'X-API-Key',
+                in: 'header',
+                required: false,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+    };
+    const source = generateOpenApiClient(doc, { sdkImport: '@hono-enterprise/sdk' });
+    await compileCheck(source);
+  });
+});

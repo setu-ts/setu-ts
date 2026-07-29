@@ -28,7 +28,7 @@ export function createApi(client: IHttpClient) {
             query: { 'page': (opts?.page as number | undefined), 'limit': (opts?.limit as number | undefined) },
             headers: (() => {
                 const headers: Record<string, string> = {};
-                if (opts?.xApiKey !== undefined) headers['X-API-Key'] = opts?.xApiKey;
+                if (opts?.xApiKey !== undefined) headers['X-API-Key'] = String(opts?.xApiKey);
                 return headers;
             })(),
         });
