@@ -422,7 +422,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   auth-plugin's is internal and AI_GUIDELINES §2.2/§3.3 forbid a plugin importing another plugin. A
   real-crypto test generates an RSA keypair, signs an assertion and verifies it, so the signing path
   is exercised for real rather than only behind a fake. No `common` change, no new capability token;
-  developed in an isolated worktree off `main`) — complete (PR pending)
+  developed in an isolated worktree off `main`) — complete (PR #96)
 - **Milestone 46** (`packages/websocket-plugin` — WebSocketPlugin registering an `IWebSocketService`
   under a new `CAPABILITIES.WEBSOCKET = 'websocket'` token; full-duplex bidirectional messaging,
   completing the real-time story M43's SSE plugin covers one-way. The RFC 6455 handshake needs the
