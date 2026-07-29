@@ -133,8 +133,11 @@ export interface IMessageBroker {
    * A responder registered with {@linkcode respond} on the same topic returns
    * the reply. The call rejects with a `RequestTimeoutError` when no reply
    * arrives within `options.timeoutMs`, and with a `RemoteHandlerError` when the
-   * responder throws. Not every transport supports this: brokers that cannot
-   * (e.g. Kafka's consumer-group model) reject with a `MessagingNotSupportedError`.
+   * responder throws.
+   *
+   * Request traffic rides a channel derived from `topic`, disjoint from plain
+   * {@linkcode publish}/{@linkcode subscribe} on that same topic — a pub/sub
+   * consumer never observes an RPC request, and vice versa.
    *
    * @typeParam TReq - The request payload type
    * @typeParam TRes - The reply payload type
@@ -149,7 +152,6 @@ export interface IMessageBroker {
    * sent back to the requesting caller, correlated to the originating request.
    *
    * Pass `options.queue` to load-balance requests across competing responders.
-   * Brokers that do not support request-reply reject with a `MessagingNotSupportedError`.
    *
    * @typeParam TReq - The request payload type
    * @typeParam TRes - The reply payload type

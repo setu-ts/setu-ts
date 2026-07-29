@@ -168,6 +168,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `MessagingNotSupportedError` (consumer-group/auto-commit model); exported
   `RequestTimeoutError`/`RemoteHandlerError`/ `MessagingNotSupportedError`; developed in parallel
   with M28 in an isolated worktree off `main`) — complete (PR #60)
+- **Milestone 14d** (`packages/messaging-plugin` — reply-transport seam + Kafka RPC: restores the
+  per-broker `openInbox` seam the M14c plan specified but whose implementation collapsed into a
+  `publish`/`subscribe`/`uuid`/timers delegation object that all four reply-capable brokers passed
+  **byte-identically** — nothing named `IReplyTransport`/`openInbox` ever existed in `packages/`.
+  That generic path works only because in-memory/redis/rabbitmq/nats treat a topic as cheap and
+  per-instance-addressable, which is the real reason Kafka shipped a throw — not anything about
+  consumer groups being inherently unable to do RPC. `RequestReplyDeps` gains `openInbox` returning
+  a `ReplyInbox` (`address` + `close`); the four existing brokers pass the shared internal
+  `createTopicInbox` and are behaviour-identical, while `KafkaBroker` supplies its own — a shared
+  `replyTopic` (default `'messaging.replies'`) read under a per-instance consumer group
+  `rr-inbox-<uuid>`. Chosen because `IKafkaFactory` exposes only `producer()`/`consumer({groupId})`
+  and **no `admin()`**, so per-instance reply-topic creation is unreachable without widening an
+  option-referenced facade; the topic must therefore pre-exist, and cross-instance replies are
+  dropped by the existing correlation-id lookup so no envelope change was needed. Two defects fixed:
+  RPC moved to a derived `rr.req.<topic>` channel (a deliberate **breaking wire change** vs
+  `0.1.0-alpha.2`, recorded in CHANGELOG) so request envelopes stop leaking into plain `subscribe()`
+  consumers and a responder sharing a topic AND a queue with an ordinary subscriber no longer
+  swallows that subscriber's messages (fan-out consumers were never affected — the defect was
+  narrower than the raw envelope leak); and the reply inbox now claims its own queue name, since
+  `KafkaBroker.subscribe` otherwise falls back to the shared `'messaging-consumers'` group and
+  misroutes replies. `MessagingNotSupportedError` is **deprecated, not removed** — AI_GUIDELINES
+  §9.2 governs a published export and beats the dead-surface rule, which targets newly invented
+  surface. No `common` contract change (JSDoc only); developed in an isolated worktree off `main`) —
+  complete (PR #94)
 - **Milestone 15** (`packages/queue-plugin` — QueuePlugin with MemoryQueue and RedisQueue adapters,
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
@@ -376,8 +400,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `sendEmail`/`sendSms`/`sendSlack` examples to the committed one-method `send` surface, dropped the
   email `options` bag, fixed the Twilio registration example that omitted the required `from`, and
   added the missing Notifications Options/Exports/Notes sections in the same PR; the legacy FCM
-  `serverKey` API it ships was decommissioned by Google in 2024 — FCM HTTP v1 with service-account
-  JWT signing is a follow-up) — complete (PR #65)
+  `serverKey` API it ships was decommissioned by Google in 2024 — **fixed in M30b**, which moves the
+  provider to FCM HTTP v1) — complete (PR #65)
+- **Milestone 30b** (`packages/notification-plugin` — FCM HTTP v1: M30's `FcmProvider` posted to
+  `POST /fcm/send` with `Authorization: key=<serverKey>`, the API Google switched off in 2024, so
+  the push channel could never succeed against a live project — a defect repair, not a feature. Now
+  posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted from a
+  service account: an internal `ServiceAccountTokenSource` signs an RS256 JWT assertion with
+  `runtime.subtle` (same route as M16's `JwtService`;
+  `importKey('pkcs8', …,
+  { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' })`), exchanges it at
+  `oauth2.googleapis.com/token` over the existing `INotificationHttp` seam, and caches both the
+  imported key and the token until 60 s before expiry — so a send costs one request in the steady
+  state. Zero npm dependencies, Workers-portable. `FcmProviderOptions.serverKey` is **replaced, not
+  deprecated**, by `{ projectId, clientEmail, privateKey }`: §9.2's deprecate-then-remove assumes a
+  working replacement path, and `serverKey` addressed a dead endpoint, so a compile error is the
+  correct signal (maintainer-approved). `createProvider`'s `fcm` arm now takes `IPluginContext` and
+  throws during `register` when `CAPABILITIES.RUNTIME` is absent, mirroring the `mail` arm — unless
+  an exported `FcmTokenSource` is supplied, which carries its own credentials (GCP metadata server,
+  key broker) and lifts the runtime requirement. `pemToDer` is a deliberate local copy:
+  auth-plugin's is internal and AI_GUIDELINES §2.2/§3.3 forbid a plugin importing another plugin. A
+  real-crypto test generates an RSA keypair, signs an assertion and verifies it, so the signing path
+  is exercised for real rather than only behind a fake. No `common` change, no new capability token;
+  developed in an isolated worktree off `main`) — complete (PR #96)
 - **Milestone 46** (`packages/websocket-plugin` — WebSocketPlugin registering an `IWebSocketService`
   under a new `CAPABILITIES.WEBSOCKET = 'websocket'` token; full-duplex bidirectional messaging,
   completing the real-time story M43's SSE plugin covers one-way. The RFC 6455 handshake needs the
@@ -429,11 +474,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   contract and `FEATURE_FLAGS: 'feature-flags'` token were committed in M1. **LaunchDarkly was
   deferred**: the Node server SDK's `variation`/`allFlagsState` are async (verified from
   `@launchdarkly/js-server-sdk-common` `LDClient.d.ts`), so no provider can satisfy the synchronous
-  `isEnabled` without widening `common`; the `'custom'` arm is the documented bridge until then.
-  Corrected the ROADMAP/PUBLIC_API `flags.middleware(...)` examples to `createFlagGuard`, dropped
-  LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules row, added the missing Feature
-  Flags Options/Exports/Notes sections, and fixed the ROADMAP implementation-files list in the same
-  PR) — complete (PR #67)
+  `isEnabled` without widening `common`; the `'custom'` arm was the documented bridge. **Resolved in
+  M47** — `LDFlagsState.getFlagValue` is synchronous, which is the bridge, plus an optional
+  `IFeatureFlags.isEnabledAsync`. Corrected the ROADMAP/PUBLIC_API `flags.middleware(...)` examples
+  to `createFlagGuard`, dropped LaunchDarkly from the ROADMAP provider list and ARCHITECTURE Rules
+  row, added the missing Feature Flags Options/Exports/Notes sections, and fixed the ROADMAP
+  implementation-files list in the same PR) — complete (PR #67)
 - **Milestone 32** (`packages/multi-tenancy-plugin` — MultiTenancyPlugin factory; four resolvers:
   Subdomain/Header/Path/Jwt; three isolation strategies: Column/Schema/Database; `ITenantDataStore`
   port + `MemoryTenantDataStore` default; `TenantRepository`; cache-key isolation via
@@ -551,9 +597,70 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   projects to the CLI's own version, so during a version bump the pinned version is not published
   yet, and checking against JSR would deadlock the release workflow's own test step against the
   publish that would fix it) — complete (PR pending)
+- **Milestone 47** (alpha-3 limitation closeout — the three `CHANGELOG.md` "Known limitations" from
+  `v0.1.0-alpha.1` that were real capability gaps rather than wording problems. Taken out of order,
+  before M35/M36, because they gate the `v0.1.0-alpha.3` release; delivered on ONE combined branch
+  at the maintainer's direction rather than three, since they share that gate. **A.**
+  `packages/resilience-plugin` timeouts now cancel: `common` gains `ResilientCall`/`HardenedCall`
+  and `IResilienceService.wrap` + `ICircuitBreaker.execute` are widened to use them —
+  source-compatible for CALLERS, breaking for IMPLEMENTORS because `fn` sits in a contravariant
+  position (established with `deno check`, not assumed; the only in-repo implementors were two
+  structural test doubles). A new `patterns/abort.ts` owns `linkAbort`/`throwIfAborted`/
+  `abortReasonOf` with listener disposal, so a long-lived caller signal cannot accumulate one
+  listener per invocation; `timeout` aborts the per-attempt controller with the SAME `TimeoutError`
+  instance it rejects with (one error identity); `retry` checks the signal before each attempt and
+  wakes its backoff early on abort (that sleep also leaked its timer handle on every attempt
+  before); a `bulkhead` waiter cancelled while queued leaves the queue and never runs its call.
+  **B.** `packages/feature-flags-plugin` gains a `LaunchDarklyProvider`. Every evaluation method on
+  the Node server SDK is async, so the bridge is `LDFlagsState.getFlagValue` — the SDK's one
+  SYNCHRONOUS read, verified against the shipped `.d.ts` AND against a real client — behind a
+  per-context snapshot cache whose cold read returns a configured `fallbackValue` and schedules a
+  background refill (coalesced per key, so a hot loop over an uncached user does not stampede).
+  `common` gains an OPTIONAL `IFeatureFlags.isEnabledAsync` carrying no cold-context caveat, and
+  `FeatureFlagService` funnels both entry points through ONE provider. Structural facades keep the
+  SDK's `any`-typed `EventEmitter.on` at the boundary; the load-failure branching is an internal
+  `toLoadFailure` seam so it is unit-tested rather than left uncovered behind the guarded real
+  import. **C.** cross-replica fan-out: `common` gains the `IRealtimeBackplane` port,
+  `RealtimeFrame`, a new `CAPABILITIES.REALTIME_BACKPLANE` token, and the pure `encodeFrameData`/
+  `decodeFrameData` codec — in `common` because three packages need the identical wire shape and no
+  plugin may import another. A NEW `packages/realtime-backplane-plugin` ships `'memory'` (default, a
+  REAL single-process bus rather than a no-op), `'messaging'` (over `CAPABILITIES.MESSAGING`,
+  reusing all five existing brokers with zero new deps), `'redis'`, and `'custom'` transports;
+  `websocket-plugin` and `sse-plugin` resolve the token OPTIONALLY, so absent it nothing changes,
+  and both `register()` become async to await their subscription. Redis uses TWO connections because
+  a subscriber-mode connection refuses every other command — a protocol property invisible to any
+  single-fake test, so the constructor refuses a client injected without its subscriber. Loop
+  prevention is a per-instance origin stamp; an arriving frame is delivered through a local-only
+  path and NEVER re-published, and never creates a room/channel that does not already exist locally.
+  `RoomBroadcastOptions.except` IS honored cluster-wide — connection ids are `runtime.uuid()` and
+  therefore globally unique, so the frame carries `exceptId` and every replica skips the match.
+  `Room.size`/`SseChannel.size` stay LOCAL, and that one is genuine: a cluster-wide count is
+  inherently async (scatter-gather), so it cannot satisfy the synchronous committed `size` getter
+  and wants a separate async method — deferred to a presence milestone as a CONTRACT decision, not
+  an implementation gap. Added the new package to `scripts/release-packages.ts`) — complete (PR #97)
 - **Milestone 35** (`packages/sdk` — client SDK) — portable, zero-npm-dependency HTTP client with
-  authentication, resilience (retry, circuit breaker, rate limiting), request/response interceptors,
-  and OpenAPI-to-TypeScript code generation; complete (PR pending)
+  bearer/API-key auth interceptors, client-side resilience (retry with fixed/exponential backoff and
+  delta-seconds `Retry-After`, a rolling-window circuit breaker, a sliding-window rate limiter),
+  request/response interceptors, and a pure OpenAPI 3.1 → TypeScript code generator. The only
+  in-repo import is type-level from `common`; no kernel, no plugin, no npm dependency, so it runs in
+  a browser. Two seams keep it testable without real time or a network: an injected `fetch` and an
+  `IClientTiming` (`performance.now()` + abort-aware `sleep`) that `createClient()` defaults, so
+  `Date.now()` never appears. The breaker's `resetTimeout` is measured from the trip, NOT from the
+  oldest failure in the rolling window — conflating the two silently closed the circuit whenever
+  `timeout < resetTimeout` and made half-open unreachable — and a failed probe restarts the cooldown
+  so a dead dependency is probed once per cooldown rather than on every request. Codegen output is
+  verified by a committed fixture that `deno task check` type-checks (`deno check` covers `test/`),
+  which is what a subprocess check could not do: it compiled a temp file in isolation and could not
+  catch emitted source disagreeing with the SDK's own `IHttpClient`. Review found the generator
+  emitted the raw `operationId` into a JSDoc comment escaped only for string literals, so a document
+  carrying a comment terminator injected EXECUTABLE code into the generated factory — a payload that
+  type-checked and ran; comment text is now escaped for its own context. It also rejected two
+  silent-corruption cases it used to emit: a path placeholder with no declared parameter (which
+  produced source referencing an undeclared identifier) and a declared path parameter absent from
+  the template (whose value was dropped). `packages/sdk` moves from `UNPUBLISHED_PACKAGES` to
+  `PUBLISHED_PACKAGES` Tier 3, so `release:verify` now reports 38 publishable packages; the next
+  release must run `release:create-packages` and `release:link-repos` before the first sdk publish,
+  because tokenless OIDC requires the repo link) — complete (PR pending)
 - **Next milestone** — **Milestone 36** (`packages/starter-*` — opinionated bundles); M36–M40 follow
   unless reprioritized.
 

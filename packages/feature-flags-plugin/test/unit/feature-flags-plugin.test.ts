@@ -13,6 +13,9 @@ import { DatabaseProvider } from '../../src/providers/database-provider.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type { FeatureFlagsPluginOptions, FlagProvider } from '../../src/interfaces/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import { LaunchDarklyProvider } from '../../src/providers/launchdarkly-provider.ts';
+import { FakeLaunchDarklyClient } from '../fixtures/fake-launchdarkly.ts';
+import type { IFeatureFlags } from '@hono-enterprise/common';
 
 describe('FeatureFlagsPlugin', () => {
   it('has correct name, provides, priority, optionalDependencies', () => {
@@ -203,5 +206,39 @@ describe('FeatureFlagsPlugin', () => {
     }
 
     expect(stopped).toBe(true);
+  });
+});
+
+describe('createProvider — launchdarkly arm', () => {
+  it('returns a LaunchDarklyProvider for the "launchdarkly" arm', () => {
+    const ctx = createFakeContext();
+    const provider = createProvider({
+      provider: 'launchdarkly',
+      options: { client: new FakeLaunchDarklyClient() },
+    }, ctx.ctx);
+    expect(provider).toBeInstanceOf(LaunchDarklyProvider);
+    expect(provider.type).toBe('launchdarkly');
+  });
+
+  it('registers the service and starts the provider through the plugin', async () => {
+    const client = new FakeLaunchDarklyClient({ values: { __anonymous__: { beta: true } } });
+    const ctx = createFakeContext();
+    const plugin = FeatureFlagsPlugin({
+      provider: 'launchdarkly',
+      options: { client },
+    });
+
+    await plugin.register(ctx.ctx);
+
+    const service = ctx.registered.get(CAPABILITIES.FEATURE_FLAGS) as IFeatureFlags;
+    expect(service).toBeDefined();
+    // Prewarmed during register, so this is real LaunchDarkly state.
+    expect(service.isEnabled('beta')).toBe(true);
+  });
+
+  it('fails registration when the arm has neither client nor sdkKey', async () => {
+    const ctx = createFakeContext();
+    const plugin = FeatureFlagsPlugin({ provider: 'launchdarkly', options: {} });
+    await expect(plugin.register(ctx.ctx)).rejects.toThrow('requires options.sdkKey');
   });
 });

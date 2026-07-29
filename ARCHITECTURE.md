@@ -1396,14 +1396,25 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 
 #### @hono-enterprise/feature-flags-plugin
 
-| Aspect               | Detail                                                                  |
-| -------------------- | ----------------------------------------------------------------------- |
-| **Purpose**          | Feature flag management                                                 |
-| **Responsibilities** | Flag evaluation; percentage rollout; user targeting; multiple providers |
-| **Dependencies**     | `common`, `kernel`                                                      |
-| **Public API**       | `FeatureFlagsPlugin()`; `IFeatureFlags`                                 |
-| **Extension Points** | Custom flag provider                                                    |
-| **Rules**            | Config provider for simple cases; DatabaseProvider for production       |
+| Aspect               | Detail                                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| **Purpose**          | Feature flag management                                                                   |
+| **Responsibilities** | Flag evaluation; percentage rollout; user targeting; multiple providers                   |
+| **Dependencies**     | `common`, `kernel`                                                                        |
+| **Public API**       | `FeatureFlagsPlugin()`; `IFeatureFlags`                                                   |
+| **Extension Points** | Custom flag provider                                                                      |
+| **Rules**            | Config provider for simple cases; DatabaseProvider or LaunchDarklyProvider for production |
+
+#### @hono-enterprise/realtime-backplane-plugin
+
+| Aspect               | Detail                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| **Purpose**          | Cross-replica fan-out for WebSocket rooms and SSE channels                               |
+| **Responsibilities** | Publish/subscribe transport; origin stamping and echo suppression; frame encoding        |
+| **Dependencies**     | `common`                                                                                 |
+| **Public API**       | `RealtimeBackplanePlugin()`; `IRealtimeBackplane`                                        |
+| **Extension Points** | Custom transport via the `'custom'` arm                                                  |
+| **Rules**            | Consumed OPTIONALLY — absent, rooms and channels stay in-process. Never imports a plugin |
 
 #### @hono-enterprise/multi-tenancy-plugin
 

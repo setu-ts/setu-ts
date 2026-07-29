@@ -99,3 +99,112 @@ describe('runWithRetry', () => {
     expect(runtime.armedDelays).toEqual([]);
   });
 });
+
+describe('runWithRetry cancellation', () => {
+  it('rejects without invoking fn when the signal is already aborted', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    const reason = new Error('cancelled before start');
+    controller.abort(reason);
+    let calls = 0;
+
+    let caught: unknown;
+    try {
+      await runWithRetry(
+        () => {
+          calls++;
+          return Promise.reject(new Error('boom'));
+        },
+        FIXED,
+        runtime,
+        controller.signal,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(reason);
+    expect(calls).toBe(0);
+  });
+
+  it('stops retrying once the signal aborts mid-sequence', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    let calls = 0;
+
+    let caught: unknown;
+    try {
+      await runWithRetry(
+        () => {
+          calls++;
+          // Cancel during the first attempt: the loop must not make a second.
+          controller.abort(new Error('cancelled mid-flight'));
+          return Promise.reject(new Error('boom'));
+        },
+        FIXED,
+        runtime,
+        controller.signal,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(calls).toBe(1);
+    expect((caught as Error).message).toBe('cancelled mid-flight');
+    // No backoff was armed, because the sequence ended instead of sleeping.
+    expect(runtime.armedDelays).toEqual([]);
+  });
+
+  it('wakes the backoff early when the signal aborts while sleeping', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    let calls = 0;
+
+    const pending = runWithRetry(
+      () => {
+        calls++;
+        return Promise.reject(new Error('boom'));
+      },
+      { limit: 5, delay: 60_000, backoff: 'fixed' },
+      runtime,
+      controller.signal,
+    );
+
+    // Let the first attempt fail and park in the (very long) backoff.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort(new Error('cancelled while sleeping'));
+
+    let caught: unknown;
+    try {
+      await pending;
+    } catch (error) {
+      caught = error;
+    }
+
+    // Without the interruptible sleep this would still be waiting a full minute.
+    expect((caught as Error).message).toBe('cancelled while sleeping');
+    expect(calls).toBe(1);
+  });
+
+  it('hands every attempt a live signal when no caller signal is supplied', async () => {
+    const runtime = new FakeRuntime();
+    const seen: boolean[] = [];
+
+    let caught: unknown;
+    try {
+      await runWithRetry(
+        (signal) => {
+          seen.push(signal.aborted);
+          return Promise.reject(new Error('boom'));
+        },
+        FIXED,
+        runtime,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect((caught as Error).message).toBe('boom');
+    expect(seen).toEqual([false, false, false]);
+  });
+});

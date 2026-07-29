@@ -1512,11 +1512,26 @@ Omitting an option disables that behaviour (no timer created).
 - `ISseConnection.lastEventId` — the value of the `Last-Event-ID` request header (for resume logic).
 - `SseChannel.publish(msg)` — broadcast to every open member, skipping closed ones.
 
+### Exports
+
+| Symbol                                                      | Kind              | Description                                                         |
+| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------- |
+| `SsePlugin`                                                 | function          | Plugin factory — registers `ISseService` under `CAPABILITIES.SSE`   |
+| `SseService`                                                | class             | The `ISseService` implementation                                    |
+| `SseConnection`                                             | class             | A live SSE connection over a `ReadableStream`                       |
+| `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`                                            |
+| `ChannelPublisher`                                          | type              | Forwards a local publish to other replicas; supplied by a backplane |
+| `ISseConnection`, `ISseService`, `SseChannel`, `SseMessage` | type (re-export)  | From `@hono-enterprise/common`                                      |
+| `CAPABILITIES`                                              | const (re-export) | From `@hono-enterprise/common`                                      |
+
 ### Notes
 
 - Built entirely on web-standard `ReadableStream`; no platform-specific server socket APIs.
-- The plugin is in-memory only. Cross-process broadcast requires a future milestone bridging to the
-  messaging capability.
+- **Channels are in-process until a backplane is registered.** Register
+  [`RealtimeBackplanePlugin`](#realtimebackplaneplugin) and every `publish` also reaches members on
+  other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE` provider the behavior is unchanged.
+  `SseChannel.size` keeps reporting **local** membership either way. `SseChannelImpl.publishLocal`
+  is the local-only delivery path the backplane subscriber uses; applications call `publish`.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
 - The `inject()` method cannot read a streaming body and throws when it meets one; SSE integration
@@ -1580,25 +1595,27 @@ ws.route('/ws/chat', {
 
 ### Exports
 
-| Export                      | Kind     | Purpose                                                               |
-| --------------------------- | -------- | --------------------------------------------------------------------- |
-| `WebSocketPlugin`           | function | Creates the plugin                                                    |
-| `WebSocketService`          | class    | The `IWebSocketService` implementation registered under the token     |
-| `WebSocketConnection`       | class    | The `IWebSocketConnection` implementation                             |
-| `Room`                      | class    | The `WebSocketRoom` implementation                                    |
-| `RoomRegistry`              | class    | Owns live rooms, creating on demand and discarding when empty         |
-| `WsRouteTable`              | class    | Exact-path route table with subprotocol selection                     |
-| `HeartbeatSweeper`          | class    | The interval implementing `heartbeatMs` / `idleTimeoutMs`             |
-| `WebSocketUnavailableError` | class    | Thrown by `route()` when the adapter offers no upgrade seam           |
-| `resolveOptions`            | function | Applies option defaults and rejects a contradictory configuration     |
-| `frameByteLength`           | function | Measures a frame in bytes (text by UTF-8 encoding, not string length) |
-| `buildContext`              | function | Builds the `WebSocketConnectionContext` from an upgrade request       |
-| `parseRequestedProtocols`   | function | Parses a `Sec-WebSocket-Protocol` header into tokens                  |
-| `selectProtocol`            | function | Picks the subprotocol to echo, or refuses                             |
-| `WebSocketPluginOptions`    | type     | The options above                                                     |
-| `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                    |
-| `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                      |
-| `RoomMembershipListener`    | type     | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates    |
+| Export                      | Kind     | Purpose                                                                |
+| --------------------------- | -------- | ---------------------------------------------------------------------- |
+| `WebSocketPlugin`           | function | Creates the plugin                                                     |
+| `WebSocketService`          | class    | The `IWebSocketService` implementation registered under the token      |
+| `WebSocketConnection`       | class    | The `IWebSocketConnection` implementation                              |
+| `Room`                      | class    | The `WebSocketRoom` implementation                                     |
+| `RoomRegistry`              | class    | Owns live rooms, creating on demand and discarding when empty          |
+| `WsRouteTable`              | class    | Exact-path route table with subprotocol selection                      |
+| `HeartbeatSweeper`          | class    | The interval implementing `heartbeatMs` / `idleTimeoutMs`              |
+| `WebSocketUnavailableError` | class    | Thrown by `route()` when the adapter offers no upgrade seam            |
+| `resolveOptions`            | function | Applies option defaults and rejects a contradictory configuration      |
+| `frameByteLength`           | function | Measures a frame in bytes (text by UTF-8 encoding, not string length)  |
+| `buildContext`              | function | Builds the `WebSocketConnectionContext` from an upgrade request        |
+| `parseRequestedProtocols`   | function | Parses a `Sec-WebSocket-Protocol` header into tokens                   |
+| `selectProtocol`            | function | Picks the subprotocol to echo, or refuses                              |
+| `WebSocketPluginOptions`    | type     | The options above                                                      |
+| `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                     |
+| `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                       |
+| `RoomMembershipListener`    | type     | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates     |
+| `RoomPublisher`             | type     | Forwards a local broadcast to other replicas; supplied by a backplane  |
+| `LocalBroadcastOptions`     | type     | `broadcastLocal` options — adds `exceptId` to exclude by connection ID |
 
 ### Notes
 
@@ -1618,11 +1635,18 @@ ws.route('/ws/chat', {
   `fetch` path.
 - **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
   the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
-- **Rooms are in-process.** Cross-replica fan-out is deferred to a follow-up milestone. A
-  `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer costs
-  only the rooms that peer had actually joined rather than a scan of every live room. The index is
-  maintained through the `RoomMembershipListener` the registry gives each `Room` it creates; a
-  standalone `new Room(name)` takes no listener and is not tracked.
+- **Rooms are in-process until a backplane is registered.** Register
+  [`RealtimeBackplanePlugin`](#realtimebackplaneplugin) and every `broadcast` also reaches members
+  on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE` provider the behavior is unchanged.
+  `RoomBroadcastOptions.except` is honored on **every** replica: connection IDs come from
+  `runtime.uuid()` and are globally unique, so the frame carries the excluded ID. `Room.size` keeps
+  reporting **local** membership either way. `Room.broadcastLocal` is the local-only delivery path
+  the backplane subscriber uses (its `LocalBroadcastOptions` adds `exceptId`); applications call
+  `broadcast`.
+- A `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer
+  costs only the rooms that peer had actually joined rather than a scan of every live room. The
+  index is maintained through the `RoomMembershipListener` the registry gives each `Room` it
+  creates; a standalone `new Room(name)` takes no listener and is not tracked.
 - **A failing upgrade router is logged, then refused with `500`.** The service catches its own
   routing errors and reports them through the logger capability when one is registered — the HTTP
   adapter's `UpgradeRouterStore` backstop runs inside `@hono-enterprise/runtime`, which has no
@@ -1631,6 +1655,115 @@ ws.route('/ws/chat', {
   (`app.start({ port })` + `new WebSocket(...)`).
 - A `websocket` health indicator reports `{ available, connections, rooms, routes }`. `onClose`
   closes every live connection with code `1001` and stops the heartbeat.
+
+---
+
+## RealtimeBackplanePlugin()
+
+Provides cross-replica fan-out for WebSocket rooms and SSE channels. Registers an
+`IRealtimeBackplane` under `CAPABILITIES.REALTIME_BACKPLANE` (`'realtime-backplane'`). Added in
+Milestone 47.
+
+Rooms and channels hold membership in in-process sets, so behind a load balancer a broadcast reaches
+only the clients connected to the replica that issued it. `WebSocketPlugin` and `SsePlugin` resolve
+this token **optionally**, so registering this plugin is the entire change; removing it restores
+in-process behavior with no application code touched.
+
+### Registration
+
+```typescript
+import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    RealtimeBackplanePlugin({ transport: 'redis', url: 'redis://localhost:6379' }),
+    WebSocketPlugin(),
+    SsePlugin(),
+  ],
+});
+```
+
+Its priority is `PLUGIN_PRIORITY.HIGH`, so the transport is connected before either consumer
+registers and subscribes.
+
+### Options
+
+Discriminated on `transport`.
+
+| Option                  | Applies to       | Default                      | Description                                                         |
+| ----------------------- | ---------------- | ---------------------------- | ------------------------------------------------------------------- |
+| `transport`             | all              | `'memory'`                   | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                    |
+| `topic`                 | all but `memory` | `'hono-enterprise.realtime'` | Broker topic / Redis channel. Every replica must agree on it        |
+| `origin`                | all              | a fresh `runtime.uuid()`     | This replica's identity. Override only to make a test deterministic |
+| `bus`                   | `'memory'`       | `'default'`                  | Named in-process bus; separate names stay isolated                  |
+| `url`                   | `'redis'`        | —                            | Connection URL, read only on the lazy `npm:ioredis@5.x` path        |
+| `client` / `subscriber` | `'redis'`        | —                            | Injected client pair. **Required together** — see Notes             |
+| `module`                | `'redis'`        | —                            | An `ioredis`-shaped module, for testing without the real driver     |
+| `instance`              | `'custom'`       | —                            | The `IRealtimeBackplane` to register, used as-is                    |
+
+### Transports
+
+| `transport`   | Crosses processes | Dependencies                   | Notes                                                          |
+| ------------- | ----------------- | ------------------------------ | -------------------------------------------------------------- |
+| `'memory'`    | No                | None                           | The default, and a real single-process bus rather than a no-op |
+| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses all five existing brokers; adds no dependency           |
+| `'redis'`     | Yes               | `npm:ioredis@5.x` (lazy)       | Redis pub/sub, over two connections                            |
+| `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane`                                       |
+
+### Exports
+
+| Symbol                                                                                               | Kind              | Description                                                   |
+| ---------------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------- |
+| `RealtimeBackplanePlugin`                                                                            | function          | Plugin factory                                                |
+| `createBackplane`                                                                                    | function          | Transport factory dispatching on the `transport` discriminant |
+| `MemoryBackplane`                                                                                    | class             | In-process transport                                          |
+| `MessagingBackplane`                                                                                 | class             | Transport over `CAPABILITIES.MESSAGING`                       |
+| `RedisBackplane`                                                                                     | class             | Redis pub/sub transport                                       |
+| `isRealtimeFrame`                                                                                    | function          | Guard narrowing arriving broker traffic to a `RealtimeFrame`  |
+| `adaptRedisModule`                                                                                   | function          | Narrows an `ioredis` module to `IRedisModule`                 |
+| `loadRedisModule`                                                                                    | function          | Real lazy `import('npm:ioredis@5.x')`                         |
+| `RedisModuleError`                                                                                   | class             | Thrown when `ioredis` cannot be loaded or recognized          |
+| `DEFAULT_TOPIC`                                                                                      | const             | `'hono-enterprise.realtime'`                                  |
+| `IRedisBackplaneClient`                                                                              | interface         | Structural facade for an injected Redis client                |
+| `IRedisModule`                                                                                       | interface         | Structural facade for the `ioredis` module                    |
+| `RealtimeBackplanePluginOptions`                                                                     | type              | Discriminated union of the four transport arms                |
+| `BackplaneCommonOptions`                                                                             | interface         | `topic` and `origin`, shared by every arm                     |
+| `MemoryBackplaneOptions`                                                                             | interface         | The `'memory'` arm                                            |
+| `MessagingBackplaneOptions`                                                                          | interface         | The `'messaging'` arm                                         |
+| `RedisBackplaneOptions`                                                                              | interface         | The `'redis'` arm                                             |
+| `CustomBackplaneOptions`                                                                             | interface         | The `'custom'` arm                                            |
+| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload` | type (re-export)  | From `@hono-enterprise/common`                                |
+| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                 | value (re-export) | From `@hono-enterprise/common`                                |
+
+### Notes
+
+- **Loop prevention is an origin stamp.** Every instance owns an `origin` (a `runtime.uuid()` by
+  default); a subscriber drops frames carrying its own. An arriving frame is delivered through the
+  consumer's local-only path and never re-published, so a broadcast is delivered exactly once per
+  replica.
+- **One topic carries both kinds.** `RealtimeFrame.kind` is `'ws-room'` or `'sse-channel'`, and each
+  consumer ignores the other — a room and a channel may legitimately share a name.
+- **Redis needs two connections.** A Redis connection in subscriber mode refuses every command other
+  than (un)subscribe, so one connection cannot both publish and subscribe. That is a property of the
+  protocol, not of `ioredis`. Injecting a `client` without a `subscriber` throws at construction
+  rather than failing at the first publish; the lazy path builds both from `url`.
+- **`transport: 'messaging'` with no messaging capability throws during `register()`**, rather than
+  failing silently per request.
+- **A remote frame never creates a room or channel.** It is delivered only to one that already
+  exists locally, so a cluster-wide namespace cannot grow a replica's maps without bound.
+- **Binary WebSocket frames are base64-encoded** for the wire (`encodeFrameData` /
+  `decodeFrameData`, in `@hono-enterprise/common` because three packages need the identical shape).
+  An `SseMessage` is already JSON-serializable and travels as its JSON encoding.
+- **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
+  replayed; a replica partitioned from the transport misses frames sent during the partition.
+- **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
+  which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
+  therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
+  matching member. Excluding a peer connected to a _different_ replica works for the same reason.
+- **`Room.size` / `SseChannel.size` remain local.** A cluster-wide count is inherently asynchronous
+  (a scatter-gather across replicas), so it cannot satisfy the synchronous committed `size` getter;
+  exposing one is a contract decision — a separate async method — that a later milestone owns.
 
 ---
 
@@ -2232,6 +2365,8 @@ interface MessagingPluginOptions {
   brokers?: readonly string[];
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
+  /** Kafka request-reply topic; must already exist. @defaultValue 'messaging.replies' */
+  replyTopic?: string;
 }
 ````
 
@@ -2322,16 +2457,25 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 `request` rejects with one of three exported error classes (import from
 `@hono-enterprise/messaging-plugin` for `instanceof` handling):
 
-| Error                        | Thrown when                                                       |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                              |
-| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message. |
-| `MessagingNotSupportedError` | The broker cannot support request-reply (Kafka — see below).      |
+| Error                        | Thrown when                                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                             |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
+| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-> **Broker support.** Request-reply is available on the **in-memory, Redis Streams, RabbitMQ, and
-> NATS** brokers. The **Kafka** broker's consumer-group / auto-commit model makes per-caller reply
-> correlation an anti-pattern, so `KafkaBroker.request`/`respond` return a promise **rejected** with
-> `MessagingNotSupportedError`; use a reply-capable broker for RPC.
+> **Broker support.** Request-reply is available on **all five** brokers — in-memory, Redis Streams,
+> RabbitMQ, NATS, and Kafka.
+>
+> **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
+> default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
+> either pre-create it or enable `auto.create.topics.enable`. Each broker instance reads that topic
+> under its own consumer group, so every instance receives every reply and discards those it did not
+> originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+
+> **RPC and pub/sub are separate channels.** `request`/`respond` travel on a channel derived from
+> the topic, not on the topic itself. A plain `subscribe('orders', …)` therefore never observes an
+> RPC request, and a plain `publish('orders', …)` is never consumed by a responder on `'orders'`.
+> The two can share a topic name safely.
 
 ### Multiple Broker Instances
 
@@ -2859,8 +3003,11 @@ try {
 The `wrap` signature and its options:
 
 ```typescript
+type ResilientCall<T> = (signal: AbortSignal) => Promise<T>;
+type HardenedCall<T> = (signal?: AbortSignal) => Promise<T>;
+
 interface IResilienceService {
-  wrap<T>(fn: () => Promise<T>, options?: WrapOptions): () => Promise<T>;
+  wrap<T>(fn: ResilientCall<T>, options?: WrapOptions): HardenedCall<T>;
 }
 
 interface WrapOptions {
@@ -2877,10 +3024,32 @@ breaker, retry, or `fn`; an open breaker fails fast before any retry attempt; ea
 gets its own timeout. A field set to `true` with no matching `default*` policy configured throws at
 `wrap` time.
 
-Because the protected-call signature carries no `AbortSignal`, a timeout rejects the caller's await
-with `TimeoutError` but does **not** cancel the underlying operation — it runs to completion in the
-background. Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across
-instances.
+### Cancellation
+
+Each attempt is handed an `AbortSignal`. On a `timeout` deadline that signal is aborted with the
+**same `TimeoutError` instance** the returned promise rejects with, so a timeout has one error
+identity whether observed through `catch` or through `signal.reason`:
+
+```typescript
+const guarded = resilience.wrap((signal) => fetch(url, { signal }), { timeout: 2000 });
+await guarded(); // rejects with TimeoutError, and the fetch is aborted
+```
+
+The returned callable also accepts a caller-owned signal. An outer abort propagates into the
+protected call, stops the retry loop between attempts, and rejects a call still queued behind the
+bulkhead:
+
+```typescript
+const controller = new AbortController();
+const pending = guarded(controller.signal);
+controller.abort(); // pending rejects with the caller's reason
+```
+
+Cancellation is **cooperative**: a call that ignores the signal still runs to completion, and only
+the caller's `await` rejects. Passing a zero-argument `() => Promise<T>` remains valid — it simply
+cannot be cancelled.
+
+Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across instances.
 
 ---
 
@@ -3180,7 +3349,14 @@ app.register(NotificationPlugin({
         from: config.get('TWILIO_FROM'), // required — the sender number
       },
     },
-    push: { provider: 'fcm', options: { serverKey: config.get('FCM_SERVER_KEY') } },
+    push: {
+      provider: 'fcm',
+      options: {
+        projectId: config.get('FCM_PROJECT_ID'),
+        clientEmail: config.get('FCM_CLIENT_EMAIL'),
+        privateKey: config.get('FCM_PRIVATE_KEY'), // PEM PKCS#8, from the service-account JSON
+      },
+    },
     slack: { provider: 'slack', options: { webhookUrl: config.get('SLACK_WEBHOOK') } },
   },
 }));
@@ -3222,7 +3398,9 @@ app.router.post('/orders', async (ctx) => {
 | `channels`                                  | —                        | Required map of dispatch name → `ChannelConfig`. Keys are the names a caller passes in `send({ channels: [...] })`. |
 | `channels.*.provider`                       | —                        | `'mail' \| 'twilio' \| 'fcm' \| 'slack'` — selects the channel class and transport.                                 |
 | `options.accountSid` / `authToken` / `from` | `twilio`                 | Twilio credentials and sender number; all three required (construction throws).                                     |
-| `options.serverKey`                         | `fcm`                    | FCM legacy server key; required (construction throws).                                                              |
+| `options.projectId`                         | `fcm`                    | Firebase project id, addressed by the v1 `messages:send` URL; required (construction throws).                       |
+| `options.clientEmail` / `privateKey`        | `fcm`                    | Service-account email and PEM PKCS#8 key that sign the OAuth2 assertion; required unless `tokenSource` is supplied. |
+| `options.tokenSource`                       | `fcm`                    | Overrides token acquisition (e.g. a GCP metadata server); when set the credential fields above are unused.          |
 | `options.webhookUrl`                        | `slack`                  | Slack incoming-webhook URL; required (construction throws).                                                         |
 | `options.http`                              | `twilio`, `fcm`, `slack` | Injected `INotificationHttp` (defaults to `createDefaultNotificationHttp()`, i.e. global `fetch`).                  |
 
@@ -3266,8 +3444,12 @@ through `CAPABILITIES.MAIL`.
   the misconfiguration surfaces at startup rather than at first send.
 - All three HTTP providers are zero-dependency (web-standard `fetch`) and Workers-portable; the
   email channel inherits M29's provider constraints (`SmtpProvider` needs raw sockets).
-  `FcmProvider` targets the legacy `serverKey` API (`POST /fcm/send`); HTTP v1 with OAuth2
-  service-account signing is not implemented.
+  `FcmProvider` targets **FCM HTTP v1** (`POST /v1/projects/{projectId}/messages:send`),
+  authenticating with an OAuth2 bearer token minted from a service account: it signs an RS256 JWT
+  assertion with `runtime.subtle` and caches the resulting token until shortly before it expires, so
+  a send costs one request in the steady state. A `push` channel using the default signer therefore
+  requires `CAPABILITIES.RUNTIME` and throws during `register` without it; supplying `tokenSource`
+  removes that requirement.
 - A `notification` health indicator reports `'up'` with the configured channel names. There is no
   `onClose`: the providers hold no socket, timer, or connection.
 
@@ -3319,13 +3501,19 @@ app.router.get('/beta', {
 
 ### Options
 
-| Option                      | Provider(s)            | Required                | Description                                                       |
-| --------------------------- | ---------------------- | ----------------------- | ----------------------------------------------------------------- |
-| `provider`                  | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, or `'custom'` |
-| `options.flags`             | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                 |
-| `options.store`             | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`   |
-| `options.refreshIntervalMs` | `'database'`           | no                      | Poll cadence; defaults to `30000`                                 |
-| `options.instance`          | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                 |
+| Option                       | Provider(s)            | Required                | Description                                                                         |
+| ---------------------------- | ---------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'` |
+| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                   |
+| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                     |
+| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                   |
+| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`         |
+| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy `npm:` import                   |
+| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                            |
+| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                  |
+| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws        |
+| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                              |
+| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                   |
 
 ### Exports
 
@@ -3337,16 +3525,27 @@ app.router.get('/beta', {
 | `ConfigProvider`               | class            | Immutable config-backed provider                                              |
 | `MemoryProvider`               | class            | Mutable in-process provider with `setFlag`/`removeFlag`/`replaceFlags`        |
 | `DatabaseProvider`             | class            | Polled database-backed provider                                               |
+| `LaunchDarklyProvider`         | class            | LaunchDarkly-backed provider bridging its async SDK to the sync contract      |
+| `toLaunchDarklyContext`        | function         | Maps a `FlagContext` to the SDK's single-kind `user` context                  |
+| `adaptLaunchDarklyModule`      | function         | Narrows an SDK module to `ILaunchDarklyModule`                                |
+| `loadLaunchDarklyModule`       | function         | Real lazy `import('npm:@launchdarkly/node-server-sdk@^9')`                    |
+| `LaunchDarklyModuleError`      | class            | Thrown when the SDK cannot be loaded or does not expose `init()`              |
+| `ILaunchDarklyClient`          | interface        | Injection facade for the SDK client                                           |
+| `ILaunchDarklyModule`          | interface        | Injection facade for the SDK module                                           |
+| `ILaunchDarklyFlagsState`      | interface        | The snapshot facade — its `getFlagValue` is the synchronous read              |
+| `LaunchDarklyContext`          | interface        | The SDK evaluation context this provider builds                               |
 | `createFlagGuard`              | function         | Free-function route guard — short-circuits to redirect/404 when flag is off   |
 | `FlagProvider`                 | interface        | Port implemented by all providers, and by the `'custom'` arm's instance       |
 | `FlagProviderStatus`           | interface        | Health status shape (`{ healthy, detail? }`)                                  |
-| `FlagProviderType`             | type             | Provider identity: `'config' \| 'memory' \| 'database' \| 'custom'`           |
+| `FlagProviderType`             | type             | `'config' \| 'memory' \| 'database' \| 'launchdarkly' \| 'custom'`            |
 | `FlagDefinition`               | interface        | `{ enabled, percentage?, users? }`                                            |
 | `IFlagStore`                   | interface        | Structural facade for `DatabaseProvider`                                      |
 | `FeatureFlagsPluginOptions`    | type             | Discriminated union of the four provider option shapes                        |
 | `ConfigProviderOptions`        | interface        | The `'config'` arm — requires `options.flags`                                 |
 | `MemoryProviderOptions`        | interface        | The `'memory'` arm — `options.flags` optional                                 |
 | `DatabaseProviderOptions`      | interface        | The `'database'` arm — requires `options.store`                               |
+| `LaunchDarklyProviderOptions`  | interface        | The `'launchdarkly'` arm                                                      |
+| `LaunchDarklyProviderConfig`   | interface        | That arm's configuration shape                                                |
 | `CustomProviderOptions`        | interface        | The `'custom'` arm — requires `options.instance`                              |
 | `FlagGuardOptions`             | interface        | `createFlagGuard` options (`fallback`, `statusCode`, `context`)               |
 | `IFeatureFlags`, `FlagContext` | type (re-export) | From `@hono-enterprise/common`                                                |
@@ -3359,8 +3558,20 @@ app.router.get('/beta', {
 - Percentage rollout uses deterministic FNV-1a 32-bit bucketing over `` `${flag}:${userId}` ``.
 - `FlagContext.attributes` is accepted but not consumed by the built-in evaluators; the `'custom'`
   arm is its extension point.
-- `LaunchDarklyProvider` was deferred: the Node server SDK exposes only async evaluation APIs that
-  cannot satisfy the synchronous contract. The `'custom'` arm bridges this gap.
+- `IFeatureFlags.isEnabledAsync` is **optional** and additive. Providers with a purely local
+  snapshot (config, memory, database) have nothing to await, so `FeatureFlagService` resolves the
+  synchronous evaluation for them. Both entry points funnel through one provider, so a configured
+  option governs them identically.
+- **LaunchDarkly.** Every evaluation method on the Node server SDK is asynchronous, so it cannot
+  directly satisfy the synchronous `isEnabled`. `LaunchDarklyProvider` bridges it using the one
+  synchronous read the SDK does offer, `LDFlagsState.getFlagValue`: it fetches a per-context
+  snapshot asynchronously and reads it synchronously thereafter. **On a cold context** — the first
+  evaluation for a given `userId` — `isEnabled` returns the configured `fallbackValue` and schedules
+  a background refill, so every later read for that user is real LaunchDarkly state. `start()`
+  prewarms the anonymous context and an SDK `update` event drops the cache. Use `isEnabledAsync`
+  wherever a wrong answer on a cold context would matter; it awaits `boolVariation` and carries no
+  such caveat. The provider is Node/Deno/Bun only (the SDK uses `node:events` and Node HTTP), and
+  the SDK is never a hard dependency.
 
 ---
 
@@ -5020,20 +5231,22 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                                                                                   |
-| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool) |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                     |
-| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                  |
-| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                  |
-| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                    |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                     |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                     |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                      |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                          |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                               |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                      |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                          |
+| Export                        | Kind     | Purpose                                                                                                                                                                                                                                       |
+| ----------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out) |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                         |
+| `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                   |
+| `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                  |
+| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                      |
+| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                      |
+| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                        |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                         |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                                                                                         |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                                                                                          |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                              |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                   |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                          |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                              |
 
 ### Types
 
@@ -5062,7 +5275,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                               |
 | Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                  |
 | Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                      |
-| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`                                                                                                                                                                |
+| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                               |
 | Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                    |
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                          |
 | Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                |
@@ -5070,6 +5283,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                         |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                     |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                       |
+| Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                              |
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                               |
 
@@ -5108,6 +5322,10 @@ Contract notes:
 - `CAPABILITIES.SSR` (`'ssr'`) — the capability token under which the React Router plugin registers
   the `ISsrService`. The service provides server-side rendering by delegating to React Router's
   request handler and writing back the result via `IResponse`. Added in Milestone 44.
+- `CAPABILITIES.REALTIME_BACKPLANE` (`'realtime-backplane'`) — the capability token under which
+  `RealtimeBackplanePlugin` registers an `IRealtimeBackplane`. Consumed **optionally** by the
+  WebSocket and SSE plugins: present, their rooms and channels fan out across replicas; absent, they
+  broadcast in-process exactly as before. Added in Milestone 47.
 - `CAPABILITIES.WEBSOCKET` (`'websocket'`) — the capability token under which the WebSocket plugin
   registers the `IWebSocketService`. The service provides full-duplex, bidirectional real-time
   messaging: exact-path routes with lifecycle handlers, named broadcast rooms, and an

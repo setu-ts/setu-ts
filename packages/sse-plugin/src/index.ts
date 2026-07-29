@@ -28,6 +28,7 @@ export { SsePlugin } from './plugin/sse-plugin.ts';
 export { SseService } from './services/sse-service.ts';
 export { SseConnection } from './connection/sse-connection.ts';
 export type { SsePluginOptions } from './interfaces/index.ts';
+export type { ChannelPublisher } from './channels/channel-registry.ts';
 
 // Re-export common SSE contracts for convenience.
 export type { ISseConnection, ISseService, SseChannel, SseMessage } from '@hono-enterprise/common';

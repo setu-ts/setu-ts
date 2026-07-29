@@ -49,6 +49,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/openapi-plugin',
   'packages/queue-plugin',
   'packages/react-router-plugin',
+  'packages/realtime-backplane-plugin',
   'packages/resilience-plugin',
   'packages/scheduler-plugin',
   'packages/secrets-plugin',

@@ -1815,6 +1815,50 @@ const res = await broker.request<Req, Res>('user.lookup', { userId: '42' }, { ti
 - [x] 90%+ per-file coverage on every changed `src/` file
 - [x] PUBLIC_API.md + README.md + ROADMAP.md updated in the same PR
 
+> **Superseded in part by Milestone 14d.** Kafka is reply-capable as of M14d, and
+> `MessagingNotSupportedError` is deprecated with no thrower.
+
+---
+
+## Milestone 14d: Messaging Plugin — Reply-Transport Seam & Kafka RPC ✅ COMPLETE
+
+**Objective:** Restore the per-broker reply-inbox seam M14c's plan specified but never built, use it
+to make Kafka reply-capable, and fix the two defects the generic path caused.
+
+> **Why this is a separate milestone.** M14c's plan (§3.2) called for a per-broker `IReplyTransport`
+> with `openInbox`; the implementation collapsed it into a `publish`/`subscribe`/`uuid`/timers
+> delegation object that all four reply-capable brokers passed identically. That works only because
+> those four treat a topic as cheap and per-instance-addressable — which is the actual reason Kafka
+> shipped a throw. No `common` contract change; `IMessageBroker` signatures are untouched.
+
+### Package: `@hono-enterprise/messaging-plugin` (extends M14/M14b/M14c)
+
+`RequestReplyDeps` gains `openInbox`, returning a `ReplyInbox` (`address` + `close`). The four
+existing brokers pass the shared `createTopicInbox` helper and are behaviour-identical.
+`KafkaBroker` supplies its own: a shared `replyTopic` (default `'messaging.replies'`, which must
+already exist — `IKafkaFactory` has no admin surface) read under a per-instance consumer group
+`rr-inbox-<uuid>`, so delivery is exclusive rather than load-balanced across the shared default
+group. Cross-instance replies are dropped by the existing correlation-id lookup, so no envelope
+change was needed.
+
+RPC traffic moves to a derived `rr.req.<topic>` channel — a **breaking wire change** against
+`0.1.0-alpha.2`, taken deliberately pre-1.0 — which fixes both defects at the routing layer: request
+envelopes no longer leak into plain `subscribe()` consumers, and a responder sharing a topic _and a
+queue_ with an ordinary subscriber no longer swallows that subscriber's messages (fan-out consumers
+were never affected).
+
+### Deliverables
+
+- [x] `ReplyInbox`/`OpenInbox` seam + shared `createTopicInbox` (`src/brokers/inbox.ts`, internal)
+- [x] `KafkaBroker.request`/`respond` implemented; both former throws removed
+- [x] `replyTopic` option threaded from `MessagingPluginOptions` through to the broker (tested by
+      round-trip, not by storage)
+- [x] D1 — RPC on `rr.req.<topic>`; regression pair proving pub/sub and RPC coexist on one topic
+- [x] D2 — reply inbox claims its own queue name
+- [x] `MessagingNotSupportedError` deprecated, not removed (AI_GUIDELINES §9.2)
+- [x] `common` JSDoc, PUBLIC_API.md, plugin README, CHANGELOG (BREAKING + Deprecated) in the same PR
+- [x] 90%+ per-file coverage on every changed `src/` file
+
 ---
 
 ## Milestone 15: Queue Plugin — Background Jobs
@@ -3147,6 +3191,47 @@ await notifier.send({
 - [x] Email, SMS, Push, Slack channels
 - [x] Full test coverage
 
+> **Superseded in part by Milestone 30b.** The push channel shipped against the legacy FCM
+> `serverKey` API, which Google had already decommissioned; M30b moves it to FCM HTTP v1.
+
+---
+
+## Milestone 30b: Notification Plugin — FCM HTTP v1 ✅ COMPLETE
+
+**Objective:** Make push delivery actually work by replacing the decommissioned legacy FCM API with
+FCM HTTP v1 and service-account OAuth2.
+
+> **Why this is a separate milestone.** Mirrors the M14b/M15b/M16b/M24b pattern: a scoped follow-up
+> to a shipped plugin, no `common` change and no new capability token. M30 shipped a provider that
+> could never succeed against a live project — the `POST /fcm/send` endpoint it targets was switched
+> off in 2024 — so this is a defect repair, not a feature.
+
+### Package: `@hono-enterprise/notification-plugin` (extends M30)
+
+`FcmProvider` posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted
+from a service account: an RS256 JWT assertion signed with `runtime.subtle` and exchanged at
+Google's token endpoint, cached until shortly before expiry. Zero npm dependencies and
+Workers-portable, the same posture as the other HTTP providers and the same crypto route M16's
+`JwtService` proves.
+
+`FcmProviderOptions.serverKey` is **replaced** (not deprecated) by
+`{ projectId, clientEmail,
+privateKey }` — a breaking change, deliberately, because the option
+addressed a dead endpoint and a compile error is the correct signal. An exported `FcmTokenSource`
+covers sourcing tokens from a GCP metadata server or an external key holder instead.
+
+### Deliverables
+
+- [x] FCM HTTP v1 endpoint, Bearer auth, and `{ message: { token, notification } }` payload
+- [x] `ServiceAccountTokenSource` — RS256 assertion signing, OAuth2 exchange, key + token caching
+- [x] Exported `FcmTokenSource` seam; local `pemToDer` (auth-plugin's copy is internal and
+      cross-plugin imports are forbidden)
+- [x] `createProvider`'s `fcm` arm takes `IPluginContext` and fails fast at `register` without a
+      runtime, mirroring the `mail` arm
+- [x] Real-crypto test: a generated RSA keypair signs an assertion that is then verified
+- [x] 90%+ per-file coverage on every changed `src/` file
+- [x] PUBLIC_API.md, plugin README, CHANGELOG (BREAKING + superseded note), ROADMAP, CLAUDE.md
+
 ---
 
 ## Milestone 31: Feature Flags Plugin
@@ -3194,10 +3279,11 @@ app.router.get('/dashboard', {
 - `DatabaseProvider` — Polls injected `IFlagStore` (`'database'`)
 - Custom providers via `'custom'` arm (ARCHITECTURE extension point)
 
-> **Note:** `LaunchDarklyProvider` was deferred to a later milestone because the Node server SDK
-> exposes only async evaluation APIs (`variation`, `allFlagsState`), which cannot satisfy the
-> synchronous `IFeatureFlags.isEnabled` contract. The `'custom'` arm serves as the documented bridge
-> until a future milestone resolves the sync/async mismatch.
+> **Note:** `LaunchDarklyProvider` was deferred out of this milestone because the Node server SDK
+> exposes only async evaluation APIs (`variation`, `allFlagsState`), which cannot directly satisfy
+> the synchronous `IFeatureFlags.isEnabled` contract. **Milestone 47 resolved this** by bridging
+> through `LDFlagsState.getFlagValue` — the SDK's one synchronous read — and adding an optional
+> async `IFeatureFlags.isEnabledAsync`. See the Milestone 47 section.
 
 **Implementation Files:**
 
@@ -4299,6 +4385,96 @@ connects a genuine client.
 
 ---
 
+## Milestone 47: Alpha-3 Limitation Closeout ✅ COMPLETE
+
+**Scope:** the three `CHANGELOG.md` "Known limitations" recorded against `v0.1.0-alpha.1` that were
+capability gaps rather than wording problems. Delivered on one combined branch at the maintainer's
+direction, because the three share a single release gate.
+
+### A. Resilience timeouts that cancel
+
+`runWithTimeout` raced the protected call against a timer and left it running. The protected call
+now receives an `AbortSignal`:
+
+- `common` — new `ResilientCall<T>` / `HardenedCall<T>`; `IResilienceService.wrap` and
+  `ICircuitBreaker.execute` widened to use them. Source-compatible for callers, breaking for
+  implementors (`fn` is contravariant).
+- `patterns/abort.ts` — shared `linkAbort` / `throwIfAborted` / `abortReasonOf`, with listener
+  disposal so a long-lived caller signal cannot accumulate one listener per invocation.
+- `timeout` aborts the per-attempt controller with the same `TimeoutError` instance it rejects with;
+  `retry` stops looping on abort and wakes its backoff early (that sleep also no longer leaks its
+  handle); a `bulkhead` waiter cancelled while queued leaves the queue and never runs its call.
+
+### B. LaunchDarkly support
+
+Every evaluation method on the Node server SDK is async, so it cannot directly satisfy the
+synchronous `isEnabled`. The bridge is `LDFlagsState.getFlagValue`, the SDK's one synchronous read:
+
+- `LaunchDarklyProvider` keeps a per-context snapshot cache. A cold context returns the configured
+  `fallbackValue` and schedules a background refill; `start()` prewarms the anonymous context; an
+  SDK `update` event drops the cache.
+- `common` — a new **optional** `IFeatureFlags.isEnabledAsync`, which awaits `boolVariation` and
+  carries no cold-context caveat. `FlagProvider` gains a matching optional member, and
+  `FeatureFlagService` delegates to it or resolves the sync evaluation, so both entry points funnel
+  through one provider.
+- Structural facades keep the SDK's `any`-typed `EventEmitter.on` at the boundary; the SDK is loaded
+  through an inject-or-lazy seam with a guarded real-import test.
+
+### C. Cross-replica rooms and channels
+
+- `common` — the `IRealtimeBackplane` port, `RealtimeFrame`, the new
+  `CAPABILITIES.REALTIME_BACKPLANE` token, and the pure `encodeFrameData` / `decodeFrameData` codec
+  (in `common` because three packages need the identical wire shape and no plugin may import
+  another).
+- **New package `@hono-enterprise/realtime-backplane-plugin`** with four transports: `'memory'`
+  (default, a real single-process bus), `'messaging'` (over `CAPABILITIES.MESSAGING`, reusing all
+  five existing brokers with no new dependency), `'redis'` (pub/sub over inject-or-lazy `ioredis`,
+  two connections), and `'custom'`.
+- `websocket-plugin` and `sse-plugin` resolve the token **optionally**; both `register()` become
+  async to await their subscription, and both unsubscribe in `onClose`.
+
+`RoomBroadcastOptions.except` is honored cluster-wide: connection IDs are `runtime.uuid()` values
+and therefore globally unique, so `RealtimeFrame.exceptId` carries the excluded ID and every replica
+skips the matching member.
+
+**Deliberately deferred:** cluster-wide `Room.size` / `SseChannel.size`. A cluster-wide count is
+inherently asynchronous (a scatter-gather across replicas), so it cannot satisfy the synchronous
+committed `size` getter — exposing one is a contract decision (a separate async method), not just an
+implementation task.
+
+### Implementation Files
+
+| Package                     | Files                                                                                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common`                    | `services/resilience.ts`, `services/feature-flags.ts`, `services/realtime.ts`, `realtime-codec.ts`, `tokens.ts`, `index.ts`                                   |
+| `resilience-plugin`         | `patterns/abort.ts` (new), `patterns/{timeout,retry,bulkhead,circuit-breaker}.ts`, `services/resilience-service.ts`                                           |
+| `feature-flags-plugin`      | `providers/launchdarkly-{provider,module}.ts` (new), `services/feature-flags-service.ts`, `interfaces/index.ts`, `plugin/feature-flags-plugin.ts`, `index.ts` |
+| `realtime-backplane-plugin` | entire package (new)                                                                                                                                          |
+| `websocket-plugin`          | `rooms/room-registry.ts`, `services/websocket-service.ts`, `plugin/websocket-plugin.ts`, `index.ts`                                                           |
+| `sse-plugin`                | `channels/channel-registry.ts`, `services/sse-service.ts`, `plugin/sse-plugin.ts`, `index.ts`                                                                 |
+
+### Doc Deliverables
+
+- [x] **CHANGELOG.md** — the three entries annotated in place in the `0.1.0-alpha.1` list as
+      superseded, each pointing at `[Unreleased]`, and an `[Unreleased]` section covering the
+      additions, the widened contract, and the fixes. (Annotated rather than deleted: `main` had
+      already established that convention for the two limitations closed by M14d and M30b, and the
+      list records what was true of that release. Settled while resolving the merge with `main`.)
+- [x] **PUBLIC_API.md** — a new `RealtimeBackplanePlugin()` section; the Resilience cancellation
+      subsection replacing the "does not cancel" note; the LaunchDarkly options, exports, and
+      cold-context semantics replacing the "was deferred" note; the WebSocket "rooms are in-process"
+      and SSE "in-memory only" notes rewritten; new `common` exports listed.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row 47; the M31 LaunchDarkly deferral
+      note now points here.
+- [x] **ARCHITECTURE.md** — a package row for `realtime-backplane-plugin`; the feature-flags Rules
+      row names LaunchDarklyProvider.
+- [x] **README** — `packages/realtime-backplane-plugin/README.md`, including the transport table and
+      the two structural limitations.
+- [x] **`scripts/release-packages.ts`** — the new package added to the ordered allow-list, so
+      `release:verify` accounts for it.
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -4445,6 +4621,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 14        | ✅     | messaging-plugin     |
 | 14b       | ✅     | messaging-plugin     |
 | 14c       | ✅     | messaging-plugin     |
+| 14d       | ✅     | messaging-plugin     |
 | 15        | ✅     | queue-plugin         |
 | 15b       | ✅     | queue-plugin         |
 | 16        | ✅     | auth-plugin          |
@@ -4465,6 +4642,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 28        | ✅     | storage-plugin       |
 | 29        | ✅     | mail-plugin          |
 | 30        | ✅     | notification-plugin  |
+| 30b       | ✅     | notification-plugin  |
 | 31        | ✅     | feature-flags-plugin |
 | 32        | ✅     | multi-tenancy-plugin |
 | 33        | ✅     | testing              |
@@ -4482,3 +4660,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 44        | ✅     | react-router-plugin  |
 | 45        | ✅     | worker-pool-plugin   |
 | 46        | ✅     | websocket-plugin     |
+| 47        | ✅     | alpha-3 limitations  |

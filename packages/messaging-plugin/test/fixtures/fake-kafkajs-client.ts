@@ -211,9 +211,17 @@ export class FakeKafkaConsumer {
  */
 export class FakeKafkaProducer {
   #calls: Array<{ method: string; args: unknown[] }>;
+  #route: ((topic: string, value: string) => Promise<void>) | null;
 
-  constructor() {
+  /**
+   * @param route - Delivers a produced message to every consumer subscribed to
+   * the topic. Modelling this is what makes a request-reply round trip
+   * observable: without it `send` records and the message never arrives, so a
+   * responder is never invoked and every RPC test would time out.
+   */
+  constructor(route: ((topic: string, value: string) => Promise<void>) | null = null) {
     this.#calls = [];
+    this.#route = route;
   }
 
   #record(method: string, args: unknown[]): void {
@@ -230,14 +238,18 @@ export class FakeKafkaProducer {
     return Promise.resolve();
   }
 
-  send(
+  async send(
     options: {
       topic: string;
       messages: Array<{ value: string; headers?: Record<string, string> }>;
     },
   ): Promise<void> {
     this.#record('send', [options]);
-    return Promise.resolve();
+    if (this.#route) {
+      for (const message of options.messages) {
+        await this.#route(options.topic, message.value);
+      }
+    }
   }
 
   disconnect(): Promise<void> {
@@ -254,12 +266,18 @@ export class FakeKafkaFactory {
   #calls: Array<{ method: string; args: unknown[] }>;
   #producers: FakeKafkaProducer[];
   #consumers: Map<string, FakeKafkaConsumer>; // groupId -> consumer
+  #offset = 0;
 
   constructor(options: FakeKafkaOptions = {}) {
     this.#options = options;
     this.#calls = [];
     this.#producers = [];
     this.#consumers = new Map();
+  }
+
+  /** Consumer group IDs created so far, in creation order. */
+  get groupIds(): string[] {
+    return [...this.#consumers.keys()];
   }
 
   #record(method: string, args: unknown[]): void {
@@ -275,10 +293,37 @@ export class FakeKafkaFactory {
     this.#record('producer', []);
     // Return existing producer, or create a new one
     if (this.#producers.length === 0) {
-      const producer = new FakeKafkaProducer();
+      const producer = new FakeKafkaProducer(
+        (topic, value) => this.route(topic, value),
+      );
       this.#producers.push(producer);
     }
     return this.#producers[0];
+  }
+
+  /**
+   * Delivers a produced message to every consumer subscribed to `topic`,
+   * preserving the per-`groupId` consumer map and the commit-on-resolve
+   * modelling. Consumer groups are distinct here, so each subscribed group
+   * receives its own copy — which is exactly how Kafka fans a reply topic out
+   * to per-instance inbox groups.
+   */
+  async route(topic: string, value: string): Promise<void> {
+    const message = new FakeKafkaMessage(
+      value,
+      0,
+      String(this.#offset++),
+      '0',
+      {},
+    );
+    for (const consumer of this.#consumers.values()) {
+      const subscribed = consumer.calls.some((c) =>
+        c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === topic
+      );
+      if (subscribed) {
+        await consumer.deliver(topic, message);
+      }
+    }
   }
 
   consumer(options: { groupId: string }): FakeKafkaConsumer {

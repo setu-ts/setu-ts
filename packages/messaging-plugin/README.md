@@ -38,7 +38,9 @@ await broker.publish('user.created', { userId: '123' });
 | `'redis-streams'` | `npm:ioredis`         | yes           |
 | `'rabbitmq'`      | `npm:amqplib`         | yes           |
 | `'nats'`          | NATS JetStream client | yes           |
-| `'kafka'`         | `npm:kafkajs`         | **no**        |
+| `'kafka'`         | `npm:kafkajs`         | yes¹          |
+
+¹ Kafka needs its reply topic to exist — see below.
 
 ## Request-reply
 
@@ -46,9 +48,29 @@ await broker.publish('user.created', { userId: '123' });
 `publish`/`subscribe` — **not** transport headers, which the in-memory and Redis brokers do not
 populate.
 
-Kafka's consumer-group and auto-commit model does not fit the pattern, so `KafkaBroker.request` and
-`.respond` throw the exported `MessagingNotSupportedError`. `RequestTimeoutError` and
-`RemoteHandlerError` are also exported for `instanceof` handling.
+RPC rides a channel derived from the topic, so it never collides with plain pub/sub: a
+`subscribe('orders', …)` consumer never sees a request envelope, and a `publish('orders', …)` is
+never consumed by a responder on `'orders'`.
+
+Each broker decides what its reply inbox is. The four whose topics are cheap mint a fresh
+per-instance one. **Kafka** cannot — a topic there is a durable, partitioned cluster resource — so
+it reads a shared `replyTopic` (default `'messaging.replies'`) under a consumer group unique to each
+instance:
+
+```typescript
+app.register(MessagingPlugin({
+  broker: 'kafka',
+  brokers: ['localhost:9092'],
+  replyTopic: 'orders.replies', // must already exist; the broker creates no topics
+}));
+```
+
+Every instance reads every reply on that topic and discards the ones it did not originate, so give a
+high-traffic service its own `replyTopic` to bound the fan-out.
+
+`RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling.
+`MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the Kafka
+broker's former refusal and no broker throws it now.
 
 ## Bridging in-process events
 

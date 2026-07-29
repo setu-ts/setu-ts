@@ -5,6 +5,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type {
   HealthCheckResult,
   HealthStatus,
+  IMessageBroker,
   IPluginContext,
   IRuntimeServices,
 } from '@hono-enterprise/common';
@@ -675,11 +676,35 @@ describe('MessagingPlugin', () => {
       brokers: ['localhost:9092', 'localhost:9093'],
       clientId: 'custom-client',
       defaultQueue: 'custom-queue',
+      replyTopic: 'custom-replies',
     });
 
     await plugin.register(ctx);
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
+  });
+
+  it('threads replyTopic through to the kafka broker rather than storing it', async () => {
+    const fakeClient = new FakeKafkaFactory();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      replyTopic: 'svc.replies',
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    await broker.respond('ping', () => 'pong');
+    await expect(broker.request('ping', {})).resolves.toBe('pong');
+
+    // The option is only honoured if the reply actually travelled on it.
+    const sentTopics = fakeClient.producer().calls
+      .filter((c) => c.method === 'send')
+      .map((c) => (c.args[0] as { topic: string }).topic);
+    expect(sentTopics).toContain('svc.replies');
+    expect(sentTopics).not.toContain('messaging.replies');
   });
 });

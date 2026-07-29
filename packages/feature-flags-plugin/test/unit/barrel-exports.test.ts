@@ -44,3 +44,20 @@ describe('barrel exports', () => {
     expect(typeof barrel.DatabaseProvider).toBe('function');
   });
 });
+
+describe('barrel exports — LaunchDarkly', () => {
+  it('exports LaunchDarklyProvider', () => {
+    expect(barrel.LaunchDarklyProvider).toBeDefined();
+    expect(typeof barrel.LaunchDarklyProvider).toBe('function');
+  });
+
+  it('exports toLaunchDarklyContext', () => {
+    expect(typeof barrel.toLaunchDarklyContext).toBe('function');
+  });
+
+  it('exports the module seam and its error', () => {
+    expect(typeof barrel.adaptLaunchDarklyModule).toBe('function');
+    expect(typeof barrel.loadLaunchDarklyModule).toBe('function');
+    expect(typeof barrel.LaunchDarklyModuleError).toBe('function');
+  });
+});

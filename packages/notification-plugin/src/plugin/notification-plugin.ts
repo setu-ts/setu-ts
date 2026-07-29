@@ -10,6 +10,7 @@ import type {
   INotifier,
   IPlugin,
   IPluginContext,
+  IRuntimeServices,
 } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type {
@@ -116,7 +117,7 @@ export function createChannel(
     case 'twilio':
       return new SmsChannel(name, createProvider(config));
     case 'fcm':
-      return new PushChannel(name, createProvider(config));
+      return new PushChannel(name, createProvider(config, ctx));
     case 'slack':
       return new SlackChannel(name, createProvider(config));
     default:
@@ -145,7 +146,7 @@ export function createChannel(
  */
 export function createProvider(config: MailChannelConfig, ctx?: IPluginContext): IMailer;
 export function createProvider(config: TwilioChannelConfig): SmsTransport;
-export function createProvider(config: FcmChannelConfig): PushTransport;
+export function createProvider(config: FcmChannelConfig, ctx?: IPluginContext): PushTransport;
 export function createProvider(config: SlackChannelConfig): SlackTransport;
 export function createProvider(
   config: ChannelConfig,
@@ -166,8 +167,22 @@ export function createProvider(
     }
     case 'twilio':
       return new TwilioProvider(config.options);
-    case 'fcm':
+    case 'fcm': {
+      // A caller-supplied tokenSource carries its own credentials, so the
+      // runtime is only needed for the default service-account signer.
+      if (config.options.tokenSource === undefined) {
+        if (!ctx || !ctx.services.has(CAPABILITIES.RUNTIME)) {
+          throw new Error(
+            'Notification "push" channel requires the runtime capability (CAPABILITIES.RUNTIME) to sign FCM service-account tokens; register RuntimePlugin, or supply an explicit "tokenSource"',
+          );
+        }
+        return new FcmProvider({
+          ...config.options,
+          runtime: ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
+        });
+      }
       return new FcmProvider(config.options);
+    }
     case 'slack':
       return new SlackProvider(config.options);
     default:
