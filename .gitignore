@@ -2,6 +2,7 @@
 # runs with `--coverage=.coverage` write .coverage/ — ignore both at any depth).
 coverage/
 .coverage/
+.cov/
 
 # Generated API docs
 docs/api/
