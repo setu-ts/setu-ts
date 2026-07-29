@@ -374,12 +374,12 @@ export function generateOpenApiClient(
     if (queryParams.length || headerParams.length || bodySchema) {
       for (const p of queryParams) {
         const pname = sanitizeIdentifier(p.name);
-        const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'string';
+        const ptype = renderSchema(p.schema, new Set(), op.path, op.method);
         argsFields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
       }
       for (const p of headerParams) {
         const pname = sanitizeIdentifier(p.name);
-        const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'string';
+        const ptype = renderSchema(p.schema, new Set(), op.path, op.method);
         argsFields.push(`    ${pname}${p.required ? '' : '?'}: ${ptype};`);
       }
       if (bodySchema) {
@@ -416,7 +416,7 @@ export function generateOpenApiClient(
     const paramList: string[] = [];
     for (const p of pathParams) {
       const pname = sanitizeIdentifier(p.name);
-      const ptype = renderSchema(p.schema, new Set(), op.path, op.method) ?? 'string';
+      const ptype = renderSchema(p.schema, new Set(), op.path, op.method);
       paramList.push(`${pname}${p.required ? '' : '?'}: ${ptype}`);
     }
     // Generate the *Args interface name and add typed opts parameter if needed.
@@ -443,12 +443,18 @@ export function generateOpenApiClient(
       L(`            query: { ${qParts.join(', ')} },`);
     }
     if (headerParams.length) {
-      const hParts = headerParams.map((p) => {
+      const hChecks = headerParams.map((p) => {
         const pname = sanitizeIdentifier(p.name);
-        // Header values are strings; cast to string | undefined.
-        return `'${escapeSingleQuote(p.name)}': (opts?.${pname} as string | undefined)`;
+        const origName = escapeSingleQuote(p.name);
+        return `if (opts?.${pname} !== undefined) headers['${origName}'] = opts?.${pname};`;
       });
-      L(`            headers: { ${hParts.join(', ')} },`);
+      L(`            headers: (() => {`);
+      L(`                const headers: Record<string, string> = {};`);
+      for (const check of hChecks) {
+        L(`                ${check}`);
+      }
+      L(`                return headers;`);
+      L(`            })(),`);
     }
     if (bodySchema) {
       L(`            json: opts?.body,`);

@@ -646,7 +646,11 @@ describe('parameter and body rendering', () => {
     });
     const out = generateOpenApiClient(doc);
     // Wire key should be 'X-API-Key', access uses opts?.xApiKey (sanitizeIdentifier splits on hyphen)
-    expect(out).toContain("'X-API-Key': (opts?.xApiKey as string | undefined)");
+    expect(out).toContain("'X-API-Key'");
+    expect(out).toContain('opts?.xApiKey');
+    expect(out).toContain('headers:');
+    // Verify the old unsafe pattern is not present
+    expect(out).not.toContain('(opts?.xApiKey as string | undefined)');
   });
 });
 
@@ -755,6 +759,7 @@ describe('fixture equality', () => {
             parameters: [
               { name: 'page', in: 'query', required: false, schema: { type: 'integer' } },
               { name: 'limit', in: 'query', required: false, schema: { type: 'integer' } },
+              { name: 'X-API-Key', in: 'header', required: false, schema: { type: 'string' } },
             ],
             responses: {
               '200': {
