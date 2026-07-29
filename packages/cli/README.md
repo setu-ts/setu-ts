@@ -6,7 +6,7 @@ Enterprise framework.
 ## Installation
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.2/main
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
 ```
 
 The `-n honoe` is required, not decorative: Deno derives the binary name from the package, which for
