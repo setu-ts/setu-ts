@@ -587,11 +587,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   single-fake test, so the constructor refuses a client injected without its subscriber. Loop
   prevention is a per-instance origin stamp; an arriving frame is delivered through a local-only
   path and NEVER re-published, and never creates a room/channel that does not already exist locally.
-  `Room.size`/`SseChannel.size` stay LOCAL and `RoomBroadcastOptions.except` is honored only on the
-  originating replica — both structural (no cross-process connection identity), documented rather
-  than approximated, and deferred to a presence milestone. Added the new package to
-  `scripts/release-packages.ts`, so `release:verify` now reports 37 publishable packages) — complete
-  (PR pending)
+  `RoomBroadcastOptions.except` IS honored cluster-wide — connection ids are `runtime.uuid()` and
+  therefore globally unique, so the frame carries `exceptId` and every replica skips the match.
+  `Room.size`/`SseChannel.size` stay LOCAL, and that one is genuine: a cluster-wide count is
+  inherently async (scatter-gather), so it cannot satisfy the synchronous committed `size` getter
+  and wants a separate async method — deferred to a presence milestone as a CONTRACT decision, not
+  an implementation gap. Added the new package to `scripts/release-packages.ts`, so `release:verify`
+  now reports 37 publishable packages) — complete (PR pending)
 - **Next milestone** — **Milestone 35** (`packages/sdk` — client SDK); M35–M40 follow unless
   reprioritized.
 

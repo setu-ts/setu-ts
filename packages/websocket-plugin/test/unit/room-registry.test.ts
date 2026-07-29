@@ -330,3 +330,80 @@ describe('Room membership listener', () => {
     expect(room.rawSize).toBe(1);
   });
 });
+
+describe('Room exclusion across the backplane', () => {
+  it('publishes the excluded connection ID alongside the broadcast', () => {
+    const published: Array<{ name: string; data: unknown; exceptId?: string }> = [];
+    const room = new Room('lobby', undefined, (name, data, exceptId) => {
+      published.push(exceptId === undefined ? { name, data } : { name, data, exceptId });
+    });
+    const a = makeConnection('conn-a');
+    const b = makeConnection('conn-b');
+    room.add(a.conn);
+    room.add(b.conn);
+
+    room.broadcast('hi', { except: a.conn });
+
+    // The ID is what survives the wire; the connection object cannot.
+    expect(published).toEqual([{ name: 'lobby', data: 'hi', exceptId: 'conn-a' }]);
+  });
+
+  it('omits the exceptId when the broadcast excludes nobody', () => {
+    const published: Array<string | undefined> = [];
+    const room = new Room('lobby', undefined, (_name, _data, exceptId) => {
+      published.push(exceptId);
+    });
+    room.add(makeConnection('conn-a').conn);
+
+    room.broadcast('hi');
+
+    expect(published).toEqual([undefined]);
+  });
+
+  it('broadcastLocal skips the member named by exceptId', () => {
+    const room = new Room('lobby');
+    const a = makeConnection('conn-a');
+    const b = makeConnection('conn-b');
+    room.add(a.conn);
+    room.add(b.conn);
+
+    room.broadcastLocal('hi', { exceptId: 'conn-a' });
+
+    expect(a.transport.sent).toEqual([]);
+    expect(b.transport.sent).toEqual(['hi']);
+  });
+
+  it('broadcastLocal delivers to everyone when the exceptId matches no member', () => {
+    const room = new Room('lobby');
+    const a = makeConnection('conn-a');
+    room.add(a.conn);
+
+    // The ordinary remote case: the excluded peer is connected elsewhere.
+    room.broadcastLocal('hi', { exceptId: 'conn-on-another-replica' });
+
+    expect(a.transport.sent).toEqual(['hi']);
+  });
+
+  it('deliverRemote forwards the exceptId to the room', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('conn-a');
+    const b = makeConnection('conn-b');
+    registry.get('lobby').add(a.conn);
+    registry.get('lobby').add(b.conn);
+
+    registry.deliverRemote('lobby', 'hi', 'conn-a');
+
+    expect(a.transport.sent).toEqual([]);
+    expect(b.transport.sent).toEqual(['hi']);
+  });
+
+  it('deliverRemote with no exceptId delivers to every member', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('conn-a');
+    registry.get('lobby').add(a.conn);
+
+    registry.deliverRemote('lobby', 'hi');
+
+    expect(a.transport.sent).toEqual(['hi']);
+  });
+});

@@ -159,7 +159,7 @@ describe('WebSocket rooms across replicas', () => {
     expect(remoteMember.sent).toEqual([JSON.stringify({ type: 'ping', n: 1 })]);
   });
 
-  it('honors `except` only on the originating replica', async () => {
+  it('honors `except` on the originating replica and on every other one', async () => {
     const [aPlane, bPlane] = createBackplanePair();
     const a = await serviceOn(aPlane);
     const b = await serviceOn(bPlane);
@@ -173,10 +173,43 @@ describe('WebSocket rooms across replicas', () => {
 
     a.room('lobby').broadcast('hi', { except: sender });
 
-    // `except` names a live in-process connection with no cross-process
-    // identity, so it cannot be honored remotely — a documented limitation.
     expect(sender.sent).toEqual([]);
     expect(otherLocal.sent).toEqual(['hi']);
+    // Everyone else still receives it, wherever they are connected.
+    expect(remoteMember.sent).toEqual(['hi']);
+  });
+
+  it('excludes the sender even when it is connected to another replica', async () => {
+    const [aPlane, bPlane] = createBackplanePair();
+    const a = await serviceOn(aPlane);
+    const b = await serviceOn(bPlane);
+
+    // The excluded connection lives on B while the broadcast is issued on A —
+    // the case a connection-object comparison cannot express, and the reason
+    // the frame carries the globally-unique connection ID instead.
+    const sender = fakeConnection('shared-id');
+    const remoteSameId = fakeConnection('shared-id');
+    const otherRemote = fakeConnection('other-remote');
+    a.room('lobby').add(sender);
+    b.room('lobby').add(remoteSameId);
+    b.room('lobby').add(otherRemote);
+
+    a.room('lobby').broadcast('hi', { except: sender });
+
+    expect(sender.sent).toEqual([]);
+    expect(remoteSameId.sent).toEqual([]);
+    expect(otherRemote.sent).toEqual(['hi']);
+  });
+
+  it('carries no exceptId when the broadcast excludes nobody', async () => {
+    const [aPlane, bPlane] = createBackplanePair();
+    const a = await serviceOn(aPlane);
+    const b = await serviceOn(bPlane);
+
+    const remoteMember = fakeConnection('remote');
+    b.room('lobby').add(remoteMember);
+
+    a.room('lobby').broadcast('hi');
     expect(remoteMember.sent).toEqual(['hi']);
   });
 

@@ -59,6 +59,21 @@ export interface RealtimeFrame {
   readonly data: string;
   /** True when {@linkcode RealtimeFrame.data} is base64-encoded binary. */
   readonly binary?: boolean;
+  /**
+   * The connection excluded from this broadcast, by ID.
+   *
+   * `RoomBroadcastOptions.except` names a live connection object, which has no
+   * meaning in another process — but connection IDs come from `runtime.uuid()`
+   * and are therefore globally unique, so carrying the ID is what lets the
+   * exclusion survive the wire. A receiving replica skips the member whose `id`
+   * matches; ordinarily none does, since the excluded peer is connected to the
+   * originating replica.
+   *
+   * Absent for SSE channels, whose `publish` has no exclusion option.
+   *
+   * @since 0.2.0
+   */
+  readonly exceptId?: string;
 }
 
 /**

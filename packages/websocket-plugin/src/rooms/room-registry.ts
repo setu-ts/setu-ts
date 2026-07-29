@@ -50,7 +50,26 @@ export interface RoomMembershipListener {
  * @param data - The payload, exactly as handed to `broadcast`
  * @since 0.2.0
  */
-export type RoomPublisher = (name: string, data: string | Uint8Array) => void;
+export type RoomPublisher = (
+  name: string,
+  data: string | Uint8Array,
+  exceptId?: string,
+) => void;
+
+/**
+ * Options for {@linkcode Room.broadcastLocal}.
+ *
+ * Extends the committed broadcast options with exclusion by connection ID,
+ * which is how `except` survives a trip across the backplane: the excluded
+ * connection object exists only on the originating replica, but its
+ * `runtime.uuid()` ID is globally unique and travels on the frame.
+ *
+ * @since 0.2.0
+ */
+export interface LocalBroadcastOptions extends RoomBroadcastOptions {
+  /** Skip the member with this connection ID. */
+  readonly exceptId?: string;
+}
 
 /**
  * A named group of connections that can be addressed as one.
@@ -114,8 +133,9 @@ export class Room implements WebSocketRoom {
   broadcast(data: string | Uint8Array, options?: RoomBroadcastOptions): void {
     this.broadcastLocal(data, options);
     // Published after local delivery so a transport error can never cost local
-    // members their message.
-    this.#publish?.(this.#name, data);
+    // members their message. The excluded connection travels as its ID, which
+    // is globally unique, so the exclusion is honored on every replica.
+    this.#publish?.(this.#name, data, options?.except?.id);
   }
 
   /**
@@ -127,18 +147,20 @@ export class Room implements WebSocketRoom {
    * call {@linkcode Room.broadcast}; only the plugin's backplane subscriber
    * calls this.
    *
-   * `options.except` is honored here, but it names a live in-process connection
-   * and therefore has no meaning on a remote replica — which is why a remote
-   * frame is delivered to every local member.
+   * Exclusion is honored two ways: `options.except` names a live connection
+   * object (the local path), and `options.exceptId` names one by ID (the path a
+   * frame arriving from another replica takes, since the excluded connection
+   * object does not exist here).
    *
    * @param data - Text as `string`, binary as `Uint8Array`
-   * @param options - Broadcast options
+   * @param options - Broadcast options, including exclusion by ID
    * @since 0.2.0
    */
-  broadcastLocal(data: string | Uint8Array, options?: RoomBroadcastOptions): void {
+  broadcastLocal(data: string | Uint8Array, options?: LocalBroadcastOptions): void {
     const except = options?.except;
+    const exceptId = options?.exceptId;
     for (const member of this.#members) {
-      if (member === except) {
+      if (member === except || (exceptId !== undefined && member.id === exceptId)) {
         continue;
       }
       if (!member.isOpen) {
@@ -305,10 +327,16 @@ export class RoomRegistry {
    *
    * @param name - The room the frame was addressed to
    * @param data - The decoded payload
+   * @param exceptId - Connection ID the originating replica excluded, if any
    * @since 0.2.0
    */
-  deliverRemote(name: string, data: string | Uint8Array): void {
-    this.#rooms.get(name)?.broadcastLocal(data);
+  deliverRemote(name: string, data: string | Uint8Array, exceptId?: string): void {
+    // `exactOptionalPropertyTypes` forbids handing through an explicit
+    // `undefined`, so the absent case passes no options at all.
+    this.#rooms.get(name)?.broadcastLocal(
+      data,
+      exceptId === undefined ? undefined : { exceptId },
+    );
   }
 
   /** Discards every room. */

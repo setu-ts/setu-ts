@@ -46,7 +46,11 @@ export {
 } from './services/websocket-service.ts';
 export { WebSocketConnection } from './connection/websocket-connection.ts';
 export { Room, RoomRegistry } from './rooms/room-registry.ts';
-export type { RoomMembershipListener, RoomPublisher } from './rooms/room-registry.ts';
+export type {
+  LocalBroadcastOptions,
+  RoomMembershipListener,
+  RoomPublisher,
+} from './rooms/room-registry.ts';
 export { parseRequestedProtocols, selectProtocol, WsRouteTable } from './routing/ws-route-table.ts';
 export type { WsRoute, WsRouteMatch } from './routing/ws-route-table.ts';
 export { HeartbeatSweeper } from './heartbeat/heartbeat.ts';

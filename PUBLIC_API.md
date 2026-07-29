@@ -1582,26 +1582,27 @@ ws.route('/ws/chat', {
 
 ### Exports
 
-| Export                      | Kind     | Purpose                                                               |
-| --------------------------- | -------- | --------------------------------------------------------------------- |
-| `WebSocketPlugin`           | function | Creates the plugin                                                    |
-| `WebSocketService`          | class    | The `IWebSocketService` implementation registered under the token     |
-| `WebSocketConnection`       | class    | The `IWebSocketConnection` implementation                             |
-| `Room`                      | class    | The `WebSocketRoom` implementation                                    |
-| `RoomRegistry`              | class    | Owns live rooms, creating on demand and discarding when empty         |
-| `WsRouteTable`              | class    | Exact-path route table with subprotocol selection                     |
-| `HeartbeatSweeper`          | class    | The interval implementing `heartbeatMs` / `idleTimeoutMs`             |
-| `WebSocketUnavailableError` | class    | Thrown by `route()` when the adapter offers no upgrade seam           |
-| `resolveOptions`            | function | Applies option defaults and rejects a contradictory configuration     |
-| `frameByteLength`           | function | Measures a frame in bytes (text by UTF-8 encoding, not string length) |
-| `buildContext`              | function | Builds the `WebSocketConnectionContext` from an upgrade request       |
-| `parseRequestedProtocols`   | function | Parses a `Sec-WebSocket-Protocol` header into tokens                  |
-| `selectProtocol`            | function | Picks the subprotocol to echo, or refuses                             |
-| `WebSocketPluginOptions`    | type     | The options above                                                     |
-| `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                    |
-| `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                      |
-| `RoomMembershipListener`    | type     | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates    |
-| `RoomPublisher`             | type     | Forwards a local broadcast to other replicas; supplied by a backplane |
+| Export                      | Kind     | Purpose                                                                |
+| --------------------------- | -------- | ---------------------------------------------------------------------- |
+| `WebSocketPlugin`           | function | Creates the plugin                                                     |
+| `WebSocketService`          | class    | The `IWebSocketService` implementation registered under the token      |
+| `WebSocketConnection`       | class    | The `IWebSocketConnection` implementation                              |
+| `Room`                      | class    | The `WebSocketRoom` implementation                                     |
+| `RoomRegistry`              | class    | Owns live rooms, creating on demand and discarding when empty          |
+| `WsRouteTable`              | class    | Exact-path route table with subprotocol selection                      |
+| `HeartbeatSweeper`          | class    | The interval implementing `heartbeatMs` / `idleTimeoutMs`              |
+| `WebSocketUnavailableError` | class    | Thrown by `route()` when the adapter offers no upgrade seam            |
+| `resolveOptions`            | function | Applies option defaults and rejects a contradictory configuration      |
+| `frameByteLength`           | function | Measures a frame in bytes (text by UTF-8 encoding, not string length)  |
+| `buildContext`              | function | Builds the `WebSocketConnectionContext` from an upgrade request        |
+| `parseRequestedProtocols`   | function | Parses a `Sec-WebSocket-Protocol` header into tokens                   |
+| `selectProtocol`            | function | Picks the subprotocol to echo, or refuses                              |
+| `WebSocketPluginOptions`    | type     | The options above                                                      |
+| `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                     |
+| `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                       |
+| `RoomMembershipListener`    | type     | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates     |
+| `RoomPublisher`             | type     | Forwards a local broadcast to other replicas; supplied by a backplane  |
+| `LocalBroadcastOptions`     | type     | `broadcastLocal` options — adds `exceptId` to exclude by connection ID |
 
 ### Notes
 
@@ -1624,10 +1625,11 @@ ws.route('/ws/chat', {
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin) and every `broadcast` also reaches members
   on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE` provider the behavior is unchanged.
-  `Room.size` keeps reporting **local** membership either way, and `RoomBroadcastOptions.except` is
-  honored only on the originating replica, because it names a live in-process connection with no
-  cross-process identity. `Room.broadcastLocal` is the local-only delivery path the backplane
-  subscriber uses; applications call `broadcast`.
+  `RoomBroadcastOptions.except` is honored on **every** replica: connection IDs come from
+  `runtime.uuid()` and are globally unique, so the frame carries the excluded ID. `Room.size` keeps
+  reporting **local** membership either way. `Room.broadcastLocal` is the local-only delivery path
+  the backplane subscriber uses (its `LocalBroadcastOptions` adds `exceptId`); applications call
+  `broadcast`.
 - A `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer
   costs only the rooms that peer had actually joined rather than a scan of every live room. The
   index is maintained through the `RoomMembershipListener` the registry gives each `Room` it
@@ -1742,9 +1744,13 @@ Discriminated on `transport`.
   An `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
   replayed; a replica partitioned from the transport misses frames sent during the partition.
-- **`Room.size` / `SseChannel.size` remain local, and `except` is honored only on the originating
-  replica.** Both are structural: a cluster-wide count needs a presence protocol with expiry, and
-  `except` names a live in-process connection with no cross-process identity.
+- **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
+  which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
+  therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
+  matching member. Excluding a peer connected to a _different_ replica works for the same reason.
+- **`Room.size` / `SseChannel.size` remain local.** A cluster-wide count is inherently asynchronous
+  (a scatter-gather across replicas), so it cannot satisfy the synchronous committed `size` getter;
+  exposing one is a contract decision — a separate async method — that a later milestone owns.
 
 ---
 

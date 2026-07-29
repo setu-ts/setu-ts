@@ -154,11 +154,18 @@ export class WebSocketService implements IWebSocketService {
     this.#logger = logger;
     this.#backplane = backplane;
     this.#rooms = new RoomRegistry(
-      backplane === undefined ? undefined : (name, data): void => {
+      backplane === undefined ? undefined : (name, data, exceptId): void => {
         const payload = encodeFrameData(data);
-        const frame: RealtimeFrame = payload.binary === true
-          ? { kind: 'ws-room', origin: backplane.origin, name, data: payload.data, binary: true }
-          : { kind: 'ws-room', origin: backplane.origin, name, data: payload.data };
+        // Assembled rather than spread so `exactOptionalPropertyTypes` never
+        // sees an explicit `undefined` on an optional field.
+        const frame: RealtimeFrame = {
+          kind: 'ws-room',
+          origin: backplane.origin,
+          name,
+          data: payload.data,
+          ...(payload.binary === true ? { binary: true } : {}),
+          ...(exceptId === undefined ? {} : { exceptId }),
+        };
         // Fire-and-forget: a transport failure must never make a local
         // broadcast throw for the application that issued it.
         void backplane.publish(frame).catch((error: unknown) => {
@@ -229,7 +236,7 @@ export class WebSocketService implements IWebSocketService {
     if (frame.kind !== 'ws-room' || frame.origin === this.#backplane?.origin) {
       return;
     }
-    this.#rooms.deliverRemote(frame.name, decodeFrameData(frame));
+    this.#rooms.deliverRemote(frame.name, decodeFrameData(frame), frame.exceptId);
   }
 
   /**

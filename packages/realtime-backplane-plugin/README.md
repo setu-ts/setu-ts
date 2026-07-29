@@ -93,12 +93,13 @@ without a `subscriber` throws at construction rather than failing at the first p
 
 ## Limitations
 
-Two are structural rather than incidental, and are documented rather than silently approximated:
+- **`Room.size` and `SseChannel.size` report LOCAL membership.** A cluster-wide count is inherently
+  asynchronous (a scatter-gather across replicas), so it cannot satisfy the synchronous committed
+  `size` getter; it wants a separate async method, which a later milestone owns.
 
-- **`Room.size` and `SseChannel.size` report LOCAL membership.** A cluster-wide count needs a
-  presence protocol with expiry, which a later milestone owns.
-- **`RoomBroadcastOptions.except` is honored only on the originating replica.** It names a live
-  in-process connection object, which has no identity on another process.
+`RoomBroadcastOptions.except` is **not** a limitation: it is honored on every replica. Connection
+IDs come from `runtime.uuid()` and are globally unique, so the frame carries the excluded ID and
+each replica skips the matching member.
 
 Delivery is at-most-once and inherits the transport's guarantees: a replica that is partitioned from
 Redis or the broker misses frames sent during the partition. Frames are not persisted or replayed.

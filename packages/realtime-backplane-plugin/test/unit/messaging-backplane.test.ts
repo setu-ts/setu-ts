@@ -67,6 +67,7 @@ describe('isRealtimeFrame', () => {
     expect(isRealtimeFrame(FRAME)).toBe(true);
     expect(isRealtimeFrame({ ...FRAME, kind: 'sse-channel' })).toBe(true);
     expect(isRealtimeFrame({ ...FRAME, binary: true })).toBe(true);
+    expect(isRealtimeFrame({ ...FRAME, exceptId: 'conn-1' })).toBe(true);
   });
 
   it('rejects non-objects', () => {
@@ -84,6 +85,7 @@ describe('isRealtimeFrame', () => {
     expect(isRealtimeFrame({ ...FRAME, name: undefined })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, data: 42 })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, binary: 'yes' })).toBe(false);
+    expect(isRealtimeFrame({ ...FRAME, exceptId: 42 })).toBe(false);
   });
 });
 

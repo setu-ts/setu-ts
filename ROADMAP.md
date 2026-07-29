@@ -4301,8 +4301,14 @@ synchronous `isEnabled`. The bridge is `LDFlagsState.getFlagValue`, the SDK's on
 - `websocket-plugin` and `sse-plugin` resolve the token **optionally**; both `register()` become
   async to await their subscription, and both unsubscribe in `onClose`.
 
-**Deliberately deferred:** cluster-wide `Room.size` / `SseChannel.size` and honoring `except`
-remotely. Both need cross-process connection identity and a presence protocol with expiry.
+`RoomBroadcastOptions.except` is honored cluster-wide: connection IDs are `runtime.uuid()` values
+and therefore globally unique, so `RealtimeFrame.exceptId` carries the excluded ID and every replica
+skips the matching member.
+
+**Deliberately deferred:** cluster-wide `Room.size` / `SseChannel.size`. A cluster-wide count is
+inherently asynchronous (a scatter-gather across replicas), so it cannot satisfy the synchronous
+committed `size` getter — exposing one is a contract decision (a separate async method), not just an
+implementation task.
 
 ### Implementation Files
 

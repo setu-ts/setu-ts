@@ -51,10 +51,13 @@ from that release's list rather than reworded.
 
 ### Notes
 
-Two real-time limitations are structural and remain, documented rather than silently approximated:
-`Room.size` / `SseChannel.size` report **local** membership, and `RoomBroadcastOptions.except` is
-honored only on the originating replica, because it names a live in-process connection with no
-cross-process identity. Cluster-wide presence is a later milestone.
+One real-time limitation remains, documented rather than silently approximated: `Room.size` /
+`SseChannel.size` report **local** membership. A cluster-wide count is inherently asynchronous — it
+needs a scatter-gather across replicas — so it cannot satisfy the synchronous committed `size`
+getter and wants a separate async method. That is a later milestone.
+
+`RoomBroadcastOptions.except` **is** honored cluster-wide: connection IDs come from `runtime.uuid()`
+and are globally unique, so the frame carries the excluded ID and every replica skips it.
 
 A call that ignores its `AbortSignal` still runs to completion; cancellation is cooperative, and the
 widened JSDoc says so.
