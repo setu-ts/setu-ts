@@ -25,6 +25,8 @@ class FakeRedisClient implements IRedisBackplaneClient {
   failSubscribe: Error | undefined;
   /** When set, `quit` rejects with this — a connection that will not close cleanly. */
   failQuit: Error | undefined;
+  /** When set, `unsubscribe` rejects with this. */
+  failUnsubscribe: Error | undefined;
   #listeners: Array<(channel: string, message: string) => void> = [];
   #inSubscriberMode = false;
   #gate: Promise<void> | undefined;
@@ -78,6 +80,9 @@ class FakeRedisClient implements IRedisBackplaneClient {
   }
 
   unsubscribe(channel: string): Promise<unknown> {
+    if (this.failUnsubscribe !== undefined) {
+      return Promise.reject(this.failUnsubscribe);
+    }
     this.subscribed.splice(this.subscribed.indexOf(channel), 1);
     return Promise.resolve(0);
   }
@@ -488,6 +493,166 @@ describe('RedisBackplane connect', () => {
 
     expect(clients.length).toBe(4);
     expect(clients[3]?.subscribed).toEqual(['realtime']);
+    await backplane.close();
+  });
+});
+
+describe('RedisBackplane close racing an open', () => {
+  /** A module whose second-built connection holds its SUBSCRIBE until released. */
+  function gatedModule(): {
+    module: IRedisModule;
+    clients: FakeRedisClient[];
+    release: () => void;
+  } {
+    const clients: FakeRedisClient[] = [];
+    let release = (): void => {};
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = new FakeRedisClient();
+        // The subscriber is the second connection built.
+        if (clients.length === 1) {
+          release = client.holdSubscribe();
+        }
+        clients.push(client);
+        return client;
+      },
+    };
+    return { module, clients, release: () => release() };
+  }
+
+  it('retires the connections it built when close lands mid-open', async () => {
+    const { module, clients, release } = gatedModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    const connecting = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Shutdown arrives while SUBSCRIBE is still outstanding, so close() sees no
+    // fields to clean up — the open itself must not hand its work over.
+    await backplane.close();
+    release();
+    await connecting;
+
+    expect(clients.map((c) => c.quitCount)).toEqual([1, 1]);
+    expect(clients[1]?.subscribed).toEqual([]);
+    expect(clients[1]?.listenerCount).toBe(0);
+
+    // The backplane is closed, not connected: publishing reaches nothing.
+    await backplane.publish(FRAME);
+    expect(clients[0]?.published).toEqual([]);
+  });
+
+  it('leaves injected connections to the caller when close lands mid-open', async () => {
+    const client = new FakeRedisClient();
+    const subscriber = new FakeRedisClient();
+    const release = subscriber.holdSubscribe();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber },
+      'node-a',
+      'realtime',
+    );
+
+    const connecting = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await backplane.close();
+    release();
+    await connecting;
+
+    // Ours to undo: the subscription and the listener. Not ours to close: the
+    // connections themselves.
+    expect(subscriber.subscribed).toEqual([]);
+    expect(subscriber.listenerCount).toBe(0);
+    expect(subscriber.quitCount).toBe(0);
+    expect(client.quitCount).toBe(0);
+  });
+
+  it('still retires the pair when the rollback unsubscribe fails', async () => {
+    const { module, clients, release } = gatedModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    const connecting = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const subscriber = clients[1];
+    if (subscriber !== undefined) {
+      subscriber.failUnsubscribe = new Error('connection already gone');
+    }
+
+    await backplane.close();
+    release();
+    // The retirement is best-effort: a failed UNSUBSCRIBE must not surface as a
+    // rejected connect() on what is already a shutdown path.
+    await connecting;
+
+    expect(clients.map((c) => c.quitCount)).toEqual([1, 1]);
+  });
+
+  it('reopens cleanly after a close superseded an open', async () => {
+    const { module, clients, release } = gatedModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    const connecting = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await backplane.close();
+    release();
+    await connecting;
+
+    await backplane.connect();
+
+    expect(clients.length).toBe(4);
+    expect(clients[3]?.subscribed).toEqual(['realtime']);
+    await backplane.publish(FRAME);
+    expect(clients[2]?.published.length).toBe(1);
+    await backplane.close();
+  });
+
+  it('a superseded attempt failing later does not clear the live memo', async () => {
+    const clients: FakeRedisClient[] = [];
+    let release = (): void => {};
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = new FakeRedisClient();
+        // Only the first attempt's subscriber is gated, and it fails when let go.
+        if (clients.length === 1) {
+          client.failSubscribe = new Error('SUBSCRIBE refused');
+          release = client.holdSubscribe();
+        }
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    const first = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await backplane.close();
+
+    // A fresh open installs a new memo while the first attempt is still pending.
+    await backplane.connect();
+    expect(clients.length).toBe(4);
+
+    release();
+    await expect(first).rejects.toThrow('SUBSCRIBE refused');
+
+    // The stale rejection must not retract the live attempt's memo, or the next
+    // connect() would open a third pair alongside the connected one.
+    await backplane.connect();
+    expect(clients.length).toBe(4);
     await backplane.close();
   });
 });
