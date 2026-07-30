@@ -11,6 +11,6 @@
  * @see {@link https://jsr.io/@hono-enterprise/microservice-starter}
  */
 
-export { createMicroserviceApp } from './microservice-app.ts';
+export { createMicroserviceApp } from './app.ts';
 export type { MicroserviceStarterOptions } from './options.ts';
-export { buildMicroservicePlugins } from './microservice-app.ts';
+export { buildMicroservicePlugins } from './app.ts';

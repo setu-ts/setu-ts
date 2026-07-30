@@ -11,6 +11,6 @@
  * @see {@link https://jsr.io/@hono-enterprise/full-stack-starter}
  */
 
-export { createFullStackApp } from './full-stack-app.ts';
+export { createFullStackApp } from './app.ts';
 export type { FullStackStarterOptions } from './options.ts';
-export { buildFullStackPlugins } from './full-stack-app.ts';
+export { buildFullStackPlugins } from './app.ts';

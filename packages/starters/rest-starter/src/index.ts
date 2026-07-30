@@ -11,6 +11,6 @@
  * @see {@link https://jsr.io/@hono-enterprise/rest-starter}
  */
 
-export { createRestApp } from './rest-app.ts';
+export { createRestApp } from './app.ts';
 export type { RestStarterOptions } from './options.ts';
-export { buildRestPlugins } from './rest-app.ts';
+export { buildRestPlugins } from './app.ts';
