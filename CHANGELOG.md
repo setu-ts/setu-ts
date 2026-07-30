@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`realtime-backplane-plugin`: `RedisBackplane.connect()` no longer leaks a connection on a failed
+  open, and is safe to call concurrently.** The connected guard was only set after both connections
+  had been constructed, so two overlapping calls each built their own pair — and if the second
+  construction threw, the first connection was already live with nothing holding a reference to
+  close it. The open is now memoized, so overlapping callers join one attempt and none of them
+  returns before `SUBSCRIBE` has actually landed; a failed attempt quits whatever it built, leaves
+  injected clients untouched (they belong to the caller), and clears the memo so a later call
+  retries. `RealtimeBackplanePlugin` calls `connect()` exactly once, so no application behavior
+  changes — this closes the seam for callers driving the transport directly.
+
 ## [0.1.0-alpha.3] — 2026-07-30
 
 **Two breaking changes ship in this release.** Both are narrow, but you meet them in production
