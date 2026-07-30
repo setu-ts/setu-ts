@@ -1,10 +1,16 @@
 /**
  * @module
  *
- * REST starter bundle: opinionated plugin set for REST APIs.
+ * REST starter bundle — opinionated plugin composition for building REST APIs.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * Provides a single factory {@linkcode createRestApp} that returns a fully wired
+ * {@linkcode IKernelApplication} with the curated REST plugin set and error-handling
+ * middleware. Also exposes the option type {@linkcode RestStarterOptions} and the
+ * plugin builder {@linkcode buildRestPlugins} for advanced composition.
+ *
+ * @see {@link https://jsr.io/@hono-enterprise/rest-starter}
  */
-export {};
+
+export { createRestApp } from './rest-app.ts';
+export type { RestStarterOptions } from './options.ts';
+export { buildRestPlugins } from './rest-app.ts';

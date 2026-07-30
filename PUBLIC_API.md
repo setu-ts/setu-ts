@@ -81,6 +81,29 @@ deno add jsr:@hono-enterprise/rest-starter
 
 ---
 
+## Full Stack Application
+
+A full-featured service with caching, events, scheduling, and more:
+
+```typescript
+import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
+
+const app = createFullStackApp({
+  cache: { store: 'memory' },
+  events: {},
+  audit: { storage: 'memory' },
+  secrets: { provider: 'env' },
+  storage: { provider: 'memory' },
+  mail: { provider: 'log' },
+});
+
+app.get('/health', (ctx) => ctx.response.json({ status: 'ok' }));
+
+await app.start({ port: 3002 });
+```
+
+---
+
 ## Minimal Application
 
 The smallest possible application — just the kernel and runtime:
@@ -4391,8 +4414,7 @@ A complete REST API using the REST starter:
 import { createRestApp } from '@hono-enterprise/rest-starter';
 import { z } from 'zod';
 
-const app = await createRestApp({
-  port: 3000,
+const app = createRestApp({
   config: {
     validationSchema: z.object({
       PORT: z.coerce.number().default(3000),
@@ -4400,13 +4422,12 @@ const app = await createRestApp({
       JWT_SECRET: z.string().min(32),
     }),
   },
-  // Values resolve from the validated config above — never process.env (runtime independence)
   database: {
     type: 'prisma',
-    urlFromConfig: 'DATABASE_URL',
+    options: { url: process.env.DATABASE_URL },
   },
   auth: {
-    jwt: { secretFromConfig: 'JWT_SECRET', expiresIn: '1h' },
+    jwt: { secret: process.env.JWT_SECRET, expiresIn: '1h' },
   },
   openapi: {
     title: 'My API',
@@ -4471,12 +4492,10 @@ app.router.get('/users/:id', {
   },
 });
 
-await app.start();
+await app.start({ port: 3000 });
 console.log('API running at http://localhost:3000');
 console.log('Docs at http://localhost:3000/docs');
 ```
-
----
 
 ## Microservice Application
 
@@ -4485,24 +4504,21 @@ A microservice with messaging, queue, and telemetry:
 ```typescript
 import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
 
-const app = await createMicroserviceApp({
-  port: 3001,
-  serviceName: 'order-service',
-  // Values resolve from ConfigPlugin's validated environment — never process.env
-  database: { type: 'prisma', urlFromConfig: 'DATABASE_URL' },
+const app = createMicroserviceApp({
+  database: { type: 'prisma', options: { url: process.env.DATABASE_URL } },
   messaging: {
     broker: 'rabbitmq',
-    urlFromConfig: 'RABBITMQ_URL',
+    options: { url: process.env.RABBITMQ_URL },
     exchange: 'orders',
   },
   queue: {
     adapter: 'redis',
-    urlFromConfig: 'REDIS_URL',
+    options: { url: process.env.REDIS_URL },
   },
   telemetry: {
     serviceName: 'order-service',
     exporter: 'otlp',
-    endpointFromConfig: 'OTLP_ENDPOINT',
+    endpoint: process.env.OTLP_ENDPOINT,
   },
 });
 
@@ -4552,10 +4568,8 @@ app.router.post('/orders', async (ctx) => {
   return ctx.response.status(201).json(order);
 });
 
-await app.start();
+await app.start({ port: 3001 });
 ```
-
----
 
 ## CQRS Application
 

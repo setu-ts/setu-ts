@@ -81,7 +81,7 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 ### 1. Prepare, on a `release/…` branch
 
 - Bump `version` in every workspace member's `deno.json`.
-- **Bump the cross-package specifiers to match.** 12 packages pin
+- **Bump the cross-package specifiers to match.** 15 packages pin
   `jsr:@hono-enterprise/{common,kernel,runtime}@^<version>` explicitly. Under semver a `^0.1.0`
   range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these
   publishes packages whose dependencies cannot resolve — and `deno publish` does not warn.

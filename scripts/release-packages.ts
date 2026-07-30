@@ -2,7 +2,7 @@
  * The ordered list of workspace packages that are published to JSR.
  *
  * This is an EXPLICIT allow-list rather than a scan of the `workspace` array in
- * the root `deno.json`, because the workspace also contains stub packages
+ * the root `deno.json`, because the workspace also contains starter stubs
  * (the three starters) that export nothing. A workspace-wide
  * `deno publish` would push those empty packages to JSR, where versions are
  * immutable and cannot be withdrawn — only yanked.
@@ -62,19 +62,21 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
 
   // Tier 5 — tooling. Depends on `common` and `runtime`.
   'packages/cli',
+
+  // Tier 6 — composition libraries (starters). These depend on other starters,
+  // so they must be published in order: rest → microservice → full-stack.
+  'packages/starters/rest-starter',
+  'packages/starters/microservice-starter',
+  'packages/starters/full-stack-starter',
 ];
 
 /**
  * Workspace members deliberately excluded from every release.
  *
- * These are starter stubs whose `src/index.ts` is `export {}`. They are
- * listed explicitly (rather than merely omitted) so that
- * `scripts/verify-release.ts` can prove the two lists together account for the
- * entire workspace — a new package added to the workspace and forgotten here
- * fails the check instead of silently going unpublished.
+ * After M36, all starter packages are real published libraries (Tier 6), so there
+ * are no longer any unpublished packages. This constant is kept (not removed)
+ * because `scripts/verify-release.ts` imports it and builds a union with
+ * `PUBLISHED_PACKAGES` for check 3; an empty array is valid and produces a
+ * summary of "0 deliberately excluded".
  */
-export const UNPUBLISHED_PACKAGES: readonly string[] = [
-  'packages/starters/rest-starter',
-  'packages/starters/microservice-starter',
-  'packages/starters/full-stack-starter',
-];
+export const UNPUBLISHED_PACKAGES: readonly string[] = [];

@@ -320,7 +320,7 @@ hono-enterprise/
 │   ├── *-plugin/          # 30 capability plugins
 │   ├── cli/               # CLI tool — `honoe`, project scaffolding and code generation
 │   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
-│   └── starters/          # Plugin bundles — stubs, Milestone 36
+│   └── starters/          # Plugin bundles — REST, microservice, full-stack starters (M36)
 ├── scripts/               # Coverage, plan linting, JSR release tooling
 ├── docs/                  # Operator guides (releasing, telemetry fan-out, …)
 ├── docker/                # Docker and OpenTelemetry Collector configurations
