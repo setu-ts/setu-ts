@@ -5,7 +5,7 @@ import { createApplication } from '@hono-enterprise/kernel';
 import type { IKernelApplication } from '@hono-enterprise/kernel';
 import type { IPlugin } from '@hono-enterprise/common';
 import { errorHandler } from '@hono-enterprise/exceptions';
-// Import rest-starter via relative path to enable cross-starter composition
+// Import rest-starter via relative path to enable cross-tier composition
 import { buildRestPlugins } from '../../rest-starter/src/rest-app.ts';
 import type { MicroserviceStarterOptions } from './options.ts';
 import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
@@ -60,7 +60,7 @@ export function createMicroserviceApp(options?: MicroserviceStarterOptions): IKe
 
   // Add error handler as outermost middleware (priority 0) — required by
   // exceptions middleware contract to catch errors from all downstream middleware.
-  app.middleware.add(errorHandler(), { priority: 0, name: 'error-handler' });
+  app.middleware.add(errorHandler({ format: 'rfc7807' }), { priority: 0, name: 'error-handler' });
 
   return app;
 }

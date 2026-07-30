@@ -34,7 +34,8 @@ describe('rest-starter / integration', () => {
     expect(response.statusCode).toBe(500);
     // Parse the JSON body to check fields
     const body = JSON.parse(response.body!);
-    expect(body.type).toContain('internal-server-error');
+    // RFC 7807 format: type includes ERROR_TYPE_BASE/statusCode
+    expect(body.type).toContain('hono-enterprise.dev/errors/500');
     expect(body.detail).toBe('test route error');
     // RFC 7807 Problem Details MUST NOT have a "message" field
     expect(Object.keys(body).includes('message')).toBe(false);

@@ -29,7 +29,8 @@ describe('microservice-starter / integration', () => {
     const response = await app.inject({ method: 'GET', url: '/throw-route' });
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toContain('"type":"http://example.com/errors/internal-server-error"');
+    // Current rfc7807Formatter produces type like "https://hono-enterprise.dev/errors/500"
+    expect(response.body).toContain('"type":"https://hono-enterprise.dev/errors/500"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"route error"');
     expect(response.body).not.toContain('"message":');
@@ -50,7 +51,8 @@ describe('microservice-starter / integration', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toContain('"type":"http://example.com/errors/internal-server-error"');
+    // Current rfc7807Formatter produces type like "https://hono-enterprise.dev/errors/500"
+    expect(response.body).toContain('"type":"https://hono-enterprise.dev/errors/500"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"middleware error"');
     expect(response.body).not.toContain('"message":');

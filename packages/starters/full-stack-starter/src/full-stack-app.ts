@@ -16,6 +16,8 @@ import { AuditPlugin } from '@hono-enterprise/audit-plugin';
 import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
 import { StoragePlugin } from '@hono-enterprise/storage-plugin';
 import { MailPlugin } from '@hono-enterprise/mail-plugin';
+import { FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
+import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
 
 /**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
@@ -38,6 +40,9 @@ export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IP
     SecretsPlugin(options.secrets),
     StoragePlugin(options.storage),
     MailPlugin(options.mail),
+    // Gated arms — only registered when explicitly provided
+    ...(options.featureFlags ? [FeatureFlagsPlugin(options.featureFlags)] : []),
+    ...(options.notifications ? [NotificationPlugin(options.notifications)] : []),
   ];
 
   return plugins;
@@ -70,7 +75,7 @@ export function createFullStackApp(options?: FullStackStarterOptions): IKernelAp
 
   // Add error handler as outermost middleware (priority 0) — required by
   // exceptions middleware contract to catch errors from all downstream middleware.
-  app.middleware.add(errorHandler(), { priority: 0, name: 'error-handler' });
+  app.middleware.add(errorHandler({ format: 'rfc7807' }), { priority: 0, name: 'error-handler' });
 
   return app;
 }
