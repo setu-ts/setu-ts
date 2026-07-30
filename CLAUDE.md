@@ -679,7 +679,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 36** (`packages/starters/rest-starter`, `packages/starters/microservice-starter`,
   `packages/starters/full-stack-starter` — opinionated plugin composition libraries:
   `createRestApp`, `createMicroserviceApp`, `createFullStackApp` with pre-wired plugin sets, option
-  arms, and Workers- portability documentation) — complete (PR pending)
+  arms, and Workers- portability documentation) — complete (PR #106)
 - **Alpha release `v0.1.0-alpha.3`** — on `release/v0.1.0-alpha.3`, published 2026-07-30 (PR #99,
   tag at the merge commit `672b2f5`; CI published it, one green `Publish to JSR` job). **38
   packages** — `sdk` (M35) and `realtime-backplane-plugin` (M47) published for the first time; only
