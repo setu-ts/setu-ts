@@ -3,12 +3,13 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createMicroserviceApp } from '../src/index.ts';
+import { createMicroserviceApp } from '../../src/index.ts';
+import type { IRequestContext } from '@hono-enterprise/common';
 
 describe('microservice-starter / integration', () => {
   it('route handler returns expected body via inject()', async () => {
     const app = createMicroserviceApp();
-    app.get('/hello', () => 'Hello world');
+    app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
 
     await app.start();
     const response = await app.inject({ method: 'GET', url: '/hello' });
@@ -17,10 +18,10 @@ describe('microservice-starter / integration', () => {
     expect(response.body).toBe('Hello world');
   });
 
-  // C7: errorHandler must be outermost — both throw sites yield RFC 7807
+  // C7: errorHandler must be outermost — both throw sites yield RFC 7807 body
   it('errorHandler catches route handler throws and formats RFC 7807 body', async () => {
     const app = createMicroserviceApp();
-    app.get('/throw-route', () => {
+    app.router.get('/throw-route', () => {
       throw new Error('route error');
     });
 
@@ -38,12 +39,12 @@ describe('microservice-starter / integration', () => {
   it('errorHandler catches middleware-level throws (priority 100 middleware)', async () => {
     const app = createMicroserviceApp();
     app.middleware.add(
-      (_ctx, _next) => {
+      (_ctx: IRequestContext, _next) => {
         throw new Error('middleware error');
       },
       { priority: 100, name: 'test-middleware' },
     );
-    app.get('/test', () => 'ok');
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
 
     await app.start();
     const response = await app.inject({ method: 'GET', url: '/test' });

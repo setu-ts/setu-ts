@@ -113,7 +113,11 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       );
 
       if (logErrors) {
-        logError(ctx, error);
+        try {
+          logError(ctx, error);
+        } catch {
+          // If logging fails, don't let it prevent the error response from being sent.
+        }
       }
 
       const body = formatter(error, ctx);
@@ -125,10 +129,15 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // the content-type header we set is not overwritten by json()'s own
       // `application/json` default — RFC 7807 requires `application/problem+json`.
       const bytes = new TextEncoder().encode(JSON.stringify(body));
-      return ctx.response
-        .status(error.statusCode)
-        .header('content-type', contentType)
-        .send(bytes);
+      try {
+        return ctx.response
+          .status(error.statusCode)
+          .header('content-type', contentType)
+          .send(bytes);
+      } catch {
+        // If sending the response fails, re-throw the original error
+        throw error;
+      }
     }
   };
 }

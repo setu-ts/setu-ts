@@ -702,8 +702,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   now 12 manifests (`{common,kernel,runtime}`), not the 11 the runbook claimed. Also corrected the
   root README, which listed the SDK under "Not yet built" while marking it ✅, had no
   `realtime-backplane-plugin` row, and claimed 36 packages / 30 plugins.
-- **Next milestone** — **Milestone 36b** (React Router app skeleton); M37 follow
-  unless reprioritized.
+- **Next milestone** — **Milestone 36b** (React Router app skeleton); M37 follow unless
+  reprioritized.
 
 ## Verification (run before declaring any work done)
 

@@ -3,7 +3,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createFullStackApp } from '../src/index.ts';
+import { createFullStackApp } from '../../src/index.ts';
+import type { IRequestContext } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import { CachePlugin } from '@hono-enterprise/cache-plugin';
 
@@ -12,7 +13,7 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     // This is the only test that can catch duplicate name/provider throws among
     // the five plugins that register imperatively with provides: [] (invisible to buildProviderIndex)
     const app = createFullStackApp();
-    app.get('/test', () => 'ok');
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
 
     await app.start();
 
@@ -25,7 +26,7 @@ describe('full-stack-starter / integration (load-bearing)', () => {
   // C7: errorHandler must be outermost — route handler throw yields RFC 7807
   it('errorHandler catches route handler throws and formats RFC 7807 body', async () => {
     const app = createFullStackApp();
-    app.get('/throw-route', () => {
+    app.router.get('/throw-route', () => {
       throw new Error('route error');
     });
 
@@ -43,12 +44,12 @@ describe('full-stack-starter / integration (load-bearing)', () => {
   it('errorHandler catches middleware-level throws (priority 100 middleware)', async () => {
     const app = createFullStackApp();
     app.middleware.add(
-      (_ctx, _next) => {
+      (_ctx: IRequestContext, _next) => {
         throw new Error('middleware error');
       },
       { priority: 100, name: 'test-middleware' },
     );
-    app.get('/test', () => 'ok');
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
 
     await app.start();
     const response = await app.inject({ method: 'GET', url: '/test' });
@@ -63,7 +64,7 @@ describe('full-stack-starter / integration (load-bearing)', () => {
   // §3.2.1: escape hatch — caller can register named CachePlugin after app creation
   it('allows registering CachePlugin with name after app creation without duplicate throw', async () => {
     const app = createFullStackApp();
-    app.get('/test', () => 'ok');
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
 
     // Before start: register a named cache plugin as documented escape hatch
     app.register(CachePlugin({ name: 'session' }));

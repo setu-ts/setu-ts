@@ -3,16 +3,17 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import * as fullStackStarter from '../src/index.ts';
+import * as fullStackStarter from '../../src/index.ts';
 
 describe('full-stack-starter / barrel exports', () => {
-  it('exports exactly createFullStackApp, FullStackStarterOptions, buildFullStackPlugins', () => {
+  it('exports exactly createFullStackApp and buildFullStackPlugins', () => {
     const exportedNames = Object.keys(fullStackStarter);
-    expect(exportedNames).toEqual([
-      'createFullStackApp',
-      'FullStackStarterOptions',
-      'buildFullStackPlugins',
-    ]);
+    expect(new Set(exportedNames)).toEqual(
+      new Set([
+        'createFullStackApp',
+        'buildFullStackPlugins',
+      ]),
+    );
   });
 
   it('createsFullStackApp is a function', () => {
@@ -24,6 +25,7 @@ describe('full-stack-starter / barrel exports', () => {
   });
 
   it('FullStackStarterOptions is a type (undefined at runtime)', () => {
-    expect(fullStackStarter.FullStackStarterOptions).toBeUndefined();
+    const fullStackStarterAny = fullStackStarter as Record<string, unknown>;
+    expect(fullStackStarterAny['FullStackStarterOptions']).toBeUndefined();
   });
 });

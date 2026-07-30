@@ -3,15 +3,16 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { buildFullStackPlugins, createFullStackApp } from '../src/index.ts';
-import type { FullStackStarterOptions } from '../src/options.ts';
+import { buildFullStackPlugins, createFullStackApp } from '../../src/index.ts';
+import type { FullStackStarterOptions } from '../../src/options.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import { buildMicroservicePlugins } from '../microservice-starter/src/microservice-app.ts';
+import { buildMicroservicePlugins } from '../../../microservice-starter/src/microservice-app.ts';
+import type { IPlugin } from '@hono-enterprise/common';
 
 describe('full-stack-starter / buildFullStackPlugins', () => {
   it('is a superset of microservice set', () => {
-    const microNames = buildMicroservicePlugins().map((p) => p.name);
-    const fullNames = buildFullStackPlugins().map((p) => p.name);
+    const microNames = buildMicroservicePlugins().map((p: IPlugin) => p.name);
+    const fullNames = buildFullStackPlugins().map((p: IPlugin) => p.name);
     // All microservice plugins should be present in full-stack
     for (const name of microNames) {
       expect(fullNames).toContain(name);
@@ -20,7 +21,7 @@ describe('full-stack-starter / buildFullStackPlugins', () => {
 
   it('adds cache, events, cqrs, scheduler, audit, secrets, storage, mail', () => {
     const plugins = buildFullStackPlugins();
-    const names = plugins.map((p) => p.name);
+    const names = plugins.map((p: IPlugin) => p.name);
     expect(names).toContain('cache-plugin');
     expect(names).toContain('events-plugin');
     expect(names).toContain('cqrs-plugin');
@@ -33,7 +34,7 @@ describe('full-stack-starter / buildFullStackPlugins', () => {
 
   it('gated arms are NOT registered by default', () => {
     const plugins = buildFullStackPlugins();
-    const names = plugins.map((p) => p.name);
+    const names = plugins.map((p: IPlugin) => p.name);
     expect(names).not.toContain('feature-flags-plugin');
     expect(names).not.toContain('notification-plugin');
     expect(names).not.toContain('multi-tenancy-plugin');
@@ -45,18 +46,19 @@ describe('full-stack-starter / buildFullStackPlugins', () => {
       featureFlags: { provider: 'memory' },
     };
     const plugins = buildFullStackPlugins(opts);
-    const names = plugins.map((p) => p.name);
+    const names = plugins.map((p: IPlugin) => p.name);
     expect(names).toContain('feature-flags-plugin');
   });
 
+  // Note: notifications test uses minimal valid shape - see issue tracking
   it('registers notifications when provided', () => {
     const opts: FullStackStarterOptions = {
-      notifications: [
-        { channel: 'email', to: 'test@example.com', subject: 'Test' },
-      ],
+      notifications: {
+        channels: {},
+      },
     };
     const plugins = buildFullStackPlugins(opts);
-    const names = plugins.map((p) => p.name);
+    const names = plugins.map((p: IPlugin) => p.name);
     expect(names).toContain('notification-plugin');
   });
 });
@@ -64,7 +66,7 @@ describe('full-stack-starter / buildFullStackPlugins', () => {
 describe('full-stack-starter / createFullStackApp', () => {
   it('starts with inject() returning 200 for a simple route', async () => {
     const app = createFullStackApp();
-    app.get('/hello', () => 'Hello world');
+    app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
 
     await app.start();
     const response = await app.inject({ method: 'GET', url: '/hello' });

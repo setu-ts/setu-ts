@@ -3,16 +3,17 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import * as microserviceStarter from '../src/index.ts';
+import * as microserviceStarter from '../../src/index.ts';
 
 describe('microservice-starter / barrel exports', () => {
-  it('exports exactly createMicroserviceApp, MicroserviceStarterOptions, buildMicroservicePlugins', () => {
+  it('exports exactly createMicroserviceApp and buildMicroservicePlugins', () => {
     const exportedNames = Object.keys(microserviceStarter);
-    expect(exportedNames).toEqual([
-      'createMicroserviceApp',
-      'MicroserviceStarterOptions',
-      'buildMicroservicePlugins',
-    ]);
+    expect(new Set(exportedNames)).toEqual(
+      new Set([
+        'createMicroserviceApp',
+        'buildMicroservicePlugins',
+      ]),
+    );
   });
 
   it('createsMicroserviceApp is a function', () => {
@@ -24,6 +25,7 @@ describe('microservice-starter / barrel exports', () => {
   });
 
   it('MicroserviceStarterOptions is a type (undefined at runtime)', () => {
-    expect(microserviceStarter.MicroserviceStarterOptions).toBeUndefined();
+    const microserviceStarterAny = microserviceStarter as Record<string, unknown>;
+    expect(microserviceStarterAny['MicroserviceStarterOptions']).toBeUndefined();
   });
 });

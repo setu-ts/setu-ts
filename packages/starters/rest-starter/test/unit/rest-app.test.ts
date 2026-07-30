@@ -3,15 +3,9 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createRestApp, buildRestPlugins } from '../../src/index.ts';
+import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import type { RestStarterOptions } from '../../src/options.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IRequestContext } from '@hono-enterprise/common';
-
-// Simple route handler that returns a string body
-function simpleHandler(ctx: IRequestContext) {
-  return ctx.response.json({ ok: true });
-}
 
 describe('rest-starter / buildRestPlugins', () => {
   it('returns exactly the REST plugin names', () => {
@@ -51,13 +45,10 @@ describe('rest-starter / createRestApp', () => {
   // Note: inject() requires app.start() to be called first
   it('starts with inject() returning 200 for a simple route', async () => {
     const app = createRestApp();
-    app.router.get('/hello', (ctx) => {
-      ctx.response.headers.set('content-type', 'text/plain');
-      return ctx.response.send('Hello world');
-    });
+    app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
 
     await app.start();
-    const response = await app.inject({ method: 'GET', url: 'http://localhost/hello' });
+    const response = await app.inject({ method: 'GET', url: '/hello' });
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe('Hello world');
@@ -67,14 +58,14 @@ describe('rest-starter / createRestApp', () => {
     const app = createRestApp({
       database: { type: 'memory' },
     });
-    app.router.get('/test', (ctx) => ctx.response.send('ok'));
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
     await app.start();
     expect(app.services.has(CAPABILITIES.DATABASE)).toBe(true);
   });
 
   it('does NOT register DATABASE capability when database arm is omitted', async () => {
     const app = createRestApp();
-    app.router.get('/test', (ctx) => ctx.response.send('ok'));
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
     await app.start();
     expect(app.services.has(CAPABILITIES.DATABASE)).toBe(false);
   });
