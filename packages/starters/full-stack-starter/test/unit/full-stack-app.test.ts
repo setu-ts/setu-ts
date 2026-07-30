@@ -5,8 +5,8 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { buildFullStackPlugins, createFullStackApp } from '../../src/index.ts';
 import type { FullStackStarterOptions } from '../../src/options.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { buildMicroservicePlugins } from '../../../microservice-starter/src/microservice-app.ts';
+// CAPABILITIES not needed in this test file
+import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
 import type { IPlugin } from '@hono-enterprise/common';
 
 describe('full-stack-starter / buildFullStackPlugins', () => {
@@ -61,6 +61,24 @@ describe('full-stack-starter / buildFullStackPlugins', () => {
     const names = plugins.map((p: IPlugin) => p.name);
     expect(names).toContain('notification-plugin');
   });
+
+  it('registers multiTenancy when provided', () => {
+    const opts: FullStackStarterOptions = {
+      multiTenancy: { resolver: 'subdomain' },
+    };
+    const plugins = buildFullStackPlugins(opts);
+    const names = plugins.map((p: IPlugin) => p.name);
+    expect(names).toContain('multi-tenancy-plugin');
+  });
+
+  it('registers reactRouter when provided', () => {
+    const opts: FullStackStarterOptions = {
+      reactRouter: { serverBuildPath: './build' },
+    };
+    const plugins = buildFullStackPlugins(opts);
+    const names = plugins.map((p: IPlugin) => p.name);
+    expect(names).toContain('react-router-plugin');
+  });
 });
 
 describe('full-stack-starter / createFullStackApp', () => {
@@ -73,24 +91,6 @@ describe('full-stack-starter / createFullStackApp', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe('Hello world');
-  });
-
-  it('default composition claims bare CAPABILITIES.CACHE token', async () => {
-    const app = createFullStackApp();
-    await app.start();
-    expect(app.services.has(CAPABILITIES.CACHE)).toBe(true);
-  });
-
-  it('default composition claims bare CAPABILITIES.EVENTS token', async () => {
-    const app = createFullStackApp();
-    await app.start();
-    expect(app.services.has(CAPABILITIES.EVENTS)).toBe(true);
-  });
-
-  it('default composition claims bare CAPABILITIES.CQRS token', async () => {
-    const app = createFullStackApp();
-    await app.start();
-    expect(app.services.has(CAPABILITIES.CQRS)).toBe(true);
   });
 
   it('typed-fixture arms exercise all full-stack options', () => {

@@ -4431,7 +4431,7 @@ const app = createRestApp({
     jwt: {
       // Illustrative: in production, resolve via IConfig or similar
       secret: process.env.JWT_SECRET,
-      expiresIn: '1h'
+      expiresIn: '1h',
     },
   },
   openapi: {
@@ -4513,13 +4513,13 @@ const app = createMicroserviceApp({
   database: {
     type: 'prisma',
     // Illustrative: in production, resolve via IConfig or similar
-    options: { url: process.env.DATABASE_URL }
+    options: { url: process.env.DATABASE_URL },
   },
   messaging: {
     broker: 'rabbitmq',
     options: {
       // Illustrative: in production, resolve via IConfig or similar
-      url: process.env.RABBITMQ_URL
+      url: process.env.RABBITMQ_URL,
     },
     exchange: 'orders',
   },
@@ -4527,7 +4527,7 @@ const app = createMicroserviceApp({
     adapter: 'redis',
     options: {
       // Illustrative: in production, resolve via IConfig or similar
-      url: process.env.REDIS_URL
+      url: process.env.REDIS_URL,
     },
   },
   telemetry: {
