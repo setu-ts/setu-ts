@@ -37,9 +37,12 @@ export const REST_PLUGINS: readonly Wiring[] = [
 export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
   // `priority: 0` is load-bearing, not cosmetic: `errorHandler`'s contract
   // requires it be the OUTERMOST middleware. At the pipeline default of 500 it
-  // sits inside metrics (20), telemetry (30), and tenant resolution (40), so a
-  // throw from any of those escapes to the adapter backstop — a bare 500 with no
-  // RFC 7807 body and no error log.
+  // sits inside every middleware these templates register — metrics (20),
+  // ip-security (120), request-size (180), cors (200), security-headers (250),
+  // csrf (270), plus telemetry (30) in the microservice set — so a throw from any
+  // of them escapes to the adapter backstop: a bare 500 with no RFC 7807 body and
+  // no error log. Nothing first-party registers at or below 0, so this slot is
+  // unambiguous rather than merely early.
   { pkg: 'exceptions', symbol: 'errorHandler', addOptions: { priority: 0, name: 'error-handler' } },
 ];
 
