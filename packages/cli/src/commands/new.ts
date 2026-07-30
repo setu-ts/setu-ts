@@ -28,7 +28,6 @@ import {
   type MiddlewareWiring,
   MINIMAL_PLUGINS,
   packagesOf,
-  type TemplateFile,
   type Wiring,
 } from '../templates/registry.ts';
 import { deriveNames } from '../utils/names.ts';
@@ -249,7 +248,7 @@ function projectFiles(
   plugins: readonly Wiring[],
   middleware: readonly MiddlewareWiring[],
   localImports: readonly LocalImport[] = [],
-  extras: readonly TemplateFile[] = [],
+  extras: readonly GeneratedFile[] = [],
 ): readonly GeneratedFile[] {
   const readme = `# ${projectName}
 

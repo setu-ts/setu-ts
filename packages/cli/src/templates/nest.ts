@@ -9,7 +9,8 @@
  * @module
  */
 
-import type { LocalImport, TemplateDefinition, TemplateFile, Wiring } from './registry.ts';
+import type { GeneratedFile } from '../utils/file-writer.ts';
+import type { LocalImport, TemplateDefinition, Wiring } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
 
 /** Where the emitted example classes live in the scaffolded project. */
@@ -69,7 +70,7 @@ export class GreetingController {
 `;
 
 /** The two example source files this template emits. */
-export const NEST_FILES: readonly TemplateFile[] = [
+export const NEST_FILES: readonly GeneratedFile[] = [
   { path: 'src/greeting-service.ts', contents: SERVICE_SOURCE },
   { path: 'src/greeting-controller.ts', contents: CONTROLLER_SOURCE },
 ];

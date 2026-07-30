@@ -4550,6 +4550,54 @@ testable without terminating the runner.
 
 ## REST API Application
 
+### Starter exports and option arms
+
+The three starters share one option chain:
+`FullStackStarterOptions extends
+MicroserviceStarterOptions extends RestStarterOptions`, so an arm
+added to the REST tier is available on all three.
+
+| Export                       | Kind     | Package                                            |
+| ---------------------------- | -------- | -------------------------------------------------- |
+| `createRestApp`              | function | `rest-starter`                                     |
+| `buildRestPlugins`           | function | `rest-starter`                                     |
+| `RestStarterOptions`         | type     | `rest-starter`                                     |
+| `RealtimeArm`                | type     | all three (re-exported along the tier's pin chain) |
+| `createMicroserviceApp`      | function | `microservice-starter`                             |
+| `buildMicroservicePlugins`   | function | `microservice-starter`                             |
+| `MicroserviceStarterOptions` | type     | `microservice-starter`                             |
+| `createFullStackApp`         | function | `full-stack-starter`                               |
+| `buildFullStackPlugins`      | function | `full-stack-starter`                               |
+| `FullStackStarterOptions`    | type     | `full-stack-starter`                               |
+
+Each arm is one plugin's option object, threaded through unchanged. **Gated arms are absent unless
+supplied**, so a starter called with no options registers exactly its always-on set:
+
+| Arm                  | Gating | Effect                                                                                        |
+| -------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| `database`, `auth`   | gated  | Adds `DatabasePlugin` / `AuthPlugin`.                                                         |
+| `di`                 | gated  | Adds `DiPlugin`. **Changes how every decorated service is constructed** — see the note below. |
+| `realtime.websocket` | gated  | Adds `WebSocketPlugin`.                                                                       |
+| `realtime.sse`       | gated  | Adds `SsePlugin`.                                                                             |
+| `realtime.backplane` | gated  | Adds `RealtimeBackplanePlugin` at `PLUGIN_PRIORITY.HIGH`, so it precedes both consumers.      |
+| everything else      | on     | Registered with defaults when the arm is omitted.                                             |
+
+Notes:
+
+- **`realtime: {}` adds nothing and is not an error.** `backplane: {}` selects the in-process
+  `'memory'` transport, whose discriminant is optional.
+- **`backplane: { transport: 'messaging' }` needs a broker.** The microservice and full-stack tiers
+  always register `MessagingPlugin`; the REST tier does not, so on that tier the backplane's own
+  `register()` throws naming `MessagingPlugin`. The starter adds no second check of its own.
+- **`di` is opt-in because it is not additive.** `DecoratorPlugin` branches on the presence of a
+  container, so with this arm each `@Injectable` becomes a container provider honoring its `scope`;
+  without it those classes are constructed directly and registered in the `ServiceRegistry`.
+- **Workers portability varies by arm.** `di`, `realtime.websocket`, `realtime.sse`, and a
+  `'memory'` backplane are Workers-portable. A `'redis'` backplane is not (raw socket); a
+  `'messaging'` backplane is portable only if its broker is.
+- **No arm sets a plugin's `name`.** Each registers on the bare capability token; register a second
+  instance yourself on the returned app.
+
 A complete REST API using the REST starter:
 
 ```typescript

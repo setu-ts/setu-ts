@@ -10,6 +10,7 @@
  */
 
 import type { TargetRuntime, TemplateName } from '../constants.ts';
+import type { GeneratedFile } from '../utils/file-writer.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
 import { NEST_TEMPLATE } from './nest.ts';
 import { REST_TEMPLATE, RUNTIME_WIRING } from './rest.ts';
@@ -54,17 +55,6 @@ export interface LocalImport {
   readonly symbols: readonly string[];
   /** Module specifier, relative to the project root, e.g. `./src/greeting-controller.ts`. */
   readonly from: string;
-}
-
-/**
- * One extra source file a template emits, in addition to the fixed project file
- * set every scaffolded project gets.
- */
-export interface TemplateFile {
-  /** Path relative to the project root. */
-  readonly path: string;
-  /** File contents. */
-  readonly contents: string;
 }
 
 /**
@@ -116,7 +106,7 @@ export interface TemplateDefinition {
    * the overwrite check in `commands/new.ts` reports a collision rather than
    * silently winning.
    */
-  readonly files?: readonly TemplateFile[];
+  readonly files?: readonly GeneratedFile[];
   /**
    * Runtime targets this template refuses, mapped to the reason shown to the
    * user. Refusing at scaffold time beats a project that deploys and then

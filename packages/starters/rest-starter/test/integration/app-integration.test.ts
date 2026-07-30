@@ -7,13 +7,7 @@ import { createRestApp } from '../../src/index.ts';
 import type { IRequestContext } from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import {
-  Controller,
-  Get,
-  Inject,
-  Injectable,
-  metadataStore,
-} from '@hono-enterprise/decorator-plugin';
+import { Controller, Get, Inject, Injectable } from '@hono-enterprise/decorator-plugin';
 
 describe('rest-starter / integration', () => {
   it('route handler returns expected body via inject()', async () => {
@@ -111,9 +105,14 @@ describe('rest-starter / integration', () => {
   // from a decorated controller. Proves the starter composes DiPlugin and
   // DecoratorPlugin correctly — the two are wired only by priority, in different
   // packages, and neither imports the other.
+  // Deliberately does NOT call `metadataStore.clear()`. That store is a
+  // process-wide singleton owned by decorator-plugin, and clearing it from
+  // another package would drop metadata written at module-evaluation time by
+  // fixtures this package never sees — which its own JSDoc warns cannot be
+  // recovered, because decorators are not re-run on a cached module. No clear is
+  // needed here: the classes below are declared inside the test and handed to
+  // the plugin explicitly, which is all it reads.
   it('serves a decorated controller whose dependency is container-injected', async () => {
-    metadataStore.clear();
-
     @Injectable({ token: 'billing-service' })
     class BillingService {
       total(): number {
@@ -145,8 +144,6 @@ describe('rest-starter / integration', () => {
   });
 
   it('serves the same decorated controller through the registry without the di arm', async () => {
-    metadataStore.clear();
-
     @Injectable({ token: 'pricing-service' })
     class PricingService {
       total(): number {
