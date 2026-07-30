@@ -77,6 +77,32 @@ function serviceToken(meta: ServiceMetadata | undefined, target: Constructor): s
 }
 
 /**
+ * Resolves the constructor injection tokens for a class, from whichever
+ * `@Inject` form it uses.
+ *
+ * The parameter-level form is preferred; the class-level list is the deprecated
+ * fallback. Carrying both throws, because `mergeService` replaces `inject`
+ * wholesale, so any precedence rule would be invisible at the call site and
+ * would depend on decorator evaluation order.
+ *
+ * @throws {Error} When the class carries both `@Inject` forms.
+ */
+function effectiveInject(
+  target: Constructor,
+  meta: ServiceMetadata | undefined,
+): readonly string[] | undefined {
+  const fromParams = metadataStore.ctorInject(target);
+  if (fromParams !== undefined && meta?.inject !== undefined) {
+    throw new Error(
+      `${className(target)} declares both a class-level @Inject(...) and parameter-level @Inject ` +
+        `decorators. Use one form — prefer @Inject on each constructor parameter; the class-level ` +
+        `token list is deprecated.`,
+    );
+  }
+  return fromParams ?? meta?.inject;
+}
+
+/**
  * Registers a class in the DI container (when present) under its token, with
  * its inject tokens and scope. No-op if the container is absent or the token
  * is already registered.
@@ -94,9 +120,10 @@ function registerInContainer(
   if (container.has(token)) {
     return;
   }
+  const inject = effectiveInject(target, meta);
   const provider: ClassProvider<unknown> = {
     useClass: target,
-    ...(meta?.inject !== undefined ? { inject: meta.inject } : {}),
+    ...(inject !== undefined ? { inject } : {}),
   };
   const opts: ProviderOptions | undefined = meta?.scope !== undefined
     ? { scope: meta.scope }
@@ -108,18 +135,26 @@ function registerInContainer(
  * Instantiates a class. Prefers the DI container (when the class is
  * registered), falls back to constructor injection resolved from the service
  * registry, then to a no-argument constructor.
+ *
+ * The container lookup deliberately does NOT require service metadata. A
+ * `@Controller` carries no `@Injectable`, so requiring it sent every
+ * constructor-injected controller down the registry path even in a DI
+ * application — where its dependencies live in the container, not the registry,
+ * so construction failed outright. `serviceToken` already defaults to the class
+ * name, which is the token `registerInContainer` registered it under.
  */
 function instantiate(target: Constructor, ctx: IPluginContext): unknown {
   const meta = metadataStore.getService(target);
   const container = ctx.container;
-  if (container !== undefined && meta !== undefined) {
+  if (container !== undefined) {
     const token = serviceToken(meta, target);
     if (container.has(token)) {
       return container.resolve<unknown>(token);
     }
   }
-  if (meta?.inject !== undefined && meta.inject.length > 0) {
-    const deps = meta.inject.map((t) => ctx.services.get<object>(t));
+  const inject = effectiveInject(target, meta);
+  if (inject !== undefined && inject.length > 0) {
+    const deps = inject.map((t) => ctx.services.get<object>(t));
     return new (target as new (...args: unknown[]) => unknown)(...deps);
   }
   return new (target as new () => unknown)();

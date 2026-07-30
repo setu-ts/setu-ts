@@ -15,6 +15,8 @@
 import type { Constructor, IMetadataStore, MiddlewareFunction } from '@hono-enterprise/common';
 import type { HttpMethod } from '@hono-enterprise/common';
 
+import { className } from '../internal.ts';
+
 /**
  * Where a request parameter is sourced from.
  *
@@ -250,6 +252,7 @@ export class MetadataStore implements IMetadataStore {
   private readonly _services = new Map<Constructor, ServiceMetadata>();
   private readonly _methods = new Map<Constructor, Map<string, MethodMeta>>();
   private readonly _custom: CustomDecoratorRecord[] = [];
+  private readonly _ctorParams = new Map<Constructor, Map<number, string>>();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -354,6 +357,60 @@ export class MetadataStore implements IMetadataStore {
       merged.inject = partial.inject;
     }
     this._services.set(target, merged);
+  }
+
+  /**
+   * Records one constructor-parameter injection token, keyed by its argument
+   * index.
+   *
+   * Indexed rather than appended because constructor parameter decorators
+   * evaluate in **reverse** argument order: appending in call order would
+   * reverse the token list and inject the wrong service into every argument.
+   *
+   * When one parameter carries two `@Inject` decorators the leftmost wins,
+   * because decorators on a single parameter also apply right-to-left, so the
+   * leftmost is written last.
+   *
+   * @param target - The decorated class
+   * @param index - Zero-based constructor argument index
+   * @param token - Capability token to resolve for that argument
+   */
+  mergeCtorParam(target: Constructor, index: number, token: string): void {
+    const params = this._ctorParams.get(target) ?? new Map<number, string>();
+    params.set(index, token);
+    this._ctorParams.set(target, params);
+  }
+
+  /**
+   * Assembles a class's constructor-parameter tokens into a dense array in
+   * ascending argument order.
+   *
+   * @param target - The class to look up
+   * @returns The tokens in argument order, or `undefined` when the class has no
+   * parameter-level `@Inject`
+   * @throws {Error} When an argument below the highest decorated index carries
+   * no token — a hole would shift every later argument, so it is refused loudly
+   * rather than filled with `undefined`.
+   */
+  ctorInject(target: Constructor): readonly string[] | undefined {
+    const params = this._ctorParams.get(target);
+    if (params === undefined || params.size === 0) {
+      return undefined;
+    }
+    const highest = Math.max(...params.keys());
+    const tokens: string[] = [];
+    for (let i = 0; i <= highest; i += 1) {
+      const token = params.get(i);
+      if (token === undefined) {
+        throw new Error(
+          `${className(target)} constructor parameter ${i} has no @Inject token, but parameter ` +
+            `${highest} does. Every parameter up to the last injected one must carry @Inject — ` +
+            `type-inferred injection needs emitDecoratorMetadata, which Deno does not support.`,
+        );
+      }
+      tokens.push(token);
+    }
+    return tokens;
   }
 
   /**
@@ -508,6 +565,7 @@ export class MetadataStore implements IMetadataStore {
     this._services.clear();
     this._methods.clear();
     this._custom.length = 0;
+    this._ctorParams.clear();
   }
 
   /**

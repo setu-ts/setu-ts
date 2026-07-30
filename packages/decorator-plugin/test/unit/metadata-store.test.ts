@@ -181,6 +181,60 @@ describe('MetadataStore', () => {
     });
   });
 
+  describe('constructor-parameter injection tokens', () => {
+    it('assembles by ascending index regardless of write order', () => {
+      class Svc {}
+      // Written in the order constructor parameter decorators actually fire.
+      store.mergeCtorParam(Svc, 1, 'logger');
+      store.mergeCtorParam(Svc, 0, 'database');
+      expect(store.ctorInject(Svc)).toEqual(['database', 'logger']);
+    });
+
+    it('returns undefined for a class with no recorded parameters', () => {
+      class Svc {}
+      expect(store.ctorInject(Svc)).toBeUndefined();
+    });
+
+    it('overwrites a re-recorded index rather than appending', () => {
+      class Svc {}
+      store.mergeCtorParam(Svc, 0, 'first');
+      store.mergeCtorParam(Svc, 0, 'second');
+      expect(store.ctorInject(Svc)).toEqual(['second']);
+    });
+
+    it('throws naming the class and the undecorated index when a gap exists', () => {
+      class GappedService {}
+      store.mergeCtorParam(GappedService, 0, 'database');
+      store.mergeCtorParam(GappedService, 2, 'cache');
+      expect(() => store.ctorInject(GappedService)).toThrow(/GappedService/);
+      expect(() => store.ctorInject(GappedService)).toThrow(
+        /constructor parameter 1 has no @Inject token/,
+      );
+    });
+
+    it('reports the highest decorated index in the gap message', () => {
+      class Svc {}
+      store.mergeCtorParam(Svc, 3, 'cache');
+      expect(() => store.ctorInject(Svc)).toThrow(/but parameter 3 does/);
+    });
+
+    it('keeps per-class isolation', () => {
+      class A {}
+      class B {}
+      store.mergeCtorParam(A, 0, 'database');
+      store.mergeCtorParam(B, 0, 'logger');
+      expect(store.ctorInject(A)).toEqual(['database']);
+      expect(store.ctorInject(B)).toEqual(['logger']);
+    });
+
+    it('is cleared by clear()', () => {
+      class Svc {}
+      store.mergeCtorParam(Svc, 0, 'database');
+      store.clear();
+      expect(store.ctorInject(Svc)).toBeUndefined();
+    });
+  });
+
   it('satisfies the IMetadataStore contract (controllers/services/routes maps)', () => {
     class Ctrl {}
     store.mergeController(Ctrl, { path: '/x' });
