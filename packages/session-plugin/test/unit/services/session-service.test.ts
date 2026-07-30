@@ -417,11 +417,27 @@ describe('SessionService.commit', () => {
 
   it('throws rather than emitting a cookie the browser would drop', async () => {
     const { service } = await makeService({ maxCookieBytes: 200 });
+    const { ctx, response } = makeContext();
+    const session = await service.load(ctx);
+    session.set('bulk', 'x'.repeat(500));
+
+    await expect(service.commit(ctx, session)).rejects.toThrow(SessionTooLargeError);
+    expect(response.setCookies().length).toBe(0);
+  });
+
+  it('leaves no stored row behind when the cookie is rejected as too large', async () => {
+    const store = new RecordingStore();
+    const { service } = await makeService({ maxCookieBytes: 120 }, store);
     const { ctx } = makeContext();
     const session = await service.load(ctx);
     session.set('bulk', 'x'.repeat(500));
 
     await expect(service.commit(ctx, session)).rejects.toThrow(SessionTooLargeError);
+
+    // The size guard runs before the store write, so a rejected commit persists
+    // nothing — otherwise the row would sit unreachable for its whole TTL.
+    expect(store.calls.filter((c) => c.startsWith('write:'))).toEqual([]);
+    expect(store.entries.size).toBe(0);
   });
 });
 

@@ -11,7 +11,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IRequestContext, IRuntimeServices } from '@hono-enterprise/common';
+import type { IRequestContext } from '@hono-enterprise/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import { CSRF_SESSION_KEY, getCsrfToken, readCsrfToken } from '../../../src/csrf/token.ts';
@@ -22,6 +22,7 @@ import { resolveSessionConfig } from '../../../src/options.ts';
 import { SESSION_STATE_KEY, SessionService } from '../../../src/services/session-service.ts';
 import type { MakeContextOptions } from '../../fixtures/context.ts';
 import { fakeRandomBytes, makeClock, makeContext } from '../../fixtures/context.ts';
+import { createFakeRuntime } from '../../fixtures/runtime.ts';
 
 const SECRET = 'c'.repeat(32);
 const FORM = 'application/x-www-form-urlencoded';
@@ -42,11 +43,9 @@ async function withSession(options: MakeContextOptions = {}) {
 
   const harness = makeContext(options);
   harness.registry.register(CAPABILITIES.SESSION, service);
-  // Only `randomBytes` is exercised; the rest of IRuntimeServices is not reached
-  // on this path, so a partial double is honest here.
-  harness.registry.register(CAPABILITIES.RUNTIME, {
-    randomBytes: fakeRandomBytes,
-  } as unknown as IRuntimeServices);
+  // A faithful IRuntimeServices, not a partial cast: a permissive double would
+  // keep passing if this path ever reached a member it did not implement.
+  harness.registry.register(CAPABILITIES.RUNTIME, createFakeRuntime().runtime);
 
   const session = await service.load(harness.ctx);
   harness.ctx.state.set(SESSION_STATE_KEY, session);

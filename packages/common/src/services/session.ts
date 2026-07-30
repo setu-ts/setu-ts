@@ -61,9 +61,14 @@ export interface ISession {
   /**
    * Writes a value and marks the session for commit.
    *
+   * Passing `undefined` removes the key instead of storing it. `undefined` is not
+   * JSON-serializable, so storing it would make {@linkcode ISession.has} report a
+   * key that serialization then drops — presence would be `true` before a commit
+   * and `false` after the next load.
+   *
    * @typeParam T - The value type
    * @param key - Session key
-   * @param value - Value to store; must be JSON-serializable
+   * @param value - Value to store; must be JSON-serializable. `undefined` removes the key
    */
   set<T>(key: string, value: T): void;
   /**

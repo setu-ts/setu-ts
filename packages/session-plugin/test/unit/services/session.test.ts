@@ -63,10 +63,24 @@ describe('Session data access', () => {
     expect(session.has('b')).toBe(false);
   });
 
-  it('stores an explicit undefined as a present key', () => {
+  it('treats setting undefined as a removal, so has() survives a round-trip', () => {
     const session = build();
-    session.set('a', undefined);
+    session.set('a', 1);
     expect(session.has('a')).toBe(true);
+
+    session.set('a', undefined);
+
+    // Storing `undefined` would make has() report a key that JSON.stringify
+    // drops, so presence would flip from true to false across a commit.
+    expect(session.has('a')).toBe(false);
+    expect(session.get('a')).toBe(undefined);
+    expect(session.toJSON()).toEqual({});
+  });
+
+  it('setting undefined on an absent key leaves the session clean', () => {
+    const session = build();
+    session.set('never-there', undefined);
+    expect(session.isDirty).toBe(false);
   });
 
   it('deletes only present keys, and dirties only on a real removal', () => {

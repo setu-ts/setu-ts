@@ -181,10 +181,6 @@ export class SessionService implements ISessionService {
       ? snapshot
       : { id: snapshot.id, data: {}, exp: snapshot.exp, seen: snapshot.seen };
 
-    if (this.#store !== undefined) {
-      await this.#store.write(snapshot.id, snapshot.data, ttlMs);
-    }
-
     const sealed = await seal(
       this.#deps.subtle,
       this.#ring,
@@ -193,8 +189,15 @@ export class SessionService implements ISessionService {
     );
     const header = this.#cookie(sealed, Math.ceil(ttlMs / 1000));
 
+    // Checked BEFORE the store write, so a rejected commit leaves no trace. The
+    // reverse order persisted a row for a session whose cookie was never sent,
+    // which would then be unreachable but still occupying its TTL.
     if (header.length > this.#config.maxCookieBytes) {
       throw new SessionTooLargeError(header.length, this.#config.maxCookieBytes);
+    }
+
+    if (this.#store !== undefined) {
+      await this.#store.write(snapshot.id, snapshot.data, ttlMs);
     }
 
     ctx.response.appendHeader('set-cookie', header);

@@ -115,7 +115,24 @@ export class Session implements ISession {
     return this.#data[key] as T | undefined;
   }
 
+  /**
+   * Writes a value, or removes the key when the value is `undefined`.
+   *
+   * `undefined` is treated as a removal rather than stored, because it is not
+   * JSON-serializable: storing it would make {@linkcode Session.has} report a key
+   * that `JSON.stringify` then drops, so presence would be true before a commit
+   * and false after the next load. Treating it as an unset keeps `has` truthful
+   * across the round-trip.
+   *
+   * @typeParam T - The value type
+   * @param key - Session key
+   * @param value - Value to store; `undefined` removes the key
+   */
   set<T>(key: string, value: T): void {
+    if (value === undefined) {
+      this.delete(key);
+      return;
+    }
     this.#data[key] = value;
     this.#dirty = true;
   }

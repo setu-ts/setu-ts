@@ -1860,6 +1860,13 @@ app.router.post('/login', (ctx) => {
 - **Expiry is server-authoritative.** A cookie's `Max-Age` is client-controlled, so `maxAge` is
   enforced from a wall-clock stamp inside the sealed payload. Both stamps come from `runtime.now()`
   rather than `hrtime()`, because they are serialized and compared across processes.
+- **`ISession.set(key, undefined)` removes the key** rather than storing `undefined`. Storing it
+  would make `has(key)` report a key that serialization drops, so presence would be `true` before a
+  commit and `false` after the next load; treating it as an unset keeps `has` truthful across the
+  round-trip.
+- **A commit rejected for size persists nothing.** The `maxCookieBytes` guard runs before the store
+  write, so a session whose cookie the browser would drop does not leave an unreachable row
+  occupying its TTL.
 - **An idle timeout is refreshed by activity, so it commits on every request.** `idleTimeoutMs`
   measures time since the last _request_, not since the last write, so any request — a read-only one
   included — advances the activity stamp. That requires re-issuing the cookie (and rewriting the

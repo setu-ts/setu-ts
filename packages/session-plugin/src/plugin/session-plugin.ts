@@ -106,6 +106,15 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
         uuid: () => runtime.uuid(),
       }, store);
 
+      // Registered before anything else that could throw. `createStore` may have
+      // armed the memory store's sweep interval, and an uncleared interval keeps
+      // the process alive (AI_GUIDELINES §14.5) — so the teardown hook goes in
+      // while the window between creating the resource and owning its cleanup is
+      // still empty.
+      ctx.lifecycle.onClose(async () => {
+        await service.close();
+      });
+
       ctx.services.register<ISessionService>(CAPABILITIES.SESSION, service);
 
       ctx.middleware.add(sessionMiddleware(service), {
@@ -132,10 +141,6 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
             store: storeHealthy ?? 'none',
           },
         };
-      });
-
-      ctx.lifecycle.onClose(async () => {
-        await service.close();
       });
     },
   };
