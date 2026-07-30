@@ -67,6 +67,102 @@ describe('rest-starter / buildRestPlugins', () => {
     const names = plugins.map((p) => p.name);
     expect(names).not.toContain('auth-plugin');
   });
+
+  it('includes none of the four M36b arms by default', () => {
+    const names = buildRestPlugins().map((p) => p.name);
+    expect(names).not.toContain('di-plugin');
+    expect(names).not.toContain('websocket-plugin');
+    expect(names).not.toContain('sse-plugin');
+    expect(names).not.toContain('realtime-backplane-plugin');
+  });
+
+  it('includes DiPlugin when the di arm is provided', () => {
+    const names = buildRestPlugins({ di: {} }).map((p) => p.name);
+    expect(names).toContain('di-plugin');
+  });
+
+  it('adds exactly the websocket plugin for realtime.websocket', () => {
+    const names = buildRestPlugins({ realtime: { websocket: {} } }).map((p) => p.name);
+    expect(names).toContain('websocket-plugin');
+    expect(names).not.toContain('sse-plugin');
+    expect(names).not.toContain('realtime-backplane-plugin');
+  });
+
+  it('adds exactly the sse plugin for realtime.sse', () => {
+    const names = buildRestPlugins({ realtime: { sse: {} } }).map((p) => p.name);
+    expect(names).toContain('sse-plugin');
+    expect(names).not.toContain('websocket-plugin');
+    expect(names).not.toContain('realtime-backplane-plugin');
+  });
+
+  it('adds exactly the backplane plugin for realtime.backplane', () => {
+    const names = buildRestPlugins({ realtime: { backplane: {} } }).map((p) => p.name);
+    expect(names).toContain('realtime-backplane-plugin');
+    expect(names).not.toContain('websocket-plugin');
+    expect(names).not.toContain('sse-plugin');
+  });
+
+  it('adds nothing for an empty realtime arm', () => {
+    const names = buildRestPlugins({ realtime: {} }).map((p) => p.name);
+    expect(names).not.toContain('websocket-plugin');
+    expect(names).not.toContain('sse-plugin');
+    expect(names).not.toContain('realtime-backplane-plugin');
+    // Still a valid app, not an error.
+    expect(names).toContain('runtime');
+  });
+
+  it('adds all three realtime plugins when all sub-arms are supplied', () => {
+    const names = buildRestPlugins({
+      realtime: { websocket: {}, sse: {}, backplane: {} },
+    }).map((p) => p.name);
+    expect(names).toContain('websocket-plugin');
+    expect(names).toContain('sse-plugin');
+    expect(names).toContain('realtime-backplane-plugin');
+  });
+
+  it('threads realtime sub-arm options through to the plugin', () => {
+    // `origin` is read by the backplane to drop its own echoes; passing it proves
+    // the arm is forwarded rather than replaced with a default instance.
+    const plugins = buildRestPlugins({
+      realtime: { backplane: { transport: 'memory', bus: 'starter-test', origin: 'fixed' } },
+    });
+    expect(plugins.map((p) => p.name)).toContain('realtime-backplane-plugin');
+  });
+
+  it('the backplane precedes both realtime consumers by priority', () => {
+    const plugins = buildRestPlugins({
+      realtime: { websocket: {}, sse: {}, backplane: {} },
+    });
+    const priorityOf = (name: string): number => {
+      const plugin = plugins.find((p) => p.name === name);
+      return plugin?.priority ?? Number.MAX_SAFE_INTEGER;
+    };
+    // The kernel sorts ascending by priority, so lower registers first.
+    expect(priorityOf('realtime-backplane-plugin')).toBeLessThan(priorityOf('websocket-plugin'));
+    expect(priorityOf('realtime-backplane-plugin')).toBeLessThan(priorityOf('sse-plugin'));
+  });
+
+  it('DiPlugin precedes DecoratorPlugin by priority, so ctx.container is set in time', () => {
+    const plugins = buildRestPlugins({ di: {} });
+    const priorityOf = (name: string): number => {
+      const plugin = plugins.find((p) => p.name === name);
+      return plugin?.priority ?? Number.MAX_SAFE_INTEGER;
+    };
+    expect(priorityOf('di-plugin')).toBeLessThan(priorityOf('decorator-plugin'));
+  });
+
+  it('registers no duplicate plugin name or capability with every arm supplied', () => {
+    const plugins = buildRestPlugins({
+      ...AUTH_FIXTURE,
+      database: { type: 'memory' },
+      di: {},
+      realtime: { websocket: {}, sse: {}, backplane: {} },
+    });
+    const names = plugins.map((p) => p.name);
+    expect(new Set(names).size).toBe(names.length);
+    const provided = plugins.flatMap((p) => p.provides ?? []);
+    expect(new Set(provided).size).toBe(provided.length);
+  });
 });
 
 describe('rest-starter / createRestApp', () => {
