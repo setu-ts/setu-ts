@@ -158,19 +158,19 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Tooling
 
-| Feature        | Status | Package   | Description                                                    |
-| -------------- | ------ | --------- | -------------------------------------------------------------- |
-| CLI            | ✅     | `cli`     | `honoe` — project scaffolding and plugin-aware code generation |
-| Client SDK     | ✅     | `sdk`     | HTTP client with retry, circuit breaker, OpenAPI codegen       |
-| Test utilities | ✅     | `testing` | `createTestApp`, mock plugins/registry, fixtures, stream reads |
+| Feature         | Status | Package                                                      | Description                                                                                                        |
+| --------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| CLI             | ✅     | `cli`                                                        | `honoe` — project scaffolding and plugin-aware code generation                                                     |
+| Client SDK      | ✅     | `sdk`                                                        | HTTP client with retry, circuit breaker, OpenAPI codegen                                                           |
+| Test utilities  | ✅     | `testing`                                                    | `createTestApp`, mock plugins/registry, fixtures, stream reads                                                     |
+| Starter bundles | ✅     | `rest-starter`, `microservice-starter`, `full-stack-starter` | `createRestApp`, `createMicroserviceApp`, `createFullStackApp` — pre-wired plugin sets with per-plugin option arms |
 
 ### Not yet built
 
-| Feature         | Status      | Description                                              |
-| --------------- | ----------- | -------------------------------------------------------- |
-| Starter bundles | 📋 Designed | REST, microservice, and full-stack starters              |
-| GraphQL         | 🚧 Planned  | Schema-first and code-first GraphQL plugin               |
-| gRPC            | 🚧 Planned  | Client and server support for microservice communication |
+| Feature | Status     | Description                                              |
+| ------- | ---------- | -------------------------------------------------------- |
+| GraphQL | 🚧 Planned | Schema-first and code-first GraphQL plugin               |
+| gRPC    | 🚧 Planned | Client and server support for microservice communication |
 
 ---
 
@@ -382,7 +382,7 @@ Each package also carries its own README with options, semantics, and a worked e
 | Features            | 28–32      | ✅     | Storage, mail, notifications, feature flags, multi-tenancy       |
 | Real-time & SSR     | 41–46      | ✅     | HTTP adapters, streaming, SSE, React SSR, worker pool, WebSocket |
 | Testing             | 33         | ✅     | Test utilities                                                   |
-| Tooling             | 34–36      | ⬜     | CLI (done), SDK (done), starter bundles                          |
+| Tooling             | 34–36      | ✅     | CLI, SDK, starter bundles                                        |
 | Release engineering | 37–40      | ⬜     | Examples, documentation, Docker/K8s, final release               |
 
 Detailed milestones, file structures, and interface definitions are documented in
