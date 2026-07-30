@@ -8,6 +8,7 @@
  * @module
  */
 import type { IRequestContext } from '@hono-enterprise/common';
+import { parseCookie } from '@hono-enterprise/common';
 
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 
@@ -60,28 +61,21 @@ export function clearParameterResolvers(): void {
 /**
  * Parses cookies from a `Cookie` request header into a name→value record.
  *
+ * Delegates to the canonical codec in `@hono-enterprise/common`, so the
+ * framework has exactly one cookie parser (AI_GUIDELINES §11.1). That codec is
+ * stricter than this function's original inline implementation in three ways,
+ * each a defect fix rather than a feature: values are percent-decoded (so a
+ * cookie written by any standards-compliant server round-trips), one layer of
+ * RFC 6265 quoting is removed, and a repeated cookie name resolves to the first
+ * occurrence rather than the last (browsers send the most specific cookie
+ * first). See the CHANGELOG entry for `0.2.0`.
+ *
  * @param headers - Request headers
  * @returns Parsed cookies (empty when no `Cookie` header is present)
  * @since 0.1.0
  */
 export function parseCookies(headers: Headers): Record<string, string> {
-  const cookieHeader = headers.get('cookie');
-  if (cookieHeader === null) {
-    return {};
-  }
-  const out: Record<string, string> = {};
-  for (const pair of cookieHeader.split(';')) {
-    const idx = pair.indexOf('=');
-    if (idx === -1) {
-      continue;
-    }
-    const key = pair.slice(0, idx).trim();
-    const val = pair.slice(idx + 1).trim();
-    if (key !== '') {
-      out[key] = val;
-    }
-  }
-  return out;
+  return parseCookie(headers.get('cookie'));
 }
 
 /**

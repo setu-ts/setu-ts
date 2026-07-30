@@ -4475,6 +4475,136 @@ implementation task.
 
 ---
 
+## Milestone 48: Session Plugin — Cookie Sessions and Form CSRF ✅ COMPLETE
+
+**Objective:** a `SESSION` capability, because the framework has none.
+`packages/common/src/tokens.ts` declares no `SESSION` token and `packages/auth-plugin/src` contains
+no session or cookie surface at all — it ships JWT, API-key, refresh-token and RBAC auth, none of
+which covers a server-rendered app that keeps state in a cookie.
+
+**Why now.** M36c cannot land without it. That milestone adapts the B2BAdmin React Router skeleton
+and rewires its cross-cutting `lib/` onto plugins; six of its eight concerns delegate to shipped
+plugins, and the two that do not are the two below. It is also the gap a developer arriving from
+NestJS or Express meets first, ahead of anything in M36b.
+
+### A. Sessions
+
+The reference implementation (`B2BAdmin app/lib/session.server.ts`, 140 lines) is an encrypted,
+self-contained cookie: the payload is AES-256-GCM encrypted under a key derived from a secret by
+HKDF-SHA256, with a versioned `v1.iv.ciphertext.tag` base64url envelope, and authentication-tag
+verification so tampering yields a null session rather than an attacker-controlled payload.
+
+Three facts were verified from source before this section was written:
+
+- **The scheme is portable.** HKDF-SHA256 → AES-256-GCM round-trips through Web Crypto, and a
+  flipped ciphertext byte is rejected by the GCM tag. So it is reachable via `runtime.subtle` with
+  zero npm dependencies, Cloudflare Workers included. The reference uses `node:crypto` (`hkdfSync`,
+  `createCipheriv`), which is unavailable outside `packages/runtime`; `runtime.subtle` is the M16
+  `JwtService` precedent.
+- **Multi-cookie responses already work.** `IResponse.appendHeader`
+  (`packages/common/src/http.ts:116-127`) is documented for emitting several `Set-Cookie` headers,
+  and `snapshot()` deliberately returns the live `Headers` rather than a clone because cloning
+  collapses repeated `Set-Cookie` into one comma-joined header (`:180-192`). No response-pipeline
+  change is needed.
+- **Secret resolution has a home.** The reference reads `SESSION_SECRET` from Azure Key Vault with
+  an env fallback, which is `secrets-plugin`'s `ISecretManager` under `CAPABILITIES.SECRETS` — a
+  shipped provider, so the mapping is direct.
+
+### B. Form CSRF
+
+`packages/http-security-plugin/src/middleware/csrf-middleware.ts` is stateless Origin/Referer
+validation plus an optional custom-header requirement, and says so: "No cookies or server-side token
+store." The reference (`B2BAdmin app/lib/csrf.server.ts`) is a **signed double-submit cookie** — an
+HMAC-SHA256 token compared timing-safely against a hidden form field, signed with the session
+secret.
+
+These are different strategies, not one feature configured two ways. A progressive-enhancement
+`<Form>` post carries no custom header, so the existing middleware cannot be driven by it. The token
+is signed with the session secret and lives in session data, which is why this ships beside sessions
+rather than as an option on the existing middleware — and why the boundary between the two packages
+is a design decision below rather than an implementation detail.
+
+### Design decisions the plan must resolve
+
+1. **API shape.** React Router's `getSession`/`commitSession`/`destroySession` against
+   `ctx.session.get`/`set` with commit-on-response. Materially different: auto-commit needs a
+   response hook, while React Router loaders reach the session through the M44 `loadContext` bridge.
+   Serving both without two divergent entry points is the central problem (one capability, one
+   implementation).
+2. **Cookie-only or server-backed, and the default.** The reference documents its own trade-off: no
+   immediate revocation, a stolen cookie stays valid until `Max-Age`, and mass invalidation means
+   rotating the secret. `cache-plugin` and `storage-plugin` are candidate stores, following the M16b
+   refresh-token-store pattern.
+3. **Secret rotation.** Deriving one key from one secret means rotation logs every user out. A
+   versioned key list (decrypt with any, encrypt with the newest) changes the cookie envelope, so it
+   is decided at plan time.
+4. **The CSRF/session package boundary.** No plugin may import another (AI_GUIDELINES §2.2/§3.3), so
+   the session-backed strategy either ships in this package or `http-security-plugin` grows a
+   pluggable verifier seam this package plugs into.
+5. **Encrypt against sign-only.** The reference encrypts because the cookie carries a whole logon
+   response; a signed-only cookie is smaller and debuggable but exposes its claims.
+6. **Expiry model** — rolling against absolute, and whether an idle timeout is in scope.
+
+### Cookie codec placement
+
+Cookie parse/serialize has no shared home. The only parser in the tree is private to
+`packages/decorator-plugin/src/resolvers/parameter-resolver.ts:61-73`, backing `@Cookie`. Two
+packages needing one codec is the M47 `encodeFrameData` situation, so `common` is the principled
+home; duplication is the only alternative, since neither plugin may import the other. `IRequest`
+also carries no `cookies` field today — adding one is a flagged `common` widening alongside the
+`tenant`, `user`, and `signal` precedents.
+
+### Deliverables
+
+- [x] `common` — `ISessionService` / `ISession` / `ISessionStore` / `SessionData` contracts, the
+      `SESSION: 'session'` capability token, and the `parseCookie` / `serializeCookie` /
+      `CookieAttributes` codec. **No `IRequest` widening**: it was assessed and declined, because
+      nothing in the design reads a `cookies` field — the middleware parses `ctx.request.headers`
+      once and parks the _session_ in `ctx.state`, so the field would have obliged every `IRequest`
+      producer (runtime adapters, kernel, `testing`, every double) to populate surface with no
+      consumer.
+- [x] `packages/session-plugin` — encrypted-cookie strategy (default) plus an `ISessionStore` port
+      with `MemorySessionStore` and `CacheSessionStore` (over `CAPABILITIES.CACHE`), secret
+      resolution via `CAPABILITIES.SECRETS` with an env fallback and a rotation list, session
+      middleware at priority 260 with commit-on-response, and `getSession(ctx)` as the single
+      accessor.
+- [x] Session-backed form CSRF — shipped **in this package**, leaving the published
+      `http-security-plugin` untouched: the token is stored in session data and protected by the
+      session's own encryption, so it needs no second cookie and no second secret.
+      `csrfFormMiddleware` at 275, plus a standalone `verifyCsrfToken` both entry points share.
+- [x] React Router integration — reachable through M44's existing `populateLoadContext` hook calling
+      the same `getSession(ctx)`; no change to `react-router-plugin` and no cross-plugin import.
+- [x] Real-crypto tests exercising `runtime.subtle` (no fake `SubtleCrypto` anywhere), including
+      tamper rejection on every envelope segment, cross-mode rejection, and a rotation case proving
+      an old cookie opens while its secret is listed and stops once dropped.
+- [x] `PUBLIC_API.md` (`CAPABILITIES.SESSION`, the session contract group, the cookie codec, a full
+      `SessionPlugin()` section), `ARCHITECTURE.md` (priority rows 260/270/275), package README, and
+      `scripts/release-packages.ts`.
+
+### Corrections shipped in this milestone's PR
+
+Four claims in the section above were checked against source and did not survive:
+
+- The cookie parser in `decorator-plugin` is **not private** — it is exported from
+  `packages/decorator-plugin/src/index.ts:56` and has been published API since `alpha.1`. It now
+  delegates to the `common` codec, which is stricter in three ways (percent-decoding, quote
+  stripping, first-occurrence-wins); each is a defect fix, recorded in `CHANGELOG.md`.
+- The `v1.iv.ciphertext.tag` envelope **cannot be reproduced on Web Crypto**, which returns the
+  authentication tag appended to the ciphertext with no `getAuthTag()` equivalent. The shipped
+  envelope is `v1.<kid>.<iv>.<sealed>`, the `kid` making rotation an O(1) lookup.
+- `storage-plugin` was assessed as a session store and declined: `IStorage` is a blob API with no
+  TTL, so it would hand-roll expiry, whereas `ICacheStore`'s `set(key, value, ttlSeconds)` is
+  exactly the right shape.
+- The documented middleware-priority table in ARCHITECTURE omitted the existing CSRF row at 270,
+  which is what makes 275 legible; it is added alongside the two new session rows.
+
+**Sequencing:** M36b (planned) → **M48** → M36c (React Router app skeleton + config-key
+indirection), because M36c consumes this milestone. M48 is not the last gap before a shippable
+framework — M37 examples, M38 documentation, and M39 deploy manifests remain — it is what makes the
+full-stack story coherent.
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -4491,6 +4621,14 @@ implementation task.
 | Extensibility    | Modules         | Plugins with capability tokens       |
 | Middleware       | Tied to modules | Independent, pipeline-based          |
 | Testing          | Mock modules    | Mock plugins/services                |
+
+**Two caveats a NestJS reader needs, so the table above is not read as parity.** Constructor
+injection takes an explicit token — `@Inject(CAPABILITIES.DATABASE) private db: Db` — because
+type-inferred injection requires `emitDecoratorMetadata`, which Deno does not support; no source in
+this repo reads `design:paramtypes`, and none can. The parameter-level form arrives in M36b,
+replacing a positional class-level token list. Separately, **cookie sessions and form-CSRF do not
+exist yet** (M48): the auth plugin covers JWT, API keys, refresh tokens, and RBAC, and the CSRF
+middleware validates Origin/Referer rather than a synchronizer token.
 
 ---
 
@@ -4649,7 +4787,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 34        | ✅     | cli                  |
 | 34b       | ✅     | cli                  |
 | 35        | ✅     | sdk                  |
-| 36        | ⬜     | starters             |
+| 36        | ✅     | starters             |
 | 37        | ⬜     | examples             |
 | 38        | ⬜     | documentation        |
 | 39        | ⬜     | docker/kubernetes    |
@@ -4661,3 +4799,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 45        | ✅     | worker-pool-plugin   |
 | 46        | ✅     | websocket-plugin     |
 | 47        | ✅     | alpha-3 limitations  |
+| 48        | ✅     | session-plugin       |

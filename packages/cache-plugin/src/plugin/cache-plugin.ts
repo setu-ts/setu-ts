@@ -207,10 +207,9 @@ function resolveLogger(
     const logger = ctx.services.get<Record<string, unknown>>('logger');
     return {
       debug: (msg: string, meta?: Record<string, unknown>): void => {
-        const dbg = logger?.debug as
-          | ((msg: string, meta?: Record<string, unknown>) => void)
-          | undefined;
-        dbg?.(msg, meta);
+        if (logger && typeof logger.debug === 'function') {
+          logger.debug.call(logger, msg, meta);
+        }
       },
     };
   }

@@ -24,6 +24,28 @@ export interface Wiring {
 }
 
 /**
+ * One middleware a generated `honoe.config.ts` adds to the pipeline.
+ *
+ * `addOptions` is **required**, deliberately. A bare `app.middleware.add(fn())`
+ * lands at the pipeline default of `500`, which is silently wrong for anything
+ * whose contract fixes its position — and that is how every project scaffolded
+ * with `--template rest` or `--template microservice` ended up with an error
+ * handler that could not catch throws from the metrics (20) or telemetry (30)
+ * middleware. Requiring the field means the next middleware added to a template
+ * cannot repeat the mistake: omitting it is a compile error, not a 500 in
+ * production.
+ */
+export interface MiddlewareWiring extends Wiring {
+  /** Position and diagnostic name for `app.middleware.add(...)`. */
+  readonly addOptions: {
+    /** Execution priority — lower runs earlier, so lower is outermost. */
+    readonly priority: number;
+    /** Diagnostic name shown in pipeline introspection. */
+    readonly name: string;
+  };
+}
+
+/**
  * A named plugin set, plus the runtimes it cannot target.
  */
 export interface TemplateDefinition {
@@ -37,7 +59,7 @@ export interface TemplateDefinition {
    */
   readonly plugins: readonly Wiring[];
   /** Middleware added with `app.middleware.add(...)` after construction. */
-  readonly middleware: readonly Wiring[];
+  readonly middleware: readonly MiddlewareWiring[];
   /**
    * Runtime targets this template refuses, mapped to the reason shown to the
    * user. Refusing at scaffold time beats a project that deploys and then

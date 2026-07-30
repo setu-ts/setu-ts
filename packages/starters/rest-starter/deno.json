@@ -2,5 +2,21 @@
   "name": "@hono-enterprise/rest-starter",
   "version": "0.1.0-alpha.3",
   "license": "MIT",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.3",
+    "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0-alpha.3",
+    "@hono-enterprise/runtime": "jsr:@hono-enterprise/runtime@^0.1.0-alpha.3",
+    "@hono-enterprise/config-plugin": "jsr:@hono-enterprise/config-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/logger-plugin": "jsr:@hono-enterprise/logger-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/validation-plugin": "jsr:@hono-enterprise/validation-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/http-security-plugin": "jsr:@hono-enterprise/http-security-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/health-plugin": "jsr:@hono-enterprise/health-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/metrics-plugin": "jsr:@hono-enterprise/metrics-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/openapi-plugin": "jsr:@hono-enterprise/openapi-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/decorator-plugin": "jsr:@hono-enterprise/decorator-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/database-plugin": "jsr:@hono-enterprise/database-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/auth-plugin": "jsr:@hono-enterprise/auth-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/exceptions": "jsr:@hono-enterprise/exceptions@^0.1.0-alpha.3"
+  }
 }
