@@ -130,15 +130,49 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
   expose no `ping()` on their web `WebSocket`, so a protocol ping would silently no-op on half the
   supported runtimes. Your client should treat `heartbeatPayload` as a keep-alive and may reply to
   keep the idle timer fresh — the idle sweep looks only at _inbound_ traffic.
-- **Rooms are in-process.** `broadcast` skips closed members and drops them, and a room that empties
-  is discarded, so a churning connection set does not grow memory. Fan-out across replicas is a
-  follow-up milestone; today two instances behind a load balancer do not share rooms.
+- **Rooms are in-process by default.** `broadcast` skips closed members and drops them, and a room
+  that empties is discarded, so a churning connection set does not grow memory. Behind more than one
+  replica, register a backplane — see [Scaling beyond one replica](#scaling-beyond-one-replica).
 - **Handler errors never escape.** A throw or a rejected promise from any callback is routed to
   `onError` rather than becoming an unhandled rejection.
 - **Backpressure is not managed for you.** `send` hands the frame to the platform socket. A slow
   consumer with a fast producer will buffer in the runtime; throttle at the application level.
 - **Shutdown.** `onClose` closes every live connection with `1001` (going away) and stops the
   heartbeat timer.
+
+## Scaling beyond one replica
+
+**A room is process-local until you register a backplane.** On a single instance that is invisible.
+Behind two or more, `room('lobby').broadcast(...)` reaches only the clients connected to _that_
+process — the other replicas' clients hear nothing, and no error is raised anywhere. It is partial
+delivery, not a failure, which is what makes it easy to ship.
+
+Registering
+[`@hono-enterprise/realtime-backplane-plugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/realtime-backplane-plugin/README.md)
+is the entire fix. This plugin resolves it _optionally_, so nothing else changes:
+
+```typescript
+import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+
+createApplication({
+  plugins: [
+    RuntimePlugin(),
+    RealtimeBackplanePlugin({ transport: 'redis', url: 'redis://localhost:6379' }),
+    WebSocketPlugin(),
+  ],
+});
+```
+
+Rooms now fan out across every replica sharing that transport, including
+`RoomBroadcastOptions.except` — connection ids are UUIDs, so the exclusion is honored cluster-wide.
+Remove the plugin and behavior returns to in-process, with no application change.
+
+Two things stay local by design: `room.size` counts this replica's members only (a cluster-wide
+count is inherently asynchronous and cannot satisfy the synchronous getter), and per-connection
+`send` is naturally local since the socket lives on one process.
+
+When no backplane is registered this plugin logs one `info` line at startup stating the limitation.
+If you are running a single replica, that line is informational and safe to ignore.
 
 ## Errors
 

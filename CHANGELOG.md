@@ -6,7 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`websocket-plugin` and `sse-plugin` now say at startup that rooms and channels are
+  process-local** when no realtime backplane is registered — one `info` line naming the limitation
+  and the plugin that lifts it. Cross-replica fan-out has shipped since `0.1.0-alpha.3`, but a
+  single-replica app and a three-replica app behave identically right up to the point where two
+  thirds of your clients silently stop receiving broadcasts, with no error raised anywhere. Both
+  READMEs gain a **Scaling beyond one replica** section for the same reason. If you run a single
+  replica the line is informational; if you register `RealtimeBackplanePlugin`, it does not appear.
+
 ### Fixed
+
+- **`websocket-plugin`'s README no longer claims cross-replica fan-out is unimplemented.** It stated
+  "fan-out across replicas is a follow-up milestone; today two instances behind a load balancer do
+  not share rooms", which stopped being true when `realtime-backplane-plugin` shipped in
+  `0.1.0-alpha.3`.
+- **`sse-plugin`'s README named a method that does not exist.** Its named-channels example called
+  `channel.broadcast(...)`; the committed `SseChannel` contract exposes `publish(...)` and no
+  `broadcast`, so the snippet would not compile.
 
 - **`realtime-backplane-plugin`: `RedisBackplane.connect()` no longer leaks a connection on a failed
   open, and is safe to call concurrently.** The connected guard was only set after both connections

@@ -55,6 +55,16 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         ? ctx.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE)
         : undefined;
 
+      if (backplane === undefined) {
+        // Said once at startup because the alternative is silent: behind more
+        // than one replica a channel broadcast reaches only the clients on this
+        // process, which looks like partial delivery rather than an error.
+        ctx.logger?.info(
+          'sse: channels broadcast in-process only. Register RealtimeBackplanePlugin ' +
+            'from @hono-enterprise/realtime-backplane-plugin to fan out across replicas.',
+        );
+      }
+
       // Build and register the SSE service, threading the real runtime in.
       const sseService = new SseService(options, runtime, backplane, ctx.logger);
       ctx.services.register<ISseService>(CAPABILITIES.SSE, sseService);

@@ -51,16 +51,35 @@ interface Harness {
   readonly registered: Map<string, unknown>;
   readonly health: Map<string, () => Promise<HealthCheckResult>>;
   readonly closeHooks: (() => void)[];
+  /** Messages the plugin logged at `info`, in order. */
+  readonly infoLogs: string[];
 }
 
-function createContext(adapter: IHttpAdapter): Harness {
+function createContext(adapter: IHttpAdapter, withLogger = false): Harness {
   const registered = new Map<string, unknown>();
   const health = new Map<string, () => Promise<HealthCheckResult>>();
   const closeHooks: (() => void)[] = [];
+  const infoLogs: string[] = [];
   const runtime = createFakeRuntime();
+
+  // Omitted rather than set to undefined, matching a context with no logger
+  // capability registered — `exactOptionalPropertyTypes` distinguishes the two.
+  const logger = withLogger
+    ? {
+      logger: {
+        info: (message: string): void => {
+          infoLogs.push(message);
+        },
+        warn: (): void => {},
+        error: (): void => {},
+        debug: (): void => {},
+      },
+    }
+    : {};
 
   const ctx = {
     runtime,
+    ...logger,
     services: {
       has: (token: string): boolean => token === CAPABILITIES.HTTP_ADAPTER || registered.has(token),
       get: <T>(token: string): T => {
@@ -89,7 +108,7 @@ function createContext(adapter: IHttpAdapter): Harness {
     },
   } as unknown as IPluginContext;
 
-  return { ctx, registered, health, closeHooks };
+  return { ctx, registered, health, closeHooks, infoLogs };
 }
 
 describe('WebSocketPlugin', () => {
@@ -183,6 +202,45 @@ describe('WebSocketPlugin', () => {
 
     expect(transport.closes).toEqual([{ code: 1001, reason: 'Server shutting down' }]);
     expect(service.connectionCount).toBe(0);
+  });
+});
+
+describe('WebSocketPlugin scaling notice', () => {
+  it('says at startup that rooms are process-local when no backplane is registered', async () => {
+    const harness = createContext(createUpgradableAdapter(), true);
+
+    await WebSocketPlugin().register(harness.ctx);
+
+    // Behind more than one replica this is silent partial delivery, so the
+    // notice must name both the limitation and the plugin that lifts it.
+    expect(harness.infoLogs.length).toBe(1);
+    expect(harness.infoLogs[0]).toContain('rooms broadcast in-process only');
+    expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+  });
+
+  it('stays quiet when a backplane is registered', async () => {
+    const harness = createContext(createUpgradableAdapter(), true);
+    harness.registered.set(CAPABILITIES.REALTIME_BACKPLANE, {
+      origin: 'node-a',
+      connect: (): Promise<void> => Promise.resolve(),
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as IRealtimeBackplane);
+
+    await WebSocketPlugin().register(harness.ctx);
+
+    expect(harness.infoLogs).toEqual([]);
+  });
+
+  it('registers without a logger capability', async () => {
+    // `ctx.logger` is absent entirely here, so the notice must be optional-call
+    // guarded rather than assuming a logger plugin is present.
+    const harness = createContext(createUpgradableAdapter());
+
+    await WebSocketPlugin().register(harness.ctx);
+
+    expect(harness.registered.has(CAPABILITIES.WEBSOCKET)).toBe(true);
   });
 });
 

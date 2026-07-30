@@ -476,3 +476,64 @@ describe('SsePlugin with a realtime backplane', () => {
     harness.close();
   });
 });
+
+describe('SsePlugin scaling notice', () => {
+  /** A context with a recording logger, optionally exposing a backplane. */
+  function contextWithLogger(backplane?: IRealtimeBackplane): {
+    readonly ctx: IPluginContext;
+    readonly infoLogs: string[];
+  } {
+    const infoLogs: string[] = [];
+    const ctx = {
+      runtime: {
+        setInterval: (): TimerHandle => ({} as TimerHandle),
+        clearInterval: (): void => {},
+        uuid: (): string => 'test-uuid',
+      },
+      logger: {
+        info: (message: string): void => {
+          infoLogs.push(message);
+        },
+        warn: (): void => {},
+        error: (): void => {},
+        debug: (): void => {},
+      },
+      services: {
+        has: (token: string): boolean =>
+          token === CAPABILITIES.REALTIME_BACKPLANE && backplane !== undefined,
+        get: <T>(): T => backplane as T,
+        register: (): void => {},
+      },
+      health: { register: (): void => {} },
+      lifecycle: { onClose: (): void => {} },
+    } as unknown as IPluginContext;
+
+    return { ctx, infoLogs };
+  }
+
+  it('says at startup that channels are process-local when no backplane is registered', async () => {
+    const harness = contextWithLogger();
+
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    // Behind more than one replica this is silent partial delivery, so the
+    // notice must name both the limitation and the plugin that lifts it.
+    expect(harness.infoLogs.length).toBe(1);
+    expect(harness.infoLogs[0]).toContain('channels broadcast in-process only');
+    expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+  });
+
+  it('stays quiet when a backplane is registered', async () => {
+    const harness = contextWithLogger({
+      origin: 'node-a',
+      connect: (): Promise<void> => Promise.resolve(),
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as IRealtimeBackplane);
+
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    expect(harness.infoLogs).toEqual([]);
+  });
+});
