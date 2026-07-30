@@ -53,6 +53,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/resilience-plugin',
   'packages/scheduler-plugin',
   'packages/secrets-plugin',
+  'packages/session-plugin',
   'packages/sse-plugin',
   'packages/storage-plugin',
   'packages/telemetry-plugin',

@@ -431,3 +431,35 @@ grep -rn "Deno.test" packages/session-plugin/test             # must be empty
   copy (C4); unifying them is an approved-refactor question, not this milestone's.
 - **The React Router app skeleton** that consumes this (M36c) and **parameter-level decorator
   injection** (M36b).
+
+---
+
+## 10. Deviations from this plan during implementation (recorded at archival)
+
+The plan held up in substance; five things changed in the doing, each for a reason found in source.
+
+1. **`getCsrfToken(session)` became `getCsrfToken(ctx)`.** Minting needs a random source, and a bare
+   `ISession` has none. Taking `ctx` lets it resolve `CAPABILITIES.RUNTIME` for `randomBytes` under
+   that token's own documented interface, instead of reaching through the session service and
+   violating the token↔interface binding rule.
+2. **`signBytes` was cut before it shipped.** §3.9 stores the token in session data, which the
+   session's own encryption already authenticates, so a detached signature had no consumer — dead
+   surface by the rule, removed rather than exported.
+3. **Two files were added and one renamed.** `src/options.ts` owns option resolution, so the plugin
+   and the service read one resolved shape without importing each other; `src/csrf/token.ts` and
+   `src/csrf/verify.ts` split minting from verification, which is what let `verifyCsrfToken` become
+   a public entry point sharing one implementation with the middleware (a React Router action
+   conventionally validates inline rather than via middleware). `toBuffer` was added to
+   `codec/envelope.ts` — a deliberate local copy of auth-plugin's internal helper, per the M30b
+   `pemToDer` precedent, because Web Crypto's `BufferSource` rejects `Uint8Array<ArrayBufferLike>`.
+4. **A fifth error type, `SessionTooLargeError`, was added.** §8 named the oversized-cookie risk but
+   left the mechanism implicit; it needed a named error to be a real mitigation rather than a note.
+5. **A sixth doc conflict (C6) surfaced.** `decorator-plugin`'s `parseCookies` does not
+   percent-decode, does not strip quoting, and is last-occurrence-wins, so delegating to the correct
+   codec changes published behaviour. Shipped as a CHANGELOG'd defect fix rather than duplicating
+   the parser (§11.1) or adding a decode toggle nobody would want, following the M14d/M30b precedent
+   for deliberate corrections during `0.1.x`.
+
+Not deviations, but worth recording: the `IRequest.cookies` widening the ROADMAP floated was
+**declined** (C2) and no `common` interface was widened at all; every planned test file was written,
+plus `options.test.ts` and `errors.test.ts` that the plan's table did not name.

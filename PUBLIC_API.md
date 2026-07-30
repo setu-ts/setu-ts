@@ -1769,6 +1769,123 @@ Discriminated on `transport`.
 
 ---
 
+## SessionPlugin()
+
+Cookie-backed sessions and session-backed form CSRF. Registers a `SessionService`
+(`ISessionService`) under `CAPABILITIES.SESSION` (`'session'`). Added in Milestone 48.
+
+The default is a self-contained **encrypted** cookie: AES-256-GCM under a key derived by
+HKDF-SHA256, entirely through `IRuntimeServices.subtle` (the Milestone 16 `JwtService` precedent),
+so the package has zero npm dependencies and works on Cloudflare Workers. Setting `store` moves the
+payload server-side and leaves only an opaque id in the cookie, which is what makes immediate
+revocation possible.
+
+```typescript
+import { getSession, SessionPlugin } from '@hono-enterprise/session-plugin';
+
+const app = createApplication({
+  plugins: [RuntimePlugin(), SessionPlugin({ secret: mySecret, csrf: {} })],
+});
+
+app.router.post('/login', (ctx) => {
+  const session = getSession(ctx);
+  session.set('userId', user.id);
+  session.regenerate(); // new id, same data — defeats session fixation
+  return ctx.response.json({ ok: true });
+});
+```
+
+### Options
+
+| Option               | Type                                   | Default                    | Behavior                                                                  |
+| -------------------- | -------------------------------------- | -------------------------- | ------------------------------------------------------------------------- |
+| `secret`             | `string \| readonly string[]`          | resolved                   | Index 0 seals; every entry can open, so rotation does not log users out   |
+| `secretName`         | `string`                               | `SESSION_SECRET`           | Name looked up in `CAPABILITIES.SECRETS` and then in `runtime.env`        |
+| `mode`               | `'encrypt' \| 'sign'`                  | `'encrypt'`                | `'sign'` is HMAC-only and leaves the payload READABLE by the client       |
+| `store`              | `'memory' \| 'cache' \| ISessionStore` | —                          | Omitted keeps the payload in the cookie; set moves it server-side         |
+| `maxAge`             | `number` (seconds)                     | `7200`                     | Enforced from a stamp inside the payload, not from the cookie's `Max-Age` |
+| `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                      |
+| `idleTimeoutMs`      | `number`                               | —                          | Idle expiry, independent of `maxAge`                                      |
+| `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop |
+| `cookie.name`        | `string`                               | `hono_session`             |                                                                           |
+| `cookie.path`        | `string`                               | `'/'`                      |                                                                           |
+| `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                       |
+| `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                  |
+| `cookie.secure`      | `boolean`                              | `true`                     | Escape hatch for plain-HTTP local development                             |
+| `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                           |
+| `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                   |
+| `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                             |
+| `csrf.headerName`    | `string`                               | —                          | Accepted alternative source; REQUIRED for `multipart/form-data`           |
+| `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                            |
+
+### Exports
+
+| Export                          | Kind      | Purpose                                                                    |
+| ------------------------------- | --------- | -------------------------------------------------------------------------- |
+| `SessionPlugin`                 | function  | The plugin factory                                                         |
+| `SessionService`                | class     | `ISessionService` implementation registered under the token                |
+| `getSession`                    | function  | The single accessor: `getSession(ctx): ISession`                           |
+| `sessionMiddleware`             | function  | Load/commit middleware (registered at 260; exported for standalone wiring) |
+| `csrfFormMiddleware`            | function  | Synchronizer-token middleware (registered at 275 when `csrf` is present)   |
+| `getCsrfToken`                  | function  | Mints-and-stores on first call, then stable within the session             |
+| `verifyCsrfToken`               | function  | Standalone verification for handlers and React Router actions              |
+| `CSRF_SESSION_KEY`              | const     | Reserved session key holding the token (`'__csrf'`)                        |
+| `MemorySessionStore`            | class     | `Map`-backed store; requires injected clock and timers                     |
+| `CacheSessionStore`             | class     | Store over any `ICacheStore` resolved from `CAPABILITIES.CACHE`            |
+| `SessionSecretMissingError`     | class     | Thrown during `register()` when no adequate secret resolves                |
+| `SessionMiddlewareMissingError` | class     | Thrown by `getSession` when the middleware did not run                     |
+| `CsrfTokenMismatchError`        | class     | Thrown by `verifyCsrfToken`; the middleware converts it to `403`           |
+| `SessionTooLargeError`          | class     | Thrown when a committed cookie would exceed `maxCookieBytes`               |
+| `SessionMode`                   | type      | `'encrypt' \| 'sign'`                                                      |
+| `SessionPluginOptions`          | interface | The factory's parameter                                                    |
+| `SessionCookieOptions`          | interface | The `cookie` block                                                         |
+| `CsrfFormOptions`               | interface | The `csrf` block, and `verifyCsrfToken`'s options                          |
+| `SessionServiceDeps`            | interface | Runtime capabilities the service is constructed with                       |
+| `MemorySessionStoreDeps`        | interface | The memory store's required clock and timer injection                      |
+| `CacheSessionStoreOptions`      | interface | The cache store's key namespacing                                          |
+
+### Notes
+
+- **Nothing in application code writes a `Set-Cookie`.** The middleware commits after `next()`
+  returns, and only when the session is dirty, regenerated, destroyed, or `rolling` is on. A pure
+  read emits no header, so sessions do not defeat downstream caching. This works after the handler
+  called a terminal response method because the kernel's response builder appends headers without
+  consulting whether it ended, and `snapshot()` hands the adapter its live `Headers` rather than a
+  clone — cloning would collapse repeated `Set-Cookie` values into one comma-joined header.
+- **A request that throws is not committed.** The error handler is about to replace the response,
+  and persisting a half-applied mutation from a failed request is worse than dropping it.
+- **`mode: 'sign'` does not hide its payload.** It protects integrity only; anyone holding the
+  cookie can read its claims. It exists to pair with the store strategy, where the cookie carries
+  nothing but an opaque id. `'encrypt'` is the default so the exposing choice is never accidental.
+- **Expiry is server-authoritative.** A cookie's `Max-Age` is client-controlled, so `maxAge` is
+  enforced from a wall-clock stamp inside the sealed payload. Both stamps come from `runtime.now()`
+  rather than `hrtime()`, because they are serialized and compared across processes.
+- **Rotation is O(1).** Each key is addressed by a short non-secret `kid` (a truncated HKDF output
+  under its own `info` label) carried in the envelope, so opening is a lookup rather than a trial
+  decryption against every key.
+- **The envelope is `v1.<kid>.<a>.<b>`.** Web Crypto's `subtle.encrypt` returns the authentication
+  tag appended to the ciphertext, so unlike `node:crypto` there is no separate tag segment. Every
+  malformed input decodes to "no session" rather than throwing.
+- **The cookie strategy cannot revoke.** A stolen cookie stays valid until it expires, and mass
+  invalidation means rotating the secret. Use a store when that matters.
+- **`store: 'cache'` shares a blast radius** with application cache data: a `clear()` elsewhere logs
+  everybody out. Keys are namespaced (`session:`), but a dedicated cache instance is the production
+  recommendation.
+- **Form CSRF here is a different mechanism** from `http-security-plugin`'s `csrfMiddleware`, not
+  the same feature configured twice. That one is a stateless `Origin`/`Referer` check; this is a
+  synchronizer token in session data. A progressive-enhancement `<Form>` post cannot set a custom
+  header, so it can satisfy this and not that. Running both is intended — 270 then 275.
+- **`multipart/form-data` bodies are not parsed** for the token; configure `csrf.headerName`.
+  Parsing multipart would duplicate the storage plugin's parser, which this package may not import.
+- **The `403` body does not disclose the reason.** It would tell an attacker whether the session or
+  the token was at fault.
+- **React Router** reaches the session through the Milestone 44 plugin's existing
+  `populateLoadContext` hook, calling the same `getSession(ctx)`. No plugin imports another.
+- A `session` health indicator reports `{ strategy, mode, keys, store }` and goes `down` when a
+  configured store reports unhealthy. `onClose` closes the store.
+
+---
+
 ## ReactRouterPlugin()
 
 Embeds **React Router v7 framework mode** as a first-party plugin so a Hono Enterprise application
@@ -5233,22 +5350,24 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                                                                                                                                                       |
-| ----------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out) |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                         |
-| `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                   |
-| `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                  |
-| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                      |
-| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                      |
-| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                        |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                         |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                                                                                         |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                                                                                          |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                              |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                   |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                          |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                              |
+| Export                        | Kind     | Purpose                                                                                                                                                                                                                                                                               |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions) |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                 |
+| `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                           |
+| `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                          |
+| `parseCookie(header)`         | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                |
+| `serializeCookie(n, v, a?)`   | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                |
+| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                              |
+| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                              |
+| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                 |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                                                                                                                                 |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                                                                                                                                  |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                      |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                           |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                  |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                      |
 
 ### Types
 
@@ -5288,6 +5407,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                              |
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                               |
+| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                 |
 
 Contract notes:
 
@@ -5332,6 +5452,11 @@ Contract notes:
   registers the `IWebSocketService`. The service provides full-duplex, bidirectional real-time
   messaging: exact-path routes with lifecycle handlers, named broadcast rooms, and an
   application-level heartbeat. Distinct from `SSE`, which is one-way. Added in Milestone 46.
+- `CAPABILITIES.SESSION` (`'session'`) — the capability token under which `SessionPlugin` registers
+  the `ISessionService`. Provides cookie-backed sessions for server-rendered applications: an
+  encrypted self-contained cookie by default, or an opaque id over an `ISessionStore`. Distinct from
+  `AUTHENTICATION`, which establishes _who_ a caller is — a session carries per-visitor state and
+  exists for anonymous visitors too. Added in Milestone 48.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
