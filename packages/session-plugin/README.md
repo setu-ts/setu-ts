@@ -36,8 +36,9 @@ await app.start({ port: 3000 });
 ```
 
 You never write a `Set-Cookie` yourself. The middleware loads the session before your handler and
-commits it afterwards — and only when it actually changed, so a pure read does not rewrite the
-cookie or defeat downstream caching.
+commits it afterwards — by default only when it actually changed, so a pure read does not rewrite
+the cookie or defeat downstream caching. (`rolling` and `idleTimeoutMs` deliberately opt out of
+that: both need every response to carry a refreshed cookie.)
 
 ## Choosing a strategy
 
@@ -117,7 +118,10 @@ SessionPlugin({ secret, maxAge: 3600, rolling: true, idleTimeoutMs: 900_000 });
 - `rolling: false` (default) — absolute expiry from creation.
 - `rolling: true` — every response extends the expiry, so an active user is not logged out
   mid-session.
-- `idleTimeoutMs` — expire after this much inactivity, independently of `maxAge`.
+- `idleTimeoutMs` — expire after this long with no requests, independently of `maxAge`. Any request
+  refreshes it, a read-only one included, so setting it re-issues the cookie on every response (and
+  rewrites the stored entry on the store strategy) to advance the activity stamp. It does not extend
+  absolute expiry — that is `rolling`'s job, and the two compose.
 
 ## Session fixation
 
@@ -213,23 +217,23 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 
 ## Options
 
-| Option            | Default          | Notes                                                       |
-| ----------------- | ---------------- | ----------------------------------------------------------- |
-| `secret`          | resolved         | `string` or rotation list; index 0 seals                    |
-| `secretName`      | `SESSION_SECRET` | Looked up in the secrets manager and the environment        |
-| `mode`            | `'encrypt'`      | `'sign'` exposes its payload                                |
-| `store`           | —                | `'memory'`, `'cache'`, or an `ISessionStore`                |
-| `maxAge`          | `7200`           | Seconds; also the cookie's `Max-Age`                        |
-| `rolling`         | `false`          | Re-issue on every response                                  |
-| `idleTimeoutMs`   | —                | Idle expiry, independent of `maxAge`                        |
-| `maxCookieBytes`  | `4096`           | Throws `SessionTooLargeError` rather than dropping silently |
-| `cookie.name`     | `hono_session`   |                                                             |
-| `cookie.path`     | `/`              |                                                             |
-| `cookie.domain`   | —                | Omitted means a host-only cookie                            |
-| `cookie.sameSite` | `'lax'`          | `'none'` forces `Secure`                                    |
-| `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development           |
-| `cookie.httpOnly` | `true`           |                                                             |
-| `csrf`            | —                | Presence enables form CSRF                                  |
+| Option            | Default          | Notes                                                                     |
+| ----------------- | ---------------- | ------------------------------------------------------------------------- |
+| `secret`          | resolved         | `string` or rotation list; index 0 seals                                  |
+| `secretName`      | `SESSION_SECRET` | Looked up in the secrets manager and the environment                      |
+| `mode`            | `'encrypt'`      | `'sign'` exposes its payload                                              |
+| `store`           | —                | `'memory'`, `'cache'`, or an `ISessionStore`                              |
+| `maxAge`          | `7200`           | Seconds; also the cookie's `Max-Age`                                      |
+| `rolling`         | `false`          | Re-issue on every response                                                |
+| `idleTimeoutMs`   | —                | No-request expiry; any request refreshes it, so it commits every response |
+| `maxCookieBytes`  | `4096`           | Throws `SessionTooLargeError` rather than dropping silently               |
+| `cookie.name`     | `hono_session`   |                                                                           |
+| `cookie.path`     | `/`              |                                                                           |
+| `cookie.domain`   | —                | Omitted means a host-only cookie                                          |
+| `cookie.sameSite` | `'lax'`          | `'none'` forces `Secure`                                                  |
+| `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development                         |
+| `cookie.httpOnly` | `true`           |                                                                           |
+| `csrf`            | —                | Presence enables form CSRF                                                |
 
 ## Health
 

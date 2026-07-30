@@ -135,14 +135,27 @@ export class SessionService implements ISessionService {
    */
   async commit(ctx: IRequestContext, session: Session): Promise<void> {
     if (session.isDestroyed) {
-      await this.#store?.destroy(session.id);
+      // Both ids, not just the current one. After a `regenerate()` in this same
+      // request `session.id` is the NEW id, which was never written to the
+      // store — while the cookie the client presented still carries the old one.
+      // Deleting only the current id would leave that row readable until its
+      // TTL, so a stolen copy of the original cookie would keep authenticating
+      // after an explicit destroy.
+      await this.#destroyStored(session.id, session.previousId);
       ctx.response.appendHeader('set-cookie', this.#cookie('', 0));
       return;
     }
 
     const rolling = this.#config.rolling;
+    // An idle timeout has to be refreshed by activity to mean anything, and
+    // `seen` only advances when this method commits. Without this, a user making
+    // read-only requests inside the idle window never refreshes it and is signed
+    // out while demonstrably active — so a configured idle timeout commits on
+    // every request exactly as `rolling` does. It does NOT extend absolute
+    // expiry; only `rolling` does that (see below).
+    const refreshesIdleWindow = rolling || this.#config.idleTimeoutMs !== undefined;
     const shouldCommit = session.isDirty || session.wasRegenerated ||
-      (rolling && !session.isNew);
+      (refreshesIdleWindow && !session.isNew);
     if (!shouldCommit) {
       return;
     }
@@ -152,10 +165,7 @@ export class SessionService implements ISessionService {
     // A regenerated session leaves its old server-side row behind, which would
     // otherwise stay readable until its TTL — that is what makes regeneration a
     // real revocation rather than a rename.
-    const previousId = session.previousId;
-    if (previousId !== null) {
-      await this.#store?.destroy(previousId);
-    }
+    await this.#destroyStored(session.previousId);
 
     session.touch(now);
     if (rolling) {
@@ -242,6 +252,23 @@ export class SessionService implements ISessionService {
       this.#deps.uuid,
       this.#config.idleTimeoutMs,
     );
+  }
+
+  /**
+   * Deletes the given ids from the store, skipping `null` and de-duplicating.
+   *
+   * A no-op on the cookie strategy, where there is no store to clean up.
+   */
+  async #destroyStored(...ids: readonly (string | null)[]): Promise<void> {
+    const store = this.#store;
+    if (store === undefined) {
+      return;
+    }
+    for (const id of new Set(ids)) {
+      if (id !== null) {
+        await store.destroy(id);
+      }
+    }
   }
 
   /** Builds the `Set-Cookie` header value for a value and remaining lifetime. */

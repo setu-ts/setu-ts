@@ -110,8 +110,14 @@ export interface SessionPluginOptions {
    */
   readonly rolling?: boolean;
   /**
-   * Expire a session that has been idle this long, independently of `maxAge`.
-   * Omitted by default (no idle check).
+   * Expire a session that has received no requests for this long, independently
+   * of `maxAge`. Omitted by default (no idle check).
+   *
+   * Idleness is refreshed by any request, including a read-only one, which means
+   * a configured idle timeout re-issues the cookie on every response (and, on the
+   * store strategy, rewrites the stored entry) so the activity stamp can advance.
+   * That is the cost of tracking activity; it does not extend absolute expiry,
+   * which stays governed by `maxAge` unless `rolling` is also set.
    */
   readonly idleTimeoutMs?: number;
   /**

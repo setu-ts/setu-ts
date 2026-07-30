@@ -1797,26 +1797,26 @@ app.router.post('/login', (ctx) => {
 
 ### Options
 
-| Option               | Type                                   | Default                    | Behavior                                                                  |
-| -------------------- | -------------------------------------- | -------------------------- | ------------------------------------------------------------------------- |
-| `secret`             | `string \| readonly string[]`          | resolved                   | Index 0 seals; every entry can open, so rotation does not log users out   |
-| `secretName`         | `string`                               | `SESSION_SECRET`           | Name looked up in `CAPABILITIES.SECRETS` and then in `runtime.env`        |
-| `mode`               | `'encrypt' \| 'sign'`                  | `'encrypt'`                | `'sign'` is HMAC-only and leaves the payload READABLE by the client       |
-| `store`              | `'memory' \| 'cache' \| ISessionStore` | —                          | Omitted keeps the payload in the cookie; set moves it server-side         |
-| `maxAge`             | `number` (seconds)                     | `7200`                     | Enforced from a stamp inside the payload, not from the cookie's `Max-Age` |
-| `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                      |
-| `idleTimeoutMs`      | `number`                               | —                          | Idle expiry, independent of `maxAge`                                      |
-| `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop |
-| `cookie.name`        | `string`                               | `hono_session`             |                                                                           |
-| `cookie.path`        | `string`                               | `'/'`                      |                                                                           |
-| `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                       |
-| `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                  |
-| `cookie.secure`      | `boolean`                              | `true`                     | Escape hatch for plain-HTTP local development                             |
-| `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                           |
-| `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                   |
-| `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                             |
-| `csrf.headerName`    | `string`                               | —                          | Accepted alternative source; REQUIRED for `multipart/form-data`           |
-| `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                            |
+| Option               | Type                                   | Default                    | Behavior                                                                                                                                                                                               |
+| -------------------- | -------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `secret`             | `string \| readonly string[]`          | resolved                   | Index 0 seals; every entry can open, so rotation does not log users out                                                                                                                                |
+| `secretName`         | `string`                               | `SESSION_SECRET`           | Name looked up in `CAPABILITIES.SECRETS` and then in `runtime.env`                                                                                                                                     |
+| `mode`               | `'encrypt' \| 'sign'`                  | `'encrypt'`                | `'sign'` is HMAC-only and leaves the payload READABLE by the client                                                                                                                                    |
+| `store`              | `'memory' \| 'cache' \| ISessionStore` | —                          | Omitted keeps the payload in the cookie; set moves it server-side                                                                                                                                      |
+| `maxAge`             | `number` (seconds)                     | `7200`                     | Enforced from a stamp inside the payload, not from the cookie's `Max-Age`                                                                                                                              |
+| `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                                                                                                                                                   |
+| `idleTimeoutMs`      | `number`                               | —                          | Expiry after this long with no requests. Refreshed by ANY request including a read-only one, so setting it commits on every response to advance the activity stamp; it does not extend absolute expiry |
+| `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop                                                                                                                              |
+| `cookie.name`        | `string`                               | `hono_session`             |                                                                                                                                                                                                        |
+| `cookie.path`        | `string`                               | `'/'`                      |                                                                                                                                                                                                        |
+| `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                                                                                                                                                    |
+| `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                                                                                                                                               |
+| `cookie.secure`      | `boolean`                              | `true`                     | Escape hatch for plain-HTTP local development                                                                                                                                                          |
+| `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                                                                                                                                                        |
+| `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                                                                                                                                                |
+| `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                          |
+| `csrf.headerName`    | `string`                               | —                          | Accepted alternative source; REQUIRED for `multipart/form-data`                                                                                                                                        |
+| `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                         |
 
 ### Exports
 
@@ -1860,6 +1860,16 @@ app.router.post('/login', (ctx) => {
 - **Expiry is server-authoritative.** A cookie's `Max-Age` is client-controlled, so `maxAge` is
   enforced from a wall-clock stamp inside the sealed payload. Both stamps come from `runtime.now()`
   rather than `hrtime()`, because they are serialized and compared across processes.
+- **An idle timeout is refreshed by activity, so it commits on every request.** `idleTimeoutMs`
+  measures time since the last _request_, not since the last write, so any request — a read-only one
+  included — advances the activity stamp. That requires re-issuing the cookie (and rewriting the
+  stored entry on the store strategy) on every response, exactly as `rolling` does. It does not
+  extend absolute expiry; `maxAge` stays absolute unless `rolling` is also set, and the two compose.
+- **A destroyed session deletes every id it has held.** When `regenerate()` and `destroy()` happen
+  in one request, `session.id` is the post-regeneration id that was never stored, while the cookie
+  the client presented carries the previous one — so both are removed. Deleting only the current id
+  would leave the earlier row readable until its TTL, and a stolen copy of the original cookie would
+  keep authenticating after an explicit destroy.
 - **Rotation is O(1).** Each key is addressed by a short non-secret `kid` (a truncated HKDF output
   under its own `info` label) carried in the envelope, so opening is a lookup rather than a trial
   decryption against every key.

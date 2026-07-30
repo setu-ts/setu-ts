@@ -388,6 +388,31 @@ describe('SessionService.commit', () => {
       await service.commit(ctx, session);
       expect(store.calls).toContain(`destroy:${session.id}`);
     });
+
+    it('deletes BOTH ids when a regenerated session is destroyed in the same request', async () => {
+      const store = new RecordingStore();
+      const { service } = await makeService({}, store);
+
+      const write = makeContext();
+      const first = await service.load(write.ctx);
+      first.set('a', 1);
+      await service.commit(write.ctx, first);
+      const originalId = first.id;
+      const header = write.response.setCookies()[0];
+
+      const next = makeContext({ headers: { cookie: header.split(';')[0] } });
+      const restored = await service.load(next.ctx);
+      restored.regenerate();
+      restored.destroy();
+      await service.commit(next.ctx, restored);
+
+      // The pre-regeneration row must not outlive the destroy: the cookie the
+      // client presented still carries `originalId`, so a stolen copy of it
+      // would keep authenticating until the row's TTL expired.
+      expect(store.calls).toContain(`destroy:${originalId}`);
+      expect(store.entries.has(originalId)).toBe(false);
+      expect(store.entries.size).toBe(0);
+    });
   });
 
   it('throws rather than emitting a cookie the browser would drop', async () => {
@@ -397,6 +422,77 @@ describe('SessionService.commit', () => {
     session.set('bulk', 'x'.repeat(500));
 
     await expect(service.commit(ctx, session)).rejects.toThrow(SessionTooLargeError);
+  });
+});
+
+describe('idleTimeoutMs', () => {
+  it('refreshes the idle window on a read-only request, so an active user stays signed in', async () => {
+    const { service, clock } = await makeService({ idleTimeoutMs: 60_000, maxAge: 86_400 });
+
+    const write = makeContext();
+    const session = await service.load(write.ctx);
+    session.set('user', 'alice');
+    await service.commit(write.ctx, session);
+    let cookie = write.response.setCookies()[0].split(';')[0];
+
+    // Five read-only requests at 30s intervals: continuously active, always
+    // well inside the 60s idle window. `seen` advances only on commit, so
+    // without committing here the third request would load a fresh session.
+    for (let i = 0; i < 5; i++) {
+      clock.advance(30_000);
+      const read = makeContext({ headers: { cookie } });
+      const restored = await service.load(read.ctx);
+      expect(restored.isNew, `request ${i + 1} at ${(i + 1) * 30}s`).toBe(false);
+      restored.get('user');
+      await service.commit(read.ctx, restored);
+      const emitted = read.response.setCookies()[0];
+      if (emitted !== undefined) {
+        cookie = emitted.split(';')[0];
+      }
+    }
+  });
+
+  it('still expires a session that really has been idle', async () => {
+    const { service, clock } = await makeService({ idleTimeoutMs: 60_000, maxAge: 86_400 });
+
+    const write = makeContext();
+    const session = await service.load(write.ctx);
+    session.set('user', 'alice');
+    await service.commit(write.ctx, session);
+    const cookie = write.response.setCookies()[0].split(';')[0];
+
+    clock.advance(60_001);
+    const read = makeContext({ headers: { cookie } });
+    expect((await service.load(read.ctx)).isNew).toBe(true);
+  });
+
+  it('refreshes the idle window without extending absolute expiry', async () => {
+    const { service, clock } = await makeService({ idleTimeoutMs: 60_000, maxAge: 100 });
+
+    const write = makeContext();
+    const session = await service.load(write.ctx);
+    const originalExp = session.expiresAt;
+    session.set('a', 1);
+    await service.commit(write.ctx, session);
+    const cookie = write.response.setCookies()[0].split(';')[0];
+
+    clock.advance(30_000);
+    const read = makeContext({ headers: { cookie } });
+    const restored = await service.load(read.ctx);
+    await service.commit(read.ctx, restored);
+
+    // `maxAge` stays absolute unless `rolling` is on — refreshing idleness must
+    // not silently turn every session into a rolling one.
+    expect(restored.expiresAt).toBe(originalExp);
+  });
+
+  it('does not commit a brand-new clean session, so anonymous requests get no cookie', async () => {
+    const { service } = await makeService({ idleTimeoutMs: 60_000 });
+    const { ctx, response } = makeContext();
+    const session = await service.load(ctx);
+
+    await service.commit(ctx, session);
+    expect(response.setCookies().length).toBe(0);
   });
 });
 
