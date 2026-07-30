@@ -45,6 +45,19 @@ export class RedisBackplane implements IRealtimeBackplane {
   #publisher: IRedisBackplaneClient | undefined;
   #subscriber: IRedisBackplaneClient | undefined;
   #listener: ((channel: string, message: string) => void) | undefined;
+  /**
+   * The in-flight (or settled) open, so overlapping `connect()` calls join one
+   * attempt instead of each building its own client pair. Cleared on failure so
+   * a retry is possible, and on `close()` so a reopen actually reopens.
+   */
+  #opening: Promise<void> | undefined;
+  /**
+   * Bumped by `close()`. An open attempt captures this on entry and compares
+   * before publishing its connections, so a close that lands mid-attempt retires
+   * them instead of letting them arrive on a closed backplane with nothing left
+   * holding a reference to shut them down.
+   */
+  #generation = 0;
 
   /**
    * @param options - The Redis arm's options
@@ -81,20 +94,69 @@ export class RedisBackplane implements IRealtimeBackplane {
     return this.#handlerErrors;
   }
 
-  /** Builds the client pair when needed, then subscribes. */
+  /**
+   * Builds the client pair when needed, then subscribes.
+   *
+   * Idempotent and safe to call concurrently: the open is memoized, so two
+   * overlapping calls join one attempt rather than each building — and leaking —
+   * its own pair of connections. A failed attempt leaves the instance
+   * unconnected with any connection it created already quit, and clears the memo
+   * so a later call retries. A `close()` arriving mid-attempt wins: the attempt
+   * retires whatever it built rather than publishing it.
+   *
+   * @throws {Error} Whatever the module load, connection construction, or
+   * SUBSCRIBE rejected with
+   */
   async connect(): Promise<void> {
-    if (this.#subscriber !== undefined) {
-      return;
+    const attempt = this.#opening ??= this.#open();
+    try {
+      await attempt;
+    } catch (error) {
+      // Only retract the attempt this call awaited. Clearing unconditionally
+      // would let a late waiter on an old failure wipe a newer attempt's memo,
+      // and the next connect() would then open a second, concurrent one.
+      if (this.#opening === attempt) {
+        this.#opening = undefined;
+      }
+      throw error;
     }
+  }
+
+  /**
+   * Performs one open attempt, publishing its clients to the instance only once
+   * the subscription is live.
+   *
+   * Nothing is assigned to `#publisher`/`#subscriber` until every step has
+   * succeeded, so a half-built attempt cannot be mistaken for a connection by
+   * `connect()`'s memo or leak a live socket past its own failure.
+   *
+   * @throws {Error} Whatever the module load, connection construction, or
+   * SUBSCRIBE rejected with
+   */
+  async #open(): Promise<void> {
+    const generation = this.#generation;
+    let publisher: IRedisBackplaneClient;
+    let subscriber: IRedisBackplaneClient;
+    // Injected connections belong to the caller: on failure they are left as
+    // they arrived, while connections built here are ours to clean up.
+    let owned = false;
 
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
-      this.#publisher = this.#options.client;
-      this.#subscriber = this.#options.subscriber;
+      publisher = this.#options.client;
+      subscriber = this.#options.subscriber;
     } else {
       const module = this.#options.module ?? await loadRedisModule();
       const url = this.#options.url as string;
-      this.#publisher = module.create(url);
-      this.#subscriber = module.create(url);
+      owned = true;
+      publisher = module.create(url);
+      try {
+        subscriber = module.create(url);
+      } catch (error) {
+        // The publisher is already live and no field references it yet, so this
+        // is the only chance to close it.
+        await this.#discard([publisher]);
+        throw error;
+      }
     }
 
     const listener = (channel: string, message: string): void => {
@@ -103,9 +165,65 @@ export class RedisBackplane implements IRealtimeBackplane {
       }
       this.#dispatch(message);
     };
+
+    subscriber.on('message', listener);
+    try {
+      await subscriber.subscribe(this.#topic);
+    } catch (error) {
+      subscriber.off('message', listener);
+      if (owned) {
+        await this.#discard([subscriber, publisher]);
+      }
+      throw error;
+    }
+
+    if (generation !== this.#generation) {
+      // A close() landed while this attempt was in flight. Publishing now would
+      // hand two live connections to a closed backplane, where nothing holds a
+      // reference to shut them down — so retire them here instead.
+      subscriber.off('message', listener);
+      await this.#unsubscribeQuietly(subscriber);
+      if (owned) {
+        await this.#discard([subscriber, publisher]);
+      }
+      return;
+    }
+
+    this.#publisher = publisher;
+    this.#subscriber = subscriber;
     this.#listener = listener;
-    this.#subscriber.on('message', listener);
-    await this.#subscriber.subscribe(this.#topic);
+  }
+
+  /**
+   * Leaves the topic without letting a failure escape.
+   *
+   * @param subscriber - The connection to unsubscribe
+   */
+  async #unsubscribeQuietly(subscriber: IRedisBackplaneClient): Promise<void> {
+    try {
+      await subscriber.unsubscribe(this.#topic);
+    } catch {
+      // Best-effort: this runs only on the superseded-by-close path, where the
+      // connection is being discarded anyway and there is no caller to inform.
+      return;
+    }
+  }
+
+  /**
+   * Quits connections abandoned by a failed open.
+   *
+   * @param clients - The connections to close
+   */
+  async #discard(clients: readonly IRedisBackplaneClient[]): Promise<void> {
+    for (const client of clients) {
+      try {
+        await client.quit();
+      } catch {
+        // Best-effort: the open's own failure is what the caller needs to see,
+        // so a rollback quit must not mask it.
+        continue;
+      }
+    }
   }
 
   async publish(frame: RealtimeFrame): Promise<void> {
@@ -121,6 +239,10 @@ export class RedisBackplane implements IRealtimeBackplane {
   }
 
   async close(): Promise<void> {
+    // Invalidate any open still in flight before reading the fields below: it
+    // has not published its connections yet, so this is what tells it to retire
+    // them rather than arrive after the shutdown.
+    this.#generation++;
     this.#handlers.clear();
     const subscriber = this.#subscriber;
     const publisher = this.#publisher;
@@ -128,6 +250,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#subscriber = undefined;
     this.#publisher = undefined;
     this.#listener = undefined;
+    // Drop the memoized open, or a connect() after this close would await the
+    // already-resolved attempt and return without reconnecting.
+    this.#opening = undefined;
 
     if (subscriber !== undefined) {
       if (listener !== undefined) {
