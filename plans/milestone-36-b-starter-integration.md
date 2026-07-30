@@ -25,8 +25,8 @@ misinjects silently when constructor arguments are reordered.
      injected service, plus a "Coming from NestJS" section in all three starter READMEs.
 - **NOT this milestone:** config-key indirection (`urlFromConfig` / `secretFromConfig`) — deferred
   with cause in §9, it needs a kernel answer this plan does not have; the full-stack React Router
-  app skeleton adapted from B2BAdmin (M36 C6) — deferred in §9, it cannot be source-verified from
-  this workspace; committed example applications under `apps/*` — Milestone 37 (see C3); the M34b
+  app skeleton adapted from B2BAdmin (M36 C6) — deferred in §9 on scope and on the absent session
+  capability; committed example applications under `apps/*` — Milestone 37 (see C3); the M34b
   `errorHandler` priority defect — its own `fix/cli-error-handler-priority` branch, per M36 §9.
 
 ## 1. Contracts verified from SOURCE (not names)
@@ -278,9 +278,22 @@ deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/f
 - **The full-stack React Router app skeleton** adapted from the B2BAdmin
   `feature → service → lib →
   model` layering, with its cross-cutting `lib/` rewired onto the
-  plugins through the M44 `loadContext` bridge (M36 C6, M44 §9) — **deferred to M36c**. It depends
-  on an external reference that is not in this workspace, so every claim about what it adapts would
-  be unverified.
+  plugins through the M44 `loadContext` bridge (M36 C6, M44 §9) — **deferred to M36c**. The
+  reference is available at `/home/dkpaul91/Projects/B2BAdmin` (React Router v7 framework mode, 240
+  tracked files), so this is no longer blocked on verifiability; it is deferred on scope and on one
+  unresolved capability. Seven of its eight cross-cutting concerns delegate to shipped plugins:
+  `app/lib/csrf.server.ts` to `http-security-plugin`, `app/lib/sse.server.ts` to `sse-plugin`,
+  `app/lib/kv.server.ts` to `secrets-plugin`'s Azure provider, `app/lib/http/xior.server.ts` to
+  `@hono-enterprise/sdk`, `app/lib/appinsights-bootstrap.server.ts` and
+  `app/lib/service-logger.server.ts` to `telemetry-plugin` and `logger-plugin`,
+  `app/lib/route-guards.server.ts` to `auth-plugin`'s guard factories, and
+  `app/config/services.server.ts` to the M44 `loadContext` bridge. The eighth has no target: **this
+  framework has no session capability.** `packages/common/src/tokens.ts` declares no `SESSION` token
+  and `packages/auth-plugin/src` contains no session or cookie surface at all, while
+  `app/lib/session.server.ts` is the largest of these files at 140 lines (with
+  `cookie-attrs.server.ts`, `country-session.ts`, and `microsoft-oauth-state.server.ts` beside it).
+  M36c must decide whether cookie sessions stay an app concern inside the skeleton, or become a
+  capability — and the second answer is its own milestone, not a line item.
 - **Committed example applications** under `apps/*` — Milestone 37 (C3). The runnable showcase here
   is the project `honoe new --template nest` produces.
 - **A `honoe new --starter` path** consuming the starter libraries — still deferred (M36 §9, C2).
