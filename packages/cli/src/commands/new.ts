@@ -24,9 +24,11 @@ import {
 import {
   getTemplate,
   listTemplates,
+  type LocalImport,
   type MiddlewareWiring,
   MINIMAL_PLUGINS,
   packagesOf,
+  type TemplateFile,
   type Wiring,
 } from '../templates/registry.ts';
 import { deriveNames } from '../utils/names.ts';
@@ -85,15 +87,18 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
 function configModule(
   plugins: readonly Wiring[],
   middleware: readonly MiddlewareWiring[],
+  localImports: readonly LocalImport[] = [],
 ): string {
   const imports = [
     `import { createApplication } from '@hono-enterprise/kernel';`,
     `import type { IApplication } from '@hono-enterprise/common';`,
     ...plugins.map((p) => `import { ${p.symbol} } from '@hono-enterprise/${p.pkg}';`),
     ...middleware.map((m) => `import { ${m.symbol} } from '@hono-enterprise/${m.pkg}';`),
+    // Project-local last, so the generated file reads package imports first.
+    ...localImports.map((l) => `import { ${l.symbols.join(', ')} } from '${l.from}';`),
   ].join('\n');
 
-  const pluginList = plugins.map((p) => `      ${p.symbol}(),`).join('\n');
+  const pluginList = plugins.map((p) => `      ${p.symbol}(${p.args ?? ''}),`).join('\n');
   const middlewareLines = middleware.length === 0 ? '' : `\n${
     middleware
       .map((m) => `  app.middleware.add(${m.symbol}()${renderAddOptions(m.addOptions)});`)
@@ -233,6 +238,9 @@ function npmDependencies(...wirings: readonly (readonly Wiring[])[]): Record<str
  * @param runtime - The selected runtime target
  * @param plugins - Plugins the generated `honoe.config.ts` registers
  * @param middleware - Middleware the generated `honoe.config.ts` adds
+ * @param localImports - Project-local imports the config module needs, for a
+ * template whose plugin arguments name a class it also emits
+ * @param extras - Extra template source files, appended to the fixed set
  * @returns The files to create, relative to the project root
  */
 function projectFiles(
@@ -240,6 +248,8 @@ function projectFiles(
   runtime: TargetRuntime,
   plugins: readonly Wiring[],
   middleware: readonly MiddlewareWiring[],
+  localImports: readonly LocalImport[] = [],
+  extras: readonly TemplateFile[] = [],
 ): readonly GeneratedFile[] {
   const readme = `# ${projectName}
 
@@ -338,7 +348,10 @@ ${PROGRAM_NAME} generate --help
     });
   }
 
-  files.push({ path: CONFIG_MODULE, contents: configModule(plugins, middleware) });
+  files.push({
+    path: CONFIG_MODULE,
+    contents: configModule(plugins, middleware, localImports),
+  });
 
   if (runtime === 'cloudflare-workers') {
     files.push({ path: 'src/index.ts', contents: workersEntry() });
@@ -352,6 +365,12 @@ compatibility_flags = ["nodejs_compat"]
     });
   } else {
     files.push({ path: 'main.ts', contents: serveEntry() });
+  }
+
+  // Template source files last. Any path colliding with the fixed set above is
+  // reported by the caller's overwrite check rather than silently winning.
+  for (const extra of extras) {
+    files.push({ path: extra.path, contents: extra.contents });
   }
 
   return files;
@@ -437,7 +456,14 @@ export async function runNewCommand(
   }
 
   const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), projectName);
-  const files = projectFiles(projectName, runtime, plugins, middleware).map((file) => ({
+  const files = projectFiles(
+    projectName,
+    runtime,
+    plugins,
+    middleware,
+    template?.localImports ?? [],
+    template?.files ?? [],
+  ).map((file) => ({
     path: joinPath(root, file.path),
     contents: file.contents,
   }));

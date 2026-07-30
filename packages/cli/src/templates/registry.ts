@@ -11,6 +11,7 @@
 
 import type { TargetRuntime, TemplateName } from '../constants.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
+import { NEST_TEMPLATE } from './nest.ts';
 import { REST_TEMPLATE, RUNTIME_WIRING } from './rest.ts';
 
 /**
@@ -21,6 +22,49 @@ export interface Wiring {
   readonly pkg: string;
   /** The exported symbol, e.g. `ConfigPlugin`. */
   readonly symbol: string;
+  /**
+   * Source rendered verbatim as the call's argument list, without the enclosing
+   * parentheses — e.g. `{ controllers: [GreetingController] }` produces
+   * `DecoratorPlugin({ controllers: [GreetingController] })`.
+   *
+   * Omitted → the symbol is called with no arguments, which is what every
+   * template did before this field existed.
+   *
+   * A rendered string rather than a structured option object: the value is
+   * authored by a template module in this repo and never taken from user input,
+   * so there is no injection surface, and an option-object AST would be a second
+   * serializer to keep in step with TypeScript syntax for no gain. Any
+   * identifier the string names must be brought into scope by the template's
+   * {@linkcode TemplateDefinition.localImports}, and the e2e drift gate
+   * type-checks the generated project, so an `args` string that does not compile
+   * fails the build.
+   */
+  readonly args?: string;
+}
+
+/**
+ * One import of a project-local module emitted into `honoe.config.ts`.
+ *
+ * Needed because a {@linkcode Wiring.args} string can name a class the template
+ * also emits as a source file; without the import, the generated config would
+ * reference an undeclared identifier.
+ */
+export interface LocalImport {
+  /** Named exports to import. */
+  readonly symbols: readonly string[];
+  /** Module specifier, relative to the project root, e.g. `./src/greeting-controller.ts`. */
+  readonly from: string;
+}
+
+/**
+ * One extra source file a template emits, in addition to the fixed project file
+ * set every scaffolded project gets.
+ */
+export interface TemplateFile {
+  /** Path relative to the project root. */
+  readonly path: string;
+  /** File contents. */
+  readonly contents: string;
 }
 
 /**
@@ -61,6 +105,19 @@ export interface TemplateDefinition {
   /** Middleware added with `app.middleware.add(...)` after construction. */
   readonly middleware: readonly MiddlewareWiring[];
   /**
+   * Project-local imports emitted into `honoe.config.ts`, above the package
+   * imports. Present only for templates whose {@linkcode Wiring.args} name a
+   * class the template also emits.
+   */
+  readonly localImports?: readonly LocalImport[];
+  /**
+   * Extra source files this template emits, appended to the fixed project file
+   * set. Paths are project-relative and must not collide with the fixed set —
+   * the overwrite check in `commands/new.ts` reports a collision rather than
+   * silently winning.
+   */
+  readonly files?: readonly TemplateFile[];
+  /**
    * Runtime targets this template refuses, mapped to the reason shown to the
    * user. Refusing at scaffold time beats a project that deploys and then
    * fails at first use.
@@ -79,6 +136,7 @@ export const MINIMAL_PLUGINS: readonly Wiring[] = [RUNTIME_WIRING];
 const TEMPLATE_REGISTRY: ReadonlyMap<string, TemplateDefinition> = new Map([
   [REST_TEMPLATE.name, REST_TEMPLATE],
   [MICROSERVICE_TEMPLATE.name, MICROSERVICE_TEMPLATE],
+  [NEST_TEMPLATE.name, NEST_TEMPLATE],
 ]);
 
 /**
