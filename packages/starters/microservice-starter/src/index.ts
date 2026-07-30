@@ -1,10 +1,16 @@
 /**
  * @module
  *
- * Microservice starter bundle: REST starter plus messaging, queue, telemetry, resilience.
+ * Microservice starter bundle — REST starter plus messaging, queue, telemetry, and resilience.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * Provides a single factory {@linkcode createMicroserviceApp} that returns a fully wired
+ * {@linkcode IKernelApplication} with the curated microservice plugin set and error-handling
+ * middleware. Also exposes the option type {@linkcode MicroserviceStarterOptions} and the
+ * plugin builder {@linkcode buildMicroservicePlugins} for advanced composition.
+ *
+ * @see {@link https://jsr.io/@hono-enterprise/microservice-starter}
  */
-export {};
+
+export { createMicroserviceApp } from './app.ts';
+export type { MicroserviceStarterOptions } from './options.ts';
+export { buildMicroservicePlugins } from './app.ts';

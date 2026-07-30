@@ -1,10 +1,16 @@
 /**
  * @module
  *
- * Full-stack starter bundle: every capability plugin with sensible defaults.
+ * Full-stack starter bundle — every capability plugin with sensible defaults.
  *
- * Package stub created in Milestone 0. The implementation follows in this
- * package's milestone — see ROADMAP.md. Nothing is exported yet; every future
- * export must be documented in PUBLIC_API.md (AI_GUIDELINES.md §10).
+ * Provides a single factory {@linkcode createFullStackApp} that returns a fully wired
+ * {@linkcode IKernelApplication} with the curated full-stack plugin set and error-handling
+ * middleware. Also exposes the option type {@linkcode FullStackStarterOptions} and the
+ * plugin builder {@linkcode buildFullStackPlugins} for advanced composition.
+ *
+ * @see {@link https://jsr.io/@hono-enterprise/full-stack-starter}
  */
-export {};
+
+export { createFullStackApp } from './app.ts';
+export type { FullStackStarterOptions } from './options.ts';
+export { buildFullStackPlugins } from './app.ts';

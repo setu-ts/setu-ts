@@ -4787,7 +4787,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 34        | ✅     | cli                  |
 | 34b       | ✅     | cli                  |
 | 35        | ✅     | sdk                  |
-| 36        | ⬜     | starters             |
+| 36        | ✅     | starters             |
 | 37        | ⬜     | examples             |
 | 38        | ⬜     | documentation        |
 | 39        | ⬜     | docker/kubernetes    |

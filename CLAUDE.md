@@ -676,6 +676,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `PUBLISHED_PACKAGES` Tier 3, so `release:verify` now reports 38 publishable packages; the next
   release must run `release:create-packages` and `release:link-repos` before the first sdk publish,
   because tokenless OIDC requires the repo link) — complete (PR #98)
+- **Milestone 36** (`packages/starters/rest-starter`, `packages/starters/microservice-starter`,
+  `packages/starters/full-stack-starter` — opinionated plugin composition libraries:
+  `createRestApp`, `createMicroserviceApp`, `createFullStackApp` with pre-wired plugin sets, option
+  arms, and Workers- portability documentation) — complete (PR #106)
 - **Alpha release `v0.1.0-alpha.3`** — on `release/v0.1.0-alpha.3`, published 2026-07-30 (PR #99,
   tag at the merge commit `672b2f5`; CI published it, one green `Publish to JSR` job). **38
   packages** — `sdk` (M35) and `realtime-backplane-plugin` (M47) published for the first time; only
@@ -745,8 +749,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   response, and a store write on the store strategy), which is documented rather than hidden, and it
   deliberately does NOT extend absolute expiry — a test pins it apart from `rolling`. All 19 changed
   `src` files ≥96% branch/function/line) — complete (PR #105)
-- **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes this
-  milestone; M37–M40 follow unless reprioritized.
+- **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes M48;
+  M37–M40 follow unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
