@@ -786,7 +786,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `ROADMAP.md:4601`; ROADMAP had **no M36b section and no `36b` Progress row** at all, both added;
   the ROADMAP NestJS-comparison caveat still claimed sessions did not exist after M48 shipped them;
   and four cross-package starter README links were relative, which returns 400 on jsr.io) — complete
-  (PR pending)
+  (PR #107)
 - **Next milestone** — **Milestone 36c** (React Router app skeleton adapted from B2BAdmin +
   config-key indirection; consumes M48's session/CSRF capability, so it is now deferred on scope
   alone), then M37–M40 unless reprioritized.
