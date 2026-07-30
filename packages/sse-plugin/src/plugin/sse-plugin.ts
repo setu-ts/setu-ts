@@ -59,9 +59,13 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         // Said once at startup because the alternative is silent: behind more
         // than one replica a channel broadcast reaches only the clients on this
         // process, which looks like partial delivery rather than an error.
+        // The transport is named because the backplane plugin defaults to
+        // 'memory', a single-process bus: registering it bare would silence this
+        // line without fanning anything out.
         ctx.logger?.info(
           'sse: channels broadcast in-process only. Register RealtimeBackplanePlugin ' +
-            'from @hono-enterprise/realtime-backplane-plugin to fan out across replicas.',
+            "from @hono-enterprise/realtime-backplane-plugin with a 'redis' or " +
+            "'messaging' transport to fan out across replicas.",
         );
       }
 

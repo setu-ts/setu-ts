@@ -17,6 +17,7 @@ import { WebSocketPlugin } from '../../src/plugin/websocket-plugin.ts';
 import { WebSocketService } from '../../src/services/websocket-service.ts';
 import { WebSocketUnavailableError } from '../../src/errors/websocket-errors.ts';
 import {
+  createFakeLogger,
   createFakeRuntime,
   createFakeTransport,
   upgradeRequest,
@@ -59,23 +60,15 @@ function createContext(adapter: IHttpAdapter, withLogger = false): Harness {
   const registered = new Map<string, unknown>();
   const health = new Map<string, () => Promise<HealthCheckResult>>();
   const closeHooks: (() => void)[] = [];
-  const infoLogs: string[] = [];
   const runtime = createFakeRuntime();
 
+  // The shared fixture is typed `FakeLogger extends ILogger`, so the compiler
+  // holds it to the full contract — a hand-rolled literal in this `as unknown`
+  // cast would not be checked at all.
+  const fake = createFakeLogger();
   // Omitted rather than set to undefined, matching a context with no logger
   // capability registered — `exactOptionalPropertyTypes` distinguishes the two.
-  const logger = withLogger
-    ? {
-      logger: {
-        info: (message: string): void => {
-          infoLogs.push(message);
-        },
-        warn: (): void => {},
-        error: (): void => {},
-        debug: (): void => {},
-      },
-    }
-    : {};
+  const logger = withLogger ? { logger: fake } : {};
 
   const ctx = {
     runtime,
@@ -108,7 +101,19 @@ function createContext(adapter: IHttpAdapter, withLogger = false): Harness {
     },
   } as unknown as IPluginContext;
 
-  return { ctx, registered, health, closeHooks, infoLogs };
+  return {
+    ctx,
+    registered,
+    health,
+    closeHooks,
+    // A getter, not a snapshot: the harness is built before `register()` runs,
+    // so an eagerly filtered array would always be empty.
+    get infoLogs(): string[] {
+      return fake.entries
+        .filter((entry) => entry.level === 'info')
+        .map((entry) => entry.message);
+    },
+  };
 }
 
 describe('WebSocketPlugin', () => {
@@ -216,6 +221,10 @@ describe('WebSocketPlugin scaling notice', () => {
     expect(harness.infoLogs.length).toBe(1);
     expect(harness.infoLogs[0]).toContain('rooms broadcast in-process only');
     expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+    // The transport must be named: the backplane plugin defaults to a
+    // single-process 'memory' bus, so registering it bare silences this notice
+    // without fanning anything out.
+    expect(harness.infoLogs[0]).toContain("'redis' or 'messaging' transport");
   });
 
   it('stays quiet when a backplane is registered', async () => {

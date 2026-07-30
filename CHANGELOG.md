@@ -9,12 +9,15 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **`websocket-plugin` and `sse-plugin` now say at startup that rooms and channels are
-  process-local** when no realtime backplane is registered — one `info` line naming the limitation
-  and the plugin that lifts it. Cross-replica fan-out has shipped since `0.1.0-alpha.3`, but a
-  single-replica app and a three-replica app behave identically right up to the point where two
-  thirds of your clients silently stop receiving broadcasts, with no error raised anywhere. Both
-  READMEs gain a **Scaling beyond one replica** section for the same reason. If you run a single
-  replica the line is informational; if you register `RealtimeBackplanePlugin`, it does not appear.
+  process-local** when no realtime backplane is registered — one `info` line naming the limitation,
+  the plugin that lifts it, and the transport it needs (`'redis'` or `'messaging'`; the backplane
+  plugin's default `'memory'` transport is a single-process bus, so registering it bare would
+  silence the notice without fanning anything out). Cross-replica fan-out has shipped since
+  `0.1.0-alpha.3`, but a single-replica app and a three-replica app behave identically right up to
+  the point where two thirds of your clients silently stop receiving broadcasts, with no error
+  raised anywhere. Both READMEs gain a **Scaling beyond one replica** section for the same reason.
+  If you run a single replica the line is informational and safe to ignore; registering a backplane
+  under the `REALTIME_BACKPLANE` token removes it.
 
 ### Fixed
 
@@ -25,7 +28,6 @@ All notable changes to this project are documented here. The format follows
 - **`sse-plugin`'s README named a method that does not exist.** Its named-channels example called
   `channel.broadcast(...)`; the committed `SseChannel` contract exposes `publish(...)` and no
   `broadcast`, so the snippet would not compile.
-
 - **`realtime-backplane-plugin`: `RedisBackplane.connect()` no longer leaks a connection on a failed
   open, and is safe to call concurrently.** The connected guard was only set after both connections
   had been constructed, so two overlapping calls each built their own pair — and if the second

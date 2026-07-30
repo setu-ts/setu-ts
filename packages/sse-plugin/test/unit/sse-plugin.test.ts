@@ -8,6 +8,7 @@ import { expect } from '@std/expect';
 import { SsePlugin } from '../../src/plugin/sse-plugin.ts';
 import { SseService } from '../../src/services/sse-service.ts';
 import type {
+  ILogger,
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
@@ -484,20 +485,29 @@ describe('SsePlugin scaling notice', () => {
     readonly infoLogs: string[];
   } {
     const infoLogs: string[] = [];
+    // Annotated, so the compiler holds the double to the whole ILogger surface.
+    // Inside the `as unknown as IPluginContext` cast below nothing would check a
+    // bare object literal, and a later `logger.child(...)` would fail here for a
+    // reason that has nothing to do with the code under test.
+    const logger: ILogger = {
+      level: 'info',
+      fatal: (): void => {},
+      error: (): void => {},
+      warn: (): void => {},
+      info: (message: string): void => {
+        infoLogs.push(message);
+      },
+      debug: (): void => {},
+      trace: (): void => {},
+      child: (): ILogger => logger,
+    };
     const ctx = {
       runtime: {
         setInterval: (): TimerHandle => ({} as TimerHandle),
         clearInterval: (): void => {},
         uuid: (): string => 'test-uuid',
       },
-      logger: {
-        info: (message: string): void => {
-          infoLogs.push(message);
-        },
-        warn: (): void => {},
-        error: (): void => {},
-        debug: (): void => {},
-      },
+      logger,
       services: {
         has: (token: string): boolean =>
           token === CAPABILITIES.REALTIME_BACKPLANE && backplane !== undefined,
@@ -521,6 +531,10 @@ describe('SsePlugin scaling notice', () => {
     expect(harness.infoLogs.length).toBe(1);
     expect(harness.infoLogs[0]).toContain('channels broadcast in-process only');
     expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+    // The transport must be named: the backplane plugin defaults to a
+    // single-process 'memory' bus, so registering it bare silences this notice
+    // without fanning anything out.
+    expect(harness.infoLogs[0]).toContain("'redis' or 'messaging' transport");
   });
 
   it('stays quiet when a backplane is registered', async () => {

@@ -149,7 +149,8 @@ delivery, not a failure, which is what makes it easy to ship.
 
 Registering
 [`@hono-enterprise/realtime-backplane-plugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/realtime-backplane-plugin/README.md)
-is the entire fix. This plugin resolves it _optionally_, so nothing else changes:
+**with a cross-process transport** is the entire fix. This plugin resolves it _optionally_, so
+nothing else changes:
 
 ```typescript
 import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
@@ -162,6 +163,11 @@ createApplication({
   ],
 });
 ```
+
+**The transport matters, not just the plugin.** `RealtimeBackplanePlugin()` defaults to
+`transport: 'memory'` — a real bus, but a _single-process_ one. Registering it bare silences the
+startup notice described below without fanning anything out. Use `'redis'`, or `'messaging'` to
+reuse whichever broker `MessagingPlugin` already registered.
 
 Rooms now fan out across every replica sharing that transport, including
 `RoomBroadcastOptions.except` — connection ids are UUIDs, so the exclusion is honored cluster-wide.
