@@ -50,12 +50,12 @@ export function buildMicroservicePlugins(options: MicroserviceStarterOptions = {
  * import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
  *
  * const app = createMicroserviceApp();
- * app.get('/hello', () => 'Hello world');
+ * app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
  * await app.start({ port: 3000 });
  * ```
  */
 export function createMicroserviceApp(options?: MicroserviceStarterOptions): IKernelApplication {
-  const plugins = buildMicroservicePlugins(options ?? {});
+  const plugins = buildMicroservicePlugins(options);
   const app = createApplication({ plugins });
 
   // Add error handler as outermost middleware (priority 0) — required by

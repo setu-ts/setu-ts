@@ -136,7 +136,11 @@ describe('every template', () => {
     }
   });
 
-  it('never references a starter package, which exports nothing', () => {
+  // Templates emit INLINE wiring on purpose, so a scaffolded project owns an
+  // explicit, editable plugin list. (Before M36 the starters were also empty
+  // stubs; they are real composition libraries now, so the reason is the
+  // inline-wiring choice, not emptiness. A `--starter` flag is future work.)
+  it('never references a starter package', () => {
     for (const template of listTemplates()) {
       for (const wiring of [...template.plugins, ...template.middleware]) {
         expect(wiring.pkg).not.toContain('starter');

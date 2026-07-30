@@ -7,6 +7,22 @@ import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import type { RestStarterOptions } from '../../src/options.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
 
+/**
+ * A valid `auth` arm. `AuthPluginOptions` requires BOTH `jwt` and `rbac`
+ * (neither is optional), so this is the minimum shape that constructs.
+ */
+const AUTH_FIXTURE: RestStarterOptions = {
+  auth: {
+    jwt: { secret: 'starter-test-secret' },
+    rbac: {
+      roles: {
+        admin: { permissions: ['*'], inherits: ['user'] },
+        user: { permissions: ['users:read'] },
+      },
+    },
+  },
+};
+
 describe('rest-starter / buildRestPlugins', () => {
   it('returns exactly the REST plugin names', () => {
     const plugins = buildRestPlugins();
@@ -39,6 +55,18 @@ describe('rest-starter / buildRestPlugins', () => {
     const names = plugins.map((p) => p.name);
     expect(names).not.toContain('database-plugin');
   });
+
+  it('includes auth when provided', () => {
+    const plugins = buildRestPlugins(AUTH_FIXTURE);
+    const names = plugins.map((p) => p.name);
+    expect(names).toContain('auth-plugin');
+  });
+
+  it('does not include auth when omitted', () => {
+    const plugins = buildRestPlugins();
+    const names = plugins.map((p) => p.name);
+    expect(names).not.toContain('auth-plugin');
+  });
 });
 
 describe('rest-starter / createRestApp', () => {
@@ -68,5 +96,27 @@ describe('rest-starter / createRestApp', () => {
     app.router.get('/test', (ctx) => ctx.response.text('ok'));
     await app.start();
     expect(app.services.has(CAPABILITIES.DATABASE)).toBe(false);
+  });
+
+  it('registers AUTH capability when auth arm is provided', async () => {
+    const app = createRestApp(AUTH_FIXTURE);
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+    await app.start();
+    expect(app.services.has(CAPABILITIES.AUTH)).toBe(true);
+  });
+
+  it('does NOT register AUTH capability when auth arm is omitted', async () => {
+    const app = createRestApp();
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+    await app.start();
+    expect(app.services.has(CAPABILITIES.AUTH)).toBe(false);
+  });
+
+  it('still serves requests with the auth arm registered', async () => {
+    const app = createRestApp(AUTH_FIXTURE);
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+    await app.start();
+    const response = await app.inject({ method: 'GET', url: '/test' });
+    expect(response.statusCode).toBe(200);
   });
 });

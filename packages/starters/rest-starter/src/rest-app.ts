@@ -62,12 +62,12 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
  * import { createRestApp } from '@hono-enterprise/rest-starter';
  *
  * const app = createRestApp();
- * app.get('/hello', () => 'Hello world');
+ * app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
  * await app.start({ port: 3000 });
  * ```
  */
 export function createRestApp(options?: RestStarterOptions): IKernelApplication {
-  const plugins = buildRestPlugins(options ?? {});
+  const plugins = buildRestPlugins(options);
   const app = createApplication({ plugins });
 
   // Add error handler as outermost middleware (priority 0) — required by

@@ -97,7 +97,7 @@ const app = createFullStackApp({
   mail: { provider: 'log' },
 });
 
-app.get('/health', (ctx) => ctx.response.json({ status: 'ok' }));
+app.router.get('/health', (ctx) => ctx.response.json({ status: 'ok' }));
 
 await app.start({ port: 3002 });
 ```

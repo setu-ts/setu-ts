@@ -28,7 +28,7 @@ import { createRestApp } from '@hono-enterprise/rest-starter';
 
 const app = createRestApp();
 
-app.get('/hello', () => 'Hello world');
+app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
 
 await app.start({ port: 3000 });
 ```

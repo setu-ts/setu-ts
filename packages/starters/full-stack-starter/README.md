@@ -29,7 +29,7 @@ import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
 
 const app = createFullStackApp();
 
-app.get('/hello', () => 'Hello world');
+app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
 
 await app.start({ port: 3000 });
 ```

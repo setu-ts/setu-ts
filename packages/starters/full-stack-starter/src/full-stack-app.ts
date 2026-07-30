@@ -69,12 +69,12 @@ export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IP
  * import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
  *
  * const app = createFullStackApp();
- * app.get('/hello', () => 'Hello world');
+ * app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
  * await app.start({ port: 3000 });
  * ```
  */
 export function createFullStackApp(options?: FullStackStarterOptions): IKernelApplication {
-  const plugins = buildFullStackPlugins(options ?? {});
+  const plugins = buildFullStackPlugins(options);
   const app = createApplication({ plugins });
 
   // Add error handler as outermost middleware (priority 0) — required by

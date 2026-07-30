@@ -28,7 +28,7 @@ import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
 
 const app = createMicroserviceApp();
 
-app.get('/hello', () => 'Hello world');
+app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));
 
 await app.start({ port: 3000 });
 ```

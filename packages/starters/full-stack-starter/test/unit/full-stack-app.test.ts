@@ -5,7 +5,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { buildFullStackPlugins, createFullStackApp } from '../../src/index.ts';
 import type { FullStackStarterOptions } from '../../src/options.ts';
-// CAPABILITIES not needed in this test file
+import { CAPABILITIES } from '@hono-enterprise/common';
 import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
 import type { IPlugin } from '@hono-enterprise/common';
 
@@ -50,7 +50,9 @@ describe('full-stack-starter / buildFullStackPlugins', () => {
     expect(names).toContain('feature-flags-plugin');
   });
 
-  // Note: notifications test uses minimal valid shape - see issue tracking
+  // An empty `channels` map is the minimal shape `NotificationPluginOptions`
+  // accepts. Configuring a real channel is the notification-plugin's own
+  // concern; here the arm only needs to prove it is threaded through.
   it('registers notifications when provided', () => {
     const opts: FullStackStarterOptions = {
       notifications: {
@@ -93,7 +95,19 @@ describe('full-stack-starter / createFullStackApp', () => {
     expect(response.body).toBe('Hello world');
   });
 
-  it('typed-fixture arms exercise all full-stack options', () => {
+  // §3.2.1: the default composition must claim the BARE cache token. If a starter
+  // ever passed a `name` through, the instance would move to a derived token and
+  // every consumer resolving CAPABILITIES.CACHE would fail at request time.
+  it('default composition claims the bare CAPABILITIES.CACHE token', async () => {
+    const app = createFullStackApp();
+    await app.start();
+    expect(app.services.has(CAPABILITIES.CACHE)).toBe(true);
+  });
+
+  // The typed fixture is a compile-time check (a wrong shape fails `deno check`),
+  // but the runtime assertion is what proves the arms are actually threaded through:
+  // the app must BOOT under non-default options and register each capability.
+  it('boots under NON-default arms and registers every full-stack capability', async () => {
     const opts: FullStackStarterOptions = {
       cache: { store: 'memory' },
       events: {},
@@ -105,6 +119,18 @@ describe('full-stack-starter / createFullStackApp', () => {
       mail: { provider: 'log' },
     };
     const app = createFullStackApp(opts);
-    expect(app).toBeDefined();
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+    await app.start();
+
+    expect(app.services.has(CAPABILITIES.CACHE)).toBe(true);
+    expect(app.services.has(CAPABILITIES.EVENTS)).toBe(true);
+    expect(app.services.has(CAPABILITIES.CQRS)).toBe(true);
+    expect(app.services.has(CAPABILITIES.AUDIT)).toBe(true);
+    expect(app.services.has(CAPABILITIES.SECRETS)).toBe(true);
+    expect(app.services.has(CAPABILITIES.STORAGE)).toBe(true);
+    expect(app.services.has(CAPABILITIES.MAIL)).toBe(true);
+
+    const response = await app.inject({ method: 'GET', url: '/test' });
+    expect(response.statusCode).toBe(200);
   });
 });
