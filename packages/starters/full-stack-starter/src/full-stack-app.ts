@@ -5,7 +5,7 @@ import { createApplication } from '@hono-enterprise/kernel';
 import type { IKernelApplication } from '@hono-enterprise/kernel';
 import type { IPlugin } from '@hono-enterprise/common';
 import { errorHandler } from '@hono-enterprise/exceptions';
-// Import microservice-starter via relative path to enable cross-tier composition
+// Import microservice-starter via bare specifier to enable cross-tier composition
 import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
 import type { FullStackStarterOptions } from './options.ts';
 import { CachePlugin } from '@hono-enterprise/cache-plugin';

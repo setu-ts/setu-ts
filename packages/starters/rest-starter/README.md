@@ -59,16 +59,20 @@ const app = createRestApp(options);
 
 ### Advanced Plugin Composition
 
-For scenarios requiring custom plugin ordering or selective inclusion, export the `buildRestPlugins`
-function to build a custom plugin array manually:
+For scenarios requiring custom plugin ordering or selective inclusion, use the `buildRestPlugins`
+builder function together with `createApplication` from the kernel:
 
 ```typescript
-import { buildRestPlugins, createApplication } from '@hono-enterprise/rest-starter';
+import { buildRestPlugins } from '@hono-enterprise/rest-starter';
+import { createApplication } from '@hono-enterprise/kernel';
 
 const app = createApplication({
   plugins: buildRestPlugins({
-    database: true, // enable with defaults
-    auth: {/* custom auth options */},
+    database: { type: 'memory' }, // provide options object; omit to exclude
+    auth: {
+      jwt: { secret: 'test-secret' },
+      rbac: { roles: {} },
+    },
   }),
 });
 ```
@@ -90,6 +94,36 @@ const app = createApplication({
 | AuthPlugin         | Optional — authentication middleware |
 
 Gated plugins (`database`, `auth`) are only included when explicitly provided in options.
+
+### Workers Portability
+
+All plugins bundled in this starter are compatible with Cloudflare Workers (edge runtime). The REST
+starter is fully Workers-portable — every plugin uses only standard Web APIs (`fetch`, `Request`,
+`Response`) and has no filesystem or network-socket dependencies. You can deploy an app built with
+`rest-starter` directly to Workers via `export default { fetch: app.fetch }`.
+
+### Multi-instance Restriction + Escape Hatch
+
+The four multi-instance plugins (**cache**, **database**, **queue**, **messaging**) accept an
+`options.name` parameter that creates a derived capability token. The starter registers **one
+instance per arm on the bare token** (e.g., `CAPABILITIES.CACHE`). Setting `name` through a starter
+arm moves the plugin off the bare token, which will break any code that resolves the capability
+(including health checks and documentation examples).
+
+The starter does **not** support setting `name` through its option arms. If you need a second
+instance (e.g., a session cache distinct from the default), register it manually after the starter
+returns:
+
+```typescript
+import { createRestApp } from '@hono-enterprise/rest-starter';
+import { CachePlugin } from '@hono-enterprise/cache-plugin';
+
+const app = createRestApp();
+app.register(CachePlugin({ name: 'session' }));
+```
+
+This escape hatch works because `createRestApp` returns an un-started `IKernelApplication` that
+accepts additional registrations.
 
 ## See Also
 

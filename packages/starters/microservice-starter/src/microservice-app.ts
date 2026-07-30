@@ -5,7 +5,7 @@ import { createApplication } from '@hono-enterprise/kernel';
 import type { IKernelApplication } from '@hono-enterprise/kernel';
 import type { IPlugin } from '@hono-enterprise/common';
 import { errorHandler } from '@hono-enterprise/exceptions';
-// Import rest-starter via relative path to enable cross-tier composition
+// Import rest-starter via bare specifier to enable cross-tier composition
 import { buildRestPlugins } from '@hono-enterprise/rest-starter';
 import type { MicroserviceStarterOptions } from './options.ts';
 import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';

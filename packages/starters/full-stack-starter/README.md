@@ -73,16 +73,17 @@ const app = createFullStackApp(options);
 
 ### Advanced Plugin Composition
 
-Use `buildFullStackPlugins` to construct a custom plugin array for advanced scenarios requiring
-selective inclusion or different ordering:
+Use `buildFullStackPlugins` together with `createApplication` from the kernel to construct a custom
+plugin array for advanced scenarios requiring selective inclusion or different ordering:
 
 ```typescript
-import { buildFullStackPlugins, createApplication } from '@hono-enterprise/full-stack-starter';
+import { buildFullStackPlugins } from '@hono-enterprise/full-stack-starter';
+import { createApplication } from '@hono-enterprise/kernel';
 
 const app = createApplication({
   plugins: buildFullStackPlugins({
-    cache: true,
-    events: true,
+    cache: {}, // provide options object; omit to use default memory store
+    events: {}, // provide options object; omit to use in-memory bus default
     reactRouter: {/* custom SSR config */},
     // Omit featureFlags, notifications, multiTenancy if not needed
   }),
@@ -123,6 +124,40 @@ const app = createApplication({
 
 Gated plugins (`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`) are only registered
 when explicitly provided in options.
+
+### Workers Portability
+
+This starter bundles **MessagingPlugin** and **QueuePlugin**, which require raw network sockets and
+are therefore **not compatible with Cloudflare Workers**. Additionally, **StoragePlugin** (local
+filesystem), **MailPlugin** (SMTP), and **SchedulerPlugin** (timers) have Node/Deno/Bun-specific
+dependencies that degrade or fail on Workers. The REST base plugins and CachePlugin/EventsPlugin are
+edge-safe. Use this starter on Node.js, Deno, or Bun only — matching the CLI's refusal of
+`--template microservice --runtime cloudflare-workers` (microservice inherits these constraints).
+
+### Multi-instance Restriction + Escape Hatch
+
+The four multi-instance plugins (**cache**, **database**, **queue**, **messaging**) accept an
+`options.name` parameter that creates a derived capability token. The starter registers **one
+instance per arm on the bare token** (e.g., `CAPABILITIES.CACHE`, `CAPABILITIES.MESSAGING`). Setting
+`name` through a starter arm moves the plugin off the bare token, which will break any code that
+resolves the capability (including health checks and documentation examples).
+
+The starter does **not** support setting `name` through its option arms. If you need a second
+instance (e.g., a session cache distinct from the default, or a separate queue for dead-letter
+processing), register it manually after the starter returns:
+
+```typescript
+import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
+import { CachePlugin } from '@hono-enterprise/cache-plugin';
+import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+
+const app = createFullStackApp();
+app.register(CachePlugin({ name: 'session' }));
+app.register(QueuePlugin({ name: 'dead-letter' }));
+```
+
+This escape hatch works because `createFullStackApp` returns an un-started `IKernelApplication` that
+accepts additional registrations.
 
 ## See Also
 

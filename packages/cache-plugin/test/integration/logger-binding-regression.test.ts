@@ -25,7 +25,7 @@ describe('Cache plugin resolveLogger regression', () => {
 
     // Starting the app should NOT throw - this exercises resolveLogger's debug call during CachePlugin registration
     // With the buggy resolveLogger, this would throw: TypeError: Cannot read properties of undefined (reading 'ConsoleLogger')
-    await expect(app.start()).not.toThrow();
+    await expect(app.start()).resolves.toBeUndefined();
 
     // Clean up
     await app.stop();
