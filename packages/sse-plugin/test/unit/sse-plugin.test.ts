@@ -483,8 +483,11 @@ describe('SsePlugin scaling notice', () => {
   function contextWithLogger(backplane?: IRealtimeBackplane): {
     readonly ctx: IPluginContext;
     readonly infoLogs: string[];
+    /** The service registered under the SSE token, if registration got that far. */
+    service(): ISseService | undefined;
   } {
     const infoLogs: string[] = [];
+    let registered: ISseService | undefined;
     // Annotated, so the compiler holds the double to the whole ILogger surface.
     // Inside the `as unknown as IPluginContext` cast below nothing would check a
     // bare object literal, and a later `logger.child(...)` would fail here for a
@@ -512,13 +515,21 @@ describe('SsePlugin scaling notice', () => {
         has: (token: string): boolean =>
           token === CAPABILITIES.REALTIME_BACKPLANE && backplane !== undefined,
         get: <T>(): T => backplane as T,
-        register: (): void => {},
+        register: <T>(token: string, value: T): void => {
+          if (token === CAPABILITIES.SSE) {
+            registered = value as ISseService;
+          }
+        },
       },
       health: { register: (): void => {} },
       lifecycle: { onClose: (): void => {} },
     } as unknown as IPluginContext;
 
-    return { ctx, infoLogs };
+    return {
+      ctx,
+      infoLogs,
+      service: (): ISseService | undefined => registered,
+    };
   }
 
   it('says at startup that channels are process-local when no backplane is registered', async () => {
@@ -542,7 +553,11 @@ describe('SsePlugin scaling notice', () => {
 
     await (SsePlugin({ scalingNotice: false }) as IPlugin).register(harness.ctx);
 
+    // Suppresses the message only. Asserting the service still registered is what
+    // separates that from a guard that short-circuits the whole of register() —
+    // an empty log alone cannot tell the two apart.
     expect(harness.infoLogs).toEqual([]);
+    expect(harness.service()).toBeInstanceOf(SseService);
   });
 
   it('emits the notice when scalingNotice is explicitly true', async () => {
