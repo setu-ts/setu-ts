@@ -133,4 +133,37 @@ describe('full-stack-starter / createFullStackApp', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
     expect(response.statusCode).toBe(200);
   });
+  it('inherits the realtime and di arms through both upstream tiers', () => {
+    const names = buildFullStackPlugins({
+      di: {},
+      realtime: { websocket: {}, sse: {}, backplane: {} },
+    }).map((p: IPlugin) => p.name);
+    expect(names).toContain('di-plugin');
+    expect(names).toContain('websocket-plugin');
+    expect(names).toContain('sse-plugin');
+    expect(names).toContain('realtime-backplane-plugin');
+  });
+
+  it('omits the inherited arms by default', () => {
+    const names = buildFullStackPlugins().map((p: IPlugin) => p.name);
+    expect(names).not.toContain('di-plugin');
+    expect(names).not.toContain('websocket-plugin');
+    expect(names).not.toContain('sse-plugin');
+    expect(names).not.toContain('realtime-backplane-plugin');
+  });
+
+  // The M36 collision guard, extended by the four M36b plugins: with every arm
+  // supplied, no plugin name and no capability token may appear twice.
+  it('has no duplicate plugin name or capability provider with every arm supplied', () => {
+    const plugins = buildFullStackPlugins({
+      di: {},
+      realtime: { websocket: {}, sse: {}, backplane: {} },
+      featureFlags: { provider: 'config', options: { flags: {} } },
+      multiTenancy: { resolver: 'header' },
+    });
+    const names = plugins.map((p: IPlugin) => p.name);
+    expect(new Set(names).size).toBe(names.length);
+    const provided = plugins.flatMap((p: IPlugin) => p.provides ?? []);
+    expect(new Set(provided).size).toBe(provided.length);
+  });
 });

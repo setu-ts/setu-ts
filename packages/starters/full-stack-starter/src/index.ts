@@ -14,3 +14,8 @@
 export { createFullStackApp } from './app.ts';
 export type { FullStackStarterOptions } from './options.ts';
 export { buildFullStackPlugins } from './app.ts';
+// Re-exported because `FullStackStarterOptions` inherits the `realtime` arm
+// through the microservice and REST tiers, so naming its type must not require
+// reaching past this package. Routed through the microservice tier, which is the
+// only starter this package pins — the same chain the option types follow.
+export type { RealtimeArm } from '@hono-enterprise/microservice-starter';

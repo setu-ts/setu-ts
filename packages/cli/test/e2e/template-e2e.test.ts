@@ -170,6 +170,65 @@ describe('template scaffolding — end to end', () => {
     });
   });
 
+  // The `nest` template is the only one whose plugin wiring carries an `args`
+  // string and whose config imports project-local modules. Both are rendered
+  // source that nothing else validates: an `args` string naming an undeclared
+  // identifier, or a `localImports` path that does not resolve, type-checks
+  // nowhere else in the suite. This is that check.
+  it('type-checks the scaffolded nest project, including its emitted classes', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+    const project = `${root}/svc`;
+
+    const sources = [
+      `${project}/main.ts`,
+      `${project}/honoe.config.ts`,
+      `${project}/src/greeting-service.ts`,
+      `${project}/src/greeting-controller.ts`,
+    ];
+    for (const source of sources) {
+      expect((await Deno.stat(source)).isFile).toBe(true);
+    }
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  it('wires the nest config with DI and the emitted classes', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+    const config = await Deno.readTextFile(`${root}/svc/honoe.config.ts`);
+
+    // The args string, rendered into the plugin call.
+    expect(config).toContain(
+      'DecoratorPlugin({ controllers: [GreetingController], services: [GreetingService] })',
+    );
+    // DiPlugin is what puts @Injectable classes on the container path.
+    expect(config).toContain('DiPlugin()');
+    // The local imports that bring the args identifiers into scope.
+    expect(config).toContain("from './src/greeting-controller.ts'");
+    expect(config).toContain("from './src/greeting-service.ts'");
+  });
+
+  it('emits parameter-level @Inject in the nest controller', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+    const controller = await Deno.readTextFile(`${root}/svc/src/greeting-controller.ts`);
+    // The showcase is the parameter position, not the deprecated class-level list.
+    expect(controller).toContain("@Inject('greeting-service')");
+    expect(controller).not.toContain("@Inject('greeting-service')\n@Controller");
+  });
+
+  it('accepts the nest template on every runtime target', async () => {
+    // `unsupported` is empty — nothing in the template needs raw sockets.
+    for (const target of ['deno', 'node', 'bun', 'cloudflare-workers']) {
+      out = [];
+      err = [];
+      expect(await run(['new', `svc-${target}`, '--template', 'nest', '--runtime', target])).toBe(
+        0,
+      );
+    }
+  });
+
   it('type-checks a scaffolded project generated over every accepted name', async () => {
     expect(await run(['new', 'svc', '--template', 'rest'])).toBe(0);
     const project = `${root}/svc`;

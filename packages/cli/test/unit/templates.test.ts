@@ -10,6 +10,7 @@ import {
 } from '../../src/templates/registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS, REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
+import { NEST_TEMPLATE } from '../../src/templates/nest.ts';
 
 const symbols = (wirings: readonly Wiring[]) => wirings.map((w) => w.symbol);
 
@@ -179,5 +180,69 @@ describe('packagesOf', () => {
     expect(packages).toContain('runtime');
     expect(packages).toContain('exceptions');
     expect(packages).toContain('openapi-plugin');
+  });
+});
+
+describe('nest template', () => {
+  it('is the rest set plus DiPlugin', () => {
+    expect(symbols(NEST_TEMPLATE.plugins)).toEqual([...symbols(REST_PLUGINS), 'DiPlugin']);
+  });
+
+  it('reuses the rest middleware, so errorHandler stays outermost', () => {
+    expect(NEST_TEMPLATE.middleware).toEqual(REST_MIDDLEWARE);
+  });
+
+  it('carries the decorator class lists as rendered args', () => {
+    const decorator = NEST_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
+    expect(decorator?.args).toBe(
+      '{ controllers: [GreetingController], services: [GreetingService] }',
+    );
+  });
+
+  it('leaves every other wiring argument-free', () => {
+    for (const wiring of NEST_TEMPLATE.plugins) {
+      if (wiring.pkg === 'decorator-plugin') continue;
+      expect(wiring.args).toBeUndefined();
+    }
+  });
+
+  it('does not mutate the shared REST_PLUGINS list', () => {
+    // NEST_PLUGINS is built by mapping REST_PLUGINS; a mutating implementation
+    // would leak the args string into the rest and microservice templates.
+    const restDecorator = REST_PLUGINS.find((w) => w.pkg === 'decorator-plugin');
+    expect(restDecorator?.args).toBeUndefined();
+    const microDecorator = MICROSERVICE_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
+    expect(microDecorator?.args).toBeUndefined();
+  });
+
+  it('imports every identifier its args string names', () => {
+    const imported = (NEST_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
+    expect(imported).toContain('GreetingController');
+    expect(imported).toContain('GreetingService');
+  });
+
+  it('emits a source file for each locally imported module', () => {
+    const emitted = (NEST_TEMPLATE.files ?? []).map((f) => `./${f.path}`);
+    for (const local of NEST_TEMPLATE.localImports ?? []) {
+      expect(emitted).toContain(local.from);
+    }
+  });
+
+  it('emits exactly the controller and the service', () => {
+    expect((NEST_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
+      'src/greeting-service.ts',
+      'src/greeting-controller.ts',
+    ]);
+  });
+
+  it('refuses no runtime target', () => {
+    expect(NEST_TEMPLATE.unsupported).toEqual({});
+    for (const target of TARGET_RUNTIMES) {
+      expect(NEST_TEMPLATE.unsupported[target]).toBeUndefined();
+    }
+  });
+
+  it('declares di-plugin in the packages a manifest must pin', () => {
+    expect(packagesOf(NEST_TEMPLATE.plugins, NEST_TEMPLATE.middleware)).toContain('di-plugin');
   });
 });

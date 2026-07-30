@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Parameter-level `@Inject` in `@hono-enterprise/decorator-plugin`** (Milestone 36b) — `Inject`
+  now works on a constructor parameter as well as on the class, binding one token to that argument
+  by position, which is the form a developer arriving from NestJS expects:
+  `constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}`. The class-level positional
+  list is **deprecated, not removed** (AI_GUIDELINES §9.2) and keeps working for the whole `0.x`
+  line. A token is still always required — inferring it from the parameter's type needs
+  `emitDecoratorMetadata`, which Deno does not support — so three ambiguous cases throw at startup
+  rather than misinjecting silently: mixing the two forms on one class, leaving a constructor
+  parameter undecorated below the last injected one, and applying `@Inject` to a _method_ parameter.
+- **Gated `realtime` and `di` arms on the three starters** (Milestone 36b) — `realtime` groups
+  `websocket`, `sse`, and `backplane` sub-arms; `di` adds `DiPlugin`. Added to `RestStarterOptions`,
+  so the microservice and full-stack tiers inherit them. **No default changes**: with no arm
+  supplied the plugin set of all three tiers is byte-identical to the previous release. Supplying
+  `di` does change how decorated services are constructed (`DecoratorPlugin` switches to its
+  container path), which is why it is opt-in. `RealtimeArm` is exported from all three starter
+  barrels.
+- **`honoe new --template nest`** (Milestone 36b) — the REST plugin set plus `DiPlugin`, an
+  `@Injectable` service, and a `@Controller` using parameter-level `@Inject`. Emits inline wiring
+  like the other templates, and refuses no runtime target.
+- **`Wiring.args`, `TemplateDefinition.localImports`, and `TemplateDefinition.files` in
+  `@hono-enterprise/cli`** — the template contract could previously express neither a plugin call
+  argument nor an extra emitted source file. All three are optional and every existing template
+  renders byte-identically (`args` absent → `Symbol()`).
 - **`@hono-enterprise/session-plugin`** (Milestone 48) — cookie-backed sessions and session-backed
   form CSRF, registering an `ISessionService` under the new `CAPABILITIES.SESSION` token. The
   default is a self-contained encrypted cookie (AES-256-GCM under an HKDF-SHA256 derived key,
@@ -36,6 +59,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DecoratorPlugin` now prefers the DI container for any class registered in it, with or without
+  `@Injectable`.** `instantiate()` required service metadata before consulting the container, so a
+  `@Controller` — which carries no `@Injectable` — took the service-registry path even in an
+  application with `DiPlugin`, where its dependencies live in the container and not the registry,
+  and construction failed outright with "No service registered for capability". The guard
+  contradicted the function's own documented behavior. Reachable before this release only for a
+  controller whose constructor took arguments; parameter-level `@Inject` makes that composition
+  ordinary, which is how it surfaced.
 - **`decorator-plugin`'s exported `parseCookies` now delegates to `common`'s `parseCookie`, which
   changes its output in three cases.** The signature is unchanged and no call site needs editing,
   but the values it returns can differ, so read this if you use `@Cookie` or call `parseCookies`

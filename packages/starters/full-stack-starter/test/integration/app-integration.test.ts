@@ -6,7 +6,7 @@ import { expect } from '@std/expect';
 import { createFullStackApp } from '../../src/index.ts';
 import type { IRequestContext } from '@hono-enterprise/common';
 import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { createCapabilityToken } from '@hono-enterprise/common';
+import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
 
 describe('full-stack-starter / integration (load-bearing)', () => {
   it('boots all ~22 plugins in one kernel and inject() returns 200', async () => {
@@ -82,5 +82,25 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     // The app should still work normally
     const response = await app.inject({ method: 'GET', url: '/test' });
     expect(response.statusCode).toBe(200);
+  });
+  // The full set plus every gated arm in ONE kernel — the only check that catches a
+  // duplicate name or provider among the plugins that register imperatively.
+  it('boots with every gated arm supplied and inject() returns 200', async () => {
+    const app = createFullStackApp({
+      di: {},
+      realtime: { websocket: {}, sse: {}, backplane: { transport: 'messaging' } },
+    });
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+
+    await app.start();
+
+    expect(app.services.has(CAPABILITIES.DI_CONTAINER)).toBe(true);
+    expect(app.services.has(CAPABILITIES.WEBSOCKET)).toBe(true);
+    expect(app.services.has(CAPABILITIES.SSE)).toBe(true);
+    expect(app.services.has(CAPABILITIES.REALTIME_BACKPLANE)).toBe(true);
+
+    const response = await app.inject({ method: 'GET', url: '/test' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('ok');
   });
 });

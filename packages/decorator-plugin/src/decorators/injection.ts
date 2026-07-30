@@ -43,13 +43,43 @@ export function Injectable(options?: InjectableOptions): ClassDecorator {
 }
 
 /**
- * Declares constructor injection tokens, in argument order. The
- * `DecoratorPlugin` resolves each token (from the DI container or service
- * registry) and passes the results to the constructor.
+ * Declares a constructor injection token. The `DecoratorPlugin` resolves each
+ * token (from the DI container or service registry) and passes the results to
+ * the constructor.
  *
- * @param tokens - Capability tokens to inject
- * @returns A class decorator
- * @example
+ * Usable in two positions:
+ *
+ * - **On a constructor parameter** (preferred) — one token per parameter, bound
+ *   to that argument by position, so reordering the constructor cannot
+ *   misinject. This is the form a NestJS reader expects.
+ * - **On the class** (deprecated) — a positional token list matching the
+ *   constructor's arguments.
+ *
+ * A token is always required: type-inferred injection needs
+ * `emitDecoratorMetadata`, which Deno does not support, so parameter types
+ * cannot be read.
+ *
+ * The two forms are mutually exclusive; a class carrying both fails at
+ * `register()` rather than silently preferring one.
+ *
+ * @param tokens - Capability tokens to inject. Exactly one in the parameter
+ * position; one per constructor argument in the (deprecated) class position.
+ * @returns A decorator valid in either the class or the constructor-parameter
+ * position
+ * @throws {Error} When used on a method parameter (only constructor parameters
+ * are injected), or when the parameter position receives anything other than
+ * exactly one token.
+ * @example Parameter position — preferred
+ * ```typescript
+ * @Injectable()
+ * class UserRepository {
+ *   constructor(
+ *     @Inject(CAPABILITIES.DATABASE) private db: Db,
+ *     @Inject(CAPABILITIES.LOGGER) private logger: ILogger,
+ *   ) {}
+ * }
+ * ```
+ * @example Class position — deprecated, still supported
  * ```typescript
  * @Injectable()
  * @Inject('database', 'logger')
@@ -59,9 +89,33 @@ export function Injectable(options?: InjectableOptions): ClassDecorator {
  * ```
  * @since 0.1.0
  */
-export function Inject(...tokens: string[]): ClassDecorator {
-  return (target) => {
+export function Inject(...tokens: string[]): ClassDecorator & ParameterDecorator {
+  const decorator = (
+    target: object,
+    propertyKey?: string | symbol,
+    parameterIndex?: number,
+  ): void => {
+    // A class decorator receives one argument; a parameter decorator receives
+    // three, the third being the argument index.
+    if (typeof parameterIndex === 'number') {
+      if (propertyKey !== undefined) {
+        throw new Error(
+          `@Inject is only valid on a constructor parameter, but was applied to parameter ` +
+            `${parameterIndex} of method "${String(propertyKey)}". Method parameters are bound ` +
+            `with @Body/@Query/@Param/@Headers instead.`,
+        );
+      }
+      if (tokens.length !== 1) {
+        throw new Error(
+          `@Inject on a constructor parameter takes exactly one token, but received ` +
+            `${tokens.length}. One token per parameter.`,
+        );
+      }
+      metadataStore.mergeCtorParam(target as Constructor, parameterIndex, tokens[0] as string);
+      return;
+    }
     metadataStore.mergeService(target as unknown as Constructor, { inject: tokens });
-    return target;
   };
+
+  return decorator as unknown as ClassDecorator & ParameterDecorator;
 }

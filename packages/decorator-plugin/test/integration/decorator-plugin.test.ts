@@ -211,6 +211,91 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(repoEntry?.options?.scope).toBe('singleton');
   });
 
+  it('injects parameter-level @Inject arguments in order on the registry path', async () => {
+    @Injectable({ token: 'repo' })
+    class Repository {
+      constructor(
+        @Inject('database') readonly db: unknown,
+        @Inject('logger') readonly logger: unknown,
+      ) {}
+    }
+    const { ctx, services } = createFakeContext();
+    ctx.services.register('database', { kind: 'db' });
+    ctx.services.register('logger', { kind: 'log' });
+    await DecoratorPlugin({ services: [Repository] }).register(ctx);
+    const repo = services.get('repo')?.[0] as Repository | undefined;
+    // Order is the assertion: a reversed token list would swap these two.
+    expect(repo?.db).toEqual({ kind: 'db' });
+    expect(repo?.logger).toEqual({ kind: 'log' });
+  });
+
+  it('passes parameter-level tokens as ClassProvider.inject on the container path', async () => {
+    @Injectable({ scope: 'transient', token: 'repo' })
+    class Repository {
+      constructor(
+        @Inject('database') readonly db: unknown,
+        @Inject('logger') readonly logger: unknown,
+      ) {}
+    }
+    const { container, registered } = recordingContainer();
+    const { ctx } = createFakeContext({ container });
+    await DecoratorPlugin({ services: [Repository] }).register(ctx);
+    const entry = registered.find((r) => r.token === 'repo');
+    expect((entry?.provider as ClassProvider<unknown>).inject).toEqual(['database', 'logger']);
+    expect(entry?.options?.scope).toBe('transient');
+  });
+
+  it('injects a parameter-decorated controller from the registry', async () => {
+    @Controller('/x')
+    class C {
+      constructor(@Inject('database') readonly db: unknown) {}
+      @Get('/')
+      list() {
+        return this.db;
+      }
+    }
+    const { ctx, routes } = createFakeContext();
+    ctx.services.register('database', { kind: 'db' });
+    await DecoratorPlugin({ controllers: [C] }).register(ctx);
+    expect(routes).toHaveLength(1);
+  });
+
+  it('fails registration when a class carries both @Inject forms (registry path)', async () => {
+    @Injectable({ token: 'mixed' })
+    @Inject('database')
+    class MixedService {
+      constructor(@Inject('logger') readonly logger: unknown) {}
+    }
+    const { ctx } = createFakeContext();
+    await expect(DecoratorPlugin({ services: [MixedService] }).register(ctx)).rejects.toThrow(
+      /MixedService declares both a class-level @Inject/,
+    );
+  });
+
+  it('fails registration when a class carries both @Inject forms (container path)', async () => {
+    @Injectable({ token: 'mixed2' })
+    @Inject('database')
+    class MixedContainerService {
+      constructor(@Inject('logger') readonly logger: unknown) {}
+    }
+    const { container } = recordingContainer();
+    const { ctx } = createFakeContext({ container });
+    await expect(
+      DecoratorPlugin({ services: [MixedContainerService] }).register(ctx),
+    ).rejects.toThrow(/MixedContainerService declares both a class-level @Inject/);
+  });
+
+  it('fails registration when a constructor parameter is left undecorated', async () => {
+    @Injectable({ token: 'gapped' })
+    class GappedService {
+      constructor(readonly plain: unknown, @Inject('logger') readonly logger: unknown) {}
+    }
+    const { ctx } = createFakeContext();
+    await expect(DecoratorPlugin({ services: [GappedService] }).register(ctx)).rejects.toThrow(
+      /GappedService constructor parameter 0 has no @Inject token/,
+    );
+  });
+
   it('replays custom decorators against registered DecoratorHandlers', async () => {
     const seen: { target: object; propertyKey?: string; ttl: unknown }[] = [];
     @Controller('/x')
