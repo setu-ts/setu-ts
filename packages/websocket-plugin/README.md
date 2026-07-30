@@ -83,13 +83,14 @@ ws.route('/ws/chat', {
 
 ## Options
 
-| Option             | Type     | Default  | Description                                                                        |
-| ------------------ | -------- | -------- | ---------------------------------------------------------------------------------- |
-| `maxConnections`   | `number` | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`. |
-| `heartbeatMs`      | `number` | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                   |
-| `heartbeatPayload` | `string` | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                   |
-| `idleTimeoutMs`    | `number` | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.            |
-| `maxMessageBytes`  | `number` | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.        |
+| Option             | Type      | Default  | Description                                                                                    |
+| ------------------ | --------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `maxConnections`   | `number`  | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.             |
+| `heartbeatMs`      | `number`  | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                               |
+| `heartbeatPayload` | `string`  | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                               |
+| `idleTimeoutMs`    | `number`  | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                        |
+| `maxMessageBytes`  | `number`  | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                    |
+| `scalingNotice`    | `boolean` | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
 
 `idleTimeoutMs` requires `heartbeatMs > 0`, since the heartbeat tick performs the sweep. Configuring
 one without the other **throws at construction** rather than silently doing nothing.
@@ -178,7 +179,14 @@ count is inherently asynchronous and cannot satisfy the synchronous getter), and
 `send` is naturally local since the socket lives on one process.
 
 When no backplane is registered this plugin logs one `info` line at startup stating the limitation.
-If you are running a single replica, that line is informational and safe to ignore.
+If you are running a single replica, that line is informational and safe to ignore — and if you have
+decided single-replica fan-out is correct for this deployment, `scalingNotice: false` silences it:
+
+```typescript
+WebSocketPlugin({ scalingNotice: false });
+```
+
+That suppresses the message only. Room delivery is identical either way.
 
 ## Errors
 

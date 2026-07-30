@@ -242,6 +242,25 @@ describe('WebSocketPlugin scaling notice', () => {
     expect(harness.infoLogs).toEqual([]);
   });
 
+  it('stays quiet when scalingNotice is false', async () => {
+    const harness = createContext(createUpgradableAdapter(), true);
+
+    await WebSocketPlugin({ scalingNotice: false }).register(harness.ctx);
+
+    // Suppresses the message only — the service still registers and rooms still
+    // work exactly as they do with the notice on.
+    expect(harness.infoLogs).toEqual([]);
+    expect(harness.registered.has(CAPABILITIES.WEBSOCKET)).toBe(true);
+  });
+
+  it('emits the notice when scalingNotice is explicitly true', async () => {
+    const harness = createContext(createUpgradableAdapter(), true);
+
+    await WebSocketPlugin({ scalingNotice: true }).register(harness.ctx);
+
+    expect(harness.infoLogs.length).toBe(1);
+  });
+
   it('registers without a logger capability', async () => {
     // `ctx.logger` is absent entirely here, so the notice must be optional-call
     // guarded rather than assuming a logger plugin is present.

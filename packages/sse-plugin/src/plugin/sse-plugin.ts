@@ -55,7 +55,7 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         ? ctx.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE)
         : undefined;
 
-      if (backplane === undefined) {
+      if (backplane === undefined && options?.scalingNotice !== false) {
         // Said once at startup because the alternative is silent: behind more
         // than one replica a channel broadcast reaches only the clients on this
         // process, which looks like partial delivery rather than an error.

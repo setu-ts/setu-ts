@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`scalingNotice` option on `WebSocketPluginOptions` and `SsePluginOptions`** (`boolean`, default
+  `true`) — set `false` to silence the startup notice described below, for a deployment where you
+  have decided single-replica fan-out is correct and do not want the line on every boot. It
+  suppresses the message only: room and channel delivery are identical either way, and the notice
+  never appears once a backplane is registered.
+
 ### Changed
 
 - **`websocket-plugin` and `sse-plugin` now say at startup that rooms and channels are

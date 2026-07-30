@@ -52,4 +52,17 @@ export interface WebSocketPluginOptions {
    * (message too big) and is never delivered to `onMessage`.
    */
   readonly maxMessageBytes?: number;
+  /**
+   * Whether to log one `info` line at registration when no realtime backplane
+   * is registered, stating that rooms broadcast in-process only. Defaults to
+   * `true`.
+   *
+   * Set `false` to silence it — appropriate when you have decided single-replica
+   * fan-out is correct for this deployment and do not want the line on every
+   * startup. It suppresses only the message: room delivery is unaffected either
+   * way, and the notice never appears once a backplane is registered.
+   *
+   * @since 0.2.0
+   */
+  readonly scalingNotice?: boolean;
 }

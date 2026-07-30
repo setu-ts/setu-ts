@@ -537,6 +537,22 @@ describe('SsePlugin scaling notice', () => {
     expect(harness.infoLogs[0]).toContain("'redis' or 'messaging' transport");
   });
 
+  it('stays quiet when scalingNotice is false', async () => {
+    const harness = contextWithLogger();
+
+    await (SsePlugin({ scalingNotice: false }) as IPlugin).register(harness.ctx);
+
+    expect(harness.infoLogs).toEqual([]);
+  });
+
+  it('emits the notice when scalingNotice is explicitly true', async () => {
+    const harness = contextWithLogger();
+
+    await (SsePlugin({ scalingNotice: true }) as IPlugin).register(harness.ctx);
+
+    expect(harness.infoLogs.length).toBe(1);
+  });
+
   it('stays quiet when a backplane is registered', async () => {
     const harness = contextWithLogger({
       origin: 'node-a',

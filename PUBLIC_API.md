@@ -1492,10 +1492,11 @@ app.router.post('/broadcast', async (ctx) => {
 
 ### Options
 
-| Option        | Type     | Default | Description                                           |
-| ------------- | -------- | ------- | ----------------------------------------------------- |
-| `heartbeatMs` | `number` | omitted | When set, sends `: heartbeat\n\n` at this interval.   |
-| `retryMs`     | `number` | omitted | When set, sends `retry: <ms>\n\n` as the first frame. |
+| Option          | Type      | Default | Description                                                                                                                                                                                   |
+| --------------- | --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `heartbeatMs`   | `number`  | omitted | When set, sends `: heartbeat\n\n` at this interval.                                                                                                                                           |
+| `retryMs`       | `number`  | omitted | When set, sends `retry: <ms>\n\n` as the first frame.                                                                                                                                         |
+| `scalingNotice` | `boolean` | `true`  | Logs one `info` line at registration when no realtime backplane is registered, stating that channels broadcast in-process only. `false` silences the message; channel delivery is unaffected. |
 
 Omitting an option disables that behaviour (no timer created).
 
@@ -1519,7 +1520,7 @@ Omitting an option disables that behaviour (no timer created).
 | `SsePlugin`                                                 | function          | Plugin factory — registers `ISseService` under `CAPABILITIES.SSE`   |
 | `SseService`                                                | class             | The `ISseService` implementation                                    |
 | `SseConnection`                                             | class             | A live SSE connection over a `ReadableStream`                       |
-| `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`                                            |
+| `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`, `scalingNotice`                           |
 | `ChannelPublisher`                                          | type              | Forwards a local publish to other replicas; supplied by a backplane |
 | `ISseConnection`, `ISseService`, `SseChannel`, `SseMessage` | type (re-export)  | From `@hono-enterprise/common`                                      |
 | `CAPABILITIES`                                              | const (re-export) | From `@hono-enterprise/common`                                      |
@@ -1565,13 +1566,14 @@ app.register(WebSocketPlugin({
 
 ### Options
 
-| Option             | Type     | Default  | Behavior                                                                                                                                                                                    |
-| ------------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxConnections`   | `number` | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                     |
-| `heartbeatMs`      | `number` | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                   |
-| `heartbeatPayload` | `string` | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                            |
-| `idleTimeoutMs`    | `number` | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert. |
-| `maxMessageBytes`  | `number` | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                   |
+| Option             | Type      | Default  | Behavior                                                                                                                                                                                    |
+| ------------------ | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxConnections`   | `number`  | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                     |
+| `heartbeatMs`      | `number`  | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                   |
+| `heartbeatPayload` | `string`  | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                            |
+| `idleTimeoutMs`    | `number`  | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert. |
+| `maxMessageBytes`  | `number`  | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                   |
+| `scalingNotice`    | `boolean` | `true`   | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.     |
 
 ### Usage
 
