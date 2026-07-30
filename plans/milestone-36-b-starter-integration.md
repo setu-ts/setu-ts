@@ -281,19 +281,25 @@ deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/f
   plugins through the M44 `loadContext` bridge (M36 C6, M44 §9) — **deferred to M36c**. The
   reference is available at `/home/dkpaul91/Projects/B2BAdmin` (React Router v7 framework mode, 240
   tracked files), so this is no longer blocked on verifiability; it is deferred on scope and on one
-  unresolved capability. Seven of its eight cross-cutting concerns delegate to shipped plugins:
-  `app/lib/csrf.server.ts` to `http-security-plugin`, `app/lib/sse.server.ts` to `sse-plugin`,
-  `app/lib/kv.server.ts` to `secrets-plugin`'s Azure provider, `app/lib/http/xior.server.ts` to
-  `@hono-enterprise/sdk`, `app/lib/appinsights-bootstrap.server.ts` and
-  `app/lib/service-logger.server.ts` to `telemetry-plugin` and `logger-plugin`,
-  `app/lib/route-guards.server.ts` to `auth-plugin`'s guard factories, and
-  `app/config/services.server.ts` to the M44 `loadContext` bridge. The eighth has no target: **this
-  framework has no session capability.** `packages/common/src/tokens.ts` declares no `SESSION` token
-  and `packages/auth-plugin/src` contains no session or cookie surface at all, while
-  `app/lib/session.server.ts` is the largest of these files at 140 lines (with
-  `cookie-attrs.server.ts`, `country-session.ts`, and `microsoft-oauth-state.server.ts` beside it).
-  M36c must decide whether cookie sessions stay an app concern inside the skeleton, or become a
-  capability — and the second answer is its own milestone, not a line item.
+  two unresolved capabilities. Six of its eight cross-cutting concerns delegate to shipped plugins:
+  `app/lib/sse.server.ts` to `sse-plugin`, `app/lib/kv.server.ts` to `secrets-plugin`'s Azure
+  provider, `app/lib/http/xior.server.ts` to `@hono-enterprise/sdk`,
+  `app/lib/appinsights-bootstrap.server.ts` and `app/lib/service-logger.server.ts` to
+  `telemetry-plugin` and `logger-plugin`, `app/lib/route-guards.server.ts` to `auth-plugin`'s guard
+  factories, and `app/config/services.server.ts` to the M44 `loadContext` bridge. **The other two
+  have no target, and they are related.** (a) This framework has no session capability:
+  `packages/common/src/tokens.ts` declares no `SESSION` token and `packages/auth-plugin/src`
+  contains no session or cookie surface, while `app/lib/session.server.ts` is the largest of these
+  files at 140 lines (with `cookie-attrs.server.ts`, `country-session.ts`, and
+  `microsoft-oauth-state.server.ts` beside it). (b) `app/lib/csrf.server.ts` is a **signed
+  double-submit cookie** — an HMAC-SHA256 token in a cookie, compared timing-safely against a hidden
+  form field, signed with the session secret — whereas
+  `packages/http-security-plugin/src/middleware/csrf-middleware.ts:1-5` is stateless Origin/Referer
+  validation plus an optional custom header, and states "No cookies or server-side token store".
+  Those are different strategies rather than one feature configured two ways: a
+  progressive-enhancement `<Form>` post carries no custom header, so they are not interchangeable
+  for a server-rendered app. M36c must decide whether both stay app concerns inside the skeleton, or
+  become capabilities — and the second answer is its own milestone, not a line item.
 - **Committed example applications** under `apps/*` — Milestone 37 (C3). The runnable showcase here
   is the project `honoe new --template nest` produces.
 - **A `honoe new --starter` path** consuming the starter libraries — still deferred (M36 §9, C2).
