@@ -9,7 +9,6 @@
  */
 import type {
   ICacheStore,
-  ILogger,
   IPlugin,
   IPluginContext,
   IRuntimeServices,
@@ -205,17 +204,15 @@ function resolveLogger(
   ctx: IPluginContext,
 ): { debug(msg: string, meta?: Record<string, unknown>): void } | undefined {
   if (ctx.services.has('logger')) {
-    const logger = ctx.services.get<ILogger>('logger');
-    // Only wrap if the logger has a debug function
-    if (logger && typeof logger.debug === 'function') {
-      return {
-        debug: (msg: string, meta?: Record<string, unknown>) => {
-          logger.debug(msg, meta);
-        },
-      };
-    }
-    // Fallback: return a no-op logger if the existing logger isn't usable
-    return { debug: () => {} };
+    const logger = ctx.services.get<Record<string, unknown>>('logger');
+    return {
+      debug: (msg: string, meta?: Record<string, unknown>): void => {
+        const dbg = logger?.debug as
+          | ((msg: string, meta?: Record<string, unknown>) => void)
+          | undefined;
+        dbg?.(msg, meta);
+      },
+    };
   }
   return undefined;
 }
