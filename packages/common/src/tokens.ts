@@ -111,6 +111,8 @@ export const CAPABILITIES = {
   REALTIME_BACKPLANE: 'realtime-backplane',
   /** Server-side rendering (SSR) — React Router or similar framework. */
   SSR: 'ssr',
+  /** Cookie-backed sessions for server-rendered applications. */
+  SESSION: 'session',
   /** Health indicator contributions (multi-provider). */
   HEALTH_INDICATOR: 'health-indicator',
   /** Metric registration contributions (multi-provider). */

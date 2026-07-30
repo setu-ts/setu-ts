@@ -8,6 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@hono-enterprise/session-plugin`** (Milestone 48) — cookie-backed sessions and session-backed
+  form CSRF, registering an `ISessionService` under the new `CAPABILITIES.SESSION` token. The
+  default is a self-contained encrypted cookie (AES-256-GCM under an HKDF-SHA256 derived key,
+  entirely through `runtime.subtle`), so the package has **zero npm dependencies** and works on
+  Cloudflare Workers. Setting `store` (`'memory'`, `'cache'`, or a custom `ISessionStore`) moves the
+  payload server-side and leaves an opaque id in the cookie, which is what makes immediate
+  revocation possible. Secret rotation goes through a key list — index 0 seals, every entry opens —
+  with an HKDF-derived non-secret `kid` in the envelope so opening is a lookup rather than trial
+  decryption. Ships `getSession`, `getCsrfToken`, `verifyCsrfToken`, `csrfFormMiddleware`,
+  `sessionMiddleware`, both stores, and four error types. Note that `mode: 'sign'` protects
+  integrity only and leaves the payload readable by the client; `'encrypt'` is the default so that
+  choice is never accidental.
+- **`parseCookie` / `serializeCookie` / `CookieAttributes` in `@hono-enterprise/common`** — the
+  framework's single cookie codec. It lives in `common` because the session plugin and the decorator
+  plugin's `@Cookie` both need it and no plugin may import another (the `encodeFrameData`
+  precedent).
+- **`ISessionService` / `ISession` / `ISessionStore` / `SessionData` contracts** and
+  `CAPABILITIES.SESSION` in `@hono-enterprise/common`. No `IRequest` widening was needed: the
+  session middleware parks the session in `ctx.state`, so a `cookies` field with no consumer was
+  declined.
 - **`scalingNotice` option on `WebSocketPluginOptions` and `SsePluginOptions`** (`boolean`, default
   `true`) — set `false` to silence the startup notice described below, for a deployment where you
   have decided single-replica fan-out is correct and do not want the line on every boot. It
@@ -15,6 +35,22 @@ All notable changes to this project are documented here. The format follows
   never appears once a backplane is registered.
 
 ### Changed
+
+- **`decorator-plugin`'s exported `parseCookies` now delegates to `common`'s `parseCookie`, which
+  changes its output in three cases.** The signature is unchanged and no call site needs editing,
+  but the values it returns can differ, so read this if you use `@Cookie` or call `parseCookies`
+  directly. Each difference is a defect fix rather than a preference:
+  - **Values are percent-decoded.** A cookie written by any standards-compliant server (including
+    this framework's own `serializeCookie`) was previously returned still-encoded — `@Cookie('x')`
+    handed you `a%20b` where the value was `a b`. If you were decoding the result yourself, remove
+    that step; double-decoding will now corrupt a value containing a literal `%`.
+  - **One layer of RFC 6265 quoting is stripped**, so `sid="abc"` yields `abc` rather than `"abc"`.
+  - **A repeated cookie name resolves to the first occurrence, not the last.** Browsers send the
+    most specific cookie first, so the first is the one that was meant.
+
+  The alternative was two cookie parsers in the tree, which AI_GUIDELINES §11.1 forbids. Shipping
+  the correction during `0.1.x` pre-release rather than freezing the defect follows the precedent of
+  the Milestone 14d wire change and the Milestone 30b FCM replacement.
 
 - **`websocket-plugin` and `sse-plugin` now say at startup that rooms and channels are
   process-local** when no realtime backplane is registered — one `info` line naming the limitation,

@@ -237,6 +237,13 @@ export type {
 // SSR contracts
 export type { ISsrService } from './services/ssr.ts';
 
+// Session contracts
+export type { ISession, ISessionService, ISessionStore, SessionData } from './services/session.ts';
+
+// Cookie codec (shared by the session plugin and the decorator plugin's @Cookie)
+export { parseCookie, serializeCookie } from './cookie.ts';
+export type { CookieAttributes } from './cookie.ts';
+
 // Worker pool contracts
 export type {
   IWorkerPool,

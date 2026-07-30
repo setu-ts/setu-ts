@@ -4475,7 +4475,7 @@ implementation task.
 
 ---
 
-## Milestone 48: Session Plugin — Cookie Sessions and Form CSRF
+## Milestone 48: Session Plugin — Cookie Sessions and Form CSRF ✅ COMPLETE
 
 **Objective:** a `SESSION` capability, because the framework has none.
 `packages/common/src/tokens.ts` declares no `SESSION` token and `packages/auth-plugin/src` contains
@@ -4556,15 +4556,47 @@ also carries no `cookies` field today — adding one is a flagged `common` widen
 
 ### Deliverables
 
-- [ ] `common` — `ISession` / `ISessionStore` contracts, a `SESSION` capability token, the cookie
-      codec, and any `IRequest` widening (flagged public-surface change)
-- [ ] `packages/session-plugin` — cookie store, one server-side store, secret resolution via
-      `CAPABILITIES.SECRETS` with an env fallback, session middleware, context integration
-- [ ] Session-backed form CSRF, per the boundary decided in the plan
-- [ ] React Router integration — the session reachable from the M44 `loadContext` bridge
-- [ ] Real-crypto tests exercising `runtime.subtle` (not a fake), including tamper rejection and a
-      secret-rotation case
-- [ ] `PUBLIC_API.md`, `ARCHITECTURE.md`, package README, and `scripts/release-packages.ts`
+- [x] `common` — `ISessionService` / `ISession` / `ISessionStore` / `SessionData` contracts, the
+      `SESSION: 'session'` capability token, and the `parseCookie` / `serializeCookie` /
+      `CookieAttributes` codec. **No `IRequest` widening**: it was assessed and declined, because
+      nothing in the design reads a `cookies` field — the middleware parses `ctx.request.headers`
+      once and parks the _session_ in `ctx.state`, so the field would have obliged every `IRequest`
+      producer (runtime adapters, kernel, `testing`, every double) to populate surface with no
+      consumer.
+- [x] `packages/session-plugin` — encrypted-cookie strategy (default) plus an `ISessionStore` port
+      with `MemorySessionStore` and `CacheSessionStore` (over `CAPABILITIES.CACHE`), secret
+      resolution via `CAPABILITIES.SECRETS` with an env fallback and a rotation list, session
+      middleware at priority 260 with commit-on-response, and `getSession(ctx)` as the single
+      accessor.
+- [x] Session-backed form CSRF — shipped **in this package**, leaving the published
+      `http-security-plugin` untouched: the token is stored in session data and protected by the
+      session's own encryption, so it needs no second cookie and no second secret.
+      `csrfFormMiddleware` at 275, plus a standalone `verifyCsrfToken` both entry points share.
+- [x] React Router integration — reachable through M44's existing `populateLoadContext` hook calling
+      the same `getSession(ctx)`; no change to `react-router-plugin` and no cross-plugin import.
+- [x] Real-crypto tests exercising `runtime.subtle` (no fake `SubtleCrypto` anywhere), including
+      tamper rejection on every envelope segment, cross-mode rejection, and a rotation case proving
+      an old cookie opens while its secret is listed and stops once dropped.
+- [x] `PUBLIC_API.md` (`CAPABILITIES.SESSION`, the session contract group, the cookie codec, a full
+      `SessionPlugin()` section), `ARCHITECTURE.md` (priority rows 260/270/275), package README, and
+      `scripts/release-packages.ts`.
+
+### Corrections shipped in this milestone's PR
+
+Four claims in the section above were checked against source and did not survive:
+
+- The cookie parser in `decorator-plugin` is **not private** — it is exported from
+  `packages/decorator-plugin/src/index.ts:56` and has been published API since `alpha.1`. It now
+  delegates to the `common` codec, which is stricter in three ways (percent-decoding, quote
+  stripping, first-occurrence-wins); each is a defect fix, recorded in `CHANGELOG.md`.
+- The `v1.iv.ciphertext.tag` envelope **cannot be reproduced on Web Crypto**, which returns the
+  authentication tag appended to the ciphertext with no `getAuthTag()` equivalent. The shipped
+  envelope is `v1.<kid>.<iv>.<sealed>`, the `kid` making rotation an O(1) lookup.
+- `storage-plugin` was assessed as a session store and declined: `IStorage` is a blob API with no
+  TTL, so it would hand-roll expiry, whereas `ICacheStore`'s `set(key, value, ttlSeconds)` is
+  exactly the right shape.
+- The documented middleware-priority table in ARCHITECTURE omitted the existing CSRF row at 270,
+  which is what makes 275 legible; it is added alongside the two new session rows.
 
 **Sequencing:** M36b (planned) → **M48** → M36c (React Router app skeleton + config-key
 indirection), because M36c consumes this milestone. M48 is not the last gap before a shippable
@@ -4767,4 +4799,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 45        | ✅     | worker-pool-plugin   |
 | 46        | ✅     | websocket-plugin     |
 | 47        | ✅     | alpha-3 limitations  |
-| 48        | ⬜     | session-plugin       |
+| 48        | ✅     | session-plugin       |
