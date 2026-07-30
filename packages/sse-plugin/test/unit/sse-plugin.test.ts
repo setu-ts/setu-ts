@@ -8,6 +8,7 @@ import { expect } from '@std/expect';
 import { SsePlugin } from '../../src/plugin/sse-plugin.ts';
 import { SseService } from '../../src/services/sse-service.ts';
 import type {
+  ILogger,
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
@@ -474,5 +475,110 @@ describe('SsePlugin with a realtime backplane', () => {
     harness.service().channel('news').publish({ data: 'local' });
     expect(received).toEqual([{ data: 'local' }]);
     harness.close();
+  });
+});
+
+describe('SsePlugin scaling notice', () => {
+  /** A context with a recording logger, optionally exposing a backplane. */
+  function contextWithLogger(backplane?: IRealtimeBackplane): {
+    readonly ctx: IPluginContext;
+    readonly infoLogs: string[];
+    /** The service registered under the SSE token, if registration got that far. */
+    service(): ISseService | undefined;
+  } {
+    const infoLogs: string[] = [];
+    let registered: ISseService | undefined;
+    // Annotated, so the compiler holds the double to the whole ILogger surface.
+    // Inside the `as unknown as IPluginContext` cast below nothing would check a
+    // bare object literal, and a later `logger.child(...)` would fail here for a
+    // reason that has nothing to do with the code under test.
+    const logger: ILogger = {
+      level: 'info',
+      fatal: (): void => {},
+      error: (): void => {},
+      warn: (): void => {},
+      info: (message: string): void => {
+        infoLogs.push(message);
+      },
+      debug: (): void => {},
+      trace: (): void => {},
+      child: (): ILogger => logger,
+    };
+    const ctx = {
+      runtime: {
+        setInterval: (): TimerHandle => ({} as TimerHandle),
+        clearInterval: (): void => {},
+        uuid: (): string => 'test-uuid',
+      },
+      logger,
+      services: {
+        has: (token: string): boolean =>
+          token === CAPABILITIES.REALTIME_BACKPLANE && backplane !== undefined,
+        get: <T>(): T => backplane as T,
+        register: <T>(token: string, value: T): void => {
+          if (token === CAPABILITIES.SSE) {
+            registered = value as ISseService;
+          }
+        },
+      },
+      health: { register: (): void => {} },
+      lifecycle: { onClose: (): void => {} },
+    } as unknown as IPluginContext;
+
+    return {
+      ctx,
+      infoLogs,
+      service: (): ISseService | undefined => registered,
+    };
+  }
+
+  it('says at startup that channels are process-local when no backplane is registered', async () => {
+    const harness = contextWithLogger();
+
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    // Behind more than one replica this is silent partial delivery, so the
+    // notice must name both the limitation and the plugin that lifts it.
+    expect(harness.infoLogs.length).toBe(1);
+    expect(harness.infoLogs[0]).toContain('channels broadcast in-process only');
+    expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+    // The transport must be named: the backplane plugin defaults to a
+    // single-process 'memory' bus, so registering it bare silences this notice
+    // without fanning anything out.
+    expect(harness.infoLogs[0]).toContain("'redis' or 'messaging' transport");
+  });
+
+  it('stays quiet when scalingNotice is false', async () => {
+    const harness = contextWithLogger();
+
+    await (SsePlugin({ scalingNotice: false }) as IPlugin).register(harness.ctx);
+
+    // Suppresses the message only. Asserting the service still registered is what
+    // separates that from a guard that short-circuits the whole of register() —
+    // an empty log alone cannot tell the two apart.
+    expect(harness.infoLogs).toEqual([]);
+    expect(harness.service()).toBeInstanceOf(SseService);
+  });
+
+  it('emits the notice when scalingNotice is explicitly true', async () => {
+    const harness = contextWithLogger();
+
+    await (SsePlugin({ scalingNotice: true }) as IPlugin).register(harness.ctx);
+
+    expect(harness.infoLogs.length).toBe(1);
+  });
+
+  it('stays quiet when a backplane is registered', async () => {
+    const harness = contextWithLogger({
+      origin: 'node-a',
+      connect: (): Promise<void> => Promise.resolve(),
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as IRealtimeBackplane);
+
+    await (SsePlugin() as IPlugin).register(harness.ctx);
+
+    expect(harness.infoLogs).toEqual([]);
   });
 });

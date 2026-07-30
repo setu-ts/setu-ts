@@ -1576,9 +1576,18 @@ last outbound).
 | 150      | CorrelationIdMiddleware   | Propagate correlation ID |
 | 200      | CorsMiddleware            | Handle CORS              |
 | 250      | SecurityHeadersMiddleware | Add security headers     |
+| 260      | SessionMiddleware         | Load/commit the session  |
+| 270      | CsrfMiddleware            | Origin/Referer check     |
+| 275      | CsrfFormMiddleware        | Synchronizer-token check |
 | 300      | AuthMiddleware            | Authenticate request     |
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
+
+The session sits below authentication so an auth strategy can read it, and its commit phase (which
+runs after `next()` returns) therefore wraps everything inner. The two CSRF middlewares are
+different mechanisms rather than one feature configured twice: the stateless Origin/Referer check at
+270 is cheap and runs first, so a request failing it never reaches token comparison at 275. Anything
+reading the session must be registered above 260, or the session accessor throws.
 
 ### Registration
 

@@ -40,7 +40,8 @@
     "./packages/react-router-plugin",
     "./packages/worker-pool-plugin",
     "./packages/websocket-plugin",
-    "./packages/realtime-backplane-plugin"
+    "./packages/realtime-backplane-plugin",
+    "./packages/session-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

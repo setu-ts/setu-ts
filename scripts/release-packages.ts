@@ -2,10 +2,13 @@
  * The ordered list of workspace packages that are published to JSR.
  *
  * This is an EXPLICIT allow-list rather than a scan of the `workspace` array in
- * the root `deno.json`, because the workspace also contains starter stubs
- * (the three starters) that export nothing. A workspace-wide
- * `deno publish` would push those empty packages to JSR, where versions are
- * immutable and cannot be withdrawn — only yanked.
+ * the root `deno.json` for two reasons. First, ORDER: a scan yields no ordering,
+ * and publish order is load-bearing (below). Second, CONTROL: JSR versions are
+ * immutable and cannot be withdrawn — only yanked — so a workspace-wide
+ * `deno publish` would push anything newly added to the workspace the moment it
+ * appeared, including a package not yet meant to ship. Until M36 the list also
+ * excluded the three starter stubs, which exported nothing; they are now real
+ * composition libraries in Tier 6 and `UNPUBLISHED_PACKAGES` is empty.
  *
  * ORDER IS LOAD-BEARING. JSR rejects a package whose declared dependency
  * version does not yet exist, so a dependency must be published before its
@@ -53,6 +56,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/resilience-plugin',
   'packages/scheduler-plugin',
   'packages/secrets-plugin',
+  'packages/session-plugin',
   'packages/sse-plugin',
   'packages/storage-plugin',
   'packages/telemetry-plugin',

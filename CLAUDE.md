@@ -679,7 +679,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 36** (`packages/starters/rest-starter`, `packages/starters/microservice-starter`,
   `packages/starters/full-stack-starter` — opinionated plugin composition libraries:
   `createRestApp`, `createMicroserviceApp`, `createFullStackApp` with pre-wired plugin sets, option
-  arms, and Workers- portability documentation) — complete (PR #100)
+  arms, and Workers- portability documentation) — complete (PR pending)
 - **Alpha release `v0.1.0-alpha.3`** — on `release/v0.1.0-alpha.3`, published 2026-07-30 (PR #99,
   tag at the merge commit `672b2f5`; CI published it, one green `Publish to JSR` job). **38
   packages** — `sdk` (M35) and `realtime-backplane-plugin` (M47) published for the first time; only
@@ -706,7 +706,51 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   now 12 manifests (`{common,kernel,runtime}`), not the 11 the runbook claimed. Also corrected the
   root README, which listed the SDK under "Not yet built" while marking it ✅, had no
   `realtime-backplane-plugin` row, and claimed 36 packages / 30 plugins.
-- **Next milestone** — **Milestone 37** (example applications); M38 follow unless reprioritized.
+- **Milestone 48** (`packages/session-plugin` — cookie sessions and form CSRF: `SessionPlugin`
+  registering an `ISessionService` under a new `CAPABILITIES.SESSION` token, the capability the
+  framework had none of — `tokens.ts` declared no `SESSION` and `auth-plugin` ships JWT/API-key/
+  refresh/RBAC with no cookie surface at all. Default is a self-contained **encrypted** cookie:
+  AES-256-GCM under an HKDF-SHA256 key, entirely via `runtime.subtle` (the M16 `JwtService`
+  precedent), so zero npm deps and Workers-portable. Setting `store` (`'memory'`/`'cache'`/custom
+  `ISessionStore`) moves the payload server-side behind an opaque id, which is the only way to get
+  immediate revocation — the cookie strategy's documented trade-off is that a stolen cookie stays
+  valid until `Max-Age`. `mode: 'sign'` (HMAC, payload READABLE) pairs with the store strategy;
+  `'encrypt'` is the default so the exposing choice is never accidental. Rotation is a key list —
+  index 0 seals, every entry opens — addressed by an HKDF-derived non-secret `kid` in the envelope,
+  so opening is O(1) rather than trial decryption. Expiry is server-authoritative: `maxAge` lives in
+  the sealed payload as a `runtime.now()` wall-clock stamp, because a cookie's `Max-Age` is
+  client-controlled; plus `rolling` and `idleTimeoutMs`. Form CSRF ships **in this package** (the
+  synchronizer-token strategy, a different mechanism from http-security-plugin's stateless
+  Origin/Referer check, which a `<Form>` post structurally cannot satisfy via `customHeader`) with
+  the token in session data — no second cookie, no second secret, and the published plugin
+  untouched; `csrfFormMiddleware` at 275 and a standalone `verifyCsrfToken` sharing one
+  implementation for React Router actions. Sessions reach handlers via `ctx.state` + one
+  `getSession(ctx)` accessor and **no `common` widening**: `IRequestContext` is fully `readonly`, so
+  a `session` member would force every producer to build one, and the ROADMAP's floated
+  `IRequest.cookies` was declined as a field no code path reads. Commit-on-response is sound because
+  the kernel's `appendHeader` never consults `#ended` and `snapshot()` returns live `Headers` —
+  verified in source, not assumed. Three ROADMAP claims did not survive source-checking:
+  `decorator-plugin`'s `parseCookies` is **exported public API**, not private, so it now delegates
+  to the new `common` codec and its three behaviour corrections (percent-decoding, quote stripping,
+  first-occurrence-wins) are a CHANGELOG'd defect fix; the `v1.iv.ciphertext.tag` envelope is
+  **unreproducible** on Web Crypto, which concatenates the tag with no `getAuthTag()`, so the wire
+  shape is `v1.<kid>.<iv>.<sealed>`; and `storage-plugin` was declined as a store backend because
+  `IStorage` has no TTL. Post-implementation code review then caught two High defects in the commit
+  path, both in options that the happy-path tests exercised only in isolation: `regenerate()`
+  followed by `destroy()` in one request leaked the pre-regeneration store row — after a regenerate
+  `session.id` is the NEW id, never written to the store, while the presented cookie carries the old
+  one, so a stolen copy of it kept authenticating after an explicit destroy, defeating the one
+  property the store strategy exists for; and `idleTimeoutMs` measured time since the last session
+  WRITE rather than the last request, because `seen` advances only in `commit()` and `commit()` is
+  skipped for a clean read, so under the DEFAULT `rolling: false` a user requesting every 30 s
+  against a 60 s window was signed out after 90 s — actively harmful in its default pairing and
+  contradicted by "expire after this much inactivity" in three doc sites. Both are fixed with tests
+  that fail without the fix; the idle fix necessarily commits on every request (a `Set-Cookie` per
+  response, and a store write on the store strategy), which is documented rather than hidden, and it
+  deliberately does NOT extend absolute expiry — a test pins it apart from `rolling`. All 19 changed
+  `src` files ≥96% branch/function/line) — complete (PR #105)
+- **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes M48;
+  M37–M40 follow unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

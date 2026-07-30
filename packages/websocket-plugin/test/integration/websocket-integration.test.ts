@@ -53,10 +53,11 @@ describe('WebSocketPlugin integration', () => {
     const response = await app.fetch(requestFailingOnSecondHeaderRead('http://localhost/ws'));
 
     expect(response.status).toBe(500);
-    expect(logger.entries.map((entry) => entry.message)).toEqual([
-      'WebSocket upgrade routing failed',
-    ]);
-    expect(logger.entries[0].level).toBe('error');
+    // Two entries, in order: the startup scaling notice (no backplane is
+    // registered here), then the upgrade failure this test is about.
+    expect(logger.entries.map((entry) => entry.level)).toEqual(['info', 'error']);
+    expect(logger.entries[0].message).toContain('rooms broadcast in-process only');
+    expect(logger.entries[1].message).toBe('WebSocket upgrade routing failed');
     await app.stop();
   });
 

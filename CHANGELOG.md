@@ -4,6 +4,87 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`@hono-enterprise/session-plugin`** (Milestone 48) — cookie-backed sessions and session-backed
+  form CSRF, registering an `ISessionService` under the new `CAPABILITIES.SESSION` token. The
+  default is a self-contained encrypted cookie (AES-256-GCM under an HKDF-SHA256 derived key,
+  entirely through `runtime.subtle`), so the package has **zero npm dependencies** and works on
+  Cloudflare Workers. Setting `store` (`'memory'`, `'cache'`, or a custom `ISessionStore`) moves the
+  payload server-side and leaves an opaque id in the cookie, which is what makes immediate
+  revocation possible. Secret rotation goes through a key list — index 0 seals, every entry opens —
+  with an HKDF-derived non-secret `kid` in the envelope so opening is a lookup rather than trial
+  decryption. Ships `getSession`, `getCsrfToken`, `verifyCsrfToken`, `csrfFormMiddleware`,
+  `sessionMiddleware`, both stores, and four error types. Note that `mode: 'sign'` protects
+  integrity only and leaves the payload readable by the client; `'encrypt'` is the default so that
+  choice is never accidental.
+- **`parseCookie` / `serializeCookie` / `CookieAttributes` in `@hono-enterprise/common`** — the
+  framework's single cookie codec. It lives in `common` because the session plugin and the decorator
+  plugin's `@Cookie` both need it and no plugin may import another (the `encodeFrameData`
+  precedent).
+- **`ISessionService` / `ISession` / `ISessionStore` / `SessionData` contracts** and
+  `CAPABILITIES.SESSION` in `@hono-enterprise/common`. No `IRequest` widening was needed: the
+  session middleware parks the session in `ctx.state`, so a `cookies` field with no consumer was
+  declined.
+- **`scalingNotice` option on `WebSocketPluginOptions` and `SsePluginOptions`** (`boolean`, default
+  `true`) — set `false` to silence the startup notice described below, for a deployment where you
+  have decided single-replica fan-out is correct and do not want the line on every boot. It
+  suppresses the message only: room and channel delivery are identical either way, and the notice
+  never appears once a backplane is registered.
+
+### Changed
+
+- **`decorator-plugin`'s exported `parseCookies` now delegates to `common`'s `parseCookie`, which
+  changes its output in three cases.** The signature is unchanged and no call site needs editing,
+  but the values it returns can differ, so read this if you use `@Cookie` or call `parseCookies`
+  directly. Each difference is a defect fix rather than a preference:
+  - **Values are percent-decoded.** A cookie written by any standards-compliant server (including
+    this framework's own `serializeCookie`) was previously returned still-encoded — `@Cookie('x')`
+    handed you `a%20b` where the value was `a b`. If you were decoding the result yourself, remove
+    that step; double-decoding will now corrupt a value containing a literal `%`.
+  - **One layer of RFC 6265 quoting is stripped**, so `sid="abc"` yields `abc` rather than `"abc"`.
+  - **A repeated cookie name resolves to the first occurrence, not the last.** Browsers send the
+    most specific cookie first, so the first is the one that was meant.
+
+  The alternative was two cookie parsers in the tree, which AI_GUIDELINES §11.1 forbids. Shipping
+  the correction during `0.1.x` pre-release rather than freezing the defect follows the precedent of
+  the Milestone 14d wire change and the Milestone 30b FCM replacement.
+
+- **`websocket-plugin` and `sse-plugin` now say at startup that rooms and channels are
+  process-local** when no realtime backplane is registered — one `info` line naming the limitation,
+  the plugin that lifts it, and the transport it needs (`'redis'` or `'messaging'`; the backplane
+  plugin's default `'memory'` transport is a single-process bus, so registering it bare would
+  silence the notice without fanning anything out). Cross-replica fan-out has shipped since
+  `0.1.0-alpha.3`, but a single-replica app and a three-replica app behave identically right up to
+  the point where two thirds of your clients silently stop receiving broadcasts, with no error
+  raised anywhere. Both READMEs gain a **Scaling beyond one replica** section for the same reason.
+  If you run a single replica the line is informational and safe to ignore; registering a backplane
+  under the `REALTIME_BACKPLANE` token removes it.
+
+### Fixed
+
+- **`websocket-plugin`'s README no longer claims cross-replica fan-out is unimplemented.** It stated
+  "fan-out across replicas is a follow-up milestone; today two instances behind a load balancer do
+  not share rooms", which stopped being true when `realtime-backplane-plugin` shipped in
+  `0.1.0-alpha.3`.
+- **`sse-plugin`'s README named a method that does not exist.** Its named-channels example called
+  `channel.broadcast(...)`; the committed `SseChannel` contract exposes `publish(...)` and no
+  `broadcast`, so the snippet would not compile.
+- **`realtime-backplane-plugin`: `RedisBackplane.connect()` no longer leaks a connection on a failed
+  open, and is safe to call concurrently.** The connected guard was only set after both connections
+  had been constructed, so two overlapping calls each built their own pair — and if the second
+  construction threw, the first connection was already live with nothing holding a reference to
+  close it. The open is now memoized, so overlapping callers join one attempt and none of them
+  returns before `SUBSCRIBE` has actually landed; a failed attempt quits whatever it built, removes
+  its own listener from injected clients but does not close them (they belong to the caller), and
+  clears the memo so a later call retries. A `close()` arriving mid-open now wins as well: the open
+  retires whatever it built instead of publishing two live connections onto a backplane that has
+  already shut down, which is what a shutdown during startup would otherwise strand.
+  `RealtimeBackplanePlugin` calls `connect()` exactly once and `close()` only from `onClose`, so no
+  application behavior changes — this closes the seam for callers driving the transport directly.
+
 ## [0.1.0-alpha.3] — 2026-07-30
 
 **Two breaking changes ship in this release.** Both are narrow, but you meet them in production

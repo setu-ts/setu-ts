@@ -24,6 +24,7 @@ import {
 import {
   getTemplate,
   listTemplates,
+  type MiddlewareWiring,
   MINIMAL_PLUGINS,
   packagesOf,
   type Wiring,
@@ -55,6 +56,21 @@ export interface NewDependencies {
 const RANGE = `^${VERSION}`;
 
 /**
+ * Renders a middleware wiring's `add()` options as source, including the
+ * leading comma.
+ *
+ * Always emits both fields: a middleware's pipeline position is never
+ * incidental, and `MiddlewareWiring.addOptions` is required precisely so this
+ * cannot degrade to a bare `add()` at the default priority of 500.
+ *
+ * @param options - The wiring's declared position and name
+ * @returns Source for the second argument to `app.middleware.add(...)`
+ */
+function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
+  return `, { priority: ${options.priority}, name: '${options.name}' }`;
+}
+
+/**
  * Renders the project's `honoe.config.ts` — the single place its plugin list
  * lives.
  *
@@ -68,7 +84,7 @@ const RANGE = `^${VERSION}`;
  */
 function configModule(
   plugins: readonly Wiring[],
-  middleware: readonly Wiring[],
+  middleware: readonly MiddlewareWiring[],
 ): string {
   const imports = [
     `import { createApplication } from '@hono-enterprise/kernel';`,
@@ -78,9 +94,11 @@ function configModule(
   ].join('\n');
 
   const pluginList = plugins.map((p) => `      ${p.symbol}(),`).join('\n');
-  const middlewareLines = middleware.length === 0
-    ? ''
-    : `\n${middleware.map((m) => `  app.middleware.add(${m.symbol}());`).join('\n')}\n`;
+  const middlewareLines = middleware.length === 0 ? '' : `\n${
+    middleware
+      .map((m) => `  app.middleware.add(${m.symbol}()${renderAddOptions(m.addOptions)});`)
+      .join('\n')
+  }\n`;
 
   return `${imports}
 
@@ -221,7 +239,7 @@ function projectFiles(
   projectName: string,
   runtime: TargetRuntime,
   plugins: readonly Wiring[],
-  middleware: readonly Wiring[],
+  middleware: readonly MiddlewareWiring[],
 ): readonly GeneratedFile[] {
   const readme = `# ${projectName}
 
