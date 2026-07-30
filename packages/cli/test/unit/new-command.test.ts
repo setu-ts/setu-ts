@@ -94,9 +94,36 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--template', 'rest']);
       const config = h.fs.read('/work/app/honoe.config.ts');
-      expect(config).toContain('app.middleware.add(errorHandler());');
       expect(config).toContain("import { errorHandler } from '@hono-enterprise/exceptions';");
       expect(config).not.toContain('ExceptionsPlugin');
+    });
+
+    it('registers errorHandler at priority 0, the outermost position', async () => {
+      const h = harness();
+      await h.run(['app', '--template', 'rest']);
+      const config = h.fs.read('/work/app/honoe.config.ts');
+
+      // `errorHandler`'s contract requires the outermost slot. A bare `add()`
+      // takes the pipeline default of 500, which sits INSIDE the metrics
+      // middleware at 20 — so a throw there escapes the try/catch entirely and
+      // the project answers with a bare adapter 500, no RFC 7807 body, no log.
+      expect(config).toContain(
+        "app.middleware.add(errorHandler(), { priority: 0, name: 'error-handler' });",
+      );
+      expect(config).not.toContain('app.middleware.add(errorHandler());');
+    });
+
+    it('registers errorHandler at priority 0 for the microservice template too', async () => {
+      const h = harness();
+      await h.run(['app', '--template', 'microservice']);
+      const config = h.fs.read('/work/app/honoe.config.ts');
+
+      // The microservice set adds telemetry middleware at 30, so the same
+      // ordering requirement applies — and it composes REST_MIDDLEWARE, so this
+      // guards that the shared list keeps carrying its position.
+      expect(config).toContain(
+        "app.middleware.add(errorHandler(), { priority: 0, name: 'error-handler' });",
+      );
     });
 
     it('declares a manifest import for every package the config references', async () => {

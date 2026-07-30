@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { TemplateDefinition, Wiring } from './registry.ts';
+import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
 
 /** Always first: the kernel makes the `runtime` capability mandatory at `start()`. */
 export const RUNTIME_WIRING: Wiring = { pkg: 'runtime', symbol: 'RuntimePlugin' };
@@ -34,8 +34,13 @@ export const REST_PLUGINS: readonly Wiring[] = [
  * ships a `MiddlewareFunction`, NOT an `IPlugin` — emitting
  * `ExceptionsPlugin()` would name a symbol that does not exist.
  */
-export const REST_MIDDLEWARE: readonly Wiring[] = [
-  { pkg: 'exceptions', symbol: 'errorHandler' },
+export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
+  // `priority: 0` is load-bearing, not cosmetic: `errorHandler`'s contract
+  // requires it be the OUTERMOST middleware. At the pipeline default of 500 it
+  // sits inside metrics (20), telemetry (30), and tenant resolution (40), so a
+  // throw from any of those escapes to the adapter backstop — a bare 500 with no
+  // RFC 7807 body and no error log.
+  { pkg: 'exceptions', symbol: 'errorHandler', addOptions: { priority: 0, name: 'error-handler' } },
 ];
 
 /**
