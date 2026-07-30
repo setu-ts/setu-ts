@@ -74,6 +74,20 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         ? ctx.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE)
         : undefined;
 
+      if (backplane === undefined && options?.scalingNotice !== false) {
+        // Said once at startup because the alternative is silent: behind more
+        // than one replica a room broadcast reaches only the clients on this
+        // process, which looks like partial delivery rather than an error.
+        // The transport is named because the backplane plugin defaults to
+        // 'memory', a single-process bus: registering it bare would silence this
+        // line without fanning anything out.
+        ctx.logger?.info(
+          'websocket: rooms broadcast in-process only. Register RealtimeBackplanePlugin ' +
+            "from @hono-enterprise/realtime-backplane-plugin with a 'redis' or " +
+            "'messaging' transport to fan out across replicas.",
+        );
+      }
+
       // `ctx.logger` is undefined when no logger capability is registered;
       // `optionalDependencies` above is what orders the logger plugin ahead of
       // this one so it is resolvable here.

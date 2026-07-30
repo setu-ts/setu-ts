@@ -45,15 +45,60 @@ app.router.get('/events', async (ctx) => {
 
 ```typescript
 const deploys = sse.channel('deploys');
-deploys.broadcast({ data: JSON.stringify({ build: 412, status: 'live' }) });
+deploys.publish({ data: JSON.stringify({ build: 412, status: 'live' }) });
 ```
+
+## Scaling beyond one replica
+
+**A channel is process-local until you register a backplane.** On a single instance that is
+invisible. Behind two or more, `channel('deploys').publish(...)` reaches only the clients connected
+to _that_ process — the other replicas' subscribers hear nothing, and no error is raised anywhere.
+It is partial delivery, not a failure, which is what makes it easy to ship.
+
+Registering
+[`@hono-enterprise/realtime-backplane-plugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/realtime-backplane-plugin/README.md)
+**with a cross-process transport** is the entire fix. This plugin resolves it _optionally_, so
+nothing else changes:
+
+```typescript
+import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+
+createApplication({
+  plugins: [
+    RuntimePlugin(),
+    RealtimeBackplanePlugin({ transport: 'redis', url: 'redis://localhost:6379' }),
+    SsePlugin(),
+  ],
+});
+```
+
+**The transport matters, not just the plugin.** `RealtimeBackplanePlugin()` defaults to
+`transport: 'memory'` — a real bus, but a _single-process_ one. Registering it bare silences the
+startup notice described below without fanning anything out. Use `'redis'`, or `'messaging'` to
+reuse whichever broker `MessagingPlugin` already registered.
+
+Channels now fan out across every replica sharing that transport. Remove the plugin and behavior
+returns to in-process, with no application change. `channel.size` stays local by design: it counts
+this replica's subscribers, because a cluster-wide count is inherently asynchronous and cannot
+satisfy the synchronous getter.
+
+When no backplane is registered this plugin logs one `info` line at startup stating the limitation.
+If you are running a single replica, that line is informational and safe to ignore — and if you have
+decided single-replica fan-out is correct for this deployment, `scalingNotice: false` silences it:
+
+```typescript
+SsePlugin({ scalingNotice: false });
+```
+
+That suppresses the message only. Channel delivery is identical either way.
 
 ## Options
 
-| Option        | Type     | Default  | Description                                                                    |
-| ------------- | -------- | -------- | ------------------------------------------------------------------------------ |
-| `heartbeatMs` | `number` | disabled | Interval for a `: heartbeat` comment frame. Omitted means **no timer at all**. |
-| `retryMs`     | `number` | disabled | Emits a leading `retry: <ms>` advertising the reconnect delay.                 |
+| Option          | Type      | Default  | Description                                                                                    |
+| --------------- | --------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `heartbeatMs`   | `number`  | disabled | Interval for a `: heartbeat` comment frame. Omitted means **no timer at all**.                 |
+| `retryMs`       | `number`  | disabled | Emits a leading `retry: <ms>` advertising the reconnect delay.                                 |
+| `scalingNotice` | `boolean` | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
 
 ## Reconnection
 
