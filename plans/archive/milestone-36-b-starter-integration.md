@@ -1,6 +1,6 @@
 # Milestone 36b — Starter integration: realtime, DI, and NestJS familiarity
 
-> **Status:** Planning. Branch: `feat/m36b-starter-integration`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m36b-starter-integration`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope

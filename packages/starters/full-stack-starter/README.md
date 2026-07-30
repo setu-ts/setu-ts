@@ -159,9 +159,70 @@ app.register(QueuePlugin({ name: 'dead-letter' }));
 This escape hatch works because `createFullStackApp` returns an un-started `IKernelApplication` that
 accepts additional registrations.
 
+## Realtime and DI arms
+
+`createFullStackApp` inherits the `realtime` and `di` arms from the REST starter — the option type
+extends `RestStarterOptions`, so every sub-arm behaves identically and nothing new is registered by
+default.
+
+```typescript
+const app = createFullStackApp({
+  di: {},
+  realtime: { sse: {}, websocket: {}, backplane: { transport: 'messaging' } },
+});
+```
+
+`{ transport: 'messaging' }` works on this tier without extra wiring, because the microservice set
+it composes from always registers `MessagingPlugin`.
+
+None of these arms collide with the plugins this tier already bundles — `sse`, `websocket`, `di`,
+and the backplane are registered by no other arm.
+
+See
+[rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
+for the full description of each arm.
+
+## Coming from NestJS
+
+| NestJS                        | Hono Enterprise                                                 |
+| ----------------------------- | --------------------------------------------------------------- |
+| `@Module({ … })`              | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
+| `providers: [UserService]`    | `decorators: { services: [UserService] }`, or `app.register(…)` |
+| `@Injectable()`               | `@Injectable({ token, scope })`                                 |
+| Constructor injection by type | `@Inject(token)` on each constructor parameter                  |
+| `@Controller('/users')`       | `@Controller('/users')` — identical                             |
+| `@Get()` / `@Post()`          | `@Get()` / `@Post()` — identical                                |
+| `@Body()` / `@Query()`        | `@Body()` / `@Query()` — identical                              |
+| Guard (`CanActivate`)         | `@UseGuards(fn)`, or an `auth-plugin` guard factory             |
+| Pipe (`ValidationPipe`)       | `@ValidateBody(schema)` (Zod)                                   |
+| Interceptor                   | `@UseInterceptors(fn)`                                          |
+| Exception filter              | `@UseFilters(fn)`, or `errorHandler()` middleware               |
+| `imports: [OtherModule]`      | `ctx.services.get(CAPABILITIES.X)` — no plugin imports another  |
+| DI is required                | DI is the optional `di` arm                                     |
+
+**The one difference that will bite you: constructor injection needs an explicit token.**
+
+```typescript
+@Injectable({ token: 'user-service' })
+class UserService {
+  constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}
+}
+```
+
+`constructor(private db: DatabaseService)` cannot work here. Inferring the token from the
+parameter's type requires `emitDecoratorMetadata`, which Deno does not support — so the type is
+simply not available at runtime. This is permanent, not a gap waiting to be filled.
+
+Three consequences, each a startup throw rather than a silent misinjection:
+
+- Leaving a constructor parameter undecorated (below the last injected one) throws, naming the class
+  and the index.
+- Mixing parameter-level `@Inject` with the deprecated class-level `@Inject('a', 'b')` list throws.
+- `@Inject` on a _method_ parameter throws — those bind with `@Body`/`@Query`/`@Param`.
+
 ## See Also
 
 - [JSR Registry](https://jsr.io/@hono-enterprise/full-stack-starter)
 - [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [rest-starter](./../rest-starter/README.md)
-- [microservice-starter](./../microservice-starter/README.md)
+- [rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
+- [microservice-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/microservice-starter/README.md)

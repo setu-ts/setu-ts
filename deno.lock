@@ -1896,6 +1896,7 @@
           "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/di-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.3",
@@ -1903,8 +1904,11 @@
           "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/realtime-backplane-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/runtime@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/sse-plugin@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/websocket-plugin@~0.1.0-alpha.3"
         ]
       },
       "packages/telemetry-plugin": {

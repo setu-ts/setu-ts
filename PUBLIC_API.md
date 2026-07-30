@@ -4319,7 +4319,7 @@ deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
 # Scaffold a project (creates ./my-app)
 honoe new my-app
 honoe new my-app --runtime node                 # deno | node | bun | cloudflare-workers
-honoe new my-app --template rest                # rest | microservice
+honoe new my-app --template rest                # rest | microservice | nest
 honoe new my-app --template microservice --runtime bun
 
 # Commands this application's plugins provide
@@ -4414,12 +4414,17 @@ export function createApp(): IApplication {
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
 | `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
 | `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+| `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
 
-Templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter` packages — those
-export nothing today and are owned by Milestone 36.
-`--template microservice --runtime
-cloudflare-workers` is refused (`2`): the messaging and queue
-plugins need raw sockets, which Workers does not provide.
+Templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter` packages. The
+starters ship (Milestone 36) and are usable directly; a `--starter` flag that scaffolds against them
+is still deferred (see "Not in this release").
+
+The `nest` template additionally emits `src/greeting-service.ts` and `src/greeting-controller.ts`,
+and its `honoe.config.ts` imports both to pass them to `DecoratorPlugin({ controllers, services })`.
+It refuses no runtime target. `--template microservice --runtime
+cloudflare-workers` is refused
+(`2`): the messaging and queue plugins need raw sockets, which Workers does not provide.
 
 ### Plugin-contributed commands
 
@@ -4534,8 +4539,9 @@ testable without terminating the runner.
 
 ### Not in this release
 
-- **Starter-backed templates.** `--template` emits inline wiring; templates resolving to
-  `@hono-enterprise/*-starter` wait on Milestone 36, which owns those packages.
+- **Starter-backed scaffolding.** `--template` emits inline wiring. A `honoe new --starter` path
+  that scaffolds a project importing `createRestApp` and friends is deferred — the starters
+  themselves shipped in Milestone 36 and can be depended on directly.
 - **Flags for plugin commands.** `CliCommandHandler` receives positionals only; giving handlers a
   parsed flag record would widen a committed `common` contract. Forward flags with `--` instead.
 - **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
@@ -5855,33 +5861,33 @@ carry full JSDoc.
 
 ### Values (decorator-plugin exports)
 
-| Export                                               | Kind     | Purpose                                                             |
-| ---------------------------------------------------- | -------- | ------------------------------------------------------------------- |
-| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services      |
-| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                |
-| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads |
-| `Controller`                                         | function | Class decorator — base path prefix                                  |
-| `Version`                                            | function | Class decorator — API version prefix                                |
-| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                              |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                        |
-| `Injectable`                                         | function | Class decorator — marks a class for DI registration                 |
-| `Inject`                                             | function | Class decorator — declares constructor injection tokens             |
-| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                 |
-| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                    |
-| `Public`                                             | function | Method decorator — bypasses auth                                    |
-| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                    |
-| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                       |
-| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                      |
-| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                      |
-| `createDecorator`                                    | function | Custom class/method decorator factory                               |
-| `createParameterDecorator`                           | function | Custom parameter decorator factory                                  |
-| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata          |
-| `resolveParameter`                                   | function | Resolves a single parameter value                                   |
-| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                    |
-| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                |
-| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                         |
-| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                   |
-| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                   |
+| Export                                               | Kind     | Purpose                                                                                                             |
+| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                      |
+| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                |
+| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                 |
+| `Controller`                                         | function | Class decorator — base path prefix                                                                                  |
+| `Version`                                            | function | Class decorator — API version prefix                                                                                |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                              |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                                                                        |
+| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                 |
+| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens |
+| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                 |
+| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                    |
+| `Public`                                             | function | Method decorator — bypasses auth                                                                                    |
+| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                    |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                                                                       |
+| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                      |
+| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                      |
+| `createDecorator`                                    | function | Custom class/method decorator factory                                                                               |
+| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                  |
+| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                          |
+| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                   |
+| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                    |
+| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                |
+| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                         |
+| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                   |
+| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                   |
 
 ### Types
 
@@ -5924,6 +5930,45 @@ Contract notes:
   `CAPABILITIES.DECORATOR_HANDLER`). `createParameterDecorator` records parameter metadata resolved
   by `resolveParameters` via `registerParameterResolver`; the `current-user` built-in resolves
   `ctx.request.user`.
+- **`@Inject` has two positions, and a token is always required.** The preferred form is on each
+  constructor parameter, binding one token to that argument by position:
+
+  ```typescript
+  @Injectable({ token: 'user-repository' })
+  class UserRepository {
+    constructor(
+      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
+      @Inject(CAPABILITIES.LOGGER) private logger: ILogger,
+    ) {}
+  }
+  ```
+
+  The class-level positional list is **deprecated** but keeps working for the whole `0.x` line
+  (AI_GUIDELINES §9.2):
+
+  ```typescript
+  @Injectable({ token: 'user-repository' })
+  @Inject('database', 'logger') // deprecated — reordering the constructor misinjects silently
+  class UserRepository {
+    constructor(db: IDatabase, logger: ILogger) {}
+  }
+  ```
+
+  A token cannot be inferred from the parameter's type: that needs `emitDecoratorMetadata`, which
+  Deno does not support, and no source in this repo reads `design:paramtypes`. Three rules follow,
+  each a throw rather than a silent misinjection:
+  - Mixing the two forms on one class throws at `register()`, naming the class. `mergeService`
+    replaces `inject` wholesale, so any precedence rule would be invisible at the call site.
+  - Leaving a constructor parameter undecorated below the last injected one throws, naming the class
+    and the index — a hole would shift every later argument.
+  - `@Inject` on a **method** parameter throws; method parameters bind with
+    `@Body`/`@Query`/`@Param`/`@Header`/`@Cookie`.
+
+  Constructor parameter decorators evaluate in reverse argument order, so tokens are stored keyed by
+  index and assembled ascending; declaration order is what reaches the constructor.
+- **The container is preferred whenever the class is registered in it**, with or without
+  `@Injectable`. A `@Controller` carries no `@Injectable`, so a constructor-injected controller in a
+  `DiPlugin` application resolves through the container — where its dependencies live.
 - **No runtime-specific APIs**: the package uses no `Date.now()`, `Deno`, `process`, or `fs` — all
   file/time operations go through `IRuntimeServices`.
 

@@ -4475,6 +4475,107 @@ implementation task.
 
 ---
 
+## Milestone 36b: Starter Integration — Realtime, DI, and NestJS Familiarity ✅ COMPLETE
+
+**Objective:** make two capabilities the M36 starters deliberately omitted expressible as gated
+arms, and close the one ergonomic gap that makes this framework feel foreign to a developer arriving
+from NestJS.
+
+M36 bundled none of the real-time plugins and no DI container, on the stated grounds that each needs
+caller-supplied routes, channels, or a transport before it does anything. **That reasoning is
+kept.** Every plugin M36b adds sits behind an arm the caller must supply, exactly as `database` and
+`auth` already work, so the default composition of all three tiers is byte-identical to M36 —
+nothing is bundled that cannot serve a request.
+
+### A. Gated `realtime` and `di` arms
+
+One `realtime` arm with three sub-arms (`websocket`, `sse`, `backplane`), added to
+`RestStarterOptions` and therefore inherited by the microservice and full-stack tiers through the
+existing `extends` chain — no new gate logic in either. Grouped rather than flattened into three
+top-level options so the real-time story stays discoverable as a unit; `realtime: {}` adds nothing
+and is not an error.
+
+The starter performs **no** validation of the `'messaging'` backplane transport. The backplane's own
+`register()` already throws naming `MessagingPlugin`, and a second check would duplicate logic that
+must not drift from it. A test pins that the REST tier rejects that transport while the microservice
+tier boots with it, so the tier distinction is proven rather than asserted.
+
+`di` is an arm rather than always-on because `DecoratorPlugin` branches on `ctx.container`:
+registering `DiPlugin` changes how every decorated service in the application is constructed, and
+the lifecycle it gets. Making it unconditional would silently change both for every existing starter
+app.
+
+### B. Parameter-level `@Inject`
+
+`Inject` is widened from `ClassDecorator` to `ClassDecorator & ParameterDecorator`, branching at
+runtime on the argument count. The class-level positional list keeps its exact signature and
+behavior, deprecated in JSDoc per AI_GUIDELINES §9.2, so it works for the whole `0.x` line.
+
+Three facts were established by probe and from source before this was designed:
+
+- **Constructor parameter decorators evaluate in reverse argument order.** Tokens are therefore
+  stored keyed by index and assembled ascending; appending in call order would reverse the list and
+  misinject every argument — the precise failure this deliverable removes, reintroduced one layer
+  down.
+- **`IMetadataStore` in `common` declares only three readonly maps.** `mergeCtorParam`/`ctorInject`
+  are concrete-class members, so storing parameter tokens needs **no `common` change** and no new
+  capability token.
+- **A token can never be inferred.** `emitDecoratorMetadata` appears nowhere in the repo and no
+  source reads `design:paramtypes`; Deno does not support it. This is permanent, not deferred.
+
+Every ambiguous case throws at startup rather than misinjecting: mixing the two forms on one class,
+leaving a parameter undecorated below the last injected one, and `@Inject` on a method parameter.
+
+This also fixed a latent defect it made reachable: `instantiate()` required service metadata before
+consulting the container, so a `@Controller` — which carries no `@Injectable` — took the registry
+path even in a DI application, where its dependencies live in the container, and construction failed
+outright. The guard contradicted the function's own documented behavior.
+
+### C. `honoe new --template nest`
+
+A third template beside `rest` and `microservice`: the REST set plus `DiPlugin`, an `@Injectable`
+service, and a `@Controller` whose dependency is declared with parameter-level `@Inject`. Wiring
+stays **inline**, like the other two — this is not the deferred `--starter` path. The scaffolded
+project is the runnable showcase, and it is covered by the CLI drift gate, which type-checks
+generated output against this workspace.
+
+Emitting it required widening the template contract, which could express neither a plugin call
+argument nor an extra source file: `Wiring` was `{ pkg, symbol }` and the renderer hardcoded
+`Symbol()`. Three optional fields close that while keeping templates as DATA behind the single
+renderer — `Wiring.args`, `TemplateDefinition.localImports`, and `TemplateDefinition.files`. Every
+existing wiring renders byte-identically.
+
+### Deliverables
+
+- [x] **`realtime` arm** — `RealtimeArm` on `RestStarterOptions`, three spread-gates, re-exported
+      through the microservice and full-stack barrels along the tier's own pin chain.
+- [x] **`di` arm** — `DiPlugin` gated, with a test that the same decorated composition serves
+      through the container path AND the registry path.
+- [x] **Parameter-level `@Inject`** — `injection.ts`, `metadata-store.ts` (`mergeCtorParam` /
+      `ctorInject`), and the `effectiveInject` seam in `decorator-plugin.ts` with its both-forms
+      throw.
+- [x] **`nest` template** — `templates/nest.ts`, `'nest'` in `TEMPLATES`, the three registry fields,
+      and the renderer changes in `commands/new.ts`.
+- [x] **Real-kernel DI interop test** — `decorator-plugin/test/integration/di-interop.test.ts`, a
+      real app with `DiPlugin` + `DecoratorPlugin` serving a route from a parameter-injected
+      controller. Guards the priority ordering rather than assuming it.
+- [x] **Drift gate for `nest`** — scaffolds the project, repoints imports at this workspace, and
+      `deno check`s the config plus both emitted classes. The only check that validates the rendered
+      `args` string and the `localImports` paths.
+- [x] **Docs** — `PUBLIC_API.md` `Inject` row + both-position contract notes and the `nest` template
+      row; the three starter READMEs' arm documentation and "Coming from NestJS" mapping; this
+      section and the Progress Tracking row `36b`; the `CLAUDE.md` "Next milestone" mislabel (it
+      named M36b as the React Router skeleton, contradicting this file); the stale NestJS-comparison
+      caveat below, which still said sessions did not exist after M48 shipped them; and the four
+      cross-package README links that returned 400 on jsr.io.
+
+**Not this milestone:** config-key indirection (`urlFromConfig` / `secretFromConfig`) and the
+full-stack React Router app skeleton adapted from B2BAdmin — both **M36c**. The skeleton is deferred
+on scope alone now: M48 closed the session/CSRF capability gap that also blocked it. Example
+applications under `apps/*` remain M37; a `honoe new --starter` path remains deferred.
+
+---
+
 ## Milestone 48: Session Plugin — Cookie Sessions and Form CSRF ✅ COMPLETE
 
 **Objective:** a `SESSION` capability, because the framework has none.
@@ -4598,7 +4699,7 @@ Four claims in the section above were checked against source and did not survive
 - The documented middleware-priority table in ARCHITECTURE omitted the existing CSRF row at 270,
   which is what makes 275 legible; it is added alongside the two new session rows.
 
-**Sequencing:** M36b (planned) → **M48** → M36c (React Router app skeleton + config-key
+**Sequencing:** M36b (complete) → **M48** → M36c (React Router app skeleton + config-key
 indirection), because M36c consumes this milestone. M48 is not the last gap before a shippable
 framework — M37 examples, M38 documentation, and M39 deploy manifests remain — it is what makes the
 full-stack story coherent.
@@ -4622,13 +4723,19 @@ full-stack story coherent.
 | Middleware       | Tied to modules | Independent, pipeline-based          |
 | Testing          | Mock modules    | Mock plugins/services                |
 
-**Two caveats a NestJS reader needs, so the table above is not read as parity.** Constructor
+**One caveat a NestJS reader needs, so the table above is not read as parity.** Constructor
 injection takes an explicit token — `@Inject(CAPABILITIES.DATABASE) private db: Db` — because
 type-inferred injection requires `emitDecoratorMetadata`, which Deno does not support; no source in
-this repo reads `design:paramtypes`, and none can. The parameter-level form arrives in M36b,
-replacing a positional class-level token list. Separately, **cookie sessions and form-CSRF do not
-exist yet** (M48): the auth plugin covers JWT, API keys, refresh tokens, and RBAC, and the CSRF
-middleware validates Origin/Referer rather than a synchronizer token.
+this repo reads `design:paramtypes`, and none can. So `constructor(private db: DatabaseService)`
+cannot work, and this is permanent rather than a gap waiting to be filled. M36b shipped the
+parameter-level form, which binds one token per argument by position and deprecates the positional
+class-level list; mixing the two forms, or leaving a parameter undecorated, throws at startup rather
+than misinjecting silently.
+
+Cookie sessions and form-CSRF **were** the second caveat here; M48 closed it. `session-plugin` ships
+a `SESSION` capability with encrypted cookie sessions, server-side store strategies, and the
+synchronizer-token `csrfFormMiddleware` a progressive-enhancement `<Form>` post needs — which the
+stateless Origin/Referer check in `http-security-plugin` structurally cannot satisfy.
 
 ---
 
@@ -4740,63 +4847,64 @@ app.register(MyPlugin({ option1: 'value' }));
 
 ## Progress Tracking
 
-| Milestone | Status | Package              |
-| --------- | ------ | -------------------- |
-| 0         | ✅     | Monorepo Foundation  |
-| 1         | ✅     | common               |
-| 2         | ✅     | kernel               |
-| 3         | ✅     | runtime              |
-| 4         | ✅     | logger-plugin        |
-| 5         | ✅     | config-plugin        |
-| 6         | ✅     | validation-plugin    |
-| 7         | ✅     | exceptions           |
-| 8         | ✅     | di-plugin            |
-| 9         | ✅     | decorator-plugin     |
-| 10        | ✅     | database-plugin      |
-| 11        | ✅     | cache-plugin         |
-| 12        | ✅     | events-plugin        |
-| 13        | ✅     | cqrs-plugin          |
-| 14        | ✅     | messaging-plugin     |
-| 14b       | ✅     | messaging-plugin     |
-| 14c       | ✅     | messaging-plugin     |
-| 14d       | ✅     | messaging-plugin     |
-| 15        | ✅     | queue-plugin         |
-| 15b       | ✅     | queue-plugin         |
-| 16        | ✅     | auth-plugin          |
-| 16b       | ✅     | auth-plugin          |
-| 17        | ✅     | http-security-plugin |
-| 18        | ✅     | scheduler-plugin     |
-| 19        | ✅     | metrics-plugin       |
-| 20        | ✅     | health-plugin        |
-| 21        | ✅     | openapi-plugin       |
-| 22        | ✅     | kernel-on-hono       |
-| 23        | ✅     | runtime-serve-hono   |
-| 24        | ✅     | telemetry-plugin     |
-| 24b       | ✅     | telemetry-plugin     |
-| 24c       | ✅     | telemetry-collector  |
-| 25        | ✅     | secrets-plugin       |
-| 26        | ✅     | audit-plugin         |
-| 27        | ✅     | resilience-plugin    |
-| 28        | ✅     | storage-plugin       |
-| 29        | ✅     | mail-plugin          |
-| 30        | ✅     | notification-plugin  |
-| 30b       | ✅     | notification-plugin  |
-| 31        | ✅     | feature-flags-plugin |
-| 32        | ✅     | multi-tenancy-plugin |
-| 33        | ✅     | testing              |
-| 34        | ✅     | cli                  |
-| 34b       | ✅     | cli                  |
-| 35        | ✅     | sdk                  |
-| 36        | ✅     | starters             |
-| 37        | ⬜     | examples             |
-| 38        | ⬜     | documentation        |
-| 39        | ⬜     | docker/kubernetes    |
-| 40        | ⬜     | final release        |
-| 41        | ✅     | http-adapters        |
-| 42        | ✅     | streaming-response   |
-| 43        | ✅     | sse-plugin           |
-| 44        | ✅     | react-router-plugin  |
-| 45        | ✅     | worker-pool-plugin   |
-| 46        | ✅     | websocket-plugin     |
-| 47        | ✅     | alpha-3 limitations  |
-| 48        | ✅     | session-plugin       |
+| Milestone | Status | Package                           |
+| --------- | ------ | --------------------------------- |
+| 0         | ✅     | Monorepo Foundation               |
+| 1         | ✅     | common                            |
+| 2         | ✅     | kernel                            |
+| 3         | ✅     | runtime                           |
+| 4         | ✅     | logger-plugin                     |
+| 5         | ✅     | config-plugin                     |
+| 6         | ✅     | validation-plugin                 |
+| 7         | ✅     | exceptions                        |
+| 8         | ✅     | di-plugin                         |
+| 9         | ✅     | decorator-plugin                  |
+| 10        | ✅     | database-plugin                   |
+| 11        | ✅     | cache-plugin                      |
+| 12        | ✅     | events-plugin                     |
+| 13        | ✅     | cqrs-plugin                       |
+| 14        | ✅     | messaging-plugin                  |
+| 14b       | ✅     | messaging-plugin                  |
+| 14c       | ✅     | messaging-plugin                  |
+| 14d       | ✅     | messaging-plugin                  |
+| 15        | ✅     | queue-plugin                      |
+| 15b       | ✅     | queue-plugin                      |
+| 16        | ✅     | auth-plugin                       |
+| 16b       | ✅     | auth-plugin                       |
+| 17        | ✅     | http-security-plugin              |
+| 18        | ✅     | scheduler-plugin                  |
+| 19        | ✅     | metrics-plugin                    |
+| 20        | ✅     | health-plugin                     |
+| 21        | ✅     | openapi-plugin                    |
+| 22        | ✅     | kernel-on-hono                    |
+| 23        | ✅     | runtime-serve-hono                |
+| 24        | ✅     | telemetry-plugin                  |
+| 24b       | ✅     | telemetry-plugin                  |
+| 24c       | ✅     | telemetry-collector               |
+| 25        | ✅     | secrets-plugin                    |
+| 26        | ✅     | audit-plugin                      |
+| 27        | ✅     | resilience-plugin                 |
+| 28        | ✅     | storage-plugin                    |
+| 29        | ✅     | mail-plugin                       |
+| 30        | ✅     | notification-plugin               |
+| 30b       | ✅     | notification-plugin               |
+| 31        | ✅     | feature-flags-plugin              |
+| 32        | ✅     | multi-tenancy-plugin              |
+| 33        | ✅     | testing                           |
+| 34        | ✅     | cli                               |
+| 34b       | ✅     | cli                               |
+| 35        | ✅     | sdk                               |
+| 36        | ✅     | starters                          |
+| 36b       | ✅     | starters + decorator-plugin + cli |
+| 37        | ⬜     | examples                          |
+| 38        | ⬜     | documentation                     |
+| 39        | ⬜     | docker/kubernetes                 |
+| 40        | ⬜     | final release                     |
+| 41        | ✅     | http-adapters                     |
+| 42        | ✅     | streaming-response                |
+| 43        | ✅     | sse-plugin                        |
+| 44        | ✅     | react-router-plugin               |
+| 45        | ✅     | worker-pool-plugin                |
+| 46        | ✅     | websocket-plugin                  |
+| 47        | ✅     | alpha-3 limitations               |
+| 48        | ✅     | session-plugin                    |

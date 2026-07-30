@@ -473,6 +473,13 @@ deno task test:coverage     # read ANSI-stripped per-file table; >=90% branch/fu
   needs task modules addressed by specifier. A "full-stack" starter that silently shipped the entire
   real-time story would imply a working WebSocket/SSE endpoint that does not exist. A caller adds
   any of them with `app.register(...)` on the returned app.
+  - **Superseded in part by M36b — the reasoning above is kept, the conclusion narrowed.** M36b
+    added `sse-plugin`, `websocket-plugin`, `realtime-backplane-plugin`, and `di-plugin` as **gated
+    arms** (`realtime.{websocket,sse,backplane}` and `di`), which are absent unless the caller
+    supplies them. So nothing is bundled and the default plugin set of all three tiers is
+    byte-identical to M36; the arms only remove the need for `app.register(...)`.
+    `worker-pool-plugin` remains unbundled and un-armed. Read this bullet as M36's rule, not as
+    current policy on those four.
 - **The M34b CLI's `errorHandler` priority defect** (`packages/cli/src/commands/new.ts:83`) — C7. It
   is a defect in already-merged `main`, so it belongs on its own `fix/cli-error-handler-priority`
   branch per CLAUDE.md's branch rule, NOT on `feat/m36-starters`. Every project scaffolded by

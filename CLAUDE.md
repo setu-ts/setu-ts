@@ -749,8 +749,47 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   response, and a store write on the store strategy), which is documented rather than hidden, and it
   deliberately does NOT extend absolute expiry — a test pins it apart from `rolling`. All 19 changed
   `src` files ≥96% branch/function/line) — complete (PR #105)
-- **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes M48;
-  M37–M40 follow unless reprioritized.
+- **Milestone 36b** (`packages/starters/*` + `packages/decorator-plugin` + `packages/cli` — starter
+  integration: realtime, DI, and NestJS familiarity. Three deliverables, none of which changes any
+  default: **(A)** gated `realtime` (three sub-arms: `websocket`/`sse`/`backplane`) and `di` arms on
+  `RestStarterOptions`, inherited by the microservice and full-stack tiers through the existing
+  `extends` chain with no new gate logic, so the default composition of all three tiers stays
+  byte-identical to M36 — M36's rule that nothing unusable is bundled is kept, the arms just make
+  previously-impossible compositions expressible without `app.register(...)`. The starter does NO
+  validation of the `'messaging'` backplane transport: the backplane's own `register()` already
+  throws naming `MessagingPlugin`, and a test pins that the REST tier rejects it while the
+  microservice tier boots with it, so the tier distinction is proven rather than asserted. `di` is
+  gated because `DecoratorPlugin` branches on `ctx.container` — registering `DiPlugin` changes how
+  every decorated service is constructed and the lifecycle it gets. **(B)** parameter-level
+  `@Inject`: `Inject` widened to `ClassDecorator & ParameterDecorator`, branching on the argument
+  count, with the class-level positional list deprecated (§9.2) not removed. Constructor parameter
+  decorators evaluate in **reverse** argument order (re-probed this milestone, not taken on trust),
+  so tokens are stored index-keyed and assembled ascending — appending in call order would reverse
+  the list and misinject every argument, the exact failure the deliverable removes. `IMetadataStore`
+  in `common` declares only three readonly maps, so `mergeCtorParam`/`ctorInject` are concrete-class
+  members and there is **no `common` change and no new token**. A token can never be inferred
+  (`emitDecoratorMetadata` is absent repo-wide and Deno does not support it), so every ambiguous
+  case throws at startup instead of misinjecting: mixing both forms, a hole below the last injected
+  index, and `@Inject` on a method parameter. This also fixed a latent defect it made reachable —
+  `instantiate()` required service metadata before consulting the container, so a `@Controller`
+  (which carries no `@Injectable`) took the registry path even in a DI app where its dependencies
+  live in the container, and construction failed outright; the guard contradicted the function's own
+  JSDoc. **(C)** `honoe new --template nest`, the showcase: REST set + `DiPlugin` + an `@Injectable`
+  service + a `@Controller` using the parameter form, wiring INLINE like the other templates (not
+  the deferred `--starter` path). That needed a template-contract widening the original plan had
+  assumed away — `Wiring` was `{ pkg, symbol }` and the renderer hardcoded `Symbol()`, so neither a
+  plugin argument nor an extra source file was expressible; three optional fields (`Wiring.args`,
+  `localImports`, `files`) close it with every existing wiring rendering byte-identically. Verified
+  by scaffolding the project, repointing its imports at the workspace, `deno check`ing it, and
+  RUNNING it — both routes serve 200 with the injected service's output. Docs: the `CLAUDE.md` "Next
+  milestone" line had M36b mislabelled as the React Router skeleton, contradicting
+  `ROADMAP.md:4601`; ROADMAP had **no M36b section and no `36b` Progress row** at all, both added;
+  the ROADMAP NestJS-comparison caveat still claimed sessions did not exist after M48 shipped them;
+  and four cross-package starter README links were relative, which returns 400 on jsr.io) — complete
+  (PR pending)
+- **Next milestone** — **Milestone 36c** (React Router app skeleton adapted from B2BAdmin +
+  config-key indirection; consumes M48's session/CSRF capability, so it is now deferred on scope
+  alone), then M37–M40 unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
