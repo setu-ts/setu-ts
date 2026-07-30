@@ -34,6 +34,6 @@
     "@hono-enterprise/notification-plugin": "jsr:@hono-enterprise/notification-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/multi-tenancy-plugin": "jsr:@hono-enterprise/multi-tenancy-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/react-router-plugin": "jsr:@hono-enterprise/react-router-plugin@^0.1.0-alpha.3",
-    "@hono-enterprise/microservice-starter": "../microservice-starter/"
+    "@hono-enterprise/microservice-starter": "jsr:@hono-enterprise/microservice-starter@^0.1.0-alpha.3"
   }
 }

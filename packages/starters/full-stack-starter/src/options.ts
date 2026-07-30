@@ -1,7 +1,7 @@
 /**
  * @module
  */
-import type { MicroserviceStarterOptions } from '../../microservice-starter/src/options.ts';
+import type { MicroserviceStarterOptions } from '@hono-enterprise/microservice-starter';
 import type { CachePluginOptions } from '@hono-enterprise/cache-plugin';
 import type { EventsPluginOptions } from '@hono-enterprise/events-plugin';
 import type { CqrsPluginOptions } from '@hono-enterprise/cqrs-plugin';

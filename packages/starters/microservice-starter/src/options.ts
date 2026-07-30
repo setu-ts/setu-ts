@@ -1,7 +1,7 @@
 /**
  * @module
  */
-import type { RestStarterOptions } from '../../rest-starter/src/options.ts';
+import type { RestStarterOptions } from '@hono-enterprise/rest-starter';
 import type { MessagingPluginOptions } from '@hono-enterprise/messaging-plugin';
 import type { QueuePluginOptions } from '@hono-enterprise/queue-plugin';
 import type { ResiliencePluginOptions } from '@hono-enterprise/resilience-plugin';

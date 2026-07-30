@@ -4424,10 +4424,15 @@ const app = createRestApp({
   },
   database: {
     type: 'prisma',
+    // Illustrative: in production, resolve via IConfig or similar
     options: { url: process.env.DATABASE_URL },
   },
   auth: {
-    jwt: { secret: process.env.JWT_SECRET, expiresIn: '1h' },
+    jwt: {
+      // Illustrative: in production, resolve via IConfig or similar
+      secret: process.env.JWT_SECRET,
+      expiresIn: '1h'
+    },
   },
   openapi: {
     title: 'My API',
@@ -4505,20 +4510,32 @@ A microservice with messaging, queue, and telemetry:
 import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
 
 const app = createMicroserviceApp({
-  database: { type: 'prisma', options: { url: process.env.DATABASE_URL } },
+  database: {
+    type: 'prisma',
+    // Illustrative: in production, resolve via IConfig or similar
+    options: { url: process.env.DATABASE_URL }
+  },
   messaging: {
     broker: 'rabbitmq',
-    options: { url: process.env.RABBITMQ_URL },
+    options: {
+      // Illustrative: in production, resolve via IConfig or similar
+      url: process.env.RABBITMQ_URL
+    },
     exchange: 'orders',
   },
   queue: {
     adapter: 'redis',
-    options: { url: process.env.REDIS_URL },
+    options: {
+      // Illustrative: in production, resolve via IConfig or similar
+      url: process.env.REDIS_URL
+    },
   },
   telemetry: {
     serviceName: 'order-service',
     exporter: 'otlp',
-    endpoint: process.env.OTLP_ENDPOINT,
+    endpoint:
+      // Illustrative: in production, resolve via IConfig or similar
+      process.env.OTLP_ENDPOINT,
   },
 });
 

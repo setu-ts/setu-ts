@@ -6,7 +6,7 @@ import type { IKernelApplication } from '@hono-enterprise/kernel';
 import type { IPlugin } from '@hono-enterprise/common';
 import { errorHandler } from '@hono-enterprise/exceptions';
 // Import microservice-starter via relative path to enable cross-tier composition
-import { buildMicroservicePlugins } from '../../microservice-starter/src/microservice-app.ts';
+import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
 import type { FullStackStarterOptions } from './options.ts';
 import { CachePlugin } from '@hono-enterprise/cache-plugin';
 import { EventsPlugin } from '@hono-enterprise/events-plugin';
@@ -18,6 +18,8 @@ import { StoragePlugin } from '@hono-enterprise/storage-plugin';
 import { MailPlugin } from '@hono-enterprise/mail-plugin';
 import { FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
 import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
+import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
+import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
 
 /**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
@@ -43,6 +45,8 @@ export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IP
     // Gated arms — only registered when explicitly provided
     ...(options.featureFlags ? [FeatureFlagsPlugin(options.featureFlags)] : []),
     ...(options.notifications ? [NotificationPlugin(options.notifications)] : []),
+    ...(options.multiTenancy ? [MultiTenancyPlugin(options.multiTenancy)] : []),
+    ...(options.reactRouter ? [ReactRouterPlugin(options.reactRouter)] : []),
   ];
 
   return plugins;

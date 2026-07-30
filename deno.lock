@@ -1851,6 +1851,7 @@
           "jsr:@hono-enterprise/mail-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/messaging-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/microservice-starter@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/multi-tenancy-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/notification-plugin@~0.1.0-alpha.3",
           "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.3",
