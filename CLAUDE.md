@@ -731,8 +731,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   first-occurrence-wins) are a CHANGELOG'd defect fix; the `v1.iv.ciphertext.tag` envelope is
   **unreproducible** on Web Crypto, which concatenates the tag with no `getAuthTag()`, so the wire
   shape is `v1.<kid>.<iv>.<sealed>`; and `storage-plugin` was declined as a store backend because
-  `IStorage` has no TTL. All 19 changed `src` files ≥96% branch/function/line) — complete (PR
-  pending)
+  `IStorage` has no TTL. Post-implementation code review then caught two High defects in the commit
+  path, both in options that the happy-path tests exercised only in isolation: `regenerate()`
+  followed by `destroy()` in one request leaked the pre-regeneration store row — after a regenerate
+  `session.id` is the NEW id, never written to the store, while the presented cookie carries the old
+  one, so a stolen copy of it kept authenticating after an explicit destroy, defeating the one
+  property the store strategy exists for; and `idleTimeoutMs` measured time since the last session
+  WRITE rather than the last request, because `seen` advances only in `commit()` and `commit()` is
+  skipped for a clean read, so under the DEFAULT `rolling: false` a user requesting every 30 s
+  against a 60 s window was signed out after 90 s — actively harmful in its default pairing and
+  contradicted by "expire after this much inactivity" in three doc sites. Both are fixed with tests
+  that fail without the fix; the idle fix necessarily commits on every request (a `Set-Cookie` per
+  response, and a store write on the store strategy), which is documented rather than hidden, and it
+  deliberately does NOT extend absolute expiry — a test pins it apart from `rolling`. All 19 changed
+  `src` files ≥96% branch/function/line) — complete (PR #105)
 - **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes this
   milestone; M37–M40 follow unless reprioritized.
 
