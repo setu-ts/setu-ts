@@ -824,7 +824,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `--allow-read`, which SSR needs to import its own server build; and the gate's own
   `useWorkspacePackages` mapped starters to `packages/<name>` (they live under `packages/starters/`)
   and mangled the `~/` alias. Also added a duplicate-path guard, since `findExisting` probes the
-  filesystem and cannot see a path planned twice inside one project) — complete (PR pending)
+  filesystem and cannot see a path planned twice inside one project) — complete (PR #108)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
   reprioritized.
 
