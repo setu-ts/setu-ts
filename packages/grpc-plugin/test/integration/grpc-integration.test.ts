@@ -19,9 +19,9 @@ describe('GrpcPlugin Integration', () => {
 
     const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
     expect(grpc).toBeDefined();
-    expect(grpc.available).toBeTrue();
+    expect(grpc.available).toBeTruthy();
 
-    await app.close();
+    // Application close not available on IKernelApplication in this context
   });
 
   it('should throw on duplicate plugin registration', async () => {
@@ -29,7 +29,7 @@ describe('GrpcPlugin Integration', () => {
       plugins: [RuntimePlugin(), GrpcPlugin(), GrpcPlugin()],
     });
     await expect(app.start({ port: 0 })).rejects;
-    await app.close().catch(() => {});
+    // Application close not available on IKernelApplication in this context
   });
 
   it('should not affect normal Hono routes when gRPC is registered', async () => {
@@ -41,6 +41,6 @@ describe('GrpcPlugin Integration', () => {
     // For now, we just verify the plugin doesn't break application startup
 
     await app.start({ port: 0 });
-    await app.close();
+    // Application close not available on IKernelApplication in this context
   });
 });

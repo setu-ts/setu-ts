@@ -6,7 +6,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GrpcService } from '../../src/services/grpc-service.ts';
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
-import type { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
+// EmbeddedDescriptors is used for typing fakeEmbeddedDescriptors but not directly referenced
 import type { IHttpAdapter } from '@hono-enterprise/common';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
@@ -28,9 +28,9 @@ const fakeEmbeddedDescriptors = {
 
 // A minimal mock IHttpAdapter that satisfies the interface
 function createMockAdapter(setRpcHandler: boolean): IHttpAdapter {
-  const handler = (_: any) => Promise.resolve(null);
+  
   return {
-    setRpcHandler: setRpcHandler ? ((handler) => {}) : (() => {}),
+    setRpcHandler: setRpcHandler ? (() => {}) : () => {},
     setHandler: (() => {}) as any,
     fetch: (() => {}) as any,
     listen: (() => {}) as any,
@@ -47,7 +47,7 @@ describe('GrpcService', () => {
       {} as GrpcPluginOptions,
       adapter,
     );
-    expect(service.available).toBeTrue();
+    expect(service.available).toBeTruthy();
   });
 
   it('should be unavailable when adapter lacks setRpcHandler', () => {
@@ -58,7 +58,7 @@ describe('GrpcService', () => {
       {} as GrpcPluginOptions,
       adapter,
     );
-    expect(service.available).toBeFalse();
+    expect(service.available).toBeFalsy();
   });
 
   it('should register a service via addService', () => {
@@ -75,7 +75,7 @@ describe('GrpcService', () => {
 
     // The service is stored internally; verify no exception was thrown
     expect(() => service.addService({ typeName: 'package.TestService', methods: {} }))
-      .toThrowError();
+      .toThrow();
   });
 
   it('should throw on duplicate service registration', () => {
@@ -90,7 +90,7 @@ describe('GrpcService', () => {
     const definition = { typeName: 'package.TestService', methods: {} };
     service.addService(definition);
 
-    expect(() => service.addService(definition)).toThrowError();
+    expect(() => service.addService(definition)).toThrow();
   });
 
   it('handleRequest should return response for non-RPC paths when available', async () => {

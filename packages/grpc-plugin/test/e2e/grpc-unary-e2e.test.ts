@@ -18,7 +18,7 @@ const DummyService = {
   typeName: 'example.DummyService',
   methods: {
     // A simple unary method
-    sayHello: (context: any) => ({ message: 'Hello!' }),
+    sayHello: (_context: any) => ({ message: 'Hello!' }),
   },
 };
 
@@ -33,7 +33,7 @@ describe('gRPC Unary E2E', () => {
     // Resolve the gRPC service
     const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
     expect(grpc).toBeDefined();
-    expect(grpc.available).toBeTrue();
+    expect(grpc.available).toBeTruthy();
 
     // Add a dummy service
     grpc.addService(DummyService);
@@ -44,6 +44,6 @@ describe('gRPC Unary E2E', () => {
     expect(grpcAsAny.services).toHaveLength(1);
     expect(grpcAsAny.servicesCount).toBe(1);
 
-    await app.close();
+    // Application close not available on IKernelApplication in this context
   });
 });

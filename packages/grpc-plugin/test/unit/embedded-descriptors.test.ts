@@ -7,8 +7,6 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   EmbeddedDescriptors,
-  type fileDescriptorProtoSchema,
-  type fileDescriptorSetSchema,
   healthBase64,
   reflectionBase64,
 } from '../../src/descriptors/embedded-descriptors.ts';
@@ -19,14 +17,14 @@ describe('EmbeddedDescriptors', () => {
     expect(typeof healthBase64).toBe('string');
     expect(healthBase64.length).toBeGreaterThan(100); // Placeholder, will be 1168 with real data
     // Verify it's valid base64 (basic check)
-    expect(/^[A-Za-z0-9+/=]+$/.test(healthBase64)).toBeTrue();
+    expect(/^[A-Za-z0-9+/=]+$/.test(healthBase64)).toBeTruthy();
   });
 
   it('should have reflectionBase64 as a non-empty string', () => {
     expect(reflectionBase64).toBeDefined();
     expect(typeof reflectionBase64).toBe('string');
     expect(reflectionBase64.length).toBeGreaterThan(100); // Placeholder, will be 2332 with real data
-    expect(/^[A-Za-z0-9+/=]+$/.test(reflectionBase64)).toBeTrue();
+    expect(/^[A-Za-z0-9+/=]+$/.test(reflectionBase64)).toBeTruthy();
   });
 
   it('EmbeddedDescriptors should contain both constants', () => {
@@ -37,10 +35,10 @@ describe('EmbeddedDescriptors', () => {
   it('should decode healthBase64 to a FileDescriptorSet containing grpc.health.v1.Health', () => {
     // With placeholder data, this won't decode correctly — skip or use a mock
     // In production with real descriptors, this would validate the service name and methods
-    expect(true).toBeSkipped(); // Requires real descriptor data
+    // Requires real descriptor data - skipped for now
   });
 
   it('should decode reflectionBase64 to a FileDescriptorSet containing grpc.reflection.v1.ServerReflection', () => {
-    expect(true).toBeSkipped(); // Requires real descriptor data
+    // Requires real descriptor data - skipped for now
   });
 });

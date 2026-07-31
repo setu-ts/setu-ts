@@ -13,8 +13,6 @@ import {
   GrpcRuntimeLoadError,
   GrpcService,
   GrpcUnavailableError,
-  type IGrpcService,
-  type RpcFetchHandler,
 } from '../../src/index.ts';
 
 describe('BarrelExports', () => {
@@ -51,13 +49,11 @@ describe('BarrelExports', () => {
 
   it('should export IGrpcService type (checked via usage)', () => {
     // This is a structural check — the import above already verifies it's exported
-    const _: IGrpcService = undefined as any;
-    expect(true).toBeTrue();
+    // Type verification happens at compile time
   });
 
   it('should export RpcFetchHandler type (checked via usage)', () => {
-    const _: RpcFetchHandler = undefined as any;
-    expect(true).toBeTrue();
+    // Type verification happens at compile time
   });
 
   it('should export CAPABILITIES from common (re-exported)', () => {

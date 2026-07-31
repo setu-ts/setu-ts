@@ -38,8 +38,8 @@ describe('RPCDispatcher', () => {
       const map = buildDispatcherMap('/grpc', handlers);
 
       expect(map.size).toBe(2);
-      expect(map.has('/grpc/echo')).toBeTrue();
-      expect(map.has('/grpc/status')).toBeTrue();
+      expect(map.has('/grpc/echo')).toBeTruthy();
+      expect(map.has('/grpc/status')).toBeTruthy();
       expect(map.get('/grpc/echo')).toBeDefined();
     });
   });
@@ -87,8 +87,8 @@ describe('RPCDispatcher', () => {
         '/grpc/',
       ); // normalized to /grpc
 
-      expect(result1 !== null).toBeTrue();
-      expect(result2 !== null).toBeTrue();
+      expect(result1 !== null).toBeTruthy();
+      expect(result2 !== null).toBeTruthy();
     });
   });
 });

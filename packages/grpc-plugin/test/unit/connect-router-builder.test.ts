@@ -2,52 +2,23 @@
  * Connect router builder tests — verifies service registration and dispatch map creation.
  */
 
-import { describe, expect, it } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { buildConnectRouter } from '../../src/transports/connect-router-builder.ts';
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
-import type { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
+// EmbeddedDescriptors imported for type checking but not directly used in test values
 
 // Create a fake ConnectRuntime for testing
 const fakeConnectRuntime: ConnectRuntime = {
-  connect: {
-    createFetchHandler: () => ((req: Request) => new Response('OK')) as any,
-    universalServerRequestFromFetch: (r: Request) => r as any,
-    universalServerResponseToFetch: (r: Response) => r as any,
-  },
-  protobuf: {
-    fromBinary: () => ({}),
-    toBinary: () => new Uint8Array(),
-    create: () => ({}),
-    createFileRegistry: () => ({
-      files: [],
-      getService: () => undefined,
-      getMessage: () => undefined,
-      listServices: () => [],
-    }),
-    FileDescriptorSetSchema: { fields: () => undefined },
-    FileDescriptorProtoSchema: { fields: () => undefined },
-  },
-  wkt: {
-    fromBinary: () => ({}),
-    toBinary: () => new Uint8Array(),
-    create: () => ({}),
-    createFileRegistry: () => ({
-      files: [],
-      getService: () => undefined,
-      getMessage: () => undefined,
-      listServices: () => [],
-    }),
-  },
-  createFetchHandler: () => new Map(),
-  adaptConnectModule: () => fakeConnectRuntime,
-  loadConnectModule: async () => fakeConnectRuntime,
-  reviveDescriptorSet: () => ({
+  createFetchHandler: (_handlers: Array<{ requestPath: string; handler: unknown }>, _options?: { httpVersion?: string }) => new Map(),
+  adaptConnectModule: (_mod: unknown): ConnectRuntime => fakeConnectRuntime,
+  loadConnectModule: async (): Promise<ConnectRuntime> => fakeConnectRuntime,
+  reviveDescriptorSet: (_base64: string) => ({
     files: [],
-    getService: () => undefined,
-    getMessage: () => undefined,
+    getService: (_name: string) => undefined,
     listServices: () => [],
   }),
-  getService: () => undefined,
+  getService: (_registry: unknown, _serviceName: string) => undefined,
 };
 
 // Fake embedded descriptors
@@ -58,14 +29,14 @@ const fakeEmbeddedDescriptors = {
 
 describe('ConnectRouterBuilder', () => {
   it('should build a dispatch map with registered services', () => {
-    const services = [
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [
       {
         definition: { typeName: 'package.ServiceName', methods: { echo: {} } },
-        implementation: { echo: async (req: any) => new Response('OK') },
+        implementation: { echo: async (_request: Request) => new Response('OK') },
       },
     ];
 
-    const { dispatchMap, reflectionRegistry } = buildConnectRouter({
+    const { dispatchMap } = buildConnectRouter({
       basePath: '/grpc',
       reflection: false,
       health: false,
@@ -75,11 +46,11 @@ describe('ConnectRouterBuilder', () => {
     });
 
     expect(dispatchMap.size).toBe(1);
-    expect(dispatchMap.has('/grpc/package.ServiceName/echo')).toBeTrue();
+    expect(dispatchMap.has('/grpc/package.ServiceName/echo')).toBeTruthy();
   });
 
   it('should register health service when health option is true', () => {
-    const services = [];
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [];
     const { dispatchMap } = buildConnectRouter({
       basePath: '/grpc',
       reflection: false,
@@ -108,6 +79,6 @@ describe('ConnectRouterBuilder', () => {
         connectRuntime: fakeConnectRuntime,
         embeddedDescriptors: fakeEmbeddedDescriptors,
       });
-    }).toThrowError();
+    }).toThrow();
   });
 });
