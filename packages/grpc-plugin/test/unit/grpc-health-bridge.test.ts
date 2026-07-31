@@ -5,8 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createHealthService } from '../../src/health/grpc-health-bridge.ts';
-
-// GrpcServingStatus is imported from common but not directly used in this test
+import type { IHealthService } from '@hono-enterprise/common';
 
 describe('GrpcHealthBridge', () => {
   it('creates a health service', () => {
@@ -20,7 +19,9 @@ describe('GrpcHealthBridge', () => {
 
   it('returns serving when no health service provided', async () => {
     const service = createHealthService(null);
-    const typedService = service as { Check: (arg: any) => Promise<{ status: number }> };
+    const typedService = service as {
+      Check: (arg: { service?: string }) => Promise<{ status: number }>;
+    };
     const result = await typedService.Check({ service: '' });
     expect(result).toBeDefined();
     expect(result.status).toBe(1); // 'serving'
@@ -28,12 +29,50 @@ describe('GrpcHealthBridge', () => {
 
   it('handles health service errors gracefully', async () => {
     const mockHealthService = {
-      check: async () => ({ status: 'up' }),
-    } as any;
+      check: () => Promise.resolve({ status: 'up' as const }),
+    } as unknown as IHealthService;
     const service = createHealthService(null, mockHealthService);
-    const typedService = service as { Check: (arg: any) => Promise<{ status: number }> };
+    const typedService = service as {
+      Check: (arg: { service?: string }) => Promise<{ status: number }>;
+    };
     const result = await typedService.Check({ service: '' });
     expect(result).toBeDefined();
     expect(result.status).toBe(1); // 'serving'
+  });
+
+  it('returns not-serving when health service reports down', async () => {
+    const mockHealthService = {
+      check: () => Promise.resolve({ status: 'down' as const }),
+    } as unknown as IHealthService;
+    const service = createHealthService(null, mockHealthService);
+    const typedService = service as {
+      Check: (arg: { service?: string }) => Promise<{ status: number }>;
+    };
+    const result = await typedService.Check({ service: '' });
+    expect(result.status).toBe(2); // 'not-serving'
+  });
+
+  it('returns serving when health service reports degraded', async () => {
+    const mockHealthService = {
+      check: () => Promise.resolve({ status: 'degraded' as const }),
+    } as unknown as IHealthService;
+    const service = createHealthService(null, mockHealthService);
+    const typedService = service as {
+      Check: (arg: { service?: string }) => Promise<{ status: number }>;
+    };
+    const result = await typedService.Check({ service: '' });
+    expect(result.status).toBe(1); // 'serving' (degraded maps to serving)
+  });
+
+  it('returns not-serving when health service check throws', async () => {
+    const mockHealthService = {
+      check: () => Promise.reject(new Error('health check failed')),
+    } as unknown as IHealthService;
+    const service = createHealthService(null, mockHealthService);
+    const typedService = service as {
+      Check: (arg: { service?: string }) => Promise<{ status: number }>;
+    };
+    const result = await typedService.Check({ service: '' });
+    expect(result.status).toBe(2); // 'not-serving'
   });
 });

@@ -23,7 +23,11 @@ describe('BarrelExports', () => {
 
   it('should export GrpcService class', () => {
     expect(GrpcService).not.toBeNull();
-    expect(typeof GrpcService).toBe('class');
+    expect(GrpcService).toBeDefined();
+    // In JavaScript, classes are functions; verify it's a constructor with a name
+    expect(typeof GrpcService).toBe('function');
+    expect(GrpcService.name).toBe('GrpcService');
+    expect(GrpcService.prototype).toBeDefined();
   });
 
   it('should export adaptConnectModule function', () => {
@@ -33,12 +37,22 @@ describe('BarrelExports', () => {
 
   it('should export GrpcUnavailableError class', () => {
     expect(GrpcUnavailableError).not.toBeNull();
-    expect(() => new GrpcUnavailableError()).not.toThrow();
+    expect(GrpcUnavailableError).toBeDefined();
+    expect(typeof GrpcUnavailableError).toBe('function');
+    expect(GrpcUnavailableError.name).toBe('GrpcUnavailableError');
+    const err = new GrpcUnavailableError();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('gRPC is unavailable');
   });
 
   it('should export GrpcRuntimeLoadError class', () => {
     expect(GrpcRuntimeLoadError).not.toBeNull();
-    expect(() => new GrpcRuntimeLoadError('spec', 'cmd')).not.toThrow();
+    expect(GrpcRuntimeLoadError).toBeDefined();
+    expect(typeof GrpcRuntimeLoadError).toBe('function');
+    expect(GrpcRuntimeLoadError.name).toBe('GrpcRuntimeLoadError');
+    const err = new GrpcRuntimeLoadError('spec', 'cmd');
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('Cannot load Connect runtime module');
   });
 
   it('should export GrpcPluginOptions type (checked via usage)', () => {

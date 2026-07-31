@@ -14,6 +14,12 @@ import { dispatchRequest, normalizeBasePath } from '../transports/rpc-dispatcher
 import { buildConnectRouter } from '../transports/connect-router-builder.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
+/** Shape of a service definition with a typeName property. */
+interface ServiceDefinitionLike {
+  typeName?: string;
+  methods?: Record<string, unknown>;
+}
+
 /**
  * The gRPC service that applications use to register gRPC/Connect services.
  * Implements the {@linkcode IGrpcService} contract from common.
@@ -55,9 +61,12 @@ export class GrpcService {
   }
 
   addService<TDef>(definition: TDef, _implementation?: unknown): void {
-    const typeName = (definition as any)?.typeName;
+    const defLike = definition as ServiceDefinitionLike;
+    const typeName = defLike.typeName;
     if (typeName) {
-      const exists = this.services.some((s) => (s.definition as any)?.typeName === typeName);
+      const exists = this.services.some(
+        (s) => ((s.definition as ServiceDefinitionLike)?.typeName) === typeName,
+      );
       if (exists) {
         throw new Error(`Service '${typeName}' has already been registered`);
       }
@@ -107,14 +116,14 @@ export class GrpcService {
     };
   }
 
-  private async ensureRouter(): Promise<void> {
+  private ensureRouter(): Promise<void> {
     if (this.routerBuilt) {
-      return;
+      return Promise.resolve();
     }
 
     if (!this.available) {
       this.routerBuilt = true;
-      return;
+      return Promise.resolve();
     }
 
     const normalizedBase = this.basePath;
@@ -131,6 +140,7 @@ export class GrpcService {
 
     this.dispatchMap = dispatchMap;
     this.routerBuilt = true;
+    return Promise.resolve();
   }
 
   // For testing access to internal state

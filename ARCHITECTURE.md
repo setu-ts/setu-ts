@@ -902,6 +902,10 @@ interface IHttpAdapter {
   fetch(request: Request): Promise<Response>;
   listen(port: number, hostname?: string): Promise<ServerHandle>;
   close(handle: ServerHandle): Promise<void>;
+  /** Optional: gRPC/Connect RPC interceptor. Consulted after WebSocket upgrade short-circuit and before body mapping. */
+  setRpcHandler?(handler: RpcFetchHandler): void;
+  /** Optional: WebSocket upgrade router. Consulted before body mapping. */
+  setUpgradeRouter?(router: WebSocketUpgradeRouter): void;
 }
 ```
 

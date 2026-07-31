@@ -7,6 +7,12 @@
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
+/** Shape of a service definition with a typeName property. */
+interface ServiceDefinitionLike {
+  typeName?: string;
+  methods?: Record<string, unknown>;
+}
+
 /**
  * Revives a FileDescriptorSet from base64-encoded data using the ConnectRuntime.
  *
@@ -44,20 +50,35 @@ export function buildReflectionRegistry(
     embeddedDescriptors.reflectionBase64,
   );
 
+  /** Helper to safely access getService from a registry object. */
+  function safeGetService(registry: unknown, name: string): unknown {
+    if (typeof registry !== 'object' || registry === null) {
+      return undefined;
+    }
+    const obj = registry as Record<string, unknown>;
+    const getService = obj.getService;
+    if (typeof getService === 'function') {
+      return getService(name);
+    }
+    return undefined;
+  }
+
   // Build a combined registry that includes app services' files and their dependencies
   const combinedRegistry = {
-    files: [],
+    files: [] as unknown[],
     getService(name: string) {
       // Check embedded services first
       if (name === 'grpc.health.v1.Health') {
-        return (healthRegistry as any)?.getService?.(name);
+        return safeGetService(healthRegistry, name);
       }
       if (name === 'grpc.reflection.v1.ServerReflection') {
-        return (reflectionRegistry as any)?.getService?.(name);
+        return safeGetService(reflectionRegistry, name);
       }
       // Check app services
       for (const service of appServices) {
-        if ((service as any)?.typeName === name) {
+        const svc = service as Record<string, unknown>;
+        const def = svc.definition as ServiceDefinitionLike | undefined;
+        if (def?.typeName === name) {
           return service;
         }
       }
@@ -70,8 +91,12 @@ export function buildReflectionRegistry(
       services.add('grpc.reflection.v1.ServerReflection');
       // Add app services
       for (const service of appServices) {
-        const typeName = (service as any)?.typeName;
-        if (typeName) services.add(typeName);
+        const svc = service as Record<string, unknown>;
+        const def = svc.definition as ServiceDefinitionLike | undefined;
+        const typeName = def?.typeName;
+        if (typeof typeName === 'string' && typeName) {
+          services.add(typeName);
+        }
       }
       return Array.from(services);
     },

@@ -28,7 +28,7 @@ describe('GrpcPlugin Integration', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), GrpcPlugin(), GrpcPlugin()],
     });
-    await expect(app.start({ port: 0 })).rejects;
+    await expect(app.start({ port: 0 })).rejects.toThrow('Duplicate plugin name');
     // Application close not available on IKernelApplication in this context
   });
 

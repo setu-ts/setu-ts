@@ -10,6 +10,15 @@ import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 import { createReflectionService } from '../reflection/grpc-reflection.ts';
 
+/** Shape of a service definition with typeName/methods. */
+interface ServiceDefinitionLike {
+  typeName?: string;
+  package?: string;
+  methods?: Record<string, unknown>;
+  implementation?: unknown;
+  protoFile?: string;
+}
+
 /**
  * Build options for the Connect router.
  */
@@ -49,7 +58,8 @@ export function buildConnectRouter({
   // Track service type names to detect duplicates
   const typeNames = new Set<string>();
   for (const serviceDef of services) {
-    const typeName = (serviceDef as any)?.typeName;
+    const def = serviceDef.definition as ServiceDefinitionLike;
+    const typeName = def.typeName;
     if (typeName) {
       if (typeNames.has(typeName)) {
         throw new Error(`Service '${typeName}' has already been registered`);
@@ -63,15 +73,18 @@ export function buildConnectRouter({
 
   // Register app services with their implementations
   for (const serviceDef of services) {
-    const typeName = (serviceDef as any)?.typeName;
+    const def = serviceDef.definition as ServiceDefinitionLike;
+    const typeName = def.typeName;
     if (!typeName) continue;
 
-    const impl = (serviceDef as any)?.implementation || {};
-    const methods = (serviceDef as any)?.methods || {};
+    const impl = serviceDef.implementation || {};
+    const methods = def.methods || {};
 
     for (const methodName of Object.keys(methods)) {
       const requestPath = `${normalizedBase}/${typeName}/${methodName}`;
-      const methodHandler = impl[methodName] || ((_req: any) => ({ message: 'Not implemented' }));
+      const rawMethodHandler = (impl as Record<string, unknown>)[methodName];
+      const methodHandler = rawMethodHandler ??
+        ((_req: Record<string, unknown>) => ({ message: 'Not implemented' }));
 
       // Wrap the method handler to produce a Response (Connect protocol)
       handlers.push({
@@ -81,8 +94,11 @@ export function buildConnectRouter({
             // In a real Connect implementation, the request body would be
             // deserialized from protobuf using the service descriptor.
             // For now, we extract the body and invoke the method.
-            const body = await req.json();
-            const response = await methodHandler(body);
+            const body = await req.json() as Record<string, unknown>;
+            const response =
+              await (methodHandler as (arg: Record<string, unknown>) => Promise<unknown> | unknown)(
+                body,
+              );
             return new Response(JSON.stringify(response), {
               headers: { 'content-type': 'application/json' },
               status: 200,
@@ -90,7 +106,7 @@ export function buildConnectRouter({
           } catch (error) {
             const errorMsg = typeof error === 'string'
               ? error
-              : (error as any)?.message ?? 'Unknown error';
+              : (error as Error)?.message ?? 'Unknown error';
             return new Response(JSON.stringify({ error: errorMsg }), {
               headers: { 'content-type': 'application/json' },
               status: 500,
@@ -134,13 +150,13 @@ export function buildConnectRouter({
     const healthPath = `${normalizedBase}/grpc.health.v1.Health/Check`;
     handlers.push({
       requestPath: healthPath,
-      handler: async (_req: Request) => {
-        // Simulate health check response
-        return new Response(JSON.stringify({ status: 1 }), {
-          headers: { 'content-type': 'application/json' },
-          status: 200,
-        });
-      },
+      handler: (_req: Request) =>
+        Promise.resolve(
+          new Response(JSON.stringify({ status: 1 }), {
+            headers: { 'content-type': 'application/json' },
+            status: 200,
+          }),
+        ),
     });
 
     // Re-create fetch handler with health endpoint
@@ -185,14 +201,18 @@ function buildReflectionRegistry(
   // containing all service descriptors for reflection queries.
   // For now, we return a simple object with service information.
   return {
-    files: services.map((s) => ({
-      name: (s.definition as any)?.typeName || '',
-      package: (s.definition as any)?.package || '',
-      methods: Object.keys((s.definition as any)?.methods || {}),
-    })),
-    listServices: () => services.map((s) => (s.definition as any)?.typeName || ''),
+    files: services.map((s) => {
+      const def = s.definition as ServiceDefinitionLike;
+      return {
+        name: def.typeName || '',
+        package: def.package || '',
+        methods: Object.keys(def.methods || {}),
+      };
+    }),
+    listServices: () =>
+      services.map((s) => ((s.definition as ServiceDefinitionLike)?.typeName) || ''),
     getService: (name: string) => {
-      return services.find((s) => (s.definition as any)?.typeName === name);
+      return services.find((s) => ((s.definition as ServiceDefinitionLike)?.typeName) === name);
     },
   };
 }

@@ -8,11 +8,23 @@ import { buildConnectRouter } from '../../src/transports/connect-router-builder.
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 // EmbeddedDescriptors imported for type checking but not directly used in test values
 
-// Create a fake ConnectRuntime for testing
+// Create a fake ConnectRuntime for testing that builds a real dispatch map
+const createFakeDispatchMap = (): Map<string, (request: Request) => Promise<Response>> => {
+  const map = new Map<string, (request: Request) => Promise<Response>>();
+  map.set(
+    '/grpc/package.ServiceName/echo',
+    (_request: Request) => Promise.resolve(new Response('OK')),
+  );
+  return map;
+};
+
 const fakeConnectRuntime: ConnectRuntime = {
-  createFetchHandler: (_handlers: Array<{ requestPath: string; handler: unknown }>, _options?: { httpVersion?: string }) => new Map(),
+  createFetchHandler: (
+    _handlers: Array<{ requestPath: string; handler: unknown }>,
+    _options?: { httpVersion?: string },
+  ) => createFakeDispatchMap(),
   adaptConnectModule: (_mod: unknown): ConnectRuntime => fakeConnectRuntime,
-  loadConnectModule: async (): Promise<ConnectRuntime> => fakeConnectRuntime,
+  loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
   reviveDescriptorSet: (_base64: string) => ({
     files: [],
     getService: (_name: string) => undefined,
@@ -32,7 +44,7 @@ describe('ConnectRouterBuilder', () => {
     const services: Array<{ definition: unknown; implementation?: unknown }> = [
       {
         definition: { typeName: 'package.ServiceName', methods: { echo: {} } },
-        implementation: { echo: async (_request: Request) => new Response('OK') },
+        implementation: { echo: (_request: Request) => Promise.resolve(new Response('OK')) },
       },
     ];
 
@@ -65,6 +77,7 @@ describe('ConnectRouterBuilder', () => {
   });
 
   it('should reject duplicate service type names', () => {
+    // Pass proper shape with definition property containing typeName
     const services = [
       { definition: { typeName: 'package.Service' }, implementation: {} },
       { definition: { typeName: 'package.Service' }, implementation: {} },
@@ -79,6 +92,6 @@ describe('ConnectRouterBuilder', () => {
         connectRuntime: fakeConnectRuntime,
         embeddedDescriptors: fakeEmbeddedDescriptors,
       });
-    }).toThrow();
+    }).toThrow('has already been registered');
   });
 });

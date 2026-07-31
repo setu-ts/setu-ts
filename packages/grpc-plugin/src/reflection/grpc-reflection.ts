@@ -9,6 +9,54 @@
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
+/** Shape of a reflection request variant. */
+interface ListServicesRequest {
+  listServices?: Record<string, never>;
+}
+
+interface FileByFilenameRequest {
+  fileByFilename: { filename: string };
+}
+
+interface FileContainingSymbolRequest {
+  fileContainingSymbol: { symbol: string };
+}
+
+interface AllExtensionNumbersRequest {
+  allExtensionNumbersOfType: string;
+}
+
+type ReflectionRequestVariant =
+  | ListServicesRequest
+  | FileByFilenameRequest
+  | FileContainingSymbolRequest
+  | AllExtensionNumbersRequest;
+
+/** Shape of a reflection response. */
+interface ListServicesResponse {
+  services: string[];
+  nextFileDescriptorNumber: number;
+}
+
+interface FileDescriptorResponse {
+  descriptorFile: unknown[];
+}
+
+interface ErrorResponse {
+  code: number;
+  message: string;
+}
+
+interface ExtensionNumberResponse {
+  numbers: number[];
+}
+
+type ReflectionResponseVariant =
+  | { response: { listServices: ListServicesResponse } }
+  | { response: { fileDescriptorResponse: FileDescriptorResponse } }
+  | { response: { errorResponse: ErrorResponse } }
+  | { response: { extensionNumberResponse: ExtensionNumberResponse } };
+
 /**
  * Creates a gRPC ServerReflection service implementation.
  *
@@ -18,19 +66,19 @@ import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts
  * @returns A ServerReflection service implementation
  */
 export function createReflectionService(
-  _connectRuntime: ConnectRuntime,
-  _embeddedDescriptors: EmbeddedDescriptors,
+  connectRuntime: ConnectRuntime,
+  embeddedDescriptors: EmbeddedDescriptors,
   appServices: readonly unknown[],
 ): unknown {
   // Build the registry (simplified)
-  const registry = buildReflectionRegistry(_connectRuntime, _embeddedDescriptors, appServices);
+  const registry = buildReflectionRegistry(connectRuntime, embeddedDescriptors, appServices);
 
   return {
-    async *ServerReflectionInfo(requestStream: AsyncIterable<any>) {
-      for await (const request of requestStream) {
-        const response = request.response;
-
-        if (response.listServices) {
+    async *ServerReflectionInfo(
+      requestStream: AsyncIterable<{ response: ReflectionRequestVariant }>,
+    ): AsyncGenerator<ReflectionResponseVariant> {
+      for await (const { response } of requestStream) {
+        if ('listServices' in response) {
           yield {
             response: {
               listServices: {
@@ -42,7 +90,7 @@ export function createReflectionService(
           continue;
         }
 
-        if (response.fileByFilename) {
+        if ('fileByFilename' in response) {
           const filename = response.fileByFilename.filename;
           const file = registry.getFileByName(filename);
           if (file) {
@@ -66,7 +114,7 @@ export function createReflectionService(
           continue;
         }
 
-        if (response.fileContainingSymbol) {
+        if ('fileContainingSymbol' in response) {
           const symbol = response.fileContainingSymbol.symbol;
           const file = registry.getFileContaining(symbol);
           if (file) {
@@ -90,7 +138,7 @@ export function createReflectionService(
           continue;
         }
 
-        if (response.allExtensionNumbersOfType) {
+        if ('allExtensionNumbersOfType' in response) {
           yield {
             response: {
               extensionNumberResponse: {
@@ -115,21 +163,27 @@ export function createReflectionService(
   };
 }
 
-function buildReflectionRegistry(
-  _connectRuntime: any,
-  _embeddedDescriptors: any,
-  appServices: readonly unknown[],
-): {
+/** Shape of the reflection registry used internally. */
+interface ReflectionRegistry {
   listServices(): string[];
   getFileByName(filename: string): unknown | undefined;
   getFileContaining(symbol: string): unknown | undefined;
-} {
+}
+
+function buildReflectionRegistry(
+  _connectRuntime: ConnectRuntime,
+  _embeddedDescriptors: EmbeddedDescriptors,
+  appServices: readonly unknown[],
+): ReflectionRegistry {
   const services = new Set<string>();
   services.add('grpc.health.v1.Health');
   services.add('grpc.reflection.v1.ServerReflection');
   for (const service of appServices) {
-    const typeName = (service as any)?.typeName;
-    if (typeName) services.add(typeName);
+    const svc = service as Record<string, unknown>;
+    const typeName = svc.typeName;
+    if (typeof typeName === 'string' && typeName) {
+      services.add(typeName);
+    }
   }
 
   const files = [
@@ -138,10 +192,13 @@ function buildReflectionRegistry(
       name: 'grpc/reflection/v1/reflection.proto',
       serviceName: 'grpc.reflection.v1.ServerReflection',
     },
-    ...appServices.map((s) => ({
-      name: (s as any)?.protoFile || 'unknown.proto',
-      serviceName: (s as any)?.typeName,
-    })),
+    ...appServices.map((s) => {
+      const svc = s as Record<string, unknown>;
+      return {
+        name: (svc.protoFile as string | undefined) ?? 'unknown.proto',
+        serviceName: svc.typeName as string | undefined,
+      };
+    }),
   ];
 
   return {
@@ -154,7 +211,9 @@ function buildReflectionRegistry(
     },
 
     getFileContaining(symbol: string): unknown | undefined {
-      return files.find((f) => f.name.includes(symbol) || f.serviceName.includes(symbol));
+      return files.find(
+        (f) => f.name.includes(symbol) || (f.serviceName ?? '').includes(symbol),
+      );
     },
   };
 }

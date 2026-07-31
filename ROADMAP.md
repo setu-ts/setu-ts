@@ -4800,3 +4800,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 46        | ✅     | websocket-plugin     |
 | 47        | ✅     | alpha-3 limitations  |
 | 48        | ✅     | session-plugin       |
+| 49        | ✅     | grpc-plugin          |

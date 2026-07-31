@@ -4,17 +4,13 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { adaptConnectModule } from '../../src/interfaces/connect-runtime.ts';
+import { getFallbackConnectRuntime } from '../../src/transports/connect-loader.ts';
 import { GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
-
-// Mock the actual imports for testing
-const mockConnectModule = {};
-const mockProtobuf = {};
-const mockWkt = {};
 
 describe('ConnectLoader', () => {
   it('adaptConnectModule should produce a ConnectRuntime with required methods', () => {
-    const runtime = adaptConnectModule(mockConnectModule, mockProtobuf, mockWkt);
+    // Use the fallback runtime which provides all required methods
+    const runtime = getFallbackConnectRuntime();
     expect(runtime).toBeDefined();
     expect(typeof runtime.createFetchHandler).toBe('function');
     expect(typeof runtime.adaptConnectModule).toBe('function');
@@ -30,6 +26,10 @@ describe('ConnectLoader', () => {
 
   it('should handle each missing module producing correct error message', () => {
     // Structural check — the error class is defined correctly
-    expect(() => new GrpcRuntimeLoadError('spec', 'cmd')).not.toThrow();
+    const err = new GrpcRuntimeLoadError('spec', 'cmd');
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('Cannot load Connect runtime module');
+    expect(err.message).toContain('spec');
+    expect(err.message).toContain('cmd');
   });
 });

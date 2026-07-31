@@ -5456,6 +5456,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                               |
 | Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                 |
+| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                   |
 
 Contract notes:
 
@@ -5507,7 +5508,10 @@ Contract notes:
   exists for anonymous visitors too. Added in Milestone 48.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
-  are multi-provider capabilities. The kernel collects plugin contributions registered under these
+- `CAPABILITIES.GRPC` (`'grpc'`) — the capability token under which `GrpcPlugin` registers the
+  `IGrpcService`. The service provides gRPC/Connect co-serving on the same port as ordinary Hono
+  routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49. are
+  multi-provider capabilities. The kernel collects plugin contributions registered under these
   tokens via `services.getAll()`; the corresponding first-party plugins aggregate and expose them.
   `HTTP_ADAPTER` is single-provider — the runtime plugin registers its `IHttpAdapter` there.
 - `METADATA_STORE` (`'metadata-store'`) is the single-provider capability backing
@@ -6322,6 +6326,82 @@ placeholders deriving onto one argument name; and a malformed local `$ref`.
 `SdkOpenApiRequestBody`, `SdkOpenApiResponse`, and `SdkOpenApiSchema` are the structural OpenAPI 3.1
 subset accepted by the generator. They are intentionally different from the openapi-plugin types
 (which have different shapes) and take the `SdkOpenApi*` prefix to avoid a barrel collision.
+
+---
+
+## API Reference: @hono-enterprise/grpc-plugin
+
+gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered under
+`CAPABILITIES.GRPC`. Added in Milestone 49.
+
+### Registration
+
+```typescript
+import { GrpcPlugin } from '@hono-enterprise/grpc-plugin';
+
+app.register(GrpcPlugin({
+  basePath: '/grpc', // default
+  reflection: true, // default — grpc.reflection.v1.ServerReflection
+  health: true, // default — grpc.health.v1.Health (bridged to M20)
+  services: [], // initial service definitions
+  connectModule: undefined, // inject for testing; otherwise lazy-loaded
+}));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IGrpcService } from '@hono-enterprise/common';
+
+const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+grpc.addService(MyServiceDefinition, myServiceImpl);
+```
+
+### Options
+
+| Option          | Type                                     | Default | Description                                                                                           |
+| --------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.            |
+| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch. |
+| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                    |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                              |
+| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.          |
+
+### Exports
+
+| Export                 | Kind     | Purpose                                                                                       |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `GrpcPlugin`           | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                           |
+| `GrpcService`          | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing       |
+| `adaptConnectModule`   | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port |
+| `GrpcUnavailableError` | class    | Thrown by `handleRequest` when the adapter lacks `setRpcHandler`                              |
+| `GrpcRuntimeLoadError` | class    | Thrown by `loadConnectModule` when any of the four npm specifiers cannot be imported          |
+| `GrpcPluginOptions`    | type     | The factory parameter shape                                                                   |
+| `ConnectRuntime`       | type     | Internal structural facade over Connect-ES modules (re-exported for convenience)              |
+
+### Notes
+
+- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`/grpc` by default).
+  Content-type sniffing is deliberately not used because Connect's real unary content types include
+  `application/json` and `application/proto`. A non-prefixed path returns `null` and falls through
+  to the Hono pipeline unchanged.
+- **`inject()` does not reach the interceptor.** The kernel's `inject()` bypasses the HTTP adapter
+  entirely. RPC must be exercised via `app.fetch(webRequest)` in tests.
+- **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
+  real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
+  client-streaming work on every runtime.
+- **Health bridge maps `degraded → SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
+  `'degraded' → SERVING (1)`. Degraded still serves; mapping it to `NOT_SERVING` would shed capacity
+  in the wrong direction.
+- **`List` and `Watch` are unimplemented.** Connect auto-responses `unimplemented` for methods not
+  provided by the bridge.
+- **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
+  `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
+  Absence throws `GrpcRuntimeLoadError` with the install command.
+- **Optional seam.** If the HTTP adapter does not implement `setRpcHandler?`, the plugin still
+  registers and reports `available: false`; `handleRequest` throws `GrpcUnavailableError` while
+  `createFetchHandler` returns `null` for every request.
 
 ---
 

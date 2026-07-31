@@ -12,13 +12,17 @@ import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
 
 // Create a fake ConnectRuntime for testing
-const fakeConnectRuntime: ConnectRuntime = {
-  createFetchHandler: () => new Map(),
-  adaptConnectModule: () => fakeConnectRuntime,
-  loadConnectModule: async () => fakeConnectRuntime,
-  reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-  getService: () => undefined,
-};
+function createFakeConnectRuntime(): ConnectRuntime {
+  return {
+    createFetchHandler: () => new Map(),
+    adaptConnectModule: (_mod: unknown): ConnectRuntime => createFakeConnectRuntime(),
+    loadConnectModule: () => Promise.resolve(createFakeConnectRuntime()),
+    reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
+    getService: () => undefined,
+  };
+}
+
+const fakeConnectRuntime = createFakeConnectRuntime();
 
 // Fake embedded descriptors
 const fakeEmbeddedDescriptors = {
@@ -26,16 +30,19 @@ const fakeEmbeddedDescriptors = {
   reflectionBase64: 'd29ybGQ=', // placeholder
 };
 
-// A minimal mock IHttpAdapter that satisfies the interface
-function createMockAdapter(setRpcHandler: boolean): IHttpAdapter {
-  
-  return {
-    setRpcHandler: setRpcHandler ? (() => {}) : () => {},
-    setHandler: (() => {}) as any,
-    fetch: (() => {}) as any,
-    listen: (() => {}) as any,
-    close: (() => {}) as any,
+// A minimal mock IHttpAdapter that satisfies the interface.
+// When hasRpcHandler is true, setRpcHandler is present; otherwise omitted entirely.
+function createMockAdapter(hasRpcHandler: boolean): IHttpAdapter {
+  const adapter: Omit<IHttpAdapter, 'setRpcHandler'> & { setRpcHandler?: () => void } = {
+    setHandler: (() => {}) as never,
+    fetch: (() => {}) as never,
+    listen: (() => {}) as never,
+    close: (() => {}) as never,
   };
+  if (hasRpcHandler) {
+    adapter.setRpcHandler = () => {};
+  }
+  return adapter as IHttpAdapter;
 }
 
 describe('GrpcService', () => {
@@ -120,5 +127,119 @@ describe('GrpcService', () => {
 
     const request = new Request('http://example.com/grpc/service/method');
     await expect(service.handleRequest(request)).rejects.toThrow(GrpcUnavailableError);
+  });
+
+  it('should accept services from options at construction', () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {
+        services: [
+          { definition: { typeName: 'package.PreReg', methods: {} } },
+        ],
+      } as GrpcPluginOptions,
+      adapter,
+    );
+    expect(service.servicesCount).toBe(1);
+  });
+
+  it('should use custom basePath from options', () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      { basePath: '/custom-grpc' } as GrpcPluginOptions,
+      adapter,
+    );
+    // basePath is internal; verify no error during construction
+    expect(service).toBeDefined();
+  });
+
+  it('servicesCount should reflect registered services', () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    expect(service.servicesCount).toBe(0);
+    service.addService({ typeName: 'pkg.Svc', methods: {} });
+    expect(service.servicesCount).toBe(1);
+  });
+
+  it('dispatchMapSize should be 0 before router is built', () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    expect(service.dispatchMapSize).toBe(0);
+  });
+
+  it('createFetchHandler should return null for non-RPC paths when available', async () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    const handler = service.createFetchHandler();
+    const result = await handler(new Request('http://example.com/other/path'));
+    expect(result).toBeNull();
+  });
+
+  it('createFetchHandler should return null when not available', async () => {
+    const adapter = createMockAdapter(false);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    const handler = service.createFetchHandler();
+    const result = await handler(new Request('http://example.com/grpc/svc/method'));
+    expect(result).toBeNull();
+  });
+
+  it('handleRequest should return response when dispatchMap has a handler', async () => {
+    // Create a fake ConnectRuntime that returns a dispatch map with a handler
+    const fakeDispatchMap = new Map<string, (request: Request) => Promise<Response>>();
+    fakeDispatchMap.set(
+      '/grpc/package.TestService/echo',
+      (_request: Request) => Promise.resolve(new Response('{"message":"hello"}', { status: 200 })),
+    );
+    const fakeRuntimeWithDispatch = {
+      ...fakeConnectRuntime,
+      createFetchHandler: () => fakeDispatchMap,
+    };
+
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeRuntimeWithDispatch,
+      fakeEmbeddedDescriptors,
+      {
+        services: [
+          {
+            definition: { typeName: 'package.TestService', methods: { echo: {} } },
+            implementation: { echo: () => ({ message: 'hello' }) },
+          },
+        ],
+      } as GrpcPluginOptions,
+      adapter,
+    );
+
+    const request = new Request('http://example.com/grpc/package.TestService/echo', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const result = await service.handleRequest(request);
+    expect(result).toBeDefined();
+    expect(result.status).toBe(200);
   });
 });

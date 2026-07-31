@@ -9,6 +9,11 @@
 import type { IHealthService } from '@hono-enterprise/common';
 import type { GrpcServingStatus } from '@hono-enterprise/common';
 
+/** Shape of a health check request. */
+interface HealthCheckRequest {
+  service?: string;
+}
+
 /**
  * Creates a gRPC Health v1 service implementation.
  *
@@ -24,7 +29,7 @@ export function createHealthService(
   healthService?: IHealthService,
 ): unknown {
   return {
-    Check: async (_request: any) => {
+    Check: async (_request: HealthCheckRequest) => {
       // request.service is available for future extensibility; currently not used
       // No need to read it for basic health check
 
@@ -44,7 +49,7 @@ export function createHealthService(
               status = 'serving'; // degraded still serving per plan
               break;
           }
-        } catch (e) {
+        } catch (_e) {
           // If health check throws, treat as NOT_SERVING
           status = 'not-serving';
         }

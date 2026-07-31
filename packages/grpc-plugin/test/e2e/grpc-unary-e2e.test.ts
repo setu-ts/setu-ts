@@ -18,7 +18,7 @@ const DummyService = {
   typeName: 'example.DummyService',
   methods: {
     // A simple unary method
-    sayHello: (_context: any) => ({ message: 'Hello!' }),
+    sayHello: (_context: Record<string, unknown>) => ({ message: 'Hello!' }),
   },
 };
 
@@ -39,10 +39,8 @@ describe('gRPC Unary E2E', () => {
     grpc.addService(DummyService);
 
     // Verify the service was registered via addService
-    // Using a type assertion to access internal state for testing purposes
-    const grpcAsAny = grpc as any;
-    expect(grpcAsAny.services).toHaveLength(1);
-    expect(grpcAsAny.servicesCount).toBe(1);
+    // Access internal state via the public getter
+    expect((grpc as unknown as { servicesCount: number }).servicesCount).toBe(1);
 
     // Application close not available on IKernelApplication in this context
   });

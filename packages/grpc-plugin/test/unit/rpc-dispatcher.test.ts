@@ -32,8 +32,14 @@ describe('RPCDispatcher', () => {
   describe('buildDispatcherMap', () => {
     it('should map handlers with basePath + requestPath keys', () => {
       const handlers = [
-        { requestPath: '/echo', handler: async (_request: Request) => new Response('OK') },
-        { requestPath: '/status', handler: async (_request: Request) => new Response('OK') },
+        {
+          requestPath: '/echo',
+          handler: (_request: Request) => Promise.resolve(new Response('OK')),
+        },
+        {
+          requestPath: '/status',
+          handler: (_request: Request) => Promise.resolve(new Response('OK')),
+        },
       ];
       const map = buildDispatcherMap('/grpc', handlers);
 
@@ -54,7 +60,7 @@ describe('RPCDispatcher', () => {
 
     it('should return handler response for exact match within basePath', async () => {
       const map = new Map<string, (request: Request) => Promise<Response>>();
-      map.set('/grpc/async', async (_request: Request) => new Response('Found'));
+      map.set('/grpc/async', (_request: Request) => Promise.resolve(new Response('Found')));
       const request = new Request('http://example.com/grpc/async');
       const result = await dispatchRequest(request, map, '/grpc');
       expect(result).not.toBeNull();
@@ -72,7 +78,7 @@ describe('RPCDispatcher', () => {
 
     it('should handle basePath with and without trailing slash identically', async () => {
       const map1 = new Map<string, (request: Request) => Promise<Response>>();
-      map1.set('/grpc/async', async (_request: Request) => new Response('OK'));
+      map1.set('/grpc/async', (_request: Request) => Promise.resolve(new Response('OK')));
       const result1 = await dispatchRequest(
         new Request('http://example.com/grpc/async'),
         map1,
@@ -80,7 +86,7 @@ describe('RPCDispatcher', () => {
       );
 
       const map2 = new Map<string, (request: Request) => Promise<Response>>();
-      map2.set('/grpc/async', async (_request: Request) => new Response('OK'));
+      map2.set('/grpc/async', (_request: Request) => Promise.resolve(new Response('OK')));
       const result2 = await dispatchRequest(
         new Request('http://example.com/grpc/async'),
         map2,

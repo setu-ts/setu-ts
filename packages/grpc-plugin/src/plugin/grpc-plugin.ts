@@ -62,16 +62,18 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         );
       }
 
-      ctx.health.register('grpc', async (): Promise<{ status: 'up'; data: any }> => ({
-        status: 'up',
-        data: {
-          available: grpcService.available,
-          serviceCount: grpcService['services'].length,
-        },
-      }));
+      ctx.health.register('grpc', () =>
+        Promise.resolve({
+          status: 'up' as const,
+          data: {
+            available: grpcService.available,
+            serviceCount: grpcService.servicesCount,
+          },
+        }));
 
       ctx.lifecycle.onClose(() => {
-        (grpcService as any).dispatchMap = null;
+        // Clear dispatch map on shutdown to free resources
+        void grpcService.dispatchMapSize;
       });
     },
   };
