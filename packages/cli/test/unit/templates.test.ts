@@ -138,10 +138,10 @@ describe('every template', () => {
   });
 
   // Templates emit INLINE wiring on purpose, so a scaffolded project owns an
-  // explicit, editable plugin list. (Before M36 the starters were also empty
-  // stubs; they are real composition libraries now, so the reason is the
-  // inline-wiring choice, not emptiness. A `--starter` flag is future work.)
-  it('never references a starter package', () => {
+  // explicit, editable plugin list. The one exception composes through a
+  // starter FACTORY (`appFactory`), never through a plugin wiring — so a
+  // starter package must still never appear in a plugin or middleware list.
+  it('never references a starter package in its wirings', () => {
     for (const template of listTemplates()) {
       for (const wiring of [...template.plugins, ...template.middleware]) {
         expect(wiring.pkg).not.toContain('starter');
@@ -149,9 +149,20 @@ describe('every template', () => {
     }
   });
 
-  it('declares a runtime provider first', () => {
+  it('declares a runtime provider first, unless a factory owns the plugin set', () => {
     for (const template of listTemplates()) {
+      if (template.appFactory !== undefined) continue;
       expect(template.plugins[0].symbol).toBe('RuntimePlugin');
+    }
+  });
+
+  // A factory returns the application, so anything in `plugins` would be
+  // silently dropped by the renderer. Enforced across the registry here rather
+  // than by a runtime check no user input could ever reach.
+  it('lists no plugins when a factory owns the plugin set', () => {
+    for (const template of listTemplates()) {
+      if (template.appFactory === undefined) continue;
+      expect(template.plugins).toEqual([]);
     }
   });
 

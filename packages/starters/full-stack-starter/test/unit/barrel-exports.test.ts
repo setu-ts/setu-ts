@@ -6,14 +6,19 @@ import { expect } from '@std/expect';
 import * as fullStackStarter from '../../src/index.ts';
 
 describe('full-stack-starter / barrel exports', () => {
-  it('exports exactly createFullStackApp and buildFullStackPlugins', () => {
+  it('exports exactly the three factories', () => {
     const exportedNames = Object.keys(fullStackStarter);
     expect(new Set(exportedNames)).toEqual(
       new Set([
         'createFullStackApp',
         'buildFullStackPlugins',
+        'createFullStackAppFromConfig',
       ]),
     );
+  });
+
+  it('createFullStackAppFromConfig is a function', () => {
+    expect(typeof fullStackStarter.createFullStackAppFromConfig).toBe('function');
   });
 
   it('createsFullStackApp is a function', () => {

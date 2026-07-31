@@ -107,6 +107,14 @@ export type PopulateLoadContext = (
 export interface ReactRouterPluginOptions {
   /**
    * Path to the React Router Vite server build (default export = `ServerBuild`).
+   *
+   * Must be **absolute** — an absolute filesystem path or a `file:` URL. The
+   * default loader performs `await import(serverBuildPath)`, and a relative
+   * specifier there resolves against this plugin's own module rather than
+   * against the consuming application, so it can never find the build. From an
+   * application module, derive one with
+   * `new URL('./build/server/index.js', import.meta.url).href`.
+   *
    * @since 0.1.0
    */
   readonly serverBuildPath: string;

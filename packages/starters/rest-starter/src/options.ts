@@ -15,6 +15,7 @@ import type { DiPluginOptions } from '@hono-enterprise/di-plugin';
 import type { WebSocketPluginOptions } from '@hono-enterprise/websocket-plugin';
 import type { SsePluginOptions } from '@hono-enterprise/sse-plugin';
 import type { RealtimeBackplanePluginOptions } from '@hono-enterprise/realtime-backplane-plugin';
+import type { SessionPluginOptions } from '@hono-enterprise/session-plugin';
 
 /**
  * The real-time arm: one option grouping the three plugins that together make a
@@ -120,6 +121,30 @@ export interface RestStarterOptions {
    * @see {@linkcode RealtimeArm}
    */
   realtime?: RealtimeArm;
+  /**
+   * Optional arm: `SessionPlugin`. Omitted → the application has no cookie
+   * session and no session-backed form CSRF.
+   *
+   * Gated because a session needs a secret nobody can default: the plugin
+   * throws during `register()` without one, so an always-on arm would make
+   * every starter application fail to boot until it supplied one. It is also
+   * genuinely optional — a token-authenticated API has no use for cookies,
+   * which is what `auth` covers.
+   *
+   * Setting `csrf` additionally registers the synchronizer-token middleware at
+   * priority 275, which is the check a progressive-enhancement `<Form>` post
+   * can satisfy — unlike the stateless Origin/Referer check that
+   * `httpSecurity` performs, which a form structurally cannot. Running both is
+   * intended.
+   *
+   * @example
+   * ```typescript
+   * const app = createRestApp({
+   *   session: { secret: mySecret, csrf: {} },
+   * });
+   * ```
+   */
+  session?: SessionPluginOptions;
   /**
    * Optional arm: `DiPlugin`. Omitted → decorated services are constructed
    * directly and registered in the kernel's `ServiceRegistry`, which is the

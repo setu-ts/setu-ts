@@ -11,6 +11,7 @@
 
 import type { TargetRuntime, TemplateName } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { FULL_STACK_TEMPLATE } from './full-stack.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
 import { NEST_TEMPLATE } from './nest.ts';
 import { REST_TEMPLATE, RUNTIME_WIRING } from './rest.ts';
@@ -80,6 +81,79 @@ export interface MiddlewareWiring extends Wiring {
 }
 
 /**
+ * The starter factory a template composes through, instead of listing plugins.
+ *
+ * Separate from {@linkcode Wiring} because the two are rendered differently and
+ * one field genuinely differs: a plugin's arguments are fixed text, while a
+ * factory's can depend on the runtime target — whether the framework serves
+ * static assets itself is a platform question, and a fixed string cannot ask
+ * it.
+ */
+export interface AppFactoryWiring {
+  /** Bare `@hono-enterprise` package name, e.g. `full-stack-starter`. */
+  readonly pkg: string;
+  /** The exported factory, e.g. `createFullStackAppFromConfig`. */
+  readonly symbol: string;
+  /**
+   * Renders the call's argument list for a runtime target, without the
+   * enclosing parentheses. Omitted → the factory is called with no arguments.
+   *
+   * The rendered call is always `await`ed, so a factory may be sync or async.
+   */
+  readonly args?: (runtime: TargetRuntime) => string;
+}
+
+/**
+ * One `@hono-enterprise` package a template needs beyond its wirings.
+ *
+ * Two things are declared at once, deliberately: the symbols (if any) the
+ * generated `honoe.config.ts` imports, and the fact that the project depends on
+ * the package. A template whose emitted source files import a package that no
+ * wiring names — a type from the SSR plugin, say — would otherwise produce a
+ * project whose own imports cannot resolve.
+ */
+export interface PackageImport {
+  /** Bare `@hono-enterprise` package name. */
+  readonly pkg: string;
+  /**
+   * Named exports the config module imports. Omitted → the package is added to
+   * the manifest but nothing is imported into `honoe.config.ts`, which is what
+   * a package used only by the template's own source files needs.
+   */
+  readonly symbols?: readonly string[];
+}
+
+/**
+ * Additions a template makes to the project's manifests.
+ *
+ * A template cannot simply emit its own `package.json` or `tsconfig.json`: on
+ * the Node and Bun targets the fixed file set already writes both, so a second
+ * copy would collide. Declaring the additions instead means one source of truth
+ * produces both the merged file (Node, Bun) and the standalone one (Deno,
+ * Cloudflare Workers, which otherwise have no npm manifest at all).
+ */
+export interface TemplateManifest {
+  /** npm packages the running application needs, merged into `dependencies`. */
+  readonly npmDependencies?: Readonly<Record<string, string>>;
+  /** npm packages the build needs, merged into `devDependencies`. */
+  readonly npmDevDependencies?: Readonly<Record<string, string>>;
+  /** `compilerOptions` merged into `tsconfig.json`. */
+  readonly tsconfigCompilerOptions?: Readonly<Record<string, unknown>>;
+  /** Entries merged into the Deno import map, for aliases `deno check` must resolve. */
+  readonly denoImports?: Readonly<Record<string, string>>;
+  /**
+   * Permission flags the generated Deno `start` task needs beyond the default
+   * `--allow-net --allow-env`.
+   *
+   * A server-rendering template needs `--allow-read`: it loads its own compiled
+   * server build and serves static assets through the runtime filesystem, so
+   * without it the scaffolded project scaffolds cleanly and then fails on its
+   * first request.
+   */
+  readonly denoPermissions?: readonly string[];
+}
+
+/**
  * A named plugin set, plus the runtimes it cannot target.
  */
 export interface TemplateDefinition {
@@ -90,8 +164,38 @@ export interface TemplateDefinition {
   /**
    * Plugins passed to `createApplication({ plugins: [...] })`, in registration
    * order, starting with the runtime provider.
+   *
+   * Must be empty when {@linkcode TemplateDefinition.appFactory} is set — the
+   * factory owns the whole plugin set, so anything listed here would be
+   * dropped. A unit test enforces it across the registry rather than a runtime
+   * check that no user input could ever reach.
    */
   readonly plugins: readonly Wiring[];
+  /**
+   * Compose through a starter factory instead of listing plugins.
+   *
+   * Present → the generated module awaits `<symbol>(<args>)` and imports it
+   * from its package; absent → it calls `createApplication({ plugins })`,
+   * rendering byte-identically to before this field existed.
+   *
+   * Reserved for a set large enough that listing it is worse than naming it:
+   * the full-stack composition is twenty-two plugins, and a generated file a
+   * human is meant to edit should not open with twenty-two imports they did not
+   * choose.
+   */
+  readonly appFactory?: AppFactoryWiring;
+  /**
+   * Packages the template needs beyond those its wirings name.
+   *
+   * @see {@linkcode PackageImport}
+   */
+  readonly packageImports?: readonly PackageImport[];
+  /**
+   * Additions to the project's npm and TypeScript manifests.
+   *
+   * @see {@linkcode TemplateManifest}
+   */
+  readonly manifest?: TemplateManifest;
   /** Middleware added with `app.middleware.add(...)` after construction. */
   readonly middleware: readonly MiddlewareWiring[];
   /**
@@ -127,6 +231,7 @@ const TEMPLATE_REGISTRY: ReadonlyMap<string, TemplateDefinition> = new Map([
   [REST_TEMPLATE.name, REST_TEMPLATE],
   [MICROSERVICE_TEMPLATE.name, MICROSERVICE_TEMPLATE],
   [NEST_TEMPLATE.name, NEST_TEMPLATE],
+  [FULL_STACK_TEMPLATE.name, FULL_STACK_TEMPLATE],
 ]);
 
 /**

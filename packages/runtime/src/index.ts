@@ -16,6 +16,13 @@ export type { HttpAdapterFactories, RuntimeOptions } from './plugin/runtime-plug
 export { detectRuntime } from './detector/runtime-detector.ts';
 export type { GlobalScope } from './detector/runtime-detector.ts';
 
+// Runtime services for the detected platform, without an application
+export { createRuntimeServices } from './adapters/shared/runtime-services-factory.ts';
+export type {
+  CreateRuntimeServicesOptions,
+  RuntimeAdapterFactories,
+} from './adapters/shared/runtime-services-factory.ts';
+
 // Runtime adapters — factories
 export { createDenoRuntimeServices } from './adapters/deno/deno-runtime.ts';
 export type { DenoDirEntry, DenoFileInfo, DenoHost } from './adapters/deno/deno-runtime.ts';

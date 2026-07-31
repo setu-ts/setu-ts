@@ -14,6 +14,9 @@
 export { createFullStackApp } from './app.ts';
 export type { FullStackStarterOptions } from './options.ts';
 export { buildFullStackPlugins } from './app.ts';
+// Config-driven composition: options derived from configuration that is only
+// known at runtime, resolved before the plugins are constructed.
+export { createFullStackAppFromConfig } from './from-config.ts';
 // Re-exported because `FullStackStarterOptions` inherits the `realtime` arm
 // through the microservice and REST tiers, so naming its type must not require
 // reaching past this package. Routed through the microservice tier, which is the

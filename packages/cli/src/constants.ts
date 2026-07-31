@@ -51,7 +51,7 @@ export type TargetRuntime = (typeof TARGET_RUNTIMES)[number];
  * `honoe.config.ts`. Omitting the flag yields the minimal set (the runtime
  * plugin alone), which is still emitted through the same config seam.
  */
-export const TEMPLATES = ['rest', 'microservice', 'nest'] as const;
+export const TEMPLATES = ['rest', 'microservice', 'nest', 'full-stack'] as const;
 
 /** A project template accepted by `honoe new --template`. */
 export type TemplateName = (typeof TEMPLATES)[number];

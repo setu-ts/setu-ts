@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
-import { runNewCommand } from '../../src/commands/new.ts';
+import { firstDuplicatePath, runNewCommand } from '../../src/commands/new.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 
 interface Harness {
@@ -24,6 +24,54 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
       runNewCommand(parseArgs(argv), { fs, cwd: '/work', log: out.sink, error: err.sink }),
   };
 }
+
+describe('firstDuplicatePath', () => {
+  // The overwrite check probes the filesystem, so it cannot see a path planned
+  // twice within one project — both would be written and the last would win.
+  it('finds a path planned twice', () => {
+    expect(firstDuplicatePath([
+      { path: 'deno.json', contents: '{}' },
+      { path: 'main.ts', contents: '' },
+      { path: 'deno.json', contents: 'overwrites the framework manifest' },
+    ])).toBe('deno.json');
+  });
+
+  it('returns the FIRST duplicate when there are several', () => {
+    expect(firstDuplicatePath([
+      { path: 'a', contents: '' },
+      { path: 'b', contents: '' },
+      { path: 'a', contents: '' },
+      { path: 'b', contents: '' },
+    ])).toBe('a');
+  });
+
+  it('returns undefined for a distinct plan', () => {
+    expect(firstDuplicatePath([
+      { path: 'deno.json', contents: '' },
+      { path: 'main.ts', contents: '' },
+    ])).toBeUndefined();
+  });
+
+  it('returns undefined for an empty plan', () => {
+    expect(firstDuplicatePath([])).toBeUndefined();
+  });
+
+  it('reports no duplicate for any built-in template on any runtime', async () => {
+    // The invariant the guard protects: a template's own files must never
+    // collide with the fixed project files, for any target.
+    for (const template of listTemplates()) {
+      for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+        // A pairing the template refuses never reaches the plan.
+        if (template.unsupported[runtime] !== undefined) continue;
+
+        const h = harness();
+        const code = await h.run(['app', '--template', template.name, '--runtime', runtime]);
+        expect(code).toBe(0);
+        expect(h.err.lines.join('\n')).not.toContain('twice');
+      }
+    }
+  });
+});
 
 describe('runNewCommand', () => {
   it('creates a deno project under the working directory by default', async () => {
@@ -66,6 +114,86 @@ describe('runNewCommand', () => {
       expect(main).toContain('app.start({ port: 3000 })');
       expect(main).not.toContain('RuntimePlugin');
       expect(main).not.toContain('createApplication');
+    });
+  });
+
+  describe('a template that composes through a starter factory', () => {
+    it('awaits the factory instead of calling createApplication', async () => {
+      const h = harness();
+      expect(await h.run(['shop', '--template', 'full-stack'])).toBe(0);
+      const config = h.fs.read('/work/shop/honoe.config.ts');
+
+      expect(config).toContain('await createFullStackAppFromConfig(');
+      expect(config).toContain("from '@hono-enterprise/full-stack-starter'");
+      // The kernel is not on this path at all.
+      expect(config).not.toContain('createApplication');
+      expect(config).not.toContain('@hono-enterprise/kernel');
+    });
+
+    it('exports an async factory, which the loader already awaits', async () => {
+      const h = harness();
+      await h.run(['shop', '--template', 'full-stack']);
+      const config = h.fs.read('/work/shop/honoe.config.ts');
+
+      expect(config).toContain('export async function createApp(): Promise<IApplication>');
+      // Still must not start the server: command discovery imports this module.
+      expect(config).not.toContain('.start(');
+    });
+
+    it('pins the starter in the manifest and drops the kernel', async () => {
+      const h = harness();
+      await h.run(['shop', '--template', 'full-stack']);
+      const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
+
+      expect(manifest.imports['@hono-enterprise/full-stack-starter']).toContain(
+        'jsr:@hono-enterprise/full-stack-starter@',
+      );
+      // Declaring the kernel would name a package the project never imports.
+      expect(manifest.imports['@hono-enterprise/kernel']).toBeUndefined();
+      // Still needed: the config module imports the IApplication type.
+      expect(manifest.imports['@hono-enterprise/common']).toBeDefined();
+    });
+
+    it('declares every package the generated config imports', async () => {
+      const h = harness();
+      await h.run(['shop', '--template', 'full-stack']);
+      const config = h.fs.read('/work/shop/honoe.config.ts');
+      const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
+
+      for (const match of config.matchAll(/from '(@hono-enterprise\/[a-z-]+)'/g)) {
+        expect(Object.keys(manifest.imports)).toContain(match[1]);
+      }
+    });
+
+    it('emits the app tree alongside the config', async () => {
+      const h = harness();
+      await h.run(['shop', '--template', 'full-stack']);
+
+      for (
+        const file of [
+          'app/routes.ts',
+          'app/root.tsx',
+          'app/lib/context-keys.server.ts',
+          'app/lib/load-context.ts',
+          'app/features/products/products.server.ts',
+          'vite.config.ts',
+          'react-router.config.ts',
+        ]
+      ) {
+        expect(h.fs.has(`/work/shop/${file}`)).toBe(true);
+      }
+    });
+
+    it('leaves templates without a factory rendering exactly as before', async () => {
+      // The field is additive: the rest template must be untouched by it.
+      const h = harness();
+      await h.run(['api', '--template', 'rest']);
+      const config = h.fs.read('/work/api/honoe.config.ts');
+
+      expect(config).toContain('export function createApp(): IApplication');
+      expect(config).toContain('createApplication({');
+      expect(config).toContain("app.router.get('/'");
+      expect(config).not.toContain('await create');
     });
   });
 
