@@ -2,7 +2,8 @@
  * GrpcService tests — verifies service registration and request handling.
  */
 
-import { describe, it, expect } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { GrpcService } from '../../src/services/grpc-service.ts';
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';

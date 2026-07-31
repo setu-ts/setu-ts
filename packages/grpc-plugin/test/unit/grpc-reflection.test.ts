@@ -2,7 +2,8 @@
  * gRPC Reflection tests — verifies reflection query handling.
  */
 
-import { describe, it, expect } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { createReflectionService } from '../../src/reflection/grpc-reflection.ts';
 
 describe('GrpcReflection', () => {

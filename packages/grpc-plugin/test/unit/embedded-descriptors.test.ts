@@ -3,7 +3,8 @@
  * valid FileDescriptorSets containing the expected service definitions.
  */
 
-import { describe, it, expect } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import {
   healthBase64,
   reflectionBase64,

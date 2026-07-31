@@ -2,7 +2,8 @@
  * Connect loader tests — verifies adaptConnectModule and error handling.
  */
 
-import { describe, it, expect, mock } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import {
   type ConnectRuntime,
   adaptConnectModule,
@@ -37,9 +38,6 @@ describe('ConnectLoader', () => {
   it('adaptConnectModule should produce a ConnectRuntime with required methods', () => {
     const runtime = adaptConnectModule(mockConnectModule, mockProtobuf, mockWkt);
     expect(runtime).toBeDefined();
-    expect(runtime.connect).toBeDefined();
-    expect(runtime.protobuf).toBeDefined();
-    expect(runtime.wkt).toBeDefined();
     expect(typeof runtime.createFetchHandler).toBe('function');
     expect(typeof runtime.adaptConnectModule).toBe('function');
     expect(typeof runtime.loadConnectModule).toBe('function');

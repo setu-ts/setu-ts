@@ -2,7 +2,8 @@
  * Connect router builder tests — verifies service registration and dispatch map creation.
  */
 
-import { describe, it, expect } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { buildConnectRouter } from '../../src/transports/connect-router-builder.ts';
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';

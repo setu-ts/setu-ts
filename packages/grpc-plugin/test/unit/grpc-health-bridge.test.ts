@@ -2,7 +2,8 @@
  * gRPC Health bridge tests — verifies status mapping and health check handling.
  */
 
-import { describe, it, expect } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import { handleHealthCheck, mapHealthStatus, type GrpcServingStatus } from '../../src/health/grpc-health-bridge.ts';
 
 describe('GrpcHealthBridge', () => {

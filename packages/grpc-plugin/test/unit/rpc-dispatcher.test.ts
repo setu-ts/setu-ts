@@ -2,7 +2,8 @@
  * RPC dispatcher tests — verifies basePath normalization, prefix checking, and dispatch.
  */
 
-import { describe, it, expect } from '@std/testing/bdd';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import {
   normalizeBasePath,
   buildDispatcherMap,

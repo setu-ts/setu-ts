@@ -14,7 +14,7 @@ export interface ConnectRuntime {
     options?: { httpVersion?: string },
   ): Map<string, (request: Request) => Promise<Response>>;
 
-  /** Adapts an imported module to ConnectRuntime. */
+  /** Adapts an imported module to ConnectRuntime using cached protobuf/wkt. */
   adaptConnectModule(mod: unknown): ConnectRuntime;
 
   /** Loads Connect modules via lazy import. */
@@ -32,4 +32,16 @@ export interface FileRegistryLike {
   files: unknown[];
   getService(name: string): unknown | undefined;
   listServices(): string[];
+}
+
+/** Standalone adaptation function — takes all three modules explicitly.
+ * Re-exported from connect-loader.ts.
+ */
+export function adaptConnectModule(
+  mod: unknown,
+  protobuf: unknown,
+  wkt: unknown,
+): ConnectRuntime {
+  // Implementation will be filled by connect-loader.ts
+  throw new Error('Implementation in connect-loader.ts');
 }

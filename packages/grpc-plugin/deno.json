@@ -6,10 +6,8 @@
   "imports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
-    "@connectrpc/connect": "^2.1.2",
-    "@bufbuild/protobuf": "^2.7.0"
-  },
+  // Zero runtime dependencies — Connect-ES and Protobuf-ES are lazy-imported at runtime
+  // via loadConnectModule(). No entries here.
   "test": {
     "permissions": {
       "net": true,

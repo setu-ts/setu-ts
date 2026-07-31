@@ -11,6 +11,8 @@ import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { buildDispatcherMap, normalizeBasePath, dispatchRequest } from '../transports/rpc-dispatcher.ts';
+import { buildConnectRouter } from '../transports/connect-router-builder.ts';
+import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
 /**
  * The gRPC service that applications use to register gRPC/Connect services.
@@ -23,20 +25,25 @@ export class GrpcService {
   }> = [];
 
   private readonly basePath: string;
+  private readonly connectRuntime: ConnectRuntime;
+  private readonly embeddedDescriptors: EmbeddedDescriptors;
 
   private dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
+  private registry: unknown | null = null;
   private routerBuilt = false;
 
   /** Whether the HTTP adapter supports the RPC interceptor seam. */
   readonly available: boolean;
 
   constructor(
-    _connectRuntime: ConnectRuntime,
-    _embeddedDescriptors: unknown,
+    connectRuntime: ConnectRuntime,
+    embeddedDescriptors: EmbeddedDescriptors,
     options: GrpcPluginOptions,
-    _adapter: IHttpAdapter | undefined,
+    adapter: IHttpAdapter | undefined,
     canSetRpcHandler: boolean,
   ) {
+    this.connectRuntime = connectRuntime;
+    this.embeddedDescriptors = embeddedDescriptors;
     this.basePath = normalizeBasePath(options.basePath ?? '/grpc');
     this.available = canSetRpcHandler;
 
@@ -58,9 +65,7 @@ export class GrpcService {
     }
 
     this.services.push({ definition, implementation: _implementation });
-    if (!this.routerBuilt) {
-      this.dispatchMap = null;
-    }
+    this.routerBuilt = false; // Invalidate cached router
   }
 
   async handleRequest(request: Request): Promise<Response> {
@@ -82,37 +87,6 @@ export class GrpcService {
     return new Response('Not Found', { status: 404 });
   }
 
-  private async ensureRouter(): Promise<void> {
-    if (this.routerBuilt) {
-      return;
-    }
-
-    if (!this.available) {
-      this.routerBuilt = true;
-      return;
-    }
-
-    const normalizedBase = this.basePath;
-    const handlers: Array<{
-      requestPath: string;
-      handler: (request: Request) => Promise<Response>;
-    }> = [];
-
-    for (const { definition, implementation: _implementation } of this.services) {
-      const methods = (definition as any)?.methods || {};
-      for (const methodName of Object.keys(methods)) {
-        const requestPath = `${normalizedBase}/${(definition as any)?.typeName || 'unknown'}/${methodName}`;
-        handlers.push({
-          requestPath,
-          handler: async () => new Response('OK'),
-        });
-      }
-    }
-
-    this.dispatchMap = buildDispatcherMap(normalizedBase, handlers);
-    this.routerBuilt = true;
-  }
-
   createFetchHandler(): RpcFetchHandler {
     return async (request: Request): Promise<Response | null> => {
       if (!this.available) {
@@ -132,5 +106,41 @@ export class GrpcService {
 
       return null;
     };
+  }
+
+  private async ensureRouter(): Promise<void> {
+    if (this.routerBuilt) {
+      return;
+    }
+
+    if (!this.available) {
+      this.routerBuilt = true;
+      return;
+    }
+
+    const normalizedBase = this.basePath;
+    
+    // Build the Connect router with all registered services
+    const { dispatchMap, registry } = buildConnectRouter({
+      connectRuntime: this.connectRuntime,
+      basePath: normalizedBase,
+      reflection: true, // Default to enabled per plan
+      health: true,     // Default to enabled per plan
+      services: this.services,
+      embeddedDescriptors: this.embeddedDescriptors,
+    });
+
+    this.dispatchMap = dispatchMap;
+    this.registry = registry;
+    this.routerBuilt = true;
+  }
+
+  // For testing access to internal state
+  get servicesCount(): number {
+    return this.services.length;
+  }
+
+  get dispatchMapSize(): number {
+    return this.dispatchMap ? this.dispatchMap.size : 0;
   }
 }

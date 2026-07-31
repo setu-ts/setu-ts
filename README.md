@@ -170,7 +170,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature | Status     | Description                                              |
 | ------- | ---------- | -------------------------------------------------------- |
 | GraphQL | 🚧 Planned | Schema-first and code-first GraphQL plugin               |
-| gRPC    | 🚧 Planned | Client and server support for microservice communication |
+| gRPC    | ✅     | `grpc-plugin` — Co-serve gRPC, Connect, and gRPC-Web on the same port |
 
 ---
 

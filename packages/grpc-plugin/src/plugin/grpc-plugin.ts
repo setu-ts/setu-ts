@@ -15,7 +15,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
-import { getFallbackConnectRuntime } from '../transports/connect-loader.ts';
+import { loadConnectModule, getFallbackConnectRuntime } from '../transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
 /** Plugin name. */
@@ -23,10 +23,13 @@ const PLUGIN_NAME = 'grpc-plugin';
 
 export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
   let connectRuntime: ConnectRuntime;
+  
+  // If a custom connectModule is provided via options, use it directly
   if (options.connectModule) {
     connectRuntime = options.connectModule;
   } else {
-    connectRuntime = getFallbackConnectRuntime();
+    // Otherwise, load Connect lazily at registration time
+    connectRuntime = getFallbackConnectRuntime(); // Will be replaced during async register
   }
 
   return {
@@ -37,6 +40,11 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
+      // Load the Connect runtime lazily if not already loaded
+      if (connectRuntime === getFallbackConnectRuntime()) {
+        connectRuntime = await loadConnectModule();
+      }
+
       const adapter = ctx.services.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       const canSetRpcHandler = typeof adapter.setRpcHandler === 'function';
 
