@@ -145,6 +145,20 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     }
   });
 
+  it('gives the login form an action, so its CSRF token is actually consumed', () => {
+    // A <Form method="post"> whose route exports no action answers 405, which
+    // makes the whole session/CSRF wiring undemonstrable: the token is
+    // rendered and never checked against anything.
+    const login = contentsOf('app/routes/_auth/login.tsx');
+
+    expect(login).toContain('export async function action');
+    expect(login).toContain('<Form method="post">');
+    // The action writes to the session, which is what the plugin commits onto
+    // the response — otherwise the login would not stick.
+    expect(login).toContain('getSession(context)');
+    expect(login).toContain('redirect(');
+  });
+
   it('keeps the context keys in a server-only module', () => {
     // They value-import the key helper, so a client-reachable module declaring
     // them would break the client build.
@@ -196,6 +210,16 @@ describe('full-stack template | the runtime-dependent argument', () => {
       expect(args).toContain('context.set(sessionContext, getSession(ctx))');
       expect(args).toContain('context.set(csrfContext, getCsrfToken(ctx))');
       expect(args).toContain("new URL('./build/server/index.js', import.meta.url).href");
+    }
+  });
+
+  it('passes the request env to the factory on every target', () => {
+    // Cloudflare Workers bindings arrive per request, so configuration cannot
+    // be read from a process-wide environment there. Off Workers the parameter
+    // is undefined and the factory reads the platform environment as usual, so
+    // one call shape serves all four targets.
+    for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+      expect(argsFor(runtime)).toContain('{ env }');
     }
   });
 

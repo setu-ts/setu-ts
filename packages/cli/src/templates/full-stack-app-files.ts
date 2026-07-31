@@ -104,9 +104,16 @@ import { ServerRouter, type EntryContext } from 'react-router';
 /**
  * Server entry.
  *
- * Streams the response, which the framework passes through untouched — the
- * kernel's IResponse.stream() carries a ReadableStream all the way to the
- * platform, so SSR streaming works on every supported runtime.
+ * The response body is a ReadableStream, which the framework passes through
+ * untouched — the kernel's IResponse.stream() carries it all the way to the
+ * platform on every supported runtime.
+ *
+ * \`await stream.allReady\` then waits for every Suspense boundary before the
+ * response is returned, so the HTML is complete and the status can still be
+ * corrected to 500 if rendering failed late. That is the safe default, and it
+ * means the document is NOT delivered incrementally. To stream shell-first,
+ * drop the await for browser requests and keep it for crawlers, which need the
+ * finished markup.
  */
 export default async function handleRequest(
   request: Request,
@@ -253,12 +260,12 @@ import {
  * module holds NO state: every value comes from the request context that
  * \`honoe.config.ts\` populated, and nothing is memoised here.
  *
- * @param context - The loader's or action's request context
- * @param key - The context key to read
+ * @param value - The value read from the request context
  * @param name - The service name, for the error message
- * @returns The resolved service
- * @throws {Error} If the service is absent, which means either that the plugin
- * is not registered or that this ran outside a loader or action
+ * @returns The value, once known to be present
+ * @throws {Error} If the value is absent, which means either that the plugin
+ * is not registered, that its context key is not set in populateLoadContext,
+ * or that this ran outside a loader or action
  */
 function requireValue<T>(value: T | null, name: string): T {
   if (value === null) {
@@ -482,10 +489,10 @@ export default function ProductsRoute() {
 }
 `;
 
-const loginRoute = `import { Form, useLoaderData } from 'react-router';
+const loginRoute = `import { Form, redirect, useActionData, useLoaderData } from 'react-router';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getCsrfToken } from '~/config/services.server.ts';
+import { getCsrfToken, getSession } from '~/config/services.server.ts';
 
 /**
  * Hands the form its CSRF token.
@@ -501,11 +508,41 @@ export function loader({ context }: { context: AppLoadContext }) {
   return { csrfToken: getCsrfToken(context) };
 }
 
+/**
+ * Handles the sign-in post.
+ *
+ * The CSRF token is NOT checked here: the session plugin's form-CSRF
+ * middleware runs at priority 275, before this route is ever reached, and
+ * answers 403 on a missing or mismatched token. So this action only runs for a
+ * request that already passed the check.
+ *
+ * The session write is what makes the login stick — the plugin commits the
+ * session onto the response after the handler returns, so the redirect below
+ * carries the updated cookie.
+ */
+export async function action({ request, context }: { request: Request; context: AppLoadContext }) {
+  const form = await request.formData();
+  const email = String(form.get('email') ?? '');
+
+  // Replace with a real credential check — resolve the auth service through a
+  // context key, exactly as the logger is resolved.
+  if (email === '') {
+    return { error: 'Email is required.' };
+  }
+
+  const session = getSession(context);
+  session.set('userEmail', email);
+
+  return redirect('/products');
+}
+
 export default function LoginRoute() {
   const { csrfToken } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
   return (
     <Form method="post">
+      {actionData?.error ? <p role="alert">{actionData.error}</p> : null}
       <input type="hidden" name="_csrf" value={csrfToken} />
       <label>
         Email <input type="email" name="email" required />

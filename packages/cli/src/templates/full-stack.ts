@@ -54,6 +54,11 @@ function fullStackArgs(runtime: TargetRuntime): string {
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
+  //
+  // `{ env }` is passed on every target, not only Workers. Off Workers the
+  // parameter is undefined and the factory reads the platform environment as
+  // usual; on Workers it is the per-request bindings object, which is the only
+  // place configuration exists there.
   return `(config) => ({
     reactRouter: {
       // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
@@ -76,7 +81,7 @@ function fullStackArgs(runtime: TargetRuntime): string {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: {},
     },
-  })`;
+  }), { env }`;
 }
 
 /**

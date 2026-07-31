@@ -197,7 +197,7 @@ import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starte
 const app = await createFullStackAppFromConfig((config) => ({
   database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-}), { envFilePath: ['.env.local', '.env'] });
+}), { config: { envFilePath: ['.env.local', '.env'] } });
 
 await app.start({ port: 3000 });
 ```

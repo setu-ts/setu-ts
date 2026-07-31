@@ -4742,7 +4742,7 @@ import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starte
 const app = await createFullStackAppFromConfig((config) => ({
   database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-}), { envFilePath: ['.env.local', '.env'] });
+}), { config: { envFilePath: ['.env.local', '.env'] } });
 
 await app.start({ port: 3000 });
 ```
@@ -4754,10 +4754,20 @@ snapshot into the application under `config.instance` — so `app.services.get(C
 returns the exact object the resolver saw, rather than a second one read a moment later.
 
 Signature:
-`(build: (config: IConfig) => FullStackStarterOptions, configOptions?: ConfigPluginOptions) =>
-Promise<IKernelApplication>`.
-The resolver is called exactly once; if it throws, or configuration fails to load, the returned
-promise rejects and no partially-composed application exists.
+`(build: (config: IConfig) => FullStackStarterOptions, options?: FromConfigOptions) =>
+Promise<IKernelApplication>`,
+where
+`FromConfigOptions = { config?: ConfigPluginOptions; env?: Readonly<Record<string, unknown>> }`. The
+resolver is called exactly once; if it throws, or configuration fails to load, the returned promise
+rejects and no partially-composed application exists.
+
+**`env` is required on Cloudflare Workers.** Bindings arrive as the `env` argument of the `fetch`
+handler, never process-wide, so runtime services built before a request report an EMPTY environment
+there — the composition would see no configuration at all, and a resolver calling `getOrThrow` would
+fail on the first request and every request after it, because the boot promise is memoised. Pass the
+handler's `env` straight through; non-string values (KV, D1, R2 bindings) are ignored. Omit it on
+Node, Deno, and Bun, where the detected runtime reads the environment itself.
+`honoe new --template full-stack` wires this for you on all four targets.
 
 This is why **no plugin option carries a config-key shorthand** (`urlFromConfig`,
 `endpointFromConfig`): such a field would need its value at the same impossible moment.

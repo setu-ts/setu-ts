@@ -4631,10 +4631,10 @@ all, leaving assets to the platform binding.
 
 ### B. Config-driven composition (`urlFromConfig` rejected, not implemented)
 
-`createFullStackAppFromConfig(build, configOptions?)` loads configuration once, hands the snapshot
-to `build`, and passes that same snapshot into the application. Per-option config-key shorthands
-were **rejected with cause**: a `urlFromConfig` field needs its value at plugin-construction time,
-which is before `ConfigPlugin` has registered — the alternatives were an async starter (breaking) or
+`createFullStackAppFromConfig(build, options?)` loads configuration once, hands the snapshot to
+`build`, and passes that same snapshot into the application. Per-option config-key shorthands were
+**rejected with cause**: a `urlFromConfig` field needs its value at plugin-construction time, which
+is before `ConfigPlugin` has registered — the alternatives were an async starter (breaking) or
 plugin-contributes-plugin (a kernel change). `secretFromConfig` is worse: secrets come from a
 plugin, so nothing can resolve them pre-`start()` at all.
 
@@ -4910,7 +4910,7 @@ import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starte
 const app = await createFullStackAppFromConfig((config) => ({
   database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-}), { envFilePath: ['.env.local', '.env'] });
+}), { config: { envFilePath: ['.env.local', '.env'] } });
 
 await app.start({ port: 3000 });
 ```

@@ -144,7 +144,9 @@ function configModule(
  *
  * @returns The configured, unstarted application
  */
-export async function ${CONFIG_EXPORT}(): Promise<IApplication> {
+export async function ${CONFIG_EXPORT}(
+  env?: Readonly<Record<string, unknown>>,
+): Promise<IApplication> {
   const app = await ${appFactory.symbol}(${appFactory.args?.(runtime) ?? ''});
 ${middlewareLines}
   return app;
@@ -205,7 +207,21 @@ await app.start({ port: 3000 });
  *
  * @returns The `src/index.ts` contents
  */
-function workersEntry(): string {
+function workersEntry(hasAppFactory: boolean): string {
+  // A factory-composed app resolves its configuration BEFORE any plugin is
+  // constructed, and on Workers the environment is not process-wide — bindings
+  // arrive as the `env` argument below. So it has to be threaded in; without
+  // it the app would compose from an empty configuration and fail on the first
+  // request, permanently, because `booted` memoises the rejection.
+  const bootSignature = hasAppFactory
+    ? 'async function boot(env: Record<string, unknown>): Promise<IApplication> {'
+    : 'async function boot(): Promise<IApplication> {';
+  const bootCall = hasAppFactory ? `${CONFIG_EXPORT}(env)` : `${CONFIG_EXPORT}()`;
+  const bootedInit = hasAppFactory ? 'booted ??= boot(env);' : 'booted ??= boot();';
+  const fetchSignature = hasAppFactory
+    ? 'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {'
+    : 'async fetch(request: Request): Promise<Response> {';
+
   return `import type { IApplication } from '@hono-enterprise/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 
@@ -217,15 +233,15 @@ let booted: Promise<IApplication> | undefined;
  * Workers have no socket to bind, so start() takes no port: it registers the
  * plugins and the platform drives the app through fetch().
  */
-async function boot(): Promise<IApplication> {
-  const app = await ${CONFIG_EXPORT}();
+${bootSignature}
+  const app = await ${bootCall};
   await app.start();
   return app;
 }
 
 export default {
-  async fetch(request: Request): Promise<Response> {
-    booted ??= boot();
+  ${fetchSignature}
+    ${bootedInit}
     const app = await booted;
     return await app.fetch(request);
   },
@@ -529,7 +545,7 @@ ${PROGRAM_NAME} generate --help
   });
 
   if (runtime === 'cloudflare-workers') {
-    files.push({ path: 'src/index.ts', contents: workersEntry() });
+    files.push({ path: 'src/index.ts', contents: workersEntry(appFactory !== undefined) });
     files.push({
       path: 'wrangler.toml',
       contents: `name = "${projectName}"

@@ -135,7 +135,8 @@ describe('runNewCommand', () => {
       await h.run(['shop', '--template', 'full-stack']);
       const config = h.fs.read('/work/shop/honoe.config.ts');
 
-      expect(config).toContain('export async function createApp(): Promise<IApplication>');
+      expect(config).toContain('export async function createApp(');
+      expect(config).toContain('): Promise<IApplication> {');
       // Still must not start the server: command discovery imports this module.
       expect(config).not.toContain('.start(');
     });
@@ -182,6 +183,38 @@ describe('runNewCommand', () => {
       ) {
         expect(h.fs.has(`/work/shop/${file}`)).toBe(true);
       }
+    });
+
+    it('threads the Workers env binding into the factory', async () => {
+      // On Workers the environment is per-request, so a factory that resolves
+      // configuration before any plugin is constructed can only see it if the
+      // entry hands it over. Without this the app composes from an empty
+      // config and fails on every request, since `booted` memoises the boot.
+      const h = harness();
+      expect(
+        await h.run(['shop', '--template', 'full-stack', '--runtime', 'cloudflare-workers']),
+      ).toBe(0);
+
+      const entry = h.fs.read('/work/shop/src/index.ts');
+      const config = h.fs.read('/work/shop/honoe.config.ts');
+
+      expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
+      expect(entry).toContain('booted ??= boot(env)');
+      expect(entry).toContain('createApp(env)');
+      expect(config).toContain('env?: Readonly<Record<string, unknown>>');
+      expect(config).toContain('{ env }');
+    });
+
+    it('leaves the Workers entry untouched for a template without a factory', async () => {
+      // The env parameter exists only because a factory resolves config early;
+      // an inline-wiring template must render exactly as it did before.
+      const h = harness();
+      await h.run(['api', '--runtime', 'cloudflare-workers']);
+      const entry = h.fs.read('/work/api/src/index.ts');
+
+      expect(entry).toContain('async fetch(request: Request): Promise<Response>');
+      expect(entry).toContain('booted ??= boot();');
+      expect(entry).not.toContain('createApp(env)');
     });
 
     it('leaves templates without a factory rendering exactly as before', async () => {

@@ -33,15 +33,18 @@ All notable changes to this project are documented here. The format follows
   `await import(serverBuildPath)`, so a relative specifier resolves against the plugin's own module
   and can never find the application's build.
 - **`createFullStackAppFromConfig` in `@hono-enterprise/full-stack-starter`** (Milestone 36c) —
-  `(build: (config: IConfig) => FullStackStarterOptions, configOptions?) =>
-  Promise<IKernelApplication>`.
-  Plugin options must be decided before the plugins are constructed, which is before `ConfigPlugin`
-  has registered anything; this loads configuration once, hands the snapshot to the resolver, and
-  passes that same object into the application, so the values the composition branched on are the
-  values handlers read. It applies to every option uniformly, which is why no plugin option carries
-  a `urlFromConfig`-style config-key field — such a field would need its value at the same
-  impossible moment. Secrets remain out of reach by construction: they are served by a plugin that
-  exists only after registration.
+  `(build: (config: IConfig) => FullStackStarterOptions, options?: FromConfigOptions) =>
+  Promise<IKernelApplication>`,
+  where `FromConfigOptions` carries `config` (loading options) and `env`. **`env` is required on
+  Cloudflare Workers**, where bindings arrive per request rather than process-wide, so without it
+  the application composes from an empty configuration and fails on every request; the `full-stack`
+  template threads the handler's `env` through automatically. Plugin options must be decided before
+  the plugins are constructed, which is before `ConfigPlugin` has registered anything; this loads
+  configuration once, hands the snapshot to the resolver, and passes that same object into the
+  application, so the values the composition branched on are the values handlers read. It applies to
+  every option uniformly, which is why no plugin option carries a `urlFromConfig`-style config-key
+  field — such a field would need its value at the same impossible moment. Secrets remain out of
+  reach by construction: they are served by a plugin that exists only after registration.
 - **`loadConfig` and `ConfigPluginOptions.instance` in `@hono-enterprise/config-plugin`** (Milestone
   36c) — `loadConfig(runtime, options?)` is the same implementation `ConfigPlugin` registers,
   reachable without an application; `instance` registers a supplied snapshot verbatim, reading
