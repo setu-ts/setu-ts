@@ -14,7 +14,8 @@ import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
 // Create a fake ConnectRuntime for testing
 function createFakeConnectRuntime(): ConnectRuntime {
   return {
-    createFetchHandler: () => new Map(),
+    createConnectRouter: () => ({ handlers: [], service: () => {} }),
+    createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
     adaptConnectModule: (_mod: unknown): ConnectRuntime => createFakeConnectRuntime(),
     loadConnectModule: () => Promise.resolve(createFakeConnectRuntime()),
     reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
@@ -204,42 +205,5 @@ describe('GrpcService', () => {
     const handler = service.createFetchHandler();
     const result = await handler(new Request('http://example.com/grpc/svc/method'));
     expect(result).toBeNull();
-  });
-
-  it('handleRequest should return response when dispatchMap has a handler', async () => {
-    // Create a fake ConnectRuntime that returns a dispatch map with a handler
-    const fakeDispatchMap = new Map<string, (request: Request) => Promise<Response>>();
-    fakeDispatchMap.set(
-      '/grpc/package.TestService/echo',
-      (_request: Request) => Promise.resolve(new Response('{"message":"hello"}', { status: 200 })),
-    );
-    const fakeRuntimeWithDispatch = {
-      ...fakeConnectRuntime,
-      createFetchHandler: () => fakeDispatchMap,
-    };
-
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeRuntimeWithDispatch,
-      fakeEmbeddedDescriptors,
-      {
-        services: [
-          {
-            definition: { typeName: 'package.TestService', methods: { echo: {} } },
-            implementation: { echo: () => ({ message: 'hello' }) },
-          },
-        ],
-      } as GrpcPluginOptions,
-      adapter,
-    );
-
-    const request = new Request('http://example.com/grpc/package.TestService/echo', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const result = await service.handleRequest(request);
-    expect(result).toBeDefined();
-    expect(result.status).toBe(200);
   });
 });

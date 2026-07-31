@@ -12,12 +12,27 @@ import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 let connectModule: unknown = null;
 let protobufModule: unknown = null;
 let wktModule: unknown = null;
+let protocolModule: unknown = null;
+
+/**
+ * Shape of the @connectrpc/connect module.
+ */
+interface ConnectModule {
+  createConnectRouter(): {
+    handlers: Array<{ requestPath: string; handler: unknown }>;
+    service<T extends { typeName: string }>(
+      service: T,
+      implementation: Record<string, (...args: unknown[]) => unknown>,
+      options?: Record<string, unknown>,
+    ): void;
+  };
+}
 
 /**
  * Shape of the @bufbuild/protobuf module.
  */
 interface ProtobufModule {
-  createFileRegistry(fdSet: unknown): unknown;
+  createFileRegistry(fdSet: unknown): { getService(name: string): unknown };
   fromBinary(schema: unknown, bytes: Uint8Array): unknown;
 }
 
@@ -29,58 +44,71 @@ interface WktModule {
 }
 
 /**
- * Shape of the @connectrpc/connect module.
+ * Shape of the @connectrpc/connect/protocol module.
  */
-interface ConnectModule {
+interface ProtocolModule {
   createFetchHandler(
-    handlers: Array<{ requestPath: string; handler: unknown }>,
+    uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
     options?: { httpVersion?: string },
-  ): Map<string, (request: Request) => Promise<Response>>;
+  ): (request: Request) => Promise<Response>;
 }
 
 /**
  * Creates a ConnectRuntime implementation from raw module objects.
- * This is the internal implementation detail.
  */
 function createConnectRuntime(
-  _mod: unknown,
-  _protobuf: unknown,
-  _wkt: unknown,
+  mod: ConnectModule,
+  protobuf: ProtobufModule,
+  wkt: WktModule,
+  proto: ProtocolModule,
 ): ConnectRuntime {
-  const modObj = _mod as ConnectModule | null;
-  const protobufObj = _protobuf as ProtobufModule | null;
-  const wktObj = _wkt as WktModule | null;
+  const { createFileRegistry, fromBinary } = protobuf;
+  const { FileDescriptorSetSchema } = wkt;
 
-  if (!protobufObj || !wktObj) {
-    throw new Error('Protobuf/WKT modules not available');
-  }
-
-  const { createFileRegistry, fromBinary } = protobufObj;
-  const { FileDescriptorSetSchema } = wktObj;
+  // Cache the real router so createConnectRouter() always returns the same instance
+  let cachedRealRouter: {
+    handlers: Array<{ requestPath: string; handler: unknown }>;
+    service: (service: unknown, impl: unknown, options?: unknown) => void;
+  } | null = null;
 
   return {
-    createFetchHandler: (
-      handlers: Array<{ requestPath: string; handler: unknown }>,
-      options?: { httpVersion?: string },
-    ) => {
-      if (!modObj?.createFetchHandler) {
-        throw new Error('Connect module does not have createFetchHandler');
+    createConnectRouter() {
+      if (cachedRealRouter === null) {
+        // Delegate to the real createConnectRouter from the connect module
+        const realRouter = (mod as {
+          createConnectRouter: () => {
+            handlers: Array<{ requestPath: string; handler: unknown }>;
+            service: (service: unknown, impl: unknown, options?: unknown) => void;
+          };
+        }).createConnectRouter();
+        // Cache the real router directly to ensure handlers are shared
+        cachedRealRouter = realRouter;
       }
-      return modObj.createFetchHandler(handlers, options);
+      return cachedRealRouter;
     },
 
-    // Method on ConnectRuntime interface - takes only the mod parameter
-    // Uses cached protobuf/wkt internally
-    adaptConnectModule: (m: unknown) => {
-      if (!protobufModule || !wktModule) {
-        throw new Error('Protobuf modules not available for adaptation');
+    createFetchHandler(
+      uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
+      options?: { httpVersion?: string },
+    ): (request: Request) => Promise<Response> {
+      return proto.createFetchHandler(uHandler, options);
+    },
+
+    adaptConnectModule(_m: unknown): ConnectRuntime {
+      if (!protobufModule || !wktModule || !protocolModule) {
+        throw new Error('Protobuf/protocol modules not available for adaptation');
       }
-      return createConnectRuntime(m, protobufModule, wktModule);
+      return createConnectRuntime(
+        _m as ConnectModule,
+        protobufModule as ProtobufModule,
+        wktModule as WktModule,
+        protocolModule as ProtocolModule,
+      );
     },
 
     loadConnectModule: () => loadConnectModule(),
 
-    reviveDescriptorSet: (base64: string) => {
+    reviveDescriptorSet(base64: string): unknown {
       const bytes = new Uint8Array(
         base64.split('').map((c) => c.charCodeAt(0) & 0xFF),
       );
@@ -88,8 +116,8 @@ function createConnectRuntime(
       return createFileRegistry(fdSet);
     },
 
-    getService: (registry: unknown, serviceName: string) => {
-      const reg = registry as Record<string, (...args: unknown[]) => unknown> | null;
+    getService(registry: unknown, serviceName: string): unknown {
+      const reg = registry as { getService?: (name: string) => unknown } | null;
       return reg?.getService?.(serviceName) || undefined;
     },
   };
@@ -100,11 +128,6 @@ function createConnectRuntime(
  * {@linkcode GrpcRuntimeLoadError} if any specifier cannot be resolved.
  */
 export async function loadConnectModule(): Promise<ConnectRuntime> {
-  // Use cached modules if already loaded
-  if (connectModule && protobufModule && wktModule) {
-    return createConnectRuntime(connectModule, protobufModule, wktModule);
-  }
-
   // Load connectrpc/connect
   if (!connectModule) {
     try {
@@ -141,15 +164,36 @@ export async function loadConnectModule(): Promise<ConnectRuntime> {
     }
   }
 
-  return createConnectRuntime(connectModule, protobufModule, wktModule);
+  // Load the protocol module
+  if (!protocolModule) {
+    try {
+      protocolModule = await import('npm:@connectrpc/connect@^2.1.2/protocol') as unknown;
+    } catch (_e) {
+      throw new GrpcRuntimeLoadError(
+        '@connectrpc/connect/protocol',
+        'deno add @connectrpc/connect@^2.1.2',
+      );
+    }
+  }
+
+  // Create a NEW runtime instance for each call — don't cache at module level
+  // This ensures each plugin instance gets its own router
+  return createConnectRuntime(
+    connectModule as ConnectModule,
+    protobufModule as ProtobufModule,
+    wktModule as WktModule,
+    protocolModule as ProtocolModule,
+  );
 }
 
 /**
  * Fallback connect runtime for when Connect is not available (e.g., during testing).
+ * Returns a singleton instance.
  */
 export function getFallbackConnectRuntime(): ConnectRuntime {
   return {
-    createFetchHandler: () => new Map(),
+    createConnectRouter: () => ({ handlers: [], service: () => {} }),
+    createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
     adaptConnectModule: (_m: unknown) => getFallbackConnectRuntime(),
     loadConnectModule: () => Promise.resolve(getFallbackConnectRuntime()),
     reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
@@ -162,14 +206,47 @@ export function getFallbackConnectRuntime(): ConnectRuntime {
  * Used by tests to avoid needing the full lazy-load machinery.
  */
 export function adaptConnectModule(
-  _mod: unknown,
-  _protobuf: unknown,
-  _wkt: unknown,
+  mod: unknown,
+  protobuf: unknown,
+  wkt: unknown,
 ): ConnectRuntime {
-  // For now, use a fallback since we don't have actual module objects in tests
-  // In production, this would call createConnectRuntime with the real modules
-  void _mod;
-  void _protobuf;
-  void _wkt;
-  return getFallbackConnectRuntime();
+  // For tests, we need a protocol module too
+  const protocolModule = {
+    createFetchHandler: (
+      uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    ) => {
+      return async (request: Request) => {
+        // Build a minimal universal request from the fetch request
+        const universalRequest = {
+          url: request.url,
+          method: request.method,
+          header: Object.fromEntries(request.headers.entries()),
+          body: null,
+          httpVersion: '',
+          signal: request.signal,
+        };
+
+        try {
+          const response = await uHandler(universalRequest);
+          const body = response.body ? await request.text() : null;
+          return new Response(body ?? JSON.stringify(response), {
+            status: (response.status as number) ?? 200,
+            headers: (response.header as HeadersInit) ?? new Headers(),
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: (e as Error).message }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+      };
+    },
+  } as ProtocolModule;
+
+  return createConnectRuntime(
+    mod as ConnectModule,
+    protobuf as ProtobufModule,
+    wkt as WktModule,
+    protocolModule,
+  );
 }

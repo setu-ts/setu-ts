@@ -15,7 +15,8 @@ describe('DescriptorRegistry', () => {
   it('reviveDescriptorSet should delegate to connectRuntime.reviveDescriptorSet', () => {
     let called = false;
     const fakeConnectRuntime: ConnectRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => fakeConnectRuntime,
       loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: (base64: string) => {
@@ -32,7 +33,8 @@ describe('DescriptorRegistry', () => {
 
   it('buildReflectionRegistry should include embedded services', () => {
     const fakeConnectRuntime: ConnectRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => fakeConnectRuntime,
       loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
@@ -60,7 +62,8 @@ describe('DescriptorRegistry', () => {
 
   it('buildReflectionRegistry should include app services', () => {
     const fakeConnectRuntime: ConnectRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => fakeConnectRuntime,
       loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
@@ -87,7 +90,8 @@ describe('DescriptorRegistry', () => {
 
   it('buildReflectionRegistry getService should find app services', () => {
     const fakeConnectRuntime: ConnectRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => fakeConnectRuntime,
       loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
@@ -111,7 +115,8 @@ describe('DescriptorRegistry', () => {
 
   it('buildReflectionRegistry getService should return undefined for unknown service', () => {
     const fakeConnectRuntime: ConnectRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => fakeConnectRuntime,
       loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
@@ -133,7 +138,8 @@ describe('DescriptorRegistry', () => {
 
   it('buildReflectionRegistry getService should find embedded health service', () => {
     const fakeConnectRuntime: ConnectRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => fakeConnectRuntime,
       loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({

@@ -10,7 +10,8 @@ import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 describe('GrpcReflection', () => {
   function createFakeRuntime(): ConnectRuntime {
     return {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => createFakeRuntime(),
       loadConnectModule: () => Promise.resolve(createFakeRuntime()),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),

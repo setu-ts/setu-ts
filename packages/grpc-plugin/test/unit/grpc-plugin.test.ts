@@ -146,7 +146,8 @@ describe('GrpcPlugin', () => {
 
   it('register should use custom connectModule from options', async () => {
     const customRuntime = {
-      createFetchHandler: () => new Map(),
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
       adaptConnectModule: () => customRuntime,
       loadConnectModule: () => Promise.resolve(customRuntime),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
@@ -177,7 +178,7 @@ describe('GrpcPlugin', () => {
       },
     } as unknown as import('@hono-enterprise/common').IPluginContext;
 
-    const plugin = GrpcPlugin({ connectModule: customRuntime });
+    const plugin = GrpcPlugin({ connectModule: customRuntime as never });
     await plugin.register(mockContext);
 
     expect(rpcHandlers.length).toBe(1);

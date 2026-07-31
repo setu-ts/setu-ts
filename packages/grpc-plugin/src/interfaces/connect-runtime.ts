@@ -8,11 +8,24 @@
  */
 
 export interface ConnectRuntime {
-  /** Creates a fetch handler map from Connect router handlers. */
+  /** Creates a ConnectRouter for registering services. */
+  createConnectRouter(): {
+    handlers: Array<{ requestPath: string; handler: unknown }>;
+    service<T extends { typeName: string }>(
+      service: T,
+      implementation: Record<string, (...args: unknown[]) => unknown>,
+      options?: Record<string, unknown>,
+    ): void;
+  };
+
+  /**
+   * Converts a universal handler function to a fetch handler.
+   * The universal handler receives a UniversalServerRequest and returns a Promise<UniversalServerResponse>.
+   */
   createFetchHandler(
-    handlers: Array<{ requestPath: string; handler: unknown }>,
+    uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
     options?: { httpVersion?: string },
-  ): Map<string, (request: Request) => Promise<Response>>;
+  ): (request: Request) => Promise<Response>;
 
   /** Adapts an imported module to ConnectRuntime using cached protobuf/wkt. */
   adaptConnectModule(mod: unknown): ConnectRuntime;
@@ -32,16 +45,4 @@ export interface FileRegistryLike {
   files: unknown[];
   getService(name: string): unknown | undefined;
   listServices(): string[];
-}
-
-/** Standalone adaptation function — takes all three modules explicitly.
- * Re-exported from connect-loader.ts.
- */
-export function adaptConnectModule(
-  _mod: unknown,
-  _protobuf: unknown,
-  _wkt: unknown,
-): ConnectRuntime {
-  // Implementation will be filled by connect-loader.ts
-  throw new Error('Implementation in connect-loader.ts');
 }
