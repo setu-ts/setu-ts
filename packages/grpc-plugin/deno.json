@@ -1,0 +1,19 @@
+{
+  "name": "@hono-enterprise/grpc-plugin",
+  "version": "0.3.0-alpha.3",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "imports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@connectrpc/connect": "^2.1.2",
+    "@bufbuild/protobuf": "^2.7.0"
+  },
+  "test": {
+    "permissions": {
+      "net": true,
+      "env": true
+    }
+  }
+}
