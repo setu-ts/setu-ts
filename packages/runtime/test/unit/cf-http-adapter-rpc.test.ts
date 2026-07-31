@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any, require-await
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CloudflareWorkersHttpAdapter } from '../../src/adapters/workers/cf-http-adapter.ts';
@@ -8,10 +9,10 @@ import { CloudflareWorkersHttpAdapter } from '../../src/adapters/workers/cf-http
 
 describe('cf-http-adapter | RPC interceptor', () => {
   it('RPC handler short-circuits before body mapping', async () => {
-    const adapter = new CloudflareWorkersHttpAdapter(undefined as any);
+    const adapter = new CloudflareWorkersHttpAdapter();
 
-    const mockHandler = async (_request: Request): Promise<Response | null> => {
-      return new Response('grpc response');
+    const mockHandler = (_request: Request): Promise<Response | null> => {
+      return Promise.resolve(new Response('grpc response'));
     };
     adapter.setRpcHandler(mockHandler);
 
@@ -29,10 +30,10 @@ describe('cf-http-adapter | RPC interceptor', () => {
   });
 
   it('RPC handler returning null falls through to framework handler', async () => {
-    const adapter = new CloudflareWorkersHttpAdapter(undefined as any);
+    const adapter = new CloudflareWorkersHttpAdapter();
 
-    const mockHandler = async (_request: Request): Promise<Response | null> => {
-      return null;
+    const mockHandler = (_request: Request): Promise<Response | null> => {
+      return Promise.resolve(null);
     };
     adapter.setRpcHandler(mockHandler);
 
@@ -50,9 +51,9 @@ describe('cf-http-adapter | RPC interceptor', () => {
   });
 
   it('RPC throwing handler returns 500 error', async () => {
-    const adapter = new CloudflareWorkersHttpAdapter(undefined as any);
+    const adapter = new CloudflareWorkersHttpAdapter();
 
-    const mockHandler = async (_request: Request): Promise<Response | null> => {
+    const mockHandler = (_request: Request): Promise<Response | null> => {
       throw new Error('handler failed');
     };
     adapter.setRpcHandler(mockHandler);
@@ -71,7 +72,7 @@ describe('cf-http-adapter | RPC interceptor', () => {
   });
 
   it('no RPC handler falls through to framework handler', async () => {
-    const adapter = new CloudflareWorkersHttpAdapter(undefined as any);
+    const adapter = new CloudflareWorkersHttpAdapter();
 
     adapter.setHandler(async (_request: any) => {
       return {

@@ -33,6 +33,7 @@ export class GrpcService {
   private readonly basePath: string;
   private readonly connectRuntime: ConnectRuntime;
   private readonly embeddedDescriptors: EmbeddedDescriptors;
+  private readonly options: GrpcPluginOptions;
 
   private dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
   private routerBuilt = false;
@@ -48,6 +49,7 @@ export class GrpcService {
   ) {
     this.connectRuntime = connectRuntime;
     this.embeddedDescriptors = embeddedDescriptors;
+    this.options = options;
     this.basePath = normalizeBasePath(options.basePath ?? '/grpc');
     // Determine if the adapter supports the RPC interceptor seam
     this.available = adapter !== undefined && 'setRpcHandler' in adapter;
@@ -132,8 +134,8 @@ export class GrpcService {
     const { dispatchMap } = buildConnectRouter({
       connectRuntime: this.connectRuntime,
       basePath: normalizedBase,
-      reflection: true, // Default to enabled per plan
-      health: true, // Default to enabled per plan
+      reflection: this.options.reflection ?? true,
+      health: this.options.health ?? true,
       services: this.services,
       embeddedDescriptors: this.embeddedDescriptors,
     });

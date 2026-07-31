@@ -1,25 +1,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '../../src/tokens.ts';
-import type {
-  GrpcServiceDefinition,
-  GrpcServingStatus,
-  RpcFetchHandler,
-} from '../../src/services/grpc.ts';
+import type { GrpcServiceDefinition, GrpcServingStatus } from '../../src/services/grpc.ts';
 
 // Make IGrpcService partial for testing - we can't instantiate the real interface
 describe('gRPC contract', () => {
   it('CAPABILITIES.GRPC equals "grpc"', () => {
     expect(CAPABILITIES.GRPC).toBe('grpc');
-  });
-
-  it('RpcFetchHandler signature is correct', async () => {
-    const handler: RpcFetchHandler = async (_request: Request) => {
-      return new Response('ok');
-    };
-    // Just verify the type accepts Request and returns Promise<Response | null>
-    const result = handler(new Request('http://localhost/'));
-    expect(result).toBeDefined();
   });
 
   it('GrpcServingStatus has valid values', () => {

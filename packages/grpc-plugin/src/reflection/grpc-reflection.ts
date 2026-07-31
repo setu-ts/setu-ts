@@ -170,7 +170,11 @@ interface ReflectionRegistry {
   getFileContaining(symbol: string): unknown | undefined;
 }
 
-function buildReflectionRegistry(
+/**
+ * Builds a reflection registry from app services and embedded descriptors.
+ * Exported for testing.
+ */
+export function buildReflectionRegistry(
   _connectRuntime: ConnectRuntime,
   _embeddedDescriptors: EmbeddedDescriptors,
   appServices: readonly unknown[],

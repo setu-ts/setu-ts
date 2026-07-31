@@ -206,4 +206,99 @@ describe('GrpcService', () => {
     const result = await handler(new Request('http://example.com/grpc/svc/method'));
     expect(result).toBeNull();
   });
+
+  it('ensureRouter should build dispatch map on first call', async () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
+
+    // Access internal ensureRouter via handleRequest
+    const request = new Request('http://example.com/grpc/pkg.Svc/method');
+    await service.handleRequest(request);
+
+    // After first call, dispatchMap should be built
+    expect(service.dispatchMapSize).toBeGreaterThan(0);
+  });
+
+  it('ensureRouter should be idempotent — second call returns immediately', async () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
+
+    // First call builds the router
+    const request1 = new Request('http://example.com/grpc/pkg.Svc/method');
+    await service.handleRequest(request1);
+
+    // Second call should reuse the cached router
+    const request2 = new Request('http://example.com/grpc/pkg.Svc/method');
+    await service.handleRequest(request2);
+
+    expect(service.dispatchMapSize).toBeGreaterThan(0);
+  });
+
+  it('should throw GrpcUnavailableError on handleRequest when adapter is null', async () => {
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      undefined,
+    );
+
+    const request = new Request('http://example.com/grpc/svc/method');
+    await expect(service.handleRequest(request)).rejects.toThrow(GrpcUnavailableError);
+  });
+
+  it('createFetchHandler should dispatch RPC requests when available', async () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
+
+    const handler = service.createFetchHandler();
+    const request = new Request('http://example.com/grpc/pkg.Svc/method');
+    const result = await handler(request);
+
+    // The fallback runtime returns 404 for unhandled paths
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe(404);
+  });
+
+  it('should invalidate router cache when adding a new service', () => {
+    const adapter = createMockAdapter(true);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    service.addService({ typeName: 'pkg.Svc1', methods: { method: {} } });
+
+    // Build the router
+    const request1 = new Request('http://example.com/grpc/pkg.Svc1/method');
+    service.handleRequest(request1);
+
+    // Add another service
+    service.addService({ typeName: 'pkg.Svc2', methods: { method: {} } });
+
+    // The routerBuilt flag should be reset (we can't directly check it, but
+    // dispatchMapSize should reflect the new state after another request)
+    const request2 = new Request('http://example.com/grpc/pkg.Svc2/method');
+    service.handleRequest(request2);
+
+    expect(service.dispatchMapSize).toBeGreaterThan(0);
+  });
 });

@@ -1,18 +1,14 @@
+// deno-lint-ignore-file no-explicit-any, require-await
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { BunHttpAdapter } from '../../src/adapters/bun/bun-http-adapter.ts';
+import type { BunServeHost } from '../../src/adapters/bun/bun-http-adapter.ts';
 
 // ---------------------------------------------------------------------------
 // Fake host
 // ---------------------------------------------------------------------------
 
-function createFakeHost(): {
-  host: {
-    serve: (_options: any) => {
-      stop: () => void;
-    };
-  };
-} {
+function createFakeHost(): { host: BunServeHost } {
   const host = {
     serve: () => ({
       stop: () => {},
@@ -28,10 +24,10 @@ function createFakeHost(): {
 describe('bun-http-adapter | RPC interceptor', () => {
   it('RPC handler short-circuits before body mapping', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host as any);
+    const adapter = new BunHttpAdapter(host);
 
-    const mockHandler = async (_request: Request): Promise<Response | null> => {
-      return new Response('grpc response');
+    const mockHandler = (_request: Request): Promise<Response | null> => {
+      return Promise.resolve(new Response('grpc response'));
     };
     adapter.setRpcHandler(mockHandler);
 
@@ -50,10 +46,10 @@ describe('bun-http-adapter | RPC interceptor', () => {
 
   it('RPC handler returning null falls through to framework handler', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host as any);
+    const adapter = new BunHttpAdapter(host);
 
-    const mockHandler = async (_request: Request): Promise<Response | null> => {
-      return null;
+    const mockHandler = (_request: Request): Promise<Response | null> => {
+      return Promise.resolve(null);
     };
     adapter.setRpcHandler(mockHandler);
 
@@ -72,9 +68,9 @@ describe('bun-http-adapter | RPC interceptor', () => {
 
   it('RPC throwing handler returns 500 error', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host as any);
+    const adapter = new BunHttpAdapter(host);
 
-    const mockHandler = async (_request: Request): Promise<Response | null> => {
+    const mockHandler = (_request: Request): Promise<Response | null> => {
       throw new Error('handler failed');
     };
     adapter.setRpcHandler(mockHandler);
@@ -94,7 +90,7 @@ describe('bun-http-adapter | RPC interceptor', () => {
 
   it('no RPC handler falls through to framework handler', async () => {
     const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host as any);
+    const adapter = new BunHttpAdapter(host);
 
     adapter.setHandler(async (_request: any) => {
       return {

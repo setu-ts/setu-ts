@@ -124,10 +124,21 @@ function createConnectRuntime(
 }
 
 /**
- * Lazy-loads all four Connect runtime modules from npm. Throws
- * {@linkcode GrpcRuntimeLoadError} if any specifier cannot be resolved.
+ * Builds the error message for a failed module load.
+ * Exported for testing.
  */
-export async function loadConnectModule(): Promise<ConnectRuntime> {
+export function buildLoadErrorMessage(
+  specifier: string,
+  installCommand: string,
+): string {
+  return `Cannot load Connect runtime module: ${specifier}. Run: ${installCommand}`;
+}
+
+/**
+ * Internal helper that loads all four Connect runtime modules.
+ * Exported for testing to allow coverage of the load path.
+ */
+export async function loadConnectModules(): Promise<void> {
   // Load connectrpc/connect
   if (!connectModule) {
     try {
@@ -175,7 +186,14 @@ export async function loadConnectModule(): Promise<ConnectRuntime> {
       );
     }
   }
+}
 
+/**
+ * Lazy-loads all four Connect runtime modules from npm. Throws
+ * {@linkcode GrpcRuntimeLoadError} if any specifier cannot be resolved.
+ */
+export async function loadConnectModule(): Promise<ConnectRuntime> {
+  await loadConnectModules();
   // Create a NEW runtime instance for each call — don't cache at module level
   // This ensures each plugin instance gets its own router
   return createConnectRuntime(
