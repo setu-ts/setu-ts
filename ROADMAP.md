@@ -3729,7 +3729,7 @@ resolved by load order.
 
 ---
 
-## Milestone 36: Starters — Opinionated Bundles
+## Milestone 36: Starters — Opinionated Bundles ✅ COMPLETE
 
 **Objective:** Provide starter bundles for common use cases.
 
@@ -3767,26 +3767,31 @@ sensible defaults.
 > `react-router-plugin` is deliberately convention-agnostic (it only mounts the RR handler, bridges
 > DI via `loadContext`, and serves assets). The **standard app-side code structure** — the
 > `feature → service → lib → model` layering, `flatRoutes` `_app`/`_auth` layout groups, `~/*`
-> alias, per-feature Zod schemas, `.server.ts` convention — is owned by THIS milestone's Full-Stack
-> Starter, NOT by the plugin. Adapt the reference skeleton from the user's `B2BAdmin` project
-> (`/home/dkpaul91/Projects/B2BAdmin`, a standalone RR7 framework-mode app). **Critical rule when
-> adapting:** B2BAdmin re-implements cross-cutting concerns in-frontend (SSE, session/auth, CSRF,
-> telemetry, secrets/config, HTTP client) that this framework already ships as plugins — SSE (M43),
-> Auth (M16), HTTP-Security/CSRF (M17), Telemetry (M24), Secrets/Config, etc. KEEP B2BAdmin's
-> layering but REWIRE those `lib/` modules to consume the plugins through the M44 `loadContext`
-> bridge (`context.services.get(CAPABILITIES.X)`) instead of duplicating them; keep only
-> app-specific glue in `app/lib`. A worthwhile validation is migrating B2BAdmin itself off
-> `@react-router/serve` onto the M44 plugin. See the M44 plan §9 (archived under
+> alias, per-feature Zod schemas, `.server.ts` convention — belongs to the full-stack story, not to
+> the plugin. **Delivered in M36c, and by the CLI rather than by the starter package**: a starter is
+> a JSR library and cannot write `app/routes.ts` into a user's project, so ownership is split —
+> `honoe new --template full-stack` owns the FILE LAYOUT, and `full-stack-starter` owns the PLUGIN
+> COMPOSITION that the generated `honoe.config.ts` calls. Adapt the reference skeleton from the
+> user's `B2BAdmin` project (`/home/dkpaul91/Projects/B2BAdmin`, a standalone RR7 framework-mode
+> app). **Critical rule when adapting:** B2BAdmin re-implements cross-cutting concerns in-frontend
+> (SSE, session/auth, CSRF, telemetry, secrets/config, HTTP client) that this framework already
+> ships as plugins — SSE (M43), Auth (M16), HTTP-Security/CSRF (M17), Telemetry (M24),
+> Secrets/Config, etc. KEEP B2BAdmin's layering but REWIRE those `lib/` modules to consume the
+> plugins through the M44 `loadContext` bridge (`context.services.get(CAPABILITIES.X)`) instead of
+> duplicating them; keep only app-specific glue in `app/lib`. A worthwhile validation is migrating
+> B2BAdmin itself off `@react-router/serve` onto the M44 plugin. See the M44 plan §9 (archived under
 > `plans/archive/milestone-44-react-router-plugin.md` once M44 merges).
 
 ### Deliverables
 
-- [ ] REST starter
-- [ ] Microservice starter
-- [ ] Full-stack starter (plugin bundle)
-- [ ] Full-stack starter — standard React Router app structure (M44 `loadContext`-based; adapts the
-      B2BAdmin skeleton, delegates cross-cutting concerns to plugins — see note above)
-- [ ] Documentation
+- [x] REST starter
+- [x] Microservice starter
+- [x] Full-stack starter (plugin bundle)
+- [x] Documentation
+
+**Deferred to M36c (not delivered here):** the standard React Router app structure. M36 shipped
+three plugin-composition libraries and no app skeleton; the box above was moved rather than ticked,
+because a library cannot deliver `app/` files into a user's project. See Milestone 36c.
 
 ---
 
@@ -4569,10 +4574,102 @@ existing wiring renders byte-identically.
       caveat below, which still said sessions did not exist after M48 shipped them; and the four
       cross-package README links that returned 400 on jsr.io.
 
-**Not this milestone:** config-key indirection (`urlFromConfig` / `secretFromConfig`) and the
-full-stack React Router app skeleton adapted from B2BAdmin — both **M36c**. The skeleton is deferred
-on scope alone now: M48 closed the session/CSRF capability gap that also blocked it. Example
-applications under `apps/*` remain M37; a `honoe new --starter` path remains deferred.
+**Not this milestone:** config-key indirection and the full-stack React Router app skeleton adapted
+from B2BAdmin — both **M36c**. The skeleton is deferred on scope alone now: M48 closed the
+session/CSRF capability gap that also blocked it. Example applications under `apps/*` remain M37; a
+`honoe new --starter` path remains deferred. (M36c **rejected** `urlFromConfig` / `secretFromConfig`
+rather than implementing them, and delivered `createFullStackAppFromConfig` instead — see that
+section for the reasoning.)
+
+---
+
+## Milestone 36c: React Router App Skeleton + Config-Driven Composition ✅ COMPLETE
+
+**Objective:** ship the app-side structure the full-stack story was missing, and close the
+config-ordering gap M36 and M36b both deferred.
+
+M44 shipped a deliberately convention-agnostic `react-router-plugin`: it mounts the RR handler,
+bridges DI through `loadContext`, and serves assets. Nothing told an author **how to lay out the
+app**, so the full-stack story ended at "a plugin exists". This milestone ships that layout as a
+scaffoldable skeleton, with its cross-cutting `lib/` rewired onto the shipped plugins rather than
+reimplemented.
+
+### A. `honoe new --template full-stack`
+
+A React Router 8 framework-mode skeleton: the `routes → features → services → models` layering,
+`flatRoutes` `_app`/`_auth` layout groups each wrapped in their own layout, the `~/*` alias, the
+`.server.ts` convention, one worked feature (`products`), and the Vite/npm build files.
+
+Ownership is split because it has to be (see the M36 note): a starter is a JSR **library** and
+cannot write files into a user's project, so the **CLI owns the file layout** and the **starter owns
+the plugin composition** the generated `honoe.config.ts` calls.
+
+**The cross-cutting rewiring** — the deliverable that distinguishes this from
+`npx create-react-router`:
+
+| Conventional React Router module      | Replaced by                                               |
+| ------------------------------------- | --------------------------------------------------------- |
+| `lib/session.server.ts`               | M48 `getSession(ctx)`, via an app-declared context key    |
+| `lib/cookie-attrs.server.ts`          | M48 `SessionCookieOptions`                                |
+| `lib/csrf.server.ts`                  | M48 `csrfFormMiddleware` + `getCsrfToken`                 |
+| `lib/sse.server.ts`                   | `CAPABILITIES.SSE` (M43), via the M36b `realtime.sse` arm |
+| `lib/kv.server.ts`                    | `CAPABILITIES.SECRETS` (M25)                              |
+| `lib/http/xior.server.ts`             | `@hono-enterprise/sdk` (M35)                              |
+| `lib/appinsights-bootstrap.server.ts` | `CAPABILITIES.TELEMETRY` (M24)                            |
+| `lib/service-logger.server.ts`        | `CAPABILITIES.LOGGER`                                     |
+| `lib/route-guards.server.ts`          | `auth-plugin` guard factories + `userContext`             |
+| `config/services.server.ts`           | the kernel registry — its module-level caches disappear   |
+
+Session reaches loaders through an **app-declared** `RouterContextKey`, never a plugin-to-plugin
+import: `getSession` takes an `IRequestContext`, which a loader never sees, while
+`populateLoadContext` receives exactly that. Doing the bridge in app code is what keeps
+`react-router-plugin` ignorant of `session-plugin`.
+
+Every runtime target is supported. Cloudflare Workers omits `assetsDir` — with no filesystem the
+asset handler answers 404 rather than throwing, and omitting the option registers no asset route at
+all, leaving assets to the platform binding.
+
+### B. Config-driven composition (`urlFromConfig` rejected, not implemented)
+
+`createFullStackAppFromConfig(build, configOptions?)` loads configuration once, hands the snapshot
+to `build`, and passes that same snapshot into the application. Per-option config-key shorthands
+were **rejected with cause**: a `urlFromConfig` field needs its value at plugin-construction time,
+which is before `ConfigPlugin` has registered — the alternatives were an async starter (breaking) or
+plugin-contributes-plugin (a kernel change). `secretFromConfig` is worse: secrets come from a
+plugin, so nothing can resolve them pre-`start()` at all.
+
+Supporting it needed two extractions, each leaving ONE implementation behind two entry points:
+`loadConfig(runtime, options)` in `config-plugin` (which `ConfigPlugin.register` now delegates to),
+and `createRuntimeServices(options?)` in `runtime` (which `RuntimePlugin.register` now delegates
+to), because runtime services are needed before any application exists.
+`ConfigPluginOptions.instance` registers a supplied snapshot verbatim, so the app never loads
+configuration a second time.
+
+### Deliverables
+
+- [x] **`full-stack` CLI template** — the `app/` tree, both layout groups, the worked feature, and
+      the Vite build files, emitted through M36b's `files` seam.
+- [x] **`TemplateDefinition.appFactory`** — composing through a starter factory rather than a plugin
+      list, reversing M36's inline-wiring rule for this one template with cause (22 wirings is not a
+      file a human wants to open). `plugins` must be empty when it is set; a registry-wide test
+      enforces that.
+- [x] **The cross-cutting rewiring** — the table above, with a regression test pinning that none of
+      those modules is emitted.
+- [x] **`session` arm on the starters** — M48 postdates M36, so no starter could register a session.
+      Gated, because the plugin throws without a secret.
+- [x] **`createFullStackAppFromConfig` + `loadConfig` + `ConfigPluginOptions.instance` +
+      `createRuntimeServices`** — one implementation per behaviour, two entry points each.
+- [x] **Drift gate** — scaffolds the full-stack project, repoints imports at this workspace, and
+      `deno check`s the config plus every emitted `.server.ts`. It caught a React Router major
+      mismatch (the plugin loads `npm:react-router@8`; the template pinned 7) that nothing else
+      would have.
+- [x] **Docs** — this section, the M36 heading and boxes (C4/C5), the `urlFromConfig` examples (C3),
+      the M36 app-structure note's ownership (C1), `PUBLIC_API.md`, and the Progress row.
+
+**Not this milestone:** migrating B2BAdmin itself off `@react-router/serve` (a manual validation
+exercise — it edits a repository CI cannot gate); example applications under `apps/*` — M37; a
+general `honoe new --starter` flag for the other three templates; secrets resolved before startup
+(**rejected**, see above).
 
 ---
 
@@ -4785,25 +4882,43 @@ await app.start({ port: 3000 });
 
 ```typescript
 import { createRestApp } from '@hono-enterprise/rest-starter';
+import { CAPABILITIES, type IDatabase } from '@hono-enterprise/common';
+import { requireAuth } from '@hono-enterprise/auth-plugin';
 
-const app = await createRestApp({
-  port: 3000,
-  // Starters load config via ConfigPlugin; reference env keys, never process.env
-  database: { type: 'prisma', urlFromConfig: 'DATABASE_URL' },
-  auth: { jwt: { secretFromConfig: 'JWT_SECRET' } },
+const app = createRestApp({
+  database: { type: 'prisma', url: Deno.env.get('DATABASE_URL')! },
 });
 
-app.router.get('/users', {
-  middleware: [app.services.auth.requireAuth()],
-  handler: async (ctx) => {
-    const db = ctx.services.get('database');
-    const users = await db.getRepository('User').findAll();
-    ctx.response.json(users);
-  },
-});
+app.router.get('/users', async (ctx) => {
+  const db = ctx.services.get<IDatabase>(CAPABILITIES.DATABASE);
+  return ctx.response.json(await db.getRepository('User').findAll());
+}, { middleware: [requireAuth()] });
 
-await app.start();
+await app.start({ port: 3000 });
 ```
+
+### Composing from configuration
+
+Plugin options must be decided before the plugins are constructed — which is before `ConfigPlugin`
+has registered anything. That is why no plugin option carries a config-key shorthand: a
+`urlFromConfig` field would need its value at the same impossible moment. The full-stack starter
+closes the ordering gap once, for every option:
+
+```typescript
+import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+
+const app = await createFullStackAppFromConfig((config) => ({
+  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+}), { envFilePath: ['.env.local', '.env'] });
+
+await app.start({ port: 3000 });
+```
+
+Configuration is loaded once, before composition, and that same snapshot is registered under
+`CAPABILITIES.CONFIG` — so the values the composition branched on are the values handlers read.
+Secrets are a different problem and this does not solve it: they are served by `secrets-plugin`
+after registration, so a plugin needing one resolves it lazily at use time.
 
 ### Custom Plugin
 
@@ -4896,6 +5011,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 35        | ✅     | sdk                               |
 | 36        | ✅     | starters                          |
 | 36b       | ✅     | starters + decorator-plugin + cli |
+| 36c       | ✅     | cli + starters + config + runtime |
 | 37        | ⬜     | examples                          |
 | 38        | ⬜     | documentation                     |
 | 39        | ⬜     | docker/kubernetes                 |

@@ -787,9 +787,46 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the ROADMAP NestJS-comparison caveat still claimed sessions did not exist after M48 shipped them;
   and four cross-package starter README links were relative, which returns 400 on jsr.io) — complete
   (PR #107)
-- **Next milestone** — **Milestone 36c** (React Router app skeleton adapted from B2BAdmin +
-  config-key indirection; consumes M48's session/CSRF capability, so it is now deferred on scope
-  alone), then M37–M40 unless reprioritized.
+- **Milestone 36c** (`packages/cli` + `packages/starters/*` + `packages/config-plugin` +
+  `packages/runtime` — React Router app skeleton and config-driven composition. Two deliverables.
+  **(A)** `honoe new --template full-stack` emits a React Router **8** framework-mode skeleton: the
+  `routes → features → services → models` layering, `flatRoutes` `_app`/`_auth` groups each wrapped
+  in their own `layout()`, the `~/*` alias, the `.server.ts` convention, one worked feature, and the
+  Vite/npm build files. ROADMAP said the app structure was owned by the full-stack STARTER; that is
+  impossible and was corrected — a starter is a JSR **library** and cannot write `app/routes.ts`
+  into a user's project, so the CLI owns the file layout and the starter owns the plugin composition
+  the generated `honoe.config.ts` calls. The deliverable that distinguishes this from
+  `create-react-router` is the REMOVAL: a conventional RR app's
+  `lib/{session,csrf,sse,kv,
+  service-logger}.server.ts` and its `config/services.server.ts`
+  module-level caches are the session/SSE/secrets/logger capabilities plus the kernel registry, and
+  a test pins that none of them is emitted. Session reaches loaders through an **app-declared**
+  `RouterContextKey` — `getSession` takes an `IRequestContext` a loader never sees, while
+  `populateLoadContext` receives exactly that, so the bridge lives in app code and
+  `react-router-plugin` stays ignorant of `session-plugin`. Composing through a starter needed
+  `TemplateDefinition.appFactory`, which reverses M36's inline-wiring rule for this ONE template
+  with cause (22 wirings is not a file a human wants to open); it took its own type rather than
+  reusing `Wiring`, because §3.4's runtime-conditional `assetsDir` cannot be expressed as a fixed
+  string. Workers omits `assetsDir` (no `fs` → the asset handler 404s rather than throwing, and
+  omitting it registers no route at all). **(B)** config-driven composition:
+  `createFullStackAppFromConfig(build, configOptions?)` loads config once, hands the snapshot to the
+  resolver, and passes THAT SAME object into the app via a new `ConfigPluginOptions.instance`, so
+  the values the composition branched on are the values handlers read. Per-option
+  `urlFromConfig`/`secretFromConfig` were **rejected, not implemented** — they need a value at
+  plugin-construction time, before `ConfigPlugin` has registered. That needed two extractions, each
+  leaving one implementation behind two entry points: `loadConfig` in `config-plugin` and
+  `createRuntimeServices` in `runtime` (the barrel exported `detectRuntime` and four per-platform
+  factories but nothing for the DETECTED platform — the map was private to
+  `RuntimePlugin.register`). A fifth package joined late: no starter had a `session` arm, because
+  M48 postdates M36, so `RestStarterOptions.session` was added (gated — the plugin throws without a
+  secret). Three defects the drift gate caught that nothing else would: the template pinned React
+  Router **7** while the plugin imports `npm:react-router@8`; the Deno `start` task lacked
+  `--allow-read`, which SSR needs to import its own server build; and the gate's own
+  `useWorkspacePackages` mapped starters to `packages/<name>` (they live under `packages/starters/`)
+  and mangled the `~/` alias. Also added a duplicate-path guard, since `findExisting` probes the
+  filesystem and cannot see a path planned twice inside one project) — complete (PR pending)
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
+  reprioritized.
 
 ## Verification (run before declaring any work done)
 

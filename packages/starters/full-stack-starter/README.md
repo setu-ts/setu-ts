@@ -178,9 +178,49 @@ it composes from always registers `MessagingPlugin`.
 None of these arms collide with the plugins this tier already bundles — `sse`, `websocket`, `di`,
 and the backplane are registered by no other arm.
 
+The `session` arm is inherited the same way: `session: { secret, csrf: {} }` adds cookie sessions
+and the form-CSRF middleware, which a server-rendered `<Form>` post needs.
+
 See
 [rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
 for the full description of each arm.
+
+## Composing from configuration
+
+Plugin options must be decided **before** the plugins are constructed — which is before
+`ConfigPlugin` has registered anything, so `ctx.services.get(CAPABILITIES.CONFIG)` is not available
+yet. `createFullStackAppFromConfig` closes that ordering gap for every option at once:
+
+```typescript
+import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+
+const app = await createFullStackAppFromConfig((config) => ({
+  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+}), { envFilePath: ['.env.local', '.env'] });
+
+await app.start({ port: 3000 });
+```
+
+Configuration is loaded once and the **same snapshot** is registered under `CAPABILITIES.CONFIG`, so
+the values the composition branched on are the values handlers read — not a second snapshot taken a
+moment later. The resolver runs exactly once; if it throws, or configuration fails to load, the
+promise rejects and no partially-composed application exists.
+
+This is why no plugin option carries a config-key shorthand such as `urlFromConfig`: that field
+would need its value at the same impossible moment. Secrets are further out of reach — they are
+served by `secrets-plugin` after registration, so a plugin needing one resolves it lazily at use
+time.
+
+## The React Router app skeleton
+
+This package supplies the plugin **composition**; it cannot supply the application's `app/`
+directory, because a JSR library cannot write files into your project. Scaffold that with the CLI,
+which generates a `honoe.config.ts` calling `createFullStackAppFromConfig`:
+
+```bash
+honoe new my-app --template full-stack
+```
 
 ## Coming from NestJS
 

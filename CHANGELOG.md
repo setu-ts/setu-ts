@@ -8,6 +8,55 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`honoe new --template full-stack`** (Milestone 36c) — scaffolds a React Router 8 SSR
+  application: the `routes → features → services → models` layering, `flatRoutes` `_app`/`_auth`
+  layout groups, the `~/*` alias, the `.server.ts` convention, one worked feature, and the Vite
+  build files. What it deliberately does **not** emit is as important as what it does: no
+  `lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`, `lib/kv.server.ts` or
+  `lib/service-logger.server.ts`, because those are the session, SSE, secrets and logger
+  capabilities, reached through the service registry the SSR plugin attaches to every request. The
+  session reaches loaders through a context key the **application** declares and
+  `populateLoadContext` fills, so no plugin imports another. Every runtime target is supported;
+  Cloudflare Workers omits `assetsDir` and leaves assets to the platform binding. This is the only
+  template that composes through a starter rather than inline wiring — its plugin set is twenty-two,
+  and a generated file a human is meant to edit should not open with twenty-two imports they did not
+  choose.
+- **`contextKeyFor` in `@hono-enterprise/react-router-plugin`** (Milestone 36c) — creates React
+  Router context keys by name, memoised, so the same name always yields the same object. Keys are
+  matched by identity, and in a framework-mode application the module declaring them exists twice:
+  Vite inlines application modules into the server build, while the runtime loads `honoe.config.ts`
+  from source. Two hand-written `{ defaultValue }` literals then match nothing, and every read
+  silently returns the default — a session that is always `null`, a CSRF token that is always empty,
+  with no error raised. Requires the server build to treat `@hono-enterprise/*` as external
+  (`environments.ssr.build.rollupOptions.external`), which the `full-stack` template configures. The
+  `serverBuildPath` JSDoc now also states that the path must be **absolute**: the loader does
+  `await import(serverBuildPath)`, so a relative specifier resolves against the plugin's own module
+  and can never find the application's build.
+- **`createFullStackAppFromConfig` in `@hono-enterprise/full-stack-starter`** (Milestone 36c) —
+  `(build: (config: IConfig) => FullStackStarterOptions, configOptions?) =>
+  Promise<IKernelApplication>`.
+  Plugin options must be decided before the plugins are constructed, which is before `ConfigPlugin`
+  has registered anything; this loads configuration once, hands the snapshot to the resolver, and
+  passes that same object into the application, so the values the composition branched on are the
+  values handlers read. It applies to every option uniformly, which is why no plugin option carries
+  a `urlFromConfig`-style config-key field — such a field would need its value at the same
+  impossible moment. Secrets remain out of reach by construction: they are served by a plugin that
+  exists only after registration.
+- **`loadConfig` and `ConfigPluginOptions.instance` in `@hono-enterprise/config-plugin`** (Milestone
+  36c) — `loadConfig(runtime, options?)` is the same implementation `ConfigPlugin` registers,
+  reachable without an application; `instance` registers a supplied snapshot verbatim, reading
+  nothing from the environment. `ConfigPlugin.register` now delegates to `loadConfig`, so merging,
+  expansion, and validation cannot drift between the two paths.
+- **`createRuntimeServices` in `@hono-enterprise/runtime`** (Milestone 36c) — builds
+  `IRuntimeServices` for the detected platform without an application. The barrel previously
+  exported `detectRuntime` and four per-platform factories but nothing joining them, so the platform
+  → adapter map was unreachable outside `RuntimePlugin.register`; that method now delegates here,
+  leaving one implementation behind two entry points. `RuntimeAdapterFactories` and
+  `CreateRuntimeServicesOptions` are exported alongside it.
+- **Gated `session` arm on the three starters** (Milestone 36c) — `RestStarterOptions.session`
+  registers `SessionPlugin`, inherited by the microservice and full-stack tiers. M48 shipped after
+  the starters, so no tier could previously register a session at all. Gated because the plugin
+  throws during `register()` without an adequate secret; **no default changes**.
 - **Parameter-level `@Inject` in `@hono-enterprise/decorator-plugin`** (Milestone 36b) — `Inject`
   now works on a constructor parameter as well as on the class, binding one token to that argument
   by position, which is the form a developer arriving from NestJS expects:
@@ -96,6 +145,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`honoe new` now refuses a project plan containing the same path twice** (Milestone 36c). The
+  overwrite check probes the filesystem, so it could not see a duplicate inside one plan: both files
+  were written and the last silently won. A template emitting `deno.json` would have overwritten the
+  framework manifest with no warning.
+- **The CLI drift gate resolved starter packages to the wrong directory** (Milestone 36c). It mapped
+  `@hono-enterprise/<name>` to `packages/<name>`, but the three starters live under
+  `packages/starters/`, so any template importing one could not be type-checked. It also rewrote
+  every import-map entry, mangling a template's project-local alias (`~/`) into a package path.
 - **`websocket-plugin`'s README no longer claims cross-replica fan-out is unimplemented.** It stated
   "fan-out across replicas is a follow-up milestone; today two instances behind a load balancer do
   not share rooms", which stopped being true when `realtime-backplane-plugin` shipped in

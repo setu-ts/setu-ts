@@ -52,6 +52,7 @@ const options: RestStarterOptions = {
   decorators: {/* decorator plugin options */},
   database: {/* database plugin options */},
   auth: {/* auth plugin options */},
+  session: {/* session plugin options */},
   di: {/* di plugin options */},
   realtime: {
     websocket: {/* websocket plugin options */},
@@ -85,26 +86,44 @@ const app = createApplication({
 
 ## Included Plugins
 
-| Plugin             | Description                          |
-| ------------------ | ------------------------------------ |
-| RuntimePlugin      | Core runtime integration             |
-| ConfigPlugin       | Configuration management             |
-| LoggerPlugin       | Structured logging                   |
-| ValidationPlugin   | Request/response validation          |
-| HttpSecurityPlugin | HTTP security headers                |
-| HealthPlugin       | Health check endpoints               |
-| MetricsPlugin      | Application metrics collection       |
-| OpenApiPlugin      | OpenAPI/Swagger documentation        |
-| DecoratorPlugin    | Decorator-based route registration   |
-| DatabasePlugin     | Optional — database access layer     |
-| AuthPlugin         | Optional — authentication middleware |
-| DiPlugin           | Optional — DI container              |
-| WebSocketPlugin    | Optional — WebSocket messaging       |
-| SsePlugin          | Optional — Server-Sent Events        |
-| RealtimeBackplane  | Optional — cross-replica fan-out     |
+| Plugin             | Description                            |
+| ------------------ | -------------------------------------- |
+| RuntimePlugin      | Core runtime integration               |
+| ConfigPlugin       | Configuration management               |
+| LoggerPlugin       | Structured logging                     |
+| ValidationPlugin   | Request/response validation            |
+| HttpSecurityPlugin | HTTP security headers                  |
+| HealthPlugin       | Health check endpoints                 |
+| MetricsPlugin      | Application metrics collection         |
+| OpenApiPlugin      | OpenAPI/Swagger documentation          |
+| DecoratorPlugin    | Decorator-based route registration     |
+| DatabasePlugin     | Optional — database access layer       |
+| AuthPlugin         | Optional — authentication middleware   |
+| DiPlugin           | Optional — DI container                |
+| WebSocketPlugin    | Optional — WebSocket messaging         |
+| SsePlugin          | Optional — Server-Sent Events          |
+| RealtimeBackplane  | Optional — cross-replica fan-out       |
+| SessionPlugin      | Optional — cookie sessions + form CSRF |
 
-Gated plugins (`database`, `auth`, `di`, and each `realtime` sub-arm) are only included when
-explicitly provided in options.
+Gated plugins (`database`, `auth`, `session`, `di`, and each `realtime` sub-arm) are only included
+when explicitly provided in options.
+
+### The `session` arm
+
+Adds `SessionPlugin`: cookie-backed sessions under `CAPABILITIES.SESSION`, and — with `csrf` — the
+synchronizer-token form-CSRF middleware at priority 275, which is the check a
+progressive-enhancement `<Form>` post can satisfy (the stateless Origin/Referer check in
+`httpSecurity` structurally cannot). Running both together is intended.
+
+```typescript
+const app = createRestApp({
+  session: { secret: Deno.env.get('SESSION_SECRET')!, csrf: {} },
+});
+```
+
+It is gated rather than always-on because the secret cannot be defaulted: `SessionPlugin` throws
+during `register()` without an adequate one, so an always-on arm would stop every application from
+booting until it supplied one. A token-authenticated API needs no cookie at all.
 
 ### The `realtime` arm
 
