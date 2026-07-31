@@ -10,39 +10,8 @@
 import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 
-import { ConfigService } from '../services/config-service.ts';
-import type { EnvLoaderOptions } from '../services/env-loader.ts';
-import { loadEnv } from '../services/env-loader.ts';
-import { expandVariables as expandConfigVariables } from '../services/variable-expander.ts';
-import type { StructuralSchema } from '../validators/config-validator.ts';
-import { validateConfig } from '../validators/config-validator.ts';
-
-/**
- * Options for {@linkcode ConfigPlugin}.
- *
- * @since 0.1.0
- */
-export interface ConfigPluginOptions {
-  /**
-   * Path or paths to `.env` files to load. Defaults to no file loading.
-   * When supplied, the runtime must provide `fs` (absent on edge platforms).
-   */
-  readonly envFilePath?: string | readonly string[];
-
-  /**
-   * A structural schema (e.g., a Zod schema) for validating configuration at
-   * startup. When provided, the schema's `parse()` is called once after
-   * merging and expansion, and the parsed output is stored as the
-   * configuration snapshot. This preserves Zod coercions and defaults.
-   */
-  readonly validationSchema?: StructuralSchema<unknown>;
-
-  /**
-   * When `true` (default), expand `${NAME}` references in values.
-   * Set to `false` to disable variable expansion.
-   */
-  readonly expandVariables?: boolean;
-}
+import type { ConfigPluginOptions } from '../options.ts';
+import { loadConfig } from '../services/load-config.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'config-plugin';
@@ -79,10 +48,6 @@ const PLUGIN_NAME = 'config-plugin';
  * @since 0.1.0
  */
 export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
-  const envFilePath = options?.envFilePath;
-  const validationSchema = options?.validationSchema;
-  const expandVariables = options?.expandVariables ?? true;
-
   return {
     name: PLUGIN_NAME,
     version: '0.1.0',
@@ -94,19 +59,10 @@ export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
     async register(ctx: IPluginContext): Promise<void> {
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
 
-      const loaderOptions: EnvLoaderOptions = envFilePath === undefined ? {} : { envFilePath };
-
-      // Load raw string values from environment and files.
-      const loaded = await loadEnv(runtime, loaderOptions);
-      const raw = expandVariables ? expandConfigVariables(loaded) : loaded;
-
-      // If a validation schema is provided, validate and coerce.
-      const data: Record<string, unknown> = validationSchema
-        ? validateConfig(raw, validationSchema)
-        : raw;
-
-      // Register immutable config service.
-      const config = new ConfigService(data);
+      // Delegation, not a second copy: `loadConfig` owns merging, expansion,
+      // validation, and the `instance` short-circuit, so a snapshot built
+      // before the application starts and one built here are the same code.
+      const config = await loadConfig(runtime, options);
       ctx.services.register<IConfig>(CAPABILITIES.CONFIG, config);
     },
   };

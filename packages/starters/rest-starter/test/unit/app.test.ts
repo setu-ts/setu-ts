@@ -6,6 +6,7 @@ import { expect } from '@std/expect';
 import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import type { RestStarterOptions } from '../../src/options.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
+import { getSession } from '@hono-enterprise/session-plugin';
 
 /**
  * A valid `auth` arm. `AuthPluginOptions` requires BOTH `jwt` and `rbac`
@@ -74,6 +75,17 @@ describe('rest-starter / buildRestPlugins', () => {
     expect(names).not.toContain('websocket-plugin');
     expect(names).not.toContain('sse-plugin');
     expect(names).not.toContain('realtime-backplane-plugin');
+  });
+
+  it('does not include session when omitted', () => {
+    // Gated: the plugin throws during register() without a secret, so an
+    // always-on arm would stop every starter application from booting.
+    expect(buildRestPlugins().map((p) => p.name)).not.toContain('session-plugin');
+  });
+
+  it('includes session when the arm is provided', () => {
+    const names = buildRestPlugins({ session: { secret: 'a'.repeat(32) } }).map((p) => p.name);
+    expect(names).toContain('session-plugin');
   });
 
   it('includes DiPlugin when the di arm is provided', () => {
@@ -214,5 +226,31 @@ describe('rest-starter / createRestApp', () => {
     await app.start();
     const response = await app.inject({ method: 'GET', url: '/test' });
     expect(response.statusCode).toBe(200);
+  });
+
+  it('registers SESSION capability and serves a session-reading route', async () => {
+    const app = createRestApp({ session: { secret: 'a'.repeat(32) } });
+    app.router.get('/visit', (ctx) => {
+      const session = getSession(ctx);
+      const count = (session.get<number>('count') ?? 0) + 1;
+      session.set('count', count);
+      return ctx.response.json({ count });
+    });
+    await app.start();
+
+    expect(app.services.has(CAPABILITIES.SESSION)).toBe(true);
+    // Read the value back through the real request path: the arm is wired only
+    // if the middleware actually runs and the session commits.
+    const response = await app.inject({ method: 'GET', url: '/visit' });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body ?? '')).toEqual({ count: 1 });
+    expect(response.headers.get('set-cookie')).not.toBeNull();
+  });
+
+  it('does NOT register SESSION capability when the arm is omitted', async () => {
+    const app = createRestApp();
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+    await app.start();
+    expect(app.services.has(CAPABILITIES.SESSION)).toBe(false);
   });
 });

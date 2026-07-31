@@ -19,6 +19,7 @@ import { DiPlugin } from '@hono-enterprise/di-plugin';
 import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
 import { SsePlugin } from '@hono-enterprise/sse-plugin';
 import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+import { SessionPlugin } from '@hono-enterprise/session-plugin';
 import { errorHandler } from '@hono-enterprise/exceptions';
 import type { RestStarterOptions } from './options.ts';
 
@@ -53,6 +54,7 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     // they sit in this list.
     ...(options.database ? [DatabasePlugin(options.database)] : []),
     ...(options.auth ? [AuthPlugin(options.auth)] : []),
+    ...(options.session ? [SessionPlugin(options.session)] : []),
     ...(options.di ? [DiPlugin(options.di)] : []),
     ...(options.realtime?.backplane ? [RealtimeBackplanePlugin(options.realtime.backplane)] : []),
     ...(options.realtime?.websocket ? [WebSocketPlugin(options.realtime.websocket)] : []),

@@ -11,16 +11,13 @@ import type {
   IHttpAdapter,
   IPlugin,
   IPluginContext,
-  IRuntimeServices,
   RuntimePlatform,
 } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 
 import { detectRuntime } from '../detector/runtime-detector.ts';
-import { createDenoRuntimeServices } from '../adapters/deno/deno-runtime.ts';
-import { createNodeRuntimeServices } from '../adapters/node/node-runtime.ts';
-import { createBunRuntimeServices } from '../adapters/bun/bun-runtime.ts';
-import { createCloudflareRuntimeServices } from '../adapters/workers/cf-runtime.ts';
+import type { RuntimeAdapterFactories } from '../adapters/shared/runtime-services-factory.ts';
+import { createRuntimeServices } from '../adapters/shared/runtime-services-factory.ts';
 import { DenoHttpAdapter } from '../adapters/deno/deno-http-adapter.ts';
 import { NodeHttpAdapter } from '../adapters/node/node-http-adapter.ts';
 import { BunHttpAdapter } from '../adapters/bun/bun-http-adapter.ts';
@@ -55,16 +52,6 @@ export interface RuntimeOptions {
 }
 
 /**
- * Map of platform → runtime adapter factory. Used internally for dependency injection.
- */
-export interface RuntimeAdapterFactories {
-  deno?: () => IRuntimeServices;
-  node?: () => IRuntimeServices;
-  bun?: () => IRuntimeServices;
-  'cloudflare-workers'?: () => IRuntimeServices;
-}
-
-/**
  * Map of platform → HTTP adapter factory. Used internally for dependency injection.
  */
 export interface HttpAdapterFactories {
@@ -73,13 +60,6 @@ export interface HttpAdapterFactories {
   bun?: () => IHttpAdapter;
   'cloudflare-workers'?: () => IHttpAdapter;
 }
-
-const defaultRuntimeAdapters: RuntimeAdapterFactories = {
-  deno: createDenoRuntimeServices,
-  node: createNodeRuntimeServices,
-  bun: createBunRuntimeServices,
-  'cloudflare-workers': createCloudflareRuntimeServices,
-};
 
 const defaultHttpAdapters: HttpAdapterFactories = {
   deno: () => new DenoHttpAdapter(),
@@ -101,7 +81,7 @@ const defaultHttpAdapters: HttpAdapterFactories = {
  */
 export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const platform: RuntimePlatform = options?.platform ?? detectRuntime();
-  const runtimeAdapters = options?.adapters ?? defaultRuntimeAdapters;
+  const runtimeAdapters = options?.adapters;
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
 
   return {
@@ -111,13 +91,15 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
     priority: PLUGIN_PRIORITY.HIGHEST,
 
     register(ctx: IPluginContext): void {
-      // Register runtime services
-      const runtimeFactory =
-        (runtimeAdapters as Record<string, (() => IRuntimeServices) | undefined>)[platform];
-      if (runtimeFactory === undefined) {
-        throw new Error(`No runtime adapter factory for platform: ${platform}`);
-      }
-      const services = runtimeFactory();
+      // Register runtime services. Built through the shared factory rather than
+      // a second copy of the platform → adapter map, so a caller that needs
+      // services before start() (config resolution) gets the same resolution
+      // this plugin does.
+      const services = createRuntimeServices(
+        // `exactOptionalPropertyTypes`: omit `adapters` entirely rather than
+        // passing undefined, so the factory's own default map applies.
+        runtimeAdapters === undefined ? { platform } : { platform, adapters: runtimeAdapters },
+      );
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 
       // Register HTTP adapter
