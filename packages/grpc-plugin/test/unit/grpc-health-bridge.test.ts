@@ -4,7 +4,11 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { handleHealthCheck, mapHealthStatus, type GrpcServingStatus } from '../../src/health/grpc-health-bridge.ts';
+import {
+  type GrpcServingStatus,
+  handleHealthCheck,
+  mapHealthStatus,
+} from '../../src/health/grpc-health-bridge.ts';
 
 describe('GrpcHealthBridge', () => {
   describe('mapHealthStatus', () => {
@@ -37,10 +41,12 @@ describe('GrpcHealthBridge', () => {
 
     it('returns not-serving when health check throws', async () => {
       const mockHealthService = {
-        check: async () => { throw new Error('failed'); },
+        check: async () => {
+          throw new Error('failed');
+        },
       };
       const consoleSpy = mock(console, 'warn').mockImplementation(() => {});
-      const result = await handleHealthCheck({ service: '' }, { 
+      const result = await handleHealthCheck({ service: '' }, {
         healthService: mockHealthService,
         logger: (...msg) => console.log(msg),
       });
@@ -49,7 +55,9 @@ describe('GrpcHealthBridge', () => {
     });
 
     it('returns service-unknown for unknown service name', async () => {
-      const result = await handleHealthCheck({ service: 'Unknown.Service' }, { healthService: undefined });
+      const result = await handleHealthCheck({ service: 'Unknown.Service' }, {
+        healthService: undefined,
+      });
       expect(result.status).toBe('service-unknown');
     });
   });

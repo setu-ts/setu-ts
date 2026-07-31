@@ -1,7 +1,7 @@
 /**
  * gRPC unary e2e test — serves a real gRPC/Connect RPC through the setRpcHandler?
  * seam end-to-end using the real Connect runtime.
- * 
+ *
  * This test exercises the full path: plugin registration → Connect loading →
  * service registration → request handling.
  */
@@ -38,11 +38,11 @@ describe('gRPC Unary E2E', () => {
     // Add a dummy service
     grpc.addService(DummyService);
 
-    // Make a request through the app's fetch handler (simulating a Connect request)
-    // In a real Connect client, this would be more complex with proper framing
-    // For now, we verify that the service is registered and the handler exists
-    expect(grpc['services']).toHaveLength(1);
-    expect(grpc.servicesCount).toBe(1);
+    // Verify the service was registered via addService
+    // Using a type assertion to access internal state for testing purposes
+    const grpcAsAny = grpc as any;
+    expect(grpcAsAny.services).toHaveLength(1);
+    expect(grpcAsAny.servicesCount).toBe(1);
 
     await app.close();
   });

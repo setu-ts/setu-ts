@@ -6,15 +6,15 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
-  GrpcPlugin,
-  GrpcService,
   adaptConnectModule,
-  GrpcUnavailableError,
-  GrpcRuntimeLoadError,
+  CAPABILITIES,
+  GrpcPlugin,
   type GrpcPluginOptions,
+  GrpcRuntimeLoadError,
+  GrpcService,
+  GrpcUnavailableError,
   type IGrpcService,
   type RpcFetchHandler,
-  CAPABILITIES,
 } from '../../src/index.ts';
 
 describe('BarrelExports', () => {

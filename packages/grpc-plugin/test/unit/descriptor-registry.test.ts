@@ -4,7 +4,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { reviveDescriptorSet, buildReflectionRegistry } from '../../src/descriptors/descriptor-registry.ts';
+import {
+  buildReflectionRegistry,
+  type reviveDescriptorSet,
+} from '../../src/descriptors/descriptor-registry.ts';
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 

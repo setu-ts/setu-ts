@@ -5,17 +5,12 @@
  * @module
  */
 
-import type {
-  IHttpAdapter,
-  IPlugin,
-  IPluginContext,
-  IGrpcService,
-} from '@hono-enterprise/common';
+import type { IGrpcService, IHttpAdapter, IPlugin, IPluginContext } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
-import { loadConnectModule, getFallbackConnectRuntime } from '../transports/connect-loader.ts';
+import { getFallbackConnectRuntime, loadConnectModule } from '../transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
 /** Plugin name. */
@@ -23,7 +18,7 @@ const PLUGIN_NAME = 'grpc-plugin';
 
 export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
   let connectRuntime: ConnectRuntime;
-  
+
   // If a custom connectModule is provided via options, use it directly
   if (options.connectModule) {
     connectRuntime = options.connectModule;
@@ -53,7 +48,6 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         EmbeddedDescriptors,
         options,
         adapter,
-        canSetRpcHandler,
       );
 
       ctx.services.register<IGrpcService>(CAPABILITIES.GRPC, grpcService);
@@ -64,7 +58,7 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
       } else {
         ctx.logger?.warn(
           'grpc-plugin: HTTP adapter does not support the RPC interceptor seam. ' +
-          'gRPC services are registered but will not handle incoming requests.',
+            'gRPC services are registered but will not handle incoming requests.',
         );
       }
 

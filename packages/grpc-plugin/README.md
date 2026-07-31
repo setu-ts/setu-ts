@@ -1,6 +1,8 @@
 # @hono-enterprise/grpc-plugin
 
-gRPC plugin for Hono Enterprise — enables co-serving of gRPC, Connect, and gRPC-Web protocols on the same port as ordinary Hono routes. The plugin registers an `IGrpcService` under `CAPABILITIES.GRPC` and installs a fetch handler into the HTTP adapter's RPC interceptor seam.
+gRPC plugin for Hono Enterprise — enables co-serving of gRPC, Connect, and gRPC-Web protocols on the
+same port as ordinary Hono routes. The plugin registers an `IGrpcService` under `CAPABILITIES.GRPC`
+and installs a fetch handler into the HTTP adapter's RPC interceptor seam.
 
 ## Features
 
@@ -54,13 +56,18 @@ GrpcPlugin({
 
 ## Limitations
 
-- **Bidi streaming**: Requires HTTP/2. Over HTTP/1.1, Connect may refuse bidi connections with `505 Connection: Close`. In practice, this is not a concern since gRPC clients typically speak HTTP/2.
-- **Application injection**: The `Application.inject()` method bypasses the HTTP adapter seam and cannot reach gRPC handlers. Use `app.fetch()` for testing gRPC endpoints.
-- **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are handled by generated Connect/gRPC client code in the application.
+- **Bidi streaming**: Requires HTTP/2. Over HTTP/1.1, Connect may refuse bidi connections with
+  `505 Connection: Close`. In practice, this is not a concern since gRPC clients typically speak
+  HTTP/2.
+- **Application injection**: The `Application.inject()` method bypasses the HTTP adapter seam and
+  cannot reach gRPC handlers. Use `app.fetch()` for testing gRPC endpoints.
+- **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
+  handled by generated Connect/gRPC client code in the application.
 
 ## Health Indicator
 
 The plugin registers a health indicator named `'grpc'` that reports:
+
 - `available`: Whether the HTTP adapter supports the RPC interceptor seam
 - `basePath`: The configured base path
 - `reflection`: Whether reflection is enabled

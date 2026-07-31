@@ -36,10 +36,10 @@ describe('GrpcPlugin Integration', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), GrpcPlugin()],
     });
-    
+
     // Add a normal Hono route (this would normally require the Hono framework)
     // For now, we just verify the plugin doesn't break application startup
-    
+
     await app.start({ port: 0 });
     await app.close();
   });

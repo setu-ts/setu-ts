@@ -6,11 +6,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
+  EmbeddedDescriptors,
+  type fileDescriptorProtoSchema,
+  type fileDescriptorSetSchema,
   healthBase64,
   reflectionBase64,
-  fileDescriptorSetSchema,
-  fileDescriptorProtoSchema,
-  EmbeddedDescriptors,
 } from '../../src/descriptors/embedded-descriptors.ts';
 
 describe('EmbeddedDescriptors', () => {

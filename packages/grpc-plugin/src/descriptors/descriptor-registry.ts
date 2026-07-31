@@ -9,7 +9,7 @@ import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts
 
 /**
  * Revives a FileDescriptorSet from base64-encoded data using the ConnectRuntime.
- * 
+ *
  * @param connectRuntime - The ConnectRuntime providing Protobuf-ES utilities
  * @param base64 - Base64-encoded FileDescriptorSet
  * @returns A FileRegistry-like structure containing the revived descriptors
@@ -23,10 +23,10 @@ export function reviveDescriptorSet(
 
 /**
  * Builds a reflection registry from app services and embedded descriptors.
- * 
+ *
  * The registry supports querying by service name, file name, and symbol names
  * for server reflection.
- * 
+ *
  * @param connectRuntime - The ConnectRuntime for descriptor operations
  * @param embeddedDescriptors - The embedded health and reflection descriptors
  * @param appServices - Array of app service definitions (with .file property)
@@ -39,8 +39,11 @@ export function buildReflectionRegistry(
 ): unknown {
   // Start with the embedded descriptors (health + reflection services)
   const healthRegistry = reviveDescriptorSet(connectRuntime, embeddedDescriptors.healthBase64);
-  const reflectionRegistry = reviveDescriptorSet(connectRuntime, embeddedDescriptors.reflectionBase64);
-  
+  const reflectionRegistry = reviveDescriptorSet(
+    connectRuntime,
+    embeddedDescriptors.reflectionBase64,
+  );
+
   // Build a combined registry that includes app services' files and their dependencies
   const combinedRegistry = {
     files: [],
@@ -73,6 +76,6 @@ export function buildReflectionRegistry(
       return Array.from(services);
     },
   };
-  
+
   return combinedRegistry;
 }

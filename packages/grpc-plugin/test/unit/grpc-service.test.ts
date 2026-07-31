@@ -8,121 +8,117 @@ import { GrpcService } from '../../src/services/grpc-service.ts';
 import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import type { IHttpAdapter } from '@hono-enterprise/common';
+import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
+import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
 
 // Create a fake ConnectRuntime for testing
 const fakeConnectRuntime: ConnectRuntime = {
-  connect: {
-    createFetchHandler: () => ((req: Request) => new Response('OK')) as any,
-    universalServerRequestFromFetch: (r: Request) => r as any,
-    universalServerResponseToFetch: (r: Response) => r as any,
-  },
-  protobuf: {
-    fromBinary: () => ({}),
-    toBinary: () => new Uint8Array(),
-    create: () => ({}),
-    createFileRegistry: () => ({ files: [], getService: () => undefined, getMessage: () => undefined, listServices: () => [] }),
-    FileDescriptorSetSchema: { fields: () => undefined },
-    FileDescriptorProtoSchema: { fields: () => undefined },
-  },
-  wkt: {
-    fromBinary: () => ({}),
-    toBinary: () => new Uint8Array(),
-    create: () => ({}),
-    createFileRegistry: () => ({ files: [], getService: () => undefined, getMessage: () => undefined, listServices: () => [] }),
-  },
   createFetchHandler: () => new Map(),
   adaptConnectModule: () => fakeConnectRuntime,
   loadConnectModule: async () => fakeConnectRuntime,
-  reviveDescriptorSet: () => ({ files: [], getService: () => undefined, getMessage: () => undefined, listServices: () => [] }),
+  reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
   getService: () => undefined,
 };
 
 // Fake embedded descriptors
 const fakeEmbeddedDescriptors = {
-  healthBase64: 'aGVsbG8=',
-  reflectionBase64: 'd29ybGQ=',
+  healthBase64: 'aGVsbG8=', // placeholder
+  reflectionBase64: 'd29ybGQ=', // placeholder
 };
+
+// A minimal mock IHttpAdapter that satisfies the interface
+function createMockAdapter(setRpcHandler: boolean): IHttpAdapter {
+  const handler = (_: any) => Promise.resolve(null);
+  return {
+    setRpcHandler: setRpcHandler ? ((handler) => {}) : (() => {}),
+    setHandler: (() => {}) as any,
+    fetch: (() => {}) as any,
+    listen: (() => {}) as any,
+    close: (() => {}) as any,
+  };
+}
 
 describe('GrpcService', () => {
   it('should be available when adapter has setRpcHandler', () => {
-    const adapter = { setRpcHandler: (() => {}) as any };
+    const adapter = createMockAdapter(true);
     const service = new GrpcService(
       fakeConnectRuntime,
       fakeEmbeddedDescriptors,
-      {},
+      {} as GrpcPluginOptions,
       adapter,
     );
     expect(service.available).toBeTrue();
   });
 
   it('should be unavailable when adapter lacks setRpcHandler', () => {
-    const adapter = {} as any;
+    const adapter = createMockAdapter(false);
     const service = new GrpcService(
       fakeConnectRuntime,
       fakeEmbeddedDescriptors,
-      {},
+      {} as GrpcPluginOptions,
       adapter,
     );
     expect(service.available).toBeFalse();
   });
 
   it('should register a service via addService', () => {
-    const adapter = { setRpcHandler: (() => {}) as any };
+    const adapter = createMockAdapter(true);
     const service = new GrpcService(
       fakeConnectRuntime,
       fakeEmbeddedDescriptors,
-      {},
+      {} as GrpcPluginOptions,
       adapter,
     );
-    
+
     const definition = { typeName: 'package.TestService', methods: {} };
     service.addService(definition);
-    
+
     // The service is stored internally; verify no exception was thrown
-    expect(() => service.addService({ typeName: 'package.TestService', methods: {} })).toThrowError();
+    expect(() => service.addService({ typeName: 'package.TestService', methods: {} }))
+      .toThrowError();
   });
 
   it('should throw on duplicate service registration', () => {
-    const adapter = { setRpcHandler: (() => {}) as any };
+    const adapter = createMockAdapter(true);
     const service = new GrpcService(
       fakeConnectRuntime,
       fakeEmbeddedDescriptors,
-      {},
+      {} as GrpcPluginOptions,
       adapter,
     );
-    
+
     const definition = { typeName: 'package.TestService', methods: {} };
     service.addService(definition);
-    
+
     expect(() => service.addService(definition)).toThrowError();
   });
 
-  it('handleRequest should return null for non-RPC paths when available', async () => {
-    const adapter = { setRpcHandler: (() => {}) as any };
+  it('handleRequest should return response for non-RPC paths when available', async () => {
+    const adapter = createMockAdapter(true);
     const service = new GrpcService(
       fakeConnectRuntime,
       fakeEmbeddedDescriptors,
-      {},
+      {} as GrpcPluginOptions,
       adapter,
     );
-    
-    // Without services configured, handleRequest should fall through
+
+    // Without services configured, handleRequest should fall through (return 404)
     const request = new Request('http://example.com/normal/path');
     const result = await service.handleRequest(request);
-    // With empty services, this would return GrpcUnavailableError or similar
-    // depending on implementation
+    expect(result).toBeDefined();
+    expect((result as Response).status).toBe(404);
   });
 
   it('handleRequest should throw GrpcUnavailableError when not available', async () => {
-    const adapter = {} as any;
+    const adapter = createMockAdapter(false);
     const service = new GrpcService(
       fakeConnectRuntime,
       fakeEmbeddedDescriptors,
-      {},
+      {} as GrpcPluginOptions,
       adapter,
     );
-    
+
     const request = new Request('http://example.com/grpc/service/method');
-    await expect(service.handleRequest(request)).rejects.toThrow();
+    await expect(service.handleRequest(request)).rejects.toThrow(GrpcUnavailableError);
   });
 });

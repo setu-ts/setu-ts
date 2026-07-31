@@ -6,7 +6,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { CAPABILITIES } from '@hono-enterprise/common';
-import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
+import type { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
 
 describe('GrpcPlugin', () => {
   it('should register under the correct name and provide GRPC token', () => {

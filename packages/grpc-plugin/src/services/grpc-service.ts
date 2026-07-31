@@ -6,13 +6,13 @@
  */
 
 import type { IHttpAdapter } from '@hono-enterprise/common';
-import { RpcFetchHandler } from '@hono-enterprise/common';
+import type { RpcFetchHandler } from '@hono-enterprise/common';
 import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
-import { buildDispatcherMap, normalizeBasePath, dispatchRequest } from '../transports/rpc-dispatcher.ts';
+import { dispatchRequest, normalizeBasePath } from '../transports/rpc-dispatcher.ts';
 import { buildConnectRouter } from '../transports/connect-router-builder.ts';
-import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
+import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
 /**
  * The gRPC service that applications use to register gRPC/Connect services.
@@ -29,7 +29,6 @@ export class GrpcService {
   private readonly embeddedDescriptors: EmbeddedDescriptors;
 
   private dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
-  private registry: unknown | null = null;
   private routerBuilt = false;
 
   /** Whether the HTTP adapter supports the RPC interceptor seam. */
@@ -39,13 +38,13 @@ export class GrpcService {
     connectRuntime: ConnectRuntime,
     embeddedDescriptors: EmbeddedDescriptors,
     options: GrpcPluginOptions,
-    adapter: IHttpAdapter | undefined,
-    canSetRpcHandler: boolean,
+    adapter?: IHttpAdapter,
   ) {
     this.connectRuntime = connectRuntime;
     this.embeddedDescriptors = embeddedDescriptors;
     this.basePath = normalizeBasePath(options.basePath ?? '/grpc');
-    this.available = canSetRpcHandler;
+    // Determine if the adapter supports the RPC interceptor seam
+    this.available = adapter !== undefined && 'setRpcHandler' in adapter;
 
     // Pre-register any services provided in options
     if (options.services) {
@@ -119,19 +118,18 @@ export class GrpcService {
     }
 
     const normalizedBase = this.basePath;
-    
+
     // Build the Connect router with all registered services
-    const { dispatchMap, registry } = buildConnectRouter({
+    const { dispatchMap } = buildConnectRouter({
       connectRuntime: this.connectRuntime,
       basePath: normalizedBase,
       reflection: true, // Default to enabled per plan
-      health: true,     // Default to enabled per plan
+      health: true, // Default to enabled per plan
       services: this.services,
       embeddedDescriptors: this.embeddedDescriptors,
     });
 
     this.dispatchMap = dispatchMap;
-    this.registry = registry;
     this.routerBuilt = true;
   }
 

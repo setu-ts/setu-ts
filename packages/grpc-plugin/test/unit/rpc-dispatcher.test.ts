@@ -5,9 +5,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
-  normalizeBasePath,
   buildDispatcherMap,
   dispatchRequest,
+  normalizeBasePath,
 } from '../../src/transports/rpc-dispatcher.ts';
 
 describe('RPCDispatcher', () => {
@@ -32,11 +32,11 @@ describe('RPCDispatcher', () => {
   describe('buildDispatcherMap', () => {
     it('should map handlers with basePath + requestPath keys', () => {
       const handlers = [
-        { requestPath: '/echo', handler: async (r: Request) => new Response('OK') },
-        { requestPath: '/status', handler: async (r: Request) => new Response('OK') },
+        { requestPath: '/echo', handler: async (_request: Request) => new Response('OK') },
+        { requestPath: '/status', handler: async (_request: Request) => new Response('OK') },
       ];
       const map = buildDispatcherMap('/grpc', handlers);
-      
+
       expect(map.size).toBe(2);
       expect(map.has('/grpc/echo')).toBeTrue();
       expect(map.has('/grpc/status')).toBeTrue();
@@ -54,7 +54,7 @@ describe('RPCDispatcher', () => {
 
     it('should return handler response for exact match within basePath', async () => {
       const map = new Map<string, (request: Request) => Promise<Response>>();
-      map.set('/grpc/async', async (r) => new Response('Found'));
+      map.set('/grpc/async', async (_request: Request) => new Response('Found'));
       const request = new Request('http://example.com/grpc/async');
       const result = await dispatchRequest(request, map, '/grpc');
       expect(result).not.toBeNull();
@@ -72,13 +72,21 @@ describe('RPCDispatcher', () => {
 
     it('should handle basePath with and without trailing slash identically', async () => {
       const map1 = new Map<string, (request: Request) => Promise<Response>>();
-      map1.set('/grpc/async', async (r) => new Response('OK'));
-      const result1 = await dispatchRequest(new Request('http://example.com/grpc/async'), map1, '/grpc');
-      
+      map1.set('/grpc/async', async (_request: Request) => new Response('OK'));
+      const result1 = await dispatchRequest(
+        new Request('http://example.com/grpc/async'),
+        map1,
+        '/grpc',
+      );
+
       const map2 = new Map<string, (request: Request) => Promise<Response>>();
-      map2.set('/grpc/async', async (r) => new Response('OK'));
-      const result2 = await dispatchRequest(new Request('http://example.com/grpc/async'), map2, '/grpc/'); // normalized to /grpc
-  
+      map2.set('/grpc/async', async (_request: Request) => new Response('OK'));
+      const result2 = await dispatchRequest(
+        new Request('http://example.com/grpc/async'),
+        map2,
+        '/grpc/',
+      ); // normalized to /grpc
+
       expect(result1 !== null).toBeTrue();
       expect(result2 !== null).toBeTrue();
     });

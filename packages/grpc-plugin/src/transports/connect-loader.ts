@@ -18,18 +18,21 @@ let wktModule: any = null;
  * This is the internal implementation detail.
  */
 function createConnectRuntime(
-  mod: any,
-  protobuf: any,
-  wkt: any,
+  _mod: any,
+  _protobuf: any,
+  _wkt: any,
 ): ConnectRuntime {
-  const { createFileRegistry } = protobuf;
+  const { createFileRegistry } = _protobuf;
   // Note: Some values may be unused in certain builds but are needed for full functionality
-  const { FileDescriptorSetSchema, FileDescriptorProtoSchema } = wkt;
-  const { fromBinary, toBinary, create } = protobuf;
-  const { createFetchHandler: connectCreateFetchHandler } = mod;
+  const { FileDescriptorSetSchema } = _wkt;
+  const { fromBinary } = _protobuf;
+  const { createFetchHandler: connectCreateFetchHandler } = _mod;
 
   return {
-    createFetchHandler: (handlers: Array<{ requestPath: string; handler: unknown }>, options?: { httpVersion?: string }) => {
+    createFetchHandler: (
+      handlers: Array<{ requestPath: string; handler: unknown }>,
+      options?: { httpVersion?: string },
+    ) => {
       if (!connectCreateFetchHandler) {
         throw new Error('Connect module does not have createFetchHandler');
       }
@@ -49,7 +52,8 @@ function createConnectRuntime(
 
     reviveDescriptorSet: (base64: string) => {
       const bytes = new Uint8Array(
-        base64.split('').map(c => c.charCodeAt(0) & 0xFF));
+        base64.split('').map((c) => c.charCodeAt(0) & 0xFF),
+      );
       const fdSet = fromBinary(FileDescriptorSetSchema, bytes);
       return createFileRegistry(fdSet);
     },
@@ -127,9 +131,9 @@ export function getFallbackConnectRuntime(): ConnectRuntime {
  * Used by tests to avoid needing the full lazy-load machinery.
  */
 export function adaptConnectModule(
-  mod: unknown,
-  protobuf: unknown,
-  wkt: unknown,
+  _mod: unknown,
+  _protobuf: unknown,
+  _wkt: unknown,
 ): ConnectRuntime {
   // For now, use a fallback since we don't have actual module objects in tests
   // In production, this would call createConnectRuntime with the real modules

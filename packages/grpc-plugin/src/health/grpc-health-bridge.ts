@@ -6,15 +6,15 @@
  * @module
  */
 
-import { type IHealthService } from '@hono-enterprise/common';
-import { GrpcServingStatus } from '@hono-enterprise/common';
+import type { IHealthService } from '@hono-enterprise/common';
+import type { GrpcServingStatus } from '@hono-enterprise/common';
 
 /**
  * Creates a gRPC Health v1 service implementation.
- * 
+ *
  * The Check method resolves the CAPABILITIES.HEALTH capability if present,
  * otherwise returns SERVING. It maps HealthStatus values to gRPC ServingStatus.
- * 
+ *
  * @param _connectRuntime - The Connect runtime (needed for descriptor operations, unused in Check)
  * @param healthService - Optional IHealthService capability
  * @returns A Health service implementation object
@@ -24,9 +24,10 @@ export function createHealthService(
   healthService?: IHealthService,
 ): unknown {
   return {
-    Check: async (request: any) => {
-      const _service = request.service || ''; // service name or empty string for server-wide check
-      
+    Check: async (_request: any) => {
+      // request.service is available for future extensibility; currently not used
+      // No need to read it for basic health check
+
       let status: GrpcServingStatus = 'serving';
 
       if (healthService) {

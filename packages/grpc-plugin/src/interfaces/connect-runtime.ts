@@ -38,9 +38,9 @@ export interface FileRegistryLike {
  * Re-exported from connect-loader.ts.
  */
 export function adaptConnectModule(
-  mod: unknown,
-  protobuf: unknown,
-  wkt: unknown,
+  _mod: unknown,
+  _protobuf: unknown,
+  _wkt: unknown,
 ): ConnectRuntime {
   // Implementation will be filled by connect-loader.ts
   throw new Error('Implementation in connect-loader.ts');

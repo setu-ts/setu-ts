@@ -4,12 +4,9 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import {
-  type ConnectRuntime,
-  adaptConnectModule,
-} from '../../src/interfaces/connect-runtime.ts';
+import { adaptConnectModule, type ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
 import { GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
-import { loadConnectModule } from '../../src/transports/connect-loader.ts';
+import type { loadConnectModule } from '../../src/transports/connect-loader.ts';
 
 // Mock the actual imports for testing
 const mockConnectModule = {
