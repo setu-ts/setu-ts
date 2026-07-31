@@ -7,6 +7,7 @@
 import type { RuntimePlatform } from './types.ts';
 import type { IRequest, IResponse } from './http.ts';
 import type { WebSocketUpgradeRouter } from './services/websocket.ts';
+import type { RpcFetchHandler } from './services/grpc.ts';
 
 /**
  * Opaque handle returned by runtime timer methods. Its concrete shape is
@@ -340,4 +341,20 @@ export interface IHttpAdapter {
    * @since 0.2.0
    */
   setUpgradeRouter?(router: WebSocketUpgradeRouter): void;
+  /**
+   * Installs a gRPC/Connect fetch handler, consulted for every inbound request
+   * *before* the request is mapped to an {@linkcode IRequest} and enters the
+   * middleware pipeline. A handler returning a {@linkcode Response} short-circuits
+   * the request as RPC; returning {@linkcode null} falls through to normal Hono
+   * handling.
+   *
+   * Optional: absent on adapters predating this widening. Callers must check for
+   * existence before use (see the {@linkcode IGrpcService} implementation in the
+   * grpc-plugin). Because the member is optional, adapters written before this
+   * seam existed remain valid implementations.
+   *
+   * @param handler - The RPC fetch handler
+   * @since 0.3.0
+   */
+  setRpcHandler?(handler: RpcFetchHandler): void;
 }

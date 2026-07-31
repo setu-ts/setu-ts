@@ -98,3 +98,6 @@ export { BunHttpAdapter } from './adapters/bun/bun-http-adapter.ts';
 export type { BunServeHost, BunServer } from './adapters/bun/bun-http-adapter.ts';
 
 export { CloudflareWorkersHttpAdapter } from './adapters/workers/cf-http-adapter.ts';
+
+// RPC interceptor store
+export { RpcInterceptorStore } from './adapters/shared/rpc-interceptor-store.ts';
