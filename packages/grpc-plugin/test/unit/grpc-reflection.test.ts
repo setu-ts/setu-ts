@@ -594,3 +594,126 @@ describe('buildReflectionRegistry', () => {
     expect(file).toBeDefined();
   });
 });
+
+describe('ReflectionService', () => {
+  function createFakeRuntime(): ConnectRuntime {
+    return {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      adaptConnectModule: () => createFakeRuntime(),
+      loadConnectModule: () => Promise.resolve(createFakeRuntime()),
+      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
+      getService: () => undefined,
+    };
+  }
+
+  it('should handle fileByName request', async () => {
+    const service = createReflectionService(
+      createFakeRuntime(),
+      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
+      [],
+    );
+    const typedService = service as {
+      ServerReflectionInfo: (
+        stream: AsyncIterable<{ response: unknown }>,
+      ) => AsyncGenerator<unknown>;
+    };
+    const generator = typedService.ServerReflectionInfo(
+      (async function* () {
+        yield { response: { fileByFilename: { filename: 'test.proto' } } };
+      })(),
+    );
+    const result = await generator.next();
+    expect(result.done).toBe(false);
+  });
+
+  it('should handle fileContainingSymbol request', async () => {
+    const service = createReflectionService(
+      createFakeRuntime(),
+      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
+      [],
+    );
+    const typedService = service as {
+      ServerReflectionInfo: (
+        stream: AsyncIterable<{ response: unknown }>,
+      ) => AsyncGenerator<unknown>;
+    };
+    const generator = typedService.ServerReflectionInfo(
+      (async function* () {
+        yield { response: { fileContainingSymbol: { symbol: 'pkg.MyService' } } };
+      })(),
+    );
+    const result = await generator.next();
+    expect(result.done).toBe(false);
+  });
+
+  it('should handle allExtensionNumbersOfType request', async () => {
+    const service = createReflectionService(
+      createFakeRuntime(),
+      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
+      [],
+    );
+    const typedService = service as {
+      ServerReflectionInfo: (
+        stream: AsyncIterable<{ response: unknown }>,
+      ) => AsyncGenerator<unknown>;
+    };
+    const generator = typedService.ServerReflectionInfo(
+      (async function* () {
+        yield { response: { allExtensionNumbersOfType: { typeName: 'pkg.MyMessage' } } };
+      })(),
+    );
+    const result = await generator.next();
+    expect(result.done).toBe(false);
+  });
+
+  it('should return error response for unknown request type', async () => {
+    const service = createReflectionService(
+      createFakeRuntime(),
+      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
+      [],
+    );
+    const typedService = service as {
+      ServerReflectionInfo: (
+        stream: AsyncIterable<{ response: unknown }>,
+      ) => AsyncGenerator<unknown>;
+    };
+    const generator = typedService.ServerReflectionInfo(
+      (async function* () {
+        yield { response: {} };
+      })(),
+    );
+    const result = await generator.next();
+    expect(result.done).toBe(false);
+    const response = result.value as {
+      response: { errorResponse?: { code: number; message: string } };
+    };
+    expect(response.response.errorResponse).toBeDefined();
+    expect(response.response.errorResponse!.code).toBe(3);
+  });
+
+  it('should handle fileContainingSymbol with unknown symbol', async () => {
+    const service = createReflectionService(
+      createFakeRuntime(),
+      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
+      [],
+    );
+    const typedService = service as {
+      ServerReflectionInfo: (
+        stream: AsyncIterable<{ response: unknown }>,
+      ) => AsyncGenerator<unknown>;
+    };
+    const generator = typedService.ServerReflectionInfo(
+      (async function* () {
+        yield { response: { fileContainingSymbol: { symbol: 'unknown.Symbol' } } };
+      })(),
+    );
+    const result = await generator.next();
+    expect(result.done).toBe(false);
+    const response = result.value as {
+      response: { errorResponse?: { code: number; message: string } };
+    };
+    expect(response.response.errorResponse).toBeDefined();
+    expect(response.response.errorResponse!.code).toBe(3);
+  });
+});

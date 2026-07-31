@@ -8,8 +8,10 @@ import { expect } from '@std/expect';
 import {
   adaptConnectModule,
   buildLoadErrorMessage,
+  defaultImport,
   getFallbackConnectRuntime,
   loadConnectModules,
+  resetModuleCache,
 } from '../../src/transports/connect-loader.ts';
 import { GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
 
@@ -112,6 +114,13 @@ describe('ConnectLoader', () => {
     const runtime = getFallbackConnectRuntime();
     const service = runtime.getService({}, 'some-service');
     expect(service).toBeUndefined();
+  });
+
+  it('fallback runtime service should be callable', () => {
+    const runtime = getFallbackConnectRuntime();
+    const router = runtime.createConnectRouter();
+    expect(typeof router.service).toBe('function');
+    expect(() => router.service({ typeName: 'test' }, {})).not.toThrow();
   });
 
   it('adaptConnectModule should create a runtime with cached router', () => {
@@ -275,6 +284,63 @@ describe('ConnectLoader', () => {
     // In the test environment, the packages are installed, so this should succeed
     await loadConnectModules();
     // If we get here without throwing, the modules loaded successfully
+  });
+
+  it('loadConnectModules should throw GrpcRuntimeLoadError when connect module fails', async () => {
+    resetModuleCache();
+    const mockImporter = (specifier: string): Promise<unknown> => {
+      if (specifier.includes('@connectrpc/connect') && !specifier.includes('protocol')) {
+        return Promise.reject(new Error('Failed to resolve module'));
+      }
+      return Promise.resolve({});
+    };
+    await expect(
+      loadConnectModules(mockImporter),
+    ).rejects.toBeInstanceOf(GrpcRuntimeLoadError);
+  });
+
+  it('loadConnectModules should throw GrpcRuntimeLoadError when protobuf module fails', async () => {
+    resetModuleCache();
+    const mockImporter = (specifier: string): Promise<unknown> => {
+      if (specifier.includes('@bufbuild/protobuf') && !specifier.includes('wkt')) {
+        return Promise.reject(new Error('Failed to resolve module'));
+      }
+      return Promise.resolve({});
+    };
+    await expect(
+      loadConnectModules(mockImporter),
+    ).rejects.toBeInstanceOf(GrpcRuntimeLoadError);
+  });
+
+  it('loadConnectModules should throw GrpcRuntimeLoadError when wkt module fails', async () => {
+    resetModuleCache();
+    const mockImporter = (specifier: string): Promise<unknown> => {
+      if (specifier.includes('wkt')) {
+        return Promise.reject(new Error('Failed to resolve module'));
+      }
+      return Promise.resolve({});
+    };
+    await expect(
+      loadConnectModules(mockImporter),
+    ).rejects.toBeInstanceOf(GrpcRuntimeLoadError);
+  });
+
+  it('loadConnectModules should throw GrpcRuntimeLoadError when protocol module fails', async () => {
+    resetModuleCache();
+    const mockImporter = (specifier: string): Promise<unknown> => {
+      if (specifier.includes('protocol')) {
+        return Promise.reject(new Error('Failed to resolve module'));
+      }
+      return Promise.resolve({});
+    };
+    await expect(
+      loadConnectModules(mockImporter),
+    ).rejects.toBeInstanceOf(GrpcRuntimeLoadError);
+  });
+
+  it('defaultImport should delegate to dynamic import', async () => {
+    const result = await defaultImport('npm:@connectrpc/connect@^2.1.2');
+    expect(result).toBeDefined();
   });
 
   it('getService should handle null registry', () => {
@@ -545,5 +611,91 @@ describe('ConnectLoader', () => {
     expect(response.status).toBe(500);
     const text = await response.text();
     expect(text).toContain('handler error');
+  });
+
+  it('runtime.adaptConnectModule should delegate to createConnectRuntime', async () => {
+    // Load modules first (resetModuleCache may have been called by previous tests)
+    await loadConnectModules();
+
+    const fakeMod = { createConnectRouter: () => ({ handlers: [], service: () => {} }) };
+    const fakeProtobuf = {
+      createFileRegistry: () => ({ getService: () => undefined }),
+      fromBinary: () => ({}),
+    };
+    const fakeWkt = { FileDescriptorSetSchema: {} };
+
+    const runtime = adaptConnectModule(fakeMod, fakeProtobuf, fakeWkt);
+    // Call adaptConnectModule on the runtime itself
+    const adapted = runtime.adaptConnectModule({} as never);
+    expect(adapted).toBeDefined();
+    expect(typeof adapted.createConnectRouter).toBe('function');
+    expect(typeof adapted.createFetchHandler).toBe('function');
+  });
+
+  it('runtime.loadConnectModule should return a promise', () => {
+    const fakeMod = { createConnectRouter: () => ({ handlers: [], service: () => {} }) };
+    const fakeProtobuf = {
+      createFileRegistry: () => ({ getService: () => undefined }),
+      fromBinary: () => ({}),
+    };
+    const fakeWkt = { FileDescriptorSetSchema: {} };
+
+    const runtime = adaptConnectModule(fakeMod, fakeProtobuf, fakeWkt);
+    const result = runtime.loadConnectModule();
+    expect(result).toBeInstanceOf(Promise);
+  });
+
+  it('runtime.getService should delegate to registry.getService', () => {
+    const fakeMod = { createConnectRouter: () => ({ handlers: [], service: () => {} }) };
+    const fakeProtobuf = {
+      createFileRegistry: () => ({ getService: (name: string) => ({ name }) }),
+      fromBinary: () => ({}),
+    };
+    const fakeWkt = { FileDescriptorSetSchema: {} };
+
+    const runtime = adaptConnectModule(fakeMod, fakeProtobuf, fakeWkt);
+    const registry = runtime.reviveDescriptorSet('dGVzdA==');
+    const service = runtime.getService(registry, 'test-service');
+    expect(service).toEqual({ name: 'test-service' });
+  });
+
+  it('runtime.getService should return undefined for null registry', () => {
+    const fakeMod = { createConnectRouter: () => ({ handlers: [], service: () => {} }) };
+    const fakeProtobuf = {
+      createFileRegistry: () => ({ getService: () => undefined }),
+      fromBinary: () => ({}),
+    };
+    const fakeWkt = { FileDescriptorSetSchema: {} };
+
+    const runtime = adaptConnectModule(fakeMod, fakeProtobuf, fakeWkt);
+    const service = runtime.getService(null, 'test-service');
+    expect(service).toBeUndefined();
+  });
+
+  it('runtime.getService should return undefined for undefined registry', () => {
+    const fakeMod = { createConnectRouter: () => ({ handlers: [], service: () => {} }) };
+    const fakeProtobuf = {
+      createFileRegistry: () => ({ getService: () => undefined }),
+      fromBinary: () => ({}),
+    };
+    const fakeWkt = { FileDescriptorSetSchema: {} };
+
+    const runtime = adaptConnectModule(fakeMod, fakeProtobuf, fakeWkt);
+    const service = runtime.getService(undefined, 'test-service');
+    expect(service).toBeUndefined();
+  });
+
+  it('runtime.getService should handle registry without getService', () => {
+    const fakeMod = { createConnectRouter: () => ({ handlers: [], service: () => {} }) };
+    const fakeProtobuf = {
+      createFileRegistry: () => ({}),
+      fromBinary: () => ({}),
+    };
+    const fakeWkt = { FileDescriptorSetSchema: {} };
+
+    const runtime = adaptConnectModule(fakeMod, fakeProtobuf, fakeWkt);
+    const registry = runtime.reviveDescriptorSet('dGVzdA==');
+    const service = runtime.getService(registry, 'test-service');
+    expect(service).toBeUndefined();
   });
 });

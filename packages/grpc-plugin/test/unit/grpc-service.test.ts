@@ -301,4 +301,30 @@ describe('GrpcService', () => {
 
     expect(service.dispatchMapSize).toBeGreaterThan(0);
   });
+
+  it('createFetchHandler should return null when not available', async () => {
+    const adapter = createMockAdapter(false);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    const handler = service.createFetchHandler();
+    const result = await handler(new Request('http://example.com/grpc/svc/method'));
+    expect(result).toBeNull();
+  });
+
+  it('ensureRouter should be a no-op when not available', async () => {
+    const adapter = createMockAdapter(false);
+    const service = new GrpcService(
+      fakeConnectRuntime,
+      fakeEmbeddedDescriptors,
+      {} as GrpcPluginOptions,
+      adapter,
+    );
+    // Should not throw
+    await (service as unknown as { ensureRouter: () => Promise<void> }).ensureRouter();
+    expect(service.dispatchMapSize).toBe(0);
+  });
 });

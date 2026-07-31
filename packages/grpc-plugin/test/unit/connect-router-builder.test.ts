@@ -597,4 +597,110 @@ describe('ConnectRouterBuilder', () => {
     const body = JSON.parse(await response.text());
     expect(body.pong).toBe(true);
   });
+
+  it('should add health path to dispatch map when health is true', () => {
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [
+      {
+        definition: { typeName: 'pkg.Svc', methods: { echo: {} } },
+        implementation: { echo: () => ({ result: 'ok' }) },
+      },
+    ];
+    const { dispatchMap } = buildConnectRouter({
+      basePath: '/grpc',
+      reflection: false,
+      health: true,
+      services,
+      connectRuntime: fakeConnectRuntime,
+      embeddedDescriptors: fakeEmbeddedDescriptors,
+    });
+
+    const healthHandler = dispatchMap.get('/grpc/grpc.health.v1.Health/Check');
+    expect(healthHandler).toBeDefined();
+  });
+
+  it('should add reflection path to dispatch map when reflection is true', () => {
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [
+      {
+        definition: { typeName: 'pkg.Svc', methods: { echo: {} } },
+        implementation: { echo: () => ({ result: 'ok' }) },
+      },
+    ];
+    const { dispatchMap } = buildConnectRouter({
+      basePath: '/grpc',
+      reflection: true,
+      health: false,
+      services,
+      connectRuntime: fakeConnectRuntime,
+      embeddedDescriptors: fakeEmbeddedDescriptors,
+    });
+
+    const reflectionHandler = dispatchMap.get(
+      '/grpc/grpc.reflection.v1.ServerReflection/ServerReflectionInfo',
+    );
+    expect(reflectionHandler).toBeDefined();
+  });
+
+  it('should not add health or reflection paths when both are false', () => {
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [
+      {
+        definition: { typeName: 'pkg.Svc', methods: { echo: {} } },
+        implementation: { echo: () => ({ result: 'ok' }) },
+      },
+    ];
+    const { dispatchMap } = buildConnectRouter({
+      basePath: '/grpc',
+      reflection: false,
+      health: false,
+      services,
+      connectRuntime: fakeConnectRuntime,
+      embeddedDescriptors: fakeEmbeddedDescriptors,
+    });
+
+    expect(dispatchMap.has('/grpc/grpc.health.v1.Health/Check')).toBe(false);
+    expect(
+      dispatchMap.has('/grpc/grpc.reflection.v1.ServerReflection/ServerReflectionInfo'),
+    ).toBe(false);
+  });
+
+  it('health handler should return status 1', async () => {
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [];
+    const { dispatchMap } = buildConnectRouter({
+      basePath: '/grpc',
+      reflection: false,
+      health: true,
+      services,
+      connectRuntime: fakeConnectRuntime,
+      embeddedDescriptors: fakeEmbeddedDescriptors,
+    });
+
+    const handler = dispatchMap.get('/grpc/grpc.health.v1.Health/Check');
+    expect(handler).toBeDefined();
+    const response = await handler!(
+      new Request('http://localhost/grpc/grpc.health.v1.Health/Check'),
+    );
+    expect(response.status).toBe(200);
+    const body = JSON.parse(await response.text());
+    expect(body.status).toBe(1);
+  });
+
+  it('reflection handler should return 404', async () => {
+    const services: Array<{ definition: unknown; implementation?: unknown }> = [];
+    const { dispatchMap } = buildConnectRouter({
+      basePath: '/grpc',
+      reflection: true,
+      health: false,
+      services,
+      connectRuntime: fakeConnectRuntime,
+      embeddedDescriptors: fakeEmbeddedDescriptors,
+    });
+
+    const handler = dispatchMap.get(
+      '/grpc/grpc.reflection.v1.ServerReflection/ServerReflectionInfo',
+    );
+    expect(handler).toBeDefined();
+    const response = await handler!(
+      new Request('http://localhost/grpc/grpc.reflection.v1.ServerReflection/ServerReflectionInfo'),
+    );
+    expect(response.status).toBe(404);
+  });
 });

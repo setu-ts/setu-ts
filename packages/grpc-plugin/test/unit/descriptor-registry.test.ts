@@ -231,4 +231,84 @@ describe('DescriptorRegistry', () => {
     const service = (reg.getService as (name: string) => unknown)('grpc.health.v1.Health');
     expect(service).toBeUndefined();
   });
+
+  it('buildReflectionRegistry should include app services in listServices', () => {
+    const fakeConnectRuntime: ConnectRuntime = {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      adaptConnectModule: () => fakeConnectRuntime,
+      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
+      reviveDescriptorSet: () => ({
+        files: [],
+        getService: () => undefined,
+        listServices: () => [],
+      }),
+      getService: () => undefined,
+    };
+    const registry = buildReflectionRegistry(
+      fakeConnectRuntime,
+      EmbeddedDescriptors,
+      [
+        { definition: { typeName: 'app.MyService' } },
+      ],
+    );
+    const reg = registry as Record<string, unknown>;
+    const services = (reg.listServices as () => string[])();
+    expect(services).toContain('app.MyService');
+  });
+
+  it('buildReflectionRegistry getService should find app services by typeName', () => {
+    const fakeConnectRuntime: ConnectRuntime = {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      adaptConnectModule: () => fakeConnectRuntime,
+      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
+      reviveDescriptorSet: () => ({
+        files: [],
+        getService: () => undefined,
+        listServices: () => [],
+      }),
+      getService: () => undefined,
+    };
+    const registry = buildReflectionRegistry(
+      fakeConnectRuntime,
+      EmbeddedDescriptors,
+      [
+        { definition: { typeName: 'app.MyService' } },
+      ],
+    );
+    const reg = registry as Record<string, unknown>;
+    const service = (reg.getService as (name: string) => unknown)('app.MyService');
+    expect(service).toBeDefined();
+    expect((service as { definition: { typeName: string } }).definition.typeName).toBe(
+      'app.MyService',
+    );
+  });
+
+  it('buildReflectionRegistry should handle service without typeName', () => {
+    const fakeConnectRuntime: ConnectRuntime = {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      adaptConnectModule: () => fakeConnectRuntime,
+      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
+      reviveDescriptorSet: () => ({
+        files: [],
+        getService: () => undefined,
+        listServices: () => [],
+      }),
+      getService: () => undefined,
+    };
+    const registry = buildReflectionRegistry(
+      fakeConnectRuntime,
+      EmbeddedDescriptors,
+      [
+        { definition: { methods: {} } }, // No typeName
+      ],
+    );
+    const reg = registry as Record<string, unknown>;
+    const services = (reg.listServices as () => string[])();
+    // Should have embedded services but not the app service without typeName
+    expect(services).toContain('grpc.health.v1.Health');
+    expect(services).toContain('grpc.reflection.v1.ServerReflection');
+  });
 });

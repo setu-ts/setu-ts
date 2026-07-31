@@ -183,4 +183,90 @@ describe('GrpcPlugin', () => {
 
     expect(rpcHandlers.length).toBe(1);
   });
+
+  it('register should pass options to GrpcService', async () => {
+    const customRuntime = {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      adaptConnectModule: () => customRuntime,
+      loadConnectModule: () => Promise.resolve(customRuntime),
+      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
+      getService: () => undefined,
+    };
+    const registeredServices: Array<{ token: string; service: unknown }> = [];
+    const mockContext = {
+      services: {
+        get: () => ({
+          setHandler: () => {},
+          fetch: () => {},
+          listen: () => {},
+          close: () => {},
+          setRpcHandler: () => {},
+        }),
+        register: (token: string, service: unknown) => {
+          registeredServices.push({ token, service });
+        },
+      },
+      logger: {
+        warn: () => {},
+      },
+      health: {
+        register: () => {},
+      },
+      lifecycle: {
+        onClose: () => {},
+      },
+    } as unknown as import('@hono-enterprise/common').IPluginContext;
+
+    const plugin = GrpcPlugin({
+      basePath: '/custom',
+      reflection: false,
+      health: false,
+      connectModule: customRuntime as never,
+    });
+    await plugin.register(mockContext);
+
+    expect(registeredServices.length).toBe(1);
+    expect(registeredServices[0].token).toBe('grpc');
+  });
+
+  it('register should call lifecycle.onClose', async () => {
+    const customRuntime = {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      adaptConnectModule: () => customRuntime,
+      loadConnectModule: () => Promise.resolve(customRuntime),
+      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
+      getService: () => undefined,
+    };
+    const onCloseCalls: Array<() => void> = [];
+    const mockContext = {
+      services: {
+        get: () => ({
+          setHandler: () => {},
+          fetch: () => {},
+          listen: () => {},
+          close: () => {},
+          setRpcHandler: () => {},
+        }),
+        register: () => {},
+      },
+      logger: {
+        warn: () => {},
+      },
+      health: {
+        register: () => {},
+      },
+      lifecycle: {
+        onClose: (fn: () => void) => {
+          onCloseCalls.push(fn);
+        },
+      },
+    } as unknown as import('@hono-enterprise/common').IPluginContext;
+
+    const plugin = GrpcPlugin({ connectModule: customRuntime as never });
+    await plugin.register(mockContext);
+
+    expect(onCloseCalls.length).toBe(1);
+  });
 });

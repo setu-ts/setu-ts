@@ -15,6 +15,16 @@ let wktModule: unknown = null;
 let protocolModule: unknown = null;
 
 /**
+ * Resets the module cache. Exported for testing only.
+ */
+export function resetModuleCache(): void {
+  connectModule = null;
+  protobufModule = null;
+  wktModule = null;
+  protocolModule = null;
+}
+
+/**
  * Shape of the @connectrpc/connect module.
  */
 interface ConnectModule {
@@ -135,14 +145,26 @@ export function buildLoadErrorMessage(
 }
 
 /**
+ * Default dynamic import function used by loadConnectModules.
+ * Exported for testing to allow mocking.
+ */
+export async function defaultImport(specifier: string): Promise<unknown> {
+  return await import(specifier) as unknown;
+}
+
+/**
  * Internal helper that loads all four Connect runtime modules.
  * Exported for testing to allow coverage of the load path.
+ *
+ * @param importer - Optional injectable import function for testing.
  */
-export async function loadConnectModules(): Promise<void> {
+export async function loadConnectModules(
+  importer: typeof defaultImport = defaultImport,
+): Promise<void> {
   // Load connectrpc/connect
   if (!connectModule) {
     try {
-      connectModule = await import('npm:@connectrpc/connect@^2.1.2') as unknown;
+      connectModule = await importer('npm:@connectrpc/connect@^2.1.2');
     } catch (_e) {
       throw new GrpcRuntimeLoadError(
         '@connectrpc/connect',
@@ -154,7 +176,7 @@ export async function loadConnectModules(): Promise<void> {
   // Load @bufbuild/protobuf
   if (!protobufModule) {
     try {
-      protobufModule = await import('npm:@bufbuild/protobuf@^2.7.0') as unknown;
+      protobufModule = await importer('npm:@bufbuild/protobuf@^2.7.0');
     } catch (_e) {
       throw new GrpcRuntimeLoadError(
         '@bufbuild/protobuf',
@@ -166,7 +188,7 @@ export async function loadConnectModules(): Promise<void> {
   // Load @bufbuild/protobuf/wkt
   if (!wktModule) {
     try {
-      wktModule = await import('npm:@bufbuild/protobuf@^2.7.0/wkt') as unknown;
+      wktModule = await importer('npm:@bufbuild/protobuf@^2.7.0/wkt');
     } catch (_e) {
       throw new GrpcRuntimeLoadError(
         '@bufbuild/protobuf/wkt',
@@ -178,7 +200,7 @@ export async function loadConnectModules(): Promise<void> {
   // Load the protocol module
   if (!protocolModule) {
     try {
-      protocolModule = await import('npm:@connectrpc/connect@^2.1.2/protocol') as unknown;
+      protocolModule = await importer('npm:@connectrpc/connect@^2.1.2/protocol');
     } catch (_e) {
       throw new GrpcRuntimeLoadError(
         '@connectrpc/connect/protocol',
@@ -212,10 +234,10 @@ export function getFallbackConnectRuntime(): ConnectRuntime {
   return {
     createConnectRouter: () => ({ handlers: [], service: () => {} }),
     createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-    adaptConnectModule: (_m: unknown) => getFallbackConnectRuntime(),
+    adaptConnectModule: (_m: unknown): ConnectRuntime => getFallbackConnectRuntime(),
     loadConnectModule: () => Promise.resolve(getFallbackConnectRuntime()),
     reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-    getService: () => undefined,
+    getService: (_registry: unknown, _serviceName: string): unknown => undefined,
   };
 }
 
