@@ -29,7 +29,7 @@ export function createHealthService(
   healthService?: IHealthService,
 ): unknown {
   return {
-    Check: async (_request: HealthCheckRequest) => {
+    check: async (_request: HealthCheckRequest) => {
       // request.service is available for future extensibility; currently not used
       // No need to read it for basic health check
 

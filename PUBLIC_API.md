@@ -6402,6 +6402,12 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 - **Optional seam.** If the HTTP adapter does not implement `setRpcHandler?`, the plugin still
   registers and reports `available: false`; `handleRequest` throws `GrpcUnavailableError` while
   `createFetchHandler` returns `null` for every request.
+- **gRPC-binary trailers on Deno.** Native gRPC-binary protocol (`application/grpc`) relies on
+  HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling. Deno's
+  `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
+  correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
+  protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
+  support.
 
 ---
 

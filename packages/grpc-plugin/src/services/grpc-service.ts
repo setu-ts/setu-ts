@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { IHttpAdapter } from '@hono-enterprise/common';
+import type { IHealthService, IHttpAdapter } from '@hono-enterprise/common';
 import type { RpcFetchHandler } from '@hono-enterprise/common';
 import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
@@ -34,6 +34,7 @@ export class GrpcService {
   private readonly connectRuntime: ConnectRuntime;
   private readonly embeddedDescriptors: EmbeddedDescriptors;
   private readonly options: GrpcPluginOptions;
+  private readonly healthService: IHealthService | undefined;
 
   private dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
   private routerBuilt = false;
@@ -47,10 +48,12 @@ export class GrpcService {
     embeddedDescriptors: EmbeddedDescriptors,
     options: GrpcPluginOptions,
     adapter?: IHttpAdapter,
+    healthService?: IHealthService,
   ) {
     this.connectRuntime = connectRuntime;
     this.embeddedDescriptors = embeddedDescriptors;
     this.options = options;
+    this.healthService = healthService as IHealthService | undefined;
     this.basePath = normalizeBasePath(options.basePath ?? '/grpc');
     // Determine if the adapter supports the RPC interceptor seam
     this.available = adapter !== undefined && 'setRpcHandler' in adapter;
@@ -63,7 +66,7 @@ export class GrpcService {
     }
   }
 
-  addService<TDef>(definition: TDef, _implementation?: unknown): void {
+  addService<TDef>(definition: TDef, implementation?: unknown): void {
     const defLike = definition as ServiceDefinitionLike;
     const typeName = defLike.typeName;
     if (typeName) {
@@ -75,7 +78,7 @@ export class GrpcService {
       }
     }
 
-    this.services.push({ definition, implementation: _implementation });
+    this.services.push({ definition, implementation });
     this.routerBuilt = false; // Invalidate cached router
   }
 
@@ -147,6 +150,7 @@ export class GrpcService {
       health: this.options.health ?? true,
       services: this.services,
       embeddedDescriptors: this.embeddedDescriptors,
+      healthService: this.healthService as IHealthService | undefined,
     });
 
     this.dispatchMap = dispatchMap;

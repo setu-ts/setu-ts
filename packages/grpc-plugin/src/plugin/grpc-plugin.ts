@@ -5,7 +5,13 @@
  * @module
  */
 
-import type { IGrpcService, IHttpAdapter, IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type {
+  IGrpcService,
+  IHealthService,
+  IHttpAdapter,
+  IPlugin,
+  IPluginContext,
+} from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
@@ -43,11 +49,20 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
       const adapter = ctx.services.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       const canSetRpcHandler = typeof adapter.setRpcHandler === 'function';
 
+      // Optionally resolve the health capability
+      let healthService: IHealthService | undefined;
+      try {
+        healthService = ctx.services.get<IHealthService>(CAPABILITIES.HEALTH);
+      } catch {
+        // Health capability not available — the health bridge will default to SERVING
+      }
+
       const grpcService = new GrpcService(
         connectRuntime,
         EmbeddedDescriptors,
         options,
         adapter,
+        healthService,
       );
 
       ctx.services.register<IGrpcService>(CAPABILITIES.GRPC, grpcService);

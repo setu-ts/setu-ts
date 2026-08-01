@@ -38,11 +38,11 @@ describe('GrpcReflection', () => {
       [{ typeName: 'pkg.MyService' }],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
       })(),
@@ -64,11 +64,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileByFilename: { filename: 'grpc/health/v1/health.proto' } } };
       })(),
@@ -89,11 +89,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileByFilename: { filename: 'unknown.proto' } } };
       })(),
@@ -114,11 +114,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileContainingSymbol: { symbol: 'grpc.health.v1.Health' } } };
       })(),
@@ -138,11 +138,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileContainingSymbol: { symbol: 'unknown.Symbol' } } };
       })(),
@@ -163,11 +163,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { allExtensionNumbersOfType: 'google.protobuf.MessageOptions' } };
       })(),
@@ -188,11 +188,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: {} };
       })(),
@@ -216,11 +216,11 @@ describe('GrpcReflection', () => {
       ],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
       })(),
@@ -239,11 +239,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileByFilename: { filename: '' } } };
       })(),
@@ -264,11 +264,11 @@ describe('GrpcReflection', () => {
       [{ typeName: 'pkg.MyService' }],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileContainingSymbol: { symbol: 'MyService' } } };
       })(),
@@ -288,11 +288,11 @@ describe('GrpcReflection', () => {
       [{ typeName: 'pkg.MyService', protoFile: 'pkg/my_service.proto' }],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileByFilename: { filename: 'pkg/my_service.proto' } } };
       })(),
@@ -313,11 +313,11 @@ describe('GrpcReflection', () => {
       [{ methods: { echo: {} } }],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
       })(),
@@ -340,11 +340,11 @@ describe('GrpcReflection', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
       })(),
@@ -365,11 +365,11 @@ describe('GrpcReflection', () => {
       [{ typeName: '' }],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
       })(),
@@ -390,11 +390,11 @@ describe('GrpcReflection', () => {
       [{}],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
       })(),
@@ -415,11 +415,11 @@ describe('GrpcReflection', () => {
       [{ typeName: 'pkg.MyService' }],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { listServices: {} } };
         yield { response: { fileByFilename: { filename: 'grpc/health/v1/health.proto' } } };
@@ -611,11 +611,11 @@ describe('ReflectionService', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileByFilename: { filename: 'test.proto' } } };
       })(),
@@ -631,11 +631,11 @@ describe('ReflectionService', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileContainingSymbol: { symbol: 'pkg.MyService' } } };
       })(),
@@ -651,11 +651,11 @@ describe('ReflectionService', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { allExtensionNumbersOfType: { typeName: 'pkg.MyMessage' } } };
       })(),
@@ -671,11 +671,11 @@ describe('ReflectionService', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: {} };
       })(),
@@ -696,11 +696,11 @@ describe('ReflectionService', () => {
       [],
     );
     const typedService = service as {
-      ServerReflectionInfo: (
+      serverReflectionInfo: (
         stream: AsyncIterable<{ response: unknown }>,
       ) => AsyncGenerator<unknown>;
     };
-    const generator = typedService.ServerReflectionInfo(
+    const generator = typedService.serverReflectionInfo(
       (async function* () {
         yield { response: { fileContainingSymbol: { symbol: 'unknown.Symbol' } } };
       })(),

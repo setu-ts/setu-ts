@@ -63,6 +63,13 @@ GrpcPlugin({
   cannot reach gRPC handlers. Use `app.fetch()` for testing gRPC endpoints.
 - **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
   handled by generated Connect/gRPC client code in the application.
+- **gRPC-binary trailers on Deno**: Native gRPC-binary protocol (`application/grpc`) relies on
+  HTTP/2 response trailers (specifically the `grpc-status` trailer) for proper status signaling.
+  Deno's `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
+  correctly on Deno. This is a **platform limitation**, not a plugin bug—the plugin correctly
+  forwards `Response.trailers` when available. Connect-JSON and gRPC-Web protocols work on all
+  runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer support depending on
+  their HTTP/2 implementations.
 
 ## Health Indicator
 

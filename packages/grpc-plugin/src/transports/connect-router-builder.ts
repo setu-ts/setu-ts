@@ -46,6 +46,10 @@ interface ServiceEntry {
  * Uses the real Connect runtime API: `createConnectRouter()` +
  * `router.service()` + `createFetchHandler()` from `@connectrpc/connect`.
  */
+import { createHealthService } from '../health/grpc-health-bridge.ts';
+import { createReflectionService } from '../reflection/grpc-reflection.ts';
+import type { IHealthService } from '@hono-enterprise/common';
+
 export function buildConnectRouter({
   connectRuntime,
   basePath,
@@ -53,6 +57,7 @@ export function buildConnectRouter({
   health,
   services,
   embeddedDescriptors,
+  healthService,
 }: {
   connectRuntime: ConnectRuntime;
   basePath: string;
@@ -60,6 +65,7 @@ export function buildConnectRouter({
   health: boolean;
   services: ReadonlyArray<ServiceEntry>;
   embeddedDescriptors: EmbeddedDescriptors;
+  healthService: IHealthService | undefined;
 }): {
   dispatchMap: Map<string, (request: Request) => Promise<Response>>;
   registry: unknown;
@@ -102,7 +108,11 @@ export function buildConnectRouter({
       'grpc.health.v1.Health',
     );
     if (healthServiceDesc) {
-      router.service(healthServiceDesc as { typeName: string }, {});
+      const healthImpl = createHealthService(connectRuntime, healthService);
+      router.service(
+        healthServiceDesc as { typeName: string },
+        healthImpl as Record<string, (...args: unknown[]) => unknown>,
+      );
     }
   }
 
@@ -114,7 +124,17 @@ export function buildConnectRouter({
       'grpc.reflection.v1.ServerReflection',
     );
     if (reflectionServiceDesc) {
-      router.service(reflectionServiceDesc as { typeName: string }, {});
+      // Build the app services list for reflection (typeName only)
+      const appServices = services.map((s) => s.definition);
+      const reflectionImpl = createReflectionService(
+        connectRuntime,
+        embeddedDescriptors,
+        appServices,
+      );
+      router.service(
+        reflectionServiceDesc as { typeName: string },
+        reflectionImpl as Record<string, (...args: unknown[]) => unknown>,
+      );
     }
   }
 

@@ -42,6 +42,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(dispatchMap).toBeDefined();
@@ -62,6 +63,7 @@ describe('ConnectRouterBuilder', () => {
         services,
         connectRuntime: fakeConnectRuntime,
         embeddedDescriptors: fakeEmbeddedDescriptors,
+        healthService: undefined,
       });
     }).toThrow('has already been registered');
   });
@@ -77,6 +79,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(registry).toBeDefined();
@@ -97,6 +100,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(registry).toBeNull();
@@ -118,6 +122,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // Test without trailing slash
@@ -128,6 +133,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // Both should have the same keys
@@ -146,6 +152,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(dispatchMap).toBeDefined();
@@ -164,6 +171,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(dispatchMap).toBeDefined();
@@ -187,6 +195,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(registry).toBeDefined();
@@ -219,6 +228,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(registry).toBeDefined();
@@ -238,6 +248,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(dispatchMap).toBeDefined();
@@ -261,6 +272,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     const reg = registry as {
@@ -285,6 +297,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     const reg = registry as {
@@ -306,6 +319,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     const reg = registry as {
@@ -329,6 +343,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // No handler should be registered since implementation is null/falsy
@@ -346,6 +361,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // No handler should be registered since methods is null/falsy
@@ -366,6 +382,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // No handler should be registered since the method is not in implementation
@@ -399,6 +416,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeRuntimeWithTracking,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // Should call service() once per app service (2) — health/reflection disabled
@@ -433,6 +451,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeRuntimeWithTracking,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // Should call service() once per app service only (1)
@@ -478,6 +497,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeRuntimeWithTracking,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(serviceCalls.length).toBe(1);
@@ -521,6 +541,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeRuntimeWithTracking,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     expect(serviceCalls.length).toBe(1);
@@ -555,6 +576,7 @@ describe('ConnectRouterBuilder', () => {
       services: [],
       connectRuntime: fakeRuntimeWithNullHealth,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // Should not call service() for health since descriptor is null
@@ -589,6 +611,7 @@ describe('ConnectRouterBuilder', () => {
       services: [],
       connectRuntime: fakeRuntimeWithNullReflection,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
 
     // Should not call service() for reflection since descriptor is null
@@ -606,6 +629,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
     expect(dispatchMap).toBeDefined();
   });
@@ -621,6 +645,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
     const reg = registry as {
       files: Array<{ name: string; package: string; methods: string[] }>;
@@ -640,6 +665,7 @@ describe('ConnectRouterBuilder', () => {
       services,
       connectRuntime: fakeConnectRuntime,
       embeddedDescriptors: fakeEmbeddedDescriptors,
+      healthService: undefined,
     });
     const reg = registry as {
       listServices: () => string[];

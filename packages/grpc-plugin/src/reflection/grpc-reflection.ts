@@ -74,7 +74,7 @@ export function createReflectionService(
   const registry = buildReflectionRegistry(connectRuntime, embeddedDescriptors, appServices);
 
   return {
-    async *ServerReflectionInfo(
+    async *serverReflectionInfo(
       requestStream: AsyncIterable<{ response: ReflectionRequestVariant }>,
     ): AsyncGenerator<ReflectionResponseVariant> {
       for await (const { response } of requestStream) {
