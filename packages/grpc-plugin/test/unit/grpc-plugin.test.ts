@@ -148,8 +148,6 @@ describe('GrpcPlugin', () => {
     const customRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => customRuntime,
-      loadConnectModule: () => Promise.resolve(customRuntime),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
       getService: () => undefined,
     };
@@ -188,8 +186,6 @@ describe('GrpcPlugin', () => {
     const customRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => customRuntime,
-      loadConnectModule: () => Promise.resolve(customRuntime),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
       getService: () => undefined,
     };
@@ -234,8 +230,6 @@ describe('GrpcPlugin', () => {
     const customRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => customRuntime,
-      loadConnectModule: () => Promise.resolve(customRuntime),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
       getService: () => undefined,
     };

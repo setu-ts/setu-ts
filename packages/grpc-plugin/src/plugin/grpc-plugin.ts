@@ -71,9 +71,9 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
           },
         }));
 
+      // Post-stop guard: set a stopped flag when the app closes
       ctx.lifecycle.onClose(() => {
-        // Clear dispatch map on shutdown to free resources
-        void grpcService.dispatchMapSize;
+        (grpcService as unknown as { setStopped: (v: boolean) => void }).setStopped(true);
       });
     },
   };

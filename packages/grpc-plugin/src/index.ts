@@ -30,9 +30,6 @@ export { GrpcPlugin } from './plugin/grpc-plugin.ts';
 // Re-export the service class
 export { GrpcService } from './services/grpc-service.ts';
 
-// Re-export the Connect runtime adaptor
-export { adaptConnectModule } from './transports/connect-loader.ts';
-
 // Re-export errors
 export { GrpcRuntimeLoadError, GrpcUnavailableError } from './errors/grpc-errors.ts';
 

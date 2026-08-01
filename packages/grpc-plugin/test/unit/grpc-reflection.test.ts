@@ -15,10 +15,9 @@ describe('GrpcReflection', () => {
     return {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => createFakeRuntime(),
-      loadConnectModule: () => Promise.resolve(createFakeRuntime()),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
   }
 
@@ -475,10 +474,9 @@ describe('buildReflectionRegistry', () => {
     return {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => createFakeRuntime(),
-      loadConnectModule: () => Promise.resolve(createFakeRuntime()),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
   }
 
@@ -600,10 +598,9 @@ describe('ReflectionService', () => {
     return {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => createFakeRuntime(),
-      loadConnectModule: () => Promise.resolve(createFakeRuntime()),
       reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
   }
 

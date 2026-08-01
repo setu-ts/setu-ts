@@ -17,14 +17,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: (base64: string) => {
         called = true;
         expect(base64).toBe('dGVzdA==');
         return { files: [], getService: () => undefined, listServices: [] };
       },
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const result = reviveDescriptorSet(fakeConnectRuntime, 'dGVzdA==');
     expect(called).toBe(true);
@@ -35,14 +34,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -64,14 +62,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     // App services have definition property with typeName inside
     const registry = buildReflectionRegistry(
@@ -92,14 +89,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -117,14 +113,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -140,14 +135,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => ({ kind: 'service' }),
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -163,14 +157,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => ({ kind: 'service' }),
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -188,14 +181,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -215,11 +207,10 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () =>
         null as unknown as ReturnType<ConnectRuntime['reviveDescriptorSet']>,
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -236,14 +227,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -261,14 +251,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,
@@ -289,14 +278,13 @@ describe('DescriptorRegistry', () => {
     const fakeConnectRuntime: ConnectRuntime = {
       createConnectRouter: () => ({ handlers: [], service: () => {} }),
       createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      adaptConnectModule: () => fakeConnectRuntime,
-      loadConnectModule: () => Promise.resolve(fakeConnectRuntime),
       reviveDescriptorSet: () => ({
         files: [],
         getService: () => undefined,
         listServices: () => [],
       }),
       getService: () => undefined,
+      createRegistry: () => ({}),
     };
     const registry = buildReflectionRegistry(
       fakeConnectRuntime,

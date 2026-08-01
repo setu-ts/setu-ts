@@ -37,6 +37,7 @@ export class GrpcService {
 
   private dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
   private routerBuilt = false;
+  private stopped = false;
 
   /** Whether the HTTP adapter supports the RPC interceptor seam. */
   readonly available: boolean;
@@ -83,6 +84,10 @@ export class GrpcService {
       throw new GrpcUnavailableError();
     }
 
+    if (this.stopped) {
+      return new Response('Service Unavailable', { status: 503 });
+    }
+
     await this.ensureRouter();
 
     if (!this.dispatchMap) {
@@ -101,6 +106,10 @@ export class GrpcService {
     return async (request: Request): Promise<Response | null> => {
       if (!this.available) {
         return null;
+      }
+
+      if (this.stopped) {
+        return new Response('Service Unavailable', { status: 503 });
       }
 
       await this.ensureRouter();
@@ -152,5 +161,10 @@ export class GrpcService {
 
   get dispatchMapSize(): number {
     return this.dispatchMap ? this.dispatchMap.size : 0;
+  }
+
+  // Internal method for post-stop guard
+  setStopped(value: boolean): void {
+    this.stopped = value;
   }
 }

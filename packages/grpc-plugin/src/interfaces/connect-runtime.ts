@@ -7,10 +7,17 @@
  * @module
  */
 
+/**
+ * Internal port that the Connect runtime loader produces.
+ * The plugin never imports @connectrpc/connect or @bufbuild/protobuf directly.
+ */
 export interface ConnectRuntime {
-  /** Creates a ConnectRouter for registering services. */
+  /** Creates a new ConnectRouter for registering services. */
   createConnectRouter(): {
-    handlers: Array<{ requestPath: string; handler: unknown }>;
+    handlers: Array<{
+      requestPath: string;
+      handler: (request: Request) => Promise<Response>;
+    }>;
     service<T extends { typeName: string }>(
       service: T,
       implementation: Record<string, (...args: unknown[]) => unknown>,
@@ -27,22 +34,12 @@ export interface ConnectRuntime {
     options?: { httpVersion?: string },
   ): (request: Request) => Promise<Response>;
 
-  /** Adapts an imported module to ConnectRuntime using cached protobuf/wkt. */
-  adaptConnectModule(mod: unknown): ConnectRuntime;
-
-  /** Loads Connect modules via lazy import. */
-  loadConnectModule(): Promise<ConnectRuntime>;
-
   /** Revives a FileDescriptorSet from base64. */
   reviveDescriptorSet(base64: string): unknown;
 
   /** Gets a service from a registry. */
   getService(registry: unknown, serviceName: string): unknown;
-}
 
-/** Simple FileRegistry-like structure. */
-export interface FileRegistryLike {
-  files: unknown[];
-  getService(name: string): unknown | undefined;
-  listServices(): string[];
+  /** Creates a FileRegistry from a FileDescriptorSet message. */
+  createRegistry(fdSet: unknown): unknown;
 }

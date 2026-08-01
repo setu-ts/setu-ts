@@ -14,6 +14,9 @@ let protobufModule: unknown = null;
 let wktModule: unknown = null;
 let protocolModule: unknown = null;
 
+// Singleton fallback instance
+let fallbackRuntime: ConnectRuntime | null = null;
+
 /**
  * Resets the module cache. Exported for testing only.
  */
@@ -22,6 +25,7 @@ export function resetModuleCache(): void {
   protobufModule = null;
   wktModule = null;
   protocolModule = null;
+  fallbackRuntime = null;
 }
 
 /**
@@ -29,7 +33,7 @@ export function resetModuleCache(): void {
  */
 interface ConnectModule {
   createConnectRouter(): {
-    handlers: Array<{ requestPath: string; handler: unknown }>;
+    handlers: Array<{ requestPath: string; handler: (request: Request) => Promise<Response> }>;
     service<T extends { typeName: string }>(
       service: T,
       implementation: Record<string, (...args: unknown[]) => unknown>,
@@ -42,7 +46,7 @@ interface ConnectModule {
  * Shape of the @bufbuild/protobuf module.
  */
 interface ProtobufModule {
-  createFileRegistry(fdSet: unknown): { getService(name: string): unknown };
+  createRegistry(fdSet: unknown): { getService(name: string): unknown };
   fromBinary(schema: unknown, bytes: Uint8Array): unknown;
 }
 
@@ -64,6 +68,18 @@ interface ProtocolModule {
 }
 
 /**
+ * Decodes a base64 string into a Uint8Array.
+ */
+function decodeBase64(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Creates a ConnectRuntime implementation from raw module objects.
  */
 function createConnectRuntime(
@@ -72,29 +88,20 @@ function createConnectRuntime(
   wkt: WktModule,
   proto: ProtocolModule,
 ): ConnectRuntime {
-  const { createFileRegistry, fromBinary } = protobuf;
+  const { createRegistry, fromBinary } = protobuf;
   const { FileDescriptorSetSchema } = wkt;
-
-  // Cache the real router so createConnectRouter() always returns the same instance
-  let cachedRealRouter: {
-    handlers: Array<{ requestPath: string; handler: unknown }>;
-    service: (service: unknown, impl: unknown, options?: unknown) => void;
-  } | null = null;
 
   return {
     createConnectRouter() {
-      if (cachedRealRouter === null) {
-        // Delegate to the real createConnectRouter from the connect module
-        const realRouter = (mod as {
-          createConnectRouter: () => {
-            handlers: Array<{ requestPath: string; handler: unknown }>;
-            service: (service: unknown, impl: unknown, options?: unknown) => void;
-          };
-        }).createConnectRouter();
-        // Cache the real router directly to ensure handlers are shared
-        cachedRealRouter = realRouter;
-      }
-      return cachedRealRouter;
+      // Delegate to the real createConnectRouter from the connect module
+      return (mod as {
+        createConnectRouter: () => {
+          handlers: Array<
+            { requestPath: string; handler: (request: Request) => Promise<Response> }
+          >;
+          service: (service: unknown, impl: unknown, options?: unknown) => void;
+        };
+      }).createConnectRouter();
     },
 
     createFetchHandler(
@@ -104,31 +111,19 @@ function createConnectRuntime(
       return proto.createFetchHandler(uHandler, options);
     },
 
-    adaptConnectModule(_m: unknown): ConnectRuntime {
-      if (!protobufModule || !wktModule || !protocolModule) {
-        throw new Error('Protobuf/protocol modules not available for adaptation');
-      }
-      return createConnectRuntime(
-        _m as ConnectModule,
-        protobufModule as ProtobufModule,
-        wktModule as WktModule,
-        protocolModule as ProtocolModule,
-      );
-    },
-
-    loadConnectModule: () => loadConnectModule(),
-
     reviveDescriptorSet(base64: string): unknown {
-      const bytes = new Uint8Array(
-        base64.split('').map((c) => c.charCodeAt(0) & 0xFF),
-      );
+      const bytes = decodeBase64(base64);
       const fdSet = fromBinary(FileDescriptorSetSchema, bytes);
-      return createFileRegistry(fdSet);
+      return createRegistry(fdSet);
     },
 
     getService(registry: unknown, serviceName: string): unknown {
       const reg = registry as { getService?: (name: string) => unknown } | null;
       return reg?.getService?.(serviceName) || undefined;
+    },
+
+    createRegistry(fdSet: unknown): unknown {
+      return createRegistry(fdSet);
     },
   };
 }
@@ -216,8 +211,6 @@ export async function loadConnectModules(
  */
 export async function loadConnectModule(): Promise<ConnectRuntime> {
   await loadConnectModules();
-  // Create a NEW runtime instance for each call — don't cache at module level
-  // This ensures each plugin instance gets its own router
   return createConnectRuntime(
     connectModule as ConnectModule,
     protobufModule as ProtobufModule,
@@ -231,62 +224,14 @@ export async function loadConnectModule(): Promise<ConnectRuntime> {
  * Returns a singleton instance.
  */
 export function getFallbackConnectRuntime(): ConnectRuntime {
-  return {
-    createConnectRouter: () => ({ handlers: [], service: () => {} }),
-    createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-    adaptConnectModule: (_m: unknown): ConnectRuntime => getFallbackConnectRuntime(),
-    loadConnectModule: () => Promise.resolve(getFallbackConnectRuntime()),
-    reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-    getService: (_registry: unknown, _serviceName: string): unknown => undefined,
-  };
-}
-
-/**
- * Standalone adaptation function — takes all three modules explicitly.
- * Used by tests to avoid needing the full lazy-load machinery.
- */
-export function adaptConnectModule(
-  mod: unknown,
-  protobuf: unknown,
-  wkt: unknown,
-): ConnectRuntime {
-  // For tests, we need a protocol module too
-  const protocolModule = {
-    createFetchHandler: (
-      uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
-    ) => {
-      return async (request: Request) => {
-        // Build a minimal universal request from the fetch request
-        const universalRequest = {
-          url: request.url,
-          method: request.method,
-          header: Object.fromEntries(request.headers.entries()),
-          body: null,
-          httpVersion: '',
-          signal: request.signal,
-        };
-
-        try {
-          const response = await uHandler(universalRequest);
-          const body = response.body ? await request.text() : null;
-          return new Response(body ?? JSON.stringify(response), {
-            status: (response.status as number) ?? 200,
-            headers: (response.header as HeadersInit) ?? new Headers(),
-          });
-        } catch (e) {
-          return new Response(JSON.stringify({ error: (e as Error).message }), {
-            status: 500,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-      };
-    },
-  } as ProtocolModule;
-
-  return createConnectRuntime(
-    mod as ConnectModule,
-    protobuf as ProtobufModule,
-    wkt as WktModule,
-    protocolModule,
-  );
+  if (!fallbackRuntime) {
+    fallbackRuntime = {
+      createConnectRouter: () => ({ handlers: [], service: () => {} }),
+      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
+      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
+      getService: (_registry: unknown, _serviceName: string): unknown => undefined,
+      createRegistry: () => ({ getService: () => undefined }),
+    };
+  }
+  return fallbackRuntime;
 }
