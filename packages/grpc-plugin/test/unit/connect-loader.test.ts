@@ -226,4 +226,11 @@ describe('ConnectLoader', () => {
     const service = runtime.getService({}, 'test');
     expect(service).toBeUndefined();
   });
+
+  it('fallback runtime createRegistry should return a registry', () => {
+    const runtime = getFallbackConnectRuntime();
+    const registry = runtime.createRegistry({});
+    expect(registry).toBeDefined();
+    expect(typeof (registry as { getService: unknown }).getService).toBe('function');
+  });
 });

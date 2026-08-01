@@ -440,26 +440,35 @@ describe('ConnectRouterBuilder', () => {
     expect(serviceCalls[0].typeName).toBe('pkg.Svc');
   });
 
-  it('should pass valid descriptor objects to router.service', () => {
-    const serviceCalls: Array<{ typeName: string; hasKind: boolean }> = [];
+  it('should forward the definition and implementation verbatim to router.service', () => {
+    const serviceCalls: Array<{ typeName: string; hasKind: boolean; implKeys: string[] }> = [];
     const fakeRuntimeWithTracking: ConnectRuntime = {
       ...fakeConnectRuntime,
       createConnectRouter: () => {
         return {
           handlers: [],
-          service: (service: unknown, _impl: unknown) => {
+          service: (service: unknown, impl: unknown) => {
             const desc = service as { kind?: string; typeName: string };
             serviceCalls.push({
               typeName: desc.typeName,
               hasKind: desc.kind === 'service',
+              implKeys: Object.keys(impl as Record<string, unknown>),
             });
           },
         };
       },
     };
 
+    // A real Protobuf-ES DescService carries kind:'service' and a methods array.
     const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Svc', methods: { echo: {} } } },
+      {
+        definition: {
+          kind: 'service',
+          typeName: 'pkg.Svc',
+          methods: [{ name: 'echo', localName: 'echo' }],
+        },
+        implementation: { echo: () => ({}) },
+      },
     ];
 
     buildConnectRouter({
@@ -474,6 +483,7 @@ describe('ConnectRouterBuilder', () => {
     expect(serviceCalls.length).toBe(1);
     expect(serviceCalls[0].typeName).toBe('pkg.Svc');
     expect(serviceCalls[0].hasKind).toBe(true);
+    expect(serviceCalls[0].implKeys).toEqual(['echo']);
   });
 
   it('should pass through real DescService when kind is service', () => {

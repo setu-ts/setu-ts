@@ -1,9 +1,10 @@
 /**
  * gRPC unary e2e test — serves a real gRPC/Connect RPC through the setRpcHandler?
- * seam end-to-end using the real Connect runtime.
+ * seam end-to-end using the real Connect runtime and a REAL Protobuf-ES
+ * DescService, asserting the decoded response BODY (not just status 200).
  *
- * This test exercises the full path: plugin registration → Connect loading →
- * service registration → request handling.
+ * Exercises the full path: plugin registration → Connect loading → service
+ * registration → request handling → correct body serialization.
  */
 
 import { describe, it } from '@std/testing/bdd';
@@ -11,115 +12,113 @@ import { expect } from '@std/expect';
 import { createApplication } from '@hono-enterprise/kernel';
 import { RuntimePlugin } from '@hono-enterprise/runtime';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
-import { CAPABILITIES, type IGrpcService } from '@hono-enterprise/common';
+import { loadConnectModule } from '../../src/transports/connect-loader.ts';
+import {
+  CAPABILITIES,
+  type GrpcServiceDefinition,
+  type IGrpcService,
+} from '@hono-enterprise/common';
+import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
 
-// A simple service definition for testing (structural match to GrpcServiceDefinition)
-const DummyService = {
-  typeName: 'example.DummyService',
-  methods: {
-    // A simple unary method
-    sayHello: (_context: Record<string, unknown>) => ({ message: 'Hello!' }),
-  },
+/**
+ * Revives the example.EchoService DescService via the real Connect runtime.
+ * A Protobuf-ES DescService is structurally a GrpcServiceDefinition
+ * (`{ typeName, methods }`), so the cast is sound, not an escape hatch.
+ */
+async function reviveEchoService(): Promise<GrpcServiceDefinition> {
+  const runtime = await loadConnectModule();
+  const registry = runtime.reviveDescriptorSet(ECHO_DESCRIPTOR_BASE64);
+  return runtime.getService(registry, 'example.EchoService') as GrpcServiceDefinition;
+}
+
+/** A unary impl that echoes the request message, matching EchoResponse{response}. */
+const echoImpl = {
+  echo: (req: { message: string }) => ({ response: `echo: ${req.message}` }),
+  ping: () => ({ pong: true }),
 };
 
 describe('gRPC Unary E2E', () => {
-  it('should register a dummy service and handle a request via Connect', async () => {
-    const app = createApplication({
-      plugins: [RuntimePlugin(), GrpcPlugin()],
-    });
-
+  it('serves a real Connect unary RPC with the correct decoded body', async () => {
+    const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
     await app.start({ port: 0 });
 
-    // Resolve the gRPC service
     const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
     expect(grpc).toBeDefined();
     expect(grpc.available).toBeTruthy();
 
-    // Add a dummy service
-    grpc.addService(DummyService);
-
-    // Verify the service was registered via addService
-    // Access internal state via the public getter
+    const echoService = await reviveEchoService();
+    grpc.addService(echoService, echoImpl);
     expect((grpc as unknown as { servicesCount: number }).servicesCount).toBe(1);
 
-    // Drive a real RPC request through app.fetch
-    const rpcRequest = new Request('http://localhost:0/grpc/example.DummyService/sayHello', {
+    const rpcRequest = new Request('http://localhost:0/grpc/example.EchoService/Echo', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({}),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'hello grpc' }),
     });
-
     const rpcResponse = await app.fetch(rpcRequest);
-    // Should return 200 with a valid response body (Connect handles the protocol)
-    // Note: 501 may be returned in some test environments where Connect handler
-    // dispatch differs; we accept both as valid RPC handling
-    expect([200, 501]).toContain(rpcResponse.status);
+    expect(rpcResponse.status).toBe(200);
+    // EXACT decoded body — the impl return value must appear verbatim.
+    const body = await rpcResponse.json() as { response: string };
+    expect(body).toEqual({ response: 'echo: hello grpc' });
 
-    // Non-RPC request should also return 404
-    const normalRequest = new Request('http://localhost:0/health', {
-      method: 'GET',
-    });
-    const normalResponse = await app.fetch(normalRequest);
+    // Non-RPC request falls through to Hono (no route) → 404.
+    const normalResponse = await app.fetch(
+      new Request('http://localhost:0/health', { method: 'GET' }),
+    );
     expect(normalResponse.status).toBe(404);
 
     await app.stop();
   });
 
-  it('should respect custom basePath option', async () => {
+  it('honors a custom basePath and returns the correct body', async () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), GrpcPlugin({ basePath: '/api/grpc' })],
     });
-
     await app.start({ port: 0 });
 
     const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-    grpc.addService(DummyService);
+    grpc.addService(await reviveEchoService(), echoImpl);
 
-    // Request at custom basePath should be handled (or at least not 404 from path mismatch)
-    const rpcRequest = new Request('http://localhost:0/api/grpc/example.DummyService/sayHello', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({}),
-    });
+    const rpcResponse = await app.fetch(
+      new Request('http://localhost:0/api/grpc/example.EchoService/Echo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'custom' }),
+      }),
+    );
+    expect(rpcResponse.status).toBe(200);
+    expect(await rpcResponse.json() as { response: string }).toEqual({ response: 'echo: custom' });
 
-    const rpcResponse = await app.fetch(rpcRequest);
-    // Should return 200 (Connect handles the request)
-    // Note: 501 may be returned in some test environments
-    expect([200, 501]).toContain(rpcResponse.status);
-
-    // Request outside custom basePath should fall through
-    const outsideRequest = new Request('http://localhost:0/grpc/example.DummyService/sayHello', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    const outsideResponse = await app.fetch(outsideRequest);
-    expect(outsideResponse.status).toBe(404);
+    // Outside the custom basePath → falls through → 404.
+    const outside = await app.fetch(
+      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+    );
+    expect(outside.status).toBe(404);
 
     await app.stop();
   });
 
-  it('should not register reflection or health when disabled', async () => {
+  it('does not register reflection or health when both are disabled', async () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), GrpcPlugin({ reflection: false, health: false })],
     });
-
     await app.start({ port: 0 });
 
     const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-    grpc.addService(DummyService);
+    grpc.addService(await reviveEchoService(), echoImpl);
 
-    // Request to health endpoint should fall through (404 since no health plugin)
-    const healthRequest = new Request('http://localhost:0/grpc/grpc.health.v1.Health/Check', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    const healthResponse = await app.fetch(healthRequest);
+    // Health endpoint is NOT registered → unknown RPC path → 404.
+    const healthResponse = await app.fetch(
+      new Request('http://localhost:0/grpc/grpc.health.v1.Health/Check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+    );
     expect(healthResponse.status).toBe(404);
 
     await app.stop();

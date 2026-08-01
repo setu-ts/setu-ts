@@ -44,9 +44,14 @@ interface ConnectModule {
 
 /**
  * Shape of the @bufbuild/protobuf module.
+ *
+ * `createFileRegistry` revives a {@linkcode FileDescriptorSet} into a
+ * `FileRegistry` (the ONLY `@bufbuild/protobuf` entry point that can resolve
+ * service descriptors from a serialized descriptor set — `createRegistry`
+ * cannot, and silently returns a registry in which `getService()` is missing).
  */
 interface ProtobufModule {
-  createRegistry(fdSet: unknown): { getService(name: string): unknown };
+  createFileRegistry(fdSet: unknown): { getService(name: string): unknown };
   fromBinary(schema: unknown, bytes: Uint8Array): unknown;
 }
 
@@ -88,7 +93,7 @@ function createConnectRuntime(
   wkt: WktModule,
   proto: ProtocolModule,
 ): ConnectRuntime {
-  const { createRegistry, fromBinary } = protobuf;
+  const { createFileRegistry, fromBinary } = protobuf;
   const { FileDescriptorSetSchema } = wkt;
 
   return {
@@ -114,7 +119,9 @@ function createConnectRuntime(
     reviveDescriptorSet(base64: string): unknown {
       const bytes = decodeBase64(base64);
       const fdSet = fromBinary(FileDescriptorSetSchema, bytes);
-      return createRegistry(fdSet);
+      // createFileRegistry is the ONLY entry point that resolves services from a
+      // serialized FileDescriptorSet; createRegistry returns an empty registry.
+      return createFileRegistry(fdSet);
     },
 
     getService(registry: unknown, serviceName: string): unknown {
@@ -123,7 +130,10 @@ function createConnectRuntime(
     },
 
     createRegistry(fdSet: unknown): unknown {
-      return createRegistry(fdSet);
+      // Build a FileRegistry from a FileDescriptorSet (createFileRegistry).
+      // Kept under the historical name `createRegistry` to avoid widening the
+      // internal ConnectRuntime port's surface; the underlying call is correct.
+      return createFileRegistry(fdSet);
     },
   };
 }

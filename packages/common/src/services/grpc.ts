@@ -91,7 +91,13 @@ export interface IGrpcService {
    */
   addService<TDef extends GrpcServiceDefinition>(
     definition: TDef,
-    implementation?: Partial<ServiceImpl<TDef>>,
+    /**
+     * Optional service implementation object mapping method local-names to
+     * handler functions. Typed permissively (methods are `unknown`) because the
+     * plugin is generic over the application's generated descriptors and cannot
+     * enumerate concrete method signatures.
+     */
+    implementation?: Partial<ServiceImpl>,
   ): void;
 
   /**

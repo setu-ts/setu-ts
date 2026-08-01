@@ -1,7 +1,17 @@
 /**
- * Connect router builder — registers services, health, and reflection onto a
- * Connect router using the REAL Connect API, then produces a dispatch map
- * keyed by full path.
+ * Connect router builder — registers real Protobuf-ES {@linkcode DescService}
+ * values (app services plus the revived health/reflection services) onto a
+ * Connect router, then produces a dispatch map keyed by full request path.
+ *
+ * Connect's `router.service()` REQUIRES a real `DescService` — its `methods`
+ * must be an array of method descriptors whose `input`/`output` carry real
+ * field descriptors, because Connect serializes a response by walking those
+ * fields. Hand-built objects with empty-field messages serialize to `{}` (the
+ * empty-body bug this module was refactored to eliminate), and plain
+ * `{ typeName, methods: {...} }` objects make Connect throw
+ * `service.methods is not iterable`. Applications therefore register generated
+ * `DescService` values (or ones revived from an embedded `FileDescriptorSet`),
+ * and this builder passes them straight through to Connect.
  *
  * @module
  */
@@ -10,18 +20,31 @@ import { normalizeBasePath } from './rpc-dispatcher.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
-/** Shape of a service definition with a typeName property. */
+/** Structural shape of a service definition the builder reads for routing/reflection. */
 interface ServiceDefinitionLike {
+  /** Fully-qualified service name, e.g. `"package.Service"`. */
   typeName?: string;
-  methods?: Record<string, unknown>;
+  /** Discriminator — real Protobuf-ES descriptors carry `kind: 'service'`. */
+  kind?: string;
+  /**
+   * Method descriptors. For a real `DescService` this is an array of method
+   * descriptors; legacy structural definitions may use a record.
+   */
+  methods?: Array<{ name?: string; localName?: string }> | Record<string, unknown>;
+}
+
+/** A service entry the builder consumes. */
+interface ServiceEntry {
+  definition: unknown;
+  implementation?: unknown;
 }
 
 /**
- * Builds a Connect router and returns a dispatch map plus the registry for
- * reflection queries.
+ * Builds a Connect router and returns a dispatch map plus a best-effort
+ * reflection registry.
  *
- * Uses the real Connect runtime API: createConnectRouter() + router.service()
- * + createFetchHandler() from @connectrpc/connect/protocol.
+ * Uses the real Connect runtime API: `createConnectRouter()` +
+ * `router.service()` + `createFetchHandler()` from `@connectrpc/connect`.
  */
 export function buildConnectRouter({
   connectRuntime,
@@ -35,10 +58,7 @@ export function buildConnectRouter({
   basePath: string;
   reflection: boolean;
   health: boolean;
-  services: Array<{
-    definition: unknown;
-    implementation?: unknown;
-  }>;
+  services: ReadonlyArray<ServiceEntry>;
   embeddedDescriptors: EmbeddedDescriptors;
 }): {
   dispatchMap: Map<string, (request: Request) => Promise<Response>>;
@@ -46,7 +66,7 @@ export function buildConnectRouter({
 } {
   const normalizedBase = normalizeBasePath(basePath);
 
-  // Track service type names to detect duplicates
+  // Detect duplicate service type names up front (defensive — GrpcService also guards).
   const typeNames = new Set<string>();
   for (const serviceDef of services) {
     const def = serviceDef.definition as ServiceDefinitionLike;
@@ -59,38 +79,22 @@ export function buildConnectRouter({
     }
   }
 
-  // Build the real Connect router
   const router = connectRuntime.createConnectRouter();
 
-  // Register app services with their implementations
+  // Register each app service. The definition MUST be a real Protobuf-ES
+  // DescService (kind: 'service'); Connect walks its method descriptors to
+  // serialize request/response bodies.
   for (const serviceDef of services) {
     const def = serviceDef.definition as ServiceDefinitionLike;
-    const typeName = def.typeName;
-    if (!typeName) continue;
-
-    const impl = serviceDef.implementation || {};
-    const methods = def.methods || {};
-
-    // Check if this is already a real DescService (has kind: 'service')
-    const isRealDescService = (def as { kind?: string }).kind === 'service';
-
-    if (isRealDescService) {
-      // Pass through real DescService directly
-      router.service(
-        def as { typeName: string },
-        impl as Record<string, (...args: unknown[]) => unknown>,
-      );
-    } else {
-      // Build a proper DescService from the fake definition
-      const serviceDesc = buildDescService(typeName, methods);
-      router.service(
-        serviceDesc as { typeName: string },
-        impl as Record<string, (...args: unknown[]) => unknown>,
-      );
-    }
+    if (!def.typeName) continue;
+    const impl = (serviceDef.implementation ?? {}) as Record<
+      string,
+      (...args: unknown[]) => unknown
+    >;
+    router.service(serviceDef.definition as { typeName: string }, impl);
   }
 
-  // Register health service if enabled
+  // Register the built-in Health service (revived from the embedded descriptor set).
   if (health) {
     const healthServiceDesc = reviveServiceDescriptor(
       connectRuntime,
@@ -102,7 +106,7 @@ export function buildConnectRouter({
     }
   }
 
-  // Register reflection service if enabled
+  // Register the built-in Server Reflection service (revived from the embedded descriptor set).
   if (reflection) {
     const reflectionServiceDesc = reviveServiceDescriptor(
       connectRuntime,
@@ -114,250 +118,47 @@ export function buildConnectRouter({
     }
   }
 
-  // Build the dispatch map from the router's handlers
-  // Each handler is a UniversalHandler (function with requestPath property)
-  // We need to convert it to a fetch handler using createFetchHandler
+  // Build the dispatch map keyed by `basePath + requestPath`. Each Connect
+  // `UniversalHandler` carries a `requestPath` (e.g. `/pkg.Svc/Method`); the
+  // runtime's `createFetchHandler` adapts it to a fetch `(Request) => Response`.
   const dispatchMap = new Map<string, (request: Request) => Promise<Response>>();
   for (const handler of router.handlers) {
     const requestPath = (handler as { requestPath: string }).requestPath;
     const fullPath = normalizedBase + requestPath;
-    // Convert the universal handler to a fetch handler using the runtime's createFetchHandler
     const fetchHandler = connectRuntime.createFetchHandler(
       handler as unknown as (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
     );
     dispatchMap.set(fullPath, fetchHandler);
   }
 
-  // Build the reflection registry if needed
+  // Best-effort reflection registry (names only — actual reflection answers are
+  // produced by the dedicated reflection service). Computed when health or
+  // reflection is enabled so callers can enumerate registered services.
   let registry: unknown = null;
   if (reflection || health) {
-    registry = buildReflectionRegistry(
-      connectRuntime,
-      embeddedDescriptors,
-      services,
-    );
+    registry = buildReflectionRegistry(services);
   }
 
   return { dispatchMap, registry };
 }
 
 /**
- * Builds a proper DescService-like object from a fake service definition.
- * This ensures Connect's router can properly create handlers.
+ * Extracts method names from a service's `methods`, tolerating both a real
+ * `DescService` (array of method descriptors) and a legacy record shape.
  */
-function buildDescService(typeName: string, methods: Record<string, unknown>): {
-  kind: 'service';
-  typeName: string;
-  name: string;
-  file: {
-    kind: 'file';
-    name: string;
-    dependencies: unknown[];
-    enums: unknown[];
-    messages: unknown[];
-    extensions: unknown[];
-    services: unknown[];
-    deprecated: boolean;
-    edition: string;
-    proto: {
-      name: string;
-      package: string;
-      dependency: string[];
-      messageType: unknown[];
-      enumType: unknown[];
-      service: unknown[];
-      extension: unknown[];
-      syntax: string;
-    };
-    toString: () => string;
-  };
-  methods: Array<{
-    kind: 'rpc';
-    name: string;
-    localName: string;
-    parent: { kind: 'service'; typeName: string };
-    methodKind: 'unary' | 'server_streaming' | 'client_streaming' | 'bidi_streaming';
-    input: {
-      kind: 'message';
-      typeName: string;
-      name: string;
-      file: { name: string; edition: string };
-      fields: unknown[];
-      field: Record<string, unknown>;
-      oneofs: unknown[];
-      members: unknown[];
-      nestedEnums: unknown[];
-      nestedMessages: unknown[];
-      nestedExtensions: unknown[];
-      deprecated: boolean;
-      proto: { name: string; oneofDecl: unknown[]; options: Record<string, unknown> };
-      toString: () => string;
-    };
-    output: {
-      kind: 'message';
-      typeName: string;
-      name: string;
-      file: { name: string; edition: string };
-      fields: unknown[];
-      field: Record<string, unknown>;
-      oneofs: unknown[];
-      members: unknown[];
-      nestedEnums: unknown[];
-      nestedMessages: unknown[];
-      nestedExtensions: unknown[];
-      deprecated: boolean;
-      proto: { name: string; oneofDecl: unknown[]; options: Record<string, unknown> };
-      toString: () => string;
-    };
-    idempotency: 'IDEMPOTENCY_UNKNOWN';
-    deprecated: boolean;
-    proto: {
-      name: string;
-      inputType: string;
-      outputType: string;
-      options: Record<string, unknown>;
-      clientStreaming: boolean;
-      serverStreaming: boolean;
-    };
-    toString: () => string;
-  }>;
-  method: Record<string, unknown>;
-  deprecated: boolean;
-  proto: {
-    name: string;
-    method: Array<{
-      name: string;
-      inputType: string;
-      outputType: string;
-      clientStreaming: boolean;
-      serverStreaming: boolean;
-      options: Record<string, unknown>;
-    }>;
-  };
-  toString: () => string;
-} {
-  const serviceName = typeName.split('.').pop() ?? typeName;
-  const packageName = typeName.substring(0, typeName.lastIndexOf('.'));
-  const fileName = `${packageName || 'example'}.proto`;
-
-  // Create a shared file descriptor that all messages will reference
-  const fileDesc = {
-    kind: 'file' as const,
-    name: fileName,
-    dependencies: [],
-    enums: [],
-    messages: [],
-    extensions: [],
-    services: [],
-    deprecated: false,
-    edition: 'EDITION_PROTO3',
-    proto: {
-      name: typeName.replace(/\./g, '/'),
-      package: packageName,
-      dependency: [],
-      messageType: [],
-      enumType: [],
-      service: [],
-      extension: [],
-      syntax: 'proto3',
-    },
-    toString: () => typeName,
-  };
-
-  const methodList = Object.keys(methods).map((methodName) => {
-    const inputMsgName = `${typeName}.${methodName}Request`;
-    const outputMsgName = `${typeName}.${methodName}Response`;
-
-    const inputMsg = {
-      kind: 'message' as const,
-      typeName: inputMsgName,
-      name: `${methodName}Request`,
-      file: fileDesc as { name: string; edition: string },
-      fields: [],
-      field: {},
-      oneofs: [],
-      members: [],
-      nestedEnums: [],
-      nestedMessages: [],
-      nestedExtensions: [],
-      deprecated: false,
-      proto: { name: `${methodName}Request`, oneofDecl: [], options: {} },
-      toString: () => inputMsgName,
-    };
-
-    const outputMsg = {
-      kind: 'message' as const,
-      typeName: outputMsgName,
-      name: `${methodName}Response`,
-      file: fileDesc as { name: string; edition: string },
-      fields: [],
-      field: {},
-      oneofs: [],
-      members: [],
-      nestedEnums: [],
-      nestedMessages: [],
-      nestedExtensions: [],
-      deprecated: false,
-      proto: { name: `${methodName}Response`, oneofDecl: [], options: {} },
-      toString: () => outputMsgName,
-    };
-
-    return {
-      kind: 'rpc' as const,
-      name: methodName,
-      localName: methodName,
-      parent: null as unknown as { kind: 'service'; typeName: string },
-      methodKind: 'unary' as const,
-      input: inputMsg,
-      output: outputMsg,
-      idempotency: 'IDEMPOTENCY_UNKNOWN' as const,
-      deprecated: false,
-      proto: {
-        name: methodName,
-        inputType: inputMsgName,
-        outputType: outputMsgName,
-        options: {},
-        clientStreaming: false,
-        serverStreaming: false,
-      },
-      toString: () => methodName,
-    };
-  });
-
-  // Set parent references for methods
-  const serviceDesc = {
-    kind: 'service' as const,
-    typeName,
-    name: serviceName,
-    file: fileDesc,
-    methods: methodList,
-    method: Object.fromEntries(methodList.map((m) => [m.name, m])),
-    deprecated: false,
-    proto: {
-      name: serviceName,
-      method: methodList.map((m) => ({
-        name: m.name,
-        inputType: m.proto.inputType,
-        outputType: m.proto.outputType,
-        clientStreaming: m.proto.clientStreaming,
-        serverStreaming: m.proto.serverStreaming,
-        options: m.proto.options,
-      })),
-    },
-    toString: () => typeName,
-  };
-
-  // Set parent references after creating the service descriptor
-  for (const method of serviceDesc.methods) {
-    (method as { parent: unknown }).parent = serviceDesc;
+function extractMethodNames(methods: ServiceDefinitionLike['methods']): string[] {
+  if (Array.isArray(methods)) {
+    return methods.map((m) => m.localName ?? m.name ?? '').filter((n) => n.length > 0);
   }
-
-  return serviceDesc;
+  if (methods && typeof methods === 'object') {
+    return Object.keys(methods as Record<string, unknown>);
+  }
+  return [];
 }
 
 /**
- * Revives a service descriptor from the embedded descriptor set.
- * Returns the DescService for the given service name, or null if not found.
+ * Revives a real DescService from an embedded base64 FileDescriptorSet.
+ * Returns the DescService for the given service name, or `undefined` if absent.
  */
 function reviveServiceDescriptor(
   connectRuntime: ConnectRuntime,
@@ -369,26 +170,22 @@ function reviveServiceDescriptor(
 }
 
 /**
- * Builds a reflection registry used by the gRPC reflection service.
+ * Builds a best-effort reflection registry from the registered app services.
+ * Used to enumerate service names and methods for server reflection.
  */
-function buildReflectionRegistry(
-  _connectRuntime: ConnectRuntime,
-  _embeddedDescriptors: EmbeddedDescriptors,
-  services: Array<{ definition: unknown; implementation?: unknown }>,
-): unknown {
+function buildReflectionRegistry(services: ReadonlyArray<ServiceEntry>): unknown {
   return {
     files: services.map((s) => {
       const def = s.definition as ServiceDefinitionLike;
       return {
-        name: def.typeName || '',
+        name: def.typeName ?? '',
         package: '',
-        methods: Object.keys(def.methods || {}),
+        methods: extractMethodNames(def.methods),
       };
     }),
     listServices: () =>
-      services.map((s) => ((s.definition as ServiceDefinitionLike)?.typeName) || ''),
-    getService: (name: string) => {
-      return services.find((s) => ((s.definition as ServiceDefinitionLike)?.typeName) === name);
-    },
+      services.map((s) => (s.definition as ServiceDefinitionLike)?.typeName ?? ''),
+    getService: (name: string) =>
+      services.find((s) => (s.definition as ServiceDefinitionLike)?.typeName === name),
   };
 }
