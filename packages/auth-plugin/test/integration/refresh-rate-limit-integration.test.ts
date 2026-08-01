@@ -77,6 +77,7 @@ function registerAuthPlugin(runtime: FakeRuntime): Map<string, unknown> {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
     },
     runtime,

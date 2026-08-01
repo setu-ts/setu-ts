@@ -71,6 +71,7 @@ function createFakeLifecycle(): ILifecycleApi {
     onRequest: () => {},
     onResponse: () => {},
     onError: () => {},
+    onStopping: () => {},
     onShutdown: () => {},
     onClose: (fn: () => Promise<void>): void => {
       closeFns.push(fn);
@@ -182,6 +183,7 @@ describe('DatabasePlugin integration', () => {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
       onClose: (fn: () => Promise<void>) => closeFns.push(fn),
     };

@@ -3849,6 +3849,11 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 - [ ] All documentation
 - [ ] `deno doc` API reference generation
 - [ ] API reference
+- [ ] Reconcile the ARCHITECTURE.md §8 "Package Overview" diagram with the workspace member list. It
+      graphs a subset of the members; ten were missing as of M50 (`exceptions`, `sse-plugin`,
+      `websocket-plugin`, `worker-pool-plugin`, `realtime-backplane-plugin`, `react-router-plugin`,
+      `session-plugin`, and the three starters). M50 added only its own node — the backlog is doc
+      debt from seven prior milestones and wants a full pass, not another incremental patch.
 
 ---
 
@@ -3860,6 +3865,11 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 > `listen`); CF Workers (M23) deploys via `wrangler deploy`, not a container — add a Workers deploy
 > path rather than forcing it into the Docker/k8s model. (M24c's OTel Collector config is referenced
 > here per that milestone's note.)
+>
+> **Scope boundary with M50.** This milestone owns the platform side of discovery — the Kubernetes
+> `Service` and `EndpointSlice` objects, and any Consul deployment. M50 owns the **app side**:
+> resolving a name to instances, balancing across them, watching for changes, and ejecting outliers.
+> Kubernetes DNS alone covers none of the latter four.
 
 ### Docker
 
@@ -4803,6 +4813,93 @@ full-stack story coherent.
 
 ---
 
+## Milestone 50: Service Discovery — Finding Other Services ✅ COMPLETE
+
+**Objective:** the framework can be _found_ by an orchestrator but cannot _find_ anything.
+`packages/kernel`'s `ServiceRegistry` is an in-process capability registry (same word, unrelated
+concern), `health-plugin` produces readiness probes a discovery system consumes without ever
+registering anywhere, and `packages/sdk` takes a fixed `baseUrl`. The only inter-service path that
+works today is brokered messaging (M14/M14c/M14d), which needs no discovery by construction because
+callers address a topic. Direct service-to-service HTTP — the path M49's gRPC plugin opens on the
+server side — has no way to turn a logical service name into an address.
+
+**Package:** `packages/service-discovery-plugin`
+
+### Scope
+
+- `IServiceDiscovery` + `ServiceInstance`/`PickOptions`/`LoadBalanceStrategy`/`ServiceOutcome` in
+  `common`, plus a new `CAPABILITIES.SERVICE_DISCOVERY = 'service-discovery'` token.
+- `ServiceDiscoveryPlugin` over a pluggable `DiscoveryProvider` port with five arms: `'static'`,
+  `'consul'`, `'kubernetes'`, `'dns'`, and `'custom'`. The option type is a union discriminated on
+  `provider`, so a missing per-arm credential is a **compile** error.
+- Monotonic-clock read-through cache with per-service in-flight coalescing, stale-on-failure, and
+  watch invalidation.
+- `watch()` change propagation: Consul blocking queries and Kubernetes watch streams (push), DNS and
+  static (polled). Without it every consumer polls on a TTL.
+- Outlier ejection with a panic threshold — a pool-membership filter, deliberately **not** a second
+  circuit breaker (M27 `wrap` breaks a call site; this removes a pool member while the call site
+  stays open).
+- Three balancing strategies (`round-robin`, `random`, `weighted-random`) over
+  `IRuntimeServices.randomBytes`.
+- Consul self-registration at `onBootstrap` and deregistration at `onStopping`.
+- A `service-discovery` health indicator and an `onClose` that unsubscribes every watch.
+
+### Two flagged widenings outside the package
+
+- **`IRuntimeServices.dns?: IDnsResolver`** (+ `SrvRecord`), implemented by the Node, Deno, and Bun
+  adapters and **omitted on Cloudflare Workers**, following the M44 `fs?` / M45 `workers?`
+  precedent. DNS-SRV cannot be expressed over `fetch`, and it is how Consul DNS, Kubernetes headless
+  services, and ECS Service Connect are actually consumed. `SrvRecord.host` is normalized because
+  Deno spells the field `target` and Node spells it `name` — passing either through would type-check
+  on both runtimes and produce `undefined` hostnames on one.
+- **`ILifecycleApi.onStopping`**, a new kernel lifecycle phase running at the very start of
+  `stop()`, before the application begins refusing requests. Deregistering in `onShutdown` — which
+  runs after the drain and after the socket closes — leaves Consul routing at a dead port for up to
+  a check interval on every rolling deploy. `Application.#doStop()` skips the phase entirely when no
+  hook is registered, so `stop()` is byte-for-byte unchanged for every existing application:
+  awaiting an already-resolved promise would still defer when `#stopping` flips and hand a 404 to a
+  request that used to get a 503, which a pre-existing kernel test caught.
+
+### Implementation files
+
+- `packages/common/src/services/service-discovery.ts`, `runtime.ts` (edit), `plugin.ts` (edit),
+  `tokens.ts` (edit), `index.ts` (edit)
+- `packages/kernel/src/lifecycle/lifecycle-manager.ts` (edit), `src/application/application.ts`
+  (edit)
+- `packages/runtime/src/adapters/shared/node-dns-resolver.ts`,
+  `src/adapters/deno/deno-dns-resolver.ts`, `src/services/cross-runtime.ts` (edit), the three
+  adapters (edit), `src/index.ts` (edit)
+- `packages/service-discovery-plugin/src/`: `index.ts`, `options.ts`, `errors.ts`,
+  `interfaces/index.ts`, `http/default-http.ts`, `http/ndjson.ts`,
+  `plugin/service-discovery-plugin.ts`, `services/service-discovery-service.ts`,
+  `services/ejection-tracker.ts`, `balancer/load-balancer.ts`, `url/instance-url.ts`,
+  `providers/{provider-factory,static-provider,consul-provider,consul-watch,kubernetes-provider,kubernetes-watch,dns-provider}.ts`
+
+### Deliverables
+
+- [x] `IServiceDiscovery` contract and `SERVICE_DISCOVERY` token in `common`
+- [x] `IRuntimeServices.dns?` with Node/Deno/Bun resolvers and the documented Workers omission
+- [x] `ILifecycleApi.onStopping` in `common` and `kernel`
+- [x] `ServiceDiscoveryPlugin` with five provider arms
+- [x] Read-through cache, coalescing, stale-on-failure, watch invalidation
+- [x] Consul blocking-query and Kubernetes watch-stream change propagation
+- [x] Outlier ejection with panic threshold and all-ejected fallback
+- [x] Three load-balancing strategies
+- [x] Consul self-registration and deregistration
+- [x] `service-discovery` health indicator and `onClose`
+- [x] Doc deliverables C1–C5 (ARCHITECTURE, PUBLIC_API, README, ROADMAP)
+
+### Out of scope
+
+- Wiring discovery into `packages/sdk` or M49's gRPC client. M35 owns the SDK's `baseUrl` and M49
+  owns the gRPC client story, and neither may import this plugin. The composition recipe in the
+  package README works today via `resolveUrl`.
+- Cluster-wide ejection state. It would run over `CAPABILITIES.REALTIME_BACKPLANE` (M47) and is a
+  distributed-consensus problem, not a discovery one.
+- Docker/Kubernetes/Consul manifests exercising this against a real cluster — M39.
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -5024,3 +5121,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 46        | ✅     | websocket-plugin                  |
 | 47        | ✅     | alpha-3 limitations               |
 | 48        | ✅     | session-plugin                    |
+| 50        | ✅     | service-discovery-plugin          |

@@ -89,6 +89,7 @@ function createFakeContext(runtime: ReturnType<typeof createFakeRuntime>): {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
     },
     runtime,

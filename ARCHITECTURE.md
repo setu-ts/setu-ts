@@ -645,16 +645,28 @@ Plugins never communicate directly. They communicate through:
 
 Plugins register lifecycle hooks via `ctx.lifecycle`:
 
-| Hook          | When                      | Use Case                         |
-| ------------- | ------------------------- | -------------------------------- |
-| `onRegister`  | Plugin registration       | Initialize plugin state          |
-| `onInit`      | All plugins registered    | Validate cross-plugin state      |
-| `onBootstrap` | Server about to start     | Final preparation                |
-| `onRequest`   | Every request             | Per-request setup                |
-| `onResponse`  | Every response            | Per-response cleanup             |
-| `onError`     | Unhandled error           | Error logging, alerting          |
-| `onShutdown`  | Application shutting down | Close connections, flush buffers |
-| `onClose`     | Application closed        | Final cleanup                    |
+| Hook          | When                               | Use Case                           |
+| ------------- | ---------------------------------- | ---------------------------------- |
+| `onRegister`  | Plugin registration                | Initialize plugin state            |
+| `onInit`      | All plugins registered             | Validate cross-plugin state        |
+| `onBootstrap` | Server about to start              | Final preparation                  |
+| `onRequest`   | Every request                      | Per-request setup                  |
+| `onResponse`  | Every response                     | Per-response cleanup               |
+| `onError`     | Unhandled error                    | Error logging, alerting            |
+| `onStopping`  | `stop()` begins, **still serving** | Deregister from a service registry |
+| `onShutdown`  | Application shutting down          | Close connections, flush buffers   |
+| `onClose`     | Application closed                 | Final cleanup                      |
+
+`onStopping` is the only hook that runs while the application is still answering requests normally:
+it fires at the very start of `stop()`, **before** the application begins refusing new requests with
+a 503 and before the socket closes. That ordering is what makes it the right home for telling the
+outside world to stop routing here — deregistering from service discovery, for instance.
+Deregistering in `onShutdown` instead means the socket is already closed by the time the registry
+hears about it, so callers keep being routed at a dead port for up to one health-check interval on
+every rolling deploy. Hooks run LIFO and are awaited, so a slow hook delays shutdown and a rejecting
+one surfaces from `stop()` — but only after the rest of the shutdown has run, so a failing hook
+cannot leave an application that keeps serving and can never be stopped; with no hook registered the
+phase is skipped entirely and `stop()` behaves exactly as it did before.
 
 ### Extension Points
 
@@ -836,8 +848,16 @@ interface IRuntimeServices {
   exit(code?: number): never;
 
   fs?: IFileSystem;
+  workers?: IWorkerHost;
+  dns?: IDnsResolver;
 }
 ```
+
+The optional members are capabilities a runtime may not have. Cloudflare Workers omits all three —
+`dns` in particular because its network access is `fetch`, which resolves names internally and
+exposes no lookup surface. An adapter **omits** an absent key entirely rather than assigning
+`undefined` to it, which `exactOptionalPropertyTypes` requires and which lets a consumer distinguish
+"not supported here" with a plain `in` check.
 
 ### Runtime Adapters
 
@@ -976,6 +996,7 @@ graph TB
         messaging[messaging-plugin]
         queue[queue-plugin]
         storage[storage-plugin]
+        service-discovery[service-discovery-plugin]
     end
 
     subgraph Security Plugins
@@ -1074,6 +1095,7 @@ graph TB
     kernel --> feature-flags
     common --> multi-tenancy
     kernel --> multi-tenancy
+    common --> service-discovery
 ```
 
 ### Package Details

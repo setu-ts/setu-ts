@@ -8,6 +8,44 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@hono-enterprise/service-discovery-plugin`** (Milestone 50) — a new package registering an
+  `IServiceDiscovery` under a new `CAPABILITIES.SERVICE_DISCOVERY` token, so an application can turn
+  a logical service name into a reachable address. Five provider arms — `'static'`, `'consul'`,
+  `'kubernetes'` (EndpointSlices), `'dns'` (`SRV` and address records), and `'custom'` — behind one
+  `DiscoveryProvider` port, with the option type a **union discriminated on `provider`** so a
+  missing per-arm credential is a compile error rather than a startup throw. Zero npm dependencies:
+  the HTTP providers run on web-standard `fetch` and the DNS provider on the new optional
+  `IRuntimeServices.dns`. Adds a monotonic-clock read-through cache with per-service in-flight
+  coalescing and stale-on-failure; push-based `watch()` over Consul blocking queries (both
+  documented index hazards handled — a backwards index resets to zero, an index of `0` becomes `1`
+  to avoid busy-looping older servers) and Kubernetes watch streams (used as a change **signal**
+  rather than a delta log, with `410 Gone` resync); three balancing strategies over
+  `IRuntimeServices.randomBytes`; and outlier ejection with a panic-threshold cap and an all-ejected
+  fallback. Ejection is deliberately **not** a second circuit breaker: `wrap` breaks a call site,
+  ejection removes a pool member while the call site stays open.
+- **`IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`
+  and `CAPABILITIES.SERVICE_DISCOVERY` in `@hono-enterprise/common`** (Milestone 50) — the contract
+  a consumer types the resolved capability as, without importing the plugin.
+- **`IRuntimeServices.dns?: IDnsResolver`** and `SrvRecord` in `@hono-enterprise/common`, with
+  `createNodeDnsResolver` (Node + Bun, over `node:dns/promises`) and `createDenoDnsResolver` (over
+  `Deno.resolveDns`) exported from `@hono-enterprise/runtime` (Milestone 50). Purely additive,
+  following the `fs?` / `workers?` precedent; **Cloudflare Workers omits the key entirely**, since
+  its network access is `fetch`, which resolves names internally and exposes no lookup surface.
+  `SrvRecord.host` is a normalized name on purpose — Deno spells the field `target`, Node spells it
+  `name`, and passing either through unchanged would type-check on both runtimes while producing
+  `undefined` hostnames on one.
+- **`ILifecycleApi.onStopping`** in `@hono-enterprise/common` and `@hono-enterprise/kernel`
+  (Milestone 50) — a new lifecycle phase running at the very start of `stop()`, **before** the
+  application begins refusing new requests and before the socket closes. It is the only hook that
+  fires while the application is still serving normally, which is what makes it correct for
+  deregistering from a service registry: doing that in `onShutdown` leaves callers routed at a
+  closed port for up to one health-check interval on every rolling deploy. Listed under Added rather
+  than Changed because no existing behavior moves — `Application.#doStop()` skips the phase entirely
+  when no hook is registered, so `stop()` is byte-for-byte unchanged for every application that does
+  not opt in. (Awaiting an already-resolved promise instead would still defer when the shutting-down
+  flag flips, handing a 404 to a request that used to get a 503 — a pre-existing kernel test caught
+  exactly that.)
+
 - **`honoe new --template full-stack`** (Milestone 36c) — scaffolds a React Router 8 SSR
   application: the `routes → features → services → models` layering, `flatRoutes` `_app`/`_auth`
   layout groups, the `~/*` alias, the `.server.ts` convention, one worked feature, and the Vite

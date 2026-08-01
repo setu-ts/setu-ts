@@ -19,10 +19,11 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: `v0.1.0-alpha.3` is published — all 38 packages are live on JSR.**
+> **Status: 38 packages were published in `v0.1.0-alpha.3` and are live on JSR.** The workspace has
+> since grown to 43 packages; the five added after that release ship with the next one.
 >
-> The kernel, the runtime layer, 31 plugins, the test utilities, the client SDK, and the `honoe` CLI
-> are implemented, tested, and documented.
+> The kernel, the runtime layer, 33 plugins, the three starters, the test utilities, the client SDK,
+> and the `honoe` CLI are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
 > `deno add jsr:@hono-enterprise/kernel` fails with _"has only pre-release versions available"_.
@@ -125,6 +126,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Scheduler   | ✅     | `scheduler-plugin`   | Cron, interval, delayed jobs with distributed locking          |
 | Worker pool | ✅     | `worker-pool-plugin` | CPU-bound work on real worker threads, off the event loop      |
 
+### Service-to-service
+
+| Feature           | Status | Package                    | Description                                                     |
+| ----------------- | ------ | -------------------------- | --------------------------------------------------------------- |
+| Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection |
+
 ### Real-time and rendering
 
 | Feature               | Status | Package                     | Description                                                   |
@@ -209,8 +216,8 @@ cd my-app && honoe generate service billing
 
 The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 36 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`),
-every plugin in the tables above, and the `cli`.
+All 43 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`),
+every plugin in the tables above, the three starters, the `sdk`, and the `cli`.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -311,13 +318,13 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 hono-enterprise/
-├── packages/              # 41 workspace members — 38 published, 3 stubs
+├── packages/              # 43 workspace members, all published
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
 │   ├── exceptions/        # Exception factories and error-handler middleware
 │   ├── testing/           # Test utilities
-│   ├── *-plugin/          # 30 capability plugins
+│   ├── *-plugin/          # 33 capability plugins
 │   ├── cli/               # CLI tool — `honoe`, project scaffolding and code generation
 │   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
 │   └── starters/          # Plugin bundles — REST, microservice, full-stack starters (M36)

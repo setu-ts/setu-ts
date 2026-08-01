@@ -17,6 +17,7 @@ function createFakeDenoHost(overrides: Partial<DenoHost> = {}): DenoHost {
     exit: (code?: number) => {
       throw new Error(`exit called with code ${code ?? 0}`);
     },
+    resolveDns: (_query: string, _recordType: 'SRV' | 'A' | 'AAAA') => Promise.resolve([]),
     readFile: (path: string) => {
       const data = files.get(path);
       if (data === undefined) {
@@ -242,6 +243,7 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
       readDir: async function* () {},
       mkdir: () => Promise.resolve(),
       remove: () => Promise.resolve(),
+      resolveDns: (_query: string, _recordType: 'SRV' | 'A' | 'AAAA') => Promise.resolve([]),
     };
     const services = createDenoRuntimeServices(host);
     const info = await services.fs!.stat('/any');

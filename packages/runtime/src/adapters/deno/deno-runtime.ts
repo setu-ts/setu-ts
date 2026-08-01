@@ -9,9 +9,16 @@
  * @module
  */
 
-import type { IFileSystem, IRuntimeServices, IWorkerHost } from '@hono-enterprise/common';
+import type {
+  IDnsResolver,
+  IFileSystem,
+  IRuntimeServices,
+  IWorkerHost,
+} from '@hono-enterprise/common';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 import { createWebWorkerHost } from '../shared/web-worker-host.ts';
+import { createDenoDnsResolver } from './deno-dns-resolver.ts';
+import type { DenoSrvRecord } from './deno-dns-resolver.ts';
 
 /**
  * Minimal interface covering the Deno-specific operations used by this adapter.
@@ -44,6 +51,10 @@ export interface DenoHost {
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   /** Remove a file or directory. */
   remove(path: string, options?: { recursive?: boolean }): Promise<void>;
+  /** Resolves SRV records. */
+  resolveDns(query: string, recordType: 'SRV'): Promise<DenoSrvRecord[]>;
+  /** Resolves address records. */
+  resolveDns(query: string, recordType: 'A' | 'AAAA'): Promise<string[]>;
 }
 
 /** File info returned by DenoHost.stat(). */
@@ -64,11 +75,13 @@ export interface DenoDirEntry {
  *
  * @param host - Injected Deno host (defaults to real Deno global)
  * @param workers - Injected worker host (defaults to the web `Worker` host)
+ * @param dns - Injected DNS resolver (defaults to one over the host's `resolveDns`)
  * @returns Complete runtime services for Deno
  */
 export function createDenoRuntimeServices(
   host: DenoHost = Deno as unknown as DenoHost,
   workers: IWorkerHost = createWebWorkerHost(),
+  dns: IDnsResolver = createDenoDnsResolver(host),
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => host.readFile(path),
@@ -100,5 +113,6 @@ export function createDenoRuntimeServices(
     exit: (code?: number) => host.exit(code),
     fs,
     workers,
+    dns,
   });
 }

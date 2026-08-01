@@ -77,6 +77,7 @@ function createFakeContext(runtime: IRuntimeServices): {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
       onClose: () => {},
     },

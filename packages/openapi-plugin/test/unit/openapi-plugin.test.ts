@@ -85,6 +85,7 @@ describe('OpenApiPlugin', () => {
       },
       lifecycle: {
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
       },
       runtime: {

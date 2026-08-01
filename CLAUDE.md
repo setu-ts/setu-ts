@@ -825,6 +825,79 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `useWorkspacePackages` mapped starters to `packages/<name>` (they live under `packages/starters/`)
   and mangled the `~/` alias. Also added a duplicate-path guard, since `findExisting` probes the
   filesystem and cannot see a path planned twice inside one project) — complete (PR #108)
+- **Milestone 50** (`packages/service-discovery-plugin` — the capability the framework had none of:
+  it can be _found_ by an orchestrator but cannot _find_ anything. The kernel's `ServiceRegistry` is
+  an in-process capability registry (same word, unrelated concern), `health-plugin` produces probes
+  a discovery system consumes without ever registering anywhere, and `sdk` takes a fixed `baseUrl`.
+  Brokered messaging needs no discovery by construction — callers address a topic — so direct
+  service-to-service HTTP was the gap. `ServiceDiscoveryPlugin` registers an `IServiceDiscovery`
+  under a new `CAPABILITIES.SERVICE_DISCOVERY` token over a pluggable `DiscoveryProvider` port with
+  five arms (`'static'`, `'consul'`, `'kubernetes'` EndpointSlices, `'dns'`, `'custom'`); the option
+  type is a **union discriminated on `provider`**, so a missing per-arm credential is a compile
+  error rather than a startup throw (the M30 `ChannelConfig` precedent). **Zero npm dependencies** —
+  §12.2's inject-or-lazy pattern collapses to inject-only because Consul and the Kubernetes API
+  server are plain HTTP JSON, so one `IDiscoveryHttp` seam with a buffered `request` AND a streaming
+  `stream` (Consul's blocking-query protocol lives entirely in the `X-Consul-Index` **header**; a
+  Kubernetes watch is a chunked body `text()` would never resolve) covers both providers. Cache is
+  read-through on the **monotonic** clock with per-service in-flight coalescing (the M47
+  LaunchDarkly precedent) and stale-on-failure; a watch event invalidates that name immediately, so
+  the TTL is a safety net rather than the freshness mechanism. Consul's two documented index hazards
+  are handled as requirements, not defensive extras: a **backwards** index after a server restart
+  resets to `0` (otherwise the client misses updates for an unbounded time) and an index of `0`
+  becomes `1` (it busy-loops older servers — an incident no test would surface). The Kubernetes
+  watch is used as a change **SIGNAL**, not a delta log: any `ADDED`/`MODIFIED`/`DELETED` re-LISTs
+  and fires the full list, which removes the stateful slice-by-name merge where hand-rolled k8s
+  clients most often go wrong, at the cost of one extra LIST per change. `conditions.ready === nil`
+  means **ready** (treating `undefined` as not-ready would silently discard every endpoint in a
+  slice omitting the field), and Consul's `Service.Address` is an **empty string** for a service
+  registered without one, so the `Node.Address` fallback is mandatory — omitting it yields
+  `http://:8080`. Outlier ejection is deliberately a **different mechanism** from M27's circuit
+  breaker, not a duplicate: `wrap` breaks a CALL SITE (refusing healthy instances because unhealthy
+  ones failed), ejection removes a POOL MEMBER while the call site stays open; they compose by
+  re-`pick()`ing inside the wrapped call. Envoy's two safeguards are load-bearing —
+  `maxEjectionPercent` caps concurrent ejections and an all-ejected pool falls back to the
+  unfiltered list, because a correlated failure otherwise converts a partial outage into a total
+  one. `pick` filters ejected instances while `resolve` does not, and `resolveUrl` funnels through
+  `pick` so both entry points read one configuration. Two flagged widenings outside the package:
+  **`IRuntimeServices.dns?: IDnsResolver`** (+ `SrvRecord`) on the M44 `fs?` / M45 `workers?`
+  precedent, implemented by Node/Deno/Bun and OMITTED on Workers — DNS-SRV cannot be expressed over
+  `fetch` and is how Consul DNS, k8s headless services and ECS Service Connect are actually
+  consumed. `SrvRecord.host` is a normalized name **on purpose**: Deno spells it `target`, Node
+  spells it `name`, and passing either through would type-check on both runtimes while producing
+  `undefined` hostnames on one; `resolveHost` concatenates `A`+`AAAA` and rejects only when BOTH
+  fail, since an IPv4-only host has no `AAAA` record at all. And **`ILifecycleApi.onStopping`**, a
+  new kernel phase running at the very start of `stop()`, before the app refuses requests —
+  deregistering in `onShutdown` (after the drain, after the socket closes) leaves Consul routing at
+  a dead port for up to a check interval on every rolling deploy. The plan claimed `stop()` would be
+  "byte-for-byte unchanged" with no hooks registered; a pre-existing kernel test **falsified that**
+  — `await` on an already-resolved promise still defers `#stopping = true` by a microtask, handing a
+  404 to a request that used to get a 503 — so `#doStop()` branches on `hasStopping()` and skips the
+  phase entirely, making the compatibility claim literally true. Self-registration runs at
+  `onBootstrap`, which is BEFORE `listen()`; that window is harmless only because the mandatory,
+  non-disable-able health check keeps Consul reporting the service critical and every read sends
+  `passing=true` — so the check is load-bearing, not a convenience default. Doc deliverables C1–C5
+  shipped: the ARCHITECTURE package diagram gained this node with the 10-member backlog **named, not
+  absorbed**, into M38; README's five mutually inconsistent counts corrected to 43 members / 33
+  plugins with the alpha.3 sentence scoped to the release; PUBLIC_API gained a Service Discovery
+  section, the `dns` runtime row, and the `onStopping` contract note; M39 gained the scope boundary
+  (it owns the platform objects, M50 owns app-side resolution/balancing/watching/ejection). Code
+  review then found five defects the green gates had passed, all fixed in the same PR: a rejecting
+  `onStopping` hook ABORTED the whole shutdown (the rejection escaped before `#stopping = true`, the
+  drain, the socket close and both later hook phases, and `#stopPromise` cached it — so the app kept
+  serving and could never be stopped); both watch backoffs accumulated one permanent `abort`
+  listener per retry (50 cycles produced 51 added, 0 removed), the class M47 already fixed in
+  `resilience-plugin`; `readJsonLines` released its reader lock but never CANCELLED, so every
+  Kubernetes resync abandoned a chunked body that is still an open connection; and
+  `KubernetesProvider.authHeader` dereferenced `runtime.fs` unguarded, so the EXPORTED class threw a
+  bare `TypeError` when constructed outside the factory. The fifth is the instructive one: the
+  ejection key separator was an embedded raw NUL BYTE rather than its escape sequence, which made
+  `file` report the source as BINARY and `grep -rn` skip it silently — including this file's own
+  mandated forbidden-construct audit, whose "empty" result was therefore a FALSE PASS for that file.
+  Runtime behaviour was correct and all four gates plus the 90% bar were green, which is exactly why
+  it survived; only re-reading the source caught it. One review probe was itself wrong and had to be
+  redone: a self-closing fake stream reports zero cancels whether the code is correct or not, so the
+  body-leak evidence only became real once the fake stayed open the way a live watch does) —
+  complete (PR #109)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
   reprioritized.
 

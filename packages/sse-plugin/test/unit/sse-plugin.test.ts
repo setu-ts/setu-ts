@@ -130,6 +130,7 @@ describe('SsePlugin registration', () => {
         onRequest: () => {},
         onResponse: () => {},
         onError: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onClose: (fn: () => Promise<void>) => {
           onCloseHandler = fn;
@@ -267,6 +268,7 @@ describe('SsePlugin duplicate registration', () => {
         onRequest: () => {},
         onResponse: () => {},
         onError: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onClose: () => {},
       },
@@ -325,6 +327,7 @@ describe('SsePlugin duplicate registration', () => {
         onRequest: () => {},
         onResponse: () => {},
         onError: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onClose: () => {},
       },

@@ -77,6 +77,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: (handler: () => Promise<void>) => {
             lifecycleHandlers.push({ event: 'close', handler });
@@ -164,6 +165,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {},
         },
@@ -234,6 +236,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {},
         },
@@ -298,6 +301,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {},
         },
@@ -364,6 +368,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: (handler: () => Promise<void>) => {
             shutdownHandler = handler;
@@ -427,6 +432,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {
             onCloseCalled = true;
@@ -489,6 +495,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {},
         },
@@ -546,6 +553,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {},
         },
@@ -603,6 +611,7 @@ describe('CqrsPlugin', () => {
           onRequest: () => {},
           onResponse: () => {},
           onError: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onClose: () => {},
         },

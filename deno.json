@@ -41,7 +41,8 @@
     "./packages/worker-pool-plugin",
     "./packages/websocket-plugin",
     "./packages/realtime-backplane-plugin",
-    "./packages/session-plugin"
+    "./packages/session-plugin",
+    "./packages/service-discovery-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

@@ -76,6 +76,7 @@ function registerPlugin(options?: Parameters<typeof ValidationPlugin>[0]): IVali
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
       onClose: () => {},
     },

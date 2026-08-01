@@ -24,6 +24,7 @@ export class LifecycleManager implements ILifecycleApi {
   readonly #request: RequestHook[] = [];
   readonly #response: RequestHook[] = [];
   readonly #error: ErrorHook[] = [];
+  readonly #stopping: VoidHook[] = [];
   readonly #shutdown: VoidHook[] = [];
   readonly #close: VoidHook[] = [];
 
@@ -49,6 +50,10 @@ export class LifecycleManager implements ILifecycleApi {
 
   onError(fn: (error: Error, ctx: IRequestContext) => void | Promise<void>): void {
     this.#error.push(fn);
+  }
+
+  onStopping(fn: () => void | Promise<void>): void {
+    this.#stopping.push(fn);
   }
 
   onShutdown(fn: () => void | Promise<void>): void {
@@ -87,6 +92,29 @@ export class LifecycleManager implements ILifecycleApi {
   async runBootstrap(): Promise<void> {
     for (const fn of this.#bootstrap) {
       await fn();
+    }
+  }
+
+  /**
+   * Whether any onStopping hook is registered.
+   *
+   * `Application` checks this rather than awaiting unconditionally: awaiting
+   * an already-resolved promise still defers the rest of `stop()` by a
+   * microtask, which would move when `#stopping` flips and change the answer a
+   * request arriving in that same tick gets. Branching keeps the new phase
+   * genuinely zero-width for an application that registers no hook.
+   */
+  hasStopping(): boolean {
+    return this.#stopping.length > 0;
+  }
+
+  /**
+   * Runs stopping hooks in reverse registration order (LIFO), before the
+   * application starts refusing requests.
+   */
+  async runStopping(): Promise<void> {
+    for (let i = this.#stopping.length - 1; i >= 0; i--) {
+      await this.#stopping[i]();
     }
   }
 

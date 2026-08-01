@@ -81,6 +81,7 @@ describe('EventsPlugin', () => {
         onRequest: () => {},
         onResponse: () => {},
         onError: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onClose: (fn: () => Promise<void>) => {
           onCloseHandler = fn;
