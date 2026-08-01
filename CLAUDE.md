@@ -880,8 +880,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   absorbed**, into M38; README's five mutually inconsistent counts corrected to 43 members / 33
   plugins with the alpha.3 sentence scoped to the release; PUBLIC_API gained a Service Discovery
   section, the `dns` runtime row, and the `onStopping` contract note; M39 gained the scope boundary
-  (it owns the platform objects, M50 owns app-side resolution/balancing/watching/ejection)) —
-  complete (PR pending)
+  (it owns the platform objects, M50 owns app-side resolution/balancing/watching/ejection). Code
+  review then found five defects the green gates had passed, all fixed in the same PR: a rejecting
+  `onStopping` hook ABORTED the whole shutdown (the rejection escaped before `#stopping = true`, the
+  drain, the socket close and both later hook phases, and `#stopPromise` cached it — so the app kept
+  serving and could never be stopped); both watch backoffs accumulated one permanent `abort`
+  listener per retry (50 cycles produced 51 added, 0 removed), the class M47 already fixed in
+  `resilience-plugin`; `readJsonLines` released its reader lock but never CANCELLED, so every
+  Kubernetes resync abandoned a chunked body that is still an open connection; and
+  `KubernetesProvider.authHeader` dereferenced `runtime.fs` unguarded, so the EXPORTED class threw a
+  bare `TypeError` when constructed outside the factory. The fifth is the instructive one: the
+  ejection key separator was an embedded raw NUL BYTE rather than its escape sequence, which made
+  `file` report the source as BINARY and `grep -rn` skip it silently — including this file's own
+  mandated forbidden-construct audit, whose "empty" result was therefore a FALSE PASS for that file.
+  Runtime behaviour was correct and all four gates plus the 90% bar were green, which is exactly why
+  it survived; only re-reading the source caught it. One review probe was itself wrong and had to be
+  redone: a self-closing fake stream reports zero cancels whether the code is correct or not, so the
+  body-leak evidence only became real once the fake stayed open the way a live watch does) —
+  complete (PR #109)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
   reprioritized.
 
