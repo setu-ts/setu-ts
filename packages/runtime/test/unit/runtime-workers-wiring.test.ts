@@ -48,6 +48,7 @@ const fakeDenoHost: DenoHost = {
   readDir: async function* () {},
   mkdir: () => Promise.resolve(),
   remove: () => Promise.resolve(),
+  resolveDns: (_query: string, _recordType: 'SRV' | 'A' | 'AAAA') => Promise.resolve([]),
 };
 
 const fakeBunHost: BunHost = {

@@ -59,6 +59,7 @@ describe('HealthPlugin', () => {
       onInit: (hook: () => void) => {
         onInitHooks.push(hook);
       },
+      onStopping: () => {},
       onShutdown: () => {},
       onRegister: () => {},
       onBootstrap: () => {},
@@ -166,6 +167,7 @@ describe('HealthPlugin', () => {
         onRegister: () => {},
         onBootstrap: () => {},
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onStart: () => {},
         onStop: () => {},
@@ -243,6 +245,7 @@ describe('HealthPlugin', () => {
         onRegister: () => {},
         onBootstrap: () => {},
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onStart: () => {},
         onStop: () => {},
@@ -310,6 +313,7 @@ describe('HealthPlugin', () => {
         onRegister: () => {},
         onBootstrap: () => {},
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onStart: () => {},
         onStop: () => {},
@@ -377,6 +381,7 @@ describe('HealthPlugin', () => {
         onRegister: () => {},
         onBootstrap: () => {},
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onStart: () => {},
         onStop: () => {},
@@ -444,6 +449,7 @@ describe('HealthPlugin', () => {
         onRegister: () => {},
         onBootstrap: () => {},
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onStart: () => {},
         onStop: () => {},
@@ -521,6 +527,7 @@ describe('HealthPlugin', () => {
         onRegister: () => {},
         onBootstrap: () => {},
         onInit: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onStart: () => {},
         onStop: () => {},
@@ -598,6 +605,7 @@ describe('HealthPlugin', () => {
         onInit: (hook: () => void) => {
           onInitHooks.push(hook);
         },
+        onStopping: () => {},
         onShutdown: () => {},
         onRequest: () => {},
         onResponse: () => {},
@@ -687,6 +695,7 @@ describe('HealthPlugin', () => {
       onInit: (hook: () => void) => {
         onInitHook = hook;
       },
+      onStopping: () => {},
       onShutdown: () => {},
       onRegister: () => {},
       onBootstrap: () => {},
@@ -816,6 +825,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},
@@ -921,6 +931,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},
@@ -1026,6 +1037,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},
@@ -1133,6 +1145,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},
@@ -1245,6 +1258,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},
@@ -1360,6 +1374,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},
@@ -1482,6 +1497,7 @@ describe('HealthPlugin', () => {
         } as IRouterApi,
         lifecycle: {
           onInit: () => {},
+          onStopping: () => {},
           onShutdown: () => {},
           onRegister: () => {},
           onBootstrap: () => {},

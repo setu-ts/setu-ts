@@ -36,6 +36,13 @@ export type { BunFileInfo, BunHost, BunModules } from './adapters/bun/bun-runtim
 export { createCloudflareRuntimeServices } from './adapters/workers/cf-runtime.ts';
 export type { CloudflareEnv, CloudflareRuntimeOptions } from './adapters/workers/cf-runtime.ts';
 
+// DNS resolvers (name resolution behind IRuntimeServices.dns)
+export { createNodeDnsResolver } from './adapters/shared/node-dns-resolver.ts';
+export type { NodeDnsModule } from './adapters/shared/node-dns-resolver.ts';
+
+export { createDenoDnsResolver } from './adapters/deno/deno-dns-resolver.ts';
+export type { DenoDnsHost, DenoSrvRecord } from './adapters/deno/deno-dns-resolver.ts';
+
 // Worker hosts (thread spawning behind IRuntimeServices.workers)
 export { createWebWorkerHost } from './adapters/shared/web-worker-host.ts';
 export type { WebWorkerGlobals, WebWorkerLike } from './adapters/shared/web-worker-host.ts';

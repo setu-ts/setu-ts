@@ -79,6 +79,7 @@ describe('HttpSecurityPlugin', () => {
         onRequest: () => {},
         onResponse: () => {},
         onError: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
         onClose: () => {},
       },

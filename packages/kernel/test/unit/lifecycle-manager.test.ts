@@ -75,3 +75,54 @@ describe('LifecycleManager.runRegister', () => {
     expect(order).toEqual(['async']);
   });
 });
+
+describe('LifecycleManager — onStopping', () => {
+  it('runs stopping hooks in reverse registration order (LIFO)', async () => {
+    const lifecycle = new LifecycleManager();
+    const order: string[] = [];
+
+    lifecycle.onStopping(() => {
+      order.push('first');
+    });
+    lifecycle.onStopping(() => {
+      order.push('second');
+    });
+
+    await lifecycle.runStopping();
+
+    expect(order).toEqual(['second', 'first']);
+  });
+
+  it('awaits async stopping hooks', async () => {
+    const lifecycle = new LifecycleManager();
+    const order: string[] = [];
+
+    lifecycle.onStopping(async () => {
+      await Promise.resolve();
+      order.push('async');
+    });
+
+    await lifecycle.runStopping();
+
+    expect(order).toEqual(['async']);
+  });
+
+  it('runStopping() over an empty array resolves', async () => {
+    const lifecycle = new LifecycleManager();
+    await lifecycle.runStopping();
+    expect(lifecycle.hasStopping()).toBe(false);
+  });
+
+  it('hasStopping() reports whether any hook is registered', () => {
+    const lifecycle = new LifecycleManager();
+    expect(lifecycle.hasStopping()).toBe(false);
+    lifecycle.onStopping(() => {});
+    expect(lifecycle.hasStopping()).toBe(true);
+  });
+
+  it('a rejecting stopping hook surfaces from runStopping()', async () => {
+    const lifecycle = new LifecycleManager();
+    lifecycle.onStopping(() => Promise.reject(new Error('hook failed')));
+    await expect(lifecycle.runStopping()).rejects.toThrow('hook failed');
+  });
+});

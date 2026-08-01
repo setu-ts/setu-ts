@@ -336,7 +336,31 @@ export interface ILifecycleApi {
    */
   onError(fn: (error: Error, ctx: IRequestContext) => void | Promise<void>): void;
   /**
+   * Runs at the very start of `stop()`, **before** the application begins
+   * refusing new requests.
+   *
+   * This is the only hook that runs while the application is still serving
+   * normally, which is what makes it the right home for "tell the outside
+   * world to stop sending me traffic" work — deregistering from a service
+   * registry, for instance. Deregistering in {@linkcode onShutdown} instead
+   * means the socket is already closed by the time the registry hears about
+   * it, so callers keep being routed to a dead port for up to one health-check
+   * interval on every rolling deploy.
+   *
+   * Hooks run LIFO and are awaited, so a slow hook delays the whole shutdown
+   * and a rejecting one surfaces from `stop()`. With no hooks registered this
+   * window has zero width and `stop()` behaves exactly as it did before.
+   *
+   * @param fn - Hook body
+   * @since 0.2.0
+   */
+  onStopping(fn: () => void | Promise<void>): void;
+  /**
    * Runs when shutdown begins — close connections, flush buffers here.
+   *
+   * By this point the application is already refusing new requests and the
+   * server socket is closed; use {@linkcode onStopping} for work that must
+   * happen while traffic is still being served.
    *
    * @param fn - Hook body
    */

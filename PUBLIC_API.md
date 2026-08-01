@@ -39,12 +39,13 @@
 30. [Plugin Creation](#plugin-creation)
 31. [Custom Middleware](#custom-middleware)
 32. [Custom Decorators](#custom-decorators)
-33. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-34. [Developer Ergonomics](#developer-ergonomics)
-35. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
-36. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
-37. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
-38. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
+33. [Service Discovery](#service-discovery)
+34. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+35. [Developer Ergonomics](#developer-ergonomics)
+36. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
+37. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
+38. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
+39. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
 
 ---
 
@@ -255,6 +256,7 @@ interface IRuntimeServices {
 
   fs?: IFileSystem;
   workers?: IWorkerHost;
+  dns?: IDnsResolver;
 }
 ```
 
@@ -282,6 +284,40 @@ interface IWorkerHandle {
   terminate(): Promise<void>;
 }
 ```
+
+`dns` is an **optional** `IDnsResolver` for name resolution. It is implemented by the Node, Deno,
+and Bun runtime adapters and **absent on Cloudflare Workers**, whose network access is `fetch` —
+that resolves names internally and exposes no lookup surface. Callers must degrade gracefully when
+it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
+`DiscoveryUnavailableError` during `register()`, naming the alternatives.
+
+| Member    | Node | Deno | Bun | Workers |
+| --------- | ---- | ---- | --- | ------- |
+| `fs`      | ✅   | ✅   | ✅  | ❌      |
+| `workers` | ✅   | ✅   | ✅  | ❌      |
+| `dns`     | ✅   | ✅   | ✅  | ❌      |
+
+```typescript
+interface IDnsResolver {
+  resolveSrv(hostname: string): Promise<readonly SrvRecord[]>;
+  resolveHost(hostname: string): Promise<readonly string[]>;
+}
+
+interface SrvRecord {
+  readonly host: string;
+  readonly port: number;
+  readonly priority: number;
+  readonly weight: number;
+}
+```
+
+`SrvRecord.host` is deliberately named that rather than reusing a runtime's own spelling: Deno calls
+the field `target` and Node calls it `name`, and passing either through unchanged would type-check
+on both runtimes while producing `undefined` hostnames on one. `resolveHost` concatenates `A` and
+`AAAA` results and rejects only when **both** families fail, because an IPv4-only host has no `AAAA`
+record at all. The runtime package exports both resolver factories: `createNodeDnsResolver(dns?)`
+(shared by the Node and Bun adapters, over `node:dns/promises`) and `createDenoDnsResolver(host)`
+(over `Deno.resolveDns`).
 
 The runtime package also exports the worker host factories `createWebWorkerHost(globals?)`
 (Deno/Bun, over the web `Worker` API) and `createNodeWorkerHost(mods?)` (Node, over
@@ -5347,6 +5383,205 @@ app.router.post('/users', {
 
 ---
 
+## Service Discovery
+
+Turns a logical service name into a reachable address, balances across the instances behind it, and
+takes them out of rotation when callers report failures. Registers an `IServiceDiscovery` under
+`CAPABILITIES.SERVICE_DISCOVERY` (`'service-discovery'`). Zero npm dependencies — the HTTP providers
+run on web-standard `fetch` and the DNS provider on the optional `IRuntimeServices.dns`.
+
+### Registration
+
+```typescript
+import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
+
+app.register(ServiceDiscoveryPlugin({
+  provider: 'consul',
+  address: 'http://127.0.0.1:8500',
+  strategy: 'round-robin',
+}));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES, type IServiceDiscovery } from '@hono-enterprise/common';
+
+const discovery = ctx.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+
+const instances = await discovery.resolve('billing');
+const instance = await discovery.pick('billing', { strategy: 'weighted-random' });
+const url = await discovery.resolveUrl('billing', '/invoices');
+
+discovery.report(instance!, 'failure');
+
+const unsubscribe = await discovery.watch('billing', (list) => {
+  console.log(`billing now has ${list.length} instances`);
+});
+```
+
+### Contract
+
+```typescript
+interface IServiceDiscovery {
+  resolve(serviceName: string): Promise<readonly ServiceInstance[]>;
+  pick(serviceName: string, options?: PickOptions): Promise<ServiceInstance | null>;
+  resolveUrl(
+    serviceName: string,
+    path?: string,
+    options?: PickOptions,
+  ): Promise<string | null>;
+  report(instance: ServiceInstance, outcome: ServiceOutcome): void;
+  watch(
+    serviceName: string,
+    listener: (instances: readonly ServiceInstance[]) => void,
+  ): Promise<Unsubscribe>;
+}
+
+interface ServiceInstance {
+  readonly id: string;
+  readonly serviceName: string;
+  readonly host: string;
+  readonly port: number;
+  readonly secure?: boolean;
+  readonly weight?: number;
+  readonly tags?: readonly string[];
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+interface PickOptions {
+  readonly strategy?: LoadBalanceStrategy;
+}
+
+type LoadBalanceStrategy = 'round-robin' | 'random' | 'weighted-random';
+type ServiceOutcome = 'success' | 'failure';
+```
+
+Registration and deregistration of _this_ instance are deliberately **not** on the contract — the
+plugin drives its own lifecycle hooks, so a `registerSelf()`/`deregisterSelf()` pair here would be
+surface no application code path reads.
+
+### Providers
+
+`ServiceDiscoveryPluginOptions` is a **union discriminated on `provider`**, so a missing per-arm
+credential is a compile error rather than a startup throw.
+
+| Arm            | Reads                              | `watch()`                   | Runtimes            |
+| -------------- | ---------------------------------- | --------------------------- | ------------------- |
+| `'static'`     | A literal list in the options      | Fires once, then never      | All, incl. Workers  |
+| `'consul'`     | `GET /v1/health/service/:service`  | Blocking queries (push)     | All, incl. Workers  |
+| `'kubernetes'` | EndpointSlices from the API server | Watch stream (push)         | All, incl. Workers¹ |
+| `'dns'`        | `SRV` or `A`/`AAAA` records        | Polled at `watchIntervalMs` | Deno, Node, Bun     |
+| `'custom'`     | The application's own provider     | Whatever it implements      | Any                 |
+
+¹ Workers needs an explicit `token`: it has no file system to read the projected service-account
+token from.
+
+### Options
+
+| Option             | Arms               | Default                      | Behavior                                                             |
+| ------------------ | ------------------ | ---------------------------- | -------------------------------------------------------------------- |
+| `provider`         | all                | —                            | Discriminant; always explicit                                        |
+| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching so every `resolve` hits the backend             |
+| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`             |
+| `ejection`         | all                | see below                    | `false` disables outlier ejection entirely                           |
+| `selfRegistration` | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms         |
+| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread          |
+| `services`         | static             | —                            | Unknown name resolves to `[]`, never a throw                         |
+| `address`          | consul             | —                            | Agent base URL                                                       |
+| `token`            | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset  |
+| `datacenter`       | consul             | —                            | Sent as `?dc=`                                                       |
+| `waitSeconds`      | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600 |
+| `namespace`        | kubernetes         | —                            | Required                                                             |
+| `apiServer`        | kubernetes         | in-cluster env               | Absent both, `register()` throws                                     |
+| `token`            | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo      |
+| `portName`         | kubernetes         | —                            | Unset with one port uses it; unset with several throws               |
+| `mode`             | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records |
+| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                   |
+| `port`             | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port             |
+| `secure`           | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme      |
+| `http`             | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                             |
+| `discovery`        | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied          |
+
+### Outlier ejection
+
+`report(instance, outcome)` feeds a per-process ejection tracker. Defaults:
+`{ failureThreshold: 5, windowMs: 30_000, durationMs: 30_000, maxEjectionPercent: 50 }`. A
+`'success'` clears that instance's window and un-ejects it immediately.
+
+`pick()` filters ejected instances; `resolve()` does **not** — it reports what discovery knows,
+while `pick()` reports what is usable. `maxEjectionPercent` caps the share of a service ejected at
+once, and when every instance is ejected anyway `pick()` falls back to the unfiltered list rather
+than returning `null`: a correlated failure ejects the whole pool at once, and serving nothing turns
+a partial outage into a total one.
+
+This is a different mechanism from `IResilienceService.wrap`'s circuit breaker, not a duplicate of
+it. `wrap` breaks a **call site**; ejection removes a **pool member** while the call site stays
+open. They compose by re-`pick()`ing inside the wrapped call.
+
+### Self-registration
+
+Only the Consul arm (and a custom provider implementing `registerSelf`) can advertise this instance.
+Registration runs at `onBootstrap`; deregistration runs at **`onStopping`**, the lifecycle hook that
+fires before the application starts refusing requests, so the change propagates while traffic is
+still being served. `selfRegistration.drainDelayMs` (default `0`) then holds that window open.
+
+`selfRegistration.check` is **not optional** and cannot be disabled — it defaults to
+`{ httpPath: '/health', intervalSeconds: 10, deregisterAfterSeconds: 60 }`. `onBootstrap` runs
+before the socket binds, so the instance is advertised a moment before it can serve; that window is
+harmless only because Consul marks a newly registered service critical until its first check passes
+and every read here sends `passing=true`.
+
+### Exports
+
+| Export                              | Kind      | Purpose                                                            |
+| ----------------------------------- | --------- | ------------------------------------------------------------------ |
+| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                 |
+| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                     |
+| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                 |
+| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                 |
+| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                             |
+| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`) |
+| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                 |
+| `StaticServiceDefinition`           | interface | One entry of a static service list                                 |
+| `EjectionOptions`                   | interface | Ejection tuning                                                    |
+| `SelfRegistration`                  | interface | What this instance advertises                                      |
+| `SelfRegistrationCheck`             | interface | The mandatory health check                                         |
+| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                          |
+| `StaticProvider`                    | class     | The `'static'` provider                                            |
+| `ConsulProvider`                    | class     | The `'consul'` provider                                            |
+| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                        |
+| `DnsProvider`                       | class     | The `'dns'` provider                                               |
+| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                    |
+| `DiscoveryHttpResponse`             | interface | Buffered response shape                                            |
+| `DiscoveryHttpStream`               | interface | Streaming response shape                                           |
+| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                      |
+| `DiscoveryUnavailableError`         | class     | Cold backend failure, missing DNS resolver, k8s multi-port         |
+| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                  |
+
+### Notes
+
+- Registers a `service-discovery` health indicator reporting `provider`, `cachedServices`,
+  `watchedServices`, `ejectedInstances`, and `degraded`. It reads the cache's own observed state and
+  never issues a backend call, so a health scrape does not become load against Consul. `'degraded'`
+  means a refresh failed and a stale snapshot is being served; `'down'` is unreachable by
+  construction, because with nothing cached the caller already received a
+  `DiscoveryUnavailableError`.
+- `onClose` unsubscribes every active watch and clears ejection state.
+- The cache is read-through on the **monotonic** clock, with per-service in-flight coalescing (a
+  burst of concurrent `pick()`s for one cold service issues one backend read) and stale-on-failure.
+  A watch event invalidates that name's entry immediately.
+- `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
+  strategy and the same ejection filter.
+- Ejection state is **per-process**. A cluster-wide view is a distributed-consensus problem and is
+  not attempted.
+- In-cluster Kubernetes needs `DENO_CERT` / `NODE_EXTRA_CA_CERTS` pointed at
+  `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`; no code change fixes the cluster CA from
+  inside the process. The `http` option is the escape hatch for a caller-supplied TLS-configured
+  client.
+
+---
+
 ## Programmatic vs Decorator API
 
 The framework provides both APIs for every feature. They are equivalent.
@@ -5687,11 +5922,20 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                               |
 | Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                 |
+| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                    |
+| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                       |
 
 Contract notes:
 
 - `IPluginContext.runtime` is **non-optional**: a runtime provider is mandatory and registers first,
   so every plugin may rely on it (ARCHITECTURE.md §7).
+- `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
+  begins refusing new requests with a 503 and before the socket closes — the only hook that fires
+  while the application is still serving normally. It exists for "tell the outside world to stop
+  routing here" work, most obviously deregistering from service discovery; doing that in
+  `onShutdown` leaves callers routed at a closed port for up to one health-check interval. Hooks run
+  LIFO and are awaited, so a slow hook delays shutdown and a rejecting one surfaces from `stop()`.
+  With no hook registered the phase is skipped and `stop()` behaves exactly as before.
 - Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`

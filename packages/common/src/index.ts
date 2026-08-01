@@ -51,12 +51,14 @@ export type {
 
 // Runtime abstraction
 export type {
+  IDnsResolver,
   IFileSystem,
   IHttpAdapter,
   IRuntimeServices,
   IWorkerHandle,
   IWorkerHost,
   ServerHandle,
+  SrvRecord,
   StatResult,
   TimerHandle,
 } from './runtime.ts';
@@ -239,6 +241,15 @@ export type { ISsrService } from './services/ssr.ts';
 
 // Session contracts
 export type { ISession, ISessionService, ISessionStore, SessionData } from './services/session.ts';
+
+// Service discovery contracts
+export type {
+  IServiceDiscovery,
+  LoadBalanceStrategy,
+  PickOptions,
+  ServiceInstance,
+  ServiceOutcome,
+} from './services/service-discovery.ts';
 
 // Cookie codec (shared by the session plugin and the decorator plugin's @Cookie)
 export { parseCookie, serializeCookie } from './cookie.ts';

@@ -16,7 +16,12 @@
  * @module
  */
 
-import type { IFileSystem, IRuntimeServices, IWorkerHost } from '@hono-enterprise/common';
+import type {
+  IDnsResolver,
+  IFileSystem,
+  IRuntimeServices,
+  IWorkerHost,
+} from '@hono-enterprise/common';
 import {
   mkdirSync,
   readdirSync,
@@ -30,6 +35,7 @@ import { hostname as osHostname } from 'node:os';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 import { createWebWorkerHost } from '../shared/web-worker-host.ts';
+import { createNodeDnsResolver } from '../shared/node-dns-resolver.ts';
 
 /**
  * Minimal interface covering the Bun-specific operations used by this adapter.
@@ -74,11 +80,14 @@ export interface BunFileInfo {
  * @param host - Injected Bun host (defaults to {@linkcode buildBunHost}, which
  * is backed by `node:` built-ins — NOT by members of the `Bun` global)
  * @param workers - Injected worker host (defaults to the web `Worker` host)
+ * @param dns - Injected DNS resolver (defaults to the shared `node:dns/promises`
+ * resolver, which Bun implements)
  * @returns Complete runtime services for Bun
  */
 export function createBunRuntimeServices(
   host: BunHost = buildBunHost(),
   workers: IWorkerHost = createWebWorkerHost(),
+  dns: IDnsResolver = createNodeDnsResolver(),
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => {
@@ -154,6 +163,7 @@ export function createBunRuntimeServices(
     exit: (code?: number) => host.exit(code),
     fs,
     workers,
+    dns,
   });
 }
 

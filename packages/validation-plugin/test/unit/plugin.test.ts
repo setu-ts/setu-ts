@@ -61,6 +61,7 @@ function createFakePluginContext(): {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
       onClose: () => {},
     },

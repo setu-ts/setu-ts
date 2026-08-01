@@ -79,6 +79,7 @@ function createFakeLifecycle(): ILifecycleApi {
     onRequest: () => {},
     onResponse: () => {},
     onError: () => {},
+    onStopping: () => {},
     onShutdown: () => {},
     onClose: () => {},
   };

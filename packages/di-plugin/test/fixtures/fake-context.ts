@@ -115,6 +115,7 @@ export function createFakeContext(): {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
       onClose: () => {},
     },

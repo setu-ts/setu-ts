@@ -10,12 +10,18 @@
  * @module
  */
 
-import type { IFileSystem, IRuntimeServices, IWorkerHost } from '@hono-enterprise/common';
+import type {
+  IDnsResolver,
+  IFileSystem,
+  IRuntimeServices,
+  IWorkerHost,
+} from '@hono-enterprise/common';
 import { hostname as osHostname } from 'node:os';
 import * as nodeFs from 'node:fs/promises';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 import { createNodeWorkerHost } from './node-worker-host.ts';
+import { createNodeDnsResolver } from '../shared/node-dns-resolver.ts';
 
 // ---------------------------------------------------------------------------
 // Injection seam — Node built-ins that the adapter needs
@@ -147,6 +153,7 @@ export function buildNodeHost(
  *
  * @param host - Injected Node host (defaults to real Node.js via static node: imports)
  * @param workers - Injected worker host (defaults to the `node:worker_threads` host)
+ * @param dns - Injected DNS resolver (defaults to the `node:dns/promises` resolver)
  * @returns Complete runtime services for Node.js
  */
 export function createNodeRuntimeServices(
@@ -156,6 +163,7 @@ export function createNodeRuntimeServices(
   // every platform, even when the Node adapter is never constructed.
   host: NodeHost = buildNodeHost(),
   workers: IWorkerHost = createNodeWorkerHost(),
+  dns: IDnsResolver = createNodeDnsResolver(),
 ): IRuntimeServices {
   const fsImpl: IFileSystem = {
     readFile: host.readFile,
@@ -175,5 +183,6 @@ export function createNodeRuntimeServices(
     exit: (code?: number) => host.exit(code),
     fs: fsImpl,
     workers,
+    dns,
   });
 }

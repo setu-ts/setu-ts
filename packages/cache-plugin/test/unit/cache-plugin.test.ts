@@ -46,6 +46,7 @@ describe('CachePlugin', () => {
         onRequest: () => {},
         onResponse: () => {},
         onError: () => {},
+        onStopping: () => {},
         onShutdown: () => {},
       },
       middleware: {

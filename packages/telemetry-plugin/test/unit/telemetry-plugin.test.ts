@@ -652,6 +652,9 @@ function createMockContext(): MockResult {
       onError(_fn: unknown): void {
         // no-op
       },
+      onStopping(_fn: () => void | Promise<void>): void {
+        // no-op
+      },
       onShutdown(fn: () => void | Promise<void>): void {
         shutdownHooks.push(fn as () => Promise<void>);
       },
@@ -824,6 +827,9 @@ function createMockContextWithMiddlewareCapture(): MockResultWithMiddlewareCaptu
         // no-op
       },
       onError(_fn: unknown): void {
+        // no-op
+      },
+      onStopping(_fn: () => void | Promise<void>): void {
         // no-op
       },
       onShutdown(fn: () => void | Promise<void>): void {

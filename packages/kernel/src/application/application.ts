@@ -354,8 +354,21 @@ class Application implements IKernelApplication {
   }
 
   async #doStop(): Promise<void> {
-    // Set synchronously (before the first await) so a request arriving during
-    // the drain window sees the shutting-down state and gets a 503.
+    // Runs FIRST, while the application is still serving normally, so a hook
+    // can tell the outside world to stop routing here before that becomes
+    // true — deregistering from a service registry, for instance.
+    //
+    // Guarded rather than awaited unconditionally: `await` on an
+    // already-resolved promise still defers everything below by a microtask,
+    // which would move when `#stopping` flips and hand a 404 to a request that
+    // used to get a 503. With no hook registered the flag is still set in the
+    // same synchronous turn as before, so opting out costs nothing.
+    if (this.#lifecycle.hasStopping()) {
+      await this.#lifecycle.runStopping();
+    }
+
+    // Set before the next await so a request arriving during the drain window
+    // sees the shutting-down state and gets a 503.
     this.#stopping = true;
 
     // Wait for in-flight requests to drain (max 10s). A successfully-started

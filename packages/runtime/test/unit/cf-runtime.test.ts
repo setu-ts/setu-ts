@@ -154,3 +154,23 @@ describe('cf-runtime | hostname', () => {
     expect(services.hostname()).toBe('');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Capabilities Workers does not have are OMITTED, not set to undefined
+// ---------------------------------------------------------------------------
+
+describe('cf-runtime | omitted optional services', () => {
+  it('omits the dns key entirely', () => {
+    const services = createCloudflareRuntimeServices();
+    // Asserting ABSENCE of the key, not an undefined value: with
+    // exactOptionalPropertyTypes on, `dns: undefined` would be a different
+    // (and illegal) thing from omitting it.
+    expect('dns' in services).toBe(false);
+  });
+
+  it('omits the fs and workers keys entirely', () => {
+    const services = createCloudflareRuntimeServices();
+    expect('fs' in services).toBe(false);
+    expect('workers' in services).toBe(false);
+  });
+});
