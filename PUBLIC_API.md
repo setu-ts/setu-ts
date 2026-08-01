@@ -5934,8 +5934,10 @@ Contract notes:
   while the application is still serving normally. It exists for "tell the outside world to stop
   routing here" work, most obviously deregistering from service discovery; doing that in
   `onShutdown` leaves callers routed at a closed port for up to one health-check interval. Hooks run
-  LIFO and are awaited, so a slow hook delays shutdown and a rejecting one surfaces from `stop()`.
-  With no hook registered the phase is skipped and `stop()` behaves exactly as before.
+  LIFO and are awaited, so a slow hook delays shutdown. A rejecting hook surfaces from `stop()`, but
+  only after the drain, the socket close, and the `onShutdown`/`onClose` phases have run: a failing
+  hook must not be able to prevent the application from stopping. With no hook registered the phase
+  is skipped and `stop()` behaves exactly as before.
 - Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`

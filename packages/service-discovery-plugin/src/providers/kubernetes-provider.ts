@@ -118,9 +118,19 @@ export class KubernetesProvider implements DiscoveryProvider {
     if (this.#cachedToken !== null && now - this.#cachedToken.stampMs < TOKEN_TTL_MS) {
       return `Bearer ${this.#cachedToken.value}`;
     }
-    // `register()` refuses this configuration without `runtime.fs`, so the
-    // non-null assertion here is guarded by a startup check rather than hope.
-    const bytes = await this.#runtime.fs!.readFile(TOKEN_PATH);
+    // `createProvider` refuses this configuration at startup, but this class is
+    // exported, so a caller constructing it directly reaches here. Checking
+    // again costs nothing and turns a bare `TypeError` on `undefined.readFile`
+    // into the same typed error the factory raises.
+    const fs = this.#runtime.fs;
+    if (fs === undefined) {
+      throw new DiscoveryUnavailableError(
+        "The 'kubernetes' discovery provider needs either an explicit token option " +
+          'or IRuntimeServices.fs to read the projected service-account token, and ' +
+          'this runtime supplies neither.',
+      );
+    }
+    const bytes = await fs.readFile(TOKEN_PATH);
     const value = new TextDecoder().decode(bytes).trim();
     this.#cachedToken = { value, stampMs: now };
     return `Bearer ${value}`;

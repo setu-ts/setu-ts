@@ -162,3 +162,48 @@ describe('watchConsulService', () => {
     expect(http.calls.length).toBe(seen);
   });
 });
+
+describe('watchConsulService — signal hygiene', () => {
+  it('does not accumulate an abort listener per backoff retry', async () => {
+    // The watch signal lives as long as the watch. A sleep that registers an
+    // abort listener and only removes it when abort FIRES leaks one listener
+    // per retry — against a backend that is down, that grows without bound.
+    let added = 0;
+    let removed = 0;
+    const originalAdd = AbortSignal.prototype.addEventListener;
+    const originalRemove = AbortSignal.prototype.removeEventListener;
+    AbortSignal.prototype.addEventListener = function (
+      ...args: Parameters<typeof originalAdd>
+    ) {
+      if (args[0] === 'abort') added++;
+      return originalAdd.apply(this, args);
+    };
+    AbortSignal.prototype.removeEventListener = function (
+      ...args: Parameters<typeof originalRemove>
+    ) {
+      if (args[0] === 'abort') removed++;
+      return originalRemove.apply(this, args);
+    };
+
+    try {
+      const http = createFakeHttp([{ error: new Error('ECONNREFUSED') }]);
+      const started = start(http);
+      const unsubscribe = await started.unsubscribe;
+
+      for (let cycle = 0; cycle < 20; cycle++) {
+        await flush();
+        started.runtime.runTimeouts();
+      }
+      await flush();
+      unsubscribe();
+
+      // Every timer-won sleep releases its listener; at most the one from the
+      // sleep in flight when we stopped may remain.
+      expect(added).toBeGreaterThan(5);
+      expect(added - removed).toBeLessThanOrEqual(1);
+    } finally {
+      AbortSignal.prototype.addEventListener = originalAdd;
+      AbortSignal.prototype.removeEventListener = originalRemove;
+    }
+  });
+});

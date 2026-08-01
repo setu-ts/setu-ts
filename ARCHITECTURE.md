@@ -664,8 +664,9 @@ outside world to stop routing here — deregistering from service discovery, for
 Deregistering in `onShutdown` instead means the socket is already closed by the time the registry
 hears about it, so callers keep being routed at a dead port for up to one health-check interval on
 every rolling deploy. Hooks run LIFO and are awaited, so a slow hook delays shutdown and a rejecting
-one surfaces from `stop()`; with no hook registered the phase is skipped entirely and `stop()`
-behaves exactly as it did before.
+one surfaces from `stop()` — but only after the rest of the shutdown has run, so a failing hook
+cannot leave an application that keeps serving and can never be stopped; with no hook registered the
+phase is skipped entirely and `stop()` behaves exactly as it did before.
 
 ### Extension Points
 

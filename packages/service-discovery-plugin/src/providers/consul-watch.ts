@@ -48,13 +48,20 @@ export function watchConsulService(deps: ConsulWatchDeps): Promise<Unsubscribe> 
   let index = 0;
   let backoffMs = INITIAL_BACKOFF_MS;
 
+  // The listener is removed when the timer wins, not just when abort fires.
+  // Without that, a watch retrying against a failing agent adds one permanent
+  // listener per retry to a signal that lives as long as the watch does.
   const sleep = (ms: number): Promise<void> =>
     new Promise<void>((resolve) => {
-      const handle = deps.runtime.setTimeout(() => resolve(), ms);
-      controller.signal.addEventListener('abort', () => {
+      const onAbort = (): void => {
         deps.runtime.clearTimeout(handle);
         resolve();
-      }, { once: true });
+      };
+      const handle = deps.runtime.setTimeout(() => {
+        controller.signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      controller.signal.addEventListener('abort', onAbort, { once: true });
     });
 
   const loop = async (): Promise<void> => {

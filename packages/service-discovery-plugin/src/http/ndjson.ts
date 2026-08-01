@@ -56,9 +56,14 @@ export async function* readJsonLines(
       }
     }
   } finally {
-    // Releasing the lock lets the caller cancel the underlying response; not
-    // doing it leaves the body locked to a reader nobody holds any more.
-    reader.releaseLock();
+    // Cancel, not just releaseLock. A caller that stops consuming early — the
+    // Kubernetes watch does exactly that on an ERROR event, then re-LISTs —
+    // otherwise abandons a chunked body that is still an open connection to
+    // the server, held until the server times it out. `cancel()` releases the
+    // lock as part of its own contract, so it replaces the release rather than
+    // following it, and its rejection is ignored because the stream may
+    // already be errored or closed.
+    reader.cancel().catch(() => {});
   }
 }
 

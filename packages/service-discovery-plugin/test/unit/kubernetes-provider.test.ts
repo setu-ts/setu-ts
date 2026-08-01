@@ -303,3 +303,14 @@ describe('KubernetesProvider — watch wiring', () => {
     expect(watchCall?.url).toContain('resourceVersion=');
   });
 });
+
+describe('KubernetesProvider — constructed outside the factory', () => {
+  it('throws the typed error, not a raw TypeError, with no token and no fs', async () => {
+    // The class is exported, so a caller can bypass createProvider's guard.
+    // Dereferencing `runtime.fs` unguarded gives a bare
+    // "Cannot read properties of undefined (reading 'readFile')".
+    const { provider } = setup({});
+    await expect(provider.authHeader()).rejects.toThrow(DiscoveryUnavailableError);
+    await expect(provider.authHeader()).rejects.toThrow('IRuntimeServices.fs');
+  });
+});

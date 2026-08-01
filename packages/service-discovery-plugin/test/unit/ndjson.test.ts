@@ -68,4 +68,30 @@ describe('readJsonLines', () => {
     }
     expect(out).toEqual([{ a: 1 }]);
   });
+
+  it('cancels the body when the consumer stops reading early', async () => {
+    // A caller that breaks out mid-stream — the Kubernetes watch does exactly
+    // that on an ERROR event — must not leave the response body open.
+    // Releasing the reader lock alone does not close the connection.
+    let cancelled = 0;
+    const encoder = new TextEncoder();
+    // Stays OPEN, the way a real watch stream does; an already-closed stream
+    // reports no cancel whether the code is correct or not.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"a":1}\n'));
+      },
+      pull() {},
+      cancel() {
+        cancelled++;
+      },
+    });
+
+    for await (const _ of readJsonLines(stream)) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(cancelled).toBe(1);
+  });
 });

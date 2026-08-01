@@ -117,7 +117,42 @@ describe('Application — onStopping', () => {
     });
 
     await app.start({ port: 4103 });
-    await expect(app.stop()).rejects.toThrow('deregistration exploded');
+    const stopping = app.stop();
+    fake.tick(20_000);
+    await expect(stopping).rejects.toThrow('deregistration exploded');
+  });
+
+  it('a rejecting stopping hook does NOT prevent the application stopping', async () => {
+    // The hook runs before anything else in stop(). Letting its rejection
+    // propagate from there would abort the drain, the socket close, and both
+    // later hook phases — and because stop() caches its promise, the
+    // application could then never be stopped at all.
+    const fake = createFakeRuntime();
+    const order: string[] = [];
+    const app = createApplication({
+      plugins: [
+        runtimePluginWith(fake, (ctx) => {
+          ctx.lifecycle.onStopping(() => Promise.reject(new Error('registry unreachable')));
+          ctx.lifecycle.onShutdown(() => {
+            order.push('shutdown');
+          });
+          ctx.lifecycle.onClose(() => {
+            order.push('close');
+          });
+        }),
+      ],
+    });
+
+    await app.start({ port: 4105 });
+    const stopping = app.stop();
+    fake.tick(20_000);
+    await expect(stopping).rejects.toThrow('registry unreachable');
+
+    // The shutdown completed in full despite the failing hook...
+    expect(order).toEqual(['shutdown', 'close']);
+    // ...and the application really is refusing requests now.
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/anything' });
+    expect(response.statusCode).toBe(503);
   });
 
   it('stop() before start() never runs stopping hooks', async () => {

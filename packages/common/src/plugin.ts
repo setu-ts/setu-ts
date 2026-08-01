@@ -348,7 +348,9 @@ export interface ILifecycleApi {
    * interval on every rolling deploy.
    *
    * Hooks run LIFO and are awaited, so a slow hook delays the whole shutdown
-   * and a rejecting one surfaces from `stop()`. With no hooks registered this
+   * and a rejecting one surfaces from `stop()` — but only after the shutdown
+   * has completed, because a hook failure must not be able to prevent the
+   * application stopping. With no hooks registered this
    * window has zero width and `stop()` behaves exactly as it did before.
    *
    * @param fn - Hook body

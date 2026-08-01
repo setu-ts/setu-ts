@@ -363,8 +363,20 @@ class Application implements IKernelApplication {
     // which would move when `#stopping` flips and hand a 404 to a request that
     // used to get a 503. With no hook registered the flag is still set in the
     // same synchronous turn as before, so opting out costs nothing.
+    //
+    // A rejection is CAPTURED rather than allowed to propagate from here.
+    // Letting it escape would abort the drain, the socket close, and the
+    // shutdown/close hooks, leaving an application that keeps serving — and
+    // because `#stopPromise` caches the result, one that can never be stopped
+    // at all. The error is still surfaced to the caller, but only after the
+    // shutdown it must not prevent has finished.
+    let stoppingError: { readonly cause: unknown } | null = null;
     if (this.#lifecycle.hasStopping()) {
-      await this.#lifecycle.runStopping();
+      try {
+        await this.#lifecycle.runStopping();
+      } catch (error) {
+        stoppingError = { cause: error };
+      }
     }
 
     // Set before the next await so a request arriving during the drain window
@@ -389,6 +401,13 @@ class Application implements IKernelApplication {
 
     // Run close hooks
     await this.#lifecycle.runClose();
+
+    // Surfaced last: the application is fully stopped by now, so the caller
+    // learns the stopping hook failed without that failure having blocked the
+    // shutdown.
+    if (stoppingError !== null) {
+      throw stoppingError.cause;
+    }
   }
 
   /** Delegates a web-standard Request to the registered IHttpAdapter. */
