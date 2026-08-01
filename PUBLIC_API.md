@@ -467,6 +467,7 @@ interface ConfigPluginOptions {
   readonly envFilePath?: string | readonly string[];
   readonly validationSchema?: StructuralSchema<unknown>;
   readonly expandVariables?: boolean;
+  readonly instance?: IConfig;
 }
 ```
 
@@ -477,6 +478,33 @@ interface ConfigPluginOptions {
   snapshot, preserving Zod coercions and defaults.
 - **`expandVariables`** — When `true` (default), expand `${NAME}` references in values using the
   final merged configuration.
+- **`instance`** — An already-loaded snapshot to register verbatim. Present → **nothing is read**
+  from the environment or from disk and the three options above are ignored; absent → configuration
+  loads normally. This exists so an application can resolve configuration before its plugins are
+  constructed and then hand the plugin that same object, rather than letting it load a second
+  snapshot a moment later that the composition never saw.
+
+### loadConfig()
+
+```typescript
+import { loadConfig } from '@hono-enterprise/config-plugin';
+import { createRuntimeServices } from '@hono-enterprise/runtime';
+
+const config = await loadConfig(createRuntimeServices(), {
+  envFilePath: ['.env.local', '.env'],
+});
+const port = config.get<number>('PORT', { default: 3000 });
+```
+
+`(runtime: IRuntimeServices, options?: ConfigPluginOptions) => Promise<IConfig>` — the same
+implementation `ConfigPlugin.register` uses, reachable without an application. Use it when
+configuration must be read before any plugin exists (choosing which plugins to register, for
+instance); inside an application, resolve `CAPABILITIES.CONFIG` from the registry instead.
+
+Merging, expansion, and validation behave identically on both paths because there is only one: the
+plugin delegates to this function and registers what it returns. Pass the result back as
+`ConfigPlugin({ instance: config })` so the application holds exactly one snapshot —
+`createFullStackAppFromConfig` does precisely that.
 
 ### StructuralSchema\<T\>
 
@@ -2019,6 +2047,9 @@ app.router.get('/api/health', (ctx) => {
   service registry. Always set by the plugin.
 - `userContext: RouterContextKey<IPrincipal | null>` — context key holding the authenticated
   principal, or `null` on an anonymous request.
+- `contextKeyFor<T>(name, defaultValue): RouterContextKey<T>` — returns the key for a name,
+  memoised, so the same name always yields the **same object**. Use it for any key an application
+  declares for itself; see the note below on why a `{ defaultValue }` literal silently fails there.
 - `interface RouterContextKey<T>` — `{ readonly defaultValue?: T }`. Structurally identical to React
   Router's `RouterContext<T>`, so keys from this package and keys from `createContext<T>()` are
   interchangeable.
@@ -2041,6 +2072,51 @@ export async function loader({ context }: Route.LoaderArgs) {
   return { user };
 }
 ```
+
+### Declaring your own context keys
+
+An application that puts its own values on the request context — a session, a CSRF token, a service
+it resolved once — must create those keys with `contextKeyFor`, not with a `{ defaultValue }`
+literal:
+
+```typescript
+// app/lib/context-keys.server.ts
+import { contextKeyFor } from '@hono-enterprise/react-router-plugin';
+import type { ISession } from '@hono-enterprise/common';
+
+export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
+```
+
+Keys are matched by **identity**, and in a framework-mode application the declaring module reliably
+exists twice: Vite inlines application modules into the server build, while the runtime loads
+`honoe.config.ts` from source. Two hand-written key objects then look identical and match nothing —
+`context.get()` returns the default, so a session reads as `null` and a CSRF token as an empty
+string, with no error anywhere. Resolving by name through this package gives both copies the same
+object.
+
+That guarantee needs this package to be a **single module instance**, which means the server build
+must treat `@hono-enterprise/*` as external:
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  environments: {
+    ssr: {
+      build: {
+        rollupOptions: { external: ['@hono-enterprise/react-router-plugin'] },
+      },
+    },
+  },
+});
+```
+
+Declared under `environments.ssr.build`, deliberately: React Router builds through Vite's
+Environment API, and neither a top-level `ssr.external` nor `environments.ssr.resolve.external`
+reaches that build. `honoe new --template full-stack` emits all of this already.
+
+The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
+package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
+client bundle has to inline what it imports and cannot resolve a JSR specifier.
 
 ### Notes
 
@@ -4319,7 +4395,7 @@ deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
 # Scaffold a project (creates ./my-app)
 honoe new my-app
 honoe new my-app --runtime node                 # deno | node | bun | cloudflare-workers
-honoe new my-app --template rest                # rest | microservice | nest
+honoe new my-app --template rest                # rest | microservice | nest | full-stack
 honoe new my-app --template microservice --runtime bun
 
 # Commands this application's plugins provide
@@ -4415,10 +4491,65 @@ export function createApp(): IApplication {
 | `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
 | `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
 | `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
+| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
 
-Templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter` packages. The
-starters ship (Milestone 36) and are usable directly; a `--starter` flag that scaffolds against them
-is still deferred (see "Not in this release").
+Three of the four templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter`
+packages, so a scaffolded project owns an explicit, editable plugin list. `full-stack` is the
+exception, with cause: its composition is twenty-two plugins, and a generated file a human is meant
+to open and edit should not begin with twenty-two imports they did not choose. A general `--starter`
+flag for the other three is still deferred (see "Not in this release").
+
+### `--template full-stack`
+
+```typescript
+// honoe.config.ts (--template full-stack)
+import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+import type { IApplication } from '@hono-enterprise/common';
+import { getCsrfToken, getSession } from '@hono-enterprise/session-plugin';
+import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
+
+export async function createApp(): Promise<IApplication> {
+  return await createFullStackAppFromConfig((config) => ({
+    reactRouter: {
+      serverBuildPath: './build/server/index.js',
+      assetsDir: './build/client/assets',
+      populateLoadContext: (ctx, context) => {
+        context.set(sessionContext, getSession(ctx));
+        context.set(csrfContext, getCsrfToken(ctx));
+      },
+    },
+    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+  }));
+}
+```
+
+The emitted `app/` tree is the deliverable: `routes → features → services → models`, `flatRoutes`
+`_app`/`_auth` layout groups each wrapped in their own layout, the `~/*` alias, the `.server.ts`
+convention, and one worked feature. What it deliberately does **not** contain is a
+`lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`, `lib/kv.server.ts` or
+`lib/service-logger.server.ts` — those are the session, SSE, secrets and logger capabilities,
+reached through the registry the SSR plugin attaches to every request.
+
+Session reaches loaders through a key the **application** declares, never a plugin-to-plugin import:
+`getSession` takes an `IRequestContext`, which a loader never sees, while `populateLoadContext`
+receives exactly that. `RouterContextKey` is exported from the SSR plugin so app code can declare
+keys without importing `react-router` on the server.
+
+Notes:
+
+- **The generated factory is `async`.** `honoe` awaits it during command discovery, and `main.ts`
+  awaits it too, so nothing else changes.
+- **No hello-world route.** An exact `/` handler would take precedence over the SSR catch-all and
+  shadow the application's own index route.
+- **Every runtime target is supported.** Cloudflare Workers omits `assetsDir`: with no filesystem
+  the asset handler would answer 404 for every asset, and omitting the option registers no asset
+  route at all, leaving them to the platform's static-asset binding.
+- **The frontend build runs on npm even when the server runs on Deno** — the one documented
+  exception to the Deno-only toolchain. Deno and Workers targets get a standalone `package.json` for
+  Vite and React Router; Node and Bun targets get those dev dependencies merged into the
+  `package.json` they already have. The Deno `start` task additionally carries `--allow-read`, which
+  the SSR plugin needs to import its own server build and read client assets.
+- **React Router is pinned to v8**, matching the `npm:react-router@8` the SSR plugin imports.
 
 The `nest` template additionally emits `src/greeting-service.ts` and `src/greeting-controller.ts`,
 and its `honoe.config.ts` imports both to pass them to `DecoratorPlugin({ controllers, services })`.
@@ -4557,18 +4688,19 @@ The three starters share one option chain:
 MicroserviceStarterOptions extends RestStarterOptions`, so an arm
 added to the REST tier is available on all three.
 
-| Export                       | Kind     | Package                                            |
-| ---------------------------- | -------- | -------------------------------------------------- |
-| `createRestApp`              | function | `rest-starter`                                     |
-| `buildRestPlugins`           | function | `rest-starter`                                     |
-| `RestStarterOptions`         | type     | `rest-starter`                                     |
-| `RealtimeArm`                | type     | all three (re-exported along the tier's pin chain) |
-| `createMicroserviceApp`      | function | `microservice-starter`                             |
-| `buildMicroservicePlugins`   | function | `microservice-starter`                             |
-| `MicroserviceStarterOptions` | type     | `microservice-starter`                             |
-| `createFullStackApp`         | function | `full-stack-starter`                               |
-| `buildFullStackPlugins`      | function | `full-stack-starter`                               |
-| `FullStackStarterOptions`    | type     | `full-stack-starter`                               |
+| Export                         | Kind     | Package                                            |
+| ------------------------------ | -------- | -------------------------------------------------- |
+| `createRestApp`                | function | `rest-starter`                                     |
+| `buildRestPlugins`             | function | `rest-starter`                                     |
+| `RestStarterOptions`           | type     | `rest-starter`                                     |
+| `RealtimeArm`                  | type     | all three (re-exported along the tier's pin chain) |
+| `createMicroserviceApp`        | function | `microservice-starter`                             |
+| `buildMicroservicePlugins`     | function | `microservice-starter`                             |
+| `MicroserviceStarterOptions`   | type     | `microservice-starter`                             |
+| `createFullStackApp`           | function | `full-stack-starter`                               |
+| `buildFullStackPlugins`        | function | `full-stack-starter`                               |
+| `createFullStackAppFromConfig` | function | `full-stack-starter`                               |
+| `FullStackStarterOptions`      | type     | `full-stack-starter`                               |
 
 Each arm is one plugin's option object, threaded through unchanged. **Gated arms are absent unless
 supplied**, so a starter called with no options registers exactly its always-on set:
@@ -4576,6 +4708,7 @@ supplied**, so a starter called with no options registers exactly its always-on 
 | Arm                  | Gating | Effect                                                                                        |
 | -------------------- | ------ | --------------------------------------------------------------------------------------------- |
 | `database`, `auth`   | gated  | Adds `DatabasePlugin` / `AuthPlugin`.                                                         |
+| `session`            | gated  | Adds `SessionPlugin`; with `csrf`, its form-CSRF middleware at priority 275.                  |
 | `di`                 | gated  | Adds `DiPlugin`. **Changes how every decorated service is constructed** — see the note below. |
 | `realtime.websocket` | gated  | Adds `WebSocketPlugin`.                                                                       |
 | `realtime.sse`       | gated  | Adds `SsePlugin`.                                                                             |
@@ -4595,8 +4728,52 @@ Notes:
 - **Workers portability varies by arm.** `di`, `realtime.websocket`, `realtime.sse`, and a
   `'memory'` backplane are Workers-portable. A `'redis'` backplane is not (raw socket); a
   `'messaging'` backplane is portable only if its broker is.
+- **`session` is gated because it cannot be defaulted.** `SessionPlugin` throws during `register()`
+  without an adequate secret, so an always-on arm would stop every starter application from booting
+  until one was supplied. It is also genuinely optional: a token-authenticated API has no cookie.
 - **No arm sets a plugin's `name`.** Each registers on the bare capability token; register a second
   instance yourself on the returned app.
+
+### Composing from configuration
+
+```typescript
+import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+
+const app = await createFullStackAppFromConfig((config) => ({
+  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+}), { config: { envFilePath: ['.env.local', '.env'] } });
+
+await app.start({ port: 3000 });
+```
+
+Plugin options must be decided **before** the plugins are constructed, which is before
+`ConfigPlugin` has registered anything. This factory closes that ordering gap for every option at
+once: it builds runtime services, loads configuration, calls the resolver, and passes the SAME
+snapshot into the application under `config.instance` — so `app.services.get(CAPABILITIES.CONFIG)`
+returns the exact object the resolver saw, rather than a second one read a moment later.
+
+Signature:
+`(build: (config: IConfig) => FullStackStarterOptions, options?: FromConfigOptions) =>
+Promise<IKernelApplication>`,
+where
+`FromConfigOptions = { config?: ConfigPluginOptions; env?: Readonly<Record<string, unknown>> }`. The
+resolver is called exactly once; if it throws, or configuration fails to load, the returned promise
+rejects and no partially-composed application exists.
+
+**`env` is required on Cloudflare Workers.** Bindings arrive as the `env` argument of the `fetch`
+handler, never process-wide, so runtime services built before a request report an EMPTY environment
+there — the composition would see no configuration at all, and a resolver calling `getOrThrow` would
+fail on the first request and every request after it, because the boot promise is memoised. Pass the
+handler's `env` straight through; non-string values (KV, D1, R2 bindings) are ignored. Omit it on
+Node, Deno, and Bun, where the detected runtime reads the environment itself.
+`honoe new --template full-stack` wires this for you on all four targets.
+
+This is why **no plugin option carries a config-key shorthand** (`urlFromConfig`,
+`endpointFromConfig`): such a field would need its value at the same impossible moment.
+`secretFromConfig` is further out of reach — secrets are served by `secrets-plugin` under
+`CAPABILITIES.SECRETS`, which exists only after registration, so a plugin needing one resolves it
+lazily at use time.
 
 A complete REST API using the REST starter:
 
@@ -5637,6 +5814,7 @@ Cloudflare Workers.
 | --------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
 | `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
 | `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
+| `createRuntimeServices`           | function | Creates `IRuntimeServices` for the detected platform, without an application               |
 | `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
 | `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to `node:` built-ins)              |
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
@@ -5688,6 +5866,8 @@ Per-runtime upgrade seams:
 | Export                              | Kind | Purpose                                                                        |
 | ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
 | `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)                 |
+| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`)                   |
+| `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                         |
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
 | `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
@@ -5771,6 +5951,23 @@ Contract notes:
   cast; no other casts are used.
 - `detectRuntime()` accepts an injectable `globals` parameter (default `globalThis`) so all
   detection branches are testable without real runtimes.
+- **`createRuntimeServices(options?)` builds services without an application.** Use it when the
+  runtime is needed before any plugin exists — reading the environment to decide which plugins to
+  register, which is what `createFullStackAppFromConfig` does. `RuntimePlugin.register` calls this
+  same function, so detection, the platform → adapter lookup, and the
+  `No runtime adapter factory for platform: <p>` error exist once rather than twice.
+
+  ```typescript
+  import { createRuntimeServices } from '@hono-enterprise/runtime';
+  import { loadConfig } from '@hono-enterprise/config-plugin';
+
+  const config = await loadConfig(createRuntimeServices());
+  ```
+
+  Building a second instance alongside the application's own is safe: the adapters are stateless
+  facades over platform globals, holding no connection, cache, or handle registry, and nothing
+  compares them by identity. One caveat — `env` is a **snapshot taken at construction**, not a live
+  view, so a variable set between two constructions is visible only to the later instance.
 
 ---
 

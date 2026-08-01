@@ -22,6 +22,10 @@ describe('barrel-exports | present exports', () => {
     expect(typeof barrel.detectRuntime).toBe('function');
   });
 
+  it('createRuntimeServices is exported', () => {
+    expect(typeof barrel.createRuntimeServices).toBe('function');
+  });
+
   it('createDenoRuntimeServices is exported', () => {
     expect(typeof barrel.createDenoRuntimeServices).toBe('function');
   });

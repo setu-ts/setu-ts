@@ -30,7 +30,7 @@ export {
   loadRequestHandler,
 } from './handler/server-build.ts';
 export { bridgeRequestToRR } from './handler/request-bridge.ts';
-export { servicesContext, userContext } from './handler/context-keys.ts';
+export { contextKeyFor, servicesContext, userContext } from './handler/context-keys.ts';
 export type {
   PopulateLoadContext,
   ReactRouterPluginOptions,

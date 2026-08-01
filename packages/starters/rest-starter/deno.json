@@ -20,6 +20,7 @@
     "@hono-enterprise/decorator-plugin": "jsr:@hono-enterprise/decorator-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/database-plugin": "jsr:@hono-enterprise/database-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/auth-plugin": "jsr:@hono-enterprise/auth-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/session-plugin": "jsr:@hono-enterprise/session-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/di-plugin": "jsr:@hono-enterprise/di-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/websocket-plugin": "jsr:@hono-enterprise/websocket-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/sse-plugin": "jsr:@hono-enterprise/sse-plugin@^0.1.0-alpha.3",
