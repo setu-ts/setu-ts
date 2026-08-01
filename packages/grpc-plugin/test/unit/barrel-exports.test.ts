@@ -1,56 +1,56 @@
 /**
- * Barrel exports test — verifies that all expected symbols are exported
- * from the package's index.ts.
- *
- * @module
+ * The barrel must export exactly the documented public surface — and must NOT
+ * export the internal Connect port, which would commit the package to a shape
+ * tracking Connect's own API.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import {
-  CAPABILITIES,
-  GrpcPlugin,
-  GrpcRuntimeLoadError,
-  GrpcService,
-  GrpcUnavailableError,
-} from '../../src/index.ts';
-import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
+import * as barrel from '../../src/index.ts';
 
-describe('Barrel Exports', () => {
-  it('should export GrpcPlugin function', () => {
-    expect(GrpcPlugin).not.toBeNull();
-    expect(typeof GrpcPlugin).toBe('function');
+describe('grpc-plugin barrel', () => {
+  it('exports every documented runtime value', () => {
+    expect(typeof barrel.GrpcPlugin).toBe('function');
+    expect(typeof barrel.GrpcService).toBe('function');
+    expect(typeof barrel.adaptConnectModule).toBe('function');
+    expect(typeof barrel.GrpcUnavailableError).toBe('function');
+    expect(typeof barrel.GrpcRuntimeLoadError).toBe('function');
+    expect(typeof barrel.GrpcDescriptorError).toBe('function');
+    expect(barrel.CAPABILITIES.GRPC).toBe('grpc');
   });
 
-  it('should export GrpcService class', () => {
-    expect(GrpcService).not.toBeNull();
-    expect(typeof GrpcService).toBe('function');
+  it('exports errors that are real Error subclasses with stable names', () => {
+    const unavailable = new barrel.GrpcUnavailableError();
+    expect(unavailable).toBeInstanceOf(Error);
+    expect(unavailable.name).toBe('GrpcUnavailableError');
+
+    const load = new barrel.GrpcRuntimeLoadError('npm:x', 'deno add npm:x');
+    expect(load).toBeInstanceOf(Error);
+    expect(load.name).toBe('GrpcRuntimeLoadError');
+    expect(load.specifier).toBe('npm:x');
+
+    const descriptor = new barrel.GrpcDescriptorError('bad bytes');
+    expect(descriptor).toBeInstanceOf(Error);
+    expect(descriptor.name).toBe('GrpcDescriptorError');
   });
 
-  it('should export GrpcRuntimeLoadError class', () => {
-    expect(GrpcRuntimeLoadError).not.toBeNull();
-    expect(typeof GrpcRuntimeLoadError).toBe('function');
+  it('does not export the internal Connect runtime port or its facades', () => {
+    const names = Object.keys(barrel);
+    for (const internal of ['ConnectRuntime', 'ConnectRouterLike', 'FileRegistryLike']) {
+      expect(names).not.toContain(internal);
+    }
   });
 
-  it('should export GrpcUnavailableError class', () => {
-    expect(GrpcUnavailableError).not.toBeNull();
-    expect(typeof GrpcUnavailableError).toBe('function');
-  });
-
-  it('should export CAPABILITIES', () => {
-    expect(CAPABILITIES).not.toBeNull();
-    expect(CAPABILITIES.GRPC).toBe('grpc');
-  });
-
-  it('should export ConnectRuntime type (via import)', () => {
-    // This test verifies the type is exported by checking it can be used
-    const runtime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('test')),
-      reviveDescriptorSet: () => ({}),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    expect(runtime).toBeDefined();
+  it('exports no unexpected runtime value', () => {
+    // A new export must be a deliberate, documented decision.
+    expect(Object.keys(barrel).sort()).toEqual([
+      'CAPABILITIES',
+      'GrpcDescriptorError',
+      'GrpcPlugin',
+      'GrpcRuntimeLoadError',
+      'GrpcService',
+      'GrpcUnavailableError',
+      'adaptConnectModule',
+    ]);
   });
 });

@@ -31,7 +31,20 @@ export { GrpcPlugin } from './plugin/grpc-plugin.ts';
 export { GrpcService } from './services/grpc-service.ts';
 
 // Re-export errors
-export { GrpcRuntimeLoadError, GrpcUnavailableError } from './errors/grpc-errors.ts';
+export {
+  GrpcDescriptorError,
+  GrpcRuntimeLoadError,
+  GrpcUnavailableError,
+} from './errors/grpc-errors.ts';
+
+/**
+ * The pure adapter over already-imported Connect/Protobuf-ES modules. Exported
+ * so an application that already bundles Connect can hand the modules in via
+ * {@linkcode GrpcPluginOptions.connectModule} instead of paying for the lazy
+ * `import()`.
+ */
+export { adaptConnectModule } from './transports/connect-loader.ts';
+export type { ConnectModuleLike } from './transports/connect-loader.ts';
 
 // Re-export options type
 export type { GrpcPluginOptions } from './interfaces/index.ts';
@@ -45,5 +58,6 @@ export type {
 } from '@hono-enterprise/common';
 export { CAPABILITIES } from '@hono-enterprise/common';
 
-// Internal interfaces (not part of public API)
-export type { ConnectRuntime } from './interfaces/connect-runtime.ts';
+// `ConnectRuntime` and the structural Connect facades are deliberately NOT
+// exported: they are an internal port (plan §3.2), and publishing them would
+// commit the plugin to a shape that tracks Connect's own API.

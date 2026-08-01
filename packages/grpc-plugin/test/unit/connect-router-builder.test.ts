@@ -1,677 +1,266 @@
 /**
- * Connect router builder tests — verifies service registration, dispatch map creation,
- * health/reflection paths, and duplicate detection.
+ * Unit tests for the Connect router builder: which services get registered for
+ * each `reflection`/`health` combination, dispatch-map keying, duplicate
+ * detection, and the wiring that lets health and reflection see the full
+ * service-name list.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { buildConnectRouter } from '../../src/transports/connect-router-builder.ts';
-import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
+import { GrpcDescriptorError } from '../../src/errors/grpc-errors.ts';
+import {
+  createFakeConnectRuntime,
+  type FakeConnectRuntime,
+  fakeFile,
+  fakeService,
+} from '../fixtures/fake-connect-runtime.ts';
+import type { EmbeddedDescriptors as EmbeddedDescriptorsType } from '../../src/descriptors/embedded-descriptors.ts';
 
-const fakeConnectRuntime: ConnectRuntime = {
-  createConnectRouter: () => ({ handlers: [], service: () => {} }),
-  createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-  reviveDescriptorSet: (_base64: string) => ({
-    files: [],
-    getService: (_name: string) => undefined,
-    listServices: () => [],
-  }),
-  getService: (_registry: unknown, _serviceName: string) => undefined,
-  createRegistry: () => ({ getService: () => undefined }),
+const HEALTH = 'grpc.health.v1.Health';
+const REFLECTION = 'grpc.reflection.v1.ServerReflection';
+
+const embeddedDescriptors: EmbeddedDescriptorsType = {
+  healthBase64: btoa('health-bytes'),
+  reflectionBase64: btoa('reflection-bytes'),
 };
 
-// Fake embedded descriptors
-const fakeEmbeddedDescriptors = {
-  healthBase64: 'aGVsbG8=', // placeholder
-  reflectionBase64: 'd29ybGQ=', // placeholder
-};
+/** A runtime that can resolve the two built-in services plus any app services. */
+function runtimeWith(appServices: ReturnType<typeof fakeService>[] = []): FakeConnectRuntime {
+  return createFakeConnectRuntime({
+    services: [
+      fakeService(HEALTH, ['Check'], fakeFile('grpc/health/v1/health.proto')),
+      fakeService(
+        REFLECTION,
+        ['ServerReflectionInfo'],
+        fakeFile(
+          'grpc/reflection/v1/reflection.proto',
+        ),
+      ),
+      ...appServices,
+    ],
+  });
+}
 
-describe('ConnectRouterBuilder', () => {
-  it('should build a dispatch map with registered services', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: { typeName: 'package.ServiceName', methods: { echo: {} } },
-        implementation: { echo: (_request: Request) => Promise.resolve(new Response('OK')) },
-      },
-    ];
+function build(
+  runtime: FakeConnectRuntime,
+  overrides: Partial<Parameters<typeof buildConnectRouter>[0]> = {},
+) {
+  return buildConnectRouter({
+    connectRuntime: runtime,
+    basePath: '/grpc',
+    reflection: true,
+    health: true,
+    services: [],
+    embeddedDescriptors,
+    healthService: undefined,
+    ...overrides,
+  });
+}
 
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
+const registeredNames = (runtime: FakeConnectRuntime) =>
+  runtime.registered.map((r) => r.definition.typeName);
 
-    expect(dispatchMap).toBeDefined();
-    expect(typeof dispatchMap.get).toBe('function');
+describe('buildConnectRouter — service registration', () => {
+  it('registers health and reflection by default', () => {
+    const runtime = runtimeWith();
+    build(runtime);
+    expect(registeredNames(runtime)).toEqual([HEALTH, REFLECTION]);
   });
 
-  it('should detect duplicate service type names', () => {
-    const services = [
-      { definition: { typeName: 'package.Service' }, implementation: {} },
-      { definition: { typeName: 'package.Service' }, implementation: {} },
-    ];
-
-    expect(() => {
-      buildConnectRouter({
-        basePath: '/grpc',
-        reflection: false,
-        health: false,
-        services,
-        connectRuntime: fakeConnectRuntime,
-        embeddedDescriptors: fakeEmbeddedDescriptors,
-        healthService: undefined,
-      });
-    }).toThrow('has already been registered');
+  it('registers only health when reflection is disabled', () => {
+    const runtime = runtimeWith();
+    build(runtime, { reflection: false });
+    expect(registeredNames(runtime)).toEqual([HEALTH]);
   });
 
-  it('should build a reflection registry when reflection or health is enabled', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.MyService', methods: { echo: {} } } },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: true,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(registry).toBeDefined();
-    const reg = registry as {
-      listServices: () => string[];
-      getService: (name: string) => unknown;
-    };
-    const listedServices = reg.listServices();
-    expect(listedServices).toContain('pkg.MyService');
+  it('registers only reflection when health is disabled', () => {
+    const runtime = runtimeWith();
+    build(runtime, { health: false });
+    expect(registeredNames(runtime)).toEqual([REFLECTION]);
   });
 
-  it('should not build reflection registry when both reflection and health are false', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(registry).toBeNull();
+  it('registers neither when both are disabled', () => {
+    const runtime = runtimeWith();
+    build(runtime, { health: false, reflection: false });
+    expect(registeredNames(runtime)).toEqual([]);
   });
 
-  it('should normalize basePath correctly', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: { typeName: 'pkg.Svc', methods: { method: {} } },
-        implementation: { method: () => ({}) },
-      },
-    ];
-
-    // Test with trailing slash
-    const { dispatchMap: map1 } = buildConnectRouter({
-      basePath: '/grpc/',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    // Test without trailing slash
-    const { dispatchMap: map2 } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    // Both should have the same keys
-    expect(map1.size).toBe(map2.size);
+  it('does not revive an embedded descriptor set for a disabled service', () => {
+    const runtime = runtimeWith();
+    build(runtime, { health: false, reflection: false });
+    expect(runtime.revived).toEqual([]);
   });
 
-  it('should handle service without typeName gracefully', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { methods: { echo: {} } } },
-    ];
+  it('registers application services ahead of the built-ins', () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const runtime = runtimeWith([echo]);
+    build(runtime, { services: [{ definition: echo, implementation: { echo: () => ({}) } }] });
 
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(dispatchMap).toBeDefined();
-    expect(dispatchMap.size).toBe(0);
+    expect(registeredNames(runtime)).toEqual(['example.Echo', HEALTH, REFLECTION]);
   });
 
-  it('should handle service with empty methods', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Empty', methods: {} } },
-    ];
+  it('passes the application implementation through to the router', () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const implementation = { echo: () => ({ response: 'hi' }) };
+    const runtime = runtimeWith([echo]);
+    build(runtime, { services: [{ definition: echo, implementation }] });
 
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(dispatchMap).toBeDefined();
-    expect(dispatchMap.size).toBe(0);
+    expect(runtime.registered[0].implementation).toBe(implementation);
   });
 
-  it('should build reflection registry with service details', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: {
-          typeName: 'pkg.Svc',
-          package: 'pkg',
-          methods: { method1: {}, method2: {} },
-        },
-      },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
+  it('substitutes an empty implementation when none is supplied', () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const runtime = runtimeWith([echo]);
+    build(runtime, { services: [{ definition: echo }] });
 
-    expect(registry).toBeDefined();
-    const reg = registry as {
-      files: Array<{ name: string; package: string; methods: string[] }>;
-      listServices: () => string[];
-      getService: (name: string) => unknown;
-    };
-
-    expect(reg.files.length).toBe(1);
-    expect(reg.files[0].name).toBe('pkg.Svc');
-    // Package may be empty string when not provided in definition
-    expect(reg.files[0].methods).toEqual(['method1', 'method2']);
-
-    const listed = reg.listServices();
-    expect(listed).toContain('pkg.Svc');
-
-    const found = reg.getService('pkg.Svc');
-    expect(found).toBeDefined();
+    expect(runtime.registered[0].implementation).toEqual({});
   });
 
-  it('should handle service with empty typeName in reflection registry', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { methods: { echo: {} } } },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(registry).toBeDefined();
-    const reg = registry as { files: unknown[] };
-    expect(reg.files.length).toBe(1);
+  it('throws rather than silently overwriting a duplicate typeName', () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const runtime = runtimeWith([echo]);
+    expect(() => build(runtime, { services: [{ definition: echo }, { definition: echo }] }))
+      .toThrow(/already been registered/);
   });
 
-  it('should handle service with undefined methods', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Svc' } },
-    ];
+  it('throws GrpcDescriptorError when an embedded set lacks its service', () => {
+    const runtime = createFakeConnectRuntime({ services: [] });
+    expect(() => build(runtime)).toThrow(GrpcDescriptorError);
+  });
+});
 
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
+describe('buildConnectRouter — dispatch map', () => {
+  it('keys handlers by basePath + requestPath', () => {
+    const runtime = createFakeConnectRuntime({
+      services: [
+        fakeService(HEALTH, ['Check'], fakeFile('grpc/health/v1/health.proto')),
+        fakeService(REFLECTION, ['ServerReflectionInfo'], fakeFile('grpc/reflection/v1/r.proto')),
+      ],
+      requestPaths: ['/grpc.health.v1.Health/Check'],
     });
+    const { dispatchMap } = build(runtime);
 
-    expect(dispatchMap).toBeDefined();
-    expect(dispatchMap.size).toBe(0);
+    expect([...dispatchMap.keys()]).toEqual(['/grpc/grpc.health.v1.Health/Check']);
   });
 
-  it('buildReflectionRegistry should include package in file metadata', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: {
-          typeName: 'pkg.MyService',
-          package: 'my.package',
-          methods: { echo: {} },
-        },
-      },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
+  it('normalizes a trailing-slash basePath to the same keys', () => {
+    const paths = ['/pkg.Svc/Method'];
+    const withSlash = createFakeConnectRuntime({
+      services: [
+        fakeService(HEALTH, ['Check'], fakeFile('h.proto')),
+        fakeService(REFLECTION, ['Info'], fakeFile('r.proto')),
+      ],
+      requestPaths: paths,
     });
-
-    const reg = registry as {
-      files: Array<{ name: string; package: string; methods: string[] }>;
-    };
-    expect(reg.files.length).toBe(1);
-    // Package may be empty when not explicitly set in the definition
-    expect(reg.files[0].methods).toContain('echo');
+    const { dispatchMap } = build(withSlash, { basePath: '/grpc/' });
+    expect([...dispatchMap.keys()]).toEqual(['/grpc/pkg.Svc/Method']);
   });
 
-  it('getService on reflection registry should find service by name', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: { typeName: 'pkg.MyService', methods: { echo: {} } },
-        implementation: { echo: () => ({}) },
-      },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
+  it('keys against the root when basePath is /', () => {
+    const runtime = createFakeConnectRuntime({
+      services: [
+        fakeService(HEALTH, ['Check'], fakeFile('h.proto')),
+        fakeService(REFLECTION, ['Info'], fakeFile('r.proto')),
+      ],
+      requestPaths: ['/pkg.Svc/Method'],
     });
-
-    const reg = registry as {
-      getService: (name: string) => unknown;
-    };
-    const found = reg.getService('pkg.MyService');
-    expect(found).toBeDefined();
-    expect((found as { definition: { typeName: string } }).definition.typeName).toBe(
-      'pkg.MyService',
-    );
+    const { dispatchMap } = build(runtime, { basePath: '/' });
+    // Not '//pkg.Svc/Method'.
+    expect([...dispatchMap.keys()]).toEqual(['/pkg.Svc/Method']);
   });
 
-  it('getService on reflection registry should return undefined for unknown service', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
+  it('produces a working fetch handler per entry', async () => {
+    const runtime = createFakeConnectRuntime({
+      services: [
+        fakeService(HEALTH, ['Check'], fakeFile('h.proto')),
+        fakeService(REFLECTION, ['Info'], fakeFile('r.proto')),
+      ],
+      requestPaths: ['/pkg.Svc/Method'],
     });
+    const { dispatchMap } = build(runtime);
+    const handler = dispatchMap.get('/grpc/pkg.Svc/Method')!;
+    const response = await handler(new Request('http://x/grpc/pkg.Svc/Method'));
 
-    const reg = registry as {
-      getService: (name: string) => unknown;
-    };
-    const found = reg.getService('unknown.Service');
-    expect(found).toBeUndefined();
+    expect(await response.text()).toBe('handled:/pkg.Svc/Method');
+  });
+});
+
+describe('buildConnectRouter — health and reflection wiring', () => {
+  /** Pulls a registered implementation by service name. */
+  function implOf(runtime: FakeConnectRuntime, typeName: string): Record<string, unknown> {
+    return runtime.registered.find((r) => r.definition.typeName === typeName)!.implementation;
+  }
+
+  it('gives the health bridge every service name, so Check knows what it serves', async () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const runtime = runtimeWith([echo]);
+    build(runtime, { services: [{ definition: echo }] });
+
+    const check = implOf(runtime, HEALTH).check as (
+      r: { service: string },
+    ) => Promise<{ status: number }>;
+
+    // A registered app service is known...
+    expect((await check({ service: 'example.Echo' })).status).toBe(1);
+    // ...the built-ins are known...
+    expect((await check({ service: REFLECTION })).status).toBe(1);
+    // ...and anything else is SERVICE_UNKNOWN.
+    expect((await check({ service: 'no.Such' })).status).toBe(3);
   });
 
-  it('should handle service with falsy implementation', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: { typeName: 'pkg.Svc', methods: { method: {} } },
-        implementation: null as never,
-      },
-    ];
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
+  it('gives reflection the full service list, app services first', async () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const runtime = runtimeWith([echo]);
+    build(runtime, { services: [{ definition: echo }] });
 
-    // No handler should be registered since implementation is null/falsy
-    expect(dispatchMap.size).toBe(0);
+    const info = implOf(runtime, REFLECTION).serverReflectionInfo as (
+      requests: AsyncIterable<unknown>,
+    ) => AsyncGenerator<{ messageResponse: { case: string; value: unknown } }>;
+
+    async function* requests() {
+      yield { messageRequest: { case: 'listServices', value: '' } };
+    }
+
+    const [response] = await Array.fromAsync(info(requests()));
+    expect(response.messageResponse.case).toBe('listServicesResponse');
+    expect(response.messageResponse.value).toEqual({
+      service: [{ name: 'example.Echo' }, { name: HEALTH }, { name: REFLECTION }],
+    });
   });
 
-  it('should handle service with falsy methods', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Svc', methods: null as never } },
-    ];
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
+  it('reflects an application service file and its transitive dependencies', async () => {
+    const shared = fakeFile('example/shared.proto', {
+      messages: [{
+        typeName: 'example.Shared',
+        nestedMessages: [],
+        nestedEnums: [],
+        nestedExtensions: [],
+      }],
     });
+    const echoFile = fakeFile('example/echo.proto', { dependencies: [shared] });
+    const echo = fakeService('example.Echo', ['Echo'], echoFile);
+    const runtime = runtimeWith([echo]);
+    build(runtime, { services: [{ definition: echo }] });
 
-    // No handler should be registered since methods is null/falsy
-    expect(dispatchMap.size).toBe(0);
+    const info = implOf(runtime, REFLECTION).serverReflectionInfo as (
+      requests: AsyncIterable<unknown>,
+    ) => AsyncGenerator<{ messageResponse: { case: string; value: unknown } }>;
+
+    async function* requests() {
+      yield { messageRequest: { case: 'fileContainingSymbol', value: 'example.Shared' } };
+    }
+
+    const [response] = await Array.fromAsync(info(requests()));
+    expect(response.messageResponse.case).toBe('fileDescriptorResponse');
+    expect(runtime.serializedFiles).toContain('example/shared.proto');
   });
 
-  it('should handle method with no handler in implementation', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: { typeName: 'pkg.Svc', methods: { method: {} } },
-        implementation: { otherMethod: () => ({}) },
-      },
-    ];
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
+  it('does not build a reflection registry when reflection is disabled', () => {
+    const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
+    const runtime = runtimeWith([echo]);
+    build(runtime, { reflection: false, services: [{ definition: echo }] });
 
-    // No handler should be registered since the method is not in implementation
-    expect(dispatchMap.size).toBe(0);
-  });
-
-  it('should call router.service for each registered app service', () => {
-    const serviceCalls: Array<{ typeName: string }> = [];
-    const fakeRuntimeWithTracking: ConnectRuntime = {
-      ...fakeConnectRuntime,
-      createConnectRouter: () => {
-        return {
-          handlers: [],
-          service: (_service: unknown, _impl: unknown) => {
-            const desc = _service as { typeName: string };
-            serviceCalls.push({ typeName: desc.typeName });
-          },
-        };
-      },
-    };
-
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Svc1', methods: { method1: {} } } },
-      { definition: { typeName: 'pkg.Svc2', methods: { method2: {} } } },
-    ];
-
-    buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeRuntimeWithTracking,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    // Should call service() once per app service (2) — health/reflection disabled
-    expect(serviceCalls.length).toBe(2);
-    expect(serviceCalls.map((c) => c.typeName)).toContain('pkg.Svc1');
-    expect(serviceCalls.map((c) => c.typeName)).toContain('pkg.Svc2');
-  });
-
-  it('should not call router.service for health/reflection when disabled', () => {
-    const serviceCalls: Array<{ typeName: string }> = [];
-    const fakeRuntimeWithTracking: ConnectRuntime = {
-      ...fakeConnectRuntime,
-      createConnectRouter: () => {
-        return {
-          handlers: [],
-          service: (_service: unknown, _impl: unknown) => {
-            const desc = _service as { typeName: string };
-            serviceCalls.push({ typeName: desc.typeName });
-          },
-        };
-      },
-    };
-
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Svc', methods: { echo: {} } } },
-    ];
-
-    buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeRuntimeWithTracking,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    // Should call service() once per app service only (1)
-    expect(serviceCalls.length).toBe(1);
-    expect(serviceCalls[0].typeName).toBe('pkg.Svc');
-  });
-
-  it('should forward the definition and implementation verbatim to router.service', () => {
-    const serviceCalls: Array<{ typeName: string; hasKind: boolean; implKeys: string[] }> = [];
-    const fakeRuntimeWithTracking: ConnectRuntime = {
-      ...fakeConnectRuntime,
-      createConnectRouter: () => {
-        return {
-          handlers: [],
-          service: (service: unknown, impl: unknown) => {
-            const desc = service as { kind?: string; typeName: string };
-            serviceCalls.push({
-              typeName: desc.typeName,
-              hasKind: desc.kind === 'service',
-              implKeys: Object.keys(impl as Record<string, unknown>),
-            });
-          },
-        };
-      },
-    };
-
-    // A real Protobuf-ES DescService carries kind:'service' and a methods array.
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: {
-          kind: 'service',
-          typeName: 'pkg.Svc',
-          methods: [{ name: 'echo', localName: 'echo' }],
-        },
-        implementation: { echo: () => ({}) },
-      },
-    ];
-
-    buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeRuntimeWithTracking,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(serviceCalls.length).toBe(1);
-    expect(serviceCalls[0].typeName).toBe('pkg.Svc');
-    expect(serviceCalls[0].hasKind).toBe(true);
-    expect(serviceCalls[0].implKeys).toEqual(['echo']);
-  });
-
-  it('should pass through real DescService when kind is service', () => {
-    const serviceCalls: Array<{ typeName: string; hasKind: boolean }> = [];
-    const fakeRuntimeWithTracking: ConnectRuntime = {
-      ...fakeConnectRuntime,
-      createConnectRouter: () => {
-        return {
-          handlers: [],
-          service: (service: unknown, _impl: unknown) => {
-            const desc = service as { kind?: string; typeName: string };
-            serviceCalls.push({
-              typeName: desc.typeName,
-              hasKind: desc.kind === 'service',
-            });
-          },
-        };
-      },
-    };
-
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      {
-        definition: {
-          kind: 'service',
-          typeName: 'pkg.RealService',
-          methods: { echo: {} },
-        },
-      },
-    ];
-
-    buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeRuntimeWithTracking,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    expect(serviceCalls.length).toBe(1);
-    expect(serviceCalls[0].typeName).toBe('pkg.RealService');
-    expect(serviceCalls[0].hasKind).toBe(true);
-  });
-
-  it('should handle health service with null descriptor', () => {
-    const serviceCalls: Array<{ typeName: string }> = [];
-    const fakeRuntimeWithNullHealth: ConnectRuntime = {
-      ...fakeConnectRuntime,
-      createConnectRouter: () => ({
-        handlers: [],
-        service: (service: unknown, _impl: unknown) => {
-          const desc = service as { typeName: string };
-          serviceCalls.push({ typeName: desc.typeName });
-        },
-      }),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: (name: string) => name === 'grpc.health.v1.Health' ? null : undefined,
-        listServices: () => [],
-      }),
-      getService: (_registry: unknown, serviceName: string) =>
-        serviceName === 'grpc.health.v1.Health' ? null : undefined,
-    };
-
-    buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: true,
-      services: [],
-      connectRuntime: fakeRuntimeWithNullHealth,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    // Should not call service() for health since descriptor is null
-    expect(serviceCalls.length).toBe(0);
-  });
-
-  it('should handle reflection service with null descriptor', () => {
-    const serviceCalls: Array<{ typeName: string }> = [];
-    const fakeRuntimeWithNullReflection: ConnectRuntime = {
-      ...fakeConnectRuntime,
-      createConnectRouter: () => ({
-        handlers: [],
-        service: (service: unknown, _impl: unknown) => {
-          const desc = service as { typeName: string };
-          serviceCalls.push({ typeName: desc.typeName });
-        },
-      }),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: (name: string) =>
-          name === 'grpc.reflection.v1.ServerReflection' ? null : undefined,
-        listServices: () => [],
-      }),
-      getService: (_registry: unknown, serviceName: string) =>
-        serviceName === 'grpc.reflection.v1.ServerReflection' ? null : undefined,
-    };
-
-    buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services: [],
-      connectRuntime: fakeRuntimeWithNullReflection,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-
-    // Should not call service() for reflection since descriptor is null
-    expect(serviceCalls.length).toBe(0);
-  });
-
-  it('should handle service without dot in typeName (buildDescService edge case)', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'Svc', methods: { method: {} } } },
-    ];
-    const { dispatchMap } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: false,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-    expect(dispatchMap).toBeDefined();
-  });
-
-  it('should handle service with null methods in reflection registry', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: 'pkg.Svc', methods: null as never } },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-    const reg = registry as {
-      files: Array<{ name: string; package: string; methods: string[] }>;
-    };
-    expect(reg.files.length).toBe(1);
-    expect(reg.files[0].methods).toEqual([]);
-  });
-
-  it('should handle service with falsy typeName in reflection registry', () => {
-    const services: Array<{ definition: unknown; implementation?: unknown }> = [
-      { definition: { typeName: '', methods: { echo: {} } } },
-    ];
-    const { registry } = buildConnectRouter({
-      basePath: '/grpc',
-      reflection: true,
-      health: false,
-      services,
-      connectRuntime: fakeConnectRuntime,
-      embeddedDescriptors: fakeEmbeddedDescriptors,
-      healthService: undefined,
-    });
-    const reg = registry as {
-      listServices: () => string[];
-    };
-    const listed = reg.listServices();
-    // Empty string typeName should still be included
-    expect(listed).toContain('');
+    expect(runtime.serializedFiles).toEqual([]);
   });
 });

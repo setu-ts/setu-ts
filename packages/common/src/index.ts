@@ -240,6 +240,7 @@ export type {
   GrpcServingStatus,
   IGrpcService,
   RpcFetchHandler,
+  ServiceImpl,
 } from './services/grpc.ts';
 
 // SSR contracts

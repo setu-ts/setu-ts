@@ -1,376 +1,237 @@
 /**
- * GrpcService tests — verifies service registration and request handling.
+ * Unit tests for {@linkcode GrpcService}: availability detection, deferred
+ * service registration, dispatch, and shutdown.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GrpcService } from '../../src/services/grpc-service.ts';
-import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
-import type { IHttpAdapter } from '@hono-enterprise/common';
-import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
+import {
+  createFakeConnectRuntime,
+  type FakeConnectRuntime,
+  fakeFile,
+  fakeService,
+} from '../fixtures/fake-connect-runtime.ts';
+import type { GrpcServiceDefinition, IHttpAdapter } from '@hono-enterprise/common';
+import type { EmbeddedDescriptors as EmbeddedDescriptorsType } from '../../src/descriptors/embedded-descriptors.ts';
+import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 
-// Create a fake ConnectRuntime for testing
-function createFakeConnectRuntime(): ConnectRuntime {
-  return {
-    createConnectRouter: () => ({ handlers: [], service: () => {} }),
-    createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-    reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-    getService: () => undefined,
-    createRegistry: () => ({}),
-  };
-}
+const HEALTH = 'grpc.health.v1.Health';
+const REFLECTION = 'grpc.reflection.v1.ServerReflection';
 
-const fakeConnectRuntime = createFakeConnectRuntime();
-
-// Fake embedded descriptors
-const fakeEmbeddedDescriptors = {
-  healthBase64: 'aGVsbG8=', // placeholder
-  reflectionBase64: 'd29ybGQ=', // placeholder
+const embeddedDescriptors: EmbeddedDescriptorsType = {
+  healthBase64: btoa('health-bytes'),
+  reflectionBase64: btoa('reflection-bytes'),
 };
 
-// A minimal mock IHttpAdapter that satisfies the interface.
-// When hasRpcHandler is true, setRpcHandler is present; otherwise omitted entirely.
-function createMockAdapter(hasRpcHandler: boolean): IHttpAdapter {
-  const adapter: Omit<IHttpAdapter, 'setRpcHandler'> & { setRpcHandler?: () => void } = {
-    setHandler: (() => {}) as never,
-    fetch: (() => {}) as never,
-    listen: (() => {}) as never,
-    close: (() => {}) as never,
-  };
-  if (hasRpcHandler) {
-    adapter.setRpcHandler = () => {};
-  }
-  return adapter as IHttpAdapter;
+const echoDefinition = fakeService(
+  'example.Echo',
+  ['Echo'],
+  fakeFile('example/echo.proto'),
+) as unknown as GrpcServiceDefinition;
+
+/** An adapter that implements the RPC seam. */
+function capableAdapter(): IHttpAdapter {
+  return { setRpcHandler: () => {} } as unknown as IHttpAdapter;
 }
 
-describe('GrpcService', () => {
-  it('should be available when adapter has setRpcHandler', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    expect(service.available).toBeTruthy();
+/** An adapter predating the M49 widening. */
+function legacyAdapter(): IHttpAdapter {
+  return {} as unknown as IHttpAdapter;
+}
+
+function runtimeWith(extra: ReturnType<typeof fakeService>[] = []): FakeConnectRuntime {
+  return createFakeConnectRuntime({
+    services: [
+      fakeService(HEALTH, ['Check'], fakeFile('grpc/health/v1/health.proto')),
+      fakeService(REFLECTION, ['ServerReflectionInfo'], fakeFile('grpc/reflection/v1/r.proto')),
+      ...extra,
+    ],
+    requestPaths: ['/example.Echo/Echo'],
+  });
+}
+
+function createService(
+  overrides: {
+    runtime?: FakeConnectRuntime;
+    options?: GrpcPluginOptions;
+    adapter?: IHttpAdapter | undefined;
+  } = {},
+): GrpcService {
+  return new GrpcService({
+    connectRuntime: overrides.runtime ?? runtimeWith(),
+    embeddedDescriptors,
+    options: overrides.options ?? {},
+    adapter: 'adapter' in overrides ? overrides.adapter : capableAdapter(),
+    healthService: undefined,
+  });
+}
+
+describe('GrpcService — availability', () => {
+  it('is available when the adapter implements setRpcHandler', () => {
+    expect(createService().available).toBe(true);
   });
 
-  it('should be unavailable when adapter lacks setRpcHandler', () => {
-    const adapter = createMockAdapter(false);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    expect(service.available).toBeFalsy();
+  it('is unavailable when the adapter predates the widening', () => {
+    expect(createService({ adapter: legacyAdapter() }).available).toBe(false);
   });
 
-  it('should register a service via addService', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-
-    const definition = { typeName: 'package.TestService', methods: {} };
-    service.addService(definition);
-
-    // The service is stored internally; verify no exception was thrown
-    expect(() => service.addService({ typeName: 'package.TestService', methods: {} }))
-      .toThrow();
+  it('is unavailable when no adapter was resolved', () => {
+    expect(createService({ adapter: undefined }).available).toBe(false);
   });
 
-  it('should throw on duplicate service registration', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-
-    const definition = { typeName: 'package.TestService', methods: {} };
-    service.addService(definition);
-
-    expect(() => service.addService(definition)).toThrow();
+  it('rejects handleRequest with GrpcUnavailableError when unavailable', async () => {
+    const service = createService({ adapter: legacyAdapter() });
+    await expect(service.handleRequest(new Request('http://x/grpc/example.Echo/Echo')))
+      .rejects.toBeInstanceOf(GrpcUnavailableError);
   });
 
-  it('handleRequest should return response for non-RPC paths when available', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
+  it('still accepts addService when unavailable, so wiring is not lost', () => {
+    const service = createService({ adapter: legacyAdapter() });
+    service.addService(echoDefinition);
+    expect(service.serviceCount).toBe(1);
+  });
+});
 
-    // Without services configured, handleRequest should fall through (return 404)
-    const request = new Request('http://example.com/normal/path');
-    const result = await service.handleRequest(request);
-    expect(result).toBeDefined();
-    expect((result as Response).status).toBe(404);
+describe('GrpcService — service registration', () => {
+  it('registers services supplied through options', () => {
+    const service = createService({
+      options: { services: [{ definition: echoDefinition, implementation: { echo: () => ({}) } }] },
+    });
+    expect(service.serviceCount).toBe(1);
   });
 
-  it('handleRequest should throw GrpcUnavailableError when not available', async () => {
-    const adapter = createMockAdapter(false);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-
-    const request = new Request('http://example.com/grpc/service/method');
-    await expect(service.handleRequest(request)).rejects.toThrow(GrpcUnavailableError);
+  it('throws on a duplicate typeName', () => {
+    const service = createService();
+    service.addService(echoDefinition);
+    expect(() => service.addService(echoDefinition)).toThrow(/already been registered/);
   });
 
-  it('should accept services from options at construction', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {
-        services: [
-          { definition: { typeName: 'package.PreReg', methods: {} } },
-        ],
-      } as GrpcPluginOptions,
-      adapter,
-    );
-    expect(service.servicesCount).toBe(1);
+  it('picks up a service added after the router was already built', async () => {
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime });
+
+    // Build the router once by dispatching.
+    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    const before = runtime.registered.length;
+
+    service.addService(echoDefinition);
+    await service.handleRequest(new Request('http://x/grpc/unknown'));
+
+    // The router was rebuilt and now carries the app service too.
+    expect(runtime.registered.length).toBeGreaterThan(before);
+    expect(runtime.registered.map((r) => r.definition.typeName)).toContain('example.Echo');
   });
 
-  it('should use custom basePath from options', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      { basePath: '/custom-grpc' } as GrpcPluginOptions,
-      adapter,
+  it('builds the router once and reuses it across requests', async () => {
+    const runtime = runtimeWith();
+    const service = createService({ runtime });
+
+    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    const afterFirst = runtime.registered.length;
+    await service.handleRequest(new Request('http://x/grpc/unknown'));
+
+    expect(runtime.registered.length).toBe(afterFirst);
+  });
+});
+
+describe('GrpcService — dispatch', () => {
+  it('serves a registered procedure through handleRequest', async () => {
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime });
+    service.addService(echoDefinition);
+
+    const response = await service.handleRequest(
+      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
     );
-    // basePath is internal; verify no error during construction
-    expect(service).toBeDefined();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('handled:/example.Echo/Echo');
   });
 
-  it('servicesCount should reflect registered services', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    expect(service.servicesCount).toBe(0);
-    service.addService({ typeName: 'pkg.Svc', methods: {} });
-    expect(service.servicesCount).toBe(1);
+  it('answers 404 from handleRequest for a non-RPC path', async () => {
+    // handleRequest must return a Response, never null.
+    const response = await createService().handleRequest(new Request('http://x/users'));
+    expect(response.status).toBe(404);
   });
 
-  it('dispatchMapSize should be 0 before router is built', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    expect(service.dispatchMapSize).toBe(0);
-  });
-
-  it('createFetchHandler should return null for non-RPC paths when available', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    const handler = service.createFetchHandler();
-    const result = await handler(new Request('http://example.com/other/path'));
-    expect(result).toBeNull();
-  });
-
-  it('createFetchHandler should return null when not available', async () => {
-    const adapter = createMockAdapter(false);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    const handler = service.createFetchHandler();
-    const result = await handler(new Request('http://example.com/grpc/svc/method'));
-    expect(result).toBeNull();
-  });
-
-  it('ensureRouter should build dispatch map on first call', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
-
-    // Access internal ensureRouter via handleRequest
-    const request = new Request('http://example.com/grpc/pkg.Svc/method');
-    await service.handleRequest(request);
-
-    // After first call, dispatchMap should be built (may be empty with fake runtime)
-    expect(service.dispatchMapSize).toBeGreaterThanOrEqual(0);
-  });
-
-  it('ensureRouter should be idempotent — second call returns immediately', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
-
-    // First call builds the router
-    const request1 = new Request('http://example.com/grpc/pkg.Svc/method');
-    await service.handleRequest(request1);
-
-    // Second call should reuse the cached router
-    const request2 = new Request('http://example.com/grpc/pkg.Svc/method');
-    await service.handleRequest(request2);
-
-    // dispatchMapSize should be consistent
-    expect(service.dispatchMapSize).toBeGreaterThanOrEqual(0);
-  });
-
-  it('should throw GrpcUnavailableError on handleRequest when adapter is null', async () => {
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      undefined,
-    );
-
-    const request = new Request('http://example.com/grpc/svc/method');
-    await expect(service.handleRequest(request)).rejects.toThrow(GrpcUnavailableError);
-  });
-
-  it('createFetchHandler should dispatch RPC requests when available', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
+  it('honors a custom basePath', async () => {
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime, options: { basePath: '/rpc/' } });
+    service.addService(echoDefinition);
 
     const handler = service.createFetchHandler();
-    const request = new Request('http://example.com/grpc/pkg.Svc/method');
-    const result = await handler(request);
+    expect(await handler(new Request('http://x/grpc/example.Echo/Echo'))).toBeNull();
+    const hit = await handler(new Request('http://x/rpc/example.Echo/Echo', { method: 'POST' }));
+    expect(hit?.status).toBe(200);
+  });
+});
 
-    // The fallback runtime returns 404 for unhandled paths
-    expect(result).not.toBeNull();
-    expect(result!.status).toBe(404);
+describe('GrpcService — fetch handler', () => {
+  it('returns null for traffic outside the base path so Hono handles it', async () => {
+    const handler = createService().createFetchHandler();
+    expect(await handler(new Request('http://x/users'))).toBeNull();
   });
 
-  it('should invalidate router cache when adding a new service', () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
+  it('serves a registered procedure', async () => {
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime });
+    service.addService(echoDefinition);
+
+    const response = await service.createFetchHandler()(
+      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
     );
-    service.addService({ typeName: 'pkg.Svc1', methods: { method: {} } });
-
-    // Build the router
-    const request1 = new Request('http://example.com/grpc/pkg.Svc1/method');
-    service.handleRequest(request1);
-
-    // Add another service
-    service.addService({ typeName: 'pkg.Svc2', methods: { method: {} } });
-
-    // The routerBuilt flag should be reset (we can't directly check it, but
-    // dispatchMapSize should reflect the new state after another request)
-    const request2 = new Request('http://example.com/grpc/pkg.Svc2/method');
-    service.handleRequest(request2);
-
-    // dispatchMapSize should be consistent
-    expect(service.dispatchMapSize).toBeGreaterThanOrEqual(0);
+    expect(response?.status).toBe(200);
   });
 
-  it('createFetchHandler should return null when not available', async () => {
-    const adapter = createMockAdapter(false);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    const handler = service.createFetchHandler();
-    const result = await handler(new Request('http://example.com/grpc/svc/method'));
-    expect(result).toBeNull();
+  it('returns null for traffic outside the base path even when unavailable', async () => {
+    const service = createService({ adapter: legacyAdapter() });
+    expect(await service.createFetchHandler()(new Request('http://x/users'))).toBeNull();
   });
+});
 
-  it('ensureRouter should be a no-op when not available', async () => {
-    const adapter = createMockAdapter(false);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
+describe('GrpcService — shutdown', () => {
+  /** A service whose router has been built and then closed. */
+  async function closedService(): Promise<{ service: GrpcService; runtime: FakeConnectRuntime }> {
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime });
+    service.addService(echoDefinition);
+    // Build the router so the served-path set is populated.
+    await service.handleRequest(new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }));
+    service.close();
+    return { service, runtime };
+  }
+
+  it('answers 503 for its own procedures after close()', async () => {
+    const { service } = await closedService();
+    const response = await service.handleRequest(
+      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
     );
-    // Should not throw
-    await (service as unknown as { ensureRouter: () => Promise<void> }).ensureRouter();
-    expect(service.dispatchMapSize).toBe(0);
-  });
-
-  it('should return 503 after stop is called', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
-
-    // Build the router first
-    const request1 = new Request('http://example.com/grpc/pkg.Svc/method');
-    await service.handleRequest(request1);
-
-    // Simulate stop
-    (service as unknown as { setStopped: (v: boolean) => void }).setStopped(true);
-
-    // After stop, requests should return 503
-    const response = await service.handleRequest(request1);
     expect(response.status).toBe(503);
   });
 
-  it('createFetchHandler should return 503 after stop is called', async () => {
-    const adapter = createMockAdapter(true);
-    const service = new GrpcService(
-      fakeConnectRuntime,
-      fakeEmbeddedDescriptors,
-      {} as GrpcPluginOptions,
-      adapter,
-    );
-    service.addService({ typeName: 'pkg.Svc', methods: { method: {} } });
-
-    // Build the router first
+  it('leaves ordinary application routes alone while draining', async () => {
+    // Returning 503 for every path would take the whole app down on shutdown.
+    const { service } = await closedService();
     const handler = service.createFetchHandler();
-    const request = new Request('http://example.com/grpc/pkg.Svc/method');
-    await handler(request);
+    expect(await handler(new Request('http://x/users'))).toBeNull();
+    expect(await handler(new Request('http://x/grpc/example.Echo/Unknown'))).toBeNull();
+  });
 
-    // Simulate stop
-    (service as unknown as { setStopped: (v: boolean) => void }).setStopped(true);
+  it('does not rebuild the router after close()', async () => {
+    const { service, runtime } = await closedService();
+    const registeredAtClose = runtime.registered.length;
+    await service.handleRequest(new Request('http://x/grpc/example.Echo/Echo'));
 
-    // After stop, fetch handler should return 503
-    const response = await handler(request);
-    expect(response).not.toBeNull();
-    expect(response!.status).toBe(503);
+    expect(runtime.registered.length).toBe(registeredAtClose);
+  });
+
+  it('is idempotent', async () => {
+    const { service } = await closedService();
+    expect(() => service.close()).not.toThrow();
+    const response = await service.handleRequest(
+      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
+    );
+    expect(response.status).toBe(503);
   });
 });

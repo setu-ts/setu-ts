@@ -1,13 +1,8 @@
 {
   "name": "@hono-enterprise/grpc-plugin",
-  "version": "0.3.0-alpha.3",
+  "version": "0.1.0-alpha.3",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    ".": "./src/index.ts"
-  },
-  // Zero runtime dependencies — Connect-ES and Protobuf-ES are lazy-imported at runtime
-  // via loadConnectModule(). No entries here.
   "test": {
     "permissions": {
       "net": true,

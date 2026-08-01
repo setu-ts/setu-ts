@@ -5506,12 +5506,12 @@ Contract notes:
   encrypted self-contained cookie by default, or an opaque id over an `ISessionStore`. Distinct from
   `AUTHENTICATION`, which establishes _who_ a caller is — a session carries per-visitor state and
   exists for anonymous visitors too. Added in Milestone 48.
-- **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
-  (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
 - `CAPABILITIES.GRPC` (`'grpc'`) — the capability token under which `GrpcPlugin` registers the
   `IGrpcService`. The service provides gRPC/Connect co-serving on the same port as ordinary Hono
-  routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49. are
-  multi-provider capabilities. The kernel collects plugin contributions registered under these
+  routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49.
+- **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
+  (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
+  are multi-provider capabilities. The kernel collects plugin contributions registered under these
   tokens via `services.getAll()`; the corresponding first-party plugins aggregate and expose them.
   `HTTP_ADAPTER` is single-provider — the runtime plugin registers its `IHttpAdapter` there.
 - `METADATA_STORE` (`'metadata-store'`) is the single-provider capability backing
@@ -6377,8 +6377,12 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 | `adaptConnectModule`   | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port |
 | `GrpcUnavailableError` | class    | Thrown by `handleRequest` when the adapter lacks `setRpcHandler`                              |
 | `GrpcRuntimeLoadError` | class    | Thrown by `loadConnectModule` when any of the four npm specifiers cannot be imported          |
+| `GrpcDescriptorError`  | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service        |
 | `GrpcPluginOptions`    | type     | The factory parameter shape                                                                   |
-| `ConnectRuntime`       | type     | Internal structural facade over Connect-ES modules (re-exported for convenience)              |
+| `ConnectModuleLike`    | type     | The four-module bundle `adaptConnectModule` accepts                                           |
+
+> `ConnectRuntime` and the structural Connect facades are **not** exported. They are an internal
+> port; publishing them would commit the package to a shape that tracks Connect's own API.
 
 ### Notes
 
@@ -6394,8 +6398,21 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 - **Health bridge maps `degraded → SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
   `'degraded' → SERVING (1)`. Degraded still serves; mapping it to `NOT_SERVING` would shed capacity
   in the wrong direction.
+- **`Check` honors the `service` field.** The empty string means "the whole server" and returns the
+  mapped aggregate health. A name the server does not serve returns `SERVICE_UNKNOWN (3)`,
+  regardless of overall health.
 - **`List` and `Watch` are unimplemented.** Connect auto-responses `unimplemented` for methods not
   provided by the bridge.
+- **Reflection covers four request variants.** `list_services`, `file_by_filename`,
+  `file_containing_symbol` (services, methods, messages, nested types, enums and extensions), and
+  `all_extension_numbers_of_type`. `file_containing_extension` answers `UNIMPLEMENTED` — the
+  framework registers no extensions. An unknown filename, symbol or type answers `NOT_FOUND (5)`.
+- **Reflection sees the app's own protos.** A registered service's `DescFile` and its transitive
+  `dependencies` are indexed, so `file_containing_symbol` resolves types declared in imported protos
+  too. Nothing beyond the registered services and the plugin's own two files is exposed.
+- **Descriptors are addressed by their suffixed proto path.** Reflection clients ask for
+  `example/echo.proto`; Protobuf-ES's `DescFile.name` drops the `.proto` suffix while `proto.name`
+  retains it, and the registry keys on the latter.
 - **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
   `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
   Absence throws `GrpcRuntimeLoadError` with the install command.

@@ -1,174 +1,163 @@
 /**
- * The gRPC service implementation — applications register services through
- * this class, which is provided under `CAPABILITIES.GRPC` by the plugin.
+ * {@linkcode GrpcService} — the {@linkcode IGrpcService} implementation
+ * registered under `CAPABILITIES.GRPC`.
+ *
+ * It owns the registered service list, builds the Connect router lazily (so
+ * services added after `register()` are picked up), and dispatches RPC traffic.
  *
  * @module
  */
 
-import type { IHealthService, IHttpAdapter } from '@hono-enterprise/common';
-import type { RpcFetchHandler } from '@hono-enterprise/common';
+import type {
+  GrpcServiceDefinition,
+  IGrpcService,
+  IHealthService,
+  IHttpAdapter,
+  RpcFetchHandler,
+  ServiceImpl,
+} from '@hono-enterprise/common';
 import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { dispatchRequest, normalizeBasePath } from '../transports/rpc-dispatcher.ts';
-import { buildConnectRouter } from '../transports/connect-router-builder.ts';
+import { buildConnectRouter, type ServiceEntry } from '../transports/connect-router-builder.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
-/** Shape of a service definition with a typeName property. */
-interface ServiceDefinitionLike {
-  typeName?: string;
-  methods?: Record<string, unknown>;
+/** Constructor inputs for {@linkcode GrpcService}. */
+export interface GrpcServiceOptions {
+  readonly connectRuntime: ConnectRuntime;
+  readonly embeddedDescriptors: EmbeddedDescriptors;
+  readonly options: GrpcPluginOptions;
+  /** The resolved HTTP adapter; RPC is unavailable when it has no `setRpcHandler`. */
+  readonly adapter: IHttpAdapter | undefined;
+  readonly healthService: IHealthService | undefined;
 }
 
 /**
- * The gRPC service that applications use to register gRPC/Connect services.
- * Implements the {@linkcode IGrpcService} contract from common.
+ * The gRPC service applications use to register Connect/gRPC services.
+ *
+ * @example
+ * ```typescript
+ * const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+ * grpc.addService(EchoService, { echo: (req) => ({ text: req.text }) });
+ * ```
  */
-export class GrpcService {
-  private readonly services: Array<{
-    definition: unknown;
-    implementation?: unknown;
-  }> = [];
+export class GrpcService implements IGrpcService {
+  readonly #services: ServiceEntry[] = [];
+  readonly #basePath: string;
+  readonly #connectRuntime: ConnectRuntime;
+  readonly #embeddedDescriptors: EmbeddedDescriptors;
+  readonly #options: GrpcPluginOptions;
+  readonly #healthService: IHealthService | undefined;
 
-  private readonly basePath: string;
-  private readonly connectRuntime: ConnectRuntime;
-  private readonly embeddedDescriptors: EmbeddedDescriptors;
-  private readonly options: GrpcPluginOptions;
-  private readonly healthService: IHealthService | undefined;
-
-  private dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
-  private routerBuilt = false;
-  private stopped = false;
+  #dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
+  #closed = false;
+  /**
+   * Procedure paths the router served before shutdown. Retained so a drained
+   * server can answer `503` for its OWN procedures without claiming ordinary
+   * application routes, which must keep working while the app drains.
+   */
+  #servedPaths: ReadonlySet<string> = new Set();
 
   /** Whether the HTTP adapter supports the RPC interceptor seam. */
   readonly available: boolean;
 
-  constructor(
-    connectRuntime: ConnectRuntime,
-    embeddedDescriptors: EmbeddedDescriptors,
-    options: GrpcPluginOptions,
-    adapter?: IHttpAdapter,
-    healthService?: IHealthService,
-  ) {
-    this.connectRuntime = connectRuntime;
-    this.embeddedDescriptors = embeddedDescriptors;
-    this.options = options;
-    this.healthService = healthService as IHealthService | undefined;
-    this.basePath = normalizeBasePath(options.basePath ?? '/grpc');
-    // Determine if the adapter supports the RPC interceptor seam
-    this.available = adapter !== undefined && 'setRpcHandler' in adapter;
+  constructor(init: GrpcServiceOptions) {
+    this.#connectRuntime = init.connectRuntime;
+    this.#embeddedDescriptors = init.embeddedDescriptors;
+    this.#options = init.options;
+    this.#healthService = init.healthService;
+    this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
+    this.available = typeof init.adapter?.setRpcHandler === 'function';
 
-    // Pre-register any services provided in options
-    if (options.services) {
-      for (const { definition, implementation } of options.services) {
-        this.addService(definition, implementation);
-      }
-    }
-  }
-
-  addService<TDef>(definition: TDef, implementation?: unknown): void {
-    const defLike = definition as ServiceDefinitionLike;
-    const typeName = defLike.typeName;
-    if (typeName) {
-      const exists = this.services.some(
-        (s) => ((s.definition as ServiceDefinitionLike)?.typeName) === typeName,
+    for (const entry of init.options.services ?? []) {
+      this.addService(
+        entry.definition as GrpcServiceDefinition,
+        entry.implementation as Partial<ServiceImpl> | undefined,
       );
-      if (exists) {
-        throw new Error(`Service '${typeName}' has already been registered`);
-      }
     }
-
-    this.services.push({ definition, implementation });
-    this.routerBuilt = false; // Invalidate cached router
   }
 
-  async handleRequest(request: Request): Promise<Response> {
+  /** Number of application services registered. Read by the health indicator. */
+  get serviceCount(): number {
+    return this.#services.length;
+  }
+
+  addService<TDef extends GrpcServiceDefinition>(
+    definition: TDef,
+    implementation?: Partial<ServiceImpl>,
+  ): void {
+    const { typeName } = definition;
+    if (this.#services.some((s) => (s.definition as GrpcServiceDefinition).typeName === typeName)) {
+      throw new Error(`Service '${typeName}' has already been registered`);
+    }
+    this.#services.push({ definition, implementation });
+    // Invalidate the built router so the new service is picked up.
+    this.#dispatchMap = null;
+  }
+
+  /**
+   * Handles an RPC request directly, bypassing the adapter seam.
+   *
+   * @throws {GrpcUnavailableError} When the adapter does not implement
+   *   `setRpcHandler` — a misconfiguration surfaces on use as well as at
+   *   startup.
+   */
+  handleRequest(request: Request): Promise<Response> {
     if (!this.available) {
-      throw new GrpcUnavailableError();
+      return Promise.reject(new GrpcUnavailableError());
     }
-
-    if (this.stopped) {
-      return new Response('Service Unavailable', { status: 503 });
-    }
-
-    await this.ensureRouter();
-
-    if (!this.dispatchMap) {
-      return new Response('No gRPC services configured', { status: 404 });
-    }
-
-    const result = await dispatchRequest(request, this.dispatchMap, this.basePath);
-    if (result !== null) {
-      return result;
-    }
-
-    return new Response('Not Found', { status: 404 });
+    return Promise.resolve(this.#dispatch(request)).then(
+      (response) => response ?? new Response('Not Found', { status: 404 }),
+    );
   }
 
+  /**
+   * The handler installed into `IHttpAdapter.setRpcHandler`. Returns `null` for
+   * any request outside `basePath`, so ordinary traffic falls through to Hono
+   * untouched.
+   */
   createFetchHandler(): RpcFetchHandler {
-    return async (request: Request): Promise<Response | null> => {
-      if (!this.available) {
-        return null;
-      }
-
-      if (this.stopped) {
-        return new Response('Service Unavailable', { status: 503 });
-      }
-
-      await this.ensureRouter();
-
-      if (!this.dispatchMap) {
-        return null;
-      }
-
-      const result = await dispatchRequest(request, this.dispatchMap, this.basePath);
-      if (result !== null) {
-        return result;
-      }
-
-      return null;
-    };
+    return (request: Request): Promise<Response | null> => Promise.resolve(this.#dispatch(request));
   }
 
-  private ensureRouter(): Promise<void> {
-    if (this.routerBuilt) {
-      return Promise.resolve();
+  /**
+   * Releases the built router and its handlers. Afterwards the plugin's own
+   * procedures answer `503` instead of rebuilding a router for an application
+   * that is shutting down, while every other path falls through untouched.
+   */
+  close(): void {
+    if (this.#closed) {
+      // Idempotent: a second call must not wipe the served-path set captured by
+      // the first, which would silently turn every 503 into a fall-through.
+      return;
     }
+    this.#closed = true;
+    this.#servedPaths = new Set(this.#dispatchMap?.keys() ?? []);
+    this.#dispatchMap = null;
+  }
 
-    if (!this.available) {
-      this.routerBuilt = true;
-      return Promise.resolve();
+  /** Resolves a request against the dispatch map, building the router on demand. */
+  #dispatch(request: Request): Response | Promise<Response | null> | null {
+    if (this.#closed) {
+      // Claim only paths this server actually served; ordinary application
+      // routes must keep answering while the app drains.
+      const path = new URL(request.url).pathname;
+      return this.#servedPaths.has(path)
+        ? new Response('Service Unavailable', { status: 503 })
+        : null;
     }
-
-    const normalizedBase = this.basePath;
-
-    // Build the Connect router with all registered services
-    const { dispatchMap } = buildConnectRouter({
-      connectRuntime: this.connectRuntime,
-      basePath: normalizedBase,
-      reflection: this.options.reflection ?? true,
-      health: this.options.health ?? true,
-      services: this.services,
-      embeddedDescriptors: this.embeddedDescriptors,
-      healthService: this.healthService as IHealthService | undefined,
-    });
-
-    this.dispatchMap = dispatchMap;
-    this.routerBuilt = true;
-    return Promise.resolve();
-  }
-
-  // For testing access to internal state
-  get servicesCount(): number {
-    return this.services.length;
-  }
-
-  get dispatchMapSize(): number {
-    return this.dispatchMap ? this.dispatchMap.size : 0;
-  }
-
-  // Internal method for post-stop guard
-  setStopped(value: boolean): void {
-    this.stopped = value;
+    if (this.#dispatchMap === null) {
+      this.#dispatchMap = buildConnectRouter({
+        connectRuntime: this.#connectRuntime,
+        basePath: this.#basePath,
+        reflection: this.#options.reflection ?? true,
+        health: this.#options.health ?? true,
+        services: this.#services,
+        embeddedDescriptors: this.#embeddedDescriptors,
+        healthService: this.#healthService,
+      }).dispatchMap;
+    }
+    return dispatchRequest(request, this.#dispatchMap, this.#basePath);
   }
 }

@@ -102,7 +102,6 @@ describe('gRPC Server Streaming E2E', () => {
 
     const streamService = await reviveStreamService();
     grpc.addService(streamService, streamImpl);
-    expect((grpc as unknown as { servicesCount: number }).servicesCount).toBe(1);
 
     // Server-streaming over Connect uses POST with application/connect+json
     // The request body must be enveloped: 1-byte flag + 4-byte length + JSON payload

@@ -1,247 +1,176 @@
 /**
- * Connect runtime loader — injects or lazily imports the Connect-ES core and
- * Protobuf-ES modules. Produces a ConnectRuntime port without hard dependencies.
+ * Connect runtime loader — the inject-or-lazy seam over the four Connect-ES /
+ * Protobuf-ES specifiers (AI_GUIDELINES §12.2).
+ *
+ * The split is deliberate: {@linkcode adaptConnectModule} is a PURE adapter over
+ * already-imported modules, so every branch is unit-testable with a hand-built
+ * fake, while {@linkcode loadConnectModule} owns the four real `import()` calls
+ * behind a guarded real-import test. There is no global hook and no no-op
+ * fallback runtime — a missing dependency throws {@linkcode GrpcRuntimeLoadError}
+ * naming the specifier, rather than degrading into a router that silently
+ * answers `404`.
  *
  * @module
  */
 
-import { GrpcRuntimeLoadError } from '../errors/grpc-errors.ts';
-import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
+import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../errors/grpc-errors.ts';
+import type {
+  ConnectRouterLike,
+  ConnectRuntime,
+  FileDescriptorLike,
+  FileRegistryLike,
+  ServiceDescriptorLike,
+  UniversalHandlerLike,
+} from '../interfaces/connect-runtime.ts';
 
-// Lazy cache for imported modules — typed as unknown since we dynamically import npm packages
-let connectModule: unknown = null;
-let protobufModule: unknown = null;
-let wktModule: unknown = null;
-let protocolModule: unknown = null;
+/** The four specifiers the runtime is assembled from, in load order. */
+const SPECIFIERS = {
+  connect: 'npm:@connectrpc/connect@^2.1.2',
+  protocol: 'npm:@connectrpc/connect@^2.1.2/protocol',
+  protobuf: 'npm:@bufbuild/protobuf@^2.7.0',
+  wkt: 'npm:@bufbuild/protobuf@^2.7.0/wkt',
+} as const;
 
-// Singleton fallback instance
-let fallbackRuntime: ConnectRuntime | null = null;
+/** The install command suggested for each failing specifier. */
+const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
+  connect: 'deno add npm:@connectrpc/connect@^2.1.2',
+  protocol: 'deno add npm:@connectrpc/connect@^2.1.2',
+  protobuf: 'deno add npm:@bufbuild/protobuf@^2.7.0',
+  wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0',
+};
 
-/**
- * Resets the module cache. Exported for testing only.
- */
-export function resetModuleCache(): void {
-  connectModule = null;
-  protobufModule = null;
-  wktModule = null;
-  protocolModule = null;
-  fallbackRuntime = null;
+/** Structural shape of `@connectrpc/connect`. */
+export interface ConnectCoreModuleLike {
+  createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
 }
 
-/**
- * Shape of the @connectrpc/connect module.
- */
-interface ConnectModule {
-  createConnectRouter(): {
-    handlers: Array<{ requestPath: string; handler: (request: Request) => Promise<Response> }>;
-    service<T extends { typeName: string }>(
-      service: T,
-      implementation: Record<string, (...args: unknown[]) => unknown>,
-      options?: Record<string, unknown>,
-    ): void;
-  };
-}
-
-/**
- * Shape of the @bufbuild/protobuf module.
- *
- * `createFileRegistry` revives a {@linkcode FileDescriptorSet} into a
- * `FileRegistry` (the ONLY `@bufbuild/protobuf` entry point that can resolve
- * service descriptors from a serialized descriptor set — `createRegistry`
- * cannot, and silently returns a registry in which `getService()` is missing).
- */
-interface ProtobufModule {
-  createFileRegistry(fdSet: unknown): { getService(name: string): unknown };
-  fromBinary(schema: unknown, bytes: Uint8Array): unknown;
-}
-
-/**
- * Shape of the @bufbuild/protobuf/wkt module.
- */
-interface WktModule {
-  FileDescriptorSetSchema: unknown;
-}
-
-/**
- * Shape of the @connectrpc/connect/protocol module.
- */
-interface ProtocolModule {
+/** Structural shape of `@connectrpc/connect/protocol`. */
+export interface ConnectProtocolModuleLike {
   createFetchHandler(
-    uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
-    options?: { httpVersion?: string },
+    handler: UniversalHandlerLike,
+    options?: Record<string, unknown>,
   ): (request: Request) => Promise<Response>;
 }
 
-/**
- * Decodes a base64 string into a Uint8Array.
- */
+/** Structural shape of `@bufbuild/protobuf`. */
+export interface ProtobufModuleLike {
+  createFileRegistry(fileDescriptorSet: unknown): FileRegistryLike;
+  fromBinary(schema: unknown, bytes: Uint8Array): unknown;
+  toBinary(schema: unknown, message: unknown): Uint8Array;
+}
+
+/** Structural shape of `@bufbuild/protobuf/wkt`. */
+export interface ProtobufWktModuleLike {
+  FileDescriptorSetSchema: unknown;
+  FileDescriptorProtoSchema: unknown;
+}
+
+/** The four modules the runtime is adapted from. */
+export interface ConnectModuleLike {
+  connect: ConnectCoreModuleLike;
+  protocol: ConnectProtocolModuleLike;
+  protobuf: ProtobufModuleLike;
+  wkt: ProtobufWktModuleLike;
+}
+
+/** Decodes a base64 string into bytes. */
 function decodeBase64(base64: string): Uint8Array {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
 }
 
 /**
- * Creates a ConnectRuntime implementation from raw module objects.
+ * Adapts already-imported Connect and Protobuf-ES modules into the internal
+ * {@linkcode ConnectRuntime} port. Pure — it performs no I/O, so unit tests
+ * drive it with a fake module bundle.
+ *
+ * @param modules - The four modules of {@linkcode ConnectModuleLike}.
+ * @returns The internal runtime port every other module consumes.
  */
-function createConnectRuntime(
-  mod: ConnectModule,
-  protobuf: ProtobufModule,
-  wkt: WktModule,
-  proto: ProtocolModule,
-): ConnectRuntime {
-  const { createFileRegistry, fromBinary } = protobuf;
-  const { FileDescriptorSetSchema } = wkt;
+export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
+  const { connect, protocol, protobuf, wkt } = modules;
 
   return {
-    createConnectRouter() {
-      // Delegate to the real createConnectRouter from the connect module
-      return (mod as {
-        createConnectRouter: () => {
-          handlers: Array<
-            { requestPath: string; handler: (request: Request) => Promise<Response> }
-          >;
-          service: (service: unknown, impl: unknown, options?: unknown) => void;
-        };
-      }).createConnectRouter();
+    createConnectRouter(): ConnectRouterLike {
+      return connect.createConnectRouter();
     },
 
-    createFetchHandler(
-      uHandler: (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
-      options?: { httpVersion?: string },
-    ): (request: Request) => Promise<Response> {
-      return proto.createFetchHandler(uHandler, options);
+    createFetchHandler(handler: UniversalHandlerLike): (request: Request) => Promise<Response> {
+      // `httpVersion` is deliberately left unset: IHttpAdapter surfaces no
+      // negotiated HTTP version, and the only behavior it gates is Connect's
+      // bidi refusal, which would then fire even on transports that support
+      // bidi (plan §3.5/§3.8).
+      return protocol.createFetchHandler(handler);
     },
 
-    reviveDescriptorSet(base64: string): unknown {
-      const bytes = decodeBase64(base64);
-      const fdSet = fromBinary(FileDescriptorSetSchema, bytes);
-      // createFileRegistry is the ONLY entry point that resolves services from a
-      // serialized FileDescriptorSet; createRegistry returns an empty registry.
-      return createFileRegistry(fdSet);
+    reviveDescriptorSet(base64: string): FileRegistryLike {
+      let fileDescriptorSet: unknown;
+      try {
+        fileDescriptorSet = protobuf.fromBinary(
+          wkt.FileDescriptorSetSchema,
+          decodeBase64(base64),
+        );
+      } catch (cause) {
+        throw new GrpcDescriptorError(
+          'the embedded descriptor set could not be decoded as a FileDescriptorSet',
+          { cause },
+        );
+      }
+      return protobuf.createFileRegistry(fileDescriptorSet);
     },
 
-    getService(registry: unknown, serviceName: string): unknown {
-      const reg = registry as { getService?: (name: string) => unknown } | null;
-      return reg?.getService?.(serviceName) || undefined;
+    getService(
+      registry: FileRegistryLike,
+      serviceName: string,
+    ): ServiceDescriptorLike | undefined {
+      return registry.getService(serviceName);
     },
 
-    createRegistry(fdSet: unknown): unknown {
-      // Build a FileRegistry from a FileDescriptorSet (createFileRegistry).
-      // Kept under the historical name `createRegistry` to avoid widening the
-      // internal ConnectRuntime port's surface; the underlying call is correct.
-      return createFileRegistry(fdSet);
+    serializeFileDescriptor(file: FileDescriptorLike): Uint8Array {
+      return protobuf.toBinary(wkt.FileDescriptorProtoSchema, file.proto);
     },
   };
 }
 
 /**
- * Builds the error message for a failed module load.
- * Exported for testing.
+ * The dynamic import used by {@linkcode loadConnectModule}. Injectable so the
+ * per-specifier failure branches are unit-testable without uninstalling a
+ * package; the default performs the REAL `import()`.
  */
-export function buildLoadErrorMessage(
-  specifier: string,
-  installCommand: string,
-): string {
-  return `Cannot load Connect runtime module: ${specifier}. Run: ${installCommand}`;
-}
+export type ModuleImporter = (specifier: string) => Promise<unknown>;
+
+/** Default importer — a real dynamic `import()`, never a global hook. */
+export const defaultImporter: ModuleImporter = (specifier) => import(specifier);
 
 /**
- * Default dynamic import function used by loadConnectModules.
- * Exported for testing to allow mocking.
- */
-export async function defaultImport(specifier: string): Promise<unknown> {
-  return await import(specifier) as unknown;
-}
-
-/**
- * Internal helper that loads all four Connect runtime modules.
- * Exported for testing to allow coverage of the load path.
+ * Lazily imports the four Connect/Protobuf-ES specifiers and adapts them into
+ * the internal runtime port.
  *
- * @param importer - Optional injectable import function for testing.
+ * @param importer - Injected importer; defaults to a real dynamic `import()`.
+ * @throws {GrpcRuntimeLoadError} If any specifier cannot be imported. The error
+ *   names the failing specifier and the command that installs it.
  */
-export async function loadConnectModules(
-  importer: typeof defaultImport = defaultImport,
-): Promise<void> {
-  // Load connectrpc/connect
-  if (!connectModule) {
+export async function loadConnectModule(
+  importer: ModuleImporter = defaultImporter,
+): Promise<ConnectRuntime> {
+  const loaded = {} as Record<keyof typeof SPECIFIERS, unknown>;
+
+  for (const key of Object.keys(SPECIFIERS) as Array<keyof typeof SPECIFIERS>) {
     try {
-      connectModule = await importer('npm:@connectrpc/connect@^2.1.2');
-    } catch (_e) {
-      throw new GrpcRuntimeLoadError(
-        '@connectrpc/connect',
-        'deno add @connectrpc/connect@^2.1.2',
-      );
+      loaded[key] = await importer(SPECIFIERS[key]);
+    } catch (cause) {
+      throw new GrpcRuntimeLoadError(SPECIFIERS[key], INSTALL_COMMANDS[key], { cause });
     }
   }
 
-  // Load @bufbuild/protobuf
-  if (!protobufModule) {
-    try {
-      protobufModule = await importer('npm:@bufbuild/protobuf@^2.7.0');
-    } catch (_e) {
-      throw new GrpcRuntimeLoadError(
-        '@bufbuild/protobuf',
-        'deno add @bufbuild/protobuf@^2.7.0',
-      );
-    }
-  }
-
-  // Load @bufbuild/protobuf/wkt
-  if (!wktModule) {
-    try {
-      wktModule = await importer('npm:@bufbuild/protobuf@^2.7.0/wkt');
-    } catch (_e) {
-      throw new GrpcRuntimeLoadError(
-        '@bufbuild/protobuf/wkt',
-        'deno add @bufbuild/protobuf@^2.7.0/wkt',
-      );
-    }
-  }
-
-  // Load the protocol module
-  if (!protocolModule) {
-    try {
-      protocolModule = await importer('npm:@connectrpc/connect@^2.1.2/protocol');
-    } catch (_e) {
-      throw new GrpcRuntimeLoadError(
-        '@connectrpc/connect/protocol',
-        'deno add @connectrpc/connect@^2.1.2',
-      );
-    }
-  }
-}
-
-/**
- * Lazy-loads all four Connect runtime modules from npm. Throws
- * {@linkcode GrpcRuntimeLoadError} if any specifier cannot be resolved.
- */
-export async function loadConnectModule(): Promise<ConnectRuntime> {
-  await loadConnectModules();
-  return createConnectRuntime(
-    connectModule as ConnectModule,
-    protobufModule as ProtobufModule,
-    wktModule as WktModule,
-    protocolModule as ProtocolModule,
-  );
-}
-
-/**
- * Fallback connect runtime for when Connect is not available (e.g., during testing).
- * Returns a singleton instance.
- */
-export function getFallbackConnectRuntime(): ConnectRuntime {
-  if (!fallbackRuntime) {
-    fallbackRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-      getService: (_registry: unknown, _serviceName: string): unknown => undefined,
-      createRegistry: () => ({ getService: () => undefined }),
-    };
-  }
-  return fallbackRuntime;
+  return adaptConnectModule({
+    connect: loaded.connect as ConnectCoreModuleLike,
+    protocol: loaded.protocol as ConnectProtocolModuleLike,
+    protobuf: loaded.protobuf as ProtobufModuleLike,
+    wkt: loaded.wkt as ProtobufWktModuleLike,
+  });
 }

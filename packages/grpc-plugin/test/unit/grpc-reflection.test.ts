@@ -1,716 +1,238 @@
 /**
- * gRPC Server Reflection tests — verifies reflection service implementation.
+ * Unit tests for the Server Reflection implementation.
+ *
+ * The load-bearing assertion in every case is the ONEOF WRAPPER: Protobuf-ES
+ * represents `message_response` as `messageResponse: { case, value }`. A flat
+ * `{ listServicesResponse: … }` object type-checks against a loose type and
+ * serializes to an EMPTY message — the exact defect these tests pin.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
-  buildReflectionRegistry,
+  answerReflectionRequest,
   createReflectionService,
 } from '../../src/reflection/grpc-reflection.ts';
-import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
+import type { ReflectionRegistry } from '../../src/descriptors/descriptor-registry.ts';
 
-describe('GrpcReflection', () => {
-  function createFakeRuntime(): ConnectRuntime {
-    return {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-  }
+const FILE_BYTES = new TextEncoder().encode('fd:pkg/svc.proto');
 
-  it('should create a reflection service when reflection is enabled', () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    expect(service).toBeDefined();
+/** A registry standing in for the real index. */
+function fakeRegistry(overrides: Partial<ReflectionRegistry> = {}): ReflectionRegistry {
+  return {
+    listServices: () => ['pkg.Svc', 'grpc.health.v1.Health'],
+    getFileByName: (name) => (name === 'pkg/svc.proto' ? FILE_BYTES : undefined),
+    getFileContainingSymbol: (symbol) => (symbol === 'pkg.Svc' ? FILE_BYTES : undefined),
+    getExtensionNumbers: (typeName) => (typeName === 'pkg.Target' ? [1001, 1002] : undefined),
+    ...overrides,
+  };
+}
+
+/** Builds a request in the wrapped form Protobuf-ES delivers. */
+function request(kind: string, value: unknown) {
+  return { messageRequest: { case: kind as never, value } };
+}
+
+describe('answerReflectionRequest', () => {
+  it('answers list_services with every registered service name', () => {
+    const response = answerReflectionRequest(fakeRegistry(), request('listServices', ''));
+
+    expect(response.messageResponse.case).toBe('listServicesResponse');
+    expect(response.messageResponse.value).toEqual({
+      service: [{ name: 'pkg.Svc' }, { name: 'grpc.health.v1.Health' }],
+    });
   });
 
-  it('list_services should return embedded and app services', async () => {
-    // App services have typeName directly on the service object (not nested under definition)
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService' }],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as { response: { listServices: { services: string[] } } };
-    expect(response.response.listServices.services).toContain('grpc.health.v1.Health');
-    expect(response.response.listServices.services).toContain(
-      'grpc.reflection.v1.ServerReflection',
-    );
-    expect(response.response.listServices.services).toContain('pkg.MyService');
+  it('wraps every answer in the messageResponse oneof rather than flattening it', () => {
+    // A flat object would serialize to {} on the wire.
+    const response = answerReflectionRequest(fakeRegistry(), request('listServices', ''));
+    expect(Object.hasOwn(response, 'messageResponse')).toBe(true);
+    expect(Object.hasOwn(response, 'listServicesResponse')).toBe(false);
+    expect(response.messageResponse).toHaveProperty('case');
+    expect(response.messageResponse).toHaveProperty('value');
   });
 
-  it('file_by_filename should return file when found', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileByFilename: { filename: 'grpc/health/v1/health.proto' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { fileDescriptorResponse?: { descriptorFile: unknown[] } };
-    };
-    expect(response.response.fileDescriptorResponse).toBeDefined();
-    expect(response.response.fileDescriptorResponse!.descriptorFile.length).toBeGreaterThan(0);
+  it('echoes the original request on every response, as the spec requires', () => {
+    const req = request('listServices', '');
+    expect(answerReflectionRequest(fakeRegistry(), req).originalRequest).toBe(req);
+
+    const missing = request('fileByFilename', 'nope.proto');
+    expect(answerReflectionRequest(fakeRegistry(), missing).originalRequest).toBe(missing);
   });
 
-  it('file_by_filename should return NOT_FOUND for unknown file', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
+  it('answers file_by_filename with the serialized FileDescriptorProto', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileByFilename', 'pkg/svc.proto'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileByFilename: { filename: 'unknown.proto' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response.response.errorResponse).toBeDefined();
-    expect(response.response.errorResponse!.code).toBe(3); // NOT_FOUND
+    expect(response.messageResponse.case).toBe('fileDescriptorResponse');
+    expect(response.messageResponse.value).toEqual({ fileDescriptorProto: [FILE_BYTES] });
   });
 
-  it('file_containing_symbol should return file when found', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
+  it('answers NOT_FOUND for an unknown filename', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileByFilename', 'absent.proto'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileContainingSymbol: { symbol: 'grpc.health.v1.Health' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { fileDescriptorResponse?: { descriptorFile: unknown[] } };
-    };
-    expect(response.response.fileDescriptorResponse).toBeDefined();
+    expect(response.messageResponse).toEqual({
+      case: 'errorResponse',
+      value: { errorCode: 5, errorMessage: 'file not found: absent.proto' },
+    });
   });
 
-  it('file_containing_symbol should return NOT_FOUND for unknown symbol', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
+  it('answers file_containing_symbol with the declaring file', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileContainingSymbol', 'pkg.Svc'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileContainingSymbol: { symbol: 'unknown.Symbol' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response.response.errorResponse).toBeDefined();
-    expect(response.response.errorResponse!.code).toBe(3); // NOT_FOUND
+    expect(response.messageResponse.case).toBe('fileDescriptorResponse');
+    expect(response.messageResponse.value).toEqual({ fileDescriptorProto: [FILE_BYTES] });
   });
 
-  it('all_extension_numbers_of_type should return empty list', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
+  it('answers NOT_FOUND for an unknown symbol', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileContainingSymbol', 'no.Such'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { allExtensionNumbersOfType: 'google.protobuf.MessageOptions' } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { extensionNumberResponse?: { numbers: number[] } };
-    };
-    expect(response.response.extensionNumberResponse).toBeDefined();
-    expect(response.response.extensionNumberResponse!.numbers).toEqual([]);
+    expect(response.messageResponse).toEqual({
+      case: 'errorResponse',
+      value: { errorCode: 5, errorMessage: 'symbol not found: no.Such' },
+    });
   });
 
-  it('unknown request should return error response', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
+  it('answers all_extension_numbers_of_type with the type and its numbers', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('allExtensionNumbersOfType', 'pkg.Target'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: {} };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response.response.errorResponse).toBeDefined();
-    expect(response.response.errorResponse!.code).toBe(3);
+    expect(response.messageResponse).toEqual({
+      case: 'allExtensionNumbersResponse',
+      value: { baseTypeName: 'pkg.Target', extensionNumber: [1001, 1002] },
+    });
   });
 
-  it('list_services should include app services with typeName', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [
-        { typeName: 'pkg.ServiceA' },
-        { typeName: 'pkg.ServiceB' },
-      ],
+  it('answers an empty extension list for a known type with no extensions', () => {
+    const registry = fakeRegistry({ getExtensionNumbers: () => [] });
+    const response = answerReflectionRequest(
+      registry,
+      request('allExtensionNumbersOfType', 'pkg.Plain'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as { response: { listServices: { services: string[] } } };
-    expect(response.response.listServices.services).toContain('pkg.ServiceA');
-    expect(response.response.listServices.services).toContain('pkg.ServiceB');
+    expect(response.messageResponse).toEqual({
+      case: 'allExtensionNumbersResponse',
+      value: { baseTypeName: 'pkg.Plain', extensionNumber: [] },
+    });
   });
 
-  it('file_by_filename should return NOT_FOUND for empty filename', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
+  it('answers NOT_FOUND when the extended type itself is unknown', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('allExtensionNumbersOfType', 'no.Such'),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileByFilename: { filename: '' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response.response.errorResponse).toBeDefined();
-    expect(response.response.errorResponse!.code).toBe(3);
+    expect(response.messageResponse).toEqual({
+      case: 'errorResponse',
+      value: { errorCode: 5, errorMessage: 'type not found: no.Such' },
+    });
   });
 
-  it('file_containing_symbol should find service by partial match', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService' }],
+  it('answers UNIMPLEMENTED for file_containing_extension', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileContainingExtension', { containingType: 'pkg.Target', extensionNumber: 1001 }),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileContainingSymbol: { symbol: 'MyService' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { fileDescriptorResponse?: { descriptorFile: unknown[] } };
-    };
-    expect(response.response.fileDescriptorResponse).toBeDefined();
+    expect(response.messageResponse.case).toBe('errorResponse');
+    const value = response.messageResponse.value as { errorCode: number; errorMessage: string };
+    expect(value.errorCode).toBe(12);
+    expect(value.errorMessage).toContain('pkg.Target');
   });
 
-  it('should handle app services with protoFile in reflection registry', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService', protoFile: 'pkg/my_service.proto' }],
+  it('tolerates a file_containing_extension request with no value', () => {
+    const response = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileContainingExtension', undefined),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileByFilename: { filename: 'pkg/my_service.proto' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { fileDescriptorResponse?: { descriptorFile: unknown[] } };
-    };
-    expect(response.response.fileDescriptorResponse).toBeDefined();
-    expect(response.response.fileDescriptorResponse!.descriptorFile.length).toBeGreaterThan(0);
+    expect(response.messageResponse.case).toBe('errorResponse');
   });
 
-  it('should handle service without typeName in reflection registry', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ methods: { echo: {} } }],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as { response: { listServices: { services: string[] } } };
-    // Should have embedded services but not the app service without typeName
-    expect(response.response.listServices.services).toContain('grpc.health.v1.Health');
-    expect(response.response.listServices.services).toContain(
-      'grpc.reflection.v1.ServerReflection',
-    );
-    expect(response.response.listServices.services).not.toContain('');
+  it('answers UNIMPLEMENTED when no oneof arm is set', () => {
+    expect(answerReflectionRequest(fakeRegistry(), {}).messageResponse).toEqual({
+      case: 'errorResponse',
+      value: { errorCode: 12, errorMessage: 'unsupported reflection request: (none set)' },
+    });
   });
 
-  it('should handle empty app services array', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as { response: { listServices: { services: string[] } } };
-    expect(response.response.listServices.services).toContain('grpc.health.v1.Health');
-    expect(response.response.listServices.services).toContain(
-      'grpc.reflection.v1.ServerReflection',
-    );
+  it('answers UNIMPLEMENTED naming an unrecognized oneof arm', () => {
+    // A newer reflection proto could add an arm this build does not know.
+    const response = answerReflectionRequest(fakeRegistry(), request('somethingNew', 'x'));
+    expect(response.messageResponse).toEqual({
+      case: 'errorResponse',
+      value: { errorCode: 12, errorMessage: 'unsupported reflection request: somethingNew' },
+    });
   });
 
-  it('should handle service with empty string typeName', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: '' }],
+  it('coerces a missing oneof value to the empty string rather than "undefined"', () => {
+    // Every string-valued arm must coerce identically; a bare String(undefined)
+    // would put the literal text "undefined" on the wire.
+    const byFilename = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileByFilename', undefined),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-      })(),
+    expect((byFilename.messageResponse.value as { errorMessage: string }).errorMessage)
+      .toBe('file not found: ');
+
+    const bySymbol = answerReflectionRequest(
+      fakeRegistry(),
+      request('fileContainingSymbol', undefined),
     );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as { response: { listServices: { services: string[] } } };
-    // Empty string typeName should not be added to services
-    expect(response.response.listServices.services).not.toContain('');
-    // But embedded services should still be there
-    expect(response.response.listServices.services).toContain('grpc.health.v1.Health');
-  });
+    expect((bySymbol.messageResponse.value as { errorMessage: string }).errorMessage)
+      .toBe('symbol not found: ');
 
-  it('should handle service without typeName property', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{}],
+    const byType = answerReflectionRequest(
+      fakeRegistry(),
+      request('allExtensionNumbersOfType', undefined),
     );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as { response: { listServices: { services: string[] } } };
-    // No typeName means no service added
-    expect(response.response.listServices.services).not.toContain(undefined as unknown as string);
-    // But embedded services should still be there
-    expect(response.response.listServices.services).toContain('grpc.health.v1.Health');
-  });
-
-  it('should handle multiple request types in sequence', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService' }],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { listServices: {} } };
-        yield { response: { fileByFilename: { filename: 'grpc/health/v1/health.proto' } } };
-        yield { response: { fileContainingSymbol: { symbol: 'pkg.MyService' } } };
-        yield { response: { allExtensionNumbersOfType: 'google.protobuf.MessageOptions' } };
-        yield { response: {} };
-      })(),
-    );
-
-    // listServices
-    let result = await generator.next();
-    expect(result.done).toBe(false);
-    const response1 = result.value as { response: { listServices: { services: string[] } } };
-    expect(response1.response.listServices.services).toContain('pkg.MyService');
-
-    // fileByFilename
-    result = await generator.next();
-    expect(result.done).toBe(false);
-    const response2 = result.value as {
-      response: { fileDescriptorResponse?: { descriptorFile: unknown[] } };
-    };
-    expect(response2.response.fileDescriptorResponse).toBeDefined();
-
-    // fileContainingSymbol
-    result = await generator.next();
-    expect(result.done).toBe(false);
-    const response3 = result.value as {
-      response: { fileDescriptorResponse?: { descriptorFile: unknown[] } };
-    };
-    expect(response3.response.fileDescriptorResponse).toBeDefined();
-
-    // allExtensionNumbersOfType
-    result = await generator.next();
-    expect(result.done).toBe(false);
-    const response4 = result.value as {
-      response: { extensionNumberResponse?: { numbers: number[] } };
-    };
-    expect(response4.response.extensionNumberResponse!.numbers).toEqual([]);
-
-    // unknown request
-    result = await generator.next();
-    expect(result.done).toBe(false);
-    const response5 = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response5.response.errorResponse!.code).toBe(3);
+    expect((byType.messageResponse.value as { errorMessage: string }).errorMessage)
+      .toBe('type not found: ');
   });
 });
 
-describe('buildReflectionRegistry', () => {
-  function createFakeRuntime(): ConnectRuntime {
-    return {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-  }
+describe('createReflectionService', () => {
+  it('exposes serverReflectionInfo and answers each request in the stream', async () => {
+    const service = createReflectionService(fakeRegistry());
+    const handler = service.serverReflectionInfo as (
+      requests: AsyncIterable<unknown>,
+    ) => AsyncGenerator<{ messageResponse: { case: string } }>;
 
-  it('should include embedded services in listServices', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const services = registry.listServices();
-    expect(services).toContain('grpc.health.v1.Health');
-    expect(services).toContain('grpc.reflection.v1.ServerReflection');
+    async function* requests() {
+      yield request('listServices', '');
+      yield request('fileByFilename', 'pkg/svc.proto');
+      yield request('fileContainingSymbol', 'no.Such');
+    }
+
+    const cases: string[] = [];
+    for await (const response of handler(requests())) {
+      cases.push(response.messageResponse.case);
+    }
+
+    // One response per request, in order — the bidi contract.
+    expect(cases).toEqual([
+      'listServicesResponse',
+      'fileDescriptorResponse',
+      'errorResponse',
+    ]);
   });
 
-  it('should include app services with typeName in listServices', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService' }],
-    );
-    const services = registry.listServices();
-    expect(services).toContain('pkg.MyService');
-  });
+  it('yields nothing for an empty request stream', async () => {
+    const service = createReflectionService(fakeRegistry());
+    const handler = service.serverReflectionInfo as (
+      requests: AsyncIterable<unknown>,
+    ) => AsyncGenerator<unknown>;
 
-  it('should skip app services without typeName', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{}],
-    );
-    const services = registry.listServices();
-    expect(services).not.toContain('');
-    expect(services).not.toContain(undefined as unknown as string);
-  });
+    async function* none() {}
 
-  it('should skip app services with empty string typeName', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: '' }],
-    );
-    const services = registry.listServices();
-    expect(services).not.toContain('');
-  });
-
-  it('should find file by name', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const file = registry.getFileByName('grpc/health/v1/health.proto');
-    expect(file).toBeDefined();
-  });
-
-  it('should return undefined for unknown file name', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const file = registry.getFileByName('unknown.proto');
-    expect(file).toBeUndefined();
-  });
-
-  it('should find file containing symbol by service name', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const file = registry.getFileContaining('grpc.health.v1.Health');
-    expect(file).toBeDefined();
-  });
-
-  it('should find file containing symbol by proto file name', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const file = registry.getFileContaining('health.proto');
-    expect(file).toBeDefined();
-  });
-
-  it('should return undefined for unknown symbol', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const file = registry.getFileContaining('unknown.Symbol');
-    expect(file).toBeUndefined();
-  });
-
-  it('should include app service files with protoFile', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService', protoFile: 'pkg/my_service.proto' }],
-    );
-    const file = registry.getFileByName('pkg/my_service.proto');
-    expect(file).toBeDefined();
-  });
-
-  it('should use unknown.proto when protoFile is not provided', () => {
-    const registry = buildReflectionRegistry(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [{ typeName: 'pkg.MyService' }],
-    );
-    const file = registry.getFileByName('unknown.proto');
-    expect(file).toBeDefined();
-  });
-});
-
-describe('ReflectionService', () => {
-  function createFakeRuntime(): ConnectRuntime {
-    return {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({ files: [], getService: () => undefined, listServices: [] }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-  }
-
-  it('should handle fileByName request', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileByFilename: { filename: 'test.proto' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-  });
-
-  it('should handle fileContainingSymbol request', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileContainingSymbol: { symbol: 'pkg.MyService' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-  });
-
-  it('should handle allExtensionNumbersOfType request', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { allExtensionNumbersOfType: { typeName: 'pkg.MyMessage' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-  });
-
-  it('should return error response for unknown request type', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: {} };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response.response.errorResponse).toBeDefined();
-    expect(response.response.errorResponse!.code).toBe(3);
-  });
-
-  it('should handle fileContainingSymbol with unknown symbol', async () => {
-    const service = createReflectionService(
-      createFakeRuntime(),
-      { healthBase64: 'aGVsbG8=', reflectionBase64: 'd29ybGQ=' },
-      [],
-    );
-    const typedService = service as {
-      serverReflectionInfo: (
-        stream: AsyncIterable<{ response: unknown }>,
-      ) => AsyncGenerator<unknown>;
-    };
-    const generator = typedService.serverReflectionInfo(
-      (async function* () {
-        yield { response: { fileContainingSymbol: { symbol: 'unknown.Symbol' } } };
-      })(),
-    );
-    const result = await generator.next();
-    expect(result.done).toBe(false);
-    const response = result.value as {
-      response: { errorResponse?: { code: number; message: string } };
-    };
-    expect(response.response.errorResponse).toBeDefined();
-    expect(response.response.errorResponse!.code).toBe(3);
+    const responses: unknown[] = [];
+    for await (const response of handler(none())) {
+      responses.push(response);
+    }
+    expect(responses).toEqual([]);
   });
 });

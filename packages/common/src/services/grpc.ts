@@ -38,10 +38,15 @@ export interface GrpcServiceDefinition<TMethod = unknown> {
    */
   readonly typeName: string;
   /**
-   * Map of method names to their implementation descriptors.
-   * The plugin reads this to build the dispatch table and reflection data.
+   * Methods keyed by their camelCase local name.
+   *
+   * This is deliberately `method` (singular), matching the record a Protobuf-ES
+   * `DescService` exposes alongside its `methods` ARRAY. The array form is not
+   * assignable to `Record<string, TMethod>`, so constraining on `methods` would
+   * reject every real generated descriptor and force callers into a cast — the
+   * opposite of what this structural constraint exists for.
    */
-  readonly methods: Readonly<Record<string, TMethod>>;
+  readonly method: Readonly<Record<string, TMethod>>;
 }
 
 /**

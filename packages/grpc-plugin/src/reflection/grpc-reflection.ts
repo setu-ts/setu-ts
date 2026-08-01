@@ -1,223 +1,191 @@
 /**
- * gRPC Server Reflection v1 service — implements `grpc.reflection.v1.ServerReflectionInfo`.
- * Supports four request variants: list_services, file_by_filename, file_containing_symbol,
- * and all_extension_numbers_of_type. file_containing_extension returns UNIMPLEMENTED.
+ * gRPC Server Reflection v1 — implements `grpc.reflection.v1.ServerReflectionInfo`.
+ *
+ * ## Wire shape (verified against the real runtime, not inferred from the proto)
+ *
+ * Both messages carry a oneof, and Protobuf-ES v2 represents a oneof as a
+ * single property named after the oneof — NOT as flat sibling fields:
+ *
+ * - request: `{ messageRequest: { case: 'listServices', value: '' } }`
+ * - response: `{ messageResponse: { case: 'listServicesResponse', value: {…} } }`
+ *
+ * The `case` values are the fields' camelCase `localName`s. Connect serializes
+ * that object to the flat JSON the wire expects
+ * (`{"listServicesResponse":{"service":[…]}}`), so the wrapper is an in-memory
+ * representation only. Returning a flat object instead produces a silently
+ * EMPTY response — every field is unset because none of them is the oneof.
+ *
+ * Connect accepts a plain init object here: `$typeName` and `create()` are not
+ * required, which is what keeps this module free of a Protobuf-ES import.
  *
  * @module
  */
 
-import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
-import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
-
-/** Shape of a reflection request variant. */
-interface ListServicesRequest {
-  listServices?: Record<string, never>;
-}
-
-interface FileByFilenameRequest {
-  fileByFilename: { filename: string };
-}
-
-interface FileContainingSymbolRequest {
-  fileContainingSymbol: { symbol: string };
-}
-
-interface AllExtensionNumbersRequest {
-  allExtensionNumbersOfType: string;
-}
-
-type ReflectionRequestVariant =
-  | ListServicesRequest
-  | FileByFilenameRequest
-  | FileContainingSymbolRequest
-  | AllExtensionNumbersRequest;
-
-/** Shape of a reflection response. */
-interface ListServicesResponse {
-  services: string[];
-  nextFileDescriptorNumber: number;
-}
-
-interface FileDescriptorResponse {
-  descriptorFile: unknown[];
-}
-
-interface ErrorResponse {
-  code: number;
-  message: string;
-}
-
-interface ExtensionNumberResponse {
-  numbers: number[];
-}
-
-type ReflectionResponseVariant =
-  | { response: { listServices: ListServicesResponse } }
-  | { response: { fileDescriptorResponse: FileDescriptorResponse } }
-  | { response: { errorResponse: ErrorResponse } }
-  | { response: { extensionNumberResponse: ExtensionNumberResponse } };
+import type { ReflectionRegistry } from '../descriptors/descriptor-registry.ts';
 
 /**
- * Creates a gRPC ServerReflection service implementation.
- *
- * @param connectRuntime - The Connect runtime for descriptor operations
- * @param embeddedDescriptors - Embedded health and reflection descriptors
- * @param appServices - Array of registered app service definitions
- * @returns A ServerReflection service implementation
+ * gRPC status codes used in a reflection `error_response`.
+ * @see https://grpc.github.io/grpc/core/md_doc_statuscodes.html
  */
-export function createReflectionService(
-  connectRuntime: ConnectRuntime,
-  embeddedDescriptors: EmbeddedDescriptors,
-  appServices: readonly unknown[],
-): unknown {
-  // Build the registry (simplified)
-  const registry = buildReflectionRegistry(connectRuntime, embeddedDescriptors, appServices);
+const GRPC_STATUS = {
+  NOT_FOUND: 5,
+  UNIMPLEMENTED: 12,
+} as const;
 
+/** The oneof arms a `ServerReflectionRequest` can carry. */
+type RequestCase =
+  | 'fileByFilename'
+  | 'fileContainingSymbol'
+  | 'fileContainingExtension'
+  | 'allExtensionNumbersOfType'
+  | 'listServices';
+
+/** A `ServerReflectionRequest` as Protobuf-ES hands it to the handler. */
+interface ServerReflectionRequest {
+  readonly host?: string;
+  readonly messageRequest?: {
+    readonly case?: RequestCase;
+    readonly value?: unknown;
+  };
+}
+
+/** `grpc.reflection.v1.ExtensionRequest`. */
+interface ExtensionRequest {
+  readonly containingType?: string;
+  readonly extensionNumber?: number;
+}
+
+/** A `ServerReflectionResponse` init object, as Connect accepts it. */
+interface ServerReflectionResponse {
+  readonly validHost?: string;
+  readonly originalRequest?: ServerReflectionRequest;
+  readonly messageResponse:
+    | { case: 'listServicesResponse'; value: { service: { name: string }[] } }
+    | { case: 'fileDescriptorResponse'; value: { fileDescriptorProto: Uint8Array[] } }
+    | {
+      case: 'allExtensionNumbersResponse';
+      value: { baseTypeName: string; extensionNumber: number[] };
+    }
+    | { case: 'errorResponse'; value: { errorCode: number; errorMessage: string } };
+}
+
+/** Builds an `error_response` arm. */
+function errorResponse(errorCode: number, errorMessage: string): ServerReflectionResponse {
+  return { messageResponse: { case: 'errorResponse', value: { errorCode, errorMessage } } };
+}
+
+/** Builds a `file_descriptor_response` arm. */
+function fileResponse(fileDescriptorProto: Uint8Array): ServerReflectionResponse {
   return {
-    async *serverReflectionInfo(
-      requestStream: AsyncIterable<{ response: ReflectionRequestVariant }>,
-    ): AsyncGenerator<ReflectionResponseVariant> {
-      for await (const { response } of requestStream) {
-        if ('listServices' in response) {
-          yield {
-            response: {
-              listServices: {
-                services: registry.listServices(),
-                nextFileDescriptorNumber: 1,
-              },
-            },
-          };
-          continue;
-        }
-
-        if ('fileByFilename' in response) {
-          const filename = response.fileByFilename.filename;
-          const file = registry.getFileByName(filename);
-          if (file) {
-            yield {
-              response: {
-                fileDescriptorResponse: {
-                  descriptorFile: [file],
-                },
-              },
-            };
-          } else {
-            yield {
-              response: {
-                errorResponse: {
-                  code: 3, // NOT_FOUND
-                  message: `File not found: ${filename}`,
-                },
-              },
-            };
-          }
-          continue;
-        }
-
-        if ('fileContainingSymbol' in response) {
-          const symbol = response.fileContainingSymbol.symbol;
-          const file = registry.getFileContaining(symbol);
-          if (file) {
-            yield {
-              response: {
-                fileDescriptorResponse: {
-                  descriptorFile: [file],
-                },
-              },
-            };
-          } else {
-            yield {
-              response: {
-                errorResponse: {
-                  code: 3, // NOT_FOUND
-                  message: `Symbol not found: ${symbol}`,
-                },
-              },
-            };
-          }
-          continue;
-        }
-
-        if ('allExtensionNumbersOfType' in response) {
-          yield {
-            response: {
-              extensionNumberResponse: {
-                numbers: [],
-              },
-            },
-          };
-          continue;
-        }
-
-        // Unknown request
-        yield {
-          response: {
-            errorResponse: {
-              code: 3,
-              message: 'Unknown reflection request',
-            },
-          },
-        };
-      }
+    messageResponse: {
+      case: 'fileDescriptorResponse',
+      value: { fileDescriptorProto: [fileDescriptorProto] },
     },
   };
 }
 
-/** Shape of the reflection registry used internally. */
-interface ReflectionRegistry {
-  listServices(): string[];
-  getFileByName(filename: string): unknown | undefined;
-  getFileContaining(symbol: string): unknown | undefined;
+/**
+ * Answers a single reflection request. Split out from the streaming loop so
+ * every variant is unit-testable without driving an async generator.
+ *
+ * @param registry - The reflection index.
+ * @param request - One `ServerReflectionRequest`.
+ * @returns The `ServerReflectionResponse` to send back, echoing the original
+ *   request as the spec requires.
+ */
+export function answerReflectionRequest(
+  registry: ReflectionRegistry,
+  request: ServerReflectionRequest,
+): ServerReflectionResponse {
+  const answer = ((): ServerReflectionResponse => {
+    const { case: requestCase, value } = request.messageRequest ?? {};
+
+    switch (requestCase) {
+      case 'listServices': {
+        return {
+          messageResponse: {
+            case: 'listServicesResponse',
+            value: { service: registry.listServices().map((name) => ({ name })) },
+          },
+        };
+      }
+
+      case 'fileByFilename': {
+        const filename = String(value ?? '');
+        const bytes = registry.getFileByName(filename);
+        return bytes === undefined
+          ? errorResponse(GRPC_STATUS.NOT_FOUND, `file not found: ${filename}`)
+          : fileResponse(bytes);
+      }
+
+      case 'fileContainingSymbol': {
+        const symbol = String(value ?? '');
+        const bytes = registry.getFileContainingSymbol(symbol);
+        return bytes === undefined
+          ? errorResponse(GRPC_STATUS.NOT_FOUND, `symbol not found: ${symbol}`)
+          : fileResponse(bytes);
+      }
+
+      case 'allExtensionNumbersOfType': {
+        const typeName = String(value ?? '');
+        const numbers = registry.getExtensionNumbers(typeName);
+        if (numbers === undefined) {
+          return errorResponse(GRPC_STATUS.NOT_FOUND, `type not found: ${typeName}`);
+        }
+        return {
+          messageResponse: {
+            case: 'allExtensionNumbersResponse',
+            value: { baseTypeName: typeName, extensionNumber: [...numbers] },
+          },
+        };
+      }
+
+      case 'fileContainingExtension': {
+        // Deliberately unimplemented: the framework registers no extensions, so
+        // there is nothing this could return. Documented in the README and the
+        // PUBLIC_API notes rather than answered with a misleading NOT_FOUND.
+        const extension = (value ?? {}) as ExtensionRequest;
+        return errorResponse(
+          GRPC_STATUS.UNIMPLEMENTED,
+          'file_containing_extension is not supported: ' +
+            `no extensions are registered (containing_type=${extension.containingType ?? ''})`,
+        );
+      }
+
+      default: {
+        return errorResponse(
+          GRPC_STATUS.UNIMPLEMENTED,
+          `unsupported reflection request: ${requestCase ?? '(none set)'}`,
+        );
+      }
+    }
+  })();
+
+  // The spec requires every response to echo the request that produced it.
+  return { ...answer, originalRequest: request };
 }
 
 /**
- * Builds a reflection registry from app services and embedded descriptors.
- * Exported for testing.
+ * Creates the `grpc.reflection.v1.ServerReflection` implementation.
+ *
+ * `ServerReflectionInfo` is the service's sole method and it is
+ * **bidi-streaming**, so reflection requires a genuinely full-duplex transport
+ * (HTTP/2, or in-process `app.fetch`). Over a real HTTP/1.1 socket it fails at
+ * the transport while unary RPCs on the same port keep working — see the plugin
+ * README's transport note.
+ *
+ * @param registry - The reflection index built at router-build time.
  */
-export function buildReflectionRegistry(
-  _connectRuntime: ConnectRuntime,
-  _embeddedDescriptors: EmbeddedDescriptors,
-  appServices: readonly unknown[],
-): ReflectionRegistry {
-  const services = new Set<string>();
-  services.add('grpc.health.v1.Health');
-  services.add('grpc.reflection.v1.ServerReflection');
-  for (const service of appServices) {
-    const svc = service as Record<string, unknown>;
-    const typeName = svc.typeName;
-    if (typeof typeName === 'string' && typeName) {
-      services.add(typeName);
-    }
-  }
-
-  const files = [
-    { name: 'grpc/health/v1/health.proto', serviceName: 'grpc.health.v1.Health' },
-    {
-      name: 'grpc/reflection/v1/reflection.proto',
-      serviceName: 'grpc.reflection.v1.ServerReflection',
-    },
-    ...appServices.map((s) => {
-      const svc = s as Record<string, unknown>;
-      return {
-        name: (svc.protoFile as string | undefined) ?? 'unknown.proto',
-        serviceName: svc.typeName as string | undefined,
-      };
-    }),
-  ];
-
+export function createReflectionService(
+  registry: ReflectionRegistry,
+): Record<string, unknown> {
   return {
-    listServices(): string[] {
-      return Array.from(services);
-    },
-
-    getFileByName(filename: string): unknown | undefined {
-      return files.find((f) => f.name === filename);
-    },
-
-    getFileContaining(symbol: string): unknown | undefined {
-      return files.find(
-        (f) => f.name.includes(symbol) || (f.serviceName ?? '').includes(symbol),
-      );
+    async *serverReflectionInfo(
+      requests: AsyncIterable<ServerReflectionRequest>,
+    ): AsyncGenerator<ServerReflectionResponse> {
+      for await (const request of requests) {
+        yield answerReflectionRequest(registry, request);
+      }
     },
   };
 }

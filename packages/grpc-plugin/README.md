@@ -54,11 +54,48 @@ GrpcPlugin({
 });
 ```
 
+## Reflection and Health
+
+Reflection (`grpc.reflection.v1.ServerReflection`, default ON) answers `list_services`,
+`file_by_filename`, `file_containing_symbol` and `all_extension_numbers_of_type`. Symbols resolve
+for services, their methods, messages, nested types, enums and extensions — of the plugin's own two
+protos AND of every registered application service's `DescFile` plus its transitive `dependencies`.
+Nothing else is exposed. `file_containing_extension` answers `UNIMPLEMENTED` (the framework
+registers no extensions); an unknown filename, symbol or type answers `NOT_FOUND`. Set
+`reflection: false` to register nothing.
+
+Health (`grpc.health.v1.Health`, default ON) implements `Check` only, resolving
+`CAPABILITIES.HEALTH` optionally — absent, it answers `SERVING`. An empty `service` field means "the
+whole server" and returns the mapped aggregate: `up → SERVING`, `down → NOT_SERVING`, and
+`degraded → SERVING` (degraded means impaired but still serving; reporting `NOT_SERVING` would make
+Kubernetes withdraw the replica exactly when the app is functional but under stress). A `service`
+naming something this server does not serve answers `SERVICE_UNKNOWN`. `List` and `Watch` are left
+to Connect's automatic `unimplemented` responder.
+
+## Errors
+
+| Error                  | Thrown when                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `GrpcRuntimeLoadError` | Any of the four Connect/Protobuf-ES specifiers cannot be imported              |
+| `GrpcDescriptorError`  | An embedded descriptor set cannot be decoded or lacks its expected service     |
+| `GrpcUnavailableError` | `handleRequest` is called while the adapter does not implement `setRpcHandler` |
+
 ## Limitations
 
-- **Bidi streaming**: Requires HTTP/2. Over HTTP/1.1, Connect may refuse bidi connections with
-  `505 Connection: Close`. In practice, this is not a concern since gRPC clients typically speak
-  HTTP/2.
+- **Detection is prefix-only.** A request is RPC when its path starts with `basePath`. Content-type
+  sniffing is deliberately NOT used: Connect's real unary content types include `application/json`
+  and `application/proto`, so matching them would hijack ordinary application routes. Point your
+  client's base URL at `basePath`. Paths outside it — including prefix-adjacent ones like `/grpcfoo`
+  — fall through to Hono untouched.
+
+- **Bidi streaming needs a genuinely full-duplex transport** — HTTP/2, or in-process `app.fetch`.
+  The plugin deliberately leaves Connect's `httpVersion` option unset, because `IHttpAdapter`
+  surfaces no negotiated version and guessing `'1.1'` would make Connect refuse bidi even on
+  transports that support it. The consequence is that a bidi call over a real HTTP/1.1 socket fails
+  at the transport rather than with a clean `505`. In practice this is benign — gRPC clients speak
+  HTTP/2 — but note it also applies to this plugin's OWN `grpc.reflection.v1.ServerReflection`,
+  whose sole method is bidi-streaming. Unary, server-streaming and client-streaming are unaffected
+  on every runtime.
 - **Application injection**: The `Application.inject()` method bypasses the HTTP adapter seam and
   cannot reach gRPC handlers. Use `app.fetch()` for testing gRPC endpoints.
 - **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
@@ -73,13 +110,10 @@ GrpcPlugin({
 
 ## Health Indicator
 
-The plugin registers a health indicator named `'grpc'` that reports:
+The plugin registers a health indicator named `'grpc'` whose `data` reports:
 
-- `available`: Whether the HTTP adapter supports the RPC interceptor seam
-- `basePath`: The configured base path
-- `reflection`: Whether reflection is enabled
-- `health`: Whether the health service is enabled
-- `serviceCount`: Number of registered services
+- `available`: whether the HTTP adapter implements the `setRpcHandler?` seam
+- `serviceCount`: how many application services are registered
 
 ## Development
 
@@ -98,6 +132,8 @@ base64 -w0 < reflection.binpb  # 2332 chars
 
 ## See Also
 
-- [Milestone 49 Plan](../../plans/milestone-49-grpc-plugin.md)
-- [PUBLIC_API.md](../../../PUBLIC_API.md) — gRPC section
-- [ARCHITECTURE.md](../../../ARCHITECTURE.md) — §7 and §18 updates
+- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) — the
+  `grpc-plugin` Options / Exports / Notes section
+- [ARCHITECTURE.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) — §7 the
+  `IHttpAdapter` seam, §18 why the plugin does not hang off the kernel
+- [ROADMAP.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ROADMAP.md) — Milestone 49

@@ -48,7 +48,6 @@ describe('gRPC Unary E2E', () => {
 
     const echoService = await reviveEchoService();
     grpc.addService(echoService, echoImpl);
-    expect((grpc as unknown as { servicesCount: number }).servicesCount).toBe(1);
 
     const rpcRequest = new Request('http://localhost:0/grpc/example.EchoService/Echo', {
       method: 'POST',

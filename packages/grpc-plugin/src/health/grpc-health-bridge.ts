@@ -1,74 +1,116 @@
 /**
- * gRPC Health v1 service bridge — implements `grpc.health.v1.Health` by
- * bridging to the M20 health plugin via the capability token. Only the `Check`
- * method is implemented; `List` and `Watch` are left unimplemented.
+ * gRPC Health v1 bridge — implements `grpc.health.v1.Health/Check` over the M20
+ * health capability, resolved through `CAPABILITIES.HEALTH` rather than by
+ * importing the health plugin.
+ *
+ * `List` and `Watch` are deliberately not implemented; Connect answers an
+ * omitted method with `unimplemented`, which is the correct gRPC response.
+ * `Watch` would need change notifications `IHealthService` does not expose, and
+ * `List` is keyed by gRPC service name where the framework's report is keyed by
+ * indicator name (plan §3.6).
  *
  * @module
  */
 
-import type { IHealthService } from '@hono-enterprise/common';
-import type { GrpcServingStatus } from '@hono-enterprise/common';
+import type { GrpcServingStatus, IHealthService } from '@hono-enterprise/common';
 
-/** Shape of a health check request. */
+/** `grpc.health.v1.HealthCheckRequest`. */
 interface HealthCheckRequest {
-  service?: string;
+  readonly service?: string;
+}
+
+/** `grpc.health.v1.HealthCheckResponse` init object. */
+interface HealthCheckResponse {
+  readonly status: number;
 }
 
 /**
- * Creates a gRPC Health v1 service implementation.
+ * `grpc.health.v1.HealthCheckResponse.ServingStatus`, from the embedded
+ * descriptor set: `UNKNOWN = 0`, `SERVING = 1`, `NOT_SERVING = 2`,
+ * `SERVICE_UNKNOWN = 3`.
+ */
+const SERVING_STATUS: Record<GrpcServingStatus, number> = {
+  'unknown': 0,
+  'serving': 1,
+  'not-serving': 2,
+  'service-unknown': 3,
+};
+
+/**
+ * Maps a framework {@linkcode HealthStatus} onto a gRPC serving status.
  *
- * The Check method resolves the CAPABILITIES.HEALTH capability if present,
- * otherwise returns SERVING. It maps HealthStatus values to gRPC ServingStatus.
+ * `'degraded'` maps to `serving`: degraded means impaired but still serving,
+ * and reporting `NOT_SERVING` would make Kubernetes withdraw the replica from
+ * its Service exactly when the application is functional but under stress —
+ * shedding capacity in the wrong direction (plan §3.6).
+ */
+export function mapHealthStatus(status: 'up' | 'down' | 'degraded'): GrpcServingStatus {
+  switch (status) {
+    case 'up':
+      return 'serving';
+    case 'degraded':
+      return 'serving';
+    case 'down':
+      return 'not-serving';
+  }
+}
+
+/**
+ * Resolves the serving status for one `Check` call.
  *
- * @param _connectRuntime - The Connect runtime (needed for descriptor operations, unused in Check)
- * @param healthService - Optional IHealthService capability
- * @returns A Health service implementation object
+ * Split out from the service object so every branch is unit-testable without
+ * going through Connect.
+ *
+ * @param healthService - The resolved health capability, or `undefined` when no
+ *   health plugin is registered.
+ * @param serviceNames - Every gRPC service name this server exposes, used to
+ *   answer `SERVICE_UNKNOWN` for a name the server does not serve.
+ * @param requestedService - The `service` field. The empty string (or absent)
+ *   means "the whole server" and yields the mapped aggregate.
+ */
+export async function resolveServingStatus(
+  healthService: IHealthService | undefined,
+  serviceNames: readonly string[],
+  requestedService: string,
+): Promise<GrpcServingStatus> {
+  // A named service the server does not serve is SERVICE_UNKNOWN, regardless of
+  // overall health — the empty string means the whole server.
+  if (requestedService !== '' && !serviceNames.includes(requestedService)) {
+    return 'service-unknown';
+  }
+
+  if (healthService === undefined) {
+    return 'serving';
+  }
+
+  try {
+    const report = await healthService.check();
+    return mapHealthStatus(report.status);
+  } catch {
+    // A health check that throws is not evidence of health.
+    return 'not-serving';
+  }
+}
+
+/**
+ * Creates the `grpc.health.v1.Health` implementation (`Check` only).
+ *
+ * @param healthService - The resolved `CAPABILITIES.HEALTH` service, if any.
+ *   Absent, `Check` answers `SERVING`.
+ * @param serviceNames - Every gRPC service name the server exposes.
  */
 export function createHealthService(
-  _connectRuntime: unknown,
-  healthService?: IHealthService,
-): unknown {
+  healthService: IHealthService | undefined,
+  serviceNames: readonly string[],
+): Record<string, unknown> {
   return {
-    check: async (_request: HealthCheckRequest) => {
-      // request.service is available for future extensibility; currently not used
-      // No need to read it for basic health check
-
-      let status: GrpcServingStatus = 'serving';
-
-      if (healthService) {
-        try {
-          const report = await healthService.check();
-          switch (report.status) {
-            case 'up':
-              status = 'serving';
-              break;
-            case 'down':
-              status = 'not-serving';
-              break;
-            case 'degraded':
-              status = 'serving'; // degraded still serving per plan
-              break;
-          }
-        } catch (_e) {
-          // If health check throws, treat as NOT_SERVING
-          status = 'not-serving';
-        }
-      } else {
-        // No health capability available — report SERVING
-        status = 'serving';
-      }
-
-      // Map to gRPC serving status enum: SERVING = 1, NOT_SERVING = 2, SERVICE_UNKNOWN = 3
-      const servingStatus: Record<GrpcServingStatus, number> = {
-        'serving': 1,
-        'not-serving': 2,
-        'service-unknown': 3,
-        'unknown': 0,
-      };
-
-      return {
-        status: servingStatus[status],
-      };
+    async check(request: HealthCheckRequest): Promise<HealthCheckResponse> {
+      const status = await resolveServingStatus(
+        healthService,
+        serviceNames,
+        request?.service ?? '',
+      );
+      return { status: SERVING_STATUS[status] };
     },
   };
 }

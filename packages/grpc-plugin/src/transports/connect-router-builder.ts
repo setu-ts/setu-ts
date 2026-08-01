@@ -1,211 +1,137 @@
 /**
- * Connect router builder — registers real Protobuf-ES {@linkcode DescService}
- * values (app services plus the revived health/reflection services) onto a
- * Connect router, then produces a dispatch map keyed by full request path.
+ * Connect router builder — registers the application's services plus the
+ * plugin's own health and reflection services onto a Connect router, then maps
+ * every resulting `UniversalHandler` into a dispatch map keyed by full request
+ * path.
  *
- * Connect's `router.service()` REQUIRES a real `DescService` — its `methods`
- * must be an array of method descriptors whose `input`/`output` carry real
- * field descriptors, because Connect serializes a response by walking those
- * fields. Hand-built objects with empty-field messages serialize to `{}` (the
- * empty-body bug this module was refactored to eliminate), and plain
- * `{ typeName, methods: {...} }` objects make Connect throw
- * `service.methods is not iterable`. Applications therefore register generated
- * `DescService` values (or ones revived from an embedded `FileDescriptorSet`),
- * and this builder passes them straight through to Connect.
+ * Connect's `router.service()` requires a real Protobuf-ES `DescService`: it
+ * walks the method descriptors' input/output field descriptors to serialize
+ * bodies. A hand-built `{ typeName, methods: {…} }` object makes Connect throw
+ * `service.methods is not iterable`, and one whose messages declare no fields
+ * serializes every response to `{}`. Applications therefore register generated
+ * descriptors (or ones revived from an embedded `FileDescriptorSet`), and this
+ * builder passes them straight through.
  *
  * @module
  */
 
 import { normalizeBasePath } from './rpc-dispatcher.ts';
-import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
-import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
-
-/** Structural shape of a service definition the builder reads for routing/reflection. */
-interface ServiceDefinitionLike {
-  /** Fully-qualified service name, e.g. `"package.Service"`. */
-  typeName?: string;
-  /** Discriminator — real Protobuf-ES descriptors carry `kind: 'service'`. */
-  kind?: string;
-  /**
-   * Method descriptors. For a real `DescService` this is an array of method
-   * descriptors; legacy structural definitions may use a record.
-   */
-  methods?: Array<{ name?: string; localName?: string }> | Record<string, unknown>;
-}
-
-/** A service entry the builder consumes. */
-interface ServiceEntry {
-  definition: unknown;
-  implementation?: unknown;
-}
-
-/**
- * Builds a Connect router and returns a dispatch map plus a best-effort
- * reflection registry.
- *
- * Uses the real Connect runtime API: `createConnectRouter()` +
- * `router.service()` + `createFetchHandler()` from `@connectrpc/connect`.
- */
+import {
+  buildReflectionRegistry,
+  reviveServiceDescriptor,
+} from '../descriptors/descriptor-registry.ts';
 import { createHealthService } from '../health/grpc-health-bridge.ts';
 import { createReflectionService } from '../reflection/grpc-reflection.ts';
+import type {
+  ConnectRuntime,
+  FileDescriptorLike,
+  ServiceDescriptorLike,
+} from '../interfaces/connect-runtime.ts';
+import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 import type { IHealthService } from '@hono-enterprise/common';
 
-export function buildConnectRouter({
-  connectRuntime,
-  basePath,
-  reflection,
-  health,
-  services,
-  embeddedDescriptors,
-  healthService,
-}: {
-  connectRuntime: ConnectRuntime;
-  basePath: string;
-  reflection: boolean;
-  health: boolean;
-  services: ReadonlyArray<ServiceEntry>;
-  embeddedDescriptors: EmbeddedDescriptors;
-  healthService: IHealthService | undefined;
-}): {
+/** Fully-qualified name of the built-in health service. */
+const HEALTH_SERVICE_NAME = 'grpc.health.v1.Health';
+/** Fully-qualified name of the built-in reflection service. */
+const REFLECTION_SERVICE_NAME = 'grpc.reflection.v1.ServerReflection';
+
+/** A service the builder registers. */
+export interface ServiceEntry {
+  readonly definition: unknown;
+  readonly implementation?: unknown;
+}
+
+/** Inputs to {@linkcode buildConnectRouter}. */
+export interface BuildConnectRouterOptions {
+  readonly connectRuntime: ConnectRuntime;
+  readonly basePath: string;
+  readonly reflection: boolean;
+  readonly health: boolean;
+  readonly services: readonly ServiceEntry[];
+  readonly embeddedDescriptors: EmbeddedDescriptors;
+  readonly healthService: IHealthService | undefined;
+}
+
+/**
+ * Builds the Connect router and the dispatch map.
+ *
+ * @returns The dispatch map, keyed `basePath + handler.requestPath`.
+ * @throws {Error} If two registered services share a `typeName`.
+ * @throws {GrpcDescriptorError} If an embedded descriptor set is unusable.
+ */
+export function buildConnectRouter(options: BuildConnectRouterOptions): {
   dispatchMap: Map<string, (request: Request) => Promise<Response>>;
-  registry: unknown;
 } {
+  const {
+    connectRuntime,
+    basePath,
+    reflection,
+    health,
+    services,
+    embeddedDescriptors,
+    healthService,
+  } = options;
+
   const normalizedBase = normalizeBasePath(basePath);
-
-  // Detect duplicate service type names up front (defensive — GrpcService also guards).
-  const typeNames = new Set<string>();
-  for (const serviceDef of services) {
-    const def = serviceDef.definition as ServiceDefinitionLike;
-    const typeName = def.typeName;
-    if (typeName) {
-      if (typeNames.has(typeName)) {
-        throw new Error(`Service '${typeName}' has already been registered`);
-      }
-      typeNames.add(typeName);
-    }
-  }
-
   const router = connectRuntime.createConnectRouter();
 
-  // Register each app service. The definition MUST be a real Protobuf-ES
-  // DescService (kind: 'service'); Connect walks its method descriptors to
-  // serialize request/response bodies.
-  for (const serviceDef of services) {
-    const def = serviceDef.definition as ServiceDefinitionLike;
-    if (!def.typeName) continue;
-    const impl = (serviceDef.implementation ?? {}) as Record<
-      string,
-      (...args: unknown[]) => unknown
-    >;
-    router.service(serviceDef.definition as { typeName: string }, impl);
+  // Application services first, so their names lead `list_services`.
+  const serviceNames: string[] = [];
+  const reflectionFiles: (FileDescriptorLike | undefined)[] = [];
+  const seenTypeNames = new Set<string>();
+
+  for (const entry of services) {
+    const definition = entry.definition as ServiceDescriptorLike;
+    if (seenTypeNames.has(definition.typeName)) {
+      throw new Error(`Service '${definition.typeName}' has already been registered`);
+    }
+    seenTypeNames.add(definition.typeName);
+    serviceNames.push(definition.typeName);
+    reflectionFiles.push(definition.file);
+    router.service(definition, (entry.implementation ?? {}) as Record<string, unknown>);
   }
 
-  // Register the built-in Health service (revived from the embedded descriptor set).
+  // The built-in health service.
+  let healthDescriptor: ServiceDescriptorLike | undefined;
   if (health) {
-    const healthServiceDesc = reviveServiceDescriptor(
+    healthDescriptor = reviveServiceDescriptor(
       connectRuntime,
       embeddedDescriptors.healthBase64,
-      'grpc.health.v1.Health',
+      HEALTH_SERVICE_NAME,
     );
-    if (healthServiceDesc) {
-      const healthImpl = createHealthService(connectRuntime, healthService);
-      router.service(
-        healthServiceDesc as { typeName: string },
-        healthImpl as Record<string, (...args: unknown[]) => unknown>,
-      );
-    }
+    serviceNames.push(HEALTH_SERVICE_NAME);
+    reflectionFiles.push(healthDescriptor.file);
   }
 
-  // Register the built-in Server Reflection service (revived from the embedded descriptor set).
+  // The built-in reflection service.
+  let reflectionDescriptor: ServiceDescriptorLike | undefined;
   if (reflection) {
-    const reflectionServiceDesc = reviveServiceDescriptor(
+    reflectionDescriptor = reviveServiceDescriptor(
       connectRuntime,
       embeddedDescriptors.reflectionBase64,
-      'grpc.reflection.v1.ServerReflection',
+      REFLECTION_SERVICE_NAME,
     );
-    if (reflectionServiceDesc) {
-      // Build the app services list for reflection (typeName only)
-      const appServices = services.map((s) => s.definition);
-      const reflectionImpl = createReflectionService(
-        connectRuntime,
-        embeddedDescriptors,
-        appServices,
-      );
-      router.service(
-        reflectionServiceDesc as { typeName: string },
-        reflectionImpl as Record<string, (...args: unknown[]) => unknown>,
-      );
-    }
+    serviceNames.push(REFLECTION_SERVICE_NAME);
+    reflectionFiles.push(reflectionDescriptor.file);
   }
 
-  // Build the dispatch map keyed by `basePath + requestPath`. Each Connect
-  // `UniversalHandler` carries a `requestPath` (e.g. `/pkg.Svc/Method`); the
-  // runtime's `createFetchHandler` adapts it to a fetch `(Request) => Response`.
+  // Registered after the name list is complete: `Check` answers SERVICE_UNKNOWN
+  // for a name the server does not serve, and reflection lists them all.
+  if (healthDescriptor !== undefined) {
+    router.service(healthDescriptor, createHealthService(healthService, serviceNames));
+  }
+  if (reflectionDescriptor !== undefined) {
+    const registry = buildReflectionRegistry(connectRuntime, reflectionFiles, serviceNames);
+    router.service(reflectionDescriptor, createReflectionService(registry));
+  }
+
   const dispatchMap = new Map<string, (request: Request) => Promise<Response>>();
   for (const handler of router.handlers) {
-    const requestPath = (handler as { requestPath: string }).requestPath;
-    const fullPath = normalizedBase + requestPath;
-    const fetchHandler = connectRuntime.createFetchHandler(
-      handler as unknown as (request: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    dispatchMap.set(
+      normalizedBase + handler.requestPath,
+      connectRuntime.createFetchHandler(handler),
     );
-    dispatchMap.set(fullPath, fetchHandler);
   }
 
-  // Best-effort reflection registry (names only — actual reflection answers are
-  // produced by the dedicated reflection service). Computed when health or
-  // reflection is enabled so callers can enumerate registered services.
-  let registry: unknown = null;
-  if (reflection || health) {
-    registry = buildReflectionRegistry(services);
-  }
-
-  return { dispatchMap, registry };
-}
-
-/**
- * Extracts method names from a service's `methods`, tolerating both a real
- * `DescService` (array of method descriptors) and a legacy record shape.
- */
-function extractMethodNames(methods: ServiceDefinitionLike['methods']): string[] {
-  if (Array.isArray(methods)) {
-    return methods.map((m) => m.localName ?? m.name ?? '').filter((n) => n.length > 0);
-  }
-  if (methods && typeof methods === 'object') {
-    return Object.keys(methods as Record<string, unknown>);
-  }
-  return [];
-}
-
-/**
- * Revives a real DescService from an embedded base64 FileDescriptorSet.
- * Returns the DescService for the given service name, or `undefined` if absent.
- */
-function reviveServiceDescriptor(
-  connectRuntime: ConnectRuntime,
-  base64: string,
-  serviceName: string,
-): unknown {
-  const registry = connectRuntime.reviveDescriptorSet(base64);
-  return connectRuntime.getService(registry, serviceName);
-}
-
-/**
- * Builds a best-effort reflection registry from the registered app services.
- * Used to enumerate service names and methods for server reflection.
- */
-function buildReflectionRegistry(services: ReadonlyArray<ServiceEntry>): unknown {
-  return {
-    files: services.map((s) => {
-      const def = s.definition as ServiceDefinitionLike;
-      return {
-        name: def.typeName ?? '',
-        package: '',
-        methods: extractMethodNames(def.methods),
-      };
-    }),
-    listServices: () =>
-      services.map((s) => (s.definition as ServiceDefinitionLike)?.typeName ?? ''),
-    getService: (name: string) =>
-      services.find((s) => (s.definition as ServiceDefinitionLike)?.typeName === name),
-  };
+  return { dispatchMap };
 }

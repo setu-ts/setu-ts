@@ -1789,8 +1789,11 @@ closing the one NestJS-microservice pattern (`client.send`) that pub/sub alone c
 > **Why this is a separate milestone.** Mirrors the M14 → M14b and M15 → M15b splits: a pure
 > addition to the existing plugin via the internal broker seam, with a small, flagged widening of
 > the committed `IMessageBroker` contract (`request`/`respond`) — no new capability token, no new
-> plugin. Direct point-to-point typed RPC (gRPC/Connect over the kernel catch-all) is a **separate
-> future milestone**, not this one.
+> plugin. Direct point-to-point typed RPC (gRPC/Connect) is a **separate milestone**, not this one —
+> it shipped as **Milestone 49**, and not over the kernel catch-all as this note originally
+> anticipated: `IRouterApi` exposes no catch-all registration, and the shared body mapping reads the
+> request body before the pipeline runs, so gRPC is intercepted at the HTTP-adapter seam
+> (`IHttpAdapter.setRpcHandler?`) instead.
 
 ### Package: `@hono-enterprise/messaging-plugin` (extends the M14/M14b package)
 
@@ -4602,6 +4605,88 @@ Four claims in the section above were checked against source and did not survive
 indirection), because M36c consumes this milestone. M48 is not the last gap before a shippable
 framework — M37 examples, M38 documentation, and M39 deploy manifests remain — it is what makes the
 full-stack story coherent.
+
+---
+
+## Milestone 49: gRPC Plugin — Co-Serving gRPC, Connect and gRPC-Web ✅ COMPLETE
+
+**Objective:** serve the gRPC family — the gRPC, Connect and gRPC-Web protocols — on the **same port
+and the same fetch handler** as an application's existing Hono routes, with no separate listener, no
+raw socket, and identical behavior on Node, Deno, Bun and Cloudflare Workers. The plugin registers
+an `IGrpcService` under a new `CAPABILITIES.GRPC = 'grpc'` token; applications register Protobuf
+service implementations and get server reflection plus a gRPC Health v1 service bridged to M20.
+
+**Why Connect-ES core.** `@grpc/grpc-js` binds a raw `node:http2` socket, so it is Node-only, needs
+its own port, and re-introduces the server model M23 deliberately removed. Server-side `grpc-web`
+needs an Envoy sidecar and cannot do client-streaming or bidi. Connect-ES core is **fetch-native**:
+it already operates on the web `Request`/`Response` the HTTP adapter owns, and
+`@connectrpc/connect/protocol` exports the whole fetch seam (`createFetchHandler`), so one
+interceptor serves all four runtimes with zero per-runtime code. Connect ships **no** reflection and
+**no** health service — both are built here.
+
+**Why the adapter seam rather than the kernel router.** A gRPC exchange cannot travel through
+`IRequest`/`IResponse`: the former exposes no raw streaming body, the latter no trailing headers,
+and `mapWebRequestToFrameworkRequest` calls `arrayBuffer()` on every request, disturbing the body
+before any handler runs. `IRouterApi` also exposes no catch-all registration. RPC is therefore
+intercepted inside each adapter's `fetch` path through one new **optional**
+`IHttpAdapter.setRpcHandler?(handler)` member — the M44 `fs?`, M45 `workers?` and M46
+`setUpgradeRouter?` precedent — consulted after the WebSocket upgrade short-circuit and before body
+mapping. A `Response` means handled; `null` falls through to Hono untouched.
+
+**Descriptors without committed generated code.** Connect's `router.service()` requires a real
+`DescService`, so the plugin embeds each of its two protos' `FileDescriptorSet` as an inert base64
+constant and revives them at runtime through the lazy seam (`fromBinary` → `createFileRegistry` →
+`getService`). Committing `protoc-gen-es` TypeScript would make `@bufbuild/protobuf` a hard
+import-time dependency; generating at build time would put a proto compiler in the publish path.
+Both descriptor sets report `dependencies.length === 0`, so each is self-contained.
+`grpc.health.v1.Health` declares **three** RPCs today — `Check`, `List`, `Watch` — and a unit test
+asserts the exact method **set**, so upstream drift fails the gate instead of silently widening the
+auto-`unimplemented` surface.
+
+**Deliverables**
+
+- [x] `common` — `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`,
+      `RpcFetchHandler`; `CAPABILITIES.GRPC`; the optional `IHttpAdapter.setRpcHandler?` widening.
+- [x] `runtime` — `RpcInterceptorStore` plus the consult wired into all four HTTP adapters.
+- [x] `grpc-plugin` — `GrpcPlugin`, `GrpcService`, the Connect loader (`adaptConnectModule` /
+      `loadConnectModule` over four npm specifiers), the router builder, the prefix dispatcher, the
+      embedded descriptors, the reflection registry, the reflection service, the health bridge, and
+      the three error types.
+- [x] Reflection — `list_services`, `file_by_filename`, `file_containing_symbol`,
+      `all_extension_numbers_of_type`; `file_containing_extension` answers `UNIMPLEMENTED`.
+- [x] Health — `Check` bridged to `CAPABILITIES.HEALTH`, honoring the `service` field with
+      `SERVICE_UNKNOWN`; `degraded → SERVING`.
+- [x] Tests — unit, integration and real-path e2e (unary, streaming, reflection, health); all 11
+      `src` files at 100% branch/function/line.
+- [x] **PUBLIC_API.md** — the gRPC type group, the `setRpcHandler?` listing and its adapter-widening
+      note, and the full `grpc-plugin` Options / Exports / Notes section.
+- [x] **ARCHITECTURE.md** — §7's `IHttpAdapter` block refreshed to the real six-member shape; gRPC
+      removed from the §18 Future diagram and table, with a note recording the seam.
+- [x] **README.md** — the gRPC row moved out of "Not yet built" into the shipped table.
+- [x] **ROADMAP.md** — this section, the Progress Tracking row 49, and the M14c aside corrected to
+      name the adapter seam.
+- [x] **`scripts/release-packages.ts`** — `packages/grpc-plugin` added to the ordered allow-list.
+
+**Known limitations, stated rather than discovered**
+
+- **Bidi streaming needs a genuinely full-duplex transport.** `httpVersion` is deliberately left
+  unset, because `IHttpAdapter` surfaces no negotiated version and guessing `'1.1'` would make
+  Connect refuse bidi even on HTTP/2. Bidi therefore works in-process and over HTTP/2, but over a
+  real HTTP/1.1 socket it fails at the transport rather than with a clean `505`. This also affects
+  the plugin's own reflection service, whose sole method is bidi-streaming.
+- **`inject()` never reaches the interceptor.** `Application.inject()` synthesizes an `IRequest` and
+  calls the kernel handler directly, bypassing the adapter. RPC must be driven via `app.fetch`.
+- **Detection is prefix-only.** Connect's real unary content types include `application/json`, so
+  media-type sniffing would hijack ordinary application routes. Clients must point their base URL at
+  `basePath`.
+- **Deno does not expose HTTP/2 response trailers**, so native `application/grpc` status signaling
+  is limited there. Connect-JSON and gRPC-Web work on every runtime.
+
+**Out of scope:** a `honoe generate grpc-service` schematic; codegen of the application's own
+`.proto` files (owned by `buf` in the app's toolchain); auth / telemetry / metrics / multi-tenancy
+bridging into the RPC call path (the interceptor runs before the kernel pipeline);
+`grpc.health.v1.Health/List` and `/Watch`; `grpc.reflection.v1alpha`; exposing the negotiated HTTP
+version through `IHttpAdapter`; and the browser client, which belongs to `@hono-enterprise/sdk`.
 
 ---
 

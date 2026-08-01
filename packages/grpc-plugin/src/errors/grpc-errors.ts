@@ -11,12 +11,31 @@
  * @since 0.3.0
  */
 export class GrpcRuntimeLoadError extends Error {
-  constructor(specifier: string, installCommand: string) {
+  /** The specifier that failed to import. */
+  readonly specifier: string;
+
+  constructor(specifier: string, installCommand: string, options?: ErrorOptions) {
     super(
       `Cannot load Connect runtime module: ${specifier}. ` +
         `Run: ${installCommand}`,
+      options,
     );
     this.name = 'GrpcRuntimeLoadError';
+    this.specifier = specifier;
+  }
+}
+
+/**
+ * Thrown when an embedded descriptor set cannot be decoded, or when a service
+ * the plugin expects to find inside one is absent — i.e. the committed base64
+ * constant is truncated, swapped, or regenerated against an incompatible proto.
+ *
+ * @since 0.3.0
+ */
+export class GrpcDescriptorError extends Error {
+  constructor(detail: string, options?: ErrorOptions) {
+    super(`gRPC descriptor error: ${detail}`, options);
+    this.name = 'GrpcDescriptorError';
   }
 }
 

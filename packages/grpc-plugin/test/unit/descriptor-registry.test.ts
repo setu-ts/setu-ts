@@ -1,302 +1,188 @@
 /**
- * Descriptor registry tests — verifies reviveDescriptorSet and buildReflectionRegistry.
+ * Unit tests for the reflection registry: descriptor revival, transitive
+ * dependency collection, the symbol index (including nested types and methods,
+ * which Protobuf-ES's own lookup does NOT resolve), and extension numbering.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   buildReflectionRegistry,
-  reviveDescriptorSet,
+  reviveServiceDescriptor,
 } from '../../src/descriptors/descriptor-registry.ts';
-import type { ConnectRuntime } from '../../src/interfaces/connect-runtime.ts';
-import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
+import { GrpcDescriptorError } from '../../src/errors/grpc-errors.ts';
+import {
+  createFakeConnectRuntime,
+  fakeExtension,
+  fakeFile,
+  fakeMessage,
+  fakeService,
+} from '../fixtures/fake-connect-runtime.ts';
 
-describe('DescriptorRegistry', () => {
-  it('reviveDescriptorSet should delegate to connectRuntime.reviveDescriptorSet', () => {
-    let called = false;
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: (base64: string) => {
-        called = true;
-        expect(base64).toBe('dGVzdA==');
-        return { files: [], getService: () => undefined, listServices: [] };
-      },
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const result = reviveDescriptorSet(fakeConnectRuntime, 'dGVzdA==');
-    expect(called).toBe(true);
-    expect(result).toBeDefined();
+const decode = (bytes: Uint8Array | undefined) =>
+  bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+
+describe('reviveServiceDescriptor', () => {
+  it('returns the named service from a revived descriptor set', () => {
+    const runtime = createFakeConnectRuntime({ services: [fakeService('pkg.Svc')] });
+    const service = reviveServiceDescriptor(runtime, btoa('bytes'), 'pkg.Svc');
+    expect(service.typeName).toBe('pkg.Svc');
+    expect(runtime.revived).toEqual([btoa('bytes')]);
   });
 
-  it('buildReflectionRegistry should include embedded services', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [],
+  it('throws GrpcDescriptorError naming the service when the set does not declare it', () => {
+    // A truncated or swapped embedded constant must fail loudly rather than
+    // degrading into a router with no health/reflection service.
+    const runtime = createFakeConnectRuntime({ services: [] });
+    let thrown: unknown;
+    try {
+      reviveServiceDescriptor(runtime, btoa('bytes'), 'grpc.health.v1.Health');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GrpcDescriptorError);
+    expect((thrown as Error).message).toContain('grpc.health.v1.Health');
+  });
+
+  it('propagates a decode failure from the runtime', () => {
+    const runtime = createFakeConnectRuntime({ reviveThrows: true });
+    expect(() => reviveServiceDescriptor(runtime, btoa('junk'), 'pkg.Svc')).toThrow();
+  });
+});
+
+describe('buildReflectionRegistry', () => {
+  it('lists the service names it was given, in order', () => {
+    const runtime = createFakeConnectRuntime();
+    const registry = buildReflectionRegistry(runtime, [], ['a.A', 'b.B']);
+    expect(registry.listServices()).toEqual(['a.A', 'b.B']);
+  });
+
+  it('resolves a file by its suffixed proto name', () => {
+    const runtime = createFakeConnectRuntime();
+    const file = fakeFile('example/echo.proto');
+    const registry = buildReflectionRegistry(runtime, [file], []);
+
+    expect(decode(registry.getFileByName('example/echo.proto'))).toBe('fd:example/echo.proto');
+    // `DescFile.name` (suffix stripped) is NOT the reflection key.
+    expect(registry.getFileByName('example/echo')).toBeUndefined();
+    expect(registry.getFileByName('nope.proto')).toBeUndefined();
+  });
+
+  it('collects transitive dependencies and indexes a shared one only once', () => {
+    const runtime = createFakeConnectRuntime();
+    const shared = fakeFile('common/shared.proto', {
+      messages: [fakeMessage('common.Shared')],
+    });
+    const left = fakeFile('a/left.proto', {
+      dependencies: [shared],
+      services: [fakeService('a.Left', ['Do'])],
+    });
+    const right = fakeFile('b/right.proto', {
+      dependencies: [shared],
+      services: [fakeService('b.Right', ['Do'])],
+    });
+
+    const registry = buildReflectionRegistry(runtime, [left, right], []);
+
+    expect(decode(registry.getFileByName('common/shared.proto'))).toBe('fd:common/shared.proto');
+    expect(decode(registry.getFileContainingSymbol('common.Shared'))).toBe(
+      'fd:common/shared.proto',
     );
-    expect(registry).toBeDefined();
-    // Verify the registry has the expected structure
-    const reg = registry as Record<string, unknown>;
-    expect(typeof reg.listServices).toBe('function');
-    expect(typeof reg.getService).toBe('function');
-    // Should include embedded services
-    const services = (reg.listServices as () => string[])();
-    expect(services).toContain('grpc.health.v1.Health');
-    expect(services).toContain('grpc.reflection.v1.ServerReflection');
+    // Serialization is memoized: the shared file is serialized at most once
+    // even though it was reached from two roots and queried twice.
+    expect(runtime.serializedFiles.filter((n) => n === 'common/shared.proto')).toHaveLength(1);
   });
 
-  it('buildReflectionRegistry should include app services', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    // App services have definition property with typeName inside
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [
-        { definition: { typeName: 'pkg.MyService' } },
-        { definition: { typeName: 'pkg.OtherService' } },
+  it('tolerates an undefined file root and a dependency cycle', () => {
+    const runtime = createFakeConnectRuntime();
+    const a = fakeFile('a.proto', { messages: [fakeMessage('pkg.A')] });
+    // Real descriptor graphs are acyclic, but the walk must not hang if one is not.
+    (a.dependencies as unknown as unknown[]).push(a);
+
+    const registry = buildReflectionRegistry(runtime, [undefined, a], []);
+    expect(decode(registry.getFileContainingSymbol('pkg.A'))).toBe('fd:a.proto');
+  });
+
+  it('indexes messages, nested messages, nested enums and file enums', () => {
+    const runtime = createFakeConnectRuntime();
+    const file = fakeFile('pkg/types.proto', {
+      messages: [
+        fakeMessage('pkg.Outer', {
+          messages: [
+            fakeMessage('pkg.Outer.Inner', { enums: [{ typeName: 'pkg.Outer.Inner.E' }] }),
+          ],
+          enums: [{ typeName: 'pkg.Outer.E' }],
+        }),
       ],
-    );
-    const reg = registry as Record<string, unknown>;
-    const services = (reg.listServices as () => string[])();
-    expect(services).toContain('pkg.MyService');
-    expect(services).toContain('pkg.OtherService');
+      enums: [{ typeName: 'pkg.TopEnum' }],
+    });
+    const registry = buildReflectionRegistry(runtime, [file], []);
+
+    for (
+      const symbol of [
+        'pkg.Outer',
+        'pkg.Outer.Inner',
+        'pkg.Outer.Inner.E',
+        'pkg.Outer.E',
+        'pkg.TopEnum',
+      ]
+    ) {
+      expect(decode(registry.getFileContainingSymbol(symbol))).toBe('fd:pkg/types.proto');
+    }
   });
 
-  it('buildReflectionRegistry getService should find app services', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [
-        { definition: { typeName: 'pkg.MyService' } },
+  it('indexes services AND their methods as symbols', () => {
+    // `FileRegistry.get('pkg.Svc.Method')` returns undefined in Protobuf-ES,
+    // but a method is a legal file_containing_symbol input.
+    const runtime = createFakeConnectRuntime();
+    const file = fakeFile('pkg/svc.proto', {
+      services: [fakeService('pkg.Svc', ['Check', 'Watch'])],
+    });
+    const registry = buildReflectionRegistry(runtime, [file], []);
+
+    expect(decode(registry.getFileContainingSymbol('pkg.Svc'))).toBe('fd:pkg/svc.proto');
+    expect(decode(registry.getFileContainingSymbol('pkg.Svc.Check'))).toBe('fd:pkg/svc.proto');
+    expect(decode(registry.getFileContainingSymbol('pkg.Svc.Watch'))).toBe('fd:pkg/svc.proto');
+    expect(registry.getFileContainingSymbol('pkg.Svc.Absent')).toBeUndefined();
+  });
+
+  it('tolerates a service descriptor carrying no methods', () => {
+    const runtime = createFakeConnectRuntime();
+    const file = fakeFile('pkg/bare.proto', {
+      services: [{ kind: 'service', typeName: 'pkg.Bare' }],
+    });
+    const registry = buildReflectionRegistry(runtime, [file], []);
+    expect(decode(registry.getFileContainingSymbol('pkg.Bare'))).toBe('fd:pkg/bare.proto');
+  });
+
+  it('reports extension numbers per extended type, from file and nested extensions', () => {
+    const runtime = createFakeConnectRuntime();
+    const file = fakeFile('pkg/ext.proto', {
+      messages: [
+        fakeMessage('pkg.Holder', {
+          extensions: [fakeExtension('pkg.Holder.nested', 'pkg.Target', 1001)],
+        }),
       ],
-    );
-    const reg = registry as Record<string, unknown>;
-    const service = (reg.getService as (name: string) => unknown)('pkg.MyService');
-    expect(service).toBeDefined();
-  });
-
-  it('buildReflectionRegistry getService should return undefined for unknown service', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [],
-    );
-    const reg = registry as Record<string, unknown>;
-    const service = (reg.getService as (name: string) => unknown)('unknown.Service');
-    expect(service).toBeUndefined();
-  });
-
-  it('buildReflectionRegistry getService should find embedded health service', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => ({ kind: 'service' }),
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [],
-    );
-    const reg = registry as Record<string, unknown>;
-    const service = (reg.getService as (name: string) => unknown)('grpc.health.v1.Health');
-    expect(service).toBeDefined();
-  });
-
-  it('buildReflectionRegistry getService should find embedded reflection service', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => ({ kind: 'service' }),
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [],
-    );
-    const reg = registry as Record<string, unknown>;
-    const service = (reg.getService as (name: string) => unknown)(
-      'grpc.reflection.v1.ServerReflection',
-    );
-    expect(service).toBeDefined();
-  });
-
-  it('buildReflectionRegistry should handle app services without typeName', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [
-        { definition: { methods: {} } }, // No typeName
+      extensions: [
+        fakeExtension('pkg.topLevel', 'pkg.Target', 1002),
+        fakeExtension('pkg.other', 'pkg.Elsewhere', 2001),
       ],
-    );
-    const reg = registry as Record<string, unknown>;
-    const services = (reg.listServices as () => string[])();
-    // Should still have embedded services but not the app service without typeName
-    expect(services).toContain('grpc.health.v1.Health');
-    expect(services).toContain('grpc.reflection.v1.ServerReflection');
+    });
+    const registry = buildReflectionRegistry(runtime, [file], []);
+
+    expect(registry.getExtensionNumbers('pkg.Target')?.slice().sort()).toEqual([1001, 1002]);
+    expect(registry.getExtensionNumbers('pkg.Elsewhere')).toEqual([2001]);
+    // The extensions themselves are addressable symbols.
+    expect(decode(registry.getFileContainingSymbol('pkg.topLevel'))).toBe('fd:pkg/ext.proto');
+    expect(decode(registry.getFileContainingSymbol('pkg.Holder.nested'))).toBe('fd:pkg/ext.proto');
   });
 
-  it('buildReflectionRegistry getService should return undefined for null registry', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () =>
-        null as unknown as ReturnType<ConnectRuntime['reviveDescriptorSet']>,
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [],
-    );
-    const reg = registry as Record<string, unknown>;
-    // getService should not throw even with null registry
-    const service = (reg.getService as (name: string) => unknown)('grpc.health.v1.Health');
-    expect(service).toBeUndefined();
-  });
+  it('distinguishes a known type with no extensions from an unknown type', () => {
+    const runtime = createFakeConnectRuntime();
+    const file = fakeFile('pkg/plain.proto', { messages: [fakeMessage('pkg.Plain')] });
+    const registry = buildReflectionRegistry(runtime, [file], []);
 
-  it('buildReflectionRegistry should include app services in listServices', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [
-        { definition: { typeName: 'app.MyService' } },
-      ],
-    );
-    const reg = registry as Record<string, unknown>;
-    const services = (reg.listServices as () => string[])();
-    expect(services).toContain('app.MyService');
-  });
-
-  it('buildReflectionRegistry getService should find app services by typeName', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [
-        { definition: { typeName: 'app.MyService' } },
-      ],
-    );
-    const reg = registry as Record<string, unknown>;
-    const service = (reg.getService as (name: string) => unknown)('app.MyService');
-    expect(service).toBeDefined();
-    expect((service as { definition: { typeName: string } }).definition.typeName).toBe(
-      'app.MyService',
-    );
-  });
-
-  it('buildReflectionRegistry should handle service without typeName', () => {
-    const fakeConnectRuntime: ConnectRuntime = {
-      createConnectRouter: () => ({ handlers: [], service: () => {} }),
-      createFetchHandler: () => () => Promise.resolve(new Response('Not Found', { status: 404 })),
-      reviveDescriptorSet: () => ({
-        files: [],
-        getService: () => undefined,
-        listServices: () => [],
-      }),
-      getService: () => undefined,
-      createRegistry: () => ({}),
-    };
-    const registry = buildReflectionRegistry(
-      fakeConnectRuntime,
-      EmbeddedDescriptors,
-      [
-        { definition: { methods: {} } }, // No typeName
-      ],
-    );
-    const reg = registry as Record<string, unknown>;
-    const services = (reg.listServices as () => string[])();
-    // Should have embedded services but not the app service without typeName
-    expect(services).toContain('grpc.health.v1.Health');
-    expect(services).toContain('grpc.reflection.v1.ServerReflection');
+    expect(registry.getExtensionNumbers('pkg.Plain')).toEqual([]);
+    expect(registry.getExtensionNumbers('pkg.Unknown')).toBeUndefined();
   });
 });
