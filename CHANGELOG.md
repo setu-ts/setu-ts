@@ -263,6 +263,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Every application failed to boot on Cloudflare Workers** — `packages/kernel`'s request-context
+  factory built its never-aborting `ctx.signal` sentinel from a **module-scope**
+  `new AbortController()`. workerd refuses that with
+  `Disallowed operation called within global
+  scope`, because an `AbortController` is bound to an
+  I/O context, so the isolate threw at import time and no handler ever ran. Introduced with
+  `IRequestContext.signal` in Milestone 42 and invisible to every gate: the whole suite runs on
+  Deno, where a module-scope controller is legal, and the Workers path had only ever been exercised
+  through `app.fetch` under Deno rather than under the real runtime. Found by driving the framework
+  under `wrangler dev` (workerd) for the first time. The sentinel is now constructed **per
+  request**; caching one lazily would not have been a fix either, since workerd then refuses to use
+  a controller created for one request on behalf of another. A regression test pins that two
+  contexts never share a fallback signal — it fails against the previous code.
 - **`@hono-enterprise/cloudflare-plugin` queue reporting reaches a logger registered after the
   plugin** (Milestone 52b) — `WorkersQueueOptions.logger` is a thunk rather than an `ILogger`, for
   the reason `resolveWaitUntil` already takes one: `ctx.logger` resolves lazily through a Proxy that
