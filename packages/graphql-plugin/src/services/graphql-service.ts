@@ -26,7 +26,7 @@ export class GraphqlService implements IGraphqlService {
   #schema: GraphqlSchemaLike;
   #endpoint: string;
   #documentCache: DocumentCache;
-  #validationRules: unknown[];
+  #validationRules: unknown[]; // A1: built once at construction, reused per request
   #maxDepth: number;
   #introspection: boolean;
   #maskInternalErrors: boolean;
@@ -53,7 +53,6 @@ export class GraphqlService implements IGraphqlService {
     this.#schema = schema;
     this.#endpoint = options.endpoint;
     this.#documentCache = new DocumentCache(options.documentCacheSize);
-    this.#validationRules = options.validationRules ?? [];
     this.#maxDepth = options.maxDepth;
     this.#introspection = options.introspection;
     this.#maskInternalErrors = options.maskInternalErrors;
@@ -61,6 +60,9 @@ export class GraphqlService implements IGraphqlService {
     this.#formatError = options.formatError ?? ((e: unknown) => e);
     this.#buildContext = options.buildContext ?? null;
     this.#rootValue = options.rootValue;
+
+    // A1: Build validation rules once at construction time (not per request)
+    this.#validationRules = this.#buildValidationRules();
   }
 
   get endpoint(): string {
@@ -74,7 +76,39 @@ export class GraphqlService implements IGraphqlService {
   async execute(
     params: GraphqlRequestParams,
     requestContext?: IRequestContext,
+    method?: 'GET' | 'POST',
   ): Promise<GraphqlExecutionOutcome> {
+    // B6: Check operation kind with parse-based detection (before validate/execute)
+    const operationKind = this.#checkOperationKind(params.query, params.operationName);
+    if (operationKind === 'subscription') {
+      // Subscription over HTTP → 400 for ANY method
+      return {
+        status: 400,
+        result: {
+          errors: [
+            {
+              message: 'Subscriptions are not supported over HTTP',
+              extensions: { code: 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP' },
+            },
+          ],
+        },
+      };
+    }
+    if (operationKind === 'mutation' && method === 'GET') {
+      // Mutation over GET → 405
+      return {
+        status: 405,
+        result: {
+          errors: [
+            {
+              message: 'Mutations are not allowed over GET',
+              extensions: { code: 'METHOD_NOT_ALLOWED' },
+            },
+          ],
+        },
+      };
+    }
+
     // Build context
     let contextValue: unknown;
     if (this.#buildContext !== null) {
@@ -97,7 +131,7 @@ export class GraphqlService implements IGraphqlService {
       schema: this.#schema,
       runtime: this.#runtime,
       documentCache: this.#documentCache,
-      validationRules: this.#buildValidationRules(),
+      validationRules: this.#validationRules, // A1: use pre-built rules
       maxDepth: this.#maxDepth,
       introspection: this.#introspection,
       operationName: params.operationName ?? '',
@@ -128,11 +162,15 @@ export class GraphqlService implements IGraphqlService {
     };
   }
 
+  /**
+   * Build validation rules once at construction time.
+   * A1: This is called once in the constructor, not per request.
+   */
   #buildValidationRules(): unknown[] {
     // Start with GraphQL's standard validation rules
     const rules: unknown[] = [...this.#runtime.specifiedRules];
 
-    // Add custom validation rules
+    // Add custom validation rules from options
     if (this.#validationRules && this.#validationRules.length > 0) {
       rules.push(...this.#validationRules);
     }
@@ -149,6 +187,28 @@ export class GraphqlService implements IGraphqlService {
     }
 
     return rules;
+  }
+
+  /**
+   * Check operation kind using parse-based detection.
+   * Returns undefined if parse fails (will be handled during execution).
+   * B6: This replaces the text-based getOperationKindFromQuery.
+   */
+  #checkOperationKind(
+    query: string,
+    operationName?: string,
+  ): 'query' | 'mutation' | 'subscription' | undefined {
+    try {
+      const document = this.#runtime.parse(query);
+      const ast = this.#runtime.getOperationAST(document, operationName);
+      if (!ast) {
+        return undefined;
+      }
+      return (ast.operation as 'query' | 'mutation' | 'subscription') ?? undefined;
+    } catch {
+      // Parse error - will be caught during execution
+      return undefined;
+    }
   }
 
   /**

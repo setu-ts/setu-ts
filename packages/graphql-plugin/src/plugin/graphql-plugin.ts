@@ -115,6 +115,13 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         });
       });
 
+      // A2: Register onClose to clear cache on shutdown (if lifecycle is available)
+      if (ctx.lifecycle) {
+        ctx.lifecycle.onClose(() => {
+          graphqlService?.clearCache();
+        });
+      }
+
       logger?.info(`GraphQL plugin registered at ${path}`);
     },
   };

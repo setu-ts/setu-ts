@@ -72,12 +72,8 @@ export function parsePostBody(body: unknown): GraphqlRequestParams {
   }
 
   if (typeof obj.variables === 'object' && obj.variables !== null) {
-    // Convert variables to string values
-    const vars = obj.variables as Record<string, unknown>;
-    result.variables = {};
-    for (const [key, value] of Object.entries(vars)) {
-      result.variables[key] = String(value);
-    }
+    // Pass variables through verbatim (B2)
+    result.variables = obj.variables as Record<string, unknown>;
   }
 
   return result;
@@ -114,10 +110,8 @@ export function parseGetQuery(query: Record<string, string | string[]>): Graphql
         err.code = 'INVALID_VARIABLES';
         throw err;
       }
-      result.variables = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        result.variables[key] = String(value);
-      }
+      // Pass variables through verbatim (B2)
+      result.variables = parsed as Record<string, unknown>;
     } catch (_e) {
       const err = new Error('Invalid JSON in variables parameter') as ParseError;
       err.code = 'INVALID_VARIABLES';

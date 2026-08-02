@@ -12,11 +12,10 @@ import type {
   RouteHandler,
 } from '@hono-enterprise/common';
 import type { GraphqlService } from '../services/graphql-service.ts';
-import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON } from './media-type.ts';
+import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON, negotiateMediaType } from './media-type.ts';
 import type { ParseError } from './request-parser.ts';
 import { parseGetQuery, parsePostBody } from './request-parser.ts';
 import { graphiqlHtml } from '../ui/graphiql.ts';
-import { getOperationKindFromQuery } from '../execution/operation-check.ts';
 
 /**
  * Create a GraphQL route handler.
@@ -82,7 +81,7 @@ async function handleGraphqlPost(
   }
 
   // Parse request params
-  let params: { query: string; operationName?: string; variables?: Record<string, string> };
+  let params: { query: string; operationName?: string; variables?: Record<string, unknown> };
   try {
     params = parsePostBody(body);
   } catch (e) {
@@ -94,9 +93,12 @@ async function handleGraphqlPost(
     });
   }
 
-  // Execute
-  const outcome = await graphqlService.execute(params, ctx);
-  return sendGraphqlResult(response, outcome, 'json');
+  // Execute (pass method for B6 operation kind check)
+  const outcome = await graphqlService.execute(params, ctx, 'POST');
+
+  // Wire media-type negotiation (B1)
+  const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
+  return sendGraphqlResult(response, outcome, mediaType, true);
 }
 
 /**
@@ -134,7 +136,7 @@ async function handleGraphqlGet(
   }
 
   // Parse query params
-  let params: { query: string; operationName?: string; variables?: Record<string, string> };
+  let params: { query: string; operationName?: string; variables?: Record<string, unknown> };
   try {
     params = parseGetQuery(ctx.query as Record<string, string | string[]>);
   } catch (e) {
@@ -146,28 +148,12 @@ async function handleGraphqlGet(
     });
   }
 
-  // Check operation kind (mutation not allowed over GET)
-  try {
-    const operationKind = getOperationKindFromQuery(params.query);
-    if (operationKind === 'mutation') {
-      return sendGraphqlError(response, 405, {
-        message: 'Mutations are not allowed over GET',
-        extensions: { code: 'METHOD_NOT_ALLOWED' },
-      });
-    }
-    if (operationKind === 'subscription') {
-      return sendGraphqlError(response, 400, {
-        message: 'Subscriptions are not supported over HTTP',
-        extensions: { code: 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP' },
-      });
-    }
-  } catch {
-    // Ignore parse errors here - they'll be caught during execution
-  }
+  // Execute (pass method for B6 operation kind check - parse-based, handles comments too)
+  const outcome = await graphqlService.execute(params, ctx, 'GET');
 
-  // Execute
-  const outcome = await graphqlService.execute(params, ctx);
-  return sendGraphqlResult(response, outcome, 'json');
+  // Wire media-type negotiation (B1)
+  const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
+  return sendGraphqlResult(response, outcome, mediaType, false);
 }
 
 /**
@@ -190,10 +176,26 @@ function sendGraphqlResult(
   response: IResponse,
   outcome: GraphqlExecutionOutcome,
   mediaType: 'json' | 'graphql-response',
+  isPost: boolean,
 ): HandlerResult {
   const contentType = mediaType === 'graphql-response' ? CONTENT_TYPE_GRAPHQL : CONTENT_TYPE_JSON;
 
   const body = JSON.stringify(outcome.result);
-  response.status(outcome.status).header('Content-Type', contentType);
+
+  // B1: Status code watershed — under 'json' force 200 for well-formed GraphQL requests
+  // (validation errors, execution errors), but preserve transport errors (405, 400 for subscription)
+  // under 'graphql-response' use outcome.status for all cases
+  let status: number;
+  if (mediaType === 'graphql-response') {
+    status = outcome.status;
+  } else if (isPost && outcome.status === 200) {
+    // Under 'json' media type, POST requests that succeed get 200 (even with validation errors)
+    status = 200;
+  } else {
+    // Preserve transport-level status codes (405 for mutation-over-GET, 400 for subscription)
+    status = outcome.status;
+  }
+
+  response.status(status).header('Content-Type', contentType);
   return response.send(new TextEncoder().encode(body));
 }

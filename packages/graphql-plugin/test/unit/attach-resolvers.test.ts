@@ -176,16 +176,52 @@ describe('attach-resolvers', () => {
     expect(true).toBe(true);
   });
 
-  it('handles __resolveType for interface types', () => {
-    const schema = createSchema(['Query', 'Node']);
+  it('attaches __resolveType to interface types (B5)', () => {
+    // Create a proper interface type with resolveType property
+    const interfaceType = {
+      name: 'Node',
+      getFields: () => ({ id: { name: 'id', type: { name: 'ID' }, args: [] } }),
+      resolveType: undefined as unknown,
+    };
+
+    const schema = {
+      getQueryType: () => ({
+        name: 'Query',
+        getFields: () => ({ node: { name: 'node', type: { name: 'Node' }, args: [] } }),
+        getInterfaces: () => [],
+      }),
+      getMutationType: () => null,
+      getSubscriptionType: () => null,
+      getType: (name: string) => {
+        if (name === 'Node') {
+          return interfaceType;
+        }
+        if (name === 'Query') {
+          return {
+            name: 'Query',
+            getFields: () => ({ node: { name: 'node', type: { name: 'Node' }, args: [] } }),
+            getInterfaces: () => [],
+          };
+        }
+        return null;
+      },
+      getPossibleTypes: () => [],
+      getDirectives: () => [],
+      getDirective: () => null,
+      toAST: () => ({}),
+    } as GraphqlSchemaLike;
+
+    const resolveTypeFn = () => 'User';
     const resolverMap = {
       Node: {
-        __resolveType: () => 'User',
+        __resolveType: resolveTypeFn,
       },
     };
 
-    // Should not throw - __resolveType handling is a no-op in current implementation
-    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+    attachResolvers(schema, resolverMap);
+
+    // B5: verify __resolveType is attached to the interface type
+    expect(interfaceType.resolveType).toBe(resolveTypeFn);
   });
 
   it('throws on unknown type for __resolveType', () => {
@@ -218,17 +254,5 @@ describe('attach-resolvers', () => {
 
     // Should not throw and __resolveType should be registered
     expect(resolveTypeCalled).toBe(false); // Not called during attachment
-  });
-
-  it('attaches __resolveType when type exists', () => {
-    const schema = createSchema(['Query', 'Node']);
-    const resolverMap = {
-      Node: {
-        __resolveType: () => 'User',
-      },
-    };
-
-    // Should not throw - type exists
-    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
   });
 });

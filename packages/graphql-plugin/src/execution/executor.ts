@@ -99,8 +99,25 @@ export function executeGraphql(
     document = cached.document;
     validationErrors = cached.validationErrors;
   } else {
-    document = parseDocument(runtime, query);
-    validationErrors = null;
+    // B3: Wrap parse in try/catch to return 400 with locations
+    try {
+      document = parseDocument(runtime, query);
+      validationErrors = null;
+    } catch (e) {
+      // Parse error - return as GraphQLError-like with locations
+      const parseError = e as Error & { locations?: Array<{ line: number; column: number }> };
+      const errorObj = {
+        message: parseError.message || 'Parse error',
+        locations: parseError.locations,
+        toJSON() {
+          return {
+            message: parseError.message || 'Parse error',
+            locations: parseError.locations,
+          };
+        },
+      };
+      return Promise.resolve({ errors: [errorObj as unknown as GraphqlGraphQLErrorLike] });
+    }
   }
 
   // Build validation rules - validationRules from caller already includes depth limit and introspection rules

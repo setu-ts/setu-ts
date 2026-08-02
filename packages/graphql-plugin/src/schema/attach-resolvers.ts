@@ -6,7 +6,12 @@
  * @module
  */
 
-import type { GraphqlObjectTypeLike, GraphqlSchemaLike } from '../interfaces/graphql-runtime.ts';
+import type {
+  GraphqlAbstractTypeLike,
+  GraphqlInterfaceTypeLike,
+  GraphqlObjectTypeLike,
+  GraphqlSchemaLike,
+} from '../interfaces/graphql-runtime.ts';
 import type { ResolverMap } from '../interfaces/options.ts';
 import { GraphqlSchemaError } from '../errors/graphql-errors.ts';
 
@@ -66,17 +71,30 @@ export function attachResolvers(
     }
   }
 
-  // Handle __resolveType for interface types
+  // Handle __resolveType for interface/union types (B5)
   for (const [typeName, fieldResolvers] of Object.entries(resolverMap)) {
-    if ('__resolveType' in fieldResolvers) {
+    if ('__resolveType' in fieldResolvers && typeof fieldResolvers.__resolveType === 'function') {
       const type = schema.getType(typeName);
       if (!type) {
         throw new GraphqlSchemaError(
           `Resolver map references unknown type for __resolveType: "${typeName}"`,
         );
       }
-      // Attach __resolveType to the type itself (for interfaces)
-      // This is a simplification - in practice we'd need to check if it's an interface
+
+      // Attach __resolveType to interface/union types
+      // In graphql@16, abstract types (interfaces/unions) have a resolveType property
+      const abstractType = type as GraphqlAbstractTypeLike & { resolveType?: unknown };
+      if (abstractType) {
+        // Check if this is an interface or union by checking if getType returns an interface type
+        const interfaceType = type as GraphqlInterfaceTypeLike;
+        if (typeof interfaceType.getFields === 'function') {
+          // It's an interface type - attach resolveType
+          abstractType.resolveType = fieldResolvers.__resolveType;
+        } else {
+          // It might be a union - still try to attach resolveType
+          abstractType.resolveType = fieldResolvers.__resolveType;
+        }
+      }
     }
   }
 }

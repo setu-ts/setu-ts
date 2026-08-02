@@ -24,8 +24,8 @@ export interface GraphqlRequestParams {
   query: string;
   /** Operation name for documents with multiple operations. */
   operationName?: string;
-  /** Variables as a record of string values. */
-  variables?: Record<string, string>;
+  /** Variables as a record of unknown values (passed through verbatim). */
+  variables?: Record<string, unknown>;
   /** Optional extensions (reserved for M51b — Automatic Persisted Queries). */
   // extensions?: Record<string, unknown>; // omitted in M51 — nothing reads it
 }

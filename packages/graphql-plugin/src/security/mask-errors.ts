@@ -58,8 +58,7 @@ export function maskErrors(
     logger?: { error(message: string, error?: unknown): void };
   },
 ): { data?: unknown | null; errors?: GraphqlFormattedError[] } {
-  const { maskInternalErrors, logger } = options;
-  void options.formatError; // formatError is deprecated - errors are no longer formatted
+  const { maskInternalErrors, logger, formatError } = options;
 
   if (!result.errors || result.errors.length === 0) {
     return { data: result.data };
@@ -76,20 +75,21 @@ export function maskErrors(
       originalError?: Error;
     };
 
+    let formatted: GraphqlFormattedError;
+
     if (maskInternalErrors && !isExposable(error)) {
       // Mask internal error
       logger?.error('Internal GraphQL error', err);
-      const masked: GraphqlFormattedError = {
+      formatted = {
         message: 'Internal server error',
         extensions: { code: 'INTERNAL_SERVER_ERROR' },
       };
       if (err.path) {
-        masked.path = err.path;
+        formatted.path = err.path;
       }
-      maskedErrors.push(masked);
     } else {
-      // Expose the error - formatError is only for customizing masked errors, not exposed ones
-      const formatted: GraphqlFormattedError = {
+      // Expose the error
+      formatted = {
         message: err.message,
       };
       if (err.locations) {
@@ -101,6 +101,13 @@ export function maskErrors(
       if (err.extensions) {
         formatted.extensions = err.extensions;
       }
+    }
+
+    // B7: Apply formatError after masking (for both masked and exposed errors)
+    if (formatError) {
+      const customFormatted = formatError(formatted) as GraphqlFormattedError;
+      maskedErrors.push(customFormatted);
+    } else {
       maskedErrors.push(formatted);
     }
   }

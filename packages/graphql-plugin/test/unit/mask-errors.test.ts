@@ -85,9 +85,7 @@ describe('mask-errors', () => {
       expect(masked.errors?.[0].message).toBe('Parse error');
     });
 
-    it('formatError is deprecated (no longer applied)', () => {
-      // Note: formatError option is deprecated - errors are no longer formatted
-      // This test documents that formatError is ignored
+    it('applies formatError after masking (B7)', () => {
       const error = new Error('Internal') as Error & {
         message: string;
         originalError?: Error;
@@ -101,15 +99,41 @@ describe('mask-errors', () => {
         errors: [error],
       };
 
+      const traceId = 'trace-123';
       const masked = maskErrors(result, {
         maskInternalErrors: true,
         logger: { error: () => {} },
-        formatError: (_e: unknown) => ({ customField: 'added' }),
+        formatError: (e) => ({
+          ...(e as { message: string; extensions?: { code?: string } }),
+          traceId,
+        }),
       });
 
-      // formatError is ignored - masked error should be the standard format
+      // B7: formatError is applied after masking
       expect(masked.errors?.[0].message).toBe('Internal server error');
-      expect((masked.errors?.[0] as { customField?: string }).customField).toBeUndefined();
+      expect((masked.errors?.[0] as { traceId?: string }).traceId).toBe(traceId);
+    });
+
+    it('applies formatError to exposed errors (B7)', () => {
+      const exposableError = new Error('Parse error') as Error & {
+        message: string;
+        originalError?: Error;
+        extensions?: { code: string };
+      };
+
+      const result = {
+        data: null,
+        errors: [exposableError],
+      };
+
+      const masked = maskErrors(result, {
+        maskInternalErrors: true,
+        formatError: (e) => ({ ...(e as { message: string }), customField: 'custom' }),
+      });
+
+      // B7: formatError is applied to exposed errors too
+      expect(masked.errors?.[0].message).toBe('Parse error');
+      expect((masked.errors?.[0] as { customField?: string }).customField).toBe('custom');
     });
 
     it('does not mask when disabled', () => {

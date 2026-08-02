@@ -7006,7 +7006,7 @@ app.register(GraphqlPlugin({
   },
   maxDepth: 10, // default — query depth limit
   maskInternalErrors: true, // default — mask internal error messages
-  introspection: false, // default — disable introspection in production
+  introspection: true, // default — enable introspection (can be disabled in production)
   graphiql: true, // default — serve GraphiQL UI at GET /graphql
   endpoint: '/graphql', // default
 }));
@@ -7047,14 +7047,14 @@ const result = await graphql.execute({
 | `typeDefs`           | `string`                                  | omitted    | SDL for schema-first construction. Mutually exclusive with `schema`. |
 | `resolvers`          | `ResolverMap`                             | omitted    | Resolver map for schema-first. Required with `typeDefs`.             |
 | `schema`             | `GraphqlSchemaLike`                       | omitted    | Pre-built schema for code-first. Mutually exclusive with `typeDefs`. |
-| `endpoint`           | `string`                                  | `/graphql` | URL path for GraphQL endpoint.                                       |
-| `maxDepth`           | `number`                                  | `10`       | Maximum query depth. Queries deeper are rejected with 400.           |
-| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal error messages. Set to `false` for debugging.          |
-| `introspection`      | `boolean`                                 | `false`    | Enable/disable introspection queries.                                |
+| `path`               | `string`                                  | `/graphql` | URL path for GraphQL endpoint.                                       |
 | `graphiql`           | `boolean`                                 | `true`     | Serve GraphiQL UI at GET endpoint.                                   |
-| `documentCacheSize`  | `number`                                  | `100`      | Size of the parse+validate document cache.                           |
-| `validationRules`    | `unknown[]`                               | `[]`       | Additional validation rules.                                         |
-| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter (deprecated).                                 |
+| `introspection`      | `boolean`                                 | `true`     | Enable/disable introspection queries.                                |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query depth. Queries deeper are rejected with 400.           |
+| `validationRules`    | `unknown[]`                               | omitted    | Additional validation rules.                                         |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal error messages. Set to `false` for debugging.          |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking.                        |
+| `documentCacheSize`  | `number`                                  | `1000`     | Size of the parse+validate document cache.                           |
 | `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder.                                              |
 | `rootValue`          | `unknown`                                 | omitted    | Root value for execution.                                            |
 | `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module for testing.                                 |
@@ -7085,7 +7085,7 @@ const result = await graphql.execute({
 
 - **Two construction modes.** Schema-first uses SDL + resolver map; code-first uses a pre-built
   `GraphQLSchema`. Both are mutually exclusive.
-- **Security defaults.** `maskInternalErrors: true` and `introspection: false` are production-safe
+- **Security defaults.** `maskInternalErrors: true` and `introspection: true` are production-safe
   defaults.
 - **Query depth limiting.** The `maxDepth` option rejects overly deep queries with HTTP 400 and a
   descriptive error.
@@ -7152,22 +7152,23 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ### Options
 
-| Option               | Type                 | Default    | Description                               |
-| -------------------- | -------------------- | ---------- | ----------------------------------------- |
-| `typeDefs`           | `string`             | -          | SDL schema definition (schema-first mode) |
-| `resolvers`          | `ResolverMap`        | -          | Resolver map (schema-first mode)          |
-| `schema`             | `GraphqlSchemaLike`  | -          | Pre-built schema (code-first mode)        |
-| `path`               | `string`             | `/graphql` | Endpoint path                             |
-| `graphiql`           | `boolean`            | `true`     | Enable GraphiQL UI                        |
-| `introspection`      | `boolean`            | `true`     | Enable schema introspection               |
-| `maxDepth`           | `number`             | `10`       | Maximum query depth (0 to disable)        |
-| `validationRules`    | `unknown[]`          | `[]`       | Additional validation rules               |
-| `maskInternalErrors` | `boolean`            | `true`     | Mask internal server errors               |
-| `formatError`        | `(error) => error`   | -          | Custom error formatter                    |
-| `documentCacheSize`  | `number`             | `1000`     | Max cached documents (0 to disable)       |
-| `buildContext`       | `(input) => context` | -          | Custom context builder                    |
-| `rootValue`          | `unknown`            | -          | Root value for resolvers                  |
-| `graphqlModule`      | `GraphqlModuleLike`  | -          | Injected graphql module                   |
+| Option               | Type                                      | Default    | Description                                                   |
+| -------------------- | ----------------------------------------- | ---------- | ------------------------------------------------------------- |
+| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                     |
+| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                              |
+| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                            |
+| `path`               | `string`                                  | `/graphql` | Endpoint path                                                 |
+| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                            |
+| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                   |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                            |
+| `validationRules`    | `unknown[]`                               | omitted    | Additional validation rules                                   |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                   |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                  |
+| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                           |
+| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                        |
+| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                      |
+| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios) |
+| `graphqlModule`      | `GraphqlModuleLike`                       | -          | Injected graphql module                                       |
 
 ### Exports
 
