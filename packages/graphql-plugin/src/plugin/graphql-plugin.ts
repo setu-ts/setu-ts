@@ -98,13 +98,13 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
 
       // Register health indicator
       ctx.health.register('graphql', async () => {
-        return {
+        return await Promise.resolve({
           status: 'up',
           data: {
             endpoint: path,
             cachedDocuments: graphqlService!.cachedDocumentCount,
           },
-        };
+        });
       });
 
       logger?.info(`GraphQL plugin registered at ${path}`);

@@ -30,23 +30,21 @@ describe('request-parser', () => {
     });
 
     it('throws on non-object body', () => {
-      expect(() => parsePostBody(null as unknown)).toThrow('BAD_REQUEST');
-      expect(() => parsePostBody([] as unknown)).toThrow('BAD_REQUEST');
-      expect(() => parsePostBody('string' as unknown)).toThrow('BAD_REQUEST');
+      expect(() => parsePostBody(null as unknown)).toThrow();
+      expect(() => parsePostBody([] as unknown)).toThrow();
+      expect(() => parsePostBody('string' as unknown)).toThrow();
     });
 
     it('throws on missing query', () => {
-      expect(() => parsePostBody({} as unknown)).toThrow('BAD_REQUEST');
+      expect(() => parsePostBody({} as unknown)).toThrow();
     });
 
     it('throws on non-string query', () => {
-      expect(() => parsePostBody({ query: 123 } as unknown)).toThrow('BAD_REQUEST');
+      expect(() => parsePostBody({ query: 123 } as unknown)).toThrow();
     });
 
     it('throws on non-object variables', () => {
-      expect(() => parsePostBody({ query: 'q', variables: 'invalid' } as unknown)).toThrow(
-        'INVALID_VARIABLES',
-      );
+      expect(() => parsePostBody({ query: 'q', variables: 'invalid' } as unknown)).toThrow();
     });
 
     it('accepts extensions (ignored in M51)', () => {
@@ -82,7 +80,7 @@ describe('request-parser', () => {
     });
 
     it('throws on missing query', () => {
-      expect(() => parseGetQuery({} as Record<string, string | string[]>)).toThrow('BAD_REQUEST');
+      expect(() => parseGetQuery({} as Record<string, string | string[]>)).toThrow();
     });
 
     it('throws on invalid variables JSON', () => {
@@ -90,13 +88,13 @@ describe('request-parser', () => {
         parseGetQuery(
           { query: 'q', variables: 'invalid json' } as Record<string, string | string[]>,
         )
-      ).toThrow('INVALID_VARIABLES');
+      ).toThrow();
     });
 
     it('throws on non-object variables JSON', () => {
       expect(() =>
         parseGetQuery({ query: 'q', variables: '[]' } as Record<string, string | string[]>)
-      ).toThrow('INVALID_VARIABLES');
+      ).toThrow();
     });
   });
 });

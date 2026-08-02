@@ -13,8 +13,8 @@ describe('graphql-loader', () => {
       const fakeModule = {
         parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
         validate: () => [],
-        execute: async () => await Promise.resolve({ data: {} }),
-        subscribe: async () => await Promise.resolve({ data: {} } as never),
+        execute: () => Promise.resolve({ data: {} }),
+        subscribe: () => Promise.resolve({ data: {} } as never),
         buildSchema: (_src: string) => ({
           getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
           getMutationType: () => null,
@@ -51,8 +51,8 @@ describe('graphql-loader', () => {
       const fakeModule = {
         parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
         validate: () => [],
-        execute: async () => ({ data: {} }),
-        subscribe: async () => ({ data: {} }),
+        execute: () => Promise.resolve({ data: {} }),
+        subscribe: () => Promise.resolve({ data: {} }),
         buildSchema: (_src: string) => ({
           getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
           getMutationType: () => null,
@@ -75,7 +75,7 @@ describe('graphql-loader', () => {
         specifiedRules: [],
       };
 
-      const runtime = await loadGraphqlModule(async () => fakeModule as never);
+      const runtime = await loadGraphqlModule(() => fakeModule as never);
       expect(runtime.parse).toBeDefined();
     });
 

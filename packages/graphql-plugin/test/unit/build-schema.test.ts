@@ -13,18 +13,24 @@ describe('build-schema', () => {
   const fakeRuntime: GraphqlRuntime = {
     parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
     validate: () => [],
-    execute: async () => ({ data: {} }),
-    subscribe: async () => ({ data: {} }),
-    buildSchema: (_src: string) => ({
-      getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
-      getMutationType: () => null,
-      getSubscriptionType: () => null,
-      getType: (name: string) => ({ name: name }),
-      getPossibleTypes: () => [],
-      getDirectives: () => [],
-      getDirective: () => null,
-      toAST: () => ({}),
-    }),
+    execute: () => Promise.resolve({ data: {} }),
+    subscribe: () => Promise.resolve({ data: {} }),
+    buildSchema: (src: string) => {
+      // Throw on clearly invalid SDL
+      if (src === 'INVALID SDL') {
+        throw new Error('Invalid SDL syntax');
+      }
+      return {
+        getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
+        getMutationType: () => null,
+        getSubscriptionType: () => null,
+        getType: (name: string) => ({ name: name }),
+        getPossibleTypes: () => [],
+        getDirectives: () => [],
+        getDirective: () => null,
+        toAST: () => ({}),
+      };
+    },
     validateSchema: () => [],
     getOperationAST: () => null,
     GraphQLError: class extends Error {

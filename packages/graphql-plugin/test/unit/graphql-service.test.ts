@@ -12,8 +12,8 @@ describe('GraphqlService', () => {
     ({
       parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
       validate: () => [],
-      execute: async () => ({ data: { hello: 'world' } }),
-      subscribe: async () => ({ data: {} }),
+      execute: () => Promise.resolve({ data: { hello: 'world' } }),
+      subscribe: () => Promise.resolve({ data: {} }),
       buildSchema: (_src: string) => ({
         getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
         getMutationType: () => null,

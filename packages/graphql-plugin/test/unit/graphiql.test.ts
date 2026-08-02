@@ -25,13 +25,13 @@ describe('graphiqlHtml', () => {
     const html = graphiqlHtml({ endpoint: "/graphql' onclick='alert(1)'//" });
 
     expect(html).not.toContain("onclick='alert(1)'");
-    expect(html).toContain('"');
+    expect(html).toContain('&#039;');
   });
 
   it('escapes HTML in title', () => {
     const html = graphiqlHtml({ endpoint: '/graphql', title: '<script>alert(1)</script>' });
 
-    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('<script>');
   });
 

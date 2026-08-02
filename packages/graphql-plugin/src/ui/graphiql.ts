@@ -9,15 +9,15 @@
  */
 function escapeHtml(str: string): string {
   return str
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
+    .replace(/&/g, '&' + 'amp;')
+    .replace(/</g, '&' + 'lt;')
+    .replace(/>/g, '&' + 'gt;')
+    .replace(/"/g, '&' + 'quot;')
     .replace(/'/g, '&#039;');
 }
 
 /**
- * Options for generating the GraphiQL page.
+ * Options for producing the GraphiQL page.
  */
 export interface GraphiQLOptions {
   endpoint: string;

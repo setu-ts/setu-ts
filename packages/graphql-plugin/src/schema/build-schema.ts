@@ -26,8 +26,18 @@ export function buildSchema(
 ): GraphqlSchemaLike {
   let schema: GraphqlSchemaLike;
 
+  // Check for both arms being provided (runtime check for mutual exclusivity)
+  const hasTypeDefs = 'typeDefs' in options && options.typeDefs !== undefined;
+  const hasSchema = 'schema' in options && options.schema !== undefined;
+
+  if (hasTypeDefs && hasSchema) {
+    throw new GraphqlSchemaError(
+      'Cannot provide both typeDefs and schema; choose one approach',
+    );
+  }
+
   // Schema-first arm
-  if ('typeDefs' in options && options.typeDefs !== undefined) {
+  if (hasTypeDefs) {
     if (!options.resolvers) {
       throw new GraphqlSchemaError(
         'Schema-first options require both typeDefs and resolvers',
@@ -44,7 +54,7 @@ export function buildSchema(
       );
     }
   } // Code-first arm
-  else if ('schema' in options && options.schema) {
+  else if (hasSchema) {
     schema = options.schema;
   } else {
     throw new GraphqlSchemaError(

@@ -10,18 +10,15 @@ import type { GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts'
 
 describe('attach-resolvers', () => {
   const createSchema = (types: string[] = ['Query']): GraphqlSchemaLike => {
-    const fields: Record<string, { name: string; resolve?: unknown }> = {};
-    for (const type of types) {
-      fields[type] = { name: type };
-    }
+    // Create shared field objects so mutations persist
+    const helloField = { name: 'hello', type: { name: 'String' }, args: [] };
+    const worldField = { name: 'world', type: { name: 'String' }, args: [] };
+    const queryFields = { hello: helloField, world: worldField };
 
     return {
       getQueryType: () => ({
         name: 'Query',
-        getFields: () => ({
-          hello: { name: 'hello', type: { name: 'String' }, args: [] },
-          world: { name: 'world', type: { name: 'String' }, args: [] },
-        }),
+        getFields: () => queryFields,
         getInterfaces: () => [],
       }),
       getMutationType: () => null,
@@ -30,9 +27,7 @@ describe('attach-resolvers', () => {
         if (types.includes(name)) {
           return {
             name,
-            getFields: () => ({
-              hello: { name: 'hello', type: { name: 'String' }, args: [] },
-            }),
+            getFields: () => queryFields,
           };
         }
         return null;

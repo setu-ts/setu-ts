@@ -92,7 +92,7 @@ describe('mask-errors', () => {
         extensions?: { code: string };
       };
       error.originalError = new Error('Cause');
-      error.extensions = {} as { code: string };
+      error.extensions = { code: 'GRAPHQL_ERROR' };
 
       const result = {
         data: null,
