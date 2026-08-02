@@ -322,3 +322,113 @@ describe('WebSocket backplane frame robustness', () => {
     expect(member.sent).toEqual(['good']);
   });
 });
+
+describe('opening the backplane transport on first local member', () => {
+  /** A backplane recording connects, optionally failing the first attempt. */
+  function recordingBackplane(failFirst = false): IRealtimeBackplane & {
+    readonly connects: number[];
+  } {
+    const connects: number[] = [];
+    let attempts = 0;
+    return {
+      connects,
+      origin: 'node-a',
+      connect: (): Promise<void> => {
+        attempts++;
+        connects.push(attempts);
+        return failFirst && attempts === 1
+          ? Promise.reject(new Error('transport unreachable'))
+          : Promise.resolve();
+      },
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as unknown as IRealtimeBackplane & { readonly connects: number[] };
+  }
+
+  function serviceWith(backplane: IRealtimeBackplane, logger?: unknown): WebSocketService {
+    return new WebSocketService(
+      createFakeRuntime(),
+      resolveOptions(undefined),
+      true,
+      logger as undefined,
+      backplane,
+    );
+  }
+
+  it('opens the transport when the first member joins a room', () => {
+    // Without this a listen-only replica never opens a socket and receives
+    // nothing: `subscribe()` registers a handler, it does not open a transport.
+    const backplane = recordingBackplane();
+    const service = serviceWith(backplane);
+
+    service.room('lobby').add(fakeConnection('a'));
+
+    expect(backplane.connects).toEqual([1]);
+  });
+
+  it('does not open the transport merely because a room was named', () => {
+    const backplane = recordingBackplane();
+    const service = serviceWith(backplane);
+
+    service.room('lobby');
+
+    expect(backplane.connects).toEqual([]);
+  });
+
+  it('opens once across many joins', () => {
+    const backplane = recordingBackplane();
+    const service = serviceWith(backplane);
+
+    service.room('lobby').add(fakeConnection('a'));
+    service.room('lobby').add(fakeConnection('b'));
+    service.room('other').add(fakeConnection('c'));
+
+    expect(backplane.connects).toEqual([1]);
+  });
+
+  it('retries on a later join after a failed open, and reports it', async () => {
+    const warnings: string[] = [];
+    const logger = { warn: (message: string): void => void warnings.push(message) };
+    const backplane = recordingBackplane(true);
+    const service = serviceWith(backplane, logger);
+
+    service.room('lobby').add(fakeConnection('a'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warnings[0]).toContain('backplane connect failed');
+    // The flag was cleared, so the replica is not permanently deaf.
+    service.room('lobby').add(fakeConnection('b'));
+    expect(backplane.connects).toEqual([1, 2]);
+  });
+
+  it('reports a non-Error rejection without losing the value', async () => {
+    const warnings: unknown[] = [];
+    const logger = {
+      warn: (_message: string, meta?: unknown): void => void warnings.push(meta),
+    };
+    const backplane = {
+      origin: 'node-a',
+      connect: (): Promise<void> => Promise.reject('transport gone'),
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as unknown as IRealtimeBackplane;
+    const service = serviceWith(backplane, logger);
+
+    service.room('lobby').add(fakeConnection('a'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warnings[0]).toMatchObject({ error: 'transport gone' });
+  });
+
+  it('is a no-op when no backplane is registered', () => {
+    const service = new WebSocketService(
+      createFakeRuntime(),
+      resolveOptions(undefined),
+      true,
+    );
+
+    service.room('lobby').add(fakeConnection('a'));
+  });
+});

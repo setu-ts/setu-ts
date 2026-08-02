@@ -38,6 +38,13 @@ export class SseService implements IService {
   readonly #backplane: IRealtimeBackplane | undefined;
   /** Optional logger used to report a failed cross-replica fan-out. */
   readonly #logger: ILogger | undefined;
+  /**
+   * Whether the backplane transport has been asked to open.
+   *
+   * Reset on failure so a later connection retries rather than leaving the
+   * replica permanently deaf — see {@linkcode SseService.#openBackplane}.
+   */
+  #backplaneOpening = false;
 
   /**
    * @param options - Plugin options (heartbeatMs, retryMs); may be undefined
@@ -116,6 +123,13 @@ export class SseService implements IService {
 
   /** Open a new SSE connection for the given request context. */
   open(ctx: IRequestContext): ISseConnection {
+    // This replica is about to hold a subscriber that must RECEIVE
+    // cross-replica publishes, so the transport has to be open — subscribing
+    // alone does not open it. Done here rather than at `register()` because a
+    // Cloudflare Worker runs `register()` at module scope, where the platform
+    // prohibits the I/O a transport's `connect()` performs.
+    this.#openBackplane();
+
     const conn = new SseConnection(
       ctx,
       this.#runtime,
@@ -136,6 +150,33 @@ export class SseService implements IService {
   /** Current number of open connections. */
   get connectionCount(): number {
     return this.#connections.size;
+  }
+
+  /**
+   * Opens the backplane transport, once, on first local use.
+   *
+   * `IRealtimeBackplane.connect()` is contracted as idempotent, and a
+   * subscriber cannot receive anything until it has been called — `subscribe()`
+   * only registers a handler. Until this existed the only caller was
+   * `RealtimeBackplanePlugin.register()`, so a transport whose provider could
+   * not connect at registration (a Cloudflare Durable Object, where
+   * `register()` runs at module scope and the platform forbids I/O there) left
+   * every listen-only replica silently receiving nothing.
+   *
+   * Fire-and-forget: opening a stream must not wait on the transport. The flag
+   * is cleared on failure so the next connection retries.
+   */
+  #openBackplane(): void {
+    if (this.#backplane === undefined || this.#backplaneOpening) {
+      return;
+    }
+    this.#backplaneOpening = true;
+    void this.#backplane.connect().catch((error: unknown) => {
+      this.#backplaneOpening = false;
+      this.#logger?.warn('sse: backplane connect failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /** Internal callback invoked when a connection closes. */

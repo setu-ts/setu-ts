@@ -20,7 +20,6 @@ import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type {
   IApplication,
-  IRealtimeBackplane,
   IWebSocketConnection,
   IWebSocketService,
 } from '@hono-enterprise/common';
@@ -53,6 +52,11 @@ function fakeConnection(id: string, received: (string | Uint8Array)[]): IWebSock
   } as IWebSocketConnection;
 }
 
+/** Lets detached transport work (connect, publish) finish. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 5));
+}
+
 /** Builds one replica over the shared namespace. */
 async function replica(namespace: FakeDurableObjectNamespace): Promise<IApplication> {
   const app = createApplication({
@@ -78,20 +82,25 @@ describe('Durable Object backplane end to end, through websocket-plugin', () => 
     const wsAlpha = alpha.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     const wsBeta = beta.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 
-    // Each replica must have an open socket to the object before the broadcast;
-    // on a live deployment the first publish opens it.
-    await alpha.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE).connect();
-    await beta.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE).connect();
-
+    // NOTHING here calls `connect()`. An earlier draft of this test did, and it
+    // masked a real defect: beta only listens, and a listen-only replica used to
+    // open no socket at all and therefore receive nothing. The transport is now
+    // opened by the consumer when it accepts its first connection, so this test
+    // drives exactly the path an application drives.
     const onAlpha: (string | Uint8Array)[] = [];
     const onBeta: (string | Uint8Array)[] = [];
     wsAlpha.room('lobby').add(fakeConnection('conn-alpha', onAlpha));
     wsBeta.room('lobby').add(fakeConnection('conn-beta', onBeta));
 
+    // Joining opens the transport, but fire-and-forget: an upgrade must not
+    // block on it. Let it settle, exactly as the milliseconds between a client
+    // connecting and the first broadcast do on a live deployment.
+    await settle();
+
     wsAlpha.room('lobby').broadcast('hello lobby');
     // The fan-out crosses the object synchronously in the fake, but the publish
     // itself is a promise the service fires detached.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
 
     // Local delivery is direct, and always worked.
     expect(onAlpha).toEqual(['hello lobby']);
@@ -121,9 +130,9 @@ describe('Durable Object backplane end to end, through websocket-plugin', () => 
     beta.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET).room('lobby').add(
       fakeConnection('conn-beta', onBeta),
     );
-    await alpha.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE).connect();
+    await settle();
     alpha.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET).room('lobby').broadcast('hi');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
 
     expect(onBeta).toEqual([]);
 

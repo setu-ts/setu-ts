@@ -46,6 +46,23 @@ All notable changes to this project are documented here. The format follows
   M52c's review found on D1. Adds the exported **`isDurableObjectNamespace`** guard and constructor
   validation. Not verified against a live Worker — CI holds no Cloudflare account.
 
+### Fixed
+
+- **A listen-only replica received nothing from a realtime backplane.**
+  `IRealtimeBackplane.connect()` had exactly one caller — `RealtimeBackplanePlugin.register()` — and
+  `websocket-plugin` / `sse-plugin` relied on the provider having connected before they subscribed.
+  `subscribe()` registers a handler; it does not open a transport. Any provider that cannot connect
+  at registration therefore left every replica that only listens silently receiving nothing, which a
+  Cloudflare Durable Object backplane is the first transport to hit: a Worker runs `register()` at
+  module scope, where the platform forbids the I/O `connect()` performs.
+
+  Both consumers now open the transport on first local use, inside a request context on every
+  runtime — `WebSocketService` when a connection joins its first room, `SseService` when a client
+  connects. The call is fire-and-forget so an upgrade never waits on the transport, idempotent per
+  the committed contract, and retried on the next join if it fails. Applications registering
+  `RealtimeBackplanePlugin` are unaffected: its provider still connects at registration, and the
+  extra call is a no-op.
+
 - **Cloudflare D1 as a first-class database backend, and the `common` data-access promotion that
   made it possible** (Milestone 52c). The seam a database backend implements was `IDatabaseAdapter`,
   declared **inside** `@hono-enterprise/database-plugin` and never exported, while `common` shipped

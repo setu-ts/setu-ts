@@ -7253,6 +7253,9 @@ export class RealtimeBackplaneObject extends DurableObject {
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
     this.#core.webSocketClose(ws, code, reason);
   }
+  webSocketError(ws: WebSocket): void {
+    this.#core.webSocketError(ws);
+  }
 }
 ```
 

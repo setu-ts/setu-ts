@@ -51,6 +51,9 @@ class RealtimeBackplaneObject {
   webSocketClose(ws: IDurableObjectWebSocket, code: number, reason: string): void {
     this.#core.webSocketClose(ws, code, reason);
   }
+  webSocketError(ws: IDurableObjectWebSocket): void {
+    this.#core.webSocketError(ws);
+  }
 }
 
 /** The lock object class an application exports, exactly as documented. */
@@ -229,6 +232,17 @@ describe('The Durable Object class an application exports', () => {
     await exported.fetch(new Request('https://do/connect', { headers: { Upgrade: 'websocket' } }));
 
     exported.webSocketClose(state.accepted[0]!, 1001, 'bye');
+  });
+
+  it('forwards a socket error through the documented class', async () => {
+    const namespace = new FakeDurableObjectNamespace('realtime');
+    const state = namespace.state('realtime');
+    const exported = new RealtimeBackplaneObject(state);
+    await exported.fetch(new Request('https://do/connect', { headers: { Upgrade: 'websocket' } }));
+
+    // Forwarded by the documented class, so the method is reachable on a real
+    // deployment rather than being unit-tested surface nobody calls.
+    exported.webSocketError(state.accepted[0]!);
   });
 
   it('serves the lock through the documented delegating class', async () => {
