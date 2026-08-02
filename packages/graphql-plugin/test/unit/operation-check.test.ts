@@ -172,5 +172,27 @@ describe('operation-check', () => {
       const result = hasSubscription(runtime, 'invalid');
       expect(result).toBe(false);
     });
+
+    it('handles getOperationAST with operationName', () => {
+      const runtime = createFakeRuntime();
+      const kind = getOperationAST(runtime, 'query MyQuery { hello }', 'MyQuery');
+      expect(kind).toBe('query');
+    });
+
+    it('handles parse errors gracefully', () => {
+      const runtime = createFakeRuntime();
+      (runtime as unknown as GraphqlRuntime).parse = () => {
+        throw new Error('Parse error');
+      };
+      const kind = getOperationAST(runtime, 'invalid query');
+      expect(kind).toBeUndefined();
+    });
+
+    it('handles getOperationAST returning null', () => {
+      const runtime = createFakeRuntime();
+      (runtime as unknown as GraphqlRuntime).getOperationAST = () => null;
+      const kind = getOperationAST(runtime, '{ hello }');
+      expect(kind).toBeUndefined();
+    });
   });
 });

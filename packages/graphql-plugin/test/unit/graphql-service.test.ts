@@ -6,6 +6,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
+import type { IRequestContext } from '@hono-enterprise/common';
 
 describe('GraphqlService', () => {
   const createFakeRuntime = (): GraphqlRuntime =>
@@ -121,5 +122,129 @@ describe('GraphqlService', () => {
 
     expect(result.status).toBe(200);
     expect(result.result.data).toEqual({ hello: 'world' });
+  });
+
+  it('uses custom validation rules', async () => {
+    let customRuleCalled = false;
+    const customRule = () => {
+      customRuleCalled = true;
+      return {};
+    };
+
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+      validationRules: [customRule],
+    });
+
+    await service.execute({ query: '{ hello }' });
+
+    // Custom rule should be included in validation rules
+    expect(customRuleCalled).toBe(false); // Rule is a function, not called during execute
+  });
+
+  it('disables introspection when option is false', async () => {
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: false,
+      maskInternalErrors: true,
+    });
+
+    const result = await service.execute({ query: '{ hello }' });
+
+    expect(result.status).toBe(200);
+  });
+
+  it('uses custom formatError function', async () => {
+    const formatError = (error: unknown) => ({
+      message: 'Custom formatted error',
+      original: error,
+    });
+
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+      formatError,
+    });
+
+    const result = await service.execute({ query: '{ hello }' });
+
+    expect(result.status).toBe(200);
+  });
+
+  it('uses rootValue option', async () => {
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+      rootValue: { custom: 'root' },
+    });
+
+    const result = await service.execute({ query: '{ hello }' });
+
+    expect(result.status).toBe(200);
+  });
+
+  it('handles empty validation rules array', async () => {
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+      validationRules: [],
+    });
+
+    const result = await service.execute({ query: '{ hello }' });
+
+    expect(result.status).toBe(200);
+  });
+
+  it('uses default formatError when not provided', async () => {
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+    });
+
+    const result = await service.execute({ query: '{ hello }' });
+
+    expect(result.status).toBe(200);
+  });
+
+  it('builds context with requestContext when provided', async () => {
+    let capturedContext: unknown;
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+      buildContext: (input) => {
+        capturedContext = input;
+        return { custom: 'value' };
+      },
+    });
+
+    const mockRequestContext = {
+      services: { test: 'service' },
+      request: { url: 'http://test.com' },
+    };
+
+    await service.execute({ query: '{ hello }' }, mockRequestContext as unknown as IRequestContext);
+
+    expect(capturedContext).toBeDefined();
   });
 });

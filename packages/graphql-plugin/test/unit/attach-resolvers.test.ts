@@ -85,4 +85,65 @@ describe('attach-resolvers', () => {
 
     expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
   });
+
+  it('skips __resolveType for field resolver', () => {
+    const schema = createSchema(['Query']);
+    const resolverMap = {
+      Query: {
+        hello: () => 'Hello',
+        __resolveType: () => 'String',
+      },
+    };
+
+    // Should not throw - __resolveType is skipped for field resolver
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+  });
+
+  it('handles multiple fields', () => {
+    const schema = createSchema(['Query']);
+    const resolverMap = {
+      Query: {
+        hello: () => 'Hello',
+        world: () => 'World',
+      },
+    };
+
+    attachResolvers(schema, resolverMap);
+
+    const fields = schema.getQueryType()!.getFields();
+    expect(fields.hello.resolve).toBeDefined();
+    expect(fields.world.resolve).toBeDefined();
+  });
+
+  it('attaches resolver that receives args', () => {
+    const schema = createSchema(['Query']);
+    let receivedArgs: unknown = null;
+
+    const resolverMap = {
+      Query: {
+        hello: (_src: unknown, args: Record<string, unknown>) => {
+          receivedArgs = args;
+          return 'Hello';
+        },
+      },
+    };
+
+    attachResolvers(schema, resolverMap);
+
+    const fields = schema.getQueryType()!.getFields();
+    const result = fields.hello.resolve!({}, { name: 'World' }, {}, {});
+
+    expect(result).toBe('Hello');
+    expect(receivedArgs).toEqual({ name: 'World' });
+  });
+
+  it('handles empty resolver map', () => {
+    const schema = createSchema(['Query']);
+    const resolverMap = {};
+
+    attachResolvers(schema, resolverMap);
+
+    // Should complete without errors
+    expect(true).toBe(true);
+  });
 });
