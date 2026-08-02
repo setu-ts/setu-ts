@@ -129,6 +129,8 @@ export const CAPABILITIES = {
   METADATA_STORE: 'metadata-store',
   /** gRPC plugin — server-side Connect/gRPC/gRPC-Web co-serving. */
   GRPC: 'grpc',
+  /** GraphQL plugin — schema-first and code-first GraphQL-over-HTTP. */
+  GRAPHQL: 'graphql',
 } as const;
 
 /**

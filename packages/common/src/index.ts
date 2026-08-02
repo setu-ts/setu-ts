@@ -245,6 +245,15 @@ export type {
   ServiceImpl,
 } from './services/grpc.ts';
 
+// GraphQL contracts
+export type {
+  GraphqlExecutionOutcome,
+  GraphqlExecutionResult,
+  GraphqlFormattedError,
+  GraphqlRequestParams,
+  IGraphqlService,
+} from './services/graphql.ts';
+
 // SSR contracts
 export type { ISsrService } from './services/ssr.ts';
 
