@@ -57,4 +57,23 @@ describe('CloudflarePlugin descriptor', () => {
     expect(() => CloudflarePlugin({ env: ENV, cache: { binding: 'K', name: 'Edge:1' } }))
       .toThrow(TypeError);
   });
+
+  it('claims the bare realtime-backplane token for the default instance', () => {
+    const plugin = CloudflarePlugin({ env: ENV, durableObject: { binding: 'REALTIME' } });
+    expect(plugin.provides).toEqual([CAPABILITIES.CLOUDFLARE, CAPABILITIES.REALTIME_BACKPLANE]);
+  });
+
+  it('derives a namespaced realtime-backplane token for a named instance', () => {
+    const plugin = CloudflarePlugin({
+      env: ENV,
+      durableObject: { binding: 'REALTIME', name: 'chat' },
+    });
+    expect(plugin.provides).toEqual([CAPABILITIES.CLOUDFLARE, 'realtime-backplane.chat']);
+  });
+
+  it('provides nothing extra when the durableObject arm is omitted', () => {
+    expect(CloudflarePlugin({ env: ENV }).provides).not.toContain(
+      CAPABILITIES.REALTIME_BACKPLANE,
+    );
+  });
 });

@@ -22,6 +22,11 @@ export interface CloudflareHealthInput {
   readonly storage: boolean;
   /** Whether `CAPABILITIES.QUEUE` is served from a Queues producer binding. */
   readonly queue: boolean;
+  /**
+   * Whether `CAPABILITIES.REALTIME_BACKPLANE` is served from a Durable Object
+   * namespace.
+   */
+  readonly durableObject: boolean;
   /** Whether a platform `waitUntil` sink was injected. */
   readonly waitUntil: boolean;
   /** The detected platform, from `runtime.platform()`. */
@@ -56,6 +61,7 @@ export function createCloudflareIndicator(input: CloudflareHealthInput): HealthI
       cache: input.cache,
       storage: input.storage,
       queue: input.queue,
+      durableObject: input.durableObject,
       waitUntil: input.waitUntil ? 'injected' : 'absent',
       ...(offPlatform
         ? {

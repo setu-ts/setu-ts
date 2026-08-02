@@ -9,7 +9,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { IKvNamespace, IR2Bucket } from '../../../src/index.ts';
-import { isKvNamespace, isR2Bucket } from '../../../src/index.ts';
+import { isDurableObjectNamespace, isKvNamespace, isR2Bucket } from '../../../src/index.ts';
 import { FakeKv, FakeR2 } from '../../fakes.ts';
 
 describe('binding facades', () => {
@@ -62,5 +62,31 @@ describe('isR2Bucket', () => {
   it('rejects non-objects', () => {
     expect(isR2Bucket(null)).toBe(false);
     expect(isR2Bucket({ head: 'not a function' })).toBe(false);
+  });
+});
+
+describe('isDurableObjectNamespace', () => {
+  it('accepts a namespace carrying both members', () => {
+    expect(isDurableObjectNamespace({ idFromName: () => {}, get: () => {} })).toBe(true);
+  });
+
+  it('rejects a binding missing either member', () => {
+    expect(isDurableObjectNamespace({ idFromName: () => {} })).toBe(false);
+    expect(isDurableObjectNamespace({ get: () => {} })).toBe(false);
+  });
+
+  it('rejects another binding kind, which is the wrangler.toml mistake it exists for', () => {
+    expect(isDurableObjectNamespace(new FakeKv())).toBe(false);
+    expect(isDurableObjectNamespace(new FakeR2())).toBe(false);
+  });
+
+  it('rejects a non-object', () => {
+    expect(isDurableObjectNamespace(null)).toBe(false);
+    expect(isDurableObjectNamespace(undefined)).toBe(false);
+    expect(isDurableObjectNamespace('ROOMS')).toBe(false);
+  });
+
+  it('rejects a member that is present but not callable', () => {
+    expect(isDurableObjectNamespace({ idFromName: 'nope', get: () => {} })).toBe(false);
   });
 });

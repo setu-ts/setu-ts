@@ -24,6 +24,13 @@ describe('cloudflare-plugin barrel', () => {
     expect(typeof barrel.createScheduledHandler).toBe('function');
     expect(typeof barrel.cacheApiMiddleware).toBe('function');
     expect(typeof barrel.assessCacheability).toBe('function');
+    expect(typeof barrel.isDurableObjectNamespace).toBe('function');
+    expect(typeof barrel.RealtimeBackplaneObjectCore).toBe('function');
+    expect(typeof barrel.DistributedLockObjectCore).toBe('function');
+    expect(typeof barrel.DurableObjectBackplane).toBe('function');
+    expect(typeof barrel.DurableObjectLock).toBe('function');
+    expect(typeof barrel.asUpgradeResponse).toBe('function');
+    expect(typeof barrel.createDefaultDurableObjectWebSocketHost).toBe('function');
   });
 
   it('exports errors that are real Error subclasses with stable names', () => {
@@ -52,6 +59,11 @@ describe('cloudflare-plugin barrel', () => {
         'isJobEnvelope',
         'runBounded',
         'resolveCacheApi',
+        // The frame helpers are a deliberate local copy of
+        // realtime-backplane-plugin's; copying them is sanctioned, exporting a
+        // second public definition of them is not.
+        'isRealtimeFrame',
+        'dispatchFrame',
       ]
     ) {
       expect(names).not.toContain(internal);

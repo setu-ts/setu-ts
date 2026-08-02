@@ -437,3 +437,21 @@ export function isR2Bucket(value: unknown): value is IR2Bucket {
 export function isD1Database(value: unknown): value is ID1Database {
   return hasMethods(value, ['prepare', 'batch']);
 }
+
+/**
+ * Reports whether a binding is Durable-Object-namespace-shaped.
+ *
+ * Read by {@linkcode BindingRegistry.durableObject}, closing the last hole in
+ * this guard family: that accessor cast its binding unvalidated, so a missing
+ * `durable_objects` stanza or a mistyped `class_name` let the application boot
+ * clean and fail on the first `idFromName` with a bare `TypeError`. That is the
+ * same defect M52c's review found on D1, and coverage cannot catch it — there
+ * is no branch to cover until the guard exists.
+ *
+ * @param value - The binding to check
+ * @returns `true` when it carries the Durable Object namespace methods
+ * @since 0.2.0
+ */
+export function isDurableObjectNamespace(value: unknown): value is IDurableObjectNamespace {
+  return hasMethods(value, ['idFromName', 'get']);
+}

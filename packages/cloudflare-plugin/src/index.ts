@@ -37,6 +37,7 @@
 export { CloudflarePlugin } from './plugin/cloudflare-plugin.ts';
 export type {
   CloudflarePluginOptions,
+  DurableObjectArm,
   KvCacheOptions,
   R2StorageArm,
   WorkersQueueArm,
@@ -66,7 +67,43 @@ export type {
   KvPutOptions,
   QueueSendOptions,
 } from './bindings/facades.ts';
-export { isD1Database, isKvNamespace, isR2Bucket } from './bindings/facades.ts';
+export {
+  isD1Database,
+  isDurableObjectNamespace,
+  isKvNamespace,
+  isR2Bucket,
+} from './bindings/facades.ts';
+
+// Durable Objects — the DO-side cores the application's exported DO class
+// delegates to, plus the structural facades that class is written against
+export { RealtimeBackplaneObjectCore } from './durable-objects/realtime-backplane-object.ts';
+export type {
+  RealtimeBackplaneObjectCoreOptions,
+} from './durable-objects/realtime-backplane-object.ts';
+export { DistributedLockObjectCore } from './durable-objects/distributed-lock-object.ts';
+export type {
+  DistributedLockObjectCoreOptions,
+} from './durable-objects/distributed-lock-object.ts';
+export { asUpgradeResponse } from './durable-objects/do-facades.ts';
+export type {
+  DurableObjectMessageEvent,
+  DurableObjectUpgradeResponse,
+  IDurableObjectClientSocket,
+  IDurableObjectState,
+  IDurableObjectStorage,
+  IDurableObjectWebSocket,
+} from './durable-objects/do-facades.ts';
+export { createDefaultDurableObjectWebSocketHost } from './durable-objects/do-websocket-host.ts';
+export type {
+  DurableObjectWebSocketHost,
+  DurableObjectWebSocketPair,
+} from './durable-objects/do-websocket-host.ts';
+
+// Durable Objects — the replica-side clients
+export { DurableObjectBackplane } from './realtime/durable-object-backplane.ts';
+export type { DurableObjectBackplaneOptions } from './realtime/durable-object-backplane.ts';
+export { DurableObjectLock } from './lock/durable-object-lock.ts';
+export type { DurableObjectLockOptions } from './lock/durable-object-lock.ts';
 
 // Background work
 export type { LoggerSource, WaitUntilHost } from './background/wait-until.ts';

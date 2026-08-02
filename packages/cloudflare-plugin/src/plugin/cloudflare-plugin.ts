@@ -12,6 +12,7 @@ import type {
   IPlugin,
   IPluginContext,
   IQueue,
+  IRealtimeBackplane,
   IStorage,
 } from '@hono-enterprise/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@hono-enterprise/common';
@@ -24,11 +25,15 @@ import { CloudflareBindingMissingError } from '../errors.ts';
 import { createCloudflareIndicator } from '../health/indicator.ts';
 import type { CloudflarePluginOptions } from '../options.ts';
 import { WorkersQueue } from '../queues/workers-queue.ts';
+import { DurableObjectBackplane } from '../realtime/durable-object-backplane.ts';
 import { R2Storage } from '../storage/r2-storage.ts';
 import { KvCacheStore } from '../stores/kv-cache-store.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'cloudflare-plugin';
+
+/** Durable Object name every replica shares when the arm sets no topic. */
+const DEFAULT_REALTIME_TOPIC = 'realtime';
 
 /**
  * Creates the Cloudflare Workers plugin.
@@ -77,6 +82,10 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
   const queueArm = options.queue === undefined
     ? undefined
     : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
+  const durableObjectArm = options.durableObject === undefined ? undefined : {
+    options: options.durableObject,
+    token: instanceToken(CAPABILITIES.REALTIME_BACKPLANE, options.durableObject.name),
+  };
 
   // Computed from the options rather than declared statically, so the kernel's
   // duplicate-provider index sees exactly what this instance registers.
@@ -84,6 +93,7 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
   if (cacheArm !== undefined) provides.push(cacheArm.token);
   if (storageArm !== undefined) provides.push(storageArm.token);
   if (queueArm !== undefined) provides.push(queueArm.token);
+  if (durableObjectArm !== undefined) provides.push(durableObjectArm.token);
 
   return {
     name: PLUGIN_NAME,
@@ -153,6 +163,28 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         ctx.services.register<IQueue>(queueArm.token, queue);
       }
 
+      if (durableObjectArm !== undefined) {
+        const backplane = new DurableObjectBackplane(
+          registry.durableObject(durableObjectArm.options.binding),
+          {
+            // `runtime.uuid()` rather than a counter: the origin must be
+            // distinct across every replica, and only a UUID is.
+            origin: ctx.runtime.uuid(),
+            binding: durableObjectArm.options.binding,
+            topic: durableObjectArm.options.topic ?? DEFAULT_REALTIME_TOPIC,
+            // A thunk, matching the waitUntil and queue seams above.
+            logger: () => ctx.logger,
+          },
+        );
+        ctx.services.register<IRealtimeBackplane>(durableObjectArm.token, backplane);
+        // The socket is opened lazily on first publish, so there is nothing to
+        // connect here — but it must be closed, or a shutdown leaves a live
+        // WebSocket to the Durable Object with nothing holding a reference.
+        ctx.lifecycle.onShutdown(async () => {
+          await backplane.close();
+        });
+      }
+
       ctx.health.register(
         'cloudflare',
         createCloudflareIndicator({
@@ -161,6 +193,7 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           cache: cacheArm !== undefined,
           storage: storageArm !== undefined,
           queue: queueArm !== undefined,
+          durableObject: durableObjectArm !== undefined,
           waitUntil: options.waitUntil !== undefined,
           platform: ctx.runtime.platform(),
         }),
