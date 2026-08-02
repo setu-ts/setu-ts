@@ -236,6 +236,15 @@ export type {
   WebSocketUpgradeRouter,
 } from './services/websocket.ts';
 
+// gRPC contracts
+export type {
+  GrpcServiceDefinition,
+  GrpcServingStatus,
+  IGrpcService,
+  RpcFetchHandler,
+  ServiceImpl,
+} from './services/grpc.ts';
+
 // SSR contracts
 export type { ISsrService } from './services/ssr.ts';
 

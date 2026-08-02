@@ -898,6 +898,40 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   redone: a self-closing fake stream reports zero cancels whether the code is correct or not, so the
   body-leak evidence only became real once the fake stayed open the way a live watch does) —
   complete (PR #109)
+- **Milestone 49** (`packages/grpc-plugin` — co-serving the gRPC family (gRPC, Connect, gRPC-Web) on
+  the SAME port and fetch handler as ordinary Hono routes, registering an `IGrpcService` under a new
+  `CAPABILITIES.GRPC = 'grpc'` token. Runtime is **Connect-ES core** + Protobuf-ES because it is
+  fetch-native; `@grpc/grpc-js` was rejected (binds a raw `node:http2` socket — Node-only, needs its
+  own port, re-introduces the server model M23 removed) and server-side `grpc-web` was rejected
+  (needs an Envoy sidecar, no client-streaming or bidi). A gRPC exchange cannot travel through
+  `IRequest`/`IResponse` — no raw streaming body, no trailers — and
+  `mapWebRequestToFrameworkRequest` calls `arrayBuffer()` on every request, so interception is one
+  new **optional** `IHttpAdapter.setRpcHandler?(handler)` member (the M44 `fs?` / M45 `workers?` /
+  M46 `setUpgradeRouter?` precedent), consulted in all four adapters after the WebSocket
+  short-circuit and before body mapping; `null` falls through to Hono. Detection is **prefix-only**
+  (`basePath`, default `/grpc`) because Connect's real unary content types include
+  `application/json`, so sniffing would hijack ordinary routes; the check is segment-aware, so
+  `/grpcfoo` is NOT claimed. Connect ships neither reflection nor health, so both are built here
+  over **embedded base64 `FileDescriptorSet` constants** revived at runtime — no generated
+  TypeScript committed, no proto compiler in the publish path. **Four facts were established by
+  probing the real runtime rather than inferred, and each had already produced a defect:**
+  Protobuf-ES represents a oneof as `messageResponse: { case, value }`, NOT flat sibling fields —
+  the flat form type-checks and serializes to an EMPTY body, which is what made reflection silently
+  return nothing; Connect accepts a plain init object, so no `create()` and no Protobuf-ES import is
+  needed; `FileRegistry.getFile()` keys on the SUFFIXED path while `DescFile.name` strips `.proto`;
+  and `FileRegistry.get()` resolves neither nested types nor methods, so the reflection symbol index
+  is walked here and is strictly more complete. The committed `GrpcServiceDefinition` also
+  constrained on `methods` (an ARRAY on a real `DescService`, not assignable to
+  `Record<string, T>`), forcing every caller into a cast — now `method`, the record form the plan
+  specified, pinned by a real-descriptor no-cast test. Health `Check` honors the `service` field
+  (`SERVICE_UNKNOWN` for a name not served) and maps `degraded → SERVING`. Three further defects
+  were found by writing the tests: a bare `startsWith` prefix check that shadowed prefix-adjacent
+  Hono routes; a root `basePath` normalizing to `/` and producing unmatchable `//pkg.Svc/Method`
+  keys; and `close()` answering `503` for EVERY path, which would take the whole app down on
+  shutdown — it now claims only paths it actually served. Removed a `getFallbackConnectRuntime()`
+  no-op that let the plugin register a router silently answering `404` when Connect was absent; a
+  missing dependency now throws `GrpcRuntimeLoadError` naming the specifier. All 11 `src` files at
+  100% branch/function/line) — complete (PR #110)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
   reprioritized.
 

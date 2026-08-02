@@ -14,6 +14,7 @@ import type {
   IHttpAdapter,
   IRequest,
   IResponse,
+  RpcFetchHandler,
   ServerHandle,
   WebSocketUpgradeRouter,
 } from '@hono-enterprise/common';
@@ -21,6 +22,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import { RpcInterceptorStore } from '../shared/rpc-interceptor-store.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { NodeIncomingMessage, RawUpgradeSocket, WsModuleLike } from './node-ws-upgrader.ts';
@@ -97,6 +99,7 @@ export class NodeHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: NodeServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
+  readonly #rpcStore = new RpcInterceptorStore();
   readonly #coordinator: NodeUpgradeCoordinator;
 
   constructor(wsModule?: WsModuleLike) {
@@ -115,6 +118,13 @@ export class NodeHttpServerHandle {
    */
   setUpgradeRouter(router: WebSocketUpgradeRouter): void {
     this.#upgrades.set(router);
+  }
+
+  /**
+   * Stores the gRPC/Connect fetch handler set by `setRpcHandler`.
+   */
+  setRpcHandler(handler: RpcFetchHandler): void {
+    this.#rpcStore.set(handler);
   }
 
   /**
@@ -207,9 +217,17 @@ export class NodeHttpServerHandle {
 
   /**
    * Creates the web-standard fetch handler for @hono/node-server.
+   *
+   * The RPC interceptor is consulted first; a returned Response short-circuits
+   * as RPC, while null falls through to the normal Hono pipeline.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
+      const rpcResult = await this.#rpcStore.consult(request);
+      if (rpcResult !== null) {
+        return rpcResult;
+      }
+
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -254,6 +272,10 @@ export class NodeHttpAdapter implements IHttpAdapter {
 
   setUpgradeRouter(router: WebSocketUpgradeRouter): void {
     this.#handle.setUpgradeRouter(router);
+  }
+
+  setRpcHandler(handler: RpcFetchHandler): void {
+    this.#handle.setRpcHandler(handler);
   }
 
   async listen(port: number, hostname?: string): Promise<ServerHandle> {

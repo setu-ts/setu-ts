@@ -5924,6 +5924,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                 |
 | Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                    |
 | DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                       |
+| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                    |
 
 Contract notes:
 
@@ -5982,6 +5983,9 @@ Contract notes:
   encrypted self-contained cookie by default, or an opaque id over an `ISessionStore`. Distinct from
   `AUTHENTICATION`, which establishes _who_ a caller is — a session carries per-visitor state and
   exists for anonymous visitors too. Added in Milestone 48.
+- `CAPABILITIES.GRPC` (`'grpc'`) — the capability token under which `GrpcPlugin` registers the
+  `IGrpcService`. The service provides gRPC/Connect co-serving on the same port as ordinary Hono
+  routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
@@ -6184,6 +6188,20 @@ Contract notes:
   implementations; consumers must degrade gracefully when it is absent (see `WebSocketPlugin`, which
   reports `available: false` and fails `route()` with a typed error). All four first-party adapters
   implement it.
+- **M49 added a sixth, OPTIONAL member: `setRpcHandler?(handler)`.** It installs an
+  `RpcFetchHandler` consulted for every inbound request **after** the WebSocket upgrade
+  short-circuit (where one exists) and **before** the request is mapped to an `IRequest`. The
+  ordering is again a correctness requirement: a gRPC exchange needs the raw streaming body and
+  emits trailers, neither of which `IRequest`/`IResponse` can express, and the shared mapping
+  pre-reads the body. The handler answers a `Response` (handled as RPC) or `null` to fall through,
+  so installing one never changes the behavior of non-RPC traffic. **The handler is consulted
+  exactly once per request, and one returning `null` MUST leave the body unread** — the adapter maps
+  that same `Request` afterwards, so a consumed body makes the fall-through fail with "Body already
+  consumed". Decide from method, URL and headers (the gRPC plugin matches on a path prefix alone); a
+  handler that must inspect the body has to read `request.clone()`. Because the member is optional,
+  adapters written before this seam remain valid implementations; consumers must degrade gracefully
+  when it is absent (see `GrpcPlugin`, which reports `available: false` and throws
+  `GrpcUnavailableError` from `handleRequest`). All four first-party adapters implement it.
 - **Migration note — `IRequest.ip` is no longer populated (M23).** The web-standard `fetch` mapping
   does not set `IRequest.ip`; a web `Request` carries no client address. The old M39 Node adapter
   populated `ip` from the native `socket.remoteAddress`, so Node consumers that read
@@ -6858,6 +6876,105 @@ placeholders deriving onto one argument name; and a malformed local `$ref`.
 `SdkOpenApiRequestBody`, `SdkOpenApiResponse`, and `SdkOpenApiSchema` are the structural OpenAPI 3.1
 subset accepted by the generator. They are intentionally different from the openapi-plugin types
 (which have different shapes) and take the `SdkOpenApi*` prefix to avoid a barrel collision.
+
+---
+
+## API Reference: @hono-enterprise/grpc-plugin
+
+gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered under
+`CAPABILITIES.GRPC`. Added in Milestone 49.
+
+### Registration
+
+```typescript
+import { GrpcPlugin } from '@hono-enterprise/grpc-plugin';
+
+app.register(GrpcPlugin({
+  basePath: '/grpc', // default
+  reflection: true, // default — grpc.reflection.v1.ServerReflection
+  health: true, // default — grpc.health.v1.Health (bridged to M20)
+  services: [], // initial service definitions
+  connectModule: undefined, // inject for testing; otherwise lazy-loaded
+}));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IGrpcService } from '@hono-enterprise/common';
+
+const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+grpc.addService(MyServiceDefinition, myServiceImpl);
+```
+
+### Options
+
+| Option          | Type                                     | Default | Description                                                                                           |
+| --------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.            |
+| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch. |
+| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                    |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                              |
+| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.          |
+
+### Exports
+
+| Export                 | Kind     | Purpose                                                                                       |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `GrpcPlugin`           | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                           |
+| `GrpcService`          | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing       |
+| `adaptConnectModule`   | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port |
+| `GrpcUnavailableError` | class    | Thrown by `handleRequest` when the adapter lacks `setRpcHandler`                              |
+| `GrpcRuntimeLoadError` | class    | Thrown by `loadConnectModule` when any of the four npm specifiers cannot be imported          |
+| `GrpcDescriptorError`  | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service        |
+| `GrpcPluginOptions`    | type     | The factory parameter shape                                                                   |
+| `ConnectModuleLike`    | type     | The four-module bundle `adaptConnectModule` accepts                                           |
+
+> `ConnectRuntime` and the structural Connect facades are **not** exported. They are an internal
+> port; publishing them would commit the package to a shape that tracks Connect's own API.
+
+### Notes
+
+- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`/grpc` by default).
+  Content-type sniffing is deliberately not used because Connect's real unary content types include
+  `application/json` and `application/proto`. A non-prefixed path returns `null` and falls through
+  to the Hono pipeline unchanged.
+- **`inject()` does not reach the interceptor.** The kernel's `inject()` bypasses the HTTP adapter
+  entirely. RPC must be exercised via `app.fetch(webRequest)` in tests.
+- **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
+  real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
+  client-streaming work on every runtime.
+- **Health bridge maps `degraded → SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
+  `'degraded' → SERVING (1)`. Degraded still serves; mapping it to `NOT_SERVING` would shed capacity
+  in the wrong direction.
+- **`Check` honors the `service` field.** The empty string means "the whole server" and returns the
+  mapped aggregate health. A name the server does not serve returns `SERVICE_UNKNOWN (3)`,
+  regardless of overall health.
+- **`List` and `Watch` are unimplemented.** Connect auto-responses `unimplemented` for methods not
+  provided by the bridge.
+- **Reflection covers four request variants.** `list_services`, `file_by_filename`,
+  `file_containing_symbol` (services, methods, messages, nested types, enums and extensions), and
+  `all_extension_numbers_of_type`. `file_containing_extension` answers `UNIMPLEMENTED` — the
+  framework registers no extensions. An unknown filename, symbol or type answers `NOT_FOUND (5)`.
+- **Reflection sees the app's own protos.** A registered service's `DescFile` and its transitive
+  `dependencies` are indexed, so `file_containing_symbol` resolves types declared in imported protos
+  too. Nothing beyond the registered services and the plugin's own two files is exposed.
+- **Descriptors are addressed by their suffixed proto path.** Reflection clients ask for
+  `example/echo.proto`; Protobuf-ES's `DescFile.name` drops the `.proto` suffix while `proto.name`
+  retains it, and the registry keys on the latter.
+- **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
+  `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
+  Absence throws `GrpcRuntimeLoadError` with the install command.
+- **Optional seam.** If the HTTP adapter does not implement `setRpcHandler?`, the plugin still
+  registers and reports `available: false`; `handleRequest` throws `GrpcUnavailableError` while
+  `createFetchHandler` returns `null` for every request.
+- **gRPC-binary trailers on Deno.** Native gRPC-binary protocol (`application/grpc`) relies on
+  HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling. Deno's
+  `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
+  correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
+  protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
+  support.
 
 ---
 

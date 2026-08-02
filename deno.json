@@ -42,7 +42,8 @@
     "./packages/websocket-plugin",
     "./packages/realtime-backplane-plugin",
     "./packages/session-plugin",
-    "./packages/service-discovery-plugin"
+    "./packages/service-discovery-plugin",
+    "./packages/grpc-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

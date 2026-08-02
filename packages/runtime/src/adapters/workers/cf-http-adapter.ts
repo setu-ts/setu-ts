@@ -14,6 +14,7 @@ import type {
   IHttpAdapter,
   IRequest,
   IResponse,
+  RpcFetchHandler,
   ServerHandle,
   WebSocketUpgradeRouter,
 } from '@hono-enterprise/common';
@@ -21,6 +22,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import { RpcInterceptorStore } from '../shared/rpc-interceptor-store.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
@@ -37,6 +39,7 @@ import {
 export class CloudflareWorkersServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   readonly #upgrades = new UpgradeRouterStore();
+  readonly #rpcStore = new RpcInterceptorStore();
   #wsHost: CloudflareWebSocketHost | null;
 
   constructor(wsHost?: CloudflareWebSocketHost) {
@@ -58,16 +61,30 @@ export class CloudflareWorkersServerHandle {
   }
 
   /**
+   * Stores the gRPC/Connect fetch handler set by `setRpcHandler`.
+   */
+  setRpcHandler(handler: RpcFetchHandler): void {
+    this.#rpcStore.set(handler);
+  }
+
+  /**
    * Creates the web-standard fetch handler.
    *
    * The upgrade is consulted first so the request body is never read before a
-   * handshake, matching the ordering every other adapter uses.
+   * handshake. Then the RPC interceptor is consulted; a returned Response
+   * short-circuits as RPC, while null falls through to the normal Hono pipeline.
+   * Finally the body is mapped via `mapWebRequestToFrameworkRequest`.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
       const upgraded = await this.#tryUpgrade(request);
       if (upgraded !== null) {
         return upgraded;
+      }
+
+      const rpcResult = await this.#rpcStore.consult(request);
+      if (rpcResult !== null) {
+        return rpcResult;
       }
 
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
@@ -133,6 +150,10 @@ export class CloudflareWorkersHttpAdapter implements IHttpAdapter {
 
   setUpgradeRouter(router: WebSocketUpgradeRouter): void {
     this.#handle.setUpgradeRouter(router);
+  }
+
+  setRpcHandler(handler: RpcFetchHandler): void {
+    this.#handle.setRpcHandler(handler);
   }
 
   fetch(request: Request): Promise<Response> {

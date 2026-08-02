@@ -14,6 +14,7 @@ import type {
   IHttpAdapter,
   IRequest,
   IResponse,
+  RpcFetchHandler,
   ServerHandle,
   WebSocketUpgradeRouter,
 } from '@hono-enterprise/common';
@@ -21,6 +22,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import { RpcInterceptorStore } from '../shared/rpc-interceptor-store.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
@@ -110,6 +112,7 @@ export class DenoHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: DenoServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
+  readonly #rpcStore = new RpcInterceptorStore();
   #host: DenoServeHost;
 
   constructor(host: DenoServeHost) {
@@ -131,6 +134,13 @@ export class DenoHttpServerHandle {
   }
 
   /**
+   * Stores the gRPC/Connect fetch handler set by `setRpcHandler`.
+   */
+  setRpcHandler(handler: RpcFetchHandler): void {
+    this.#rpcStore.set(handler);
+  }
+
+  /**
    * Gets the underlying Deno server (after listen is called).
    */
   get server(): DenoServer | null {
@@ -148,14 +158,21 @@ export class DenoHttpServerHandle {
    * Creates the web-standard fetch handler for Deno.serve.
    *
    * The WebSocket upgrade is consulted first and short-circuits: the request
-   * body must stay undisturbed for `Deno.upgradeWebSocket` to succeed, and
-   * `mapWebRequestToFrameworkRequest` reads it.
+   * body must stay undisturbed for `Deno.upgradeWebSocket` to succeed. Then the
+   * RPC interceptor is consulted exactly once; a returned Response
+   * short-circuits as RPC, while null falls through. Only then is the body
+   * mapped via `mapWebRequestToFrameworkRequest`, which reads it.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
       const upgraded = await this.#tryUpgrade(request);
       if (upgraded !== null) {
         return upgraded;
+      }
+
+      const rpcResult = await this.#rpcStore.consult(request);
+      if (rpcResult !== null) {
+        return rpcResult;
       }
 
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
@@ -244,6 +261,10 @@ export class DenoHttpAdapter implements IHttpAdapter {
 
   setUpgradeRouter(router: WebSocketUpgradeRouter): void {
     this.#handle.setUpgradeRouter(router);
+  }
+
+  setRpcHandler(handler: RpcFetchHandler): void {
+    this.#handle.setRpcHandler(handler);
   }
 
   fetch(request: Request): Promise<Response> {
