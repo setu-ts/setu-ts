@@ -977,15 +977,57 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   workspace, `deno check`ing it, and driving its own `fetch(request, env)` export with a KV-shaped
   binding: 200, value read back, envelope visible in the store. All 11 `src` files at 100%
   branch/function/line. **Not verified against a live Worker** — CI holds no Cloudflare account) —
-  complete (PR pending)
-- **Milestone 52b** (Cloudflare platform handlers — D1, Queues, Cron Triggers, Durable Objects, and
-  the Cache API response cache. Each is blocked on the same two things rather than on effort: a new
-  module-level handler export from the application's Worker (`queue`, `scheduled`, a DO class), or a
-  contract promotion in `common` — D1's data-access seam is `IDatabaseAdapter`, declared inside
-  `packages/database-plugin`, while `common`'s `IOrmAdapter` is lifecycle-only) — planned, not
-  started
-- **Next milestone** — **M52b** (the Cloudflare platform handlers above) or **M37** (example
-  applications under `apps/*`), then M38–M40 unless reprioritized.
+  complete (PR #111)
+- **Milestone 52b** (`packages/cloudflare-plugin` — Cloudflare Queues, Cron Triggers, and the Cache
+  API: the three platform features that need a **module-level handler export** from the
+  application's Worker rather than anything reachable through `fetch`. The original M52b scope also
+  carried D1 and Durable Objects; it was **split at the maintainer's direction** into M52b / M52c /
+  M52d, because D1 alone is a `common` contract promotion spanning three packages and a DO backplane
+  is its own design. No `common` change and no new capability token. **Queues:** `WorkersQueue`
+  satisfies the committed `IQueue` over a producer binding, opt-in through a `queue` arm and
+  registered under `CAPABILITIES.QUEUE` (or `queue.<name>`, the `cache.<name>` precedent). A
+  Cloudflare message body is arbitrary JSON carrying neither a job name nor an id, and
+  `producer.send()` resolves to `void`, so a `{ v, name, id, data, maxAttempts? }` envelope carries
+  both and the id `add` returns IS the id the processor sees as `job.id` — using `Message.id`
+  instead would have made them two different values. An unroutable message (unreadable envelope, or
+  a name with no processor) is **retried, never acked**, because acking discards it permanently and
+  silently; `maxAttempts` is enforced at dispatch since Cloudflare's `max_retries` is queue-wide
+  config; `delayMs` converts to whole `delaySeconds` **rounded up** so a job is never early; and
+  `ProcessOptions.concurrency` bounds one name's messages without throttling another's.
+  `addRecurring` throws, naming Cron Triggers. **Cron:** `WorkersCron` + `createScheduledHandler`,
+  and the decision the ROADMAP asked for — a Workers `IScheduler` **cannot** honour runtime
+  `schedule()` calls, so `CAPABILITIES.SCHEDULER` is deliberately NOT registered: `every`/`delay`
+  arm timers across an isolate eviction (which is also the real reason `scheduler-plugin` cannot run
+  on Workers), `pause`/`resume`/`remove` need state that does not survive an invocation, and
+  `getNextRun` is owned by `wrangler.toml`; six of eight methods throwing violates Liskov. That
+  decision is also why `createScheduledHandler` takes the `WorkersCron` while `createQueueHandler`
+  takes the app — the cron registry is not in the service registry to resolve. **Cache API:**
+  `cacheApiMiddleware` over `caches.default`, reporting under `X-Cache-Api` so it composes with
+  `cache-plugin`'s `X-Cache` store-backed middleware rather than colliding; the platform's refusals
+  (non-GET, 206, `Vary: *`, uncleared `Set-Cookie`) are checked first via the pure exported
+  `assessCacheability` rather than discovered from a thrown `put`, and the 206 rule is
+  **unconditional** because `cacheableStatuses: [200, 206]` is a legal configuration that would
+  otherwise let the platform throw. A HIT replays through `IResponse.stream`, which is what made
+  `app.inject()` unusable for cached routes and moved the tests to `app.fetch` — more faithful,
+  since that is the entry point a Worker invokes. One defect found by chasing a coverage gap rather
+  than by a failing test: `WorkersQueueOptions.logger` captured `ctx.logger` at `register()`, the
+  exact mistake M52 documented and fixed on the `waitUntil` seam — a logger registered imperatively
+  afterwards would have silenced every dispatch report — so it is now a thunk, with a test that
+  fails without the fix. All 20 `src` files at **100%** branch/function/line. **Not verified against
+  a live Worker** — CI holds no Cloudflare account) — complete (PR pending)
+- **Milestone 52c** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
+  D1 as a first-class backend, gated on promoting the data-access port: the seam a backend
+  implements is `IDatabaseAdapter`, declared inside `database-plugin`, while `common` ships only the
+  lifecycle-shaped `IOrmAdapter`; `DatabasePlugin.createAdapter` is additionally a closed three-arm
+  switch with no external arm, and `ITransaction` has to be reconciled with D1's batch-only
+  atomicity) — planned, not started
+- **Milestone 52d** (`packages/cloudflare-plugin` — Durable Objects: a DO-backed
+  `IRealtimeBackplane` (the M47 port is already in `common`, so no contract change) and a DO-backed
+  distributed lock handed to `SchedulerPlugin({ lock })` structurally. Both need the application to
+  export a DO class plus a wrangler migration stanza, and DOs expose **no pub/sub primitive**, so
+  the backplane means each replica holding a WebSocket to the object) — planned, not started
+- **Next milestone** — **M52c** (D1 + the `common` data-access promotion), **M52d** (Durable
+  Objects), or **M37** (example applications under `apps/*`), then M38–M40 unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

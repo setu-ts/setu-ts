@@ -5077,66 +5077,149 @@ sessions — therefore has no backend that exists on the edge. M52 closes the ac
 
 ### Out of scope
 
-Everything below is **M52b**, deferred for a stated reason rather than for time:
+Everything below was deferred for a stated reason rather than for time. It was originally one
+follow-up milestone; the maintainer split it three ways once the cost of each was clear:
 
-- **D1.** The data-access seam is `IDatabaseAdapter`, declared inside `packages/database-plugin` and
-  absent from `common`, whose `IOrmAdapter` is lifecycle-only. Shipping D1 means promoting a port to
-  `common` — a contract decision. D1 also has no imperative `BEGIN`/`COMMIT`, which has to be
-  reconciled with `ITransaction` before an adapter is honest.
-- **Queues, Cron Triggers, Durable Objects.** All three need the application's Worker module to
-  export an additional handler (`queue`, `scheduled`, a DO class), which is a new contract this
-  milestone does not invent. `IQueue.process` is additionally a pull/registration model with no
-  Cloudflare counterpart — there is no poll API.
-- **Cache API response caching.** `caches.default` carries its own rule set and belongs beside a
-  middleware, not inside an `ICacheStore`.
+- **Queues, Cron Triggers, and the Cache API — shipped in M52b.** The first two need the
+  application's Worker module to export an additional handler (`queue`, `scheduled`), which is a new
+  contract this milestone does not invent. The Cache API carries its own rule set and belongs beside
+  a middleware, not inside an `ICacheStore`.
+- **D1 — M52c.** The data-access seam is `IDatabaseAdapter`, declared inside
+  `packages/database-plugin` and absent from `common`, whose `IOrmAdapter` is lifecycle-only.
+  Shipping D1 means promoting a port to `common` — a contract decision. D1 also has no imperative
+  `BEGIN`/`COMMIT`, which has to be reconciled with `ITransaction` before an adapter is honest.
+- **Durable Objects — M52d.** Needs the application to export a DO class plus a wrangler migration
+  stanza, and a DO-backed backplane is its own design: Durable Objects expose no pub/sub primitive,
+  so each replica has to hold a WebSocket to the object.
 - **A `cloudflare` arm on any starter** — M36-series work, needing a Workers-portability review of
   the whole plugin set.
 
 ---
 
-## Milestone 52b: Cloudflare Platform Handlers — D1, Queues, Cron, Durable Objects, Cache API
+## Milestone 52b: Cloudflare Queues, Cron Triggers, and the Cache API ✅ COMPLETE
 
 **Objective:** M52 reaches every binding and satisfies the two committed ports that need nothing
-beyond a request-scoped call. The remainder share one shape: they need either a **new module-level
-handler export** from the application's Worker, or a **contract promotion in `common`**. Both are
-design decisions large enough to plan on their own evidence rather than to improvise inside M52.
+beyond a request-scoped call. The rest share one shape: they need either a **new module-level
+handler export** from the application's Worker, or a **contract promotion in `common`**. M52b ships
+the three that are pure additions inside `cloudflare-plugin` and need no `common` change at all.
 
-**Package:** `packages/cloudflare-plugin` (extended), plus a `common` contract decision for D1
+The original M52b scope covered D1 and Durable Objects too. It was split at the maintainer's
+direction, because D1 alone is a `common` contract promotion spanning three packages and the
+Durable-Object backplane is its own design — see M52c and M52d.
+
+**Package:** `packages/cloudflare-plugin` (extended). No `common` change, no new capability token.
+
+**Plan:** `plans/archive/milestone-52-b-cloudflare-handlers.md`
 
 ### Scope
 
-- **D1.** Decide and ship the data-access port. Today `common` exposes only the lifecycle-shaped
-  `IOrmAdapter`, while the seam a backend actually implements (`IDatabaseAdapter`) lives inside
-  `database-plugin`, so no separate package can supply a backend without importing another plugin.
-  Also reconcile `ITransaction` with D1's batch-only atomicity.
-- **Queues.** A producer satisfying `IQueue.add`, plus a `createQueueHandler(app)` the deployer
-  exports as `queue`, dispatching a `MessageBatch` into processors registered through
-  `IQueue.process`. `addRecurring` has no counterpart and gets a documented throw.
-- **Cron Triggers.** A `createScheduledHandler(app)` exported as `scheduled`, and the decision on
-  whether a Workers `IScheduler` can honour runtime `schedule()` calls at all given that cron
-  expressions are wrangler-config-only. This is also why `scheduler-plugin`'s `setInterval` jobs
-  cannot work on Workers.
-- **Durable Objects.** A DO-backed `IRealtimeBackplane` (M47) and a DO-backed distributed lock, both
-  requiring the application to export a DO class plus a wrangler migration stanza.
-- **Cache API.** A response cache over `caches.default` honouring the platform's own refusals
-  (`Set-Cookie`, `206`, `Vary: *`, GET-only) and its per-datacenter scope.
-- **Hyperdrive, Vectorize, Workers AI, Analytics Engine.** Each is already reachable through
-  `bindings.get<T>(name)`; promote one to a first-class capability port only when an application
-  needs it.
+- **Queues.** `WorkersQueue` satisfying the committed `IQueue` over a producer binding, opt-in via a
+  `queue` arm on `CloudflarePluginOptions` and registered under `CAPABILITIES.QUEUE` (or
+  `queue.<name>`). A `{ v, name, id, data, maxAttempts? }` envelope carries the job name and id,
+  because a Cloudflare message body is arbitrary JSON and `producer.send()` returns no id.
+  `createQueueHandler(app)` builds the `queue` export; `addRecurring` throws, naming Cron Triggers.
+  An unroutable message is **retried, never acked**.
+- **Cron Triggers.** `WorkersCron` (`on`/`expressions`/`dispatch`) plus
+  `createScheduledHandler(cron)` for the `scheduled` export. **The decision the original scope asked
+  for: a Workers `IScheduler` cannot honour runtime `schedule()` calls, so `CAPABILITIES.SCHEDULER`
+  is deliberately NOT registered.** Six of `IScheduler`'s eight methods are unimplementable on
+  Workers — `every`/`delay` arm timers across an isolate eviction (the same reason
+  `scheduler-plugin` cannot run there), `pause`/`resume`/`remove` need state that does not survive
+  an invocation, and `getNextRun` is owned by `wrangler.toml`. An implementation where six of eight
+  methods throw violates Liskov.
+- **Cache API.** `cacheApiMiddleware` over `caches.default`, honouring the platform's own refusals
+  (non-GET, 206, `Vary: *`, uncleared `Set-Cookie`) through the pure exported `assessCacheability`
+  rather than discovering them from a thrown `put`. Reports under `X-Cache-Api`, never `X-Cache`,
+  which `cache-plugin`'s store-backed middleware owns — the two layers compose.
 
 ### Deliverables
 
-- [ ] The `common` data-access contract decision, and a D1 backend on it
-- [ ] Queues producer plus `createQueueHandler`
-- [ ] `createScheduledHandler` and the Workers scheduler decision
-- [ ] Durable-Object backplane and distributed lock
-- [ ] Cache API response cache
+- [x] `WorkersQueue` implementing `IQueue`, plus the `queue` arm and its instance-named token
+- [x] `createQueueHandler` for the Worker's `queue` export
+- [x] `WorkersCron` + `createScheduledHandler` for the `scheduled` export
+- [x] The Workers-scheduler decision, recorded with its reasons
+- [x] `cacheApiMiddleware` + `assessCacheability` over `caches.default`
+- [x] Doc deliverables C1–C5 (ROADMAP re-scope + M52c/M52d, PUBLIC_API, README, CHANGELOG, the
+      `facades.ts` JSDoc milestone references, and the M52 PR number in CLAUDE.md)
+
+### Out of scope
+
+- **D1** — M52c. **Durable Objects** — M52d.
+- **A `cloudflare` arm on any starter.** M36-series work; it needs a Workers-portability review of
+  the whole plugin set.
+- Running any of it against a live Cloudflare account. CI holds no credentials; M39 owns deployment
+  manifests, and the README states which paths are unverified against a real Worker.
+
+---
+
+## Milestone 52c: D1 — the `common` data-access contract promotion
+
+**Objective:** Ship D1 as a first-class database backend. The blocker is a contract decision, not
+effort: the seam a backend actually implements is `IDatabaseAdapter`, declared **inside**
+`packages/database-plugin` (`src/adapters/adapter.ts`), while `common` exposes only the
+lifecycle-shaped `IOrmAdapter` (`connect`/`disconnect`/`isReady`/`beginTransaction`). No separate
+package can supply a backend without importing another plugin, which AI_GUIDELINES §2.2 forbids.
+
+**Packages:** `packages/common` (contract promotion), `packages/database-plugin` (external-adapter
+arm), `packages/cloudflare-plugin` (the D1 backend)
+
+### Scope
+
+- Promote the data-access port into `common` — `DataSource` and `NormalizedQuery` alongside it,
+  since the port is meaningless without them — and decide whether the promoted shape is
+  `IDatabaseAdapter` as-is or a narrower one.
+- `DatabasePlugin.createAdapter` is a closed three-arm switch (`prisma`/`drizzle`/`memory`); it
+  needs an arm accepting an externally-supplied adapter, so a backend can live in another package.
+- Reconcile `ITransaction` (`commit`/`rollback`) with D1, which has **no imperative
+  `BEGIN`/`COMMIT`** — `batch()` is its only unit of atomicity, exactly the mismatch M10 hit with
+  Prisma's callback-style `$transaction`.
+- A `D1Adapter` translating `NormalizedQuery` into SQL over the `ID1Database` facade M52 already
+  ships.
+
+### Deliverables
+
+- [ ] The `common` data-access contract decision, shipped with its PUBLIC_API entry
+- [ ] An external-adapter arm on `DatabasePlugin`
+- [ ] `D1Adapter`, with every write read back through the public repository surface
 - [ ] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
 
 ### Out of scope
 
-- Running any of it against a live Cloudflare account in CI. M39 owns deployment manifests; the
-  README states plainly which paths are unverified against a real Worker.
+- Migrations. D1 migrations are a wrangler CLI concern, and `IDatabaseAdapter` deliberately carries
+  no `migrate()` (M10's plan deviation §2).
+
+---
+
+## Milestone 52d: Durable Objects — realtime backplane and distributed lock
+
+**Objective:** Reach Durable Objects as first-class capabilities. Both deliverables need the
+application to export a **DO class** plus a `wrangler.toml` migration stanza — a contract the
+framework does not have yet, and the reason this is not M52b.
+
+**Package:** `packages/cloudflare-plugin` (extended)
+
+### Scope
+
+- A **DO-backed `IRealtimeBackplane`** (the M47 port, already in `common`, so this registers
+  `CAPABILITIES.REALTIME_BACKPLANE` directly with no plugin-to-plugin import). The hard part is that
+  Durable Objects expose **no pub/sub primitive**: each replica holds a WebSocket to the DO, which
+  fans out. That brings hibernation, reconnection, and per-replica subscription lifecycle with it.
+- A **DO-backed distributed lock**. `SchedulerPlugin` takes `IDistributedLock` as an option, so a
+  structurally-compatible class handed in needs no contract change — the `KvSessionStore` →
+  `SessionPlugin({ store })` precedent from M52.
+- The DO class the application exports, and the wrangler migration stanza it needs, documented as a
+  deliverable rather than assumed.
+
+### Deliverables
+
+- [ ] A DO class the application exports, with its wrangler stanza documented
+- [ ] DO-backed `IRealtimeBackplane` registered under `CAPABILITIES.REALTIME_BACKPLANE`
+- [ ] DO-backed distributed lock, structurally satisfying `IDistributedLock`
+- [ ] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
+
+### Out of scope
+
+- Anything requiring a live Cloudflare account in CI — M39 owns deployment manifests.
 
 ---
 
@@ -5299,69 +5382,71 @@ app.register(MyPlugin({ option1: 'value' }));
 
 ## Progress Tracking
 
-| Milestone | Status | Package                           |
-| --------- | ------ | --------------------------------- |
-| 0         | ✅     | Monorepo Foundation               |
-| 1         | ✅     | common                            |
-| 2         | ✅     | kernel                            |
-| 3         | ✅     | runtime                           |
-| 4         | ✅     | logger-plugin                     |
-| 5         | ✅     | config-plugin                     |
-| 6         | ✅     | validation-plugin                 |
-| 7         | ✅     | exceptions                        |
-| 8         | ✅     | di-plugin                         |
-| 9         | ✅     | decorator-plugin                  |
-| 10        | ✅     | database-plugin                   |
-| 11        | ✅     | cache-plugin                      |
-| 12        | ✅     | events-plugin                     |
-| 13        | ✅     | cqrs-plugin                       |
-| 14        | ✅     | messaging-plugin                  |
-| 14b       | ✅     | messaging-plugin                  |
-| 14c       | ✅     | messaging-plugin                  |
-| 14d       | ✅     | messaging-plugin                  |
-| 15        | ✅     | queue-plugin                      |
-| 15b       | ✅     | queue-plugin                      |
-| 16        | ✅     | auth-plugin                       |
-| 16b       | ✅     | auth-plugin                       |
-| 17        | ✅     | http-security-plugin              |
-| 18        | ✅     | scheduler-plugin                  |
-| 19        | ✅     | metrics-plugin                    |
-| 20        | ✅     | health-plugin                     |
-| 21        | ✅     | openapi-plugin                    |
-| 22        | ✅     | kernel-on-hono                    |
-| 23        | ✅     | runtime-serve-hono                |
-| 24        | ✅     | telemetry-plugin                  |
-| 24b       | ✅     | telemetry-plugin                  |
-| 24c       | ✅     | telemetry-collector               |
-| 25        | ✅     | secrets-plugin                    |
-| 26        | ✅     | audit-plugin                      |
-| 27        | ✅     | resilience-plugin                 |
-| 28        | ✅     | storage-plugin                    |
-| 29        | ✅     | mail-plugin                       |
-| 30        | ✅     | notification-plugin               |
-| 30b       | ✅     | notification-plugin               |
-| 31        | ✅     | feature-flags-plugin              |
-| 32        | ✅     | multi-tenancy-plugin              |
-| 33        | ✅     | testing                           |
-| 34        | ✅     | cli                               |
-| 34b       | ✅     | cli                               |
-| 35        | ✅     | sdk                               |
-| 36        | ✅     | starters                          |
-| 36b       | ✅     | starters + decorator-plugin + cli |
-| 36c       | ✅     | cli + starters + config + runtime |
-| 37        | ⬜     | examples                          |
-| 38        | ⬜     | documentation                     |
-| 39        | ⬜     | docker/kubernetes                 |
-| 40        | ⬜     | final release                     |
-| 41        | ✅     | http-adapters                     |
-| 42        | ✅     | streaming-response                |
-| 43        | ✅     | sse-plugin                        |
-| 44        | ✅     | react-router-plugin               |
-| 45        | ✅     | worker-pool-plugin                |
-| 46        | ✅     | websocket-plugin                  |
-| 47        | ✅     | alpha-3 limitations               |
-| 48        | ✅     | session-plugin                    |
-| 49        | ✅     | grpc-plugin                       |
-| 50        | ✅     | service-discovery-plugin          |
-| 52        | ✅     | cloudflare-plugin                 |
-| 52b       | ⬜     | cloudflare-plugin (platform)      |
+| Milestone | Status | Package                               |
+| --------- | ------ | ------------------------------------- |
+| 0         | ✅     | Monorepo Foundation                   |
+| 1         | ✅     | common                                |
+| 2         | ✅     | kernel                                |
+| 3         | ✅     | runtime                               |
+| 4         | ✅     | logger-plugin                         |
+| 5         | ✅     | config-plugin                         |
+| 6         | ✅     | validation-plugin                     |
+| 7         | ✅     | exceptions                            |
+| 8         | ✅     | di-plugin                             |
+| 9         | ✅     | decorator-plugin                      |
+| 10        | ✅     | database-plugin                       |
+| 11        | ✅     | cache-plugin                          |
+| 12        | ✅     | events-plugin                         |
+| 13        | ✅     | cqrs-plugin                           |
+| 14        | ✅     | messaging-plugin                      |
+| 14b       | ✅     | messaging-plugin                      |
+| 14c       | ✅     | messaging-plugin                      |
+| 14d       | ✅     | messaging-plugin                      |
+| 15        | ✅     | queue-plugin                          |
+| 15b       | ✅     | queue-plugin                          |
+| 16        | ✅     | auth-plugin                           |
+| 16b       | ✅     | auth-plugin                           |
+| 17        | ✅     | http-security-plugin                  |
+| 18        | ✅     | scheduler-plugin                      |
+| 19        | ✅     | metrics-plugin                        |
+| 20        | ✅     | health-plugin                         |
+| 21        | ✅     | openapi-plugin                        |
+| 22        | ✅     | kernel-on-hono                        |
+| 23        | ✅     | runtime-serve-hono                    |
+| 24        | ✅     | telemetry-plugin                      |
+| 24b       | ✅     | telemetry-plugin                      |
+| 24c       | ✅     | telemetry-collector                   |
+| 25        | ✅     | secrets-plugin                        |
+| 26        | ✅     | audit-plugin                          |
+| 27        | ✅     | resilience-plugin                     |
+| 28        | ✅     | storage-plugin                        |
+| 29        | ✅     | mail-plugin                           |
+| 30        | ✅     | notification-plugin                   |
+| 30b       | ✅     | notification-plugin                   |
+| 31        | ✅     | feature-flags-plugin                  |
+| 32        | ✅     | multi-tenancy-plugin                  |
+| 33        | ✅     | testing                               |
+| 34        | ✅     | cli                                   |
+| 34b       | ✅     | cli                                   |
+| 35        | ✅     | sdk                                   |
+| 36        | ✅     | starters                              |
+| 36b       | ✅     | starters + decorator-plugin + cli     |
+| 36c       | ✅     | cli + starters + config + runtime     |
+| 37        | ⬜     | examples                              |
+| 38        | ⬜     | documentation                         |
+| 39        | ⬜     | docker/kubernetes                     |
+| 40        | ⬜     | final release                         |
+| 41        | ✅     | http-adapters                         |
+| 42        | ✅     | streaming-response                    |
+| 43        | ✅     | sse-plugin                            |
+| 44        | ✅     | react-router-plugin                   |
+| 45        | ✅     | worker-pool-plugin                    |
+| 46        | ✅     | websocket-plugin                      |
+| 47        | ✅     | alpha-3 limitations                   |
+| 48        | ✅     | session-plugin                        |
+| 49        | ✅     | grpc-plugin                           |
+| 50        | ✅     | service-discovery-plugin              |
+| 52        | ✅     | cloudflare-plugin                     |
+| 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
+| 52c       | ⬜     | cloudflare-plugin (D1 + common)       |
+| 52d       | ⬜     | cloudflare-plugin (durable objects)   |

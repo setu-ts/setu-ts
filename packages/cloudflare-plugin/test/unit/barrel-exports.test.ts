@@ -16,6 +16,12 @@ describe('cloudflare-plugin barrel', () => {
     expect(typeof barrel.R2Storage).toBe('function');
     expect(typeof barrel.isKvNamespace).toBe('function');
     expect(typeof barrel.isR2Bucket).toBe('function');
+    expect(typeof barrel.WorkersQueue).toBe('function');
+    expect(typeof barrel.createQueueHandler).toBe('function');
+    expect(typeof barrel.WorkersCron).toBe('function');
+    expect(typeof barrel.createScheduledHandler).toBe('function');
+    expect(typeof barrel.cacheApiMiddleware).toBe('function');
+    expect(typeof barrel.assessCacheability).toBe('function');
   });
 
   it('exports errors that are real Error subclasses with stable names', () => {
@@ -35,7 +41,17 @@ describe('cloudflare-plugin barrel', () => {
 
   it('does not export the internal registry or the envelope codec', () => {
     const names = Object.keys(barrel);
-    for (const internal of ['BindingRegistry', 'encodeEnvelope', 'decodeEnvelope']) {
+    for (
+      const internal of [
+        'BindingRegistry',
+        'encodeEnvelope',
+        'decodeEnvelope',
+        'encodeJobEnvelope',
+        'isJobEnvelope',
+        'runBounded',
+        'resolveCacheApi',
+      ]
+    ) {
       expect(names).not.toContain(internal);
     }
   });

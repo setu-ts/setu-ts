@@ -35,7 +35,12 @@
 
 // Plugin factory
 export { CloudflarePlugin } from './plugin/cloudflare-plugin.ts';
-export type { CloudflarePluginOptions, KvCacheOptions, R2StorageArm } from './options.ts';
+export type {
+  CloudflarePluginOptions,
+  KvCacheOptions,
+  R2StorageArm,
+  WorkersQueueArm,
+} from './options.ts';
 
 // The capability published under CAPABILITIES.CLOUDFLARE
 export type { ICloudflareBindings } from './bindings/binding-registry.ts';
@@ -48,10 +53,13 @@ export type {
   ID1PreparedStatement,
   IDurableObjectNamespace,
   IKvNamespace,
+  IQueueMessage,
+  IQueueMessageBatch,
   IQueueProducer,
   IR2Bucket,
   IR2Object,
   IR2ObjectBody,
+  IScheduledController,
   IServiceBinding,
   KvListOptions,
   KvListResult,
@@ -61,7 +69,26 @@ export type {
 export { isKvNamespace, isR2Bucket } from './bindings/facades.ts';
 
 // Background work
-export type { WaitUntilHost } from './background/wait-until.ts';
+export type { LoggerSource, WaitUntilHost } from './background/wait-until.ts';
+
+// Queues — the committed IQueue over a producer binding, plus the `queue` export
+export { WorkersQueue } from './queues/workers-queue.ts';
+export type { JobIdSource, WorkersQueueOptions } from './queues/workers-queue.ts';
+export { createQueueHandler } from './queues/queue-handler.ts';
+export type { QueueHandler, QueueHandlerOptions } from './queues/queue-handler.ts';
+
+// Cron Triggers — the registry and the `scheduled` export
+export { WorkersCron } from './cron/workers-cron.ts';
+export type { CronHandler, WorkersCronOptions } from './cron/workers-cron.ts';
+export { createScheduledHandler } from './cron/scheduled-handler.ts';
+export type { ScheduledHandler } from './cron/scheduled-handler.ts';
+
+// The edge response cache, over `caches.default`
+export { cacheApiMiddleware } from './cache-api/cache-api-middleware.ts';
+export type { CacheApiMiddlewareOptions } from './cache-api/cache-api-middleware.ts';
+export type { ICacheApi } from './cache-api/cache-api.ts';
+export { assessCacheability } from './cache-api/cacheability.ts';
+export type { CacheabilityInput, CacheRefusal } from './cache-api/cacheability.ts';
 
 // Stores — constructible standalone, for wiring a capability the plugin does
 // not register (sessions) or for use outside an application

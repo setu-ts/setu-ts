@@ -50,6 +50,33 @@ export interface R2StorageArm {
 }
 
 /**
+ * Wires a Cloudflare Queues producer binding up as the application's
+ * {@linkcode IQueue} under `CAPABILITIES.QUEUE`.
+ *
+ * Producing is all this arm configures. Consuming needs the Worker module to
+ * export the handler `createQueueHandler(app)` builds, which no plugin option
+ * can do on the application's behalf.
+ *
+ * @since 0.2.0
+ */
+export interface WorkersQueueArm {
+  /** The Queues producer binding name from `wrangler.toml`. */
+  readonly binding: string;
+  /**
+   * Instance name. `'default'` (the default) claims the bare `queue` token;
+   * anything else derives `queue.<name>`, which
+   * {@linkcode QueueHandlerOptions.name} must then match.
+   */
+  readonly name?: string;
+  /**
+   * Largest accepted `AddJobOptions.delayMs`, in **seconds**. Defaults to
+   * 86400, the platform maximum; a larger delay throws rather than being
+   * silently truncated.
+   */
+  readonly maxDelaySeconds?: number;
+}
+
+/**
  * Options for {@linkcode CloudflarePlugin}.
  *
  * @example Bindings only
@@ -99,4 +126,9 @@ export interface CloudflarePluginOptions {
   readonly cache?: KvCacheOptions;
   /** Serve `CAPABILITIES.STORAGE` from an R2 bucket. Omitted registers nothing. */
   readonly storage?: R2StorageArm;
+  /**
+   * Serve `CAPABILITIES.QUEUE` from a Queues producer binding. Omitted
+   * registers nothing.
+   */
+  readonly queue?: WorkersQueueArm;
 }

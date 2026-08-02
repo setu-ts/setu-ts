@@ -214,7 +214,7 @@ export interface D1Result<T = Record<string, unknown>> {
  * A D1 database binding.
  *
  * Exposed as an escape hatch for applications that want SQL today. A first-class
- * `IDatabase` backend is M52b, because the seam a backend implements
+ * `IDatabase` backend is M52c, because the seam a backend implements
  * (`IDatabaseAdapter`) lives inside `database-plugin` and is not a committed
  * `common` port.
  *
@@ -256,8 +256,8 @@ export interface QueueSendOptions {
 /**
  * A Cloudflare Queues **producer** binding.
  *
- * Only the producer half is expressible here: consuming requires the Worker
- * module to export a `queue()` handler, which is M52b.
+ * The consumer half is {@linkcode IQueueMessageBatch}, dispatched by the
+ * handler `createQueueHandler` builds for the Worker's `queue` export.
  *
  * @since 0.2.0
  */
@@ -280,6 +280,66 @@ export interface IQueueProducer {
 }
 
 /**
+ * One message delivered to a Queues **consumer**.
+ *
+ * A real Cloudflare `Message` satisfies this structurally. `ack()` and
+ * `retry()` are the platform's only two dispositions: there is no "dead-letter
+ * now" call, because that policy lives in the queue's `wrangler.toml` stanza.
+ *
+ * @since 0.2.0
+ */
+export interface IQueueMessage {
+  /** The platform-assigned message id. */
+  readonly id: string;
+  /** The message body, as the producer sent it. */
+  readonly body: unknown;
+  /** Delivery attempt, **1 on first delivery** — the same base as `IJob`. */
+  readonly attempts: number;
+  /** Marks the message processed. It is not redelivered. */
+  ack(): void;
+  /**
+   * Returns the message for redelivery, subject to the queue's configured
+   * `max_retries` and dead-letter queue.
+   *
+   * @param options - Optional redelivery delay
+   */
+  retry(options?: { readonly delaySeconds?: number }): void;
+}
+
+/**
+ * A batch of messages delivered to a Queues consumer.
+ *
+ * A real Cloudflare `MessageBatch` satisfies this structurally.
+ *
+ * @since 0.2.0
+ */
+export interface IQueueMessageBatch {
+  /** The name of the queue this batch came from. */
+  readonly queue: string;
+  /** The messages in the batch. */
+  readonly messages: readonly IQueueMessage[];
+}
+
+/**
+ * The controller handed to a Cron Trigger's `scheduled` handler.
+ *
+ * A real Cloudflare `ScheduledController` satisfies this structurally.
+ *
+ * @since 0.2.0
+ */
+export interface IScheduledController {
+  /**
+   * The cron expression that fired, **exactly as written in `wrangler.toml`**.
+   *
+   * This is the only key a dispatcher can match on: the platform reports which
+   * of the Worker's configured triggers fired, not a name of our choosing.
+   */
+  readonly cron: string;
+  /** When the trigger was scheduled to fire, in epoch milliseconds. */
+  readonly scheduledTime: number;
+}
+
+/**
  * A service binding to another Worker — a `fetch`-shaped RPC channel.
  *
  * @since 0.2.0
@@ -299,7 +359,7 @@ export interface IServiceBinding {
  * A Durable Object namespace binding.
  *
  * Exposed as an escape hatch. A DO-backed realtime backplane and distributed
- * lock are M52b, because both need the application to export a DO class.
+ * lock are M52d, because both need the application to export a DO class.
  *
  * @since 0.2.0
  */
