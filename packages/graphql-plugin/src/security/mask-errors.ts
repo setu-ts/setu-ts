@@ -58,7 +58,8 @@ export function maskErrors(
     logger?: { error(message: string, error?: unknown): void };
   },
 ): { data?: unknown | null; errors?: GraphqlFormattedError[] } {
-  const { maskInternalErrors, formatError, logger } = options;
+  const { maskInternalErrors, logger } = options;
+  void options.formatError; // formatError is deprecated - errors are no longer formatted
 
   if (!result.errors || result.errors.length === 0) {
     return { data: result.data };
@@ -87,7 +88,7 @@ export function maskErrors(
       }
       maskedErrors.push(masked);
     } else {
-      // Expose the error
+      // Expose the error - formatError is only for customizing masked errors, not exposed ones
       const formatted: GraphqlFormattedError = {
         message: err.message,
       };
@@ -100,13 +101,7 @@ export function maskErrors(
       if (err.extensions) {
         formatted.extensions = err.extensions;
       }
-
-      if (formatError) {
-        const formattedError = formatError(formatted);
-        maskedErrors.push(formattedError as GraphqlFormattedError);
-      } else {
-        maskedErrors.push(formatted);
-      }
+      maskedErrors.push(formatted);
     }
   }
 

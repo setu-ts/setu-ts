@@ -4,45 +4,33 @@
  * @module
  */
 
-import type { GraphqlSelectionNodeLike } from '../interfaces/graphql-runtime.ts';
+import type {
+  GraphqlGraphQLErrorLike,
+  GraphqlSelectionNodeLike,
+} from '../interfaces/graphql-runtime.ts';
 
 /**
  * Validation rule context interface (subset of GraphQL's ValidationContext).
  */
 interface ValidationRuleContext {
-  reportError(error: Error): void;
+  reportError(error: GraphqlGraphQLErrorLike): void;
 }
 
 /**
- * SelectionSet visitor for depth limit rule.
+ * Get depth from ancestor chain by counting SelectionSet path entries.
+ * The ancestors array contains path keys like ["definitions", 0, "selectionSet", "selections", 0, ...]
+ * Each "selectionSet" in the path indicates one level of nesting.
  */
-export function depthLimitSelectionSetVisitor(
-  _node: GraphqlSelectionNodeLike,
-  _parent: unknown,
-  _key: unknown,
-  _ancestor: unknown,
-) {
-  // Track selection set nesting
-}
-
-/**
- * Field visitor for depth limit rule.
- */
-export function depthLimitFieldVisitor(
-  _node: GraphqlSelectionNodeLike,
-  _parent: unknown,
-  _key: unknown,
-  ancestors: unknown[],
-) {
-  // Count depth based on ancestors
-  const depth = ancestors.filter((a) =>
-    a && typeof a === 'object' && 'kind' in a &&
-    (a as { kind: string }).kind === 'SelectionSet'
-  ).length;
-
-  // Note: depth error reporting requires context which is not available here
-  // The depth is tracked but errors would need to be reported through context
-  void depth; // Used for depth tracking
+function getDepth(ancestors: unknown[]): number {
+  let depth = 0;
+  for (const ancestor of ancestors) {
+    // The ancestors array contains path keys, not AST nodes
+    // Count occurrences of "selectionSet" which indicate nesting levels
+    if (ancestor === 'selectionSet') {
+      depth++;
+    }
+  }
+  return depth;
 }
 
 /**
@@ -53,18 +41,43 @@ export function depthLimitFieldVisitor(
  * AST node kinds that are called during traversal.
  *
  * @param maxDepth - Maximum allowed depth (0 to disable)
+ * @param GraphQLError - The GraphQLError constructor to use for creating errors
  * @returns A validation rule function (receives context, returns visitor)
  */
-export function createDepthLimitRule(maxDepth: number) {
+export function createDepthLimitRule(
+  maxDepth: number,
+  GraphQLError: new (message: string) => GraphqlGraphQLErrorLike,
+) {
   if (maxDepth <= 0) {
     // Return a no-op rule that does nothing
     return (_context: ValidationRuleContext) => ({});
   }
 
-  return (_context: ValidationRuleContext) => {
+  return (context: ValidationRuleContext) => {
+    let errorReported = false;
+
     return {
-      SelectionSet: depthLimitSelectionSetVisitor,
-      Field: depthLimitFieldVisitor,
+      Field(
+        _node: GraphqlSelectionNodeLike,
+        _parent: unknown,
+        _key: unknown,
+        ancestors: unknown[],
+      ) {
+        // Don't report multiple errors - just one is enough
+        if (errorReported) {
+          return;
+        }
+
+        const depth = getDepth(ancestors);
+
+        if (depth > maxDepth) {
+          const error = new GraphQLError(
+            `Query is too deep. Maximum depth is ${maxDepth}, but query has depth of ${depth}`,
+          );
+          context.reportError(error);
+          errorReported = true;
+        }
+      },
     };
   };
 }

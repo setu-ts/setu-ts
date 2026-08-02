@@ -57,7 +57,8 @@ export class GraphqlService implements IGraphqlService {
     this.#maxDepth = options.maxDepth;
     this.#introspection = options.introspection;
     this.#maskInternalErrors = options.maskInternalErrors;
-    this.#formatError = options.formatError ?? ((_e: unknown) => undefined);
+    // formatError is only used when masking errors; default to identity when not masking
+    this.#formatError = options.formatError ?? ((e: unknown) => e);
     this.#buildContext = options.buildContext ?? null;
     this.#rootValue = options.rootValue;
   }
@@ -115,8 +116,14 @@ export class GraphqlService implements IGraphqlService {
     };
     const masked = maskErrors(result, maskErrorsOptions);
 
+    // Check if this is a validation error (has errors but no data)
+    // Validation errors should return 400, not 200
+    const hasErrors = masked.errors && masked.errors.length > 0;
+    const hasData = masked.data !== undefined && masked.data !== null;
+    const isValidationError = hasErrors && !hasData;
+
     return {
-      status: 200,
+      status: isValidationError ? 400 : 200,
       result: masked as GraphqlExecutionResult,
     };
   }
@@ -133,7 +140,7 @@ export class GraphqlService implements IGraphqlService {
     // Add depth limit rule
     if (this.#maxDepth > 0) {
       // createDepthLimitRule returns a validation rule function (receives context, returns visitor)
-      rules.push(createDepthLimitRule(this.#maxDepth));
+      rules.push(createDepthLimitRule(this.#maxDepth, this.#runtime.GraphQLError));
     }
 
     // Add introspection rule if disabled

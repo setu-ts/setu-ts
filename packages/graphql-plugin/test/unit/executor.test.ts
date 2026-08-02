@@ -4,11 +4,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import {
-  depthLimitFieldVisitor,
-  depthLimitSelectionSetVisitor,
-  executeGraphql,
-} from '../../src/execution/executor.ts';
+import { executeGraphql } from '../../src/execution/executor.ts';
 import { DocumentCache } from '../../src/execution/document-cache.ts';
 import type {
   GraphqlDocumentNodeLike,
@@ -437,23 +433,5 @@ describe('executor', () => {
     });
 
     expect(capturedOperationName).toBe('MyQuery');
-  });
-});
-
-describe('depth limit visitors', () => {
-  it('depthLimitSelectionSetVisitor exists and is a function', () => {
-    expect(typeof depthLimitSelectionSetVisitor).toBe('function');
-  });
-
-  it('depthLimitFieldVisitor exists and is a function', () => {
-    expect(typeof depthLimitFieldVisitor).toBe('function');
-  });
-
-  it('depthLimitSelectionSetVisitor does not throw', () => {
-    expect(() => depthLimitSelectionSetVisitor({ kind: 'SelectionSet' })).not.toThrow();
-  });
-
-  it('depthLimitFieldVisitor does not throw', () => {
-    expect(() => depthLimitFieldVisitor({ kind: 'Field' })).not.toThrow();
   });
 });

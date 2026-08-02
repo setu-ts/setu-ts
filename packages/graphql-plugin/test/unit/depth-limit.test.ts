@@ -6,19 +6,34 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createDepthLimitRule } from '../../src/security/depth-limit.ts';
 
+// Mock GraphQLError constructor for testing
+interface MockGraphQLErrorLike {
+  message: string;
+  toJSON(): { message: string };
+}
+class MockGraphQLError extends Error implements MockGraphQLErrorLike {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GraphQLError';
+  }
+  toJSON() {
+    return { message: this.message };
+  }
+}
+
 // Mock validation context for testing
 interface MockValidationContext {
-  reportError(error: Error): void;
+  reportError(error: MockGraphQLErrorLike): void;
 }
 
 describe('createDepthLimitRule', () => {
   it('returns a rule function', () => {
-    const rule = createDepthLimitRule(10);
+    const rule = createDepthLimitRule(10, MockGraphQLError);
     expect(typeof rule).toBe('function');
   });
 
   it('returns no-op rule when maxDepth is 0', () => {
-    const rule = createDepthLimitRule(0);
+    const rule = createDepthLimitRule(0, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -26,33 +41,30 @@ describe('createDepthLimitRule', () => {
     expect(visitor).toEqual({});
   });
 
-  it('creates a rule with SelectionSet and Field visitors', () => {
-    const rule = createDepthLimitRule(5);
+  it('creates a rule with Field visitor', () => {
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
     const visitor = rule(mockContext);
 
-    expect(visitor).toHaveProperty('SelectionSet');
     expect(visitor).toHaveProperty('Field');
   });
 
-  it('visitor functions exist and accept parameters', () => {
-    const rule = createDepthLimitRule(5);
+  it('Field visitor exists and accepts parameters', () => {
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
     const visitor = rule(mockContext) as {
-      SelectionSet: (...args: unknown[]) => void;
       Field: (...args: unknown[]) => void;
     };
 
-    expect(typeof visitor.SelectionSet).toBe('function');
     expect(typeof visitor.Field).toBe('function');
   });
 
   it('returns no-op rule when maxDepth is negative', () => {
-    const rule = createDepthLimitRule(-1);
+    const rule = createDepthLimitRule(-1, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -61,7 +73,7 @@ describe('createDepthLimitRule', () => {
   });
 
   it('Field visitor counts depth from ancestors', () => {
-    const rule = createDepthLimitRule(2);
+    const rule = createDepthLimitRule(2, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -85,25 +97,11 @@ describe('createDepthLimitRule', () => {
     expect(true).toBe(true);
   });
 
-  it('SelectionSet visitor is a function', () => {
-    const rule = createDepthLimitRule(5);
-    const mockContext: MockValidationContext = {
-      reportError: () => {},
-    };
-    const visitor = rule(mockContext) as {
-      SelectionSet: (...args: unknown[]) => void;
-      Field: (...args: unknown[]) => void;
-    };
-
-    // Call SelectionSet with mock parameters
-    visitor.SelectionSet({ kind: 'SelectionSet' }, null, null, null);
-
-    // Should not throw
-    expect(true).toBe(true);
-  });
+  // Note: The rule only returns a Field visitor (SelectionSet visitor was removed)
+  // This test documents the current implementation
 
   it('handles empty ancestors array', () => {
-    const rule = createDepthLimitRule(5);
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -118,7 +116,7 @@ describe('createDepthLimitRule', () => {
   });
 
   it('handles ancestors with no SelectionSets', () => {
-    const rule = createDepthLimitRule(5);
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -137,7 +135,7 @@ describe('createDepthLimitRule', () => {
   });
 
   it('handles null and undefined in ancestors', () => {
-    const rule = createDepthLimitRule(5);
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -152,7 +150,7 @@ describe('createDepthLimitRule', () => {
   });
 
   it('handles ancestors with objects without kind property', () => {
-    const rule = createDepthLimitRule(5);
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };
@@ -171,7 +169,7 @@ describe('createDepthLimitRule', () => {
   });
 
   it('counts multiple SelectionSets correctly', () => {
-    const rule = createDepthLimitRule(5);
+    const rule = createDepthLimitRule(5, MockGraphQLError);
     const mockContext: MockValidationContext = {
       reportError: () => {},
     };

@@ -45,7 +45,8 @@
 36. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
 37. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
 38. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
-39. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
+39. [API Reference: @hono-enterprise/graphql-plugin](#api-reference-hono-enterprisegraphql-plugin)
+40. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
 
 ---
 
@@ -6978,6 +6979,123 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
   protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
   support.
+
+---
+
+## API Reference: @hono-enterprise/graphql-plugin
+
+GraphQL support with schema-first and code-first construction, serving over the kernel router.
+Registered under `CAPABILITIES.GRAPHQL`. Added in Milestone 51.
+
+### Registration
+
+```typescript
+import { GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
+
+// Schema-first (SDL + resolver map)
+app.register(GraphqlPlugin({
+  typeDefs: `
+    type Query {
+      hello: String
+    }
+  `,
+  resolvers: {
+    Query: {
+      hello: () => 'Hello, World!',
+    },
+  },
+  maxDepth: 10, // default — query depth limit
+  maskInternalErrors: true, // default — mask internal error messages
+  introspection: false, // default — disable introspection in production
+  graphiql: true, // default — serve GraphiQL UI at GET /graphql
+  endpoint: '/graphql', // default
+}));
+
+// Code-first (application-built schema)
+import { GraphQLObjectType, GraphQLSchema, GraphQLString } from 'npm:graphql@^16';
+
+const schema = new GraphQLSchema({
+  query: new GraphQLObjectType({
+    name: 'Query',
+    fields: {
+      hello: { type: GraphQLString, resolve: () => 'Hello, World!' },
+    },
+  }),
+});
+
+app.register(GraphqlPlugin({ schema }));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IGraphqlService } from '@hono-enterprise/common';
+
+const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+const result = await graphql.execute({
+  query: '{ hello }',
+  variables: {},
+  operationName: '',
+});
+```
+
+### Options
+
+| Option               | Type                                      | Default    | Description                                                          |
+| -------------------- | ----------------------------------------- | ---------- | -------------------------------------------------------------------- |
+| `typeDefs`           | `string`                                  | omitted    | SDL for schema-first construction. Mutually exclusive with `schema`. |
+| `resolvers`          | `ResolverMap`                             | omitted    | Resolver map for schema-first. Required with `typeDefs`.             |
+| `schema`             | `GraphqlSchemaLike`                       | omitted    | Pre-built schema for code-first. Mutually exclusive with `typeDefs`. |
+| `endpoint`           | `string`                                  | `/graphql` | URL path for GraphQL endpoint.                                       |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query depth. Queries deeper are rejected with 400.           |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal error messages. Set to `false` for debugging.          |
+| `introspection`      | `boolean`                                 | `false`    | Enable/disable introspection queries.                                |
+| `graphiql`           | `boolean`                                 | `true`     | Serve GraphiQL UI at GET endpoint.                                   |
+| `documentCacheSize`  | `number`                                  | `100`      | Size of the parse+validate document cache.                           |
+| `validationRules`    | `unknown[]`                               | `[]`       | Additional validation rules.                                         |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter (deprecated).                                 |
+| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder.                                              |
+| `rootValue`          | `unknown`                                 | omitted    | Root value for execution.                                            |
+| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module for testing.                                 |
+
+### Exports
+
+| Export                      | Kind     | Purpose                                                                   |
+| --------------------------- | -------- | ------------------------------------------------------------------------- |
+| `GraphqlPlugin`             | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL` |
+| `GraphqlService`            | class    | The `IGraphqlService` implementation                                      |
+| `GraphqlPluginOptions`      | type     | Plugin options (union of schema-first and code-first)                     |
+| `GraphqlCodeFirstOptions`   | type     | Code-first options shape                                                  |
+| `GraphqlSchemaFirstOptions` | type     | Schema-first options shape                                                |
+| `ResolverMap`               | type     | Resolver map type for schema-first                                        |
+| `FieldResolver`             | type     | Field resolver function type                                              |
+| `DefaultGraphqlContext`     | type     | Default context shape passed to resolvers                                 |
+| `GraphqlContextInput`       | type     | Context builder input shape                                               |
+| `GraphqlModuleLike`         | type     | Structural shape of graphql@16 module                                     |
+| `GraphqlSchemaLike`         | type     | Structural shape of GraphQLSchema                                         |
+| `GraphqlRuntimeLoadError`   | class    | Thrown when graphql module fails to load                                  |
+| `GraphqlSchemaError`        | class    | Thrown for schema construction errors                                     |
+| `adaptGraphqlModule`        | function | Adapt graphql module to internal runtime                                  |
+| `loadGraphqlModule`         | function | Load graphql module with lazy import                                      |
+| `graphiqlHtml`              | function | Generate GraphiQL HTML page                                               |
+| `createDepthLimitRule`      | function | Create depth limit validation rule                                        |
+
+### Notes
+
+- **Two construction modes.** Schema-first uses SDL + resolver map; code-first uses a pre-built
+  `GraphQLSchema`. Both are mutually exclusive.
+- **Security defaults.** `maskInternalErrors: true` and `introspection: false` are production-safe
+  defaults.
+- **Query depth limiting.** The `maxDepth` option rejects overly deep queries with HTTP 400 and a
+  descriptive error.
+- **Document caching.** Parse+validate results are cached to avoid redundant work on repeated
+  queries.
+- **GraphiQL UI.** Served at GET `/graphql` when `accept: text/html` and `graphiql: true`.
+- **GraphQL-over-HTTP spec.** Returns 200 for GraphQL errors (field errors, validation errors) and
+  400 for transport errors (invalid JSON, unsupported media type).
+- **`npm:graphql@^16` dependency.** Required at runtime. Can be injected via `graphqlModule` option
+  for testing.
 
 ---
 

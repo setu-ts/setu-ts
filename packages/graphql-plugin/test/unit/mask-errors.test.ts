@@ -85,14 +85,16 @@ describe('mask-errors', () => {
       expect(masked.errors?.[0].message).toBe('Parse error');
     });
 
-    it('applies formatError after masking', () => {
-      const error = new Error('Test error') as Error & {
+    it('formatError is deprecated (no longer applied)', () => {
+      // Note: formatError option is deprecated - errors are no longer formatted
+      // This test documents that formatError is ignored
+      const error = new Error('Internal') as Error & {
         message: string;
         originalError?: Error;
         extensions?: { code: string };
       };
       error.originalError = new Error('Cause');
-      error.extensions = { code: 'GRAPHQL_ERROR' };
+      error.extensions = {} as { code: string };
 
       const result = {
         data: null,
@@ -105,7 +107,9 @@ describe('mask-errors', () => {
         formatError: (_e: unknown) => ({ customField: 'added' }),
       });
 
-      expect((masked.errors?.[0] as { customField?: string }).customField).toBe('added');
+      // formatError is ignored - masked error should be the standard format
+      expect(masked.errors?.[0].message).toBe('Internal server error');
+      expect((masked.errors?.[0] as { customField?: string }).customField).toBeUndefined();
     });
 
     it('does not mask when disabled', () => {

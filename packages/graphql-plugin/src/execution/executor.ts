@@ -33,37 +33,6 @@ function parseDocument(runtime: GraphqlRuntime, query: string): GraphqlDocumentN
 }
 
 /**
- * SelectionSet visitor for depth limit rule.
- */
-export function depthLimitSelectionSetVisitor(_node: unknown) {
-  // Track selection set depth
-}
-
-/**
- * Field visitor for depth limit rule.
- */
-export function depthLimitFieldVisitor(_node: unknown) {
-  // Check depth
-}
-
-/**
- * Create a depth limit validation rule.
- */
-function createDepthRule(_maxDepth: number) {
-  return function (
-    _context: unknown,
-  ): {
-    SelectionSet: typeof depthLimitSelectionSetVisitor;
-    Field: typeof depthLimitFieldVisitor;
-  } {
-    return {
-      SelectionSet: depthLimitSelectionSetVisitor,
-      Field: depthLimitFieldVisitor,
-    };
-  };
-}
-
-/**
  * Validate a document against a schema.
  */
 function validateDocument(
@@ -119,7 +88,7 @@ export function executeGraphql(
     contextValue?: unknown;
   },
 ): Promise<GraphqlExecutionResultLike> {
-  const { runtime, schema, documentCache, validationRules, maxDepth, introspection } = options;
+  const { runtime, schema, documentCache, validationRules } = options;
 
   // Parse (with cache)
   const cached = documentCache.get(query);
@@ -134,19 +103,8 @@ export function executeGraphql(
     validationErrors = null;
   }
 
-  // Build validation rules
+  // Build validation rules - validationRules from caller already includes depth limit and introspection rules
   const rules: unknown[] = [...validationRules];
-
-  // Add depth limit rule if enabled
-  if (maxDepth > 0) {
-    // createDepthRule returns a validation rule function (receives context, returns visitor)
-    rules.push(createDepthRule(maxDepth));
-  }
-
-  // Add introspection rule if disabled
-  if (!introspection) {
-    rules.push(runtime.NoSchemaIntrospectionCustomRule);
-  }
 
   // Validate (if not cached)
   if (!cached) {
