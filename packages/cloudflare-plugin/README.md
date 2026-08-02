@@ -4,7 +4,9 @@ Cloudflare Workers platform bindings for Hono Enterprise.
 
 The framework has served traffic on Workers since the Hono migration, but had no way to reach the
 platform's own primitives. This plugin publishes a Worker's bindings under `CAPABILITIES.CLOUDFLARE`
-and, optionally, serves the committed cache and storage capabilities from KV and R2.
+and, optionally, serves the committed cache, storage, and queue capabilities from KV, R2, and
+Cloudflare Queues. It also ships the `queue` and `scheduled` handler exports a Worker needs, and a
+response cache over the platform's own edge cache.
 
 **Zero npm dependencies.** Nothing in this package imports `cloudflare:workers` — the application
 passes `env` in, which keeps the package type-checkable on Deno, Node, and Bun, and trivially
@@ -79,6 +81,69 @@ longer; only `waitUntil` needs the newer date.
 | `storage.binding`         | `string`                 | —           | R2 bucket serving `CAPABILITIES.STORAGE`.                         |
 | `storage.name`            | `string`                 | `'default'` | Derives `storage.<name>` when not `'default'`.                    |
 | `storage.prefix`          | `string`                 | —           | Object-key prefix.                                                |
+| `queue.binding`           | `string`                 | —           | Queues producer binding serving `CAPABILITIES.QUEUE`.             |
+| `queue.name`              | `string`                 | `'default'` | Derives `queue.<name>` when not `'default'`.                      |
+| `queue.maxDelaySeconds`   | `number`                 | `86400`     | A larger `delayMs` throws rather than being truncated.            |
+
+## Queues, Cron Triggers, and the edge cache
+
+Cloudflare invokes `queue` and `scheduled` as **module-level exports** — `fetch` is not involved —
+so your Worker assembles them beside it:
+
+```typescript
+import {
+  cacheApiMiddleware,
+  CloudflarePlugin,
+  createQueueHandler,
+  createScheduledHandler,
+  WorkersCron,
+} from '@hono-enterprise/cloudflare-plugin';
+import { CAPABILITIES, type IQueue } from '@hono-enterprise/common';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin({ env }),
+    CloudflarePlugin({ env, waitUntil, queue: { binding: 'JOBS' } }),
+  ],
+});
+
+// A route cached in the datacenter it was served from.
+app.router.get('/catalog', {
+  handler: listCatalog,
+  middleware: [cacheApiMiddleware({ ttlSeconds: 300 })],
+});
+
+await app.start();
+
+const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+queue.process<{ to: string }>('send-welcome', async (job) => {
+  await mailer.send(job.data);
+}, { concurrency: 5 });
+
+// The expression must match wrangler.toml `[triggers] crons` exactly.
+const cron = new WorkersCron();
+cron.on('0 3 * * *', () => queue.add('rebuild-reports', {}));
+
+export default {
+  fetch: app.fetch,
+  queue: createQueueHandler(app),
+  scheduled: createScheduledHandler(cron),
+};
+```
+
+`wrangler.toml` needs the matching stanzas:
+
+```toml
+[[queues.producers]]
+queue = "jobs"
+binding = "JOBS"
+
+[[queues.consumers]]
+queue = "jobs"
+
+[triggers]
+crons = ["0 3 * * *"]
+```
 
 ## Sessions
 
@@ -117,16 +182,52 @@ SessionPlugin({
 - **Binding methods only work inside a request.** Cloudflare prohibits I/O in global scope. The
   plugin holds bindings at `register()` and never reads through them there, and the health indicator
   performs no binding I/O.
+- **An unroutable queue message is retried, never acked.** A body that is not one of this package's
+  job envelopes, or a job name with no registered processor, goes back for redelivery and is
+  reported through the logger. Acking would discard it permanently and silently. Your queue's
+  `max_retries` and dead-letter settings in `wrangler.toml` then decide what happens.
+- **`queue.addRecurring` throws.** Cloudflare Queues has no recurring message. Declare the schedule
+  in `[triggers] crons` and let a `WorkersCron` handler enqueue the work.
+- **There is no `IScheduler` on Workers, deliberately.** `every` and `delay` arm timers, and the
+  isolate is evicted between invocations, so they would silently never fire; `pause`/`resume`/
+  `remove` need state that does not survive an invocation; and `getNextRun` is owned by
+  `wrangler.toml`. `WorkersCron` is a small honest surface instead of an `IScheduler` where six of
+  eight methods throw.
+- **A cron expression registered here but absent from `wrangler.toml` never fires.** Nothing in the
+  process can read that file. `cron.expressions()` lets you assert your own coverage, and a trigger
+  that fires with nothing registered is logged every time. Matching is exact — whitespace is not
+  normalized.
+- **Only GET requests touch the edge cache.** The cache key is a URL, which the Cache API resolves
+  as a GET request, so a `POST` to a cached path would otherwise be served the cached GET body and
+  never reach your handler. Non-GET requests pass through with `X-Cache-Api: BYPASS`. This matters
+  most if you add the middleware globally rather than to one GET route.
+- **A failed cache write never fails your response.** `Cache.put` rejects for an oversized body or a
+  quota error; the response is already built by then, so the failure is reported and the request
+  succeeds uncached.
+- **`caches.default` is per-datacenter.** `cacheApiMiddleware` is a latency optimisation, not a
+  shared store: a hit in one colo says nothing about another, and a `delete` does not evict
+  globally. It reports under `X-Cache-Api`, so it composes with `cache-plugin`'s `cacheMiddleware`
+  (which reports under `X-Cache` and reads a store every colo shares) rather than colliding with it.
+- **The edge cache refuses some responses, and the middleware skips them rather than failing.**
+  Non-GET, 206, `Vary: *`, and an uncleared `Set-Cookie` all make `caches.default.put` throw; those
+  are checked first. `Cache-Control: private=Set-Cookie` is the platform's opt-in. Streaming
+  responses are never cached.
+- **A cache HIT is replayed as a stream**, so `app.inject()` cannot read its body — drive cached
+  routes in tests with `app.fetch` and a web `Request`, which is what a Worker invokes anyway.
 - **Not verified against a live Worker.** Every binding is exercised against a fake built from the
   documented signatures, including KV's 60-second floor and R2's void `delete`. CI has no Cloudflare
   account.
 
 ## Not in this package
 
-D1 as a database backend, Queues, Cron Triggers, Durable Objects, and the Cache API response cache
-are **M52b**. Each needs either a new module-level handler export from your Worker or a contract
-promotion in `common`. Their bindings are reachable today through `bindings.d1(...)`,
-`bindings.queue(...)`, and `bindings.durableObject(...)`.
+- **D1 as a database backend — M52c.** The seam a backend implements lives inside `database-plugin`,
+  not `common`, so shipping it is a contract promotion. `bindings.d1('DB')` gives you the binding
+  today.
+- **Durable Objects — M52d.** A DO-backed realtime backplane and distributed lock both need your
+  Worker to export a DO class plus a wrangler migration stanza. `bindings.durableObject('ROOMS')`
+  gives you the namespace today.
+- **Hyperdrive, Vectorize, Workers AI, Analytics Engine.** Reachable now through
+  `bindings.get<T>('NAME')`; each becomes a first-class port only when an application needs one.
 
 ## Documentation
 

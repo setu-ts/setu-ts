@@ -8,6 +8,47 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Cloudflare Queues, Cron Triggers, and the Cache API in `@hono-enterprise/cloudflare-plugin`**
+  (Milestone 52b) — the three platform features that need a **module-level handler export** from the
+  application's Worker rather than anything reachable through `fetch`. No `common` change and no new
+  capability token. `WorkersQueue` satisfies the committed `IQueue` over a Queues producer binding,
+  opt-in through a `queue` arm and registered under `CAPABILITIES.QUEUE` (or `queue.<name>`); the
+  job's **name and id travel in a `{ v, name, id, data, maxAttempts? }` envelope**, because a
+  Cloudflare message body is arbitrary JSON carrying neither and `producer.send()` resolves to
+  `void`, so the id `add` returns is the id the processor sees as `job.id`.
+  `createQueueHandler(app)` builds the `queue` export. A message whose body is not a readable
+  envelope, or whose name has no processor, is **retried rather than acked** — acking would discard
+  it permanently and silently, the failure a queue exists to prevent — and
+  `AddJobOptions.maxAttempts` is enforced at dispatch, since Cloudflare's `max_retries` is
+  queue-wide configuration rather than per message. `addRecurring` throws, naming Cron Triggers as
+  the platform's own mechanism. Cron Triggers ship as `WorkersCron` plus
+  `createScheduledHandler(cron)`, and **deliberately do not register `CAPABILITIES.SCHEDULER`**: of
+  `IScheduler`'s eight methods only `cron` is expressible on Workers — `every` and `delay` arm
+  timers across an isolate eviction (the same reason `scheduler-plugin` cannot run there),
+  `pause`/`resume`/`remove` need state that does not survive an invocation, and `getNextRun` is
+  owned by the `wrangler.toml` `[triggers]` block. An implementation where six of eight methods
+  throw would violate Liskov substitution, so a small honest surface was chosen instead. An
+  expression is matched against `ScheduledController.cron` **exactly**, and `expressions()` exists
+  so an application can assert its own coverage against `wrangler.toml`, which no code in the
+  process can read. `cacheApiMiddleware` caches responses in `caches.default`. It is a **different
+  layer** from `cache-plugin`'s `cacheMiddleware` and composes with it, so it reports under
+  **`X-Cache-Api`** rather than `X-Cache`. The platform's own refusals — non-GET, status 206,
+  `Vary: *`, and an uncleared `Set-Cookie` — are checked first through the pure exported
+  `assessCacheability` rather than discovered from a thrown `put`; the 206 and `Vary: *` rules are
+  unconditional, because an operator may legitimately configure `cacheableStatuses: [200, 206]` and
+  only the explicit rule then stops the platform throwing. The write rides
+  `ICloudflareBindings.waitUntil` when the plugin is registered and is awaited inline when it is
+  not, so it is never simply abandoned; with no cache handle at all the middleware passes through
+  rather than throwing, so an application composed for several targets still serves off Workers. A
+  HIT is replayed with `IResponse.stream`, so a cached response of any size reaches the client
+  unbuffered — which means `app.inject()` cannot read it and cached routes are tested with
+  `app.fetch`. `caches.default` is **per-datacenter**: a latency optimisation, not a shared store.
+  D1 as a database backend moved to **Milestone 52c** (it needs the `IDatabaseAdapter` seam promoted
+  from `database-plugin` into `common`, plus reconciling `ITransaction` with D1's batch-only
+  atomicity) and Durable Objects to **Milestone 52d** (both the realtime backplane and the
+  distributed lock need the application to export a DO class, and Durable Objects expose no pub/sub
+  primitive, so a backplane means each replica holding a WebSocket to the object).
+
 - **`@hono-enterprise/cloudflare-plugin`** (Milestone 52) — a new package registering
   `ICloudflareBindings` under a new `CAPABILITIES.CLOUDFLARE` token. The framework has served
   traffic on Workers since the Hono migration but could not reach a single platform binding; this
@@ -235,6 +276,12 @@ All notable changes to this project are documented here. The format follows
   request**; caching one lazily would not have been a fix either, since workerd then refuses to use
   a controller created for one request on behalf of another. A regression test pins that two
   contexts never share a fallback signal — it fails against the previous code.
+- **`@hono-enterprise/cloudflare-plugin` queue reporting reaches a logger registered after the
+  plugin** (Milestone 52b) — `WorkersQueueOptions.logger` is a thunk rather than an `ILogger`, for
+  the reason `resolveWaitUntil` already takes one: `ctx.logger` resolves lazily through a Proxy that
+  answers `undefined` until a logger is registered, and a capability may be registered imperatively
+  with no `provides` declaration for the resolver to order against. Capturing the value during
+  `register()` would silence every dispatch report in an application whose logger registers later.
 
 - **`honoe new` now refuses a project plan containing the same path twice** (Milestone 36c). The
   overwrite check probes the filesystem, so it could not see a duplicate inside one plan: both files

@@ -8,14 +8,20 @@
  */
 
 import type {
+  ICacheApi,
   IKvNamespace,
+  IQueueMessage,
+  IQueueMessageBatch,
+  IQueueProducer,
   IR2Bucket,
   IR2Object,
   IR2ObjectBody,
   KvListOptions,
   KvListResult,
   KvPutOptions,
+  QueueSendOptions,
 } from '../src/index.ts';
+import type { ILogger } from '@hono-enterprise/common';
 
 /** A recorded `put` call, so a test can assert what reached the platform. */
 export interface RecordedPut {
@@ -190,4 +196,174 @@ export async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8
     offset += chunk.byteLength;
   }
   return out;
+}
+
+/** A recorded `send` call, so a test can assert what reached the platform. */
+export interface RecordedSend {
+  readonly body: unknown;
+  readonly options: QueueSendOptions | undefined;
+}
+
+/** A Queues producer that records what was sent. */
+export class FakeQueueProducer implements IQueueProducer {
+  readonly sends: RecordedSend[] = [];
+  readonly batches: readonly { readonly body: unknown }[][] = [];
+
+  send(body: unknown, options?: QueueSendOptions): Promise<void> {
+    this.sends.push({ body, options });
+    return Promise.resolve();
+  }
+
+  sendBatch(
+    messages: readonly { readonly body: unknown; readonly contentType?: string }[],
+  ): Promise<void> {
+    (this.batches as { readonly body: unknown }[][]).push([...messages]);
+    return Promise.resolve();
+  }
+}
+
+/**
+ * One delivered message.
+ *
+ * `ack` and `retry` record rather than assert, because the property that
+ * matters is that **exactly one** of them fires per message — a fake that threw
+ * on the second call would fail the test at the wrong place.
+ */
+export class FakeQueueMessage implements IQueueMessage {
+  acked = 0;
+  retried = 0;
+  retryOptions: { readonly delaySeconds?: number } | undefined;
+
+  constructor(
+    readonly id: string,
+    readonly body: unknown,
+    readonly attempts: number = 1,
+  ) {}
+
+  ack(): void {
+    this.acked += 1;
+  }
+
+  retry(options?: { readonly delaySeconds?: number }): void {
+    this.retried += 1;
+    this.retryOptions = options;
+  }
+
+  /** How the message was settled, for a single readable assertion. */
+  get disposition(): 'acked' | 'retried' | 'unsettled' | 'both' {
+    if (this.acked > 0 && this.retried > 0) return 'both';
+    if (this.acked > 0) return 'acked';
+    if (this.retried > 0) return 'retried';
+    return 'unsettled';
+  }
+}
+
+/**
+ * A message whose `ack()` throws, reproducing a platform-side ack failure.
+ *
+ * Its whole point is to prove `ack()` is not called inside the processor's
+ * `try`: there, a throwing ack would be caught as a processor failure and the
+ * message would ALSO be retried.
+ */
+export class AckFailsQueueMessage extends FakeQueueMessage {
+  override ack(): void {
+    super.ack();
+    throw new Error('cannot ack: batch already finalized');
+  }
+}
+
+/** A delivered batch. */
+export class FakeQueueBatch implements IQueueMessageBatch {
+  constructor(
+    readonly queue: string,
+    readonly messages: readonly FakeQueueMessage[],
+  ) {}
+}
+
+/**
+ * The Cache API, recording what was stored.
+ *
+ * Keys are the request URL string, which is what the middleware passes; a real
+ * `Cache` also accepts a `Request`, but the middleware never builds one.
+ */
+export class FakeCacheApi implements ICacheApi {
+  readonly entries = new Map<string, Response>();
+  readonly puts: { readonly key: string; readonly response: Response }[] = [];
+  readonly matches: string[] = [];
+
+  match(request: Request | string): Promise<Response | undefined> {
+    const key = keyOf(request);
+    this.matches.push(key);
+    const stored = this.entries.get(key);
+    // Cloned on read, exactly as the platform hands back a fresh body: returning
+    // the same Response twice would give the second reader a used stream.
+    return Promise.resolve(stored === undefined ? undefined : stored.clone());
+  }
+
+  put(request: Request | string, response: Response): Promise<void> {
+    const key = keyOf(request);
+    this.entries.set(key, response.clone());
+    this.puts.push({ key, response });
+    return Promise.resolve();
+  }
+
+  delete(request: Request | string): Promise<boolean> {
+    return Promise.resolve(this.entries.delete(keyOf(request)));
+  }
+}
+
+function keyOf(request: Request | string): string {
+  return typeof request === 'string' ? request : request.url;
+}
+
+/** A logger that records every call, for asserting the reporting paths. */
+export class RecordingLogger implements ILogger {
+  readonly level = 'debug' as const;
+  readonly records: {
+    readonly level: string;
+    readonly message: string;
+    readonly meta?: unknown;
+  }[] = [];
+
+  fatal(message: string, metadata?: unknown): void {
+    this.#record('fatal', message, metadata);
+  }
+  error(message: string, metadata?: unknown): void {
+    this.#record('error', message, metadata);
+  }
+  warn(message: string, metadata?: unknown): void {
+    this.#record('warn', message, metadata);
+  }
+  info(message: string, metadata?: unknown): void {
+    this.#record('info', message, metadata);
+  }
+  debug(message: string, metadata?: unknown): void {
+    this.#record('debug', message, metadata);
+  }
+  trace(message: string, metadata?: unknown): void {
+    this.#record('trace', message, metadata);
+  }
+  child(): ILogger {
+    return this;
+  }
+
+  /** Every message recorded, for a compact assertion. */
+  messages(): readonly string[] {
+    return this.records.map((record) => record.message);
+  }
+
+  #record(level: string, message: string, metadata?: unknown): void {
+    this.records.push({ level, message, ...(metadata === undefined ? {} : { meta: metadata }) });
+  }
+}
+
+/** A deterministic id source, so an assertion can name the id it expects. */
+export class SequentialIds {
+  #next = 1;
+
+  uuid(): string {
+    const id = `id-${this.#next}`;
+    this.#next += 1;
+    return id;
+  }
 }

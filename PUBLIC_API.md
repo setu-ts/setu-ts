@@ -7003,7 +7003,8 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 ## API Reference: @hono-enterprise/cloudflare-plugin
 
 Cloudflare Workers platform bindings, published under `CAPABILITIES.CLOUDFLARE`, plus optional
-KV-backed cache and R2-backed storage. Zero npm dependencies. Added in Milestone 52.
+KV-backed cache, R2-backed storage, and a Queues-backed `IQueue`. Zero npm dependencies. Added in
+Milestone 52; Queues, Cron Triggers, and the Cache API response cache added in Milestone 52b.
 
 ### Registration
 
@@ -7017,7 +7018,30 @@ app.register(CloudflarePlugin({
   requireBindings: ['CACHE_KV'], // fail at register() rather than at first use
   cache: { binding: 'CACHE_KV', prefix: 'cache:', defaultTtlSeconds: 300 },
   storage: { binding: 'UPLOADS', prefix: 'user-uploads/' },
+  queue: { binding: 'JOBS' },
 }));
+```
+
+Consuming a queue and receiving Cron Triggers need **module-level handler exports** the platform
+invokes directly — `fetch` is not involved — so the application assembles them beside it:
+
+```typescript
+import {
+  createQueueHandler,
+  createScheduledHandler,
+  WorkersCron,
+} from '@hono-enterprise/cloudflare-plugin';
+
+await app.start();
+
+const cron = new WorkersCron();
+cron.on('0 3 * * *', () => rebuildReports(app)); // must match wrangler.toml [triggers] crons
+
+export default {
+  fetch: app.fetch,
+  queue: createQueueHandler(app),
+  scheduled: createScheduledHandler(cron),
+};
 ```
 
 Nothing in the package imports `cloudflare:workers`; the application passes `env` in. That specifier
@@ -7026,33 +7050,42 @@ other runtime — and injection is what the platform docs recommend for testabil
 
 ### Options
 
-| Option                    | Type                  | Default     | Consumer / behavior                                            |
-| ------------------------- | --------------------- | ----------- | -------------------------------------------------------------- |
-| `env`                     | `CloudflareWorkerEnv` | required    | `BindingRegistry` — the record every accessor reads            |
-| `waitUntil`               | `WaitUntilHost`       | —           | `resolveWaitUntil` — delegated to; omit off Workers            |
-| `requireBindings`         | `readonly string[]`   | `[]`        | `register()` — throws naming every absent entry                |
-| `cache.binding`           | `string`              | —           | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE` |
-| `cache.name`              | `string`              | `'default'` | Plugin factory — derives `cache.<name>` when not `'default'`   |
-| `cache.prefix`            | `string`              | —           | `KvCacheStore` — key prefix; **required to call `clear()`**    |
-| `cache.defaultTtlSeconds` | `number`              | —           | `KvCacheStore.set` — applied when `ttlSeconds` is omitted      |
-| `storage.binding`         | `string`              | —           | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`     |
-| `storage.name`            | `string`              | `'default'` | Plugin factory — derives `storage.<name>` when not `'default'` |
-| `storage.prefix`          | `string`              | —           | `R2Storage` — object-key prefix                                |
+| Option                    | Type                  | Default     | Consumer / behavior                                                        |
+| ------------------------- | --------------------- | ----------- | -------------------------------------------------------------------------- |
+| `env`                     | `CloudflareWorkerEnv` | required    | `BindingRegistry` — the record every accessor reads                        |
+| `waitUntil`               | `WaitUntilHost`       | —           | `resolveWaitUntil` — delegated to; omit off Workers                        |
+| `requireBindings`         | `readonly string[]`   | `[]`        | `register()` — throws naming every absent entry                            |
+| `cache.binding`           | `string`              | —           | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE`             |
+| `cache.name`              | `string`              | `'default'` | Plugin factory — derives `cache.<name>` when not `'default'`               |
+| `cache.prefix`            | `string`              | —           | `KvCacheStore` — key prefix; **required to call `clear()`**                |
+| `cache.defaultTtlSeconds` | `number`              | —           | `KvCacheStore.set` — applied when `ttlSeconds` is omitted                  |
+| `storage.binding`         | `string`              | —           | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`                 |
+| `storage.name`            | `string`              | `'default'` | Plugin factory — derives `storage.<name>` when not `'default'`             |
+| `storage.prefix`          | `string`              | —           | `R2Storage` — object-key prefix                                            |
+| `queue.binding`           | `string`              | —           | `WorkersQueue` — the producer binding serving `CAPABILITIES.QUEUE`         |
+| `queue.name`              | `string`              | `'default'` | Plugin factory — derives `queue.<name>` when not `'default'`               |
+| `queue.maxDelaySeconds`   | `number`              | `86400`     | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated |
 
 ### Exports
 
-| Export                                                                                                                                                                                                                                                                   | Kind          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
-| `CloudflarePlugin`                                                                                                                                                                                                                                                       | factory       |
-| `ICloudflareBindings`                                                                                                                                                                                                                                                    | interface     |
-| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`                                                                                                                                                                                                              | types         |
-| `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                      | class + types |
-| `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                | class + types |
-| `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                          | class + types |
-| `WaitUntilHost`                                                                                                                                                                                                                                                          | type          |
-| `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
-| `isKvNamespace`, `isR2Bucket`                                                                                                                                                                                                                                            | guards        |
-| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                           | errors        |
+| Export                                                                                                                                                                                                                                                                                                                                  | Kind          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `CloudflarePlugin`                                                                                                                                                                                                                                                                                                                      | factory       |
+| `ICloudflareBindings`                                                                                                                                                                                                                                                                                                                   | interface     |
+| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`, `WorkersQueueArm`                                                                                                                                                                                                                                                          | types         |
+| `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                                                                                     | class + types |
+| `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                                                                               | class + types |
+| `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                                                                                         | class + types |
+| `WaitUntilHost`, `LoggerSource`                                                                                                                                                                                                                                                                                                         | types         |
+| `WorkersQueue`, `WorkersQueueOptions`, `JobIdSource`                                                                                                                                                                                                                                                                                    | class + types |
+| `createQueueHandler`, `QueueHandler`, `QueueHandlerOptions`                                                                                                                                                                                                                                                                             | fn + types    |
+| `WorkersCron`, `WorkersCronOptions`, `CronHandler`                                                                                                                                                                                                                                                                                      | class + types |
+| `createScheduledHandler`, `ScheduledHandler`                                                                                                                                                                                                                                                                                            | fn + type     |
+| `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`                                                                                                                                                                                                                                                                          | fn + types    |
+| `assessCacheability`, `CacheabilityInput`, `CacheRefusal`                                                                                                                                                                                                                                                                               | fn + types    |
+| `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
+| `isKvNamespace`, `isR2Bucket`                                                                                                                                                                                                                                                                                                           | guards        |
+| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                                                                                          | errors        |
 
 ### `ICloudflareBindings`
 
@@ -7103,9 +7136,71 @@ additionally validate the binding's shape, so an R2 bucket wired into a KV optio
 - **Unverified against a live Worker.** Every binding is exercised against a fake built from the
   documented signatures — including KV's 60-second floor and R2's void `delete` — but CI holds no
   Cloudflare account.
-- **Not in this package.** D1 as a database backend, Queues, Cron Triggers, Durable Objects, and the
-  Cache API response cache are Milestone 52b: each needs a new module-level handler export from the
-  application's Worker, or a contract promotion in `common`.
+- **Queues: `addRecurring` throws.** Cloudflare Queues has no recurring message. The error names
+  Cron Triggers and `WorkersCron` as the platform's own mechanism. `add` and `process` map directly:
+  `AddJobOptions.delayMs` is converted to the platform's whole-second `delaySeconds` **rounded up**
+  (so a job is never delivered early) and refused above `maxDelaySeconds`, while
+  `ProcessOptions.concurrency` bounds how many of one batch's messages for that name run at a time —
+  per name, so one processor's limit never throttles another's.
+- **A job's id comes from this package, not the platform.** `producer.send()` resolves to `void`, so
+  the id `add` returns is minted from `runtime.uuid()` and travels inside a `{ v, name, id, data }`
+  envelope — which is also what carries the job **name**, since a Cloudflare message body is
+  arbitrary JSON and `IQueue.process` dispatches by name. The id the caller receives is therefore
+  the id the processor sees as `job.id`.
+- **An unroutable message is RETRIED, never acked.** A body that is not a readable envelope, or a
+  name with no registered processor, is returned for redelivery and reported through the logger —
+  acking it would discard it permanently and silently, which is the failure a queue exists to
+  prevent. A processor that throws is likewise retried, leaving the queue's own `max_retries` and
+  dead-letter configuration to decide what happens next. `AddJobOptions.maxAttempts` is enforced at
+  dispatch, because Cloudflare's `max_retries` is queue-wide configuration rather than per message.
+- **Cron Triggers do NOT register `CAPABILITIES.SCHEDULER`, deliberately.** Of `IScheduler`'s eight
+  methods only `cron` is expressible on Workers: `every` and `delay` arm a timer and the isolate is
+  evicted between invocations (the same reason `scheduler-plugin` cannot run on Workers);
+  `pause`/`resume`/`remove` need state that does not survive between invocations; and `getNextRun`
+  is owned by the `wrangler.toml` `[triggers]` block. An `IScheduler` where six of eight methods
+  throw would violate Liskov substitution, so `WorkersCron` is a purpose-built registry reached
+  directly instead — which is why `createScheduledHandler` takes it while `createQueueHandler` takes
+  the application.
+- **A `WorkersCron` expression must match `wrangler.toml` exactly.** Nothing in the process can read
+  that file, so an expression registered here but absent from `[triggers] crons` never fires, and a
+  configured trigger with nothing registered here is reported on every occurrence. `expressions()`
+  exists so an application can assert its own coverage. Matching is exact — whitespace is not
+  normalized.
+- **`cacheApiMiddleware` is a different layer from `cache-plugin`'s `cacheMiddleware`**, and the two
+  compose: this one serves from the datacenter the request landed in with no round trip, while
+  `cacheMiddleware` reads an `ICacheStore` every colo shares. It therefore reports under
+  **`X-Cache-Api`** (`HIT`/`MISS`/`BYPASS`), never `X-Cache`, so an operator can tell which layer
+  answered. `caches.default` is **per-datacenter**: a hit rate measured in one location says nothing
+  about another, and a `delete` does not evict globally.
+- **The platform's cache refusals are checked before the write, not discovered by it.**
+  `caches.default.put` throws for a non-GET request, status 206, `Vary: *`, and an uncleared
+  `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the
+  write. The 206 and `Vary: *` checks are unconditional — an operator may legitimately configure
+  `cacheableStatuses: [200, 206]`, at which point only the explicit rule stops the platform
+  throwing. `Cache-Control: private=Set-Cookie` is the platform's documented opt-in and clears the
+  `set-cookie` refusal.
+- **Only GET requests touch the edge cache — on the read as well as the write.** The cache key is a
+  URL string, which the Cache API resolves as a GET request, so consulting it for a `POST` would
+  serve the cached GET body and skip the handler entirely: a mutation silently discarded behind a
+  200. Any non-GET request passes straight through with `X-Cache-Api: BYPASS`, which matters most
+  when the middleware sits on the global pipeline rather than a single GET route.
+- **A failed cache write never fails the request.** `Cache.put` rejects for an oversized response or
+  a quota error, and by then the response already exists — so both write paths report and continue
+  rather than turning a 200 into a 500. With the plugin registered `waitUntil` carries that
+  reporting; without it the middleware logs through `CAPABILITIES.LOGGER` when one is present.
+- **A cache HIT is replayed as a stream**, so a cached response of any size reaches the client
+  without being buffered — which means `app.inject()` cannot read its body. Drive a cached route
+  with `app.fetch` and a web `Request`, the entry point a Worker invokes anyway. A **streaming**
+  response is never cached: teeing it would double the memory the stream exists to avoid.
+- **The cache write rides `waitUntil` when the plugin is registered**, so it never delays the
+  response; with `CAPABILITIES.CLOUDFLARE` absent the middleware awaits it inline rather than
+  abandoning it, and with no cache handle at all it passes through with `BYPASS` rather than
+  throwing.
+- **Not in this package.** D1 as a database backend is Milestone 52c — the seam a backend implements
+  (`IDatabaseAdapter`) lives inside `database-plugin` and is not a committed `common` port, so
+  shipping it means a contract promotion. A Durable-Object realtime backplane and distributed lock
+  are Milestone 52d: both need the application to export a DO class plus a wrangler migration
+  stanza.
 
 ---
 

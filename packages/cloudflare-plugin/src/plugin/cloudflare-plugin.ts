@@ -11,38 +11,24 @@ import type {
   ICacheStore,
   IPlugin,
   IPluginContext,
+  IQueue,
   IStorage,
 } from '@hono-enterprise/common';
-import {
-  CAPABILITIES,
-  createCapabilityToken,
-  PLUGIN_PRIORITY,
-  splitWorkerEnv,
-} from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@hono-enterprise/common';
 
 import { resolveWaitUntil } from '../background/wait-until.ts';
+import { instanceToken } from '../instance-token.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import { BindingRegistry } from '../bindings/binding-registry.ts';
 import { CloudflareBindingMissingError } from '../errors.ts';
 import { createCloudflareIndicator } from '../health/indicator.ts';
 import type { CloudflarePluginOptions } from '../options.ts';
+import { WorkersQueue } from '../queues/workers-queue.ts';
 import { R2Storage } from '../storage/r2-storage.ts';
 import { KvCacheStore } from '../stores/kv-cache-store.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'cloudflare-plugin';
-
-/** The instance name that claims a bare capability token. */
-const DEFAULT_INSTANCE = 'default';
-
-/**
- * Derives the capability token for an instance, matching `CachePlugin`'s
- * convention so a KV cache can sit beside a memory one.
- */
-function instanceToken(base: CapabilityToken, name: string | undefined): CapabilityToken {
-  const instance = name ?? DEFAULT_INSTANCE;
-  return instance === DEFAULT_INSTANCE ? base : createCapabilityToken(`${base}.${instance}`);
-}
 
 /**
  * Creates the Cloudflare Workers plugin.
@@ -88,12 +74,16 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
     options: options.storage,
     token: instanceToken(CAPABILITIES.STORAGE, options.storage.name),
   };
+  const queueArm = options.queue === undefined
+    ? undefined
+    : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
 
   // Computed from the options rather than declared statically, so the kernel's
   // duplicate-provider index sees exactly what this instance registers.
   const provides: CapabilityToken[] = [CAPABILITIES.CLOUDFLARE];
   if (cacheArm !== undefined) provides.push(cacheArm.token);
   if (storageArm !== undefined) provides.push(storageArm.token);
+  if (queueArm !== undefined) provides.push(queueArm.token);
 
   return {
     name: PLUGIN_NAME,
@@ -146,6 +136,23 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         ctx.services.register<IStorage>(storageArm.token, storage);
       }
 
+      if (queueArm !== undefined) {
+        // `ctx.runtime` rather than `crypto.randomUUID()`: the id `add` returns
+        // travels inside the message envelope, and AI_GUIDELINES §4.2 routes
+        // every runtime capability through IRuntimeServices. That requirement is
+        // why the queue is built here rather than by the application.
+        const queue = new WorkersQueue(registry.queue(queueArm.options.binding), ctx.runtime, {
+          // A thunk, matching the waitUntil seam above: `ctx.logger` reads as
+          // `undefined` until a logger is registered, so capturing its value
+          // here would silence a logger that registers imperatively later.
+          logger: () => ctx.logger,
+          ...(queueArm.options.maxDelaySeconds === undefined
+            ? {}
+            : { maxDelaySeconds: queueArm.options.maxDelaySeconds }),
+        });
+        ctx.services.register<IQueue>(queueArm.token, queue);
+      }
+
       ctx.health.register(
         'cloudflare',
         createCloudflareIndicator({
@@ -153,6 +160,7 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           varCount: Object.keys(vars).length,
           cache: cacheArm !== undefined,
           storage: storageArm !== undefined,
+          queue: queueArm !== undefined,
           waitUntil: options.waitUntil !== undefined,
           platform: ctx.runtime.platform(),
         }),
