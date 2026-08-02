@@ -875,8 +875,13 @@ app.router.post('/orders', async (ctx) => {
     const paymentRepo = uow.getRepository<Payment>('Payment');
 
     // All operations in same transaction
-    const newOrder = await orderRepo.create(ctx.request.body);
-    await inventoryRepo.decrement(newOrder.productId, newOrder.quantity);
+    const newOrder = await orderRepo.create(await ctx.request.json());
+
+    const stock = await inventoryRepo.findById(newOrder.productId);
+    await inventoryRepo.update(newOrder.productId, {
+      quantity: stock!.quantity - newOrder.quantity,
+    });
+
     await paymentRepo.create({ orderId: newOrder.id, amount: newOrder.total });
 
     return newOrder;
@@ -908,6 +913,76 @@ interface IRepository<Entity> {
   count(options?: CountOptions): Promise<number>;
 }
 ```
+
+### Custom Adapters (external backends)
+
+`DatabasePluginOptions` is a union discriminated on `type`. The `'custom'` arm accepts any
+`IDatabaseAdapter` from `@hono-enterprise/common`, which is how a backend implemented outside this
+package is registered — no plugin imports another plugin.
+
+```typescript
+import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+
+app.register(DatabasePlugin({
+  type: 'custom',
+  adapter: new D1Adapter(env.DB as ID1Database),
+}));
+```
+
+`adapter` is required by the union, so a `'custom'` registration that omits it is a compile error
+rather than a startup throw. The plugin calls `connect()` on the adapter during `register()` and
+`disconnect()` on shutdown; it never constructs or replaces it. `name` and `options` apply as usual
+— `logQueries` routes a custom adapter's data sources through the same single logging wrapper every
+built-in adapter uses.
+
+The port to implement:
+
+```typescript
+interface IDatabaseAdapter extends IOrmAdapter {
+  createDataSource(entity: string): IDataSource;
+  beginTransaction(): Promise<IAdapterTransaction>;
+  rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]>;
+}
+
+interface IDataSource {
+  findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]>;
+  findById(id: string | number): Promise<Record<string, unknown> | null>;
+  create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>>;
+  update(
+    id: string | number,
+    data: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown>>;
+  delete(id: string | number): Promise<boolean>;
+  count(where: Record<string, unknown>): Promise<number>;
+}
+```
+
+A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
+`select` itself, and `BaseRepository` must not re-apply any of them.
+
+### Exports
+
+| Export                                                                                                  | Kind                              |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `DatabasePlugin`                                                                                        | factory                           |
+| `DatabaseService`                                                                                       | class                             |
+| `BaseRepository`, `UnitOfWork`                                                                          | classes                           |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                      | classes                           |
+| `PrismaRepository`, `DrizzleRepository`                                                                 | classes                           |
+| `createPrismaDataSource`, `createDrizzleDataSource`                                                     | functions                         |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                        | interfaces                        |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions` | types                             |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                         | types                             |
+| `FindOptions`, `CountOptions`, `OrderDirection`                                                         | types                             |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                             | re-exports from `common`          |
+| `DataSource`                                                                                            | deprecated alias of `IDataSource` |
+
+`DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
+the promoted `IDataSource` (the same type), and will be removed in the next major version.
+
+`DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
+`type`. Both are additive for callers — every existing registration compiles unchanged.
 
 ### Multiple Databases
 
@@ -5902,7 +5977,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                                                                                                    |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                     |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                     |
-| Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                                                                                                     |
+| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                            |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                     |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                  |
 | Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                     |
@@ -7076,6 +7151,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                                                                                     | class + types |
 | `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                                                                               | class + types |
 | `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                                                                                         | class + types |
+| `D1Adapter`, `D1AdapterOptions`, `D1EntityMapping`                                                                                                                                                                                                                                                                                      | class + types |
 | `WaitUntilHost`, `LoggerSource`                                                                                                                                                                                                                                                                                                         | types         |
 | `WorkersQueue`, `WorkersQueueOptions`, `JobIdSource`                                                                                                                                                                                                                                                                                    | class + types |
 | `createQueueHandler`, `QueueHandler`, `QueueHandlerOptions`                                                                                                                                                                                                                                                                             | fn + types    |
@@ -7084,8 +7160,64 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`                                                                                                                                                                                                                                                                          | fn + types    |
 | `assessCacheability`, `CacheabilityInput`, `CacheRefusal`                                                                                                                                                                                                                                                                               | fn + types    |
 | `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
-| `isKvNamespace`, `isR2Bucket`                                                                                                                                                                                                                                                                                                           | guards        |
+| `isKvNamespace`, `isR2Bucket`, `isD1Database`                                                                                                                                                                                                                                                                                           | guards        |
 | `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                                                                                          | errors        |
+
+### `D1Adapter` — D1 as a first-class database
+
+Implements the committed `IDatabaseAdapter` (from `@hono-enterprise/common`), so a Worker serves
+`CAPABILITIES.DATABASE` through the ordinary repository and Unit-of-Work surface. Constructed by the
+application and handed to `DatabasePlugin`, matching `KvSessionStore`: those plugin options are read
+when the plugin is **constructed**, before any application exists, so an adapter published in the
+service registry could never reach it.
+
+```typescript
+import { env } from 'cloudflare:workers';
+import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+
+app.register(DatabasePlugin({
+  type: 'custom',
+  adapter: new D1Adapter(env.DB as ID1Database, {
+    tables: { User: { table: 'users', primaryKey: 'user_id' } },
+  }),
+}));
+```
+
+| Option                       | Default         | Behavior                                                          |
+| ---------------------------- | --------------- | ----------------------------------------------------------------- |
+| `tables`                     | `{}`            | Per-entity `{ table, primaryKey }` overrides                      |
+| `D1EntityMapping.table`      | the entity name | Physical table name; validated as a SQL identifier before quoting |
+| `D1EntityMapping.primaryKey` | `'id'`          | Key column used by `findById` / `update` / `delete`               |
+
+**Transactions.** D1 has **no interactive transaction** — `BEGIN TRANSACTION` is rejected by the
+platform — and `batch()` is its only unit of atomicity. `beginTransaction()` therefore **buffers**
+every write and flushes the whole buffer as one `batch()` at `commit()`; `rollback()` discards the
+buffer and sends nothing. Two consequences, both deliberate:
+
+- **No read-your-own-writes inside a transaction.** Reads run immediately against committed state,
+  so a row written earlier in the same transaction is not visible to a later read within it.
+- **`create()` inside a transaction requires an explicit primary key**, and throws
+  `CloudflareUnsupportedError` naming the constraint when one is absent — a deferred `INSERT` cannot
+  report a generated key to a caller that awaits `create()` before the flush. Outside a transaction
+  `create()` uses `RETURNING *` and returns the real persisted row, generated columns included.
+
+**Identifiers and limits.** Values are always bound (`?N`); identifiers cannot be, so table and
+column names are validated against `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, throwing
+`CloudflareUnsupportedError` otherwise. D1 binds at most **100 parameters per query**, and every
+builder whose parameter count varies with the caller's query — select, insert, update, count —
+refuses a statement that would exceed it rather than letting D1 fail with a message that points at
+the SQL instead of the caller's query. (Find-by-id and delete bind exactly one value and so cannot.)
+
+**The binding is validated where the adapter is built.** `new D1Adapter(env.DB)` throws
+`CloudflareBindingMissingError` when the binding is absent or not D1-shaped, naming what arrived and
+pointing at the `d1_databases` stanza. Without that check a mistyped binding name would register
+cleanly, report `up` from the `database` health indicator, and fail every query with a bare
+`TypeError`. The `isD1Database` guard is exported alongside `isKvNamespace` / `isR2Bucket`.
+
+**Not verified against live D1.** CI holds no Cloudflare account. Every generated statement is
+asserted verbatim, and the whole surface is driven against a real SQLite engine (the engine D1
+runs), including batch rollback.
 
 ### `ICloudflareBindings`
 

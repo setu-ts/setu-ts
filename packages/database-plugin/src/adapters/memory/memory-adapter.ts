@@ -2,14 +2,13 @@
  * In-memory database adapter — zero external dependencies, used for
  * testing and lightweight scenarios.
  *
- * Implements {@linkcode IOrmAdapter} from `@hono-enterprise/common` and
+ * Implements {@linkcode IDatabaseAdapter} from `@hono-enterprise/common` and
  * provides a simple key-value store per entity type with per-transaction
  * overlay semantics (buffered creates, update shadows, delete tombstones).
  *
  * @module
  */
-import type { IOrmAdapter } from '@hono-enterprise/common';
-import type { IAdapterTransaction } from '../adapter.ts';
+import type { IAdapterTransaction, IDatabaseAdapter } from '@hono-enterprise/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -58,14 +57,14 @@ function overlayKey(entity: string, id: unknown): string {
 }
 
 /**
- * In-memory implementation of {@linkcode IOrmAdapter}.
+ * In-memory implementation of {@linkcode IDatabaseAdapter}.
  *
  * Stores entities in plain `Map` structures, supporting basic CRUD,
  * filtering, sorting, pagination, and transaction semantics.
  *
  * @since 0.1.0
  */
-export class MemoryAdapter implements IOrmAdapter {
+export class MemoryAdapter implements IDatabaseAdapter {
   private readonly _stores = new Map<string, EntityStore>();
   private _connected = false;
   private _closed = false;
@@ -249,6 +248,28 @@ export class MemoryAdapter implements IOrmAdapter {
         }
         return Promise.resolve(results.length);
       },
+    };
+  }
+
+  /**
+   * @inheritdoc
+   *
+   * Builds a non-transactional data source reading and writing the committed
+   * store directly. Initializing the store here (rather than on first read)
+   * is what fixes the primary key for the entity before any query runs.
+   *
+   * @param entity - Entity name
+   * @param primaryKey - Primary key field (defaults to `'id'`)
+   */
+  createDataSource(entity: string, primaryKey: string = 'id'): DataSource {
+    this.getStore(entity, primaryKey); // Ensure the store (and its key) exists.
+    return {
+      findAll: (query) => this.queryEntities(entity, query),
+      findById: (id) => this.findEntityById(entity, id),
+      create: (data) => this.insertEntity(entity, data),
+      update: (id, data) => this.updateEntity(entity, id, data),
+      delete: (id) => this.deleteEntity(entity, id),
+      count: (where) => this.countEntities(entity, where),
     };
   }
 

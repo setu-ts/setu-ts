@@ -133,7 +133,15 @@ export type {
   RbacConfig,
   RoleDefinition,
 } from './services/auth.ts';
-export type { IOrmAdapter, ITransaction } from './services/database.ts';
+export type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  IOrmAdapter,
+  ITransaction,
+  NormalizedQuery,
+  OrderDirection,
+} from './services/database.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';
 export type {

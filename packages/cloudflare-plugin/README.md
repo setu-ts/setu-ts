@@ -164,6 +164,44 @@ SessionPlugin({
 });
 ```
 
+## D1
+
+`D1Adapter` implements the committed `IDatabaseAdapter`, so a Worker serves `CAPABILITIES.DATABASE`
+through the ordinary repository and Unit-of-Work surface. Like the session store, you build it and
+hand it over — `DatabasePlugin`'s options are read before any application exists.
+
+```typescript
+import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+
+DatabasePlugin({
+  type: 'custom',
+  adapter: new D1Adapter(env.DB as ID1Database, {
+    // Optional: entity name → table / primary key. Unmapped entities use their
+    // own name as the table and `id` as the key.
+    tables: { User: { table: 'users' } },
+  }),
+});
+```
+
+**D1 has no interactive transaction.** It rejects `BEGIN TRANSACTION`, and `batch()` is its only
+unit of atomicity. `db.transaction(...)` therefore buffers every write and flushes it as one
+`batch()` at commit — atomic, and rolled back whole if any statement fails. Two consequences to plan
+around:
+
+- **Reads inside a transaction do not see that transaction's own writes.** They run immediately
+  against committed state. Read what you need first, then write.
+- **`create()` inside a transaction needs an explicit primary key.** A deferred `INSERT` cannot hand
+  a generated key back to a caller awaiting `create()` before the flush, so it throws rather than
+  returning a row with a missing id. Outside a transaction `create()` uses `RETURNING *` and gives
+  you the real persisted row, generated columns included.
+
+Values are always bound; table and column names are validated and quoted, and any statement that
+would exceed D1's 100-bound-parameter limit is refused with an error naming the count rather than
+failing inside D1.
+
+Migrations stay a `wrangler d1 migrations` concern — the adapter has no `migrate()`.
+
 ## Behaviour worth knowing before you deploy
 
 - **KV rejects a TTL under 60 seconds.** `ICacheStore.set` accepts any TTL, so the value carries its
@@ -220,9 +258,6 @@ SessionPlugin({
 
 ## Not in this package
 
-- **D1 as a database backend — M52c.** The seam a backend implements lives inside `database-plugin`,
-  not `common`, so shipping it is a contract promotion. `bindings.d1('DB')` gives you the binding
-  today.
 - **Durable Objects — M52d.** A DO-backed realtime backplane and distributed lock both need your
   Worker to export a DO class plus a wrangler migration stanza. `bindings.durableObject('ROOMS')`
   gives you the namespace today.

@@ -1034,18 +1034,77 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   ack was reported as a processor failure AND retried, giving one message two dispositions; and
   `WorkersQueueArm` was exported without a PUBLIC_API entry) — complete (PR pending)
 - **Milestone 52c** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
-  D1 as a first-class backend, gated on promoting the data-access port: the seam a backend
-  implements is `IDatabaseAdapter`, declared inside `database-plugin`, while `common` ships only the
-  lifecycle-shaped `IOrmAdapter`; `DatabasePlugin.createAdapter` is additionally a closed three-arm
-  switch with no external arm, and `ITransaction` has to be reconciled with D1's batch-only
-  atomicity) — planned, not started
+  D1 as a first-class backend, gated on promoting the data-access port. The seam a backend
+  implements was `IDatabaseAdapter`, declared **inside** `database-plugin` and never exported, while
+  `common` shipped only the lifecycle-shaped `IOrmAdapter` — so a backend in another package was
+  literally inexpressible (§2.2 forbids a plugin importing a plugin). Promoted `IDatabaseAdapter`,
+  `IAdapterTransaction`, `IDataSource`, `NormalizedQuery` and `OrderDirection` into `common`, and
+  **deleted** `database-plugin/src/adapters/adapter.ts` so exactly one definition exists. The
+  promotion adds ONE member — a non-transactional `createDataSource(entity)` — and that addition is
+  the whole point: `createDataSourceFactory` was a second closed switch that **cast the adapter to
+  each concrete class** (`adapter as PrismaAdapter`) to reach `createDataSourceForEntity`, which is
+  the real reason the seam was closed, not the arm list. It is now deleted, all three built-in
+  adapters carry `createDataSource`, and `createDataSourceForEntity` is deprecated-not-removed
+  (§9.2). `DatabasePluginOptions` became a union discriminated on `type` with a `'custom'` arm
+  requiring `adapter`, so a missing backend is a **compile** error (the M30 `ChannelConfig` / M50
+  precedent); named `'custom'` rather than `'external'` to match M31/M50. `DataSource` survives as a
+  deprecated alias of `IDataSource`. The promotion also fixes a latent public-API defect: the barrel
+  exported `DataSource` whose `findAll` parameter is `NormalizedQuery`, which the barrel did **not**
+  export — the type was unnameable by any consumer. **D1's transaction reconciliation is deferred
+  batch.** D1 rejects `BEGIN TRANSACTION` outright (the platform error names
+  `state.storage.transaction()` as the alternative) and `batch()` is its only unit of atomicity, so
+  `beginTransaction()` buffers every write and flushes the whole buffer as ONE `batch()` at commit;
+  `rollback()` discards and sends nothing. Refusing with a throw was rejected — the platform does
+  offer atomicity, so refusing would strand the committed `IDatabaseService.transaction()`. The two
+  costs are documented, tested, and in PUBLIC_API rather than left to discovery: **no
+  read-your-own-writes** inside a transaction (reads hit committed state), and an in-transaction
+  `create()` **requires an explicit primary key** (a deferred INSERT cannot report a generated key
+  to a caller awaiting `create()` before the flush; outside a transaction `RETURNING *` supplies the
+  real row). `update`/`delete` read first so both honor their committed return contracts. Values are
+  always bound (`?N`); identifiers cannot be, so table/column names are validated against
+  `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, and every builder refuses a statement exceeding D1's
+  **100-bound-parameter** limit rather than letting D1 fail with a message pointing at the SQL.
+  `D1Result` was deliberately NOT widened with `meta`: `delete` uses `DELETE … RETURNING <pk>` and
+  `update` uses `UPDATE … RETURNING *`, so row counts come from `results.length` and the M52 facade
+  is untouched. `D1Adapter` is app-constructed and handed to `DatabasePlugin({ type: 'custom' })` —
+  the `KvSessionStore` precedent, because those options are read before any application exists.
+  **The test double is a real SQLite engine** (`node:sqlite`, the engine D1 runs) rather than a
+  scripted fake, so the generated SQL is genuinely parsed and executed and batch rollback is real; a
+  scripted fake can only prove which calls were made. Writing the tests caught a defect in the new
+  code — several methods typed `Promise<T>` threw **synchronously**, bypassing any caller using
+  `.catch()` (the M52b `createQueueHandler` defect class) — and one already merged on `main`:
+  `resolveLogger` extracted `logger.debug` into a local and invoked it **detached**, and both
+  loggers `logger-plugin` ships implement `debug` via a private `#` field, so `logQueries: true`
+  threw `TypeError` on **every** repository call whenever a real logger was registered. Every
+  existing test injected a plain-object logger, where a detached method works fine. `cache-plugin`
+  carries a regression test for the identical bug; `database-plugin` never got one, and now has it,
+  driving the REAL `ConsoleLogger` — verified to fail without the fix. Deliberately NOT fixed:
+  `DatabaseService.query()` throws synchronously for the memory adapter despite returning a promise
+  (`migrate()` beside it rejects). Two committed tests pin that behavior and correcting it is a
+  behavior change outside this milestone's scope — flagged in a JSDoc note instead. **Not verified
+  against live D1** — CI holds no Cloudflare account. Code review then found the defect no gate
+  could see: `D1Adapter` stored its binding **unvalidated**, so an absent binding (a name typo, a
+  missing `d1_databases` stanza) let the app boot clean, report `up` from the `database` health
+  indicator, and fail every query with a bare `TypeError` — the M50 `KubernetesProvider.authHeader`
+  class, and a contradiction of this package's own principle, since `facades.ts:402` states the
+  guard family exists "to fail at `register()` with a name rather than at the first request with a
+  bare `TypeError`" while `isKvNamespace`/`isR2Bucket` had no D1 member. Coverage could not have
+  caught it — there was no branch to cover, and all three new files were already at 100%. Added
+  `isD1Database` plus constructor validation throwing `CloudflareBindingMissingError`; five tests,
+  all five verified to fail without the guard. Review also closed a test gap where
+  `LIMIT -1 OFFSET ?N` and the `IS NULL` filter were asserted only as SQL **strings** and never
+  executed (both were correct), and corrected three doc claims — a barrel test claiming "exactly the
+  documented public surface" while omitting `D1Adapter`, `IDataSource.create`/`delete` promising
+  persistence with no caveat for the deferred-write path, and a PUBLIC_API "every builder refuses"
+  that overstated the parameter-cap check. All `src` files touched are at 100% branch/function/line)
+  — complete (PR #114)
 - **Milestone 52d** (`packages/cloudflare-plugin` — Durable Objects: a DO-backed
   `IRealtimeBackplane` (the M47 port is already in `common`, so no contract change) and a DO-backed
   distributed lock handed to `SchedulerPlugin({ lock })` structurally. Both need the application to
   export a DO class plus a wrangler migration stanza, and DOs expose **no pub/sub primitive**, so
   the backplane means each replica holding a WebSocket to the object) — planned, not started
-- **Next milestone** — **M52c** (D1 + the `common` data-access promotion), **M52d** (Durable
-  Objects), or **M37** (example applications under `apps/*`), then M38–M40 unless reprioritized.
+- **Next milestone** — **M52d** (Durable Objects) or **M37** (example applications under `apps/*`),
+  then M38–M40 unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

@@ -3,13 +3,18 @@
  *
  * @module
  */
+import type { OrderDirection } from '@hono-enterprise/common';
 
 /**
  * Sort direction for a single field.
  *
+ * Re-exported from `@hono-enterprise/common`, where it was promoted in M52c
+ * alongside `NormalizedQuery` so a backend in another package can name it.
+ * Same type, two import paths.
+ *
  * @since 0.1.0
  */
-export type OrderDirection = 'asc' | 'desc';
+export type { OrderDirection };
 
 /**
  * Options for {@linkcode IRepository.findAll}.

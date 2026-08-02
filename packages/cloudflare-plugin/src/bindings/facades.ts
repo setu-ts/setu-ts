@@ -213,10 +213,11 @@ export interface D1Result<T = Record<string, unknown>> {
 /**
  * A D1 database binding.
  *
- * Exposed as an escape hatch for applications that want SQL today. A first-class
- * `IDatabase` backend is M52c, because the seam a backend implements
- * (`IDatabaseAdapter`) lives inside `database-plugin` and is not a committed
- * `common` port.
+ * Usable directly for applications that want raw SQL, and the binding
+ * {@linkcode D1Adapter} wraps to serve `CAPABILITIES.DATABASE` through the
+ * repository and Unit-of-Work surface. M52c promoted `IDatabaseAdapter` into
+ * `common`, which is what made that backend expressible outside
+ * `database-plugin`.
  *
  * @since 0.2.0
  */
@@ -419,4 +420,20 @@ export function isKvNamespace(value: unknown): value is IKvNamespace {
  */
 export function isR2Bucket(value: unknown): value is IR2Bucket {
   return hasMethods(value, ['head', 'get', 'put', 'delete']);
+}
+
+/**
+ * Reports whether a binding is D1-shaped.
+ *
+ * Read by {@linkcode D1Adapter}'s constructor, so an absent binding — a name
+ * typo, a missing `d1_databases` stanza, a preview environment that was never
+ * given the database — fails where the adapter is built, naming what is wrong,
+ * rather than at the first query with a bare `TypeError`.
+ *
+ * @param value - The binding to check
+ * @returns `true` when it carries the D1 database methods
+ * @since 0.2.0
+ */
+export function isD1Database(value: unknown): value is ID1Database {
+  return hasMethods(value, ['prepare', 'batch']);
 }

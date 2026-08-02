@@ -5152,7 +5152,7 @@ Durable-Object backplane is its own design — see M52c and M52d.
 
 ---
 
-## Milestone 52c: D1 — the `common` data-access contract promotion
+## Milestone 52c: D1 — the `common` data-access contract promotion ✅ COMPLETE
 
 **Objective:** Ship D1 as a first-class database backend. The blocker is a contract decision, not
 effort: the seam a backend actually implements is `IDatabaseAdapter`, declared **inside**
@@ -5166,22 +5166,30 @@ arm), `packages/cloudflare-plugin` (the D1 backend)
 ### Scope
 
 - Promote the data-access port into `common` — `DataSource` and `NormalizedQuery` alongside it,
-  since the port is meaningless without them — and decide whether the promoted shape is
-  `IDatabaseAdapter` as-is or a narrower one.
+  since the port is meaningless without them. **Decision: the promoted shape is `IDatabaseAdapter`
+  as-is, plus one addition** — a non-transactional `createDataSource(entity)`. Every existing member
+  is load-bearing (`rawQuery` backs `IDatabaseService.query()`, `beginTransaction` backs
+  `transaction()`), and without the addition the plugin can only reach a data source by casting to a
+  concrete adapter class, which is what kept the switch closed. `DataSource` is promoted as
+  `IDataSource` (the `IXxx` convention) with the old name kept as a deprecated alias.
 - `DatabasePlugin.createAdapter` is a closed three-arm switch (`prisma`/`drizzle`/`memory`); it
   needs an arm accepting an externally-supplied adapter, so a backend can live in another package.
+  **The arm is named `'custom'`**, matching the M31 and M50 precedents, and `DatabasePluginOptions`
+  became a union discriminated on `type` so a missing `adapter` is a compile error.
 - Reconcile `ITransaction` (`commit`/`rollback`) with D1, which has **no imperative
   `BEGIN`/`COMMIT`** — `batch()` is its only unit of atomicity, exactly the mismatch M10 hit with
-  Prisma's callback-style `$transaction`.
+  Prisma's callback-style `$transaction`. **Decision: deferred batch** — writes are buffered and
+  flushed as one `batch()` at commit, so atomicity is genuine; the cost is no read-your-own-writes
+  inside a transaction, and an in-transaction `create()` requires an explicit primary key.
 - A `D1Adapter` translating `NormalizedQuery` into SQL over the `ID1Database` facade M52 already
   ships.
 
 ### Deliverables
 
-- [ ] The `common` data-access contract decision, shipped with its PUBLIC_API entry
-- [ ] An external-adapter arm on `DatabasePlugin`
-- [ ] `D1Adapter`, with every write read back through the public repository surface
-- [ ] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
+- [x] The `common` data-access contract decision, shipped with its PUBLIC_API entry
+- [x] An external-adapter arm on `DatabasePlugin` (`type: 'custom'`)
+- [x] `D1Adapter`, with every write read back through the public repository surface
+- [x] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
 
 ### Out of scope
 
@@ -5448,5 +5456,5 @@ app.register(MyPlugin({ option1: 'value' }));
 | 50        | ✅     | service-discovery-plugin              |
 | 52        | ✅     | cloudflare-plugin                     |
 | 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
-| 52c       | ⬜     | cloudflare-plugin (D1 + common)       |
+| 52c       | ✅     | cloudflare-plugin (D1 + common)       |
 | 52d       | ⬜     | cloudflare-plugin (durable objects)   |

@@ -7,19 +7,20 @@
  *
  * @module
  */
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
 import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 import type {
+  CustomDatabaseOptions,
   DatabaseAdapterOptions,
   DatabaseAdapterType,
   DatabasePluginOptions,
   IDatabaseService,
 } from '../interfaces/index.ts';
-import { createMemoryDataSource, DatabaseService } from '../services/database-service.ts';
+import { DatabaseService } from '../services/database-service.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
-import type { IDatabaseAdapter } from '../adapters/adapter.ts';
+import type { IDatabaseAdapter } from '@hono-enterprise/common';
 import type { DataSource } from '../repositories/base-repository.ts';
 
 /** Default adapter when none is specified. */
@@ -85,13 +86,15 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const adapter = await createAdapter(adapterType, adapterOptions);
+      const adapter = await createAdapter(options, adapterType, adapterOptions);
 
       // Connect the adapter.
       await adapter.connect();
 
-      // Build the data-source factory for the adapter type.
-      const createDataSource = createDataSourceFactory(adapterType, adapter);
+      // Every adapter — built-in or custom — exposes `createDataSource` on the
+      // promoted port, so there is no per-type switch and no cast to a
+      // concrete adapter class. That cast is what kept the seam closed.
+      const createDataSource = (entity: string): DataSource => adapter.createDataSource(entity);
 
       // Optional logger resolution.
       const logger = resolveLogger(ctx);
@@ -129,18 +132,28 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 }
 
 /**
- * Create the appropriate adapter based on the configured type.
+ * Create the appropriate adapter for the configured arm.
  *
- * @param adapterType - Which ORM adapter to instantiate
- * @param adapterOptions - Adapter-specific options
- * @returns The instantiated adapter
- * @throws {Error} If the adapter type is unsupported
+ * The `'custom'` arm returns the application's own adapter verbatim — it is
+ * never constructed or replaced here, only connected by the caller. That is
+ * what lets a backend live in another package (`cloudflare-plugin`'s
+ * `D1Adapter` is the first) without any package importing another plugin.
+ *
+ * @param options - The plugin options, needed to reach the custom arm's adapter
+ * @param adapterType - Which adapter arm was selected
+ * @param adapterOptions - Adapter-specific options for the built-in arms
+ * @returns The adapter to use
  */
 function createAdapter(
+  options: DatabasePluginOptions | undefined,
   adapterType: DatabaseAdapterType,
   adapterOptions: DatabaseAdapterOptions,
 ): Promise<IDatabaseAdapter> {
   switch (adapterType) {
+    case 'custom':
+      // The union guarantees `adapter` is present whenever type is 'custom',
+      // so this narrowing cannot fail for a type-checked caller.
+      return Promise.resolve((options as CustomDatabaseOptions).adapter);
     case 'prisma':
       return Promise.resolve(new PrismaAdapter(adapterOptions));
     case 'drizzle':
@@ -148,35 +161,6 @@ function createAdapter(
     case 'memory':
     default:
       return Promise.resolve(new MemoryAdapter());
-  }
-}
-
-/**
- * Create the data-source factory function for the given adapter type.
- *
- * @param adapterType - Which adapter is in use
- * @param adapter - The resolved adapter instance
- * @returns Factory that creates a DataSource for a given entity name
- */
-function createDataSourceFactory(
-  adapterType: DatabaseAdapterType,
-  adapter: IDatabaseAdapter,
-): (entity: string) => DataSource {
-  switch (adapterType) {
-    case 'memory': {
-      const memAdapter = adapter as MemoryAdapter;
-      return (entity: string) => createMemoryDataSource(memAdapter, entity);
-    }
-    case 'prisma': {
-      const prismaAdapter = adapter as PrismaAdapter;
-      // Prisma needs the internal client for data-source creation.
-      return (entity: string) => prismaAdapter.createDataSourceForEntity(entity);
-    }
-    case 'drizzle':
-    default: {
-      const drizzleAdapter = adapter as DrizzleAdapter;
-      return (entity: string) => drizzleAdapter.createDataSourceForEntity(entity);
-    }
   }
 }
 
@@ -213,6 +197,13 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
 /**
  * Resolve an optional logger from the plugin context.
  *
+ * The call is made **on the logger**, never through a detached reference.
+ * Both loggers `logger-plugin` ships (`ConsoleLogger`, `PinoLogger`) implement
+ * `debug` in terms of a private `#` field, and a private field access on an
+ * unbound method throws `TypeError` — so extracting `logger.debug` into a
+ * local and invoking it made `logQueries: true` fail on every repository call
+ * whenever a real logger was registered.
+ *
  * @param ctx - Plugin context
  * @returns The logger if available, otherwise `undefined`
  */
@@ -223,10 +214,10 @@ function resolveLogger(
     const logger = ctx.services.get<Record<string, unknown>>('logger');
     return {
       debug: (msg: string, meta?: Record<string, unknown>): void => {
-        const dbg = logger?.debug as
-          | ((msg: string, meta?: Record<string, unknown>) => void)
-          | undefined;
-        dbg?.(msg, meta);
+        if (typeof logger?.debug !== 'function') return;
+        // Called as a member, so `this` is the logger and its private fields
+        // resolve.
+        (logger as unknown as ILogger).debug(msg, meta);
       },
     };
   }
