@@ -137,6 +137,49 @@ describe('KvCacheStore', () => {
     );
   });
 
+  it('does not delete a deliberately cached null on read', async () => {
+    // Negative caching: `set(k, null)` records "the origin has nothing". A read
+    // that deleted it would make the pattern silently useless — every request
+    // would fall through to the origin, forever.
+    const { kv, cache } = store();
+    await cache.set('absent-upstream', null);
+
+    expect(await cache.get('absent-upstream')).toBeNull();
+    expect(kv.entries.has('absent-upstream')).toBe(true);
+    expect(kv.deletes).toEqual([]);
+  });
+
+  it('reports a cached null as present, and deletes it once', async () => {
+    const { kv, cache } = store();
+    await cache.set('absent-upstream', null);
+
+    expect(await cache.has('absent-upstream')).toBe(true);
+    expect(await cache.delete('absent-upstream')).toBe(true);
+    // Exactly one delete: reading presence must not issue its own.
+    expect(kv.deletes).toEqual(['absent-upstream']);
+  });
+
+  it('never deletes a key it does not own', async () => {
+    // `prefix` is optional and the namespace is shareable, so a plain `get` of
+    // a key written by another store must leave that key alone.
+    const { kv, cache } = store();
+    await kv.put('session:abc', JSON.stringify({ userId: 1 }));
+
+    expect(await cache.get('session:abc')).toBeNull();
+    expect(await cache.has('session:abc')).toBe(false);
+    expect(kv.entries.has('session:abc')).toBe(true);
+    expect(kv.deletes).toEqual([]);
+  });
+
+  it('issues exactly one delete when removing an expired entry', async () => {
+    const { kv, clock, cache } = store();
+    await cache.set('short', 'value', 5);
+    clock.advance(6000);
+
+    expect(await cache.delete('short')).toBe(false);
+    expect(kv.deletes).toEqual(['short']);
+  });
+
   it('refuses to clear an unprefixed store rather than wiping the namespace', async () => {
     const { kv, cache } = store();
     await cache.set('mine', 'value');

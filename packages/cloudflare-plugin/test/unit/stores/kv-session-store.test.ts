@@ -90,6 +90,26 @@ describe('KvSessionStore', () => {
     expect(kv.entries.has('session:abc')).toBe(false);
   });
 
+  it('never deletes a key it does not own', async () => {
+    // A cache store with no prefix can share this namespace; reading an id that
+    // happens to collide with a foreign key must not remove that key.
+    const { kv, sessions } = store({ prefix: '' });
+    await kv.put('some-other-row', JSON.stringify({ not: 'ours' }));
+
+    expect(await sessions.read('some-other-row')).toBeNull();
+    expect(kv.entries.has('some-other-row')).toBe(true);
+    expect(kv.deletes).toEqual([]);
+  });
+
+  it('issues exactly one delete when destroying an expired session', async () => {
+    const { kv, clock, sessions } = store();
+    await sessions.write('abc', { userId: 1 }, 1000);
+    clock.advance(2000);
+
+    expect(await sessions.destroy('abc')).toBe(false);
+    expect(kv.deletes).toEqual(['session:abc']);
+  });
+
   it('reports destroy() of an expired session as false', async () => {
     const { clock, sessions } = store();
     await sessions.write('abc', { userId: 1 }, 1000);

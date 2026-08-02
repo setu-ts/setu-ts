@@ -89,8 +89,14 @@ export class R2Storage implements IStorage {
   /**
    * Always throws — R2 bindings cannot presign.
    *
+   * The unused `_options` is kept, not deleted. Dropping it would narrow the
+   * exported class below {@linkcode IStorage}, so a consumer holding an
+   * `R2Storage` directly could no longer pass {@linkcode SignedUrlOptions} —
+   * the interface still declares it. An underscore is the sanctioned way to
+   * mark a parameter a contract requires and an implementation cannot use.
+   *
    * @param path - The object path, named in the error
-   * @param _options - Unused; the operation has no counterpart on the binding
+   * @param _options - Required by the contract; no counterpart on the binding
    * @returns Never returns
    * @throws {CloudflareUnsupportedError} Always
    */

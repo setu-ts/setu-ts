@@ -18,6 +18,8 @@ import type {
   HealthCheckResult,
   IApplication,
   ICacheStore,
+  ILogger,
+  IPlugin,
   IStorage,
 } from '@hono-enterprise/common';
 
@@ -213,6 +215,60 @@ describe('CloudflarePlugin in a kernel application', () => {
     await app.stop();
   });
 
+  it('reports a background failure through a logger registered after it', async () => {
+    // The kernel resolves ctx.logger lazily and a capability may be registered
+    // imperatively — without a `provides` declaration the resolver can order
+    // against. Capturing the logger at register() swallowed the report.
+    const reported: string[] = [];
+    const noop = (): void => {};
+    const logger = {
+      fatal: noop,
+      error: (message: string): void => {
+        reported.push(message);
+      },
+      warn: noop,
+      info: noop,
+      debug: noop,
+      trace: noop,
+      child: (): ILogger => logger,
+    } as unknown as ILogger;
+
+    const lateLogger: IPlugin = {
+      name: 'late-logger',
+      version: '0.0.0',
+      register(ctx): void {
+        ctx.services.register(CAPABILITIES.LOGGER, logger);
+      },
+    };
+
+    const settled: Promise<unknown>[] = [];
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({
+          env: {},
+          waitUntil: (promise): void => {
+            settled.push(promise);
+          },
+        }),
+        lateLogger,
+      ],
+    });
+
+    app.router.get('/bg', (ctx) => {
+      ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE)
+        .waitUntil(Promise.reject(new Error('analytics upload failed')));
+      return ctx.response.json({ ok: true });
+    });
+
+    await app.start();
+    await app.inject({ method: 'GET', url: '/bg' });
+    await Promise.all(settled);
+
+    expect(reported).toEqual(['cloudflare: background task failed']);
+    await app.stop();
+  });
+
   it('refuses to start when a required binding is absent, naming every one', async () => {
     const app = createApplication({
       plugins: [
@@ -225,6 +281,16 @@ describe('CloudflarePlugin in a kernel application', () => {
     });
 
     await expect(app.start()).rejects.toThrow(/SESSIONS/);
+    // `in` would walk the prototype chain and let this through, defeating the
+    // whole point of a fail-fast check.
+    await expect(
+      createApplication({
+        plugins: [
+          RuntimePlugin(),
+          CloudflarePlugin({ env: { CACHE_KV: new FakeKv() }, requireBindings: ['toString'] }),
+        ],
+      }).start(),
+    ).rejects.toThrow(/toString/);
     await expect(
       createApplication({
         plugins: [

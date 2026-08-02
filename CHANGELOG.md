@@ -17,13 +17,16 @@ All notable changes to this project are documented here. The format follows
   — the application passes `env` (and `waitUntil`) in, which keeps the package type-checkable on
   every runtime. `KvCacheStore` reconciles `ICacheStore`'s unbounded TTL with KV's 60-second
   `expirationTtl` floor by carrying a logical deadline inside the value, so a 5-second entry expires
-  in 5 seconds rather than surviving a minute; `clear()` requires a key prefix, because the binding
-  has no bulk delete and an unprefixed sweep would remove keys the store does not own. `R2Storage`
-  implements the optional `getStream`, heads before `delete` so its committed `Promise<boolean>` is
-  honest, and **throws** from `getSignedUrl` — the R2 Workers binding has no presign operation.
-  `KvSessionStore` is constructed by the application and handed to `SessionPlugin({ store })`, since
-  that option is read before any application exists. No binding I/O happens at registration, where
-  the platform forbids it, and the `cloudflare` health indicator performs none either.
+  in 5 seconds rather than surviving a minute. The decoder reports three outcomes rather than two —
+  live, _this store's_ expired entry, and neither — so a read never deletes a key the store does not
+  own and a deliberately cached `null` survives; `clear()` additionally requires a key prefix,
+  because the binding has no bulk delete and an unprefixed sweep would remove foreign keys.
+  `R2Storage` implements the optional `getStream`, heads before `delete` so its committed
+  `Promise<boolean>` is honest, and **throws** from `getSignedUrl` — the R2 Workers binding has no
+  presign operation. `KvSessionStore` is constructed by the application and handed to
+  `SessionPlugin({ store })`, since that option is read before any application exists. No binding
+  I/O happens at registration, where the platform forbids it, and the `cloudflare` health indicator
+  performs none either.
 - **`splitWorkerEnv` and `SplitWorkerEnv` in `@hono-enterprise/common`** (Milestone 52) — the pure
   partition of a Workers `env` record into string variables and object bindings. In `common` because
   both `runtime` and `cloudflare-plugin` need the identical rule and no plugin may import another.

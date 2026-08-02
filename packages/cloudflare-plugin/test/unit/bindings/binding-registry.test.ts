@@ -115,6 +115,31 @@ describe('BindingRegistry', () => {
     }
   });
 
+  it('treats an inherited Object.prototype key as absent, agreeing with has()', () => {
+    // The binding record is a plain object, so a bare index read would resolve
+    // `constructor` to the Object constructor and `toString` to a function —
+    // neither a binding, and both contradicting has(), which is own-key.
+    const { bindings } = registry();
+
+    for (const inherited of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(bindings.has(inherited)).toBe(false);
+      expect(() => bindings.get(inherited)).toThrow(CloudflareBindingMissingError);
+      expect(() => bindings.kv(inherited)).toThrow(CloudflareBindingMissingError);
+    }
+  });
+
+  it('names an inherited key as absent, not as the wrong shape', () => {
+    const { bindings } = registry();
+    try {
+      bindings.kv('constructor');
+    } catch (error) {
+      // "not present" is the truth; "present but not a KV namespace" would send
+      // the reader looking at a wrangler.toml stanza that does not exist.
+      expect(String(error)).toContain('is not present');
+      expect(String(error)).not.toContain('is present but');
+    }
+  });
+
   it('delegates waitUntil to the host it was built with', () => {
     const seen: Promise<unknown>[] = [];
     const bindings = new BindingRegistry({}, {}, (p) => {

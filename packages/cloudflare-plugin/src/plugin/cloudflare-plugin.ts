@@ -106,7 +106,12 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
       const { vars, bindings } = splitWorkerEnv(options.env);
       const available = Object.keys(bindings).sort();
 
-      const missing = (options.requireBindings ?? []).filter((name) => !(name in bindings));
+      // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so
+      // `requireBindings: ['toString']` would pass a check whose whole job is
+      // to fail fast on a binding the Worker does not carry.
+      const missing = (options.requireBindings ?? []).filter(
+        (name) => !Object.hasOwn(bindings, name),
+      );
       if (missing.length > 0) {
         throw CloudflareBindingMissingError.absent(missing.join("', '"), available);
       }
@@ -114,7 +119,13 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
       const registry = new BindingRegistry(
         bindings,
         vars,
-        resolveWaitUntil(options.waitUntil, ctx.logger),
+        // A thunk, not `ctx.logger`: the kernel resolves that through a Proxy
+        // that answers `undefined` until a logger is registered, and a
+        // capability may be registered imperatively without declaring
+        // `provides` — which the `optionalDependencies` ordering edge cannot
+        // see. Reading it when the failure happens is what makes the reporting
+        // this seam promises actually happen.
+        resolveWaitUntil(options.waitUntil, () => ctx.logger),
       );
       ctx.services.register<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE, registry);
 

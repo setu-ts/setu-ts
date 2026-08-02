@@ -33,6 +33,27 @@ export interface KvEnvelope<T> {
 }
 
 /**
+ * The outcome of reading a key.
+ *
+ * Three outcomes rather than two, because a caller must be able to tell **this
+ * store's expired entry** — which it may delete — from **a key this store does
+ * not own**, which it must leave alone. Collapsing both into `null` makes an
+ * idempotent read destructive: a store sharing a KV namespace would delete
+ * another writer's row on a plain `get`, and a deliberately cached `null` would
+ * delete itself on first read.
+ *
+ * @typeParam T - The stored value's type
+ * @since 0.2.0
+ */
+export type EnvelopeRead<T> =
+  /** A live entry. `value` may itself be `null`, if that is what was stored. */
+  | { readonly kind: 'hit'; readonly value: T }
+  /** This store's entry, past its logical deadline. Safe to delete. */
+  | { readonly kind: 'expired' }
+  /** Absent, unparseable, or not written by this store. Never delete. */
+  | { readonly kind: 'miss' };
+
+/**
  * Serializes a value and its logical deadline.
  *
  * @typeParam T - The stored value's type
@@ -49,36 +70,46 @@ export function encodeEnvelope<T>(value: T, expiresAt: number | null): string {
 /**
  * Parses an envelope and applies its logical deadline.
  *
- * Anything that is not a live envelope reads as a miss: unparseable text, a
- * shape without the `e` field (a key written by something other than this
- * store, sharing the namespace), and an entry whose deadline has passed. A
- * throw would turn a foreign key into a request failure, which is a worse
- * answer than a cache miss.
+ * A key is recognised as this store's only when it carries **both** an own `v`
+ * and an `e` that is `null` or a number. Anything else — unparseable text, a
+ * bare JSON scalar, an object written by something else sharing the namespace —
+ * is a `miss`, never an `expired`, so the caller does not delete it. A throw
+ * would turn a foreign key into a request failure, which is a worse answer than
+ * a cache miss.
+ *
+ * `hit` carries the stored value even when that value is `null`: a
+ * deliberately cached absence is an entry, and reporting it as a miss is what
+ * made a read delete it.
  *
  * @typeParam T - The expected value type
  * @param raw - The text KV returned, or `null` when the key was absent
  * @param now - Current wall-clock epoch milliseconds, from `runtime.now()`
- * @returns The live value, or `null` on any form of miss
+ * @returns Whether the key is a live entry, this store's expired entry, or
+ * neither
  * @since 0.2.0
  */
-export function decodeEnvelope<T>(raw: string | null, now: number): T | null {
-  if (raw === null) return null;
+export function decodeEnvelope<T>(raw: string | null, now: number): EnvelopeRead<T> {
+  if (raw === null) return { kind: 'miss' };
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return null;
+    return { kind: 'miss' };
   }
 
-  if (typeof parsed !== 'object' || parsed === null) return null;
+  if (typeof parsed !== 'object' || parsed === null) return { kind: 'miss' };
   const envelope = parsed as { v?: unknown; e?: unknown };
+
+  // `v` must be an own key: JSON cannot represent `undefined`, so its absence
+  // means the object was not written by this store.
+  if (!Object.hasOwn(envelope, 'v')) return { kind: 'miss' };
+
   const expiresAt = envelope.e;
+  if (expiresAt !== null && typeof expiresAt !== 'number') return { kind: 'miss' };
+  if (typeof expiresAt === 'number' && expiresAt <= now) return { kind: 'expired' };
 
-  if (expiresAt !== null && typeof expiresAt !== 'number') return null;
-  if (typeof expiresAt === 'number' && expiresAt <= now) return null;
-
-  return envelope.v as T;
+  return { kind: 'hit', value: envelope.v as T };
 }
 
 /**

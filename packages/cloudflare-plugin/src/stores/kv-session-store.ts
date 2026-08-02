@@ -9,6 +9,7 @@
 import type { ISessionStore, SessionData } from '@hono-enterprise/common';
 import type { IKvNamespace } from '../bindings/facades.ts';
 import type { CacheClock } from './kv-cache-store.ts';
+import type { EnvelopeRead } from './kv-envelope.ts';
 import { decodeEnvelope, encodeEnvelope, physicalTtlSeconds } from './kv-envelope.ts';
 
 /**
@@ -72,14 +73,19 @@ export class KvSessionStore implements ISessionStore {
   }
 
   async read(id: string): Promise<SessionData | null> {
-    const key = this.#key(id);
-    const raw = await this.#kv.get(key);
-    const data = decodeEnvelope<SessionData>(raw, this.#clock.now());
+    const read = await this.#read(id);
 
-    if (data === null && raw !== null) {
-      await this.#kv.delete(key);
+    if (read.kind === 'expired') {
+      // Only this store's own expired row is swept. A key sharing the namespace
+      // that this store did not write reads as a miss and is left alone.
+      await this.#kv.delete(this.#key(id));
+      return null;
     }
-    return data;
+    // No `?? null` here, unlike the cache store: `SessionData` is a record, so
+    // a hit's value is never null and the coalesce would be an unreachable
+    // branch. A row whose `v` is literally null is not something `write` can
+    // produce.
+    return read.kind === 'hit' ? read.value : null;
   }
 
   async write(id: string, data: SessionData, ttlMs: number): Promise<void> {
@@ -90,9 +96,19 @@ export class KvSessionStore implements ISessionStore {
   }
 
   async destroy(id: string): Promise<boolean> {
-    const existed = (await this.read(id)) !== null;
+    // One read, one delete: going through `read` would issue a second delete
+    // for a row that had already expired.
+    const read = await this.#read(id);
     await this.#kv.delete(this.#key(id));
-    return existed;
+    return read.kind === 'hit';
+  }
+
+  /**
+   * Reads a row without touching it, so the caller decides whether a sweep is
+   * warranted. Both entry points funnel through it.
+   */
+  async #read(id: string): Promise<EnvelopeRead<SessionData>> {
+    return decodeEnvelope<SessionData>(await this.#kv.get(this.#key(id)), this.#clock.now());
   }
 
   /** Applies the key prefix. */

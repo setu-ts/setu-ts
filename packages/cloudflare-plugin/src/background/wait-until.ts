@@ -25,6 +25,19 @@ import type { ILogger } from '@hono-enterprise/common';
 export type WaitUntilHost = (promise: Promise<unknown>) => void;
 
 /**
+ * Resolves the logger at the moment a background task fails.
+ *
+ * A thunk rather than an `ILogger`, because the plugin context resolves
+ * `logger` lazily: capturing its value during `register()` freezes whatever was
+ * registered by then, and a logger registered imperatively afterwards would
+ * never receive a report.
+ *
+ * @returns The logger, when one is resolvable
+ * @since 0.2.0
+ */
+export type LoggerSource = () => ILogger | undefined;
+
+/**
  * Builds the one `waitUntil` implementation both configurations funnel through.
  *
  * A rejection handler is attached on **both** paths, not only the delegating
@@ -37,17 +50,17 @@ export type WaitUntilHost = (promise: Promise<unknown>) => void;
  * awaiting nothing is the faithful behaviour, not a silent downgrade.
  *
  * @param host - The platform sink, when the application supplied one
- * @param logger - Resolved logger, used to report a background failure
+ * @param logger - Resolves the logger at failure time, never at registration
  * @returns The `waitUntil` implementation to publish on the bindings service
  * @since 0.2.0
  */
 export function resolveWaitUntil(
   host: WaitUntilHost | undefined,
-  logger: ILogger | undefined,
+  logger: LoggerSource,
 ): WaitUntilHost {
   return (promise: Promise<unknown>): void => {
     const reported = promise.catch((error: unknown) => {
-      logger?.error('cloudflare: background task failed', {
+      logger()?.error('cloudflare: background task failed', {
         error: error instanceof Error ? error.message : String(error),
       });
     });

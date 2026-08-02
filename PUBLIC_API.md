@@ -7079,6 +7079,11 @@ additionally validate the binding's shape, so an R2 bucket wired into a KV optio
 - **`clear()` requires a prefix.** The binding has no bulk delete, so the sweep pages `list` (1000
   keys maximum) and deletes each key. Without a prefix it would delete keys the store does not own,
   so it throws `CloudflareUnsupportedError` instead.
+- **A read never deletes a key the store does not own.** The envelope decoder reports three
+  outcomes, not two — live, _this store's_ expired entry, and neither — and only the middle one is
+  swept. That is what makes a shared namespace safe, and it is also why a deliberately cached `null`
+  survives: `get` answers `null` for it (the contract has no other way to say so) while `has` and
+  `delete` report it as present, and no path removes it.
 - **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
 - **`R2Storage.getSignedUrl` throws.** The R2 Workers binding exposes no presign operation at all.
   `getStream` is implemented, so serving through a route is a zero-copy alternative.

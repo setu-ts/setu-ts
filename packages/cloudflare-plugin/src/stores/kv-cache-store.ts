@@ -8,6 +8,7 @@
 import type { ICacheStore } from '@hono-enterprise/common';
 import type { IKvNamespace } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
+import type { EnvelopeRead } from './kv-envelope.ts';
 import { decodeEnvelope, encodeEnvelope, physicalTtlSeconds } from './kv-envelope.ts';
 
 /** KV's maximum (and default) page size for `list`. */
@@ -78,16 +79,18 @@ export class KvCacheStore implements ICacheStore {
   }
 
   async get<T>(key: string): Promise<T | null> {
-    const physicalKey = this.#key(key);
-    const raw = await this.#kv.get(physicalKey);
-    const value = decodeEnvelope<T>(raw, this.#clock.now());
+    const read = await this.#read<T>(key);
 
-    if (value === null && raw !== null) {
-      // Logically expired (or foreign): drop the key so the namespace does not
-      // accumulate entries this store will never serve again.
-      await this.#kv.delete(physicalKey);
+    if (read.kind === 'expired') {
+      // Only an entry this store owns is swept — a foreign key sharing the
+      // namespace reads as a miss and is left where it is.
+      await this.#kv.delete(this.#key(key));
+      return null;
     }
-    return value;
+    // A stored `null` is a hit, but `ICacheStore.get` has no way to express it
+    // apart from absence, so both answer null. The distinction survives on
+    // `has` and `delete`, and — the point — neither path deletes the entry.
+    return read.kind === 'hit' ? read.value ?? null : null;
   }
 
   async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
@@ -106,14 +109,21 @@ export class KvCacheStore implements ICacheStore {
 
   async delete(key: string): Promise<boolean> {
     // KV's delete reports nothing about what it removed, so presence is read
-    // first to honor the committed Promise<boolean>.
-    const existed = await this.has(key);
+    // first to honor the committed Promise<boolean>. One read, one delete:
+    // going through `has` would issue a second delete for an expired entry.
+    const read = await this.#read(key);
     await this.#kv.delete(this.#key(key));
-    return existed;
+    return read.kind === 'hit';
   }
 
   async has(key: string): Promise<boolean> {
-    return (await this.get(key)) !== null;
+    const read = await this.#read(key);
+
+    if (read.kind === 'expired') {
+      await this.#kv.delete(this.#key(key));
+      return false;
+    }
+    return read.kind === 'hit';
   }
 
   /**
@@ -148,6 +158,17 @@ export class KvCacheStore implements ICacheStore {
 
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor !== undefined);
+  }
+
+  /**
+   * Reads a key without touching it.
+   *
+   * The single read `get`, `has`, and `delete` all funnel through, so the three
+   * can never disagree about what is live — and deliberately side-effect-free,
+   * so the caller decides whether a sweep is warranted.
+   */
+  async #read<T>(key: string): Promise<EnvelopeRead<T>> {
+    return decodeEnvelope<T>(await this.#kv.get(this.#key(key)), this.#clock.now());
   }
 
   /** Applies the configured prefix. */

@@ -19,50 +19,58 @@ const NOW = 1_700_000_000_000;
 describe('encodeEnvelope / decodeEnvelope', () => {
   it('round-trips a value with no expiry', () => {
     const raw = encodeEnvelope({ id: 7, name: 'ada' }, null);
-    expect(decodeEnvelope<{ id: number; name: string }>(raw, NOW)).toEqual({ id: 7, name: 'ada' });
+    expect(decodeEnvelope<{ id: number; name: string }>(raw, NOW)).toEqual({
+      kind: 'hit',
+      value: { id: 7, name: 'ada' },
+    });
   });
 
   it('round-trips a value whose deadline is still in the future', () => {
     const raw = encodeEnvelope('live', NOW + 1000);
-    expect(decodeEnvelope<string>(raw, NOW)).toBe('live');
+    expect(decodeEnvelope<string>(raw, NOW)).toEqual({ kind: 'hit', value: 'live' });
   });
 
-  it('reads as a miss once the deadline has passed', () => {
+  it('reports expired — not a plain miss — once the deadline has passed', () => {
     const raw = encodeEnvelope('stale', NOW + 5000);
-    expect(decodeEnvelope<string>(raw, NOW + 4999)).toBe('stale');
-    expect(decodeEnvelope<string>(raw, NOW + 5000)).toBeNull();
-    expect(decodeEnvelope<string>(raw, NOW + 5001)).toBeNull();
+    expect(decodeEnvelope<string>(raw, NOW + 4999)).toEqual({ kind: 'hit', value: 'stale' });
+    // `expired` is what licenses the caller to delete. A plain `miss` must not.
+    expect(decodeEnvelope<string>(raw, NOW + 5000)).toEqual({ kind: 'expired' });
+    expect(decodeEnvelope<string>(raw, NOW + 5001)).toEqual({ kind: 'expired' });
   });
 
   it('reads an absent key as a miss', () => {
-    expect(decodeEnvelope<string>(null, NOW)).toBeNull();
+    expect(decodeEnvelope<string>(null, NOW)).toEqual({ kind: 'miss' });
   });
 
   it('reads unparseable text as a miss rather than throwing', () => {
-    expect(decodeEnvelope<string>('not json at all', NOW)).toBeNull();
+    expect(decodeEnvelope<string>('not json at all', NOW)).toEqual({ kind: 'miss' });
   });
 
   it('reads a non-object JSON document as a miss', () => {
-    expect(decodeEnvelope<string>('"a bare string"', NOW)).toBeNull();
-    expect(decodeEnvelope<string>('null', NOW)).toBeNull();
-    expect(decodeEnvelope<string>('42', NOW)).toBeNull();
+    expect(decodeEnvelope<string>('"a bare string"', NOW)).toEqual({ kind: 'miss' });
+    expect(decodeEnvelope<string>('null', NOW)).toEqual({ kind: 'miss' });
+    expect(decodeEnvelope<string>('42', NOW)).toEqual({ kind: 'miss' });
   });
 
-  it('reads a foreign object sharing the namespace as a miss', () => {
-    // Written by something other than this store: no `e` field at all.
-    expect(decodeEnvelope<string>(JSON.stringify({ some: 'other shape' }), NOW)).toBeNull();
-    // Present but not a number, so the deadline cannot be evaluated.
-    expect(decodeEnvelope<string>(JSON.stringify({ v: 'x', e: 'soon' }), NOW)).toBeNull();
+  it('reads a foreign object as a miss, NEVER as expired', () => {
+    // The distinction is the whole point: `expired` licenses a delete, and a
+    // key this store did not write must never be deleted by a read.
+    for (const foreign of [{ some: 'other shape' }, { v: 'x', e: 'soon' }, { e: NOW - 1 }]) {
+      expect(decodeEnvelope<string>(JSON.stringify(foreign), NOW)).toEqual({ kind: 'miss' });
+    }
   });
 
-  it('preserves a stored null value, distinguishing it from a miss', () => {
-    // `v: null` is a value the caller stored; the envelope still parses.
+  it('reports a deliberately stored null as a hit, not a miss', () => {
+    // Negative caching: `null` is a value the caller stored on purpose. Calling
+    // it a miss is what made an idempotent read delete the entry.
     const raw = encodeEnvelope(null, null);
-    expect(decodeEnvelope<null>(raw, NOW)).toBeNull();
-    // The stores treat that as a miss, which is the documented ICacheStore
-    // behaviour: `get` returns null for "absent", and null is not cacheable
-    // as a distinguishable value.
     expect(JSON.parse(raw)).toEqual({ v: null, e: null });
+    expect(decodeEnvelope<null>(raw, NOW)).toEqual({ kind: 'hit', value: null });
+  });
+
+  it('still reports a stored null as expired once its deadline passes', () => {
+    const raw = encodeEnvelope(null, NOW + 1000);
+    expect(decodeEnvelope<null>(raw, NOW + 2000)).toEqual({ kind: 'expired' });
   });
 });
 

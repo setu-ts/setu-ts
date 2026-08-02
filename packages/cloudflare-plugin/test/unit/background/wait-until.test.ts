@@ -36,7 +36,7 @@ describe('resolveWaitUntil', () => {
     const seen: Promise<unknown>[] = [];
     const waitUntil = resolveWaitUntil((p) => {
       seen.push(p);
-    }, undefined);
+    }, () => undefined);
 
     waitUntil(Promise.resolve('done'));
 
@@ -49,7 +49,7 @@ describe('resolveWaitUntil', () => {
     const settled: Promise<unknown>[] = [];
     const waitUntil = resolveWaitUntil((p) => {
       settled.push(p);
-    }, logger);
+    }, () => logger);
 
     waitUntil(Promise.reject(new Error('shipping analytics failed')));
     await Promise.all(settled);
@@ -64,7 +64,7 @@ describe('resolveWaitUntil', () => {
     const settled: Promise<unknown>[] = [];
     const waitUntil = resolveWaitUntil((p) => {
       settled.push(p);
-    }, logger);
+    }, () => logger);
 
     waitUntil(Promise.reject('a bare string'));
     await Promise.all(settled);
@@ -76,7 +76,7 @@ describe('resolveWaitUntil', () => {
     const settled: Promise<unknown>[] = [];
     const waitUntil = resolveWaitUntil((p) => {
       settled.push(p);
-    }, undefined);
+    }, () => undefined);
 
     waitUntil(Promise.reject(new Error('boom')));
 
@@ -85,9 +85,29 @@ describe('resolveWaitUntil', () => {
     await expect(settled[0]).resolves.toBeUndefined();
   });
 
+  it('resolves the logger at failure time, not at construction', async () => {
+    // The plugin context resolves `logger` lazily, and a capability may be
+    // registered imperatively after this seam is built. Capturing the value up
+    // front would swallow every later report.
+    const { logger, errors } = recordingLogger();
+    let current: ILogger | undefined;
+    const settled: Promise<unknown>[] = [];
+    const waitUntil = resolveWaitUntil((p) => {
+      settled.push(p);
+    }, () => current);
+
+    // Built while no logger was resolvable...
+    current = logger; // ...and one appears before the failure happens.
+    waitUntil(Promise.reject(new Error('late-logger failure')));
+    await Promise.all(settled);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toBe('cloudflare: background task failed');
+  });
+
   it('still runs and still reports the work with no host injected', async () => {
     const { logger, errors } = recordingLogger();
-    const waitUntil = resolveWaitUntil(undefined, logger);
+    const waitUntil = resolveWaitUntil(undefined, () => logger);
     let ran = false;
 
     waitUntil(

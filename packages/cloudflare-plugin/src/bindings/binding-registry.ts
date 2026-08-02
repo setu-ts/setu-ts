@@ -221,12 +221,20 @@ export class BindingRegistry implements ICloudflareBindings {
     this.#waitUntil(promise);
   }
 
-  /** Reads a binding, throwing with the available names when it is absent. */
+  /**
+   * Reads a binding, throwing with the available names when it is absent.
+   *
+   * `Object.hasOwn`, not a bare index read: the record comes from
+   * `splitWorkerEnv` and carries `Object.prototype`, so `bindings['constructor']`
+   * would hand back the `Object` constructor and `bindings['toString']` a
+   * function — neither of which is a binding, and both of which would contradict
+   * `has()`, which has always been own-key. Same class as the `Object.prototype`
+   * hole M34 fixed in the CLI's schematic registry.
+   */
   #require(name: string): object {
-    const binding = this.#bindings[name];
-    if (binding === undefined) {
+    if (!Object.hasOwn(this.#bindings, name)) {
       throw CloudflareBindingMissingError.absent(name, this.#names);
     }
-    return binding;
+    return this.#bindings[name] as object;
   }
 }

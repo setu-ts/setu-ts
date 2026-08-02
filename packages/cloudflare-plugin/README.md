@@ -106,6 +106,9 @@ SessionPlugin({
   longer. Short TTLs are correct; they are just not free of storage.
 - **KV writes are eventually consistent.** This suits read-heavy caching, not coordination. Reach
   for a Durable Object when you need a consistent read after write.
+- **A read never deletes a key the store does not own**, and a deliberately cached `null` survives a
+  read — negative caching works. `get` still answers `null` for it, because `ICacheStore` has no way
+  to distinguish a cached absence from a miss, but `has` and `delete` report it as present.
 - **`clear()` needs a prefix and costs one delete per key.** The binding has no bulk delete, so the
   sweep pages `list` (1000 keys at a time) and deletes each one. Without a prefix it would delete
   keys the store does not own, so it throws instead.
