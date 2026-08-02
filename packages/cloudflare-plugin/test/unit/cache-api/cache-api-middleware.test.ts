@@ -196,6 +196,48 @@ describe('cacheApiMiddleware — hit', () => {
     expect(headers.has('transfer-encoding')).toBe(false);
   });
 
+  it('replays EVERY Set-Cookie, not just the last one', async () => {
+    // A `Headers` iterator yields set-cookie once per value rather than
+    // comma-joined, so copying with `header()` (which overwrites) kept only the
+    // last and silently dropped the rest. Reachable through the platform's
+    // `Cache-Control: private=Set-Cookie` opt-in, which is the only way a
+    // cookie-bearing response is stored at all.
+    const cache = new FakeCacheApi();
+    await cache.put(
+      'https://example.test/multi',
+      new Response('body', {
+        headers: [
+          ['set-cookie', 'a=1; Path=/'],
+          ['set-cookie', 'b=2; Path=/'],
+          ['cache-control', 'private=Set-Cookie'],
+        ],
+      }),
+    );
+
+    const ctx = contextFor('https://example.test/multi');
+    await cacheApiMiddleware({ cache })(ctx, () => Promise.resolve());
+
+    expect(ctx.response.snapshot().headers.getSetCookie()).toEqual([
+      'a=1; Path=/',
+      'b=2; Path=/',
+    ]);
+  });
+
+  it('still overwrites rather than appends for an ordinary repeated header', async () => {
+    // Only set-cookie is special-cased. `Vary: Accept, Origin` arrives already
+    // combined, so appending it would duplicate the whole comma-joined value.
+    const cache = new FakeCacheApi();
+    await cache.put(
+      'https://example.test/vary',
+      new Response('body', { headers: [['vary', 'Accept'], ['vary', 'Origin']] }),
+    );
+
+    const ctx = contextFor('https://example.test/vary');
+    await cacheApiMiddleware({ cache })(ctx, () => Promise.resolve());
+
+    expect(ctx.response.snapshot().headers.get('vary')).toBe('Accept, Origin');
+  });
+
   it('ends the response for a cached entry with no body', async () => {
     const cache = new FakeCacheApi();
     await cache.put('https://example.test/none', new Response(null, { status: 204 }));

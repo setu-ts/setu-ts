@@ -182,7 +182,15 @@ function replay(response: IResponse, cached: Response): void {
   response.status(cached.status);
 
   for (const [name, value] of cached.headers) {
-    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
+    if (HOP_BY_HOP_HEADERS.has(name.toLowerCase())) continue;
+
+    // `Set-Cookie` is the one header a `Headers` iterator yields once PER
+    // VALUE rather than comma-joined, so `header()` — which overwrites — would
+    // keep only the last of several and silently drop the rest. Every other
+    // repeated header arrives already combined, where overwriting is correct.
+    if (name.toLowerCase() === 'set-cookie') {
+      response.appendHeader(name, value);
+    } else {
       response.header(name, value);
     }
   }

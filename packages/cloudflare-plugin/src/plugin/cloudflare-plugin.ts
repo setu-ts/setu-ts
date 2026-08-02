@@ -14,14 +14,10 @@ import type {
   IQueue,
   IStorage,
 } from '@hono-enterprise/common';
-import {
-  CAPABILITIES,
-  createCapabilityToken,
-  PLUGIN_PRIORITY,
-  splitWorkerEnv,
-} from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@hono-enterprise/common';
 
 import { resolveWaitUntil } from '../background/wait-until.ts';
+import { instanceToken } from '../instance-token.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import { BindingRegistry } from '../bindings/binding-registry.ts';
 import { CloudflareBindingMissingError } from '../errors.ts';
@@ -33,18 +29,6 @@ import { KvCacheStore } from '../stores/kv-cache-store.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'cloudflare-plugin';
-
-/** The instance name that claims a bare capability token. */
-const DEFAULT_INSTANCE = 'default';
-
-/**
- * Derives the capability token for an instance, matching `CachePlugin`'s
- * convention so a KV cache can sit beside a memory one.
- */
-function instanceToken(base: CapabilityToken, name: string | undefined): CapabilityToken {
-  const instance = name ?? DEFAULT_INSTANCE;
-  return instance === DEFAULT_INSTANCE ? base : createCapabilityToken(`${base}.${instance}`);
-}
 
 /**
  * Creates the Cloudflare Workers plugin.

@@ -12,8 +12,9 @@
  * @module
  */
 
-import type { CapabilityToken, IApplication, IQueue } from '@hono-enterprise/common';
-import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
+import type { IApplication, IQueue } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@hono-enterprise/common';
+import { instanceToken } from '../instance-token.ts';
 import type { IQueueMessageBatch } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import { WorkersQueue } from './workers-queue.ts';
@@ -78,7 +79,7 @@ export function createQueueHandler(
   app: IApplication,
   options?: QueueHandlerOptions,
 ): QueueHandler {
-  const token = queueToken(options?.name);
+  const token = instanceToken(CAPABILITIES.QUEUE, options?.name);
 
   // `async`, so a resolution failure arrives as a REJECTED promise rather than
   // a synchronous throw. `QueueHandler` is declared `=> Promise<void>`, and the
@@ -104,11 +105,4 @@ export function createQueueHandler(
 
     await service.dispatch(batch);
   };
-}
-
-/** Derives the token an instance name registers under, matching the plugin. */
-function queueToken(name: string | undefined): CapabilityToken {
-  return name === undefined || name === 'default'
-    ? CAPABILITIES.QUEUE
-    : createCapabilityToken(`${CAPABILITIES.QUEUE}.${name}`);
 }
