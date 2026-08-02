@@ -96,6 +96,13 @@ export interface NormalizedQuery {
  * `offset`/`limit` and `select` itself, and the repository above it must not
  * re-apply any of them.
  *
+ * **Transaction-scoped instances may defer their writes.** A backend whose
+ * store has no interactive transaction (Cloudflare D1, where a pre-declared
+ * `batch()` is the only unit of atomicity) has to buffer writes and apply them
+ * at commit. On such a backend the write methods below describe what WILL be
+ * written rather than what already is, and reads observe committed state only.
+ * A backend that defers must document it; `D1Adapter` is the worked example.
+ *
  * @since 0.2.0
  */
 export interface IDataSource {
@@ -117,7 +124,9 @@ export interface IDataSource {
    * Insert a new entity.
    *
    * @param data - The column values to insert
-   * @returns The persisted row, including any generated columns
+   * @returns The persisted row, including any generated columns. On a
+   * deferred-write transaction the row is the one that will be written, and a
+   * generated column is therefore not yet known.
    */
   create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>>;
   /**
@@ -136,7 +145,9 @@ export interface IDataSource {
    * Delete an entity by primary key.
    *
    * @param id - The primary key value
-   * @returns `true` when a row was deleted, `false` when none matched
+   * @returns `true` when a row was deleted, `false` when none matched. On a
+   * deferred-write transaction this reports whether a committed row matched,
+   * and the delete itself lands at commit.
    */
   delete(id: string | number): Promise<boolean>;
   /**

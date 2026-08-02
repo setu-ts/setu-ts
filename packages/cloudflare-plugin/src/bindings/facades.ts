@@ -421,3 +421,19 @@ export function isKvNamespace(value: unknown): value is IKvNamespace {
 export function isR2Bucket(value: unknown): value is IR2Bucket {
   return hasMethods(value, ['head', 'get', 'put', 'delete']);
 }
+
+/**
+ * Reports whether a binding is D1-shaped.
+ *
+ * Read by {@linkcode D1Adapter}'s constructor, so an absent binding — a name
+ * typo, a missing `d1_databases` stanza, a preview environment that was never
+ * given the database — fails where the adapter is built, naming what is wrong,
+ * rather than at the first query with a bare `TypeError`.
+ *
+ * @param value - The binding to check
+ * @returns `true` when it carries the D1 database methods
+ * @since 0.2.0
+ */
+export function isD1Database(value: unknown): value is ID1Database {
+  return hasMethods(value, ['prepare', 'batch']);
+}

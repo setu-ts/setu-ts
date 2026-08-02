@@ -7160,7 +7160,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`                                                                                                                                                                                                                                                                          | fn + types    |
 | `assessCacheability`, `CacheabilityInput`, `CacheRefusal`                                                                                                                                                                                                                                                                               | fn + types    |
 | `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
-| `isKvNamespace`, `isR2Bucket`                                                                                                                                                                                                                                                                                                           | guards        |
+| `isKvNamespace`, `isR2Bucket`, `isD1Database`                                                                                                                                                                                                                                                                                           | guards        |
 | `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                                                                                          | errors        |
 
 ### `D1Adapter` — D1 as a first-class database
@@ -7205,8 +7205,15 @@ buffer and sends nothing. Two consequences, both deliberate:
 **Identifiers and limits.** Values are always bound (`?N`); identifiers cannot be, so table and
 column names are validated against `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, throwing
 `CloudflareUnsupportedError` otherwise. D1 binds at most **100 parameters per query**, and every
-builder refuses a statement that would exceed it rather than letting D1 fail with a message that
-points at the SQL instead of the caller's query.
+builder whose parameter count varies with the caller's query — select, insert, update, count —
+refuses a statement that would exceed it rather than letting D1 fail with a message that points at
+the SQL instead of the caller's query. (Find-by-id and delete bind exactly one value and so cannot.)
+
+**The binding is validated where the adapter is built.** `new D1Adapter(env.DB)` throws
+`CloudflareBindingMissingError` when the binding is absent or not D1-shaped, naming what arrived and
+pointing at the `d1_databases` stanza. Without that check a mistyped binding name would register
+cleanly, report `up` from the `database` health indicator, and fail every query with a bare
+`TypeError`. The `isD1Database` guard is exported alongside `isKvNamespace` / `isR2Bucket`.
 
 **Not verified against live D1.** CI holds no Cloudflare account. Every generated statement is
 asserted verbatim, and the whole surface is driven against a real SQLite engine (the engine D1

@@ -12,7 +12,8 @@
 
 import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@hono-enterprise/common';
 import type { ID1Database } from '../bindings/facades.ts';
-import { CloudflareUnsupportedError } from '../errors.ts';
+import { isD1Database } from '../bindings/facades.ts';
+import { CloudflareBindingMissingError, CloudflareUnsupportedError } from '../errors.ts';
 import type { D1Target } from './d1-sql.ts';
 import {
   createD1DataSource,
@@ -23,6 +24,23 @@ import {
 
 /** The primary-key column assumed for an entity with no explicit mapping. */
 const DEFAULT_PRIMARY_KEY = 'id';
+
+/**
+ * Describe a rejected binding for the constructor's error message, without
+ * interpolating a whole object into it.
+ *
+ * @param value - Whatever was passed in place of a D1 binding
+ * @returns A short phrase naming what arrived
+ */
+function describeBinding(value: unknown): string {
+  if (value === undefined) return '`undefined`';
+  if (value === null) return '`null`';
+  if (typeof value !== 'object') return `a ${typeof value}`;
+  const missing = ['prepare', 'batch'].filter(
+    (m) => typeof (value as Record<string, unknown>)[m] !== 'function',
+  );
+  return `an object missing ${missing.join(' and ')}`;
+}
 
 /**
  * How one entity name maps onto a physical D1 table.
@@ -119,8 +137,21 @@ export class D1Adapter implements IDatabaseAdapter {
   /**
    * @param db - The D1 binding, from the Worker's `env`
    * @param options - Entity mapping overrides
+   * @throws {CloudflareBindingMissingError} When `db` is not D1-shaped. An
+   * absent binding reads as `undefined`, and without this check the adapter
+   * would register cleanly, report `up` from the `database` health indicator,
+   * and fail every query with a bare `TypeError` — the failure mode
+   * {@linkcode isD1Database} exists to prevent.
    */
   constructor(db: ID1Database, options?: D1AdapterOptions) {
+    if (!isD1Database(db)) {
+      throw new CloudflareBindingMissingError(
+        `D1Adapter needs a D1 binding exposing prepare() and batch(), but received ${
+          describeBinding(db)
+        }. An absent binding reads as \`undefined\` — check the binding name you ` +
+          'read from `env` against the `d1_databases` stanza in wrangler.toml.',
+      );
+    }
     this.#db = db;
     this.#tables = options?.tables ?? {};
   }

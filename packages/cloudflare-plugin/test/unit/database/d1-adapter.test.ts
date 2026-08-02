@@ -8,10 +8,68 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IDatabaseAdapter } from '@hono-enterprise/common';
 
-import { CloudflareUnsupportedError, D1Adapter } from '../../../src/index.ts';
+import {
+  CloudflareBindingMissingError,
+  CloudflareUnsupportedError,
+  D1Adapter,
+  type ID1Database,
+  isD1Database,
+} from '../../../src/index.ts';
 import { SqliteD1 } from '../../d1-fakes.ts';
 
 const SCHEMA = 'CREATE TABLE users (user_id TEXT PRIMARY KEY, name TEXT)';
+
+describe('D1Adapter — binding validation', () => {
+  // Without the constructor guard every case below registers cleanly, reports
+  // `up` from the `database` health indicator, and fails the FIRST query with
+  // `TypeError: Cannot read properties of undefined (reading 'prepare')`.
+  it('refuses an absent binding, naming what to fix', () => {
+    const absent = undefined as unknown as ID1Database;
+
+    expect(() => new D1Adapter(absent)).toThrow(CloudflareBindingMissingError);
+    expect(() => new D1Adapter(absent)).toThrow(/received `undefined`/);
+    expect(() => new D1Adapter(absent)).toThrow(/d1_databases/);
+  });
+
+  it('refuses a null binding', () => {
+    expect(() => new D1Adapter(null as unknown as ID1Database)).toThrow(
+      CloudflareBindingMissingError,
+    );
+  });
+
+  it('refuses a binding of the wrong shape, naming the missing methods', () => {
+    // A mistyped name pointing at a KV namespace rather than a D1 database.
+    const kvShaped = { get() {}, put() {}, delete() {}, list() {} } as unknown as ID1Database;
+
+    expect(() => new D1Adapter(kvShaped)).toThrow(CloudflareBindingMissingError);
+    expect(() => new D1Adapter(kvShaped)).toThrow(/missing prepare and batch/);
+  });
+
+  it('refuses a partially-shaped binding, naming only the method that is absent', () => {
+    const noBatch = { prepare() {} } as unknown as ID1Database;
+    expect(() => new D1Adapter(noBatch)).toThrow(/missing batch/);
+  });
+
+  it('refuses a primitive', () => {
+    expect(() => new D1Adapter('DB' as unknown as ID1Database)).toThrow(/a string/);
+  });
+
+  it('accepts a real D1-shaped binding', () => {
+    expect(() => new D1Adapter(new SqliteD1(SCHEMA))).not.toThrow();
+  });
+});
+
+describe('isD1Database', () => {
+  it('accepts a D1-shaped binding and rejects everything else', () => {
+    expect(isD1Database(new SqliteD1(SCHEMA))).toBe(true);
+    expect(isD1Database({ prepare() {}, batch() {} })).toBe(true);
+    expect(isD1Database({ prepare() {} })).toBe(false);
+    expect(isD1Database({ get() {}, put() {} })).toBe(false);
+    expect(isD1Database(undefined)).toBe(false);
+    expect(isD1Database(null)).toBe(false);
+    expect(isD1Database('DB')).toBe(false);
+  });
+});
 
 describe('D1Adapter — lifecycle', () => {
   it('is not ready until connect(), and not ready again after disconnect()', async () => {

@@ -66,7 +66,7 @@ export type {
   KvPutOptions,
   QueueSendOptions,
 } from './bindings/facades.ts';
-export { isKvNamespace, isR2Bucket } from './bindings/facades.ts';
+export { isD1Database, isKvNamespace, isR2Bucket } from './bindings/facades.ts';
 
 // Background work
 export type { LoggerSource, WaitUntilHost } from './background/wait-until.ts';

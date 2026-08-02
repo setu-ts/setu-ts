@@ -114,6 +114,32 @@ describe('createD1DataSource — reads', () => {
       .toMatchObject([{ name: 'ada' }]);
   });
 
+  // The two statements below are asserted verbatim in `d1-sql.test.ts`, but a
+  // string assertion cannot tell whether SQLite ACCEPTS them. Executing both
+  // closes that gap: a malformed `LIMIT -1 OFFSET` or a `= ?` written where
+  // `IS NULL` belongs would pass the string test and fail only in production.
+  it('EXECUTES an offset with no limit (the LIMIT -1 form)', async () => {
+    const db = await withRows();
+    const source = createD1DataSource(db, TARGET);
+
+    const rows = await source.findAll(query({ orderBy: { age: 'asc' }, offset: 1 }));
+
+    expect(rows.map((r) => r.name)).toEqual(['ada', 'cy']);
+  });
+
+  it('EXECUTES a null filter as IS NULL, which `= ?` would never match', async () => {
+    const db = await withRows();
+    const source = createD1DataSource(db, TARGET);
+    // `withRows` leaves deletedAt NULL on every row; mark one to prove the
+    // filter discriminates rather than matching everything.
+    await source.update('u2', { deletedAt: '2026-01-01' });
+
+    const live = await source.findAll(query({ where: { deletedAt: null } }));
+
+    expect(live.map((r) => r.name).sort()).toEqual(['ada', 'cy']);
+    expect(await source.count({ deletedAt: null })).toBe(2);
+  });
+
   it('counts rows with and without a filter', async () => {
     const db = await withRows();
     const source = createD1DataSource(db, TARGET);
