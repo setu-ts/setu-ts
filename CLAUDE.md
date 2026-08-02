@@ -1141,9 +1141,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   M52c's review found on D1 — now `isDurableObjectNamespace` plus constructor validation. Doc
   deliverables C1–C5 shipped, including the ARCHITECTURE note that `cloudflare-plugin` is now a
   **second provider** of `REALTIME_BACKPLANE` and an application must register exactly one. All 28
-  `src` files at **100%** branch/function/line. **Not verified against a live Worker or workerd** —
-  CI holds no Cloudflare account, and unlike M52b this milestone's surface was not driven through
-  `wrangler dev`) — complete (PR pending)
+  `src` files at **100%** branch/function/line. **Verified against real workerd** via `wrangler dev`
+  (12/12 checks): the whole surface was driven through a bundled Worker exporting both DO classes
+  under the documented wrangler stanza. That harness settled the milestone's last open design
+  question empirically — **a plain DO class WITHOUT `extends DurableObject` is accepted by
+  workerd**, which is what makes the delegation design (forced by §5.2, since a mixin cannot be
+  typed without `any`) correct rather than merely convenient. It also proved the three things no
+  fake could: a real `stub.fetch` WebSocket upgrade answering a 101 that carries a `webSocket`, a
+  real `WebSocketPair` + `state.acceptWebSocket` inside the object, and the real **input gate** — 8
+  concurrent contenders on one lock object yielded exactly 1 winner, the property the Deno fake had
+  to hand-simulate. The code-review fix was verified there too, with a negative control: with the
+  `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
+  restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
+  Cloudflare account) — complete (PR pending)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
   reprioritized.
 

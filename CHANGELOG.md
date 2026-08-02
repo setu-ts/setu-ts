@@ -44,7 +44,10 @@ All notable changes to this project are documented here. The format follows
   binding **unvalidated**, so a missing `durable_objects` stanza or a mistyped `class_name` let an
   application boot clean and fail on the first `idFromName` with a bare `TypeError` — the defect
   M52c's review found on D1. Adds the exported **`isDurableObjectNamespace`** guard and constructor
-  validation. Not verified against a live Worker — CI holds no Cloudflare account.
+  validation. Verified against real workerd via `wrangler dev` (12/12 checks), which also settled
+  the design question the milestone could not answer from docs: **a plain Durable Object class
+  without `extends DurableObject` is accepted**, so the delegation design is correct and not merely
+  convenient. Not verified against a deployed Worker — CI holds no Cloudflare account.
 
 ### Fixed
 

@@ -7308,7 +7308,11 @@ that. A non-2xx from the object **throws** rather than reporting "not acquired":
 binding names the wrong class, and folding that into contention would silently disable every
 scheduled job.
 
-**Not verified against a live Worker.** CI holds no Cloudflare account.
+**Verified against real workerd** (`wrangler dev`, 12/12 checks) — including a plain Durable Object
+class without `extends DurableObject`, a real `stub.fetch` WebSocket upgrade, real
+`state.acceptWebSocket` hibernation, and the real input gate serializing 8 concurrent lock
+contenders down to one winner. **Not verified against a deployed Worker**: CI holds no Cloudflare
+account.
 
 ### `ICloudflareBindings`
 
