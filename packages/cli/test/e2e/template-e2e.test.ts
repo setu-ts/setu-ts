@@ -68,14 +68,40 @@ async function useWorkspacePackages(root: string): Promise<void> {
   const manifestPath = `${root}/deno.json`;
   const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as {
     imports?: Record<string, string>;
+    compilerOptions?: Record<string, unknown>;
   };
   const imports: Record<string, string> = {};
-  for (const specifier of Object.keys(manifest.imports ?? {})) {
-    const pkg = specifier.slice('@hono-enterprise/'.length);
-    imports[specifier] = `${REPO_ROOT}/packages/${pkg}/src/index.ts`;
+  for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
+    // Only framework specifiers are repointed. A template may also declare a
+    // project-local alias (`~/` → `./app/`), and rewriting that to a package
+    // path would break every module that imports through it.
+    if (!specifier.startsWith('@hono-enterprise/')) {
+      imports[specifier] = target;
+      continue;
+    }
+    imports[specifier] = workspaceEntrypoint(specifier.slice('@hono-enterprise/'.length));
   }
   manifest.imports = imports;
+  manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
   await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+/** Starter packages live one directory deeper than every other package. */
+const STARTER_PACKAGES: ReadonlySet<string> = new Set([
+  'rest-starter',
+  'microservice-starter',
+  'full-stack-starter',
+]);
+
+/**
+ * Maps a bare package name to its entrypoint in this workspace.
+ *
+ * @param pkg - The package name without the scope
+ * @returns The absolute path to its `src/index.ts`
+ */
+function workspaceEntrypoint(pkg: string): string {
+  const dir = STARTER_PACKAGES.has(pkg) ? `packages/starters/${pkg}` : `packages/${pkg}`;
+  return `${REPO_ROOT}/${dir}/src/index.ts`;
 }
 
 /**
@@ -87,13 +113,38 @@ async function useWorkspacePackages(root: string): Promise<void> {
  */
 async function denoCheck(root: string, files: readonly string[]) {
   const command = new Deno.Command(Deno.execPath(), {
-    args: ['check', '--config', `${root}/deno.json`, ...files],
+    // `--node-modules-dir=none` because a template that also emits a
+    // package.json (a frontend build) would otherwise switch Deno into
+    // node_modules resolution, and the gate must not run an npm install to
+    // type-check generated TypeScript.
+    args: ['check', '--node-modules-dir=none', '--config', `${root}/deno.json`, ...files],
     stdout: 'piped',
     stderr: 'piped',
   });
   const { code, stderr } = await command.output();
   return { code, stderr: new TextDecoder().decode(stderr) };
 }
+
+/**
+ * The workspace's own compiler options, applied to a scaffolded project before
+ * it is checked.
+ *
+ * Repointing at workspace SOURCE means the framework is type-checked too, and
+ * it only compiles under the settings it was written against —
+ * `exactOptionalPropertyTypes` above all. Without this, checking a project
+ * whose import graph reaches far enough into the workspace fails inside
+ * framework source rather than in anything the template emitted.
+ */
+const WORKSPACE_COMPILER_OPTIONS: Readonly<Record<string, boolean>> = {
+  strict: true,
+  noUnusedLocals: true,
+  noUnusedParameters: true,
+  noImplicitReturns: true,
+  noFallthroughCasesInSwitch: true,
+  noImplicitOverride: true,
+  exactOptionalPropertyTypes: true,
+  useUnknownInCatchVariables: true,
+};
 
 describe('template scaffolding — end to end', () => {
   let root: string;
@@ -168,6 +219,165 @@ describe('template scaffolding — end to end', () => {
       expect(await run(['g', 'service', '2fa', '--dir', project])).toBe(2);
       await expect(Deno.stat(`${project}/src/services`)).rejects.toThrow();
     });
+  });
+
+  // The `nest` template is the only one whose plugin wiring carries an `args`
+  // string and whose config imports project-local modules. Both are rendered
+  // source that nothing else validates: an `args` string naming an undeclared
+  // identifier, or a `localImports` path that does not resolve, type-checks
+  // nowhere else in the suite. This is that check.
+  it('type-checks the scaffolded nest project, including its emitted classes', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+    const project = `${root}/svc`;
+
+    const sources = [
+      `${project}/main.ts`,
+      `${project}/honoe.config.ts`,
+      `${project}/src/greeting-service.ts`,
+      `${project}/src/greeting-controller.ts`,
+    ];
+    for (const source of sources) {
+      expect((await Deno.stat(source)).isFile).toBe(true);
+    }
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // The full-stack template is the only one that composes through a starter
+  // factory, renders a runtime-dependent argument, and emits an app tree whose
+  // modules import each other through an alias. None of that is validated
+  // anywhere else: a factory call disagreeing with the starter's real
+  // signature, or an alias the manifest never declares, type-checks nowhere
+  // else in the suite.
+  it('type-checks the scaffolded full-stack project, config and app tree', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    const project = `${root}/shop`;
+
+    // The .tsx files are deliberately excluded: they need React and the npm
+    // toolchain the project installs, which CI does not run. Everything with
+    // framework coupling is plain TypeScript and IS checked.
+    const sources = [
+      `${project}/main.ts`,
+      `${project}/honoe.config.ts`,
+      `${project}/app/lib/context-keys.server.ts`,
+      `${project}/app/lib/load-context.ts`,
+      `${project}/app/config/services.server.ts`,
+      `${project}/app/models/product.ts`,
+      `${project}/app/services/products.server.ts`,
+      `${project}/app/features/products/products.server.ts`,
+    ];
+    for (const source of sources) {
+      expect((await Deno.stat(source)).isFile).toBe(true);
+    }
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  it('serves static assets everywhere but Cloudflare Workers', async () => {
+    // The one runtime-dependent value in the template. On Workers a missing
+    // filesystem would make the asset handler answer 404 for every asset, so
+    // the option is omitted and no asset route is registered at all.
+    expect(await run(['new', 'shop', '--template', 'full-stack', '--runtime', 'deno'])).toBe(0);
+    expect(
+      await run(['new', 'edge', '--template', 'full-stack', '--runtime', 'cloudflare-workers']),
+    ).toBe(0);
+
+    const deno = await Deno.readTextFile(`${root}/shop/honoe.config.ts`);
+    const workers = await Deno.readTextFile(`${root}/edge/honoe.config.ts`);
+
+    expect(deno).toContain("assetsDir: './build/client/assets'");
+    expect(workers).not.toContain('assetsDir');
+    // The rest of the wiring is identical, so the difference is the asset
+    // option and nothing else.
+    expect(workers).toContain("new URL('./build/server/index.js', import.meta.url).href");
+  });
+
+  it('emits the npm toolchain on a Deno target, which has no package.json of its own', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack', '--runtime', 'deno'])).toBe(0);
+    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop/package.json`));
+
+    // The frontend build runs on npm even when the server runs on Deno — the
+    // one documented exception to the Deno-only toolchain.
+    expect(manifest.devDependencies['@react-router/dev']).toBeDefined();
+    expect(manifest.devDependencies['vite']).toBeDefined();
+    // Framework packages resolve through the Deno import map, never here.
+    expect(Object.keys(manifest.devDependencies)).not.toContain('@hono-enterprise/kernel');
+    expect(Object.keys(manifest.dependencies ?? {})).not.toContain('@hono-enterprise/kernel');
+  });
+
+  it('merges the npm toolchain into the fixed manifest on a Node target', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack', '--runtime', 'node'])).toBe(0);
+    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop/package.json`));
+
+    // One package.json carrying both: a second file would collide with the
+    // fixed set and silently overwrite the framework dependencies.
+    expect(manifest.dependencies['@hono-enterprise/full-stack-starter']).toBeDefined();
+    expect(manifest.devDependencies['@react-router/dev']).toBeDefined();
+
+    const tsconfig = JSON.parse(await Deno.readTextFile(`${root}/shop/tsconfig.json`));
+    expect(tsconfig.compilerOptions.paths['~/*']).toEqual(['./app/*']);
+    // The fixed options survive the merge.
+    expect(tsconfig.compilerOptions.strict).toBe(true);
+  });
+
+  it('grants the Deno start task the read permission SSR needs', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop/deno.json`));
+
+    // Without it the project scaffolds, starts, and fails on its first request:
+    // the SSR plugin imports its own server build and reads client assets.
+    expect(manifest.tasks.start).toContain('--allow-read');
+    expect(manifest.imports['~/']).toBe('./app/');
+  });
+
+  it('emits no hello-world route, which would shadow the SSR index', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    const config = await Deno.readTextFile(`${root}/shop/honoe.config.ts`);
+
+    // An exact '/' handler beats the catch-all the SSR plugin mounts, so the
+    // app's own index route would never render.
+    expect(config).not.toContain("app.router.get('/'");
+    expect(config).not.toContain('createApplication');
+  });
+
+  it('wires the nest config with DI and the emitted classes', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+    const config = await Deno.readTextFile(`${root}/svc/honoe.config.ts`);
+
+    // The args string, rendered into the plugin call.
+    expect(config).toContain(
+      'DecoratorPlugin({ controllers: [GreetingController], services: [GreetingService] })',
+    );
+    // DiPlugin is what puts @Injectable classes on the container path.
+    expect(config).toContain('DiPlugin()');
+    // The local imports that bring the args identifiers into scope.
+    expect(config).toContain("from './src/greeting-controller.ts'");
+    expect(config).toContain("from './src/greeting-service.ts'");
+  });
+
+  it('emits parameter-level @Inject in the nest controller', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+    const controller = await Deno.readTextFile(`${root}/svc/src/greeting-controller.ts`);
+    // The showcase is the parameter position, not the deprecated class-level list.
+    expect(controller).toContain("@Inject('greeting-service')");
+    expect(controller).not.toContain("@Inject('greeting-service')\n@Controller");
+  });
+
+  it('accepts the nest template on every runtime target', async () => {
+    // `unsupported` is empty — nothing in the template needs raw sockets.
+    for (const target of ['deno', 'node', 'bun', 'cloudflare-workers']) {
+      out = [];
+      err = [];
+      expect(await run(['new', `svc-${target}`, '--template', 'nest', '--runtime', target])).toBe(
+        0,
+      );
+    }
   });
 
   it('type-checks a scaffolded project generated over every accepted name', async () => {

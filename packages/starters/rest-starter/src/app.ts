@@ -15,6 +15,11 @@ import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
 import { DecoratorPlugin } from '@hono-enterprise/decorator-plugin';
 import { DatabasePlugin } from '@hono-enterprise/database-plugin';
 import { AuthPlugin } from '@hono-enterprise/auth-plugin';
+import { DiPlugin } from '@hono-enterprise/di-plugin';
+import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
+import { SsePlugin } from '@hono-enterprise/sse-plugin';
+import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+import { SessionPlugin } from '@hono-enterprise/session-plugin';
 import { errorHandler } from '@hono-enterprise/exceptions';
 import type { RestStarterOptions } from './options.ts';
 
@@ -40,9 +45,20 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     OpenApiPlugin(options.openapi),
     DecoratorPlugin(options.decorators),
 
-    // Gated arms — only added when explicitly provided
+    // Gated arms — only added when explicitly provided.
+    //
+    // Array position does not establish registration order: the kernel's plugin
+    // resolver sorts by `priority` ascending and only then by registration
+    // order. So DiPlugin (NORMAL, 500) registers before DecoratorPlugin (LOW,
+    // 900) and the backplane (HIGH, 100) before its two consumers, wherever
+    // they sit in this list.
     ...(options.database ? [DatabasePlugin(options.database)] : []),
     ...(options.auth ? [AuthPlugin(options.auth)] : []),
+    ...(options.session ? [SessionPlugin(options.session)] : []),
+    ...(options.di ? [DiPlugin(options.di)] : []),
+    ...(options.realtime?.backplane ? [RealtimeBackplanePlugin(options.realtime.backplane)] : []),
+    ...(options.realtime?.websocket ? [WebSocketPlugin(options.realtime.websocket)] : []),
+    ...(options.realtime?.sse ? [SsePlugin(options.realtime.sse)] : []),
   ];
 
   return plugins;

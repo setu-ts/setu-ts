@@ -17,6 +17,7 @@ export type LifecycleHook =
     readonly phase: 'onError';
     readonly fn: (error: Error, ctx: IRequestContext) => void | Promise<void>;
   }
+  | { readonly phase: 'onStopping'; readonly fn: () => void | Promise<void> }
   | { readonly phase: 'onShutdown'; readonly fn: () => void | Promise<void> }
   | { readonly phase: 'onClose'; readonly fn: () => void | Promise<void> };
 
@@ -48,6 +49,9 @@ export function createFakeLifecycle(): {
     },
     onError(fn) {
       hooks.push({ phase: 'onError', fn });
+    },
+    onStopping(fn) {
+      hooks.push({ phase: 'onStopping', fn });
     },
     onShutdown(fn) {
       hooks.push({ phase: 'onShutdown', fn });

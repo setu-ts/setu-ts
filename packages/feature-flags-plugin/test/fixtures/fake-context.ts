@@ -110,6 +110,7 @@ export function createFakeContext(
       onRequest: (): void => {},
       onResponse: (): void => {},
       onError: (): void => {},
+      onStopping: (): void => {},
       onShutdown: (): void => {},
     },
     middleware: { add: (): void => {} },

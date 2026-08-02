@@ -84,6 +84,7 @@ function createFakeContext(): {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
     },
     runtime,

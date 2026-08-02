@@ -22,11 +22,15 @@ import {
   VERSION,
 } from '../constants.ts';
 import {
+  type AppFactoryWiring,
   getTemplate,
   listTemplates,
+  type LocalImport,
   type MiddlewareWiring,
   MINIMAL_PLUGINS,
+  type PackageImport,
   packagesOf,
+  type TemplateManifest,
   type Wiring,
 } from '../templates/registry.ts';
 import { deriveNames } from '../utils/names.ts';
@@ -83,22 +87,74 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
  * @returns The `honoe.config.ts` contents
  */
 function configModule(
+  runtime: TargetRuntime,
   plugins: readonly Wiring[],
   middleware: readonly MiddlewareWiring[],
+  localImports: readonly LocalImport[] = [],
+  packageImports: readonly PackageImport[] = [],
+  appFactory?: AppFactoryWiring,
 ): string {
+  // `common` is always imported for the return type, so a template naming more
+  // symbols from it merges into that one statement rather than emitting a
+  // second import of the same module.
+  const extraCommonSymbols = packageImports
+    .filter((p) => p.pkg === 'common')
+    .flatMap((p) => p.symbols ?? []);
+  // With no extra symbols the statement is the type-only import every template
+  // emitted before this merge existed, so their output is unchanged.
+  const commonImport = extraCommonSymbols.length === 0
+    ? `import type { IApplication } from '@hono-enterprise/common';`
+    : `import { ${
+      [...extraCommonSymbols, 'type IApplication'].join(', ')
+    } } from '@hono-enterprise/common';`;
+
   const imports = [
-    `import { createApplication } from '@hono-enterprise/kernel';`,
-    `import type { IApplication } from '@hono-enterprise/common';`,
+    // A starter factory returns the application, so the kernel is not imported
+    // at all on that path — the generated file names only what it uses.
+    ...(appFactory === undefined
+      ? [`import { createApplication } from '@hono-enterprise/kernel';`]
+      : [`import { ${appFactory.symbol} } from '@hono-enterprise/${appFactory.pkg}';`]),
+    commonImport,
     ...plugins.map((p) => `import { ${p.symbol} } from '@hono-enterprise/${p.pkg}';`),
     ...middleware.map((m) => `import { ${m.symbol} } from '@hono-enterprise/${m.pkg}';`),
+    ...packageImports
+      .filter((p) => p.pkg !== 'common' && p.symbols !== undefined && p.symbols.length > 0)
+      .map((p) => `import { ${p.symbols?.join(', ')} } from '@hono-enterprise/${p.pkg}';`),
+    // Project-local last, so the generated file reads package imports first.
+    ...localImports.map((l) => `import { ${l.symbols.join(', ')} } from '${l.from}';`),
   ].join('\n');
 
-  const pluginList = plugins.map((p) => `      ${p.symbol}(),`).join('\n');
   const middlewareLines = middleware.length === 0 ? '' : `\n${
     middleware
       .map((m) => `  app.middleware.add(${m.symbol}()${renderAddOptions(m.addOptions)});`)
       .join('\n')
   }\n`;
+
+  if (appFactory !== undefined) {
+    // No hello-world route here: this application's routes come from its own
+    // route module, and an exact '/' handler would take precedence over the
+    // SSR catch-all and shadow the app's index route.
+    return `${imports}
+
+/**
+ * Builds the application.
+ *
+ * \`honoe\` imports this factory to discover plugin-contributed CLI commands, so
+ * it must NOT start the server — \`main.ts\` owns that.
+ *
+ * @returns The configured, unstarted application
+ */
+export async function ${CONFIG_EXPORT}(
+  env?: Readonly<Record<string, unknown>>,
+): Promise<IApplication> {
+  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime) ?? ''});
+${middlewareLines}
+  return app;
+}
+`;
+  }
+
+  const pluginList = plugins.map((p) => `      ${p.symbol}(${p.args ?? ''}),`).join('\n');
 
   return `${imports}
 
@@ -151,7 +207,21 @@ await app.start({ port: 3000 });
  *
  * @returns The `src/index.ts` contents
  */
-function workersEntry(): string {
+function workersEntry(hasAppFactory: boolean): string {
+  // A factory-composed app resolves its configuration BEFORE any plugin is
+  // constructed, and on Workers the environment is not process-wide — bindings
+  // arrive as the `env` argument below. So it has to be threaded in; without
+  // it the app would compose from an empty configuration and fail on the first
+  // request, permanently, because `booted` memoises the rejection.
+  const bootSignature = hasAppFactory
+    ? 'async function boot(env: Record<string, unknown>): Promise<IApplication> {'
+    : 'async function boot(): Promise<IApplication> {';
+  const bootCall = hasAppFactory ? `${CONFIG_EXPORT}(env)` : `${CONFIG_EXPORT}()`;
+  const bootedInit = hasAppFactory ? 'booted ??= boot(env);' : 'booted ??= boot();';
+  const fetchSignature = hasAppFactory
+    ? 'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {'
+    : 'async fetch(request: Request): Promise<Response> {';
+
   return `import type { IApplication } from '@hono-enterprise/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 
@@ -163,15 +233,15 @@ let booted: Promise<IApplication> | undefined;
  * Workers have no socket to bind, so start() takes no port: it registers the
  * plugins and the platform drives the app through fetch().
  */
-async function boot(): Promise<IApplication> {
-  const app = await ${CONFIG_EXPORT}();
+${bootSignature}
+  const app = await ${bootCall};
   await app.start();
   return app;
 }
 
 export default {
-  async fetch(request: Request): Promise<Response> {
-    booted ??= boot();
+  ${fetchSignature}
+    ${bootedInit}
     const app = await booted;
     return await app.fetch(request);
   },
@@ -189,12 +259,31 @@ export default {
  * @param wirings - The template's plugin and middleware wirings
  * @returns Bare package names, deduplicated
  */
-function frameworkPackages(...wirings: readonly (readonly Wiring[])[]): readonly string[] {
-  // `kernel` and `common` are unconditional: the config module imports
-  // createApplication and IApplication regardless of the template.
-  const packages = new Set<string>(['kernel', 'common']);
+function frameworkPackages(
+  extras: PackagesInput,
+  ...wirings: readonly (readonly Wiring[])[]
+): readonly string[] {
+  // `common` is unconditional: the config module imports IApplication whichever
+  // way it builds the app. `kernel` is not — a starter factory returns the
+  // application, so `createApplication` is never imported on that path and
+  // declaring the dependency would be a package the project never references.
+  const packages = new Set<string>(['common']);
+  if (extras.appFactory === undefined) {
+    packages.add('kernel');
+  } else {
+    packages.add(extras.appFactory.pkg);
+  }
+  for (const entry of extras.packageImports) packages.add(entry.pkg);
   for (const pkg of packagesOf(...wirings)) packages.add(pkg);
   return [...packages];
+}
+
+/** The template-supplied inputs to package and manifest resolution. */
+interface PackagesInput {
+  /** The starter factory, when the template composes through one. */
+  readonly appFactory?: AppFactoryWiring | undefined;
+  /** Packages needed beyond those the wirings name. */
+  readonly packageImports: readonly PackageImport[];
 }
 
 /**
@@ -203,12 +292,18 @@ function frameworkPackages(...wirings: readonly (readonly Wiring[])[]): readonly
  * @param wirings - The template's plugin and middleware wirings
  * @returns Specifier → `jsr:` URL
  */
-function jsrImports(...wirings: readonly (readonly Wiring[])[]): Record<string, string> {
+function jsrImports(
+  extras: PackagesInput,
+  manifest: TemplateManifest | undefined,
+  ...wirings: readonly (readonly Wiring[])[]
+): Record<string, string> {
   const imports: Record<string, string> = {};
-  for (const pkg of frameworkPackages(...wirings)) {
+  for (const pkg of frameworkPackages(extras, ...wirings)) {
     imports[`@hono-enterprise/${pkg}`] = `jsr:@hono-enterprise/${pkg}@${RANGE}`;
   }
-  return imports;
+  // Template aliases last: an alias like `~/` is not a framework package and
+  // must not be able to displace one.
+  return { ...imports, ...manifest?.denoImports };
 }
 
 /**
@@ -218,12 +313,120 @@ function jsrImports(...wirings: readonly (readonly Wiring[])[]): Record<string, 
  * @param wirings - The template's plugin and middleware wirings
  * @returns Specifier → `npm:@jsr/…` range
  */
-function npmDependencies(...wirings: readonly (readonly Wiring[])[]): Record<string, string> {
+function npmDependencies(
+  extras: PackagesInput,
+  manifest: TemplateManifest | undefined,
+  ...wirings: readonly (readonly Wiring[])[]
+): Record<string, string> {
   const deps: Record<string, string> = {};
-  for (const pkg of frameworkPackages(...wirings)) {
+  for (const pkg of frameworkPackages(extras, ...wirings)) {
     deps[`@hono-enterprise/${pkg}`] = `npm:@jsr/hono-enterprise__${pkg}@${RANGE}`;
   }
-  return deps;
+  return { ...deps, ...manifest?.npmDependencies };
+}
+
+/**
+ * The permission flags the generated Deno `start` task runs with.
+ *
+ * Network and environment access are unconditional — every generated project
+ * binds a socket and reads configuration. Anything further is the template's
+ * to declare, so the default stays least-privilege.
+ *
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The space-separated flags
+ */
+function denoPermissions(manifest?: TemplateManifest): string {
+  return ['--allow-net', '--allow-env', ...manifest?.denoPermissions ?? []].join(' ');
+}
+
+/**
+ * The `compilerOptions` a generated `tsconfig.json` carries.
+ *
+ * One function for both the Node/Bun manifest and the standalone one a Deno or
+ * Workers project gets when its template needs an npm toolchain, so the two can
+ * never disagree about how the emitted TypeScript is compiled.
+ *
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The merged compiler options
+ */
+function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
+  return {
+    target: 'ES2022',
+    module: 'ESNext',
+    moduleResolution: 'bundler',
+    strict: true,
+    // Required by the decorator and OpenAPI plugins.
+    experimentalDecorators: true,
+    verbatimModuleSyntax: true,
+    skipLibCheck: true,
+    ...manifest?.tsconfigCompilerOptions,
+  };
+}
+
+/**
+ * The `scripts` a generated `package.json` carries.
+ *
+ * A template with a frontend build gets a `build` script alongside `start`,
+ * because its `start` cannot work until the build has produced the server
+ * bundle the SSR plugin loads.
+ *
+ * @param runtime - The selected runtime target
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The scripts block
+ */
+function npmScripts(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+): Record<string, string> {
+  const start = runtime === 'bun' ? 'bun run main.ts' : 'node --experimental-strip-types main.ts';
+  return manifest?.npmDevDependencies === undefined
+    ? { start }
+    : { build: 'react-router build', start };
+}
+
+/**
+ * The npm manifest files a Deno or Workers project needs for a frontend build.
+ *
+ * Those targets carry a `deno.json` and no `package.json`, so a template with
+ * an npm toolchain would otherwise have nowhere to declare it. Returns nothing
+ * for a template that needs no npm packages, which is every template but one.
+ *
+ * @param projectName - The project directory and manifest name
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The files to add, or an empty list
+ */
+function standaloneNpmFiles(
+  projectName: string,
+  manifest?: TemplateManifest,
+): readonly GeneratedFile[] {
+  if (manifest?.npmDevDependencies === undefined) return [];
+
+  return [
+    {
+      path: 'package.json',
+      contents: `${
+        JSON.stringify(
+          {
+            name: projectName,
+            version: '0.1.0',
+            private: true,
+            type: 'module',
+            scripts: { build: 'react-router build' },
+            ...(manifest.npmDependencies === undefined
+              ? {}
+              : { dependencies: { ...manifest.npmDependencies } }),
+            devDependencies: { ...manifest.npmDevDependencies },
+          },
+          null,
+          2,
+        )
+      }\n`,
+    },
+    {
+      path: 'tsconfig.json',
+      contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
+    },
+  ];
 }
 
 /**
@@ -233,6 +436,9 @@ function npmDependencies(...wirings: readonly (readonly Wiring[])[]): Record<str
  * @param runtime - The selected runtime target
  * @param plugins - Plugins the generated `honoe.config.ts` registers
  * @param middleware - Middleware the generated `honoe.config.ts` adds
+ * @param localImports - Project-local imports the config module needs, for a
+ * template whose plugin arguments name a class it also emits
+ * @param extras - Extra template source files, appended to the fixed set
  * @returns The files to create, relative to the project root
  */
 function projectFiles(
@@ -240,7 +446,13 @@ function projectFiles(
   runtime: TargetRuntime,
   plugins: readonly Wiring[],
   middleware: readonly MiddlewareWiring[],
+  localImports: readonly LocalImport[] = [],
+  extras: readonly GeneratedFile[] = [],
+  packageImports: readonly PackageImport[] = [],
+  appFactory?: AppFactoryWiring,
+  manifest?: TemplateManifest,
 ): readonly GeneratedFile[] {
+  const packagesInput: PackagesInput = { appFactory, packageImports };
   const readme = `# ${projectName}
 
 A [Hono Enterprise](https://github.com/dkpaul91/hono-enterprise) project targeting \`${runtime}\`.
@@ -281,17 +493,24 @@ ${PROGRAM_NAME} generate --help
       contents: `${
         JSON.stringify(
           {
-            tasks: { start: `deno run --allow-net --allow-env ${entry}` },
+            tasks: { start: `deno run ${denoPermissions(manifest)} ${entry}` },
             // The decorator and OpenAPI plugins ship legacy decorators, so a
             // generated @Controller class only type-checks with this enabled.
             compilerOptions: { experimentalDecorators: true },
-            imports: jsrImports(plugins, middleware),
+            imports: jsrImports(packagesInput, manifest, plugins, middleware),
           },
           null,
           2,
         )
       }\n`,
     });
+
+    // These targets have no npm manifest in the fixed set, so a template that
+    // needs one — a frontend build — gets a standalone file rather than a
+    // merge. Framework packages stay in the import map above; only the
+    // template's own npm dependencies appear here.
+    const npmFiles = standaloneNpmFiles(projectName, manifest);
+    for (const file of npmFiles) files.push(file);
   } else {
     files.push({
       path: 'package.json',
@@ -301,12 +520,11 @@ ${PROGRAM_NAME} generate --help
             name: projectName,
             version: '0.1.0',
             type: 'module',
-            scripts: {
-              start: runtime === 'bun'
-                ? 'bun run main.ts'
-                : 'node --experimental-strip-types main.ts',
-            },
-            dependencies: npmDependencies(plugins, middleware),
+            scripts: npmScripts(runtime, manifest),
+            dependencies: npmDependencies(packagesInput, manifest, plugins, middleware),
+            ...(manifest?.npmDevDependencies === undefined
+              ? {}
+              : { devDependencies: { ...manifest.npmDevDependencies } }),
           },
           null,
           2,
@@ -317,31 +535,17 @@ ${PROGRAM_NAME} generate --help
     files.push({ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' });
     files.push({
       path: 'tsconfig.json',
-      contents: `${
-        JSON.stringify(
-          {
-            compilerOptions: {
-              target: 'ES2022',
-              module: 'ESNext',
-              moduleResolution: 'bundler',
-              strict: true,
-              // Required by the decorator and OpenAPI plugins.
-              experimentalDecorators: true,
-              verbatimModuleSyntax: true,
-              skipLibCheck: true,
-            },
-          },
-          null,
-          2,
-        )
-      }\n`,
+      contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
     });
   }
 
-  files.push({ path: CONFIG_MODULE, contents: configModule(plugins, middleware) });
+  files.push({
+    path: CONFIG_MODULE,
+    contents: configModule(runtime, plugins, middleware, localImports, packageImports, appFactory),
+  });
 
   if (runtime === 'cloudflare-workers') {
-    files.push({ path: 'src/index.ts', contents: workersEntry() });
+    files.push({ path: 'src/index.ts', contents: workersEntry(appFactory !== undefined) });
     files.push({
       path: 'wrangler.toml',
       contents: `name = "${projectName}"
@@ -354,7 +558,33 @@ compatibility_flags = ["nodejs_compat"]
     files.push({ path: 'main.ts', contents: serveEntry() });
   }
 
+  // Template source files last. Any path colliding with the fixed set above is
+  // reported by the caller's overwrite check rather than silently winning.
+  for (const extra of extras) {
+    files.push({ path: extra.path, contents: extra.contents });
+  }
+
   return files;
+}
+
+/**
+ * Returns the first path planned more than once, if any.
+ *
+ * Exported for its own unit test — not from the package barrel. The overwrite
+ * check probes the filesystem, so it cannot see two entries with the same path
+ * inside a single plan; those would both be written, the last silently winning.
+ * A template emitting `deno.json` would overwrite the framework's.
+ *
+ * @param files - The planned files, in write order
+ * @returns The duplicated path, or undefined when every path is distinct
+ */
+export function firstDuplicatePath(files: readonly GeneratedFile[]): string | undefined {
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.path)) return file.path;
+    seen.add(file.path);
+  }
+  return undefined;
 }
 
 /**
@@ -437,7 +667,31 @@ export async function runNewCommand(
   }
 
   const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), projectName);
-  const files = projectFiles(projectName, runtime, plugins, middleware).map((file) => ({
+  const planned = projectFiles(
+    projectName,
+    runtime,
+    plugins,
+    middleware,
+    template?.localImports ?? [],
+    template?.files ?? [],
+    template?.packageImports ?? [],
+    template?.appFactory,
+    template?.manifest,
+  );
+
+  // A template file whose path collides with the fixed set would otherwise be
+  // written twice, last one winning, with nothing reported — the overwrite
+  // check probes the filesystem and cannot see a duplicate inside one plan.
+  const duplicate = firstDuplicatePath(planned);
+  if (duplicate !== undefined) {
+    deps.error(
+      `Template "${template?.name ?? 'none'}" emits ${duplicate} twice; ` +
+        `it collides with the generated project file of the same name.`,
+    );
+    return EXIT_ERROR;
+  }
+
+  const files = planned.map((file) => ({
     path: joinPath(root, file.path),
     contents: file.contents,
   }));

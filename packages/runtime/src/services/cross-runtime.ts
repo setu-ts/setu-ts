@@ -73,7 +73,7 @@ export function crossClearInterval(handle: TimerHandle): void {
 export function mergeRuntimeServices(
   divergent: Pick<
     IRuntimeServices,
-    'platform' | 'version' | 'hostname' | 'env' | 'exit' | 'fs' | 'workers'
+    'platform' | 'version' | 'hostname' | 'env' | 'exit' | 'fs' | 'workers' | 'dns'
   >,
 ): IRuntimeServices {
   return {

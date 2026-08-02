@@ -14,3 +14,7 @@
 export { createMicroserviceApp } from './app.ts';
 export type { MicroserviceStarterOptions } from './options.ts';
 export { buildMicroservicePlugins } from './app.ts';
+// Re-exported because `MicroserviceStarterOptions` inherits the `realtime` arm
+// from the REST tier, so naming its type must not require reaching past this
+// package.
+export type { RealtimeArm } from '@hono-enterprise/rest-starter';

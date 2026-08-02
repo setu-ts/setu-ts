@@ -749,6 +749,155 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   response, and a store write on the store strategy), which is documented rather than hidden, and it
   deliberately does NOT extend absolute expiry — a test pins it apart from `rolling`. All 19 changed
   `src` files ≥96% branch/function/line) — complete (PR #105)
+- **Milestone 36b** (`packages/starters/*` + `packages/decorator-plugin` + `packages/cli` — starter
+  integration: realtime, DI, and NestJS familiarity. Three deliverables, none of which changes any
+  default: **(A)** gated `realtime` (three sub-arms: `websocket`/`sse`/`backplane`) and `di` arms on
+  `RestStarterOptions`, inherited by the microservice and full-stack tiers through the existing
+  `extends` chain with no new gate logic, so the default composition of all three tiers stays
+  byte-identical to M36 — M36's rule that nothing unusable is bundled is kept, the arms just make
+  previously-impossible compositions expressible without `app.register(...)`. The starter does NO
+  validation of the `'messaging'` backplane transport: the backplane's own `register()` already
+  throws naming `MessagingPlugin`, and a test pins that the REST tier rejects it while the
+  microservice tier boots with it, so the tier distinction is proven rather than asserted. `di` is
+  gated because `DecoratorPlugin` branches on `ctx.container` — registering `DiPlugin` changes how
+  every decorated service is constructed and the lifecycle it gets. **(B)** parameter-level
+  `@Inject`: `Inject` widened to `ClassDecorator & ParameterDecorator`, branching on the argument
+  count, with the class-level positional list deprecated (§9.2) not removed. Constructor parameter
+  decorators evaluate in **reverse** argument order (re-probed this milestone, not taken on trust),
+  so tokens are stored index-keyed and assembled ascending — appending in call order would reverse
+  the list and misinject every argument, the exact failure the deliverable removes. `IMetadataStore`
+  in `common` declares only three readonly maps, so `mergeCtorParam`/`ctorInject` are concrete-class
+  members and there is **no `common` change and no new token**. A token can never be inferred
+  (`emitDecoratorMetadata` is absent repo-wide and Deno does not support it), so every ambiguous
+  case throws at startup instead of misinjecting: mixing both forms, a hole below the last injected
+  index, and `@Inject` on a method parameter. This also fixed a latent defect it made reachable —
+  `instantiate()` required service metadata before consulting the container, so a `@Controller`
+  (which carries no `@Injectable`) took the registry path even in a DI app where its dependencies
+  live in the container, and construction failed outright; the guard contradicted the function's own
+  JSDoc. **(C)** `honoe new --template nest`, the showcase: REST set + `DiPlugin` + an `@Injectable`
+  service + a `@Controller` using the parameter form, wiring INLINE like the other templates (not
+  the deferred `--starter` path). That needed a template-contract widening the original plan had
+  assumed away — `Wiring` was `{ pkg, symbol }` and the renderer hardcoded `Symbol()`, so neither a
+  plugin argument nor an extra source file was expressible; three optional fields (`Wiring.args`,
+  `localImports`, `files`) close it with every existing wiring rendering byte-identically. Verified
+  by scaffolding the project, repointing its imports at the workspace, `deno check`ing it, and
+  RUNNING it — both routes serve 200 with the injected service's output. Docs: the `CLAUDE.md` "Next
+  milestone" line had M36b mislabelled as the React Router skeleton, contradicting
+  `ROADMAP.md:4601`; ROADMAP had **no M36b section and no `36b` Progress row** at all, both added;
+  the ROADMAP NestJS-comparison caveat still claimed sessions did not exist after M48 shipped them;
+  and four cross-package starter README links were relative, which returns 400 on jsr.io) — complete
+  (PR #107)
+- **Milestone 36c** (`packages/cli` + `packages/starters/*` + `packages/config-plugin` +
+  `packages/runtime` — React Router app skeleton and config-driven composition. Two deliverables.
+  **(A)** `honoe new --template full-stack` emits a React Router **8** framework-mode skeleton: the
+  `routes → features → services → models` layering, `flatRoutes` `_app`/`_auth` groups each wrapped
+  in their own `layout()`, the `~/*` alias, the `.server.ts` convention, one worked feature, and the
+  Vite/npm build files. ROADMAP said the app structure was owned by the full-stack STARTER; that is
+  impossible and was corrected — a starter is a JSR **library** and cannot write `app/routes.ts`
+  into a user's project, so the CLI owns the file layout and the starter owns the plugin composition
+  the generated `honoe.config.ts` calls. The deliverable that distinguishes this from
+  `create-react-router` is the REMOVAL: a conventional RR app's
+  `lib/{session,csrf,sse,kv,
+  service-logger}.server.ts` and its `config/services.server.ts`
+  module-level caches are the session/SSE/secrets/logger capabilities plus the kernel registry, and
+  a test pins that none of them is emitted. Session reaches loaders through an **app-declared**
+  `RouterContextKey` — `getSession` takes an `IRequestContext` a loader never sees, while
+  `populateLoadContext` receives exactly that, so the bridge lives in app code and
+  `react-router-plugin` stays ignorant of `session-plugin`. Composing through a starter needed
+  `TemplateDefinition.appFactory`, which reverses M36's inline-wiring rule for this ONE template
+  with cause (22 wirings is not a file a human wants to open); it took its own type rather than
+  reusing `Wiring`, because §3.4's runtime-conditional `assetsDir` cannot be expressed as a fixed
+  string. Workers omits `assetsDir` (no `fs` → the asset handler 404s rather than throwing, and
+  omitting it registers no route at all). **(B)** config-driven composition:
+  `createFullStackAppFromConfig(build, configOptions?)` loads config once, hands the snapshot to the
+  resolver, and passes THAT SAME object into the app via a new `ConfigPluginOptions.instance`, so
+  the values the composition branched on are the values handlers read. Per-option
+  `urlFromConfig`/`secretFromConfig` were **rejected, not implemented** — they need a value at
+  plugin-construction time, before `ConfigPlugin` has registered. That needed two extractions, each
+  leaving one implementation behind two entry points: `loadConfig` in `config-plugin` and
+  `createRuntimeServices` in `runtime` (the barrel exported `detectRuntime` and four per-platform
+  factories but nothing for the DETECTED platform — the map was private to
+  `RuntimePlugin.register`). A fifth package joined late: no starter had a `session` arm, because
+  M48 postdates M36, so `RestStarterOptions.session` was added (gated — the plugin throws without a
+  secret). Three defects the drift gate caught that nothing else would: the template pinned React
+  Router **7** while the plugin imports `npm:react-router@8`; the Deno `start` task lacked
+  `--allow-read`, which SSR needs to import its own server build; and the gate's own
+  `useWorkspacePackages` mapped starters to `packages/<name>` (they live under `packages/starters/`)
+  and mangled the `~/` alias. Also added a duplicate-path guard, since `findExisting` probes the
+  filesystem and cannot see a path planned twice inside one project) — complete (PR #108)
+- **Milestone 50** (`packages/service-discovery-plugin` — the capability the framework had none of:
+  it can be _found_ by an orchestrator but cannot _find_ anything. The kernel's `ServiceRegistry` is
+  an in-process capability registry (same word, unrelated concern), `health-plugin` produces probes
+  a discovery system consumes without ever registering anywhere, and `sdk` takes a fixed `baseUrl`.
+  Brokered messaging needs no discovery by construction — callers address a topic — so direct
+  service-to-service HTTP was the gap. `ServiceDiscoveryPlugin` registers an `IServiceDiscovery`
+  under a new `CAPABILITIES.SERVICE_DISCOVERY` token over a pluggable `DiscoveryProvider` port with
+  five arms (`'static'`, `'consul'`, `'kubernetes'` EndpointSlices, `'dns'`, `'custom'`); the option
+  type is a **union discriminated on `provider`**, so a missing per-arm credential is a compile
+  error rather than a startup throw (the M30 `ChannelConfig` precedent). **Zero npm dependencies** —
+  §12.2's inject-or-lazy pattern collapses to inject-only because Consul and the Kubernetes API
+  server are plain HTTP JSON, so one `IDiscoveryHttp` seam with a buffered `request` AND a streaming
+  `stream` (Consul's blocking-query protocol lives entirely in the `X-Consul-Index` **header**; a
+  Kubernetes watch is a chunked body `text()` would never resolve) covers both providers. Cache is
+  read-through on the **monotonic** clock with per-service in-flight coalescing (the M47
+  LaunchDarkly precedent) and stale-on-failure; a watch event invalidates that name immediately, so
+  the TTL is a safety net rather than the freshness mechanism. Consul's two documented index hazards
+  are handled as requirements, not defensive extras: a **backwards** index after a server restart
+  resets to `0` (otherwise the client misses updates for an unbounded time) and an index of `0`
+  becomes `1` (it busy-loops older servers — an incident no test would surface). The Kubernetes
+  watch is used as a change **SIGNAL**, not a delta log: any `ADDED`/`MODIFIED`/`DELETED` re-LISTs
+  and fires the full list, which removes the stateful slice-by-name merge where hand-rolled k8s
+  clients most often go wrong, at the cost of one extra LIST per change. `conditions.ready === nil`
+  means **ready** (treating `undefined` as not-ready would silently discard every endpoint in a
+  slice omitting the field), and Consul's `Service.Address` is an **empty string** for a service
+  registered without one, so the `Node.Address` fallback is mandatory — omitting it yields
+  `http://:8080`. Outlier ejection is deliberately a **different mechanism** from M27's circuit
+  breaker, not a duplicate: `wrap` breaks a CALL SITE (refusing healthy instances because unhealthy
+  ones failed), ejection removes a POOL MEMBER while the call site stays open; they compose by
+  re-`pick()`ing inside the wrapped call. Envoy's two safeguards are load-bearing —
+  `maxEjectionPercent` caps concurrent ejections and an all-ejected pool falls back to the
+  unfiltered list, because a correlated failure otherwise converts a partial outage into a total
+  one. `pick` filters ejected instances while `resolve` does not, and `resolveUrl` funnels through
+  `pick` so both entry points read one configuration. Two flagged widenings outside the package:
+  **`IRuntimeServices.dns?: IDnsResolver`** (+ `SrvRecord`) on the M44 `fs?` / M45 `workers?`
+  precedent, implemented by Node/Deno/Bun and OMITTED on Workers — DNS-SRV cannot be expressed over
+  `fetch` and is how Consul DNS, k8s headless services and ECS Service Connect are actually
+  consumed. `SrvRecord.host` is a normalized name **on purpose**: Deno spells it `target`, Node
+  spells it `name`, and passing either through would type-check on both runtimes while producing
+  `undefined` hostnames on one; `resolveHost` concatenates `A`+`AAAA` and rejects only when BOTH
+  fail, since an IPv4-only host has no `AAAA` record at all. And **`ILifecycleApi.onStopping`**, a
+  new kernel phase running at the very start of `stop()`, before the app refuses requests —
+  deregistering in `onShutdown` (after the drain, after the socket closes) leaves Consul routing at
+  a dead port for up to a check interval on every rolling deploy. The plan claimed `stop()` would be
+  "byte-for-byte unchanged" with no hooks registered; a pre-existing kernel test **falsified that**
+  — `await` on an already-resolved promise still defers `#stopping = true` by a microtask, handing a
+  404 to a request that used to get a 503 — so `#doStop()` branches on `hasStopping()` and skips the
+  phase entirely, making the compatibility claim literally true. Self-registration runs at
+  `onBootstrap`, which is BEFORE `listen()`; that window is harmless only because the mandatory,
+  non-disable-able health check keeps Consul reporting the service critical and every read sends
+  `passing=true` — so the check is load-bearing, not a convenience default. Doc deliverables C1–C5
+  shipped: the ARCHITECTURE package diagram gained this node with the 10-member backlog **named, not
+  absorbed**, into M38; README's five mutually inconsistent counts corrected to 43 members / 33
+  plugins with the alpha.3 sentence scoped to the release; PUBLIC_API gained a Service Discovery
+  section, the `dns` runtime row, and the `onStopping` contract note; M39 gained the scope boundary
+  (it owns the platform objects, M50 owns app-side resolution/balancing/watching/ejection). Code
+  review then found five defects the green gates had passed, all fixed in the same PR: a rejecting
+  `onStopping` hook ABORTED the whole shutdown (the rejection escaped before `#stopping = true`, the
+  drain, the socket close and both later hook phases, and `#stopPromise` cached it — so the app kept
+  serving and could never be stopped); both watch backoffs accumulated one permanent `abort`
+  listener per retry (50 cycles produced 51 added, 0 removed), the class M47 already fixed in
+  `resilience-plugin`; `readJsonLines` released its reader lock but never CANCELLED, so every
+  Kubernetes resync abandoned a chunked body that is still an open connection; and
+  `KubernetesProvider.authHeader` dereferenced `runtime.fs` unguarded, so the EXPORTED class threw a
+  bare `TypeError` when constructed outside the factory. The fifth is the instructive one: the
+  ejection key separator was an embedded raw NUL BYTE rather than its escape sequence, which made
+  `file` report the source as BINARY and `grep -rn` skip it silently — including this file's own
+  mandated forbidden-construct audit, whose "empty" result was therefore a FALSE PASS for that file.
+  Runtime behaviour was correct and all four gates plus the 90% bar were green, which is exactly why
+  it survived; only re-reading the source caught it. One review probe was itself wrong and had to be
+  redone: a self-closing fake stream reports zero cancels whether the code is correct or not, so the
+  body-leak evidence only became real once the fake stayed open the way a live watch does) —
+  complete (PR #109)
 - **Milestone 49** (`packages/grpc-plugin` — co-serving the gRPC family (gRPC, Connect, gRPC-Web) on
   the SAME port and fetch handler as ordinary Hono routes, registering an `IGrpcService` under a new
   `CAPABILITIES.GRPC = 'grpc'` token. Runtime is **Connect-ES core** + Protobuf-ES because it is
@@ -783,8 +932,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   no-op that let the plugin register a router silently answering `404` when Connect was absent; a
   missing dependency now throws `GrpcRuntimeLoadError` naming the specifier. All 11 `src` files at
   100% branch/function/line) — complete (PR #110)
-- **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes M48;
-  M37–M40 follow unless reprioritized.
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
+  reprioritized.
 
 ## Verification (run before declaring any work done)
 

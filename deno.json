@@ -42,6 +42,7 @@
     "./packages/websocket-plugin",
     "./packages/realtime-backplane-plugin",
     "./packages/session-plugin",
+    "./packages/service-discovery-plugin",
     "./packages/grpc-plugin"
   ],
   "tasks": {

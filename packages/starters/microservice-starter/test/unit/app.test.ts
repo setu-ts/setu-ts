@@ -75,4 +75,38 @@ describe('microservice-starter / createMicroserviceApp', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
     expect(response.statusCode).toBe(200);
   });
+  it('inherits the realtime and di arms from the REST tier', () => {
+    const names = buildMicroservicePlugins({
+      di: {},
+      realtime: { websocket: {}, sse: {}, backplane: {} },
+    }).map((p) => p.name);
+    expect(names).toContain('di-plugin');
+    expect(names).toContain('websocket-plugin');
+    expect(names).toContain('sse-plugin');
+    expect(names).toContain('realtime-backplane-plugin');
+  });
+
+  it('omits the inherited arms by default', () => {
+    const names = buildMicroservicePlugins().map((p) => p.name);
+    expect(names).not.toContain('di-plugin');
+    expect(names).not.toContain('websocket-plugin');
+    expect(names).not.toContain('sse-plugin');
+    expect(names).not.toContain('realtime-backplane-plugin');
+  });
+
+  // The 'messaging' backplane transport throws on the REST tier, which supplies no
+  // broker; here it succeeds, because this tier always registers MessagingPlugin.
+  it("boots with a 'messaging' backplane transport, which the REST tier cannot", async () => {
+    const app = createMicroserviceApp({
+      realtime: { sse: {}, backplane: { transport: 'messaging' } },
+    });
+    app.router.get('/test', (ctx) => ctx.response.text('ok'));
+    await app.start();
+
+    expect(app.services.has(CAPABILITIES.REALTIME_BACKPLANE)).toBe(true);
+    expect(app.services.has(CAPABILITIES.MESSAGING)).toBe(true);
+
+    const response = await app.inject({ method: 'GET', url: '/test' });
+    expect(response.statusCode).toBe(200);
+  });
 });

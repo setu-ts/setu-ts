@@ -17,6 +17,7 @@
     "@hono-enterprise/decorator-plugin": "jsr:@hono-enterprise/decorator-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/database-plugin": "jsr:@hono-enterprise/database-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/auth-plugin": "jsr:@hono-enterprise/auth-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/session-plugin": "jsr:@hono-enterprise/session-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/exceptions": "jsr:@hono-enterprise/exceptions@^0.1.0-alpha.3",
     "@hono-enterprise/messaging-plugin": "jsr:@hono-enterprise/messaging-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/queue-plugin": "jsr:@hono-enterprise/queue-plugin@^0.1.0-alpha.3",

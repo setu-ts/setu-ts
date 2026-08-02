@@ -165,6 +165,60 @@ export interface IWorkerHost {
 }
 
 /**
+ * One DNS `SRV` record, normalized across runtimes.
+ *
+ * The field is named `host` deliberately: Deno's resolver calls it `target`
+ * and Node's calls it `name`, so passing either spelling through would make a
+ * consumer correct on one runtime and silently `undefined` on the other. Each
+ * adapter maps its own spelling onto this one.
+ *
+ * @since 0.2.0
+ */
+export interface SrvRecord {
+  /** Target hostname. Trailing dots are left as the resolver returned them. */
+  readonly host: string;
+  /** TCP port the service listens on. */
+  readonly port: number;
+  /** RFC 2782 priority — clients use the lowest-numbered tier first. */
+  readonly priority: number;
+  /** RFC 2782 weight — relative share within one priority tier. */
+  readonly weight: number;
+}
+
+/**
+ * DNS resolution, abstracted across runtimes.
+ *
+ * Exposed as the optional {@linkcode IRuntimeServices.dns}. `fetch` cannot
+ * express an `SRV` lookup, which is how Consul DNS, Kubernetes headless
+ * services, and ECS Service Connect are actually consumed — hence a resolver
+ * seam rather than making callers reach for a runtime global.
+ *
+ * @since 0.2.0
+ */
+export interface IDnsResolver {
+  /**
+   * Resolves `SRV` records for a hostname.
+   *
+   * @param hostname - Fully qualified `SRV` name (`_http._tcp.example.com`)
+   * @returns The records, possibly empty
+   * @throws {Error} If the lookup fails
+   */
+  resolveSrv(hostname: string): Promise<readonly SrvRecord[]>;
+  /**
+   * Resolves a hostname to IP address literals.
+   *
+   * Concatenates `A` and `AAAA` results. A host with only one family present
+   * resolves successfully with just that family's addresses; the lookup
+   * rejects only when both families fail.
+   *
+   * @param hostname - Hostname to resolve
+   * @returns IPv4 and IPv6 address literals, possibly empty
+   * @throws {Error} If both address families fail to resolve
+   */
+  resolveHost(hostname: string): Promise<readonly string[]>;
+}
+
+/**
  * Runtime services — every runtime-specific operation the framework needs,
  * abstracted behind one interface. Registered under `CAPABILITIES.RUNTIME`
  * by the RuntimePlugin, which is mandatory in every application.
@@ -277,6 +331,16 @@ export interface IRuntimeServices {
 
   /** Worker-thread spawning; absent on runtimes without threads (edge platforms). */
   readonly workers?: IWorkerHost;
+
+  /**
+   * DNS resolution; absent on runtimes with no resolver API (edge platforms).
+   *
+   * Cloudflare Workers omits this key entirely — its network access is
+   * `fetch`, which resolves names internally and exposes no lookup surface.
+   *
+   * @since 0.2.0
+   */
+  readonly dns?: IDnsResolver;
 }
 
 /**

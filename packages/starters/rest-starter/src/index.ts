@@ -12,5 +12,5 @@
  */
 
 export { createRestApp } from './app.ts';
-export type { RestStarterOptions } from './options.ts';
+export type { RealtimeArm, RestStarterOptions } from './options.ts';
 export { buildRestPlugins } from './app.ts';

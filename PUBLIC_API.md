@@ -39,12 +39,13 @@
 30. [Plugin Creation](#plugin-creation)
 31. [Custom Middleware](#custom-middleware)
 32. [Custom Decorators](#custom-decorators)
-33. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-34. [Developer Ergonomics](#developer-ergonomics)
-35. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
-36. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
-37. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
-38. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
+33. [Service Discovery](#service-discovery)
+34. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+35. [Developer Ergonomics](#developer-ergonomics)
+36. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
+37. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
+38. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
+39. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
 
 ---
 
@@ -255,6 +256,7 @@ interface IRuntimeServices {
 
   fs?: IFileSystem;
   workers?: IWorkerHost;
+  dns?: IDnsResolver;
 }
 ```
 
@@ -282,6 +284,40 @@ interface IWorkerHandle {
   terminate(): Promise<void>;
 }
 ```
+
+`dns` is an **optional** `IDnsResolver` for name resolution. It is implemented by the Node, Deno,
+and Bun runtime adapters and **absent on Cloudflare Workers**, whose network access is `fetch` —
+that resolves names internally and exposes no lookup surface. Callers must degrade gracefully when
+it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
+`DiscoveryUnavailableError` during `register()`, naming the alternatives.
+
+| Member    | Node | Deno | Bun | Workers |
+| --------- | ---- | ---- | --- | ------- |
+| `fs`      | ✅   | ✅   | ✅  | ❌      |
+| `workers` | ✅   | ✅   | ✅  | ❌      |
+| `dns`     | ✅   | ✅   | ✅  | ❌      |
+
+```typescript
+interface IDnsResolver {
+  resolveSrv(hostname: string): Promise<readonly SrvRecord[]>;
+  resolveHost(hostname: string): Promise<readonly string[]>;
+}
+
+interface SrvRecord {
+  readonly host: string;
+  readonly port: number;
+  readonly priority: number;
+  readonly weight: number;
+}
+```
+
+`SrvRecord.host` is deliberately named that rather than reusing a runtime's own spelling: Deno calls
+the field `target` and Node calls it `name`, and passing either through unchanged would type-check
+on both runtimes while producing `undefined` hostnames on one. `resolveHost` concatenates `A` and
+`AAAA` results and rejects only when **both** families fail, because an IPv4-only host has no `AAAA`
+record at all. The runtime package exports both resolver factories: `createNodeDnsResolver(dns?)`
+(shared by the Node and Bun adapters, over `node:dns/promises`) and `createDenoDnsResolver(host)`
+(over `Deno.resolveDns`).
 
 The runtime package also exports the worker host factories `createWebWorkerHost(globals?)`
 (Deno/Bun, over the web `Worker` API) and `createNodeWorkerHost(mods?)` (Node, over
@@ -467,6 +503,7 @@ interface ConfigPluginOptions {
   readonly envFilePath?: string | readonly string[];
   readonly validationSchema?: StructuralSchema<unknown>;
   readonly expandVariables?: boolean;
+  readonly instance?: IConfig;
 }
 ```
 
@@ -477,6 +514,33 @@ interface ConfigPluginOptions {
   snapshot, preserving Zod coercions and defaults.
 - **`expandVariables`** — When `true` (default), expand `${NAME}` references in values using the
   final merged configuration.
+- **`instance`** — An already-loaded snapshot to register verbatim. Present → **nothing is read**
+  from the environment or from disk and the three options above are ignored; absent → configuration
+  loads normally. This exists so an application can resolve configuration before its plugins are
+  constructed and then hand the plugin that same object, rather than letting it load a second
+  snapshot a moment later that the composition never saw.
+
+### loadConfig()
+
+```typescript
+import { loadConfig } from '@hono-enterprise/config-plugin';
+import { createRuntimeServices } from '@hono-enterprise/runtime';
+
+const config = await loadConfig(createRuntimeServices(), {
+  envFilePath: ['.env.local', '.env'],
+});
+const port = config.get<number>('PORT', { default: 3000 });
+```
+
+`(runtime: IRuntimeServices, options?: ConfigPluginOptions) => Promise<IConfig>` — the same
+implementation `ConfigPlugin.register` uses, reachable without an application. Use it when
+configuration must be read before any plugin exists (choosing which plugins to register, for
+instance); inside an application, resolve `CAPABILITIES.CONFIG` from the registry instead.
+
+Merging, expansion, and validation behave identically on both paths because there is only one: the
+plugin delegates to this function and registers what it returns. Pass the result back as
+`ConfigPlugin({ instance: config })` so the application holds exactly one snapshot —
+`createFullStackAppFromConfig` does precisely that.
 
 ### StructuralSchema\<T\>
 
@@ -2019,6 +2083,9 @@ app.router.get('/api/health', (ctx) => {
   service registry. Always set by the plugin.
 - `userContext: RouterContextKey<IPrincipal | null>` — context key holding the authenticated
   principal, or `null` on an anonymous request.
+- `contextKeyFor<T>(name, defaultValue): RouterContextKey<T>` — returns the key for a name,
+  memoised, so the same name always yields the **same object**. Use it for any key an application
+  declares for itself; see the note below on why a `{ defaultValue }` literal silently fails there.
 - `interface RouterContextKey<T>` — `{ readonly defaultValue?: T }`. Structurally identical to React
   Router's `RouterContext<T>`, so keys from this package and keys from `createContext<T>()` are
   interchangeable.
@@ -2041,6 +2108,51 @@ export async function loader({ context }: Route.LoaderArgs) {
   return { user };
 }
 ```
+
+### Declaring your own context keys
+
+An application that puts its own values on the request context — a session, a CSRF token, a service
+it resolved once — must create those keys with `contextKeyFor`, not with a `{ defaultValue }`
+literal:
+
+```typescript
+// app/lib/context-keys.server.ts
+import { contextKeyFor } from '@hono-enterprise/react-router-plugin';
+import type { ISession } from '@hono-enterprise/common';
+
+export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
+```
+
+Keys are matched by **identity**, and in a framework-mode application the declaring module reliably
+exists twice: Vite inlines application modules into the server build, while the runtime loads
+`honoe.config.ts` from source. Two hand-written key objects then look identical and match nothing —
+`context.get()` returns the default, so a session reads as `null` and a CSRF token as an empty
+string, with no error anywhere. Resolving by name through this package gives both copies the same
+object.
+
+That guarantee needs this package to be a **single module instance**, which means the server build
+must treat `@hono-enterprise/*` as external:
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  environments: {
+    ssr: {
+      build: {
+        rollupOptions: { external: ['@hono-enterprise/react-router-plugin'] },
+      },
+    },
+  },
+});
+```
+
+Declared under `environments.ssr.build`, deliberately: React Router builds through Vite's
+Environment API, and neither a top-level `ssr.external` nor `environments.ssr.resolve.external`
+reaches that build. `honoe new --template full-stack` emits all of this already.
+
+The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
+package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
+client bundle has to inline what it imports and cannot resolve a JSR specifier.
 
 ### Notes
 
@@ -4319,7 +4431,7 @@ deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
 # Scaffold a project (creates ./my-app)
 honoe new my-app
 honoe new my-app --runtime node                 # deno | node | bun | cloudflare-workers
-honoe new my-app --template rest                # rest | microservice
+honoe new my-app --template rest                # rest | microservice | nest | full-stack
 honoe new my-app --template microservice --runtime bun
 
 # Commands this application's plugins provide
@@ -4414,12 +4526,72 @@ export function createApp(): IApplication {
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
 | `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
 | `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+| `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
+| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
 
-Templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter` packages — those
-export nothing today and are owned by Milestone 36.
-`--template microservice --runtime
-cloudflare-workers` is refused (`2`): the messaging and queue
-plugins need raw sockets, which Workers does not provide.
+Three of the four templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter`
+packages, so a scaffolded project owns an explicit, editable plugin list. `full-stack` is the
+exception, with cause: its composition is twenty-two plugins, and a generated file a human is meant
+to open and edit should not begin with twenty-two imports they did not choose. A general `--starter`
+flag for the other three is still deferred (see "Not in this release").
+
+### `--template full-stack`
+
+```typescript
+// honoe.config.ts (--template full-stack)
+import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+import type { IApplication } from '@hono-enterprise/common';
+import { getCsrfToken, getSession } from '@hono-enterprise/session-plugin';
+import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
+
+export async function createApp(): Promise<IApplication> {
+  return await createFullStackAppFromConfig((config) => ({
+    reactRouter: {
+      serverBuildPath: './build/server/index.js',
+      assetsDir: './build/client/assets',
+      populateLoadContext: (ctx, context) => {
+        context.set(sessionContext, getSession(ctx));
+        context.set(csrfContext, getCsrfToken(ctx));
+      },
+    },
+    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+  }));
+}
+```
+
+The emitted `app/` tree is the deliverable: `routes → features → services → models`, `flatRoutes`
+`_app`/`_auth` layout groups each wrapped in their own layout, the `~/*` alias, the `.server.ts`
+convention, and one worked feature. What it deliberately does **not** contain is a
+`lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`, `lib/kv.server.ts` or
+`lib/service-logger.server.ts` — those are the session, SSE, secrets and logger capabilities,
+reached through the registry the SSR plugin attaches to every request.
+
+Session reaches loaders through a key the **application** declares, never a plugin-to-plugin import:
+`getSession` takes an `IRequestContext`, which a loader never sees, while `populateLoadContext`
+receives exactly that. `RouterContextKey` is exported from the SSR plugin so app code can declare
+keys without importing `react-router` on the server.
+
+Notes:
+
+- **The generated factory is `async`.** `honoe` awaits it during command discovery, and `main.ts`
+  awaits it too, so nothing else changes.
+- **No hello-world route.** An exact `/` handler would take precedence over the SSR catch-all and
+  shadow the application's own index route.
+- **Every runtime target is supported.** Cloudflare Workers omits `assetsDir`: with no filesystem
+  the asset handler would answer 404 for every asset, and omitting the option registers no asset
+  route at all, leaving them to the platform's static-asset binding.
+- **The frontend build runs on npm even when the server runs on Deno** — the one documented
+  exception to the Deno-only toolchain. Deno and Workers targets get a standalone `package.json` for
+  Vite and React Router; Node and Bun targets get those dev dependencies merged into the
+  `package.json` they already have. The Deno `start` task additionally carries `--allow-read`, which
+  the SSR plugin needs to import its own server build and read client assets.
+- **React Router is pinned to v8**, matching the `npm:react-router@8` the SSR plugin imports.
+
+The `nest` template additionally emits `src/greeting-service.ts` and `src/greeting-controller.ts`,
+and its `honoe.config.ts` imports both to pass them to `DecoratorPlugin({ controllers, services })`.
+It refuses no runtime target. `--template microservice --runtime
+cloudflare-workers` is refused
+(`2`): the messaging and queue plugins need raw sockets, which Workers does not provide.
 
 ### Plugin-contributed commands
 
@@ -4534,8 +4706,9 @@ testable without terminating the runner.
 
 ### Not in this release
 
-- **Starter-backed templates.** `--template` emits inline wiring; templates resolving to
-  `@hono-enterprise/*-starter` wait on Milestone 36, which owns those packages.
+- **Starter-backed scaffolding.** `--template` emits inline wiring. A `honoe new --starter` path
+  that scaffolds a project importing `createRestApp` and friends is deferred — the starters
+  themselves shipped in Milestone 36 and can be depended on directly.
 - **Flags for plugin commands.** `CliCommandHandler` receives positionals only; giving handlers a
   parsed flag record would widen a committed `common` contract. Forward flags with `--` instead.
 - **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
@@ -4543,6 +4716,100 @@ testable without terminating the runner.
 ---
 
 ## REST API Application
+
+### Starter exports and option arms
+
+The three starters share one option chain:
+`FullStackStarterOptions extends
+MicroserviceStarterOptions extends RestStarterOptions`, so an arm
+added to the REST tier is available on all three.
+
+| Export                         | Kind     | Package                                            |
+| ------------------------------ | -------- | -------------------------------------------------- |
+| `createRestApp`                | function | `rest-starter`                                     |
+| `buildRestPlugins`             | function | `rest-starter`                                     |
+| `RestStarterOptions`           | type     | `rest-starter`                                     |
+| `RealtimeArm`                  | type     | all three (re-exported along the tier's pin chain) |
+| `createMicroserviceApp`        | function | `microservice-starter`                             |
+| `buildMicroservicePlugins`     | function | `microservice-starter`                             |
+| `MicroserviceStarterOptions`   | type     | `microservice-starter`                             |
+| `createFullStackApp`           | function | `full-stack-starter`                               |
+| `buildFullStackPlugins`        | function | `full-stack-starter`                               |
+| `createFullStackAppFromConfig` | function | `full-stack-starter`                               |
+| `FullStackStarterOptions`      | type     | `full-stack-starter`                               |
+
+Each arm is one plugin's option object, threaded through unchanged. **Gated arms are absent unless
+supplied**, so a starter called with no options registers exactly its always-on set:
+
+| Arm                  | Gating | Effect                                                                                        |
+| -------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| `database`, `auth`   | gated  | Adds `DatabasePlugin` / `AuthPlugin`.                                                         |
+| `session`            | gated  | Adds `SessionPlugin`; with `csrf`, its form-CSRF middleware at priority 275.                  |
+| `di`                 | gated  | Adds `DiPlugin`. **Changes how every decorated service is constructed** — see the note below. |
+| `realtime.websocket` | gated  | Adds `WebSocketPlugin`.                                                                       |
+| `realtime.sse`       | gated  | Adds `SsePlugin`.                                                                             |
+| `realtime.backplane` | gated  | Adds `RealtimeBackplanePlugin` at `PLUGIN_PRIORITY.HIGH`, so it precedes both consumers.      |
+| everything else      | on     | Registered with defaults when the arm is omitted.                                             |
+
+Notes:
+
+- **`realtime: {}` adds nothing and is not an error.** `backplane: {}` selects the in-process
+  `'memory'` transport, whose discriminant is optional.
+- **`backplane: { transport: 'messaging' }` needs a broker.** The microservice and full-stack tiers
+  always register `MessagingPlugin`; the REST tier does not, so on that tier the backplane's own
+  `register()` throws naming `MessagingPlugin`. The starter adds no second check of its own.
+- **`di` is opt-in because it is not additive.** `DecoratorPlugin` branches on the presence of a
+  container, so with this arm each `@Injectable` becomes a container provider honoring its `scope`;
+  without it those classes are constructed directly and registered in the `ServiceRegistry`.
+- **Workers portability varies by arm.** `di`, `realtime.websocket`, `realtime.sse`, and a
+  `'memory'` backplane are Workers-portable. A `'redis'` backplane is not (raw socket); a
+  `'messaging'` backplane is portable only if its broker is.
+- **`session` is gated because it cannot be defaulted.** `SessionPlugin` throws during `register()`
+  without an adequate secret, so an always-on arm would stop every starter application from booting
+  until one was supplied. It is also genuinely optional: a token-authenticated API has no cookie.
+- **No arm sets a plugin's `name`.** Each registers on the bare capability token; register a second
+  instance yourself on the returned app.
+
+### Composing from configuration
+
+```typescript
+import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+
+const app = await createFullStackAppFromConfig((config) => ({
+  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+}), { config: { envFilePath: ['.env.local', '.env'] } });
+
+await app.start({ port: 3000 });
+```
+
+Plugin options must be decided **before** the plugins are constructed, which is before
+`ConfigPlugin` has registered anything. This factory closes that ordering gap for every option at
+once: it builds runtime services, loads configuration, calls the resolver, and passes the SAME
+snapshot into the application under `config.instance` — so `app.services.get(CAPABILITIES.CONFIG)`
+returns the exact object the resolver saw, rather than a second one read a moment later.
+
+Signature:
+`(build: (config: IConfig) => FullStackStarterOptions, options?: FromConfigOptions) =>
+Promise<IKernelApplication>`,
+where
+`FromConfigOptions = { config?: ConfigPluginOptions; env?: Readonly<Record<string, unknown>> }`. The
+resolver is called exactly once; if it throws, or configuration fails to load, the returned promise
+rejects and no partially-composed application exists.
+
+**`env` is required on Cloudflare Workers.** Bindings arrive as the `env` argument of the `fetch`
+handler, never process-wide, so runtime services built before a request report an EMPTY environment
+there — the composition would see no configuration at all, and a resolver calling `getOrThrow` would
+fail on the first request and every request after it, because the boot promise is memoised. Pass the
+handler's `env` straight through; non-string values (KV, D1, R2 bindings) are ignored. Omit it on
+Node, Deno, and Bun, where the detected runtime reads the environment itself.
+`honoe new --template full-stack` wires this for you on all four targets.
+
+This is why **no plugin option carries a config-key shorthand** (`urlFromConfig`,
+`endpointFromConfig`): such a field would need its value at the same impossible moment.
+`secretFromConfig` is further out of reach — secrets are served by `secrets-plugin` under
+`CAPABILITIES.SECRETS`, which exists only after registration, so a plugin needing one resolves it
+lazily at use time.
 
 A complete REST API using the REST starter:
 
@@ -5116,6 +5383,205 @@ app.router.post('/users', {
 
 ---
 
+## Service Discovery
+
+Turns a logical service name into a reachable address, balances across the instances behind it, and
+takes them out of rotation when callers report failures. Registers an `IServiceDiscovery` under
+`CAPABILITIES.SERVICE_DISCOVERY` (`'service-discovery'`). Zero npm dependencies — the HTTP providers
+run on web-standard `fetch` and the DNS provider on the optional `IRuntimeServices.dns`.
+
+### Registration
+
+```typescript
+import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
+
+app.register(ServiceDiscoveryPlugin({
+  provider: 'consul',
+  address: 'http://127.0.0.1:8500',
+  strategy: 'round-robin',
+}));
+```
+
+### Usage
+
+```typescript
+import { CAPABILITIES, type IServiceDiscovery } from '@hono-enterprise/common';
+
+const discovery = ctx.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+
+const instances = await discovery.resolve('billing');
+const instance = await discovery.pick('billing', { strategy: 'weighted-random' });
+const url = await discovery.resolveUrl('billing', '/invoices');
+
+discovery.report(instance!, 'failure');
+
+const unsubscribe = await discovery.watch('billing', (list) => {
+  console.log(`billing now has ${list.length} instances`);
+});
+```
+
+### Contract
+
+```typescript
+interface IServiceDiscovery {
+  resolve(serviceName: string): Promise<readonly ServiceInstance[]>;
+  pick(serviceName: string, options?: PickOptions): Promise<ServiceInstance | null>;
+  resolveUrl(
+    serviceName: string,
+    path?: string,
+    options?: PickOptions,
+  ): Promise<string | null>;
+  report(instance: ServiceInstance, outcome: ServiceOutcome): void;
+  watch(
+    serviceName: string,
+    listener: (instances: readonly ServiceInstance[]) => void,
+  ): Promise<Unsubscribe>;
+}
+
+interface ServiceInstance {
+  readonly id: string;
+  readonly serviceName: string;
+  readonly host: string;
+  readonly port: number;
+  readonly secure?: boolean;
+  readonly weight?: number;
+  readonly tags?: readonly string[];
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+interface PickOptions {
+  readonly strategy?: LoadBalanceStrategy;
+}
+
+type LoadBalanceStrategy = 'round-robin' | 'random' | 'weighted-random';
+type ServiceOutcome = 'success' | 'failure';
+```
+
+Registration and deregistration of _this_ instance are deliberately **not** on the contract — the
+plugin drives its own lifecycle hooks, so a `registerSelf()`/`deregisterSelf()` pair here would be
+surface no application code path reads.
+
+### Providers
+
+`ServiceDiscoveryPluginOptions` is a **union discriminated on `provider`**, so a missing per-arm
+credential is a compile error rather than a startup throw.
+
+| Arm            | Reads                              | `watch()`                   | Runtimes            |
+| -------------- | ---------------------------------- | --------------------------- | ------------------- |
+| `'static'`     | A literal list in the options      | Fires once, then never      | All, incl. Workers  |
+| `'consul'`     | `GET /v1/health/service/:service`  | Blocking queries (push)     | All, incl. Workers  |
+| `'kubernetes'` | EndpointSlices from the API server | Watch stream (push)         | All, incl. Workers¹ |
+| `'dns'`        | `SRV` or `A`/`AAAA` records        | Polled at `watchIntervalMs` | Deno, Node, Bun     |
+| `'custom'`     | The application's own provider     | Whatever it implements      | Any                 |
+
+¹ Workers needs an explicit `token`: it has no file system to read the projected service-account
+token from.
+
+### Options
+
+| Option             | Arms               | Default                      | Behavior                                                             |
+| ------------------ | ------------------ | ---------------------------- | -------------------------------------------------------------------- |
+| `provider`         | all                | —                            | Discriminant; always explicit                                        |
+| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching so every `resolve` hits the backend             |
+| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`             |
+| `ejection`         | all                | see below                    | `false` disables outlier ejection entirely                           |
+| `selfRegistration` | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms         |
+| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread          |
+| `services`         | static             | —                            | Unknown name resolves to `[]`, never a throw                         |
+| `address`          | consul             | —                            | Agent base URL                                                       |
+| `token`            | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset  |
+| `datacenter`       | consul             | —                            | Sent as `?dc=`                                                       |
+| `waitSeconds`      | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600 |
+| `namespace`        | kubernetes         | —                            | Required                                                             |
+| `apiServer`        | kubernetes         | in-cluster env               | Absent both, `register()` throws                                     |
+| `token`            | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo      |
+| `portName`         | kubernetes         | —                            | Unset with one port uses it; unset with several throws               |
+| `mode`             | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records |
+| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                   |
+| `port`             | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port             |
+| `secure`           | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme      |
+| `http`             | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                             |
+| `discovery`        | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied          |
+
+### Outlier ejection
+
+`report(instance, outcome)` feeds a per-process ejection tracker. Defaults:
+`{ failureThreshold: 5, windowMs: 30_000, durationMs: 30_000, maxEjectionPercent: 50 }`. A
+`'success'` clears that instance's window and un-ejects it immediately.
+
+`pick()` filters ejected instances; `resolve()` does **not** — it reports what discovery knows,
+while `pick()` reports what is usable. `maxEjectionPercent` caps the share of a service ejected at
+once, and when every instance is ejected anyway `pick()` falls back to the unfiltered list rather
+than returning `null`: a correlated failure ejects the whole pool at once, and serving nothing turns
+a partial outage into a total one.
+
+This is a different mechanism from `IResilienceService.wrap`'s circuit breaker, not a duplicate of
+it. `wrap` breaks a **call site**; ejection removes a **pool member** while the call site stays
+open. They compose by re-`pick()`ing inside the wrapped call.
+
+### Self-registration
+
+Only the Consul arm (and a custom provider implementing `registerSelf`) can advertise this instance.
+Registration runs at `onBootstrap`; deregistration runs at **`onStopping`**, the lifecycle hook that
+fires before the application starts refusing requests, so the change propagates while traffic is
+still being served. `selfRegistration.drainDelayMs` (default `0`) then holds that window open.
+
+`selfRegistration.check` is **not optional** and cannot be disabled — it defaults to
+`{ httpPath: '/health', intervalSeconds: 10, deregisterAfterSeconds: 60 }`. `onBootstrap` runs
+before the socket binds, so the instance is advertised a moment before it can serve; that window is
+harmless only because Consul marks a newly registered service critical until its first check passes
+and every read here sends `passing=true`.
+
+### Exports
+
+| Export                              | Kind      | Purpose                                                            |
+| ----------------------------------- | --------- | ------------------------------------------------------------------ |
+| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                 |
+| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                     |
+| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                 |
+| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                 |
+| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                             |
+| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`) |
+| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                 |
+| `StaticServiceDefinition`           | interface | One entry of a static service list                                 |
+| `EjectionOptions`                   | interface | Ejection tuning                                                    |
+| `SelfRegistration`                  | interface | What this instance advertises                                      |
+| `SelfRegistrationCheck`             | interface | The mandatory health check                                         |
+| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                          |
+| `StaticProvider`                    | class     | The `'static'` provider                                            |
+| `ConsulProvider`                    | class     | The `'consul'` provider                                            |
+| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                        |
+| `DnsProvider`                       | class     | The `'dns'` provider                                               |
+| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                    |
+| `DiscoveryHttpResponse`             | interface | Buffered response shape                                            |
+| `DiscoveryHttpStream`               | interface | Streaming response shape                                           |
+| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                      |
+| `DiscoveryUnavailableError`         | class     | Cold backend failure, missing DNS resolver, k8s multi-port         |
+| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                  |
+
+### Notes
+
+- Registers a `service-discovery` health indicator reporting `provider`, `cachedServices`,
+  `watchedServices`, `ejectedInstances`, and `degraded`. It reads the cache's own observed state and
+  never issues a backend call, so a health scrape does not become load against Consul. `'degraded'`
+  means a refresh failed and a stale snapshot is being served; `'down'` is unreachable by
+  construction, because with nothing cached the caller already received a
+  `DiscoveryUnavailableError`.
+- `onClose` unsubscribes every active watch and clears ejection state.
+- The cache is read-through on the **monotonic** clock, with per-service in-flight coalescing (a
+  burst of concurrent `pick()`s for one cold service issues one backend read) and stale-on-failure.
+  A watch event invalidates that name's entry immediately.
+- `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
+  strategy and the same ejection filter.
+- Ejection state is **per-process**. A cluster-wide view is a distributed-consensus problem and is
+  not attempted.
+- In-cluster Kubernetes needs `DENO_CERT` / `NODE_EXTRA_CA_CERTS` pointed at
+  `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`; no code change fixes the cluster CA from
+  inside the process. The `http` option is the escape hatch for a caller-supplied TLS-configured
+  client.
+
+---
+
 ## Programmatic vs Decorator API
 
 The framework provides both APIs for every feature. They are equivalent.
@@ -5456,12 +5922,23 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter` |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                               |
 | Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                 |
-| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                   |
+| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                    |
+| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                       |
+| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                    |
 
 Contract notes:
 
 - `IPluginContext.runtime` is **non-optional**: a runtime provider is mandatory and registers first,
   so every plugin may rely on it (ARCHITECTURE.md §7).
+- `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
+  begins refusing new requests with a 503 and before the socket closes — the only hook that fires
+  while the application is still serving normally. It exists for "tell the outside world to stop
+  routing here" work, most obviously deregistering from service discovery; doing that in
+  `onShutdown` leaves callers routed at a closed port for up to one health-check interval. Hooks run
+  LIFO and are awaited, so a slow hook delays shutdown. A rejecting hook surfaces from `stop()`, but
+  only after the drain, the socket close, and the `onShutdown`/`onClose` phases have run: a failing
+  hook must not be able to prevent the application from stopping. With no hook registered the phase
+  is skipped and `stop()` behaves exactly as before.
 - Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
@@ -5587,6 +6064,7 @@ Cloudflare Workers.
 | --------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
 | `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
 | `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
+| `createRuntimeServices`           | function | Creates `IRuntimeServices` for the detected platform, without an application               |
 | `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
 | `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to `node:` built-ins)              |
 | `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
@@ -5638,6 +6116,8 @@ Per-runtime upgrade seams:
 | Export                              | Kind | Purpose                                                                        |
 | ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
 | `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)                 |
+| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`)                   |
+| `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                         |
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
 | `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
@@ -5735,6 +6215,23 @@ Contract notes:
   cast; no other casts are used.
 - `detectRuntime()` accepts an injectable `globals` parameter (default `globalThis`) so all
   detection branches are testable without real runtimes.
+- **`createRuntimeServices(options?)` builds services without an application.** Use it when the
+  runtime is needed before any plugin exists — reading the environment to decide which plugins to
+  register, which is what `createFullStackAppFromConfig` does. `RuntimePlugin.register` calls this
+  same function, so detection, the platform → adapter lookup, and the
+  `No runtime adapter factory for platform: <p>` error exist once rather than twice.
+
+  ```typescript
+  import { createRuntimeServices } from '@hono-enterprise/runtime';
+  import { loadConfig } from '@hono-enterprise/config-plugin';
+
+  const config = await loadConfig(createRuntimeServices());
+  ```
+
+  Building a second instance alongside the application's own is safe: the adapters are stateless
+  facades over platform globals, holding no connection, cache, or handle registry, and nothing
+  compares them by identity. One caveat — `env` is a **snapshot taken at construction**, not a live
+  view, so a variable set between two constructions is visible only to the later instance.
 
 ---
 
@@ -5873,33 +6370,33 @@ carry full JSDoc.
 
 ### Values (decorator-plugin exports)
 
-| Export                                               | Kind     | Purpose                                                             |
-| ---------------------------------------------------- | -------- | ------------------------------------------------------------------- |
-| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services      |
-| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                |
-| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads |
-| `Controller`                                         | function | Class decorator — base path prefix                                  |
-| `Version`                                            | function | Class decorator — API version prefix                                |
-| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                              |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                        |
-| `Injectable`                                         | function | Class decorator — marks a class for DI registration                 |
-| `Inject`                                             | function | Class decorator — declares constructor injection tokens             |
-| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                 |
-| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                    |
-| `Public`                                             | function | Method decorator — bypasses auth                                    |
-| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                    |
-| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                       |
-| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                      |
-| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                      |
-| `createDecorator`                                    | function | Custom class/method decorator factory                               |
-| `createParameterDecorator`                           | function | Custom parameter decorator factory                                  |
-| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata          |
-| `resolveParameter`                                   | function | Resolves a single parameter value                                   |
-| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                    |
-| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                |
-| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                         |
-| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                   |
-| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                   |
+| Export                                               | Kind     | Purpose                                                                                                             |
+| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                      |
+| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                |
+| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                 |
+| `Controller`                                         | function | Class decorator — base path prefix                                                                                  |
+| `Version`                                            | function | Class decorator — API version prefix                                                                                |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                              |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                                                                        |
+| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                 |
+| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens |
+| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                 |
+| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                    |
+| `Public`                                             | function | Method decorator — bypasses auth                                                                                    |
+| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                    |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                                                                       |
+| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                      |
+| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                      |
+| `createDecorator`                                    | function | Custom class/method decorator factory                                                                               |
+| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                  |
+| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                          |
+| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                   |
+| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                    |
+| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                |
+| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                         |
+| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                   |
+| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                   |
 
 ### Types
 
@@ -5942,6 +6439,45 @@ Contract notes:
   `CAPABILITIES.DECORATOR_HANDLER`). `createParameterDecorator` records parameter metadata resolved
   by `resolveParameters` via `registerParameterResolver`; the `current-user` built-in resolves
   `ctx.request.user`.
+- **`@Inject` has two positions, and a token is always required.** The preferred form is on each
+  constructor parameter, binding one token to that argument by position:
+
+  ```typescript
+  @Injectable({ token: 'user-repository' })
+  class UserRepository {
+    constructor(
+      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
+      @Inject(CAPABILITIES.LOGGER) private logger: ILogger,
+    ) {}
+  }
+  ```
+
+  The class-level positional list is **deprecated** but keeps working for the whole `0.x` line
+  (AI_GUIDELINES §9.2):
+
+  ```typescript
+  @Injectable({ token: 'user-repository' })
+  @Inject('database', 'logger') // deprecated — reordering the constructor misinjects silently
+  class UserRepository {
+    constructor(db: IDatabase, logger: ILogger) {}
+  }
+  ```
+
+  A token cannot be inferred from the parameter's type: that needs `emitDecoratorMetadata`, which
+  Deno does not support, and no source in this repo reads `design:paramtypes`. Three rules follow,
+  each a throw rather than a silent misinjection:
+  - Mixing the two forms on one class throws at `register()`, naming the class. `mergeService`
+    replaces `inject` wholesale, so any precedence rule would be invisible at the call site.
+  - Leaving a constructor parameter undecorated below the last injected one throws, naming the class
+    and the index — a hole would shift every later argument.
+  - `@Inject` on a **method** parameter throws; method parameters bind with
+    `@Body`/`@Query`/`@Param`/`@Header`/`@Cookie`.
+
+  Constructor parameter decorators evaluate in reverse argument order, so tokens are stored keyed by
+  index and assembled ascending; declaration order is what reaches the constructor.
+- **The container is preferred whenever the class is registered in it**, with or without
+  `@Injectable`. A `@Controller` carries no `@Injectable`, so a constructor-injected controller in a
+  `DiPlugin` application resolves through the container — where its dependencies live.
 - **No runtime-specific APIs**: the package uses no `Date.now()`, `Deno`, `process`, or `fs` — all
   file/time operations go through `IRuntimeServices`.
 

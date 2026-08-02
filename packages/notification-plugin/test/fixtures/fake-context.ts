@@ -82,6 +82,7 @@ export function createFakeContext(services?: Readonly<Record<string, unknown>>):
       onRequest: (): void => {},
       onResponse: (): void => {},
       onError: (): void => {},
+      onStopping: (): void => {},
       onShutdown: (): void => {},
     },
     middleware: { add: (): void => {} },

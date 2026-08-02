@@ -13,7 +13,11 @@
 
 // Plugin factory
 export { ConfigPlugin } from './plugin/config-plugin.ts';
-export type { ConfigPluginOptions } from './plugin/config-plugin.ts';
+export type { ConfigPluginOptions } from './options.ts';
+
+// Standalone loader — the same implementation the plugin registers, for
+// resolving configuration before any plugin is constructed.
+export { loadConfig } from './services/load-config.ts';
 
 // Structural schema for validation (compatible with Zod)
 export type { StructuralSchema } from './validators/config-validator.ts';

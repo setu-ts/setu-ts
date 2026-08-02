@@ -113,6 +113,8 @@ export const CAPABILITIES = {
   SSR: 'ssr',
   /** Cookie-backed sessions for server-rendered applications. */
   SESSION: 'session',
+  /** Service discovery — logical service name to reachable instances. */
+  SERVICE_DISCOVERY: 'service-discovery',
   /** Health indicator contributions (multi-provider). */
   HEALTH_INDICATOR: 'health-indicator',
   /** Metric registration contributions (multi-provider). */

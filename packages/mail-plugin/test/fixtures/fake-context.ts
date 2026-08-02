@@ -87,6 +87,7 @@ export function createFakeContext(withLogger = false): FakeContext {
       onRequest: (): void => {},
       onResponse: (): void => {},
       onError: (): void => {},
+      onStopping: (): void => {},
       onShutdown: (): void => {},
     },
     middleware: { add: (): void => {} },

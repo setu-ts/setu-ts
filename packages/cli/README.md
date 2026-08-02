@@ -17,7 +17,7 @@ a package called `cli` would install a binary named `cli`. All help text shows `
 ```bash
 honoe new my-app                                  # Deno, minimal (runtime plugin only)
 honoe new my-app --runtime node                   # deno | node | bun | cloudflare-workers
-honoe new my-app --template rest                  # rest | microservice
+honoe new my-app --template rest                  # rest | microservice | nest | full-stack
 ```
 
 Every project gets a `honoe.config.ts` exporting `createApp()` — the one place its plugin list
@@ -29,9 +29,29 @@ the two cannot disagree. The factory does **not** start the application.
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
 | `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
 | `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+| `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
+| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
 
 `--template microservice --runtime cloudflare-workers` is refused: the messaging and queue plugins
 need raw sockets, which Workers does not provide.
+
+### `--template full-stack`
+
+The only template that composes through a starter rather than inline wiring — its plugin set is
+twenty-two, and a generated file a human is meant to edit should not open with twenty-two imports
+they did not choose. It emits an `app/` tree with the `routes -> features -> services -> models`
+layering, `flatRoutes` `_app`/`_auth` layout groups, the `~/*` alias and the `.server.ts`
+convention, plus the Vite build files.
+
+It deliberately emits **no** `lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`,
+`lib/kv.server.ts` or `lib/service-logger.server.ts` — those are the session, SSE, secrets and
+logger capabilities, reached through the service registry the SSR plugin attaches to every request.
+The generated `createApp()` is `async`, and emits no hello-world route (an exact `/` handler would
+shadow the SSR catch-all).
+
+The frontend build runs on npm even when the server runs on Deno. Deno and Workers targets get a
+standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
+into the manifest they already have.
 
 | Runtime              | Emits                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------- |

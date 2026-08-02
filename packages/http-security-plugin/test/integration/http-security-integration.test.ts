@@ -100,6 +100,7 @@ function createPluginContext(): {
       onRequest: () => {},
       onResponse: () => {},
       onError: () => {},
+      onStopping: () => {},
       onShutdown: () => {},
       onClose: () => {},
     },

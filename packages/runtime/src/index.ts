@@ -16,6 +16,13 @@ export type { HttpAdapterFactories, RuntimeOptions } from './plugin/runtime-plug
 export { detectRuntime } from './detector/runtime-detector.ts';
 export type { GlobalScope } from './detector/runtime-detector.ts';
 
+// Runtime services for the detected platform, without an application
+export { createRuntimeServices } from './adapters/shared/runtime-services-factory.ts';
+export type {
+  CreateRuntimeServicesOptions,
+  RuntimeAdapterFactories,
+} from './adapters/shared/runtime-services-factory.ts';
+
 // Runtime adapters — factories
 export { createDenoRuntimeServices } from './adapters/deno/deno-runtime.ts';
 export type { DenoDirEntry, DenoFileInfo, DenoHost } from './adapters/deno/deno-runtime.ts';
@@ -28,6 +35,13 @@ export type { BunFileInfo, BunHost, BunModules } from './adapters/bun/bun-runtim
 
 export { createCloudflareRuntimeServices } from './adapters/workers/cf-runtime.ts';
 export type { CloudflareEnv, CloudflareRuntimeOptions } from './adapters/workers/cf-runtime.ts';
+
+// DNS resolvers (name resolution behind IRuntimeServices.dns)
+export { createNodeDnsResolver } from './adapters/shared/node-dns-resolver.ts';
+export type { NodeDnsModule } from './adapters/shared/node-dns-resolver.ts';
+
+export { createDenoDnsResolver } from './adapters/deno/deno-dns-resolver.ts';
+export type { DenoDnsHost, DenoSrvRecord } from './adapters/deno/deno-dns-resolver.ts';
 
 // Worker hosts (thread spawning behind IRuntimeServices.workers)
 export { createWebWorkerHost } from './adapters/shared/web-worker-host.ts';
