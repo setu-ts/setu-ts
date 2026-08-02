@@ -782,7 +782,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   shutdown — it now claims only paths it actually served. Removed a `getFallbackConnectRuntime()`
   no-op that let the plugin register a router silently answering `404` when Connect was absent; a
   missing dependency now throws `GrpcRuntimeLoadError` naming the specifier. All 11 `src` files at
-  100% branch/function/line) — complete (PR pending)
+  100% branch/function/line) — complete (PR #110)
 - **Next milestone** — **Milestone 36b** (React Router app skeleton), then M36c which consumes M48;
   M37–M40 follow unless reprioritized.
 
