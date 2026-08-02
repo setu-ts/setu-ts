@@ -30,11 +30,6 @@ export class RpcInterceptorStore {
     this.#handler = handler;
   }
 
-  /** Whether a handler has been installed. */
-  get hasHandler(): boolean {
-    return this.#handler !== null;
-  }
-
   /**
    * Calls the installed handler. Returns the handler's response if it returns
    * a {@linkcode Response}, otherwise returns {@linkcode null}.
@@ -42,6 +37,12 @@ export class RpcInterceptorStore {
    * A throwing handler is converted to a safe 500 Response rather than allowing
    * the error to escape: an application bug in the handler must not take down
    * the serve loop.
+   *
+   * Consult exactly ONCE per request. The request is passed through undisturbed
+   * and the caller goes on to map that same `Request` for the Hono pipeline, so
+   * a handler returning `null` must not have read the body — see
+   * {@linkcode RpcFetchHandler}. Consulting twice would break that for any
+   * body-inspecting handler even if each individual call honored the contract.
    *
    * @param request - The native, undisturbed request
    * @returns The response, or null to fall through

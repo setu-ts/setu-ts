@@ -5708,6 +5708,20 @@ Contract notes:
   implementations; consumers must degrade gracefully when it is absent (see `WebSocketPlugin`, which
   reports `available: false` and fails `route()` with a typed error). All four first-party adapters
   implement it.
+- **M49 added a sixth, OPTIONAL member: `setRpcHandler?(handler)`.** It installs an
+  `RpcFetchHandler` consulted for every inbound request **after** the WebSocket upgrade
+  short-circuit (where one exists) and **before** the request is mapped to an `IRequest`. The
+  ordering is again a correctness requirement: a gRPC exchange needs the raw streaming body and
+  emits trailers, neither of which `IRequest`/`IResponse` can express, and the shared mapping
+  pre-reads the body. The handler answers a `Response` (handled as RPC) or `null` to fall through,
+  so installing one never changes the behavior of non-RPC traffic. **The handler is consulted
+  exactly once per request, and one returning `null` MUST leave the body unread** — the adapter maps
+  that same `Request` afterwards, so a consumed body makes the fall-through fail with "Body already
+  consumed". Decide from method, URL and headers (the gRPC plugin matches on a path prefix alone); a
+  handler that must inspect the body has to read `request.clone()`. Because the member is optional,
+  adapters written before this seam remain valid implementations; consumers must degrade gracefully
+  when it is absent (see `GrpcPlugin`, which reports `available: false` and throws
+  `GrpcUnavailableError` from `handleRequest`). All four first-party adapters implement it.
 - **Migration note — `IRequest.ip` is no longer populated (M23).** The web-standard `fetch` mapping
   does not set `IRequest.ip`; a web `Request` carries no client address. The old M39 Node adapter
   populated `ip` from the native `socket.remoteAddress`, so Node consumers that read

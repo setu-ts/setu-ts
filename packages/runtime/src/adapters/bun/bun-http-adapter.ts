@@ -172,6 +172,13 @@ export class BunHttpServerHandle {
    * may resolve `undefined`, which is how Bun is told a request was upgraded
    * to a WebSocket and needs no response. WebSocket upgrades are therefore
    * only available through `listen()`, not through `IHttpAdapter.fetch`.
+   *
+   * The RPC interceptor is deliberately NOT consulted here: `httpHandler`
+   * already consults it, and doing so twice would dispatch every request
+   * through the RPC handler twice. A handler that inspects the body before
+   * returning `null` would then see an already-disturbed body on the second
+   * call, throw, and be converted to a `500` — turning an ordinary non-RPC
+   * POST into a server error.
    */
   createServeCallback(): (
     request: Request,
@@ -205,12 +212,7 @@ export class BunHttpServerHandle {
         return new Response(null, { status: 400 });
       }
 
-      // Then check RPC interceptor — a Response short-circuits as RPC, null falls through
-      const rpcResult = await this.#rpcStore.consult(request);
-      if (rpcResult !== null) {
-        return rpcResult;
-      }
-
+      // RPC is consulted inside httpHandler — see the note above.
       return await httpHandler(request);
     };
   }

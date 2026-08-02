@@ -155,14 +155,14 @@ export class DenoHttpServerHandle {
   }
 
   /**
-    * Creates the web-standard fetch handler for Deno.serve.
-    *
-    * The WebSocket upgrade is consulted first and short-circuits: the request
-    * body must stay undisturbed for `Deno.upgradeWebSocket` to succeed. Then the
-    * RPC interceptor is consulted; a returned Response short-circuits as RPC,
-    while null falls through to the normal Hono pipeline. Finally the body is
-    mapped via `mapWebRequestToFrameworkRequest`.
-    */
+   * Creates the web-standard fetch handler for Deno.serve.
+   *
+   * The WebSocket upgrade is consulted first and short-circuits: the request
+   * body must stay undisturbed for `Deno.upgradeWebSocket` to succeed. Then the
+   * RPC interceptor is consulted exactly once; a returned Response
+   * short-circuits as RPC, while null falls through. Only then is the body
+   * mapped via `mapWebRequestToFrameworkRequest`, which reads it.
+   */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
       const upgraded = await this.#tryUpgrade(request);

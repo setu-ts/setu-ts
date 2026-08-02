@@ -15,11 +15,6 @@ function mockThrow(_request: Request): Promise<Response | null> {
 }
 
 describe('RpcInterceptorStore', () => {
-  it('starts with no handler installed', () => {
-    const store = new RpcInterceptorStore();
-    expect(store.hasHandler).toBe(false);
-  });
-
   it('falls through when no handler is installed', async () => {
     const store = new RpcInterceptorStore();
     const request = new Request('http://localhost/');
@@ -38,7 +33,18 @@ describe('RpcInterceptorStore', () => {
     }
     expect(result).toBeInstanceOf(Response);
     expect(await result.text()).toBe('mocked');
-    expect(store.hasHandler).toBe(true);
+  });
+
+  it('passes the request through undisturbed so the caller can still map it', async () => {
+    // The adapter maps this same Request after a null consult; a store that
+    // consumed the body would break every fall-through.
+    const store = new RpcInterceptorStore();
+    store.set(() => Promise.resolve(null));
+    const request = new Request('http://localhost/', { method: 'POST', body: 'payload' });
+
+    expect(await store.consult(request)).toBeNull();
+    expect(request.bodyUsed).toBe(false);
+    expect(await request.text()).toBe('payload');
   });
 
   it('returns null when the handler returns null', async () => {

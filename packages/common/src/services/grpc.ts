@@ -20,6 +20,14 @@
  * otherwise returns {@linkcode null} so the adapter falls through to normal
  * Hono handling.
  *
+ * **A handler that returns `null` MUST leave the request body unread.** The
+ * adapter consults this handler before mapping the request, and then maps the
+ * same `Request` for the Hono pipeline; a body consumed here cannot be read
+ * again, so the fall-through would fail with "Body already consumed". Decide
+ * from the method, URL and headers — as the first-party gRPC plugin does, which
+ * matches on a path prefix alone. A handler that genuinely must inspect the
+ * body first has to read `request.clone()` and leave the original intact.
+ *
  * @since 0.3.0
  */
 export type RpcFetchHandler = (request: Request) => Promise<Response | null>;
