@@ -21,10 +21,17 @@ export function isExposable(error: unknown): boolean {
     return false;
   }
 
-  const err = error as { originalError?: Error; extensions?: Record<string, unknown> };
+  const err = error as {
+    originalError?: Error;
+    extensions?: Record<string, unknown>;
+    message?: string;
+    locations?: Array<{ line: number; column: number }>;
+    path?: Array<string | number>;
+  };
 
-  // No originalError = request error (parse, validate, coercion)
-  if (!err.originalError) {
+  // GraphQL validation/execution errors have a message but no originalError
+  // These are request errors that should be exposed to the client
+  if (typeof err.message === 'string' && !err.originalError) {
     return true;
   }
 

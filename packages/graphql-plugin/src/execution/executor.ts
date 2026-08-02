@@ -77,14 +77,24 @@ function executeDocument(
   variableValues?: Record<string, unknown>,
   operationName?: string,
 ): Promise<GraphqlExecutionResultLike> {
-  return runtime.execute({
+  const execArgs: {
+    schema: GraphqlSchemaLike;
+    document: GraphqlDocumentNodeLike;
+    rootValue?: unknown;
+    contextValue?: unknown;
+    variableValues?: Record<string, unknown>;
+    operationName?: string;
+  } = {
     schema,
     document,
     rootValue,
     contextValue,
     variableValues: variableValues ?? {},
-    operationName: operationName ?? '',
-  });
+  };
+  if (operationName && operationName.length > 0) {
+    execArgs.operationName = operationName;
+  }
+  return runtime.execute(execArgs);
 }
 
 /**
@@ -119,7 +129,8 @@ export function executeGraphql(
 
   // Add depth limit rule if enabled
   if (maxDepth > 0) {
-    rules.push(createDepthRule(maxDepth)(null as unknown as never));
+    // createDepthRule returns a validation rule function (receives context, returns visitor)
+    rules.push(createDepthRule(maxDepth));
   }
 
   // Add introspection rule if disabled
