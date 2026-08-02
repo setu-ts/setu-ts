@@ -1081,9 +1081,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   driving the REAL `ConsoleLogger` — verified to fail without the fix. Deliberately NOT fixed:
   `DatabaseService.query()` throws synchronously for the memory adapter despite returning a promise
   (`migrate()` beside it rejects). Two committed tests pin that behavior and correcting it is a
-  behavior change outside this milestone's scope — flagged in a JSDoc note instead. All new `src`
-  files ≥95% branch/function/line, three of four at 100%. **Not verified against live D1** — CI
-  holds no Cloudflare account) — complete (PR pending)
+  behavior change outside this milestone's scope — flagged in a JSDoc note instead. **Not verified
+  against live D1** — CI holds no Cloudflare account. Code review then found the defect no gate
+  could see: `D1Adapter` stored its binding **unvalidated**, so an absent binding (a name typo, a
+  missing `d1_databases` stanza) let the app boot clean, report `up` from the `database` health
+  indicator, and fail every query with a bare `TypeError` — the M50 `KubernetesProvider.authHeader`
+  class, and a contradiction of this package's own principle, since `facades.ts:402` states the
+  guard family exists "to fail at `register()` with a name rather than at the first request with a
+  bare `TypeError`" while `isKvNamespace`/`isR2Bucket` had no D1 member. Coverage could not have
+  caught it — there was no branch to cover, and all three new files were already at 100%. Added
+  `isD1Database` plus constructor validation throwing `CloudflareBindingMissingError`; five tests,
+  all five verified to fail without the guard. Review also closed a test gap where
+  `LIMIT -1 OFFSET ?N` and the `IS NULL` filter were asserted only as SQL **strings** and never
+  executed (both were correct), and corrected three doc claims — a barrel test claiming "exactly the
+  documented public surface" while omitting `D1Adapter`, `IDataSource.create`/`delete` promising
+  persistence with no caveat for the deferred-write path, and a PUBLIC_API "every builder refuses"
+  that overstated the parameter-cap check. All `src` files touched are at 100% branch/function/line)
+  — complete (PR #114)
 - **Milestone 52d** (`packages/cloudflare-plugin` — Durable Objects: a DO-backed
   `IRealtimeBackplane` (the M47 port is already in `common`, so no contract change) and a DO-backed
   distributed lock handed to `SchedulerPlugin({ lock })` structurally. Both need the application to
