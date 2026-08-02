@@ -1,7 +1,7 @@
 # Milestone 52d — Durable Objects (`@hono-enterprise/cloudflare-plugin`)
 
-> **Status:** Planning. Branch: `feat/m52d-durable-objects`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete — archived on merge. Branch: `feat/m52d-durable-objects`. `main` is protected
+> — all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

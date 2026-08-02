@@ -69,21 +69,24 @@ longer; only `waitUntil` needs the newer date.
 
 ## Options
 
-| Option                    | Type                     | Default     | Description                                                       |
-| ------------------------- | ------------------------ | ----------- | ----------------------------------------------------------------- |
-| `env`                     | `Record<string,unknown>` | —           | Required. The Worker's `env`.                                     |
-| `waitUntil`               | `WaitUntilHost`          | —           | The platform sink. Omit off Workers.                              |
-| `requireBindings`         | `string[]`               | `[]`        | Bindings that must exist; `register()` throws naming absent ones. |
-| `cache.binding`           | `string`                 | —           | KV namespace serving `CAPABILITIES.CACHE`.                        |
-| `cache.name`              | `string`                 | `'default'` | Derives `cache.<name>` when not `'default'`.                      |
-| `cache.prefix`            | `string`                 | —           | Key prefix. **Required to call `clear()`.**                       |
-| `cache.defaultTtlSeconds` | `number`                 | —           | TTL applied when `set` omits one.                                 |
-| `storage.binding`         | `string`                 | —           | R2 bucket serving `CAPABILITIES.STORAGE`.                         |
-| `storage.name`            | `string`                 | `'default'` | Derives `storage.<name>` when not `'default'`.                    |
-| `storage.prefix`          | `string`                 | —           | Object-key prefix.                                                |
-| `queue.binding`           | `string`                 | —           | Queues producer binding serving `CAPABILITIES.QUEUE`.             |
-| `queue.name`              | `string`                 | `'default'` | Derives `queue.<name>` when not `'default'`.                      |
-| `queue.maxDelaySeconds`   | `number`                 | `86400`     | A larger `delayMs` throws rather than being truncated.            |
+| Option                    | Type                     | Default      | Description                                                       |
+| ------------------------- | ------------------------ | ------------ | ----------------------------------------------------------------- |
+| `env`                     | `Record<string,unknown>` | —            | Required. The Worker's `env`.                                     |
+| `waitUntil`               | `WaitUntilHost`          | —            | The platform sink. Omit off Workers.                              |
+| `requireBindings`         | `string[]`               | `[]`         | Bindings that must exist; `register()` throws naming absent ones. |
+| `cache.binding`           | `string`                 | —            | KV namespace serving `CAPABILITIES.CACHE`.                        |
+| `cache.name`              | `string`                 | `'default'`  | Derives `cache.<name>` when not `'default'`.                      |
+| `cache.prefix`            | `string`                 | —            | Key prefix. **Required to call `clear()`.**                       |
+| `cache.defaultTtlSeconds` | `number`                 | —            | TTL applied when `set` omits one.                                 |
+| `storage.binding`         | `string`                 | —            | R2 bucket serving `CAPABILITIES.STORAGE`.                         |
+| `storage.name`            | `string`                 | `'default'`  | Derives `storage.<name>` when not `'default'`.                    |
+| `storage.prefix`          | `string`                 | —            | Object-key prefix.                                                |
+| `queue.binding`           | `string`                 | —            | Queues producer binding serving `CAPABILITIES.QUEUE`.             |
+| `queue.name`              | `string`                 | `'default'`  | Derives `queue.<name>` when not `'default'`.                      |
+| `queue.maxDelaySeconds`   | `number`                 | `86400`      | A larger `delayMs` throws rather than being truncated.            |
+| `durableObject.binding`   | `string`                 | —            | DO namespace serving `CAPABILITIES.REALTIME_BACKPLANE`.           |
+| `durableObject.name`      | `string`                 | `'default'`  | Derives `realtime-backplane.<name>` when not `'default'`.         |
+| `durableObject.topic`     | `string`                 | `'realtime'` | The object every replica shares. Differ it per application.       |
 
 ## Queues, Cron Triggers, and the edge cache
 
@@ -201,6 +204,117 @@ would exceed D1's 100-bound-parameter limit is refused with an error naming the 
 failing inside D1.
 
 Migrations stay a `wrangler d1 migrations` concern — the adapter has no `migrate()`.
+
+## Durable Objects — realtime backplane and distributed lock
+
+Both features need a Durable Object class **your application exports**, plus a wrangler stanza. No
+plugin option can export a class on your behalf, so this is wiring you write once.
+
+### The class you export
+
+This package ships the behaviour as two plain cores. Your class extends `DurableObject` and
+delegates — that keeps `cloudflare:workers` out of the package, which matters because the specifier
+is unresolvable on every other runtime and would break type-checking everywhere.
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import {
+  DistributedLockObjectCore,
+  RealtimeBackplaneObjectCore,
+} from '@hono-enterprise/cloudflare-plugin';
+
+export class RealtimeBackplaneObject extends DurableObject {
+  #core = new RealtimeBackplaneObjectCore(this.ctx);
+
+  override fetch(request: Request): Promise<Response> {
+    return this.#core.fetch(request);
+  }
+  webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    this.#core.webSocketMessage(ws, message);
+  }
+  webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    this.#core.webSocketClose(ws, code, reason);
+  }
+}
+
+export class DistributedLockObject extends DurableObject {
+  #core = new DistributedLockObjectCore(this.ctx);
+
+  override fetch(request: Request): Promise<Response> {
+    return this.#core.fetch(request);
+  }
+}
+```
+
+### The wrangler stanza
+
+```toml
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeBackplaneObject"
+
+[[durable_objects.bindings]]
+name = "LOCKS"
+class_name = "DistributedLockObject"
+
+[exports.RealtimeBackplaneObject]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.DistributedLockObject]
+type = "durable-object"
+storage = "sqlite"
+```
+
+`storage = "sqlite"` is required on the Workers Free plan. The older `migrations` +
+`new_sqlite_classes` flow still works, but a Worker can use only one of the two flows — do not mix
+them.
+
+### Realtime backplane
+
+```typescript
+CloudflarePlugin({ env, waitUntil, durableObject: { binding: 'REALTIME', topic: 'chat' } });
+```
+
+That registers `CAPABILITIES.REALTIME_BACKPLANE`, which `websocket-plugin` and `sse-plugin` resolve
+on their own — so `ws.room('lobby')` and `sse.channel('news')` start reaching clients on other
+replicas with no further wiring. Register **either** this arm or `RealtimeBackplanePlugin`, never
+both: the kernel rejects two providers of one capability token.
+
+**The guarantee is narrower than "a durable subscription", deliberately.** A Worker isolate is
+evicted at Cloudflare's discretion and its outbound WebSockets go with it, so no Worker can hold a
+subscription indefinitely. What makes that sound rather than lossy is the coupling: the members the
+subscription serves are client WebSockets held by the _same_ isolate, and an HTTP-triggered Worker
+stays alive as long as its clients stay connected — so losing the isolate loses the subscription and
+its members together. The socket opens lazily on first publish and reopens after any failure.
+
+Two applications sharing one namespace must set different `topic` values, or each receives the
+other's frames.
+
+### Distributed lock
+
+```typescript
+import { DurableObjectLock } from '@hono-enterprise/cloudflare-plugin';
+import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
+
+const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, {
+  runtime,
+  keyPrefix: 'reports:',
+});
+
+// An injected lock wins outright — `enabled: true` is not needed.
+app.register(SchedulerPlugin({ distributedLock: { lock } }));
+```
+
+One Durable Object per lock key. Correctness comes from the platform rather than an algorithm: a
+Durable Object processes one event at a time and holds back delivery while a storage operation runs,
+so the read-compare-write is atomic with no transaction and no Redlock-style quorum. The holder is
+persisted in the object's storage, never in memory, because an object is evicted after 70–140
+seconds of inactivity and a lock TTL routinely outlives that.
+
+A non-2xx from the object **throws** rather than reporting "not acquired" — a 404 means the binding
+points at the wrong class, and folding that into contention would silently disable every scheduled
+job.
 
 ## Behaviour worth knowing before you deploy
 
