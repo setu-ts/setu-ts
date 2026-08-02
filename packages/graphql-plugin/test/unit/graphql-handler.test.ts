@@ -10,9 +10,49 @@ import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/gra
 import type { HandlerResult, IRequestContext, IResponse } from '@hono-enterprise/common';
 
 describe('createGraphqlHandler', () => {
+  /**
+   * Parse a GraphQL query string and return a document with the correct operation type.
+   * This is needed for the B6 operation-kind check in graphql-service.ts.
+   */
+  const parseQuery = (
+    src: string,
+  ): { kind: 'Document'; definitions: Array<{ kind: string; operation: string }> } => {
+    const trimmed = src.trim().toLowerCase();
+    let operation = 'query';
+    if (trimmed.startsWith('mutation') || trimmed.startsWith('mutation ')) {
+      operation = 'mutation';
+    } else if (trimmed.startsWith('subscription') || trimmed.startsWith('subscription ')) {
+      operation = 'subscription';
+    }
+    return { kind: 'Document', definitions: [{ kind: 'OperationDefinition', operation }] };
+  };
+
+  /**
+   * Return an AST node with the correct operation type based on the document.
+   * This is needed for the B6 operation-kind check in graphql-service.ts.
+   */
+  const getOperationAst = (
+    document: { kind: 'Document'; definitions: Array<{ kind: string; operation: string }> },
+    _operationName?: string,
+  ): { kind: string; operation: 'query' | 'mutation' | 'subscription' } | null => {
+    if (document.definitions.length === 0) {
+      return null;
+    }
+    const def = document.definitions[0];
+    if (
+      def.operation === 'mutation' || def.operation === 'subscription' || def.operation === 'query'
+    ) {
+      return {
+        kind: 'OperationDefinition',
+        operation: def.operation as 'query' | 'mutation' | 'subscription',
+      };
+    }
+    return null;
+  };
+
   const createFakeRuntime = (): GraphqlRuntime =>
     ({
-      parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
+      parse: parseQuery,
       validate: () => [],
       execute: () => Promise.resolve({ data: { hello: 'world' } }),
       subscribe: () => Promise.resolve({ data: {} }),
@@ -27,7 +67,7 @@ describe('createGraphqlHandler', () => {
         toAST: () => ({}),
       }),
       validateSchema: () => [],
-      getOperationAST: () => null,
+      getOperationAST: getOperationAst,
       GraphQLError: class extends Error {
         override name = 'GraphQLError';
         toJSON() {
