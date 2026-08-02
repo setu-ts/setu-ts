@@ -9,7 +9,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
-import type { IAdapterTransaction } from '../../src/adapters/adapter.ts';
+import type { IAdapterTransaction } from '@hono-enterprise/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { normalizeQuery } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';

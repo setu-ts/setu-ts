@@ -8,6 +8,42 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Cloudflare D1 as a first-class database backend, and the `common` data-access promotion that
+  made it possible** (Milestone 52c). The seam a database backend implements was `IDatabaseAdapter`,
+  declared **inside** `@hono-enterprise/database-plugin` and never exported, while `common` shipped
+  only the lifecycle-shaped `IOrmAdapter` — so a backend living in any other package was literally
+  inexpressible, because AI_GUIDELINES §2.2 forbids one plugin importing another.
+  `@hono-enterprise/common` now exports **`IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`,
+  `NormalizedQuery` and `OrderDirection`**. The promoted port is the old shape plus one member — a
+  non-transactional `createDataSource(entity)` — and that addition is the substance of the change:
+  the plugin previously reached each adapter's data-source factory by **casting to the concrete
+  class**, which is what actually kept the seam closed. That cast is gone, all three built-in
+  adapters carry `createDataSource`, and `createDataSourceForEntity` is **deprecated, not removed**
+  (§9.2). `DatabasePluginOptions` is now a union discriminated on `type` with a **`'custom'` arm**
+  requiring an `adapter`, so registering an external backend without one is a compile error rather
+  than a startup throw; every existing registration compiles unchanged. `DataSource` is retained as
+  a deprecated alias of `IDataSource`. The promotion also repairs a latent public-API defect: the
+  barrel exported `DataSource`, whose `findAll` parameter is `NormalizedQuery`, while
+  `NormalizedQuery` itself was not exported — no consumer could name the type.
+
+  `@hono-enterprise/cloudflare-plugin` gains **`D1Adapter`** (plus `D1AdapterOptions`,
+  `D1EntityMapping`), constructed by the application from its D1 binding and handed to
+  `DatabasePlugin({ type: 'custom', adapter })` — the `KvSessionStore` precedent, since those plugin
+  options are read before any application exists. **D1 has no interactive transaction**: it rejects
+  `BEGIN TRANSACTION` outright, and `batch()` is its only unit of atomicity. `beginTransaction()`
+  therefore **buffers every write and flushes the whole buffer as one `batch()` at commit**;
+  `rollback()` discards it and sends nothing. Atomicity is genuine, and the two costs are documented
+  and tested rather than left to discovery: there is **no read-your-own-writes** inside a
+  transaction (reads run against committed state), and an in-transaction `create()` **requires an
+  explicit primary key**, throwing `CloudflareUnsupportedError` when absent — a deferred `INSERT`
+  cannot report a generated key to a caller that awaits `create()` before the flush. Outside a
+  transaction `create()` uses `RETURNING *` and returns the real persisted row. Values are always
+  bound (`?N`); identifiers cannot be, so table and column names are validated against
+  `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, and every builder refuses a statement that would
+  exceed D1's documented **100-bound-parameter** limit. Not verified against live D1 — CI holds no
+  Cloudflare account — though the whole surface is driven against a real SQLite engine, the engine
+  D1 runs, including batch rollback.
+
 - **Cloudflare Queues, Cron Triggers, and the Cache API in `@hono-enterprise/cloudflare-plugin`**
   (Milestone 52b) — the three platform features that need a **module-level handler export** from the
   application's Worker rather than anything reachable through `fetch`. No `common` change and no new
@@ -262,6 +298,16 @@ All notable changes to this project are documented here. The format follows
   under the `REALTIME_BACKPLANE` token removes it.
 
 ### Fixed
+
+- **`DatabasePlugin({ options: { logQueries: true } })` threw on every repository call whenever a
+  real logger was registered** (found in Milestone 52c). `resolveLogger` extracted `logger.debug`
+  into a local and invoked it **detached**, so `this` was `undefined` at the call. Both loggers
+  `logger-plugin` ships — `ConsoleLogger` and `PinoLogger` — implement `debug` in terms of a private
+  `#` field, and a private-field access on an unbound method throws `TypeError`, so the documented
+  `logQueries` option could not be used at all with `LoggerPlugin` present. Every existing test
+  injected a plain-object logger, where a detached method works fine, which is exactly why no gate
+  saw it. `cache-plugin` carries a regression test for the identical bug; `database-plugin` now has
+  one too, driving the real `ConsoleLogger` through a running kernel application.
 
 - **Every application failed to boot on Cloudflare Workers** — `packages/kernel`'s request-context
   factory built its never-aborting `ctx.signal` sentinel from a **module-scope**

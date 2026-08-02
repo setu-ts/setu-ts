@@ -213,10 +213,11 @@ export interface D1Result<T = Record<string, unknown>> {
 /**
  * A D1 database binding.
  *
- * Exposed as an escape hatch for applications that want SQL today. A first-class
- * `IDatabase` backend is M52c, because the seam a backend implements
- * (`IDatabaseAdapter`) lives inside `database-plugin` and is not a committed
- * `common` port.
+ * Usable directly for applications that want raw SQL, and the binding
+ * {@linkcode D1Adapter} wraps to serve `CAPABILITIES.DATABASE` through the
+ * repository and Unit-of-Work surface. M52c promoted `IDatabaseAdapter` into
+ * `common`, which is what made that backend expressible outside
+ * `database-plugin`.
  *
  * @since 0.2.0
  */

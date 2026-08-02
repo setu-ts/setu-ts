@@ -17,7 +17,7 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
-import type { IDatabaseAdapter } from '../adapters/adapter.ts';
+import type { IDatabaseAdapter } from '@hono-enterprise/common';
 
 // ---------------------------------------------------------------------------
 // Internal generic repository (was `MemoryRepository` — renamed because it
@@ -99,7 +99,16 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
-  /** @inheritdoc */
+  /**
+   * @inheritdoc
+   *
+   * NOTE: the memory-adapter refusal throws **synchronously** even though the
+   * declared return type is a promise, so a caller using `.catch()` rather
+   * than `await` is bypassed. That is pre-existing published behavior pinned
+   * by two committed tests, and correcting it is a behavior change outside
+   * M52c's scope — flagged rather than changed here. `migrate()` below
+   * rejects, so the two refusals are currently inconsistent.
+   */
   query<T>(sql: string, params?: unknown[]): Promise<T[]> {
     if (this._adapterType === 'memory') {
       throw new Error('The memory adapter does not support raw SQL queries.');
@@ -194,6 +203,10 @@ export class DatabaseService implements IDatabaseService {
  * Creates a {@linkcode DataSource} backed by a {@linkcode MemoryAdapter}
  * for the given entity name.
  *
+ * Delegates to `MemoryAdapter.createDataSource`, which owns the single
+ * implementation — the promoted {@linkcode IDatabaseAdapter} port put it on
+ * the adapter, so the plugin no longer has to cast to reach it.
+ *
  * @param adapter - The memory adapter instance
  * @param entity - Entity name
  * @param primaryKey - Primary key field
@@ -204,13 +217,5 @@ export function createMemoryDataSource(
   entity: string,
   primaryKey: string = 'id',
 ): DataSource {
-  adapter.getStore(entity, primaryKey); // Ensure store is initialized
-  return {
-    findAll: (query) => adapter.queryEntities(entity, query),
-    findById: (id) => adapter.findEntityById(entity, id),
-    create: (data) => adapter.insertEntity(entity, data),
-    update: (id, data) => adapter.updateEntity(entity, id, data),
-    delete: (id) => adapter.deleteEntity(entity, id),
-    count: (where) => adapter.countEntities(entity, where),
-  };
+  return adapter.createDataSource(entity, primaryKey);
 }

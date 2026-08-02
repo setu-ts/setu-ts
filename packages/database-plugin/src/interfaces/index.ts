@@ -6,6 +6,7 @@
  *
  * @module
  */
+import type { IDatabaseAdapter } from '@hono-enterprise/common';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
 
 // Re-export query option types so consumers don't need internal paths.
@@ -174,25 +175,21 @@ export interface IDatabaseService {
 }
 
 /**
- * Supported ORM adapter backends.
+ * Supported adapter backends.
+ *
+ * `'custom'` accepts any {@linkcode IDatabaseAdapter}, so a backend can live
+ * in another package — `cloudflare-plugin`'s `D1Adapter` is the first.
  *
  * @since 0.1.0
  */
-export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory';
+export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'custom';
 
 /**
- * Options for the {@link DatabasePlugin | DatabasePlugin} factory.
+ * The options every {@linkcode DatabasePluginOptions} arm shares.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
-export interface DatabasePluginOptions {
-  /**
-   * ORM adapter type. Defaults to `'memory'`.
-   *
-   * @since 0.1.0
-   */
-  readonly type?: DatabaseAdapterType;
-
+export interface DatabaseConnectionOptions {
   /**
    * Named connection for multi-database support. Defaults to `'default'`.
    *
@@ -208,10 +205,70 @@ export interface DatabasePluginOptions {
   /**
    * Adapter-specific options.
    *
+   * On the `'custom'` arm the adapter is already constructed, so only the
+   * options the *service* reads still apply — `logQueries` routes a custom
+   * adapter's data sources through the same single logging wrapper every
+   * built-in adapter uses.
+   *
    * @since 0.1.0
    */
   readonly options?: DatabaseAdapterOptions;
 }
+
+/**
+ * The arm selecting one of the adapters this package ships.
+ *
+ * @since 0.2.0
+ */
+export interface BuiltInDatabaseOptions extends DatabaseConnectionOptions {
+  /**
+   * ORM adapter type. Defaults to `'memory'`.
+   *
+   * @since 0.1.0
+   */
+  readonly type?: 'prisma' | 'drizzle' | 'memory';
+}
+
+/**
+ * The arm supplying an externally-implemented backend.
+ *
+ * `adapter` is required by the union, so a `'custom'` registration that
+ * forgets it is a compile error rather than a startup throw.
+ *
+ * @example
+ * ```typescript
+ * import { D1Adapter } from '@hono-enterprise/cloudflare-plugin';
+ *
+ * app.register(DatabasePlugin({
+ *   type: 'custom',
+ *   adapter: new D1Adapter(env.DB as ID1Database),
+ * }));
+ * ```
+ * @since 0.2.0
+ */
+export interface CustomDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the external-adapter arm. */
+  readonly type: 'custom';
+  /**
+   * The backend to use, already constructed. The plugin calls `connect()` on
+   * it during `register()` and `disconnect()` during shutdown; it never
+   * constructs or replaces it.
+   *
+   * @since 0.2.0
+   */
+  readonly adapter: IDatabaseAdapter;
+}
+
+/**
+ * Options for the {@link DatabasePlugin | DatabasePlugin} factory.
+ *
+ * A union discriminated on `type`: the built-in arm keeps `type` optional
+ * (so an omitted `type` still means `'memory'`), while `'custom'` requires an
+ * `adapter`.
+ *
+ * @since 0.1.0
+ */
+export type DatabasePluginOptions = BuiltInDatabaseOptions | CustomDatabaseOptions;
 
 /**
  * Adapter-specific configuration passed to the database adapter.

@@ -90,6 +90,11 @@ export type { ICacheApi } from './cache-api/cache-api.ts';
 export { assessCacheability } from './cache-api/cacheability.ts';
 export type { CacheabilityInput, CacheRefusal } from './cache-api/cacheability.ts';
 
+// D1 — the committed IDatabaseAdapter over a D1 binding, handed to
+// `DatabasePlugin({ type: 'custom', adapter })` by the application
+export { D1Adapter } from './database/d1-adapter.ts';
+export type { D1AdapterOptions, D1EntityMapping } from './database/d1-adapter.ts';
+
 // Stores — constructible standalone, for wiring a capability the plugin does
 // not register (sessions) or for use outside an application
 export { KvCacheStore } from './stores/kv-cache-store.ts';
