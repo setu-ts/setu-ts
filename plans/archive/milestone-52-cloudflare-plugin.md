@@ -109,6 +109,13 @@ first-class capability, wires the two bindings whose committed `common` ports it
   that returns `{ vars, bindings }`, keeping only `typeof value === 'string'` entries in `vars`.
   `runtime.env` receives `vars`. The three non-Workers factories ignore `env` and keep reading their
   own platform source.
+- **Deviation from this plan, taken during implementation:** `splitWorkerEnv` lives in
+  **`packages/common/src/cloudflare.ts`**, not in `packages/runtime`. `cloudflare-plugin` needs the
+  identical partition to build its binding registry, and a plugin may not import `runtime`
+  (AI_GUIDELINES §2.2/§3.3), so keeping it in `runtime` would have forced a second copy — the
+  duplicated-logic defect §11.1 forbids. `common` is where the M47 realtime frame codec and the M48
+  cookie codec live for the same reason. The plan's `runtime` barrel export becomes a `common`
+  barrel export; nothing else about the decision changes.
 - **Why:** C1 — the committed `env` type promises strings, and `ConfigPlugin` iterates it. A KV
   namespace arriving as `[object Object]` is a silent config corruption that type-checks. Splitting
   in one pure function means the same rule is testable without a Worker.

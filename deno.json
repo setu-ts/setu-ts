@@ -43,7 +43,8 @@
     "./packages/realtime-backplane-plugin",
     "./packages/session-plugin",
     "./packages/service-discovery-plugin",
-    "./packages/grpc-plugin"
+    "./packages/grpc-plugin",
+    "./packages/cloudflare-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

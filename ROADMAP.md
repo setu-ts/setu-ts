@@ -4985,7 +4985,7 @@ server side — has no way to turn a logical service name into an address.
 
 ---
 
-## Milestone 52: Cloudflare Workers Plugin — Reaching the Platform's Bindings
+## Milestone 52: Cloudflare Workers Plugin — Reaching the Platform's Bindings ✅ COMPLETE
 
 **Objective:** Cloudflare Workers has been a _serving_ target since M23 — the fetch adapter
 (`cf-http-adapter.ts`), the WebSocket upgrader (M46), and the RPC interceptor (M49) all work there —
@@ -5061,18 +5061,18 @@ sessions — therefore has no backend that exists on the edge. M52 closes the ac
 
 ### Deliverables
 
-- [ ] `CAPABILITIES.CLOUDFLARE` token in `common`
-- [ ] `CloudflarePlugin` and `ICloudflareBindings` with typed, throwing accessors
-- [ ] Structural binding facades, zero npm dependencies
-- [ ] `KvCacheStore` with the logical-expiry envelope and the prefixed `clear()` sweep
-- [ ] `R2Storage` including `getStream`, with the documented `getSignedUrl` throw
-- [ ] `KvSessionStore` driven by a real `SessionPlugin` in an integration test
-- [ ] `waitUntil` seam with rejection reporting on both paths
-- [ ] `cloudflare` health indicator that performs no binding I/O
-- [ ] `RuntimeOptions.env` passthrough and `splitWorkerEnv` string filtering
-- [ ] CLI Workers template: `compatibility_date` bump, `env` wiring, binding stanzas
-- [ ] Doc deliverables C1–C5 (PUBLIC_API, ARCHITECTURE, README, ROADMAP, CHANGELOG)
-- [ ] Workspace and `scripts/release-packages.ts` registration (first JSR publish — run
+- [x] `CAPABILITIES.CLOUDFLARE` token in `common`
+- [x] `CloudflarePlugin` and `ICloudflareBindings` with typed, throwing accessors
+- [x] Structural binding facades, zero npm dependencies
+- [x] `KvCacheStore` with the logical-expiry envelope and the prefixed `clear()` sweep
+- [x] `R2Storage` including `getStream`, with the documented `getSignedUrl` throw
+- [x] `KvSessionStore` driven by a real `SessionPlugin` in an integration test
+- [x] `waitUntil` seam with rejection reporting on both paths
+- [x] `cloudflare` health indicator that performs no binding I/O
+- [x] `RuntimeOptions.env` passthrough and `splitWorkerEnv` string filtering
+- [x] CLI Workers template: `compatibility_date` bump, `env` wiring, binding stanzas
+- [x] Doc deliverables C1–C5 (PUBLIC_API, ARCHITECTURE, README, ROADMAP, CHANGELOG)
+- [x] Workspace and `scripts/release-packages.ts` registration (first JSR publish — run
       `release:create-packages` and `release:link-repos` before the next tag)
 
 ### Out of scope
@@ -5363,5 +5363,5 @@ app.register(MyPlugin({ option1: 'value' }));
 | 48        | ✅     | session-plugin                    |
 | 49        | ✅     | grpc-plugin                       |
 | 50        | ✅     | service-discovery-plugin          |
-| 52        | ⬜     | cloudflare-plugin                 |
+| 52        | ✅     | cloudflare-plugin                 |
 | 52b       | ⬜     | cloudflare-plugin (platform)      |

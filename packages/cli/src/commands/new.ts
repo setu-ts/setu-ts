@@ -154,7 +154,18 @@ ${middlewareLines}
 `;
   }
 
-  const pluginList = plugins.map((p) => `      ${p.symbol}(${p.args ?? ''}),`).join('\n');
+  // On Workers a plugin that reads the environment must be handed it: there is
+  // no ambient environment on the edge, so `env` arrives as an argument of the
+  // `fetch` handler and is threaded through the factory.
+  const onWorkers = runtime === 'cloudflare-workers';
+  const pluginList = plugins
+    .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`)
+    .join('\n');
+
+  const factoryParam = onWorkers ? 'env: Readonly<Record<string, unknown>> = {}' : '';
+  const envDoc = onWorkers
+    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler`
+    : '';
 
   return `${imports}
 
@@ -163,10 +174,10 @@ ${middlewareLines}
  *
  * \`honoe\` imports this factory to discover plugin-contributed CLI commands, so
  * it must NOT start the server — \`main.ts\` owns that.
- *
+ *${envDoc}
  * @returns The configured, unstarted application
  */
-export function ${CONFIG_EXPORT}(): IApplication {
+export function ${CONFIG_EXPORT}(${factoryParam}): IApplication {
   const app = createApplication({
     plugins: [
 ${pluginList}
@@ -207,20 +218,19 @@ await app.start({ port: 3000 });
  *
  * @returns The `src/index.ts` contents
  */
-function workersEntry(hasAppFactory: boolean): string {
-  // A factory-composed app resolves its configuration BEFORE any plugin is
-  // constructed, and on Workers the environment is not process-wide — bindings
-  // arrive as the `env` argument below. So it has to be threaded in; without
-  // it the app would compose from an empty configuration and fail on the first
-  // request, permanently, because `booted` memoises the rejection.
-  const bootSignature = hasAppFactory
-    ? 'async function boot(env: Record<string, unknown>): Promise<IApplication> {'
-    : 'async function boot(): Promise<IApplication> {';
-  const bootCall = hasAppFactory ? `${CONFIG_EXPORT}(env)` : `${CONFIG_EXPORT}()`;
-  const bootedInit = hasAppFactory ? 'booted ??= boot(env);' : 'booted ??= boot();';
-  const fetchSignature = hasAppFactory
-    ? 'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {'
-    : 'async fetch(request: Request): Promise<Response> {';
+function workersEntry(): string {
+  // `env` is threaded in on BOTH paths. On Workers the environment is not
+  // process-wide — bindings and variables arrive as the `env` argument below —
+  // so a factory-composed app would otherwise resolve its configuration from
+  // nothing, and a plugin-list app would register a RuntimePlugin whose
+  // `runtime.env` is empty. Either failure is permanent, because `booted`
+  // memoises the rejection.
+  const bootSignature =
+    'async function boot(env: Record<string, unknown>): Promise<IApplication> {';
+  const bootCall = `${CONFIG_EXPORT}(env)`;
+  const bootedInit = 'booted ??= boot(env);';
+  const fetchSignature =
+    'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
   return `import type { IApplication } from '@hono-enterprise/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
@@ -545,13 +555,30 @@ ${PROGRAM_NAME} generate --help
   });
 
   if (runtime === 'cloudflare-workers') {
-    files.push({ path: 'src/index.ts', contents: workersEntry(appFactory !== undefined) });
+    files.push({ path: 'src/index.ts', contents: workersEntry() });
     files.push({
       path: 'wrangler.toml',
+      // The compatibility date has to postdate 2025-08-08, when Cloudflare
+      // shipped `import { waitUntil } from 'cloudflare:workers'`. A project
+      // scaffolded against an earlier date cannot import it, so
+      // CloudflarePlugin's background-work seam would be unreachable.
       contents: `name = "${projectName}"
 main = "src/index.ts"
-compatibility_date = "2024-09-23"
+compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+
+# Platform bindings reach the application through the \`env\` argument of the
+# \`fetch\` handler, which \`src/index.ts\` threads into \`${CONFIG_EXPORT}()\`.
+# Register \`CloudflarePlugin\` from @hono-enterprise/cloudflare-plugin to serve
+# the cache and storage capabilities from KV and R2.
+#
+# [[kv_namespaces]]
+# binding = "CACHE_KV"
+# id = "<your-kv-namespace-id>"
+#
+# [[r2_buckets]]
+# binding = "UPLOADS"
+# bucket_name = "<your-bucket-name>"
 `,
     });
   } else {

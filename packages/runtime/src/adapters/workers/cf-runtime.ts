@@ -5,12 +5,20 @@
  *
  * `fs` is `undefined` (no file system on edge). `env` reads from an injectable
  * seam (defaulting to an empty record) because Workers bindings arrive via the
- * `env` parameter of the `fetch` handler, not a global.
+ * `env` parameter of the `fetch` handler, not a global — the application passes
+ * them in, typically from `import { env } from 'cloudflare:workers'`.
+ *
+ * The supplied record is partitioned by {@linkcode splitWorkerEnv}: only its
+ * string entries become `IRuntimeServices.env`, because that member is
+ * contracted as a string record and `ConfigPlugin` iterates it. Object bindings
+ * (KV, R2, D1, …) are reached through `CAPABILITIES.CLOUDFLARE` instead.
  *
  * @module
  */
 
 import type { IRuntimeServices } from '@hono-enterprise/common';
+import { splitWorkerEnv } from '@hono-enterprise/common';
+
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 
 /**
@@ -41,15 +49,13 @@ export interface CloudflareRuntimeOptions {
 export function createCloudflareRuntimeServices(
   options?: CloudflareRuntimeOptions,
 ): IRuntimeServices {
-  const envSource = options?.env ?? {};
+  const { vars } = splitWorkerEnv(options?.env ?? {});
 
   return mergeRuntimeServices({
     platform: () => 'cloudflare-workers',
     version: () => '',
     hostname: () => '',
-    // Cloudflare env bindings are often objects (KV/D1/R2), so we keep envSource
-    // typed as Record<string, unknown> and cast only at this boundary.
-    env: envSource as Readonly<Record<string, string | undefined>>,
+    env: vars,
     exit: () => {
       throw new Error('Process exit is not supported in Cloudflare Workers');
     },

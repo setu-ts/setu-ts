@@ -49,6 +49,28 @@ export interface RuntimeOptions {
    * @internal
    */
   httpAdapters?: HttpAdapterFactories;
+  /**
+   * The Cloudflare Workers `env` record. There is no ambient environment on
+   * the edge, so without this `runtime.env` is empty on Workers and
+   * `ConfigPlugin` reads nothing.
+   *
+   * Pass what the platform provides — `import { env } from 'cloudflare:workers'`
+   * — and only its **string** entries populate `runtime.env`. Object bindings
+   * (KV, R2, D1, …) are published separately by `CloudflarePlugin` under
+   * `CAPABILITIES.CLOUDFLARE`, because `IRuntimeServices.env` is contracted as
+   * a string record.
+   *
+   * Ignored on Deno, Node, and Bun.
+   *
+   * @example
+   * ```typescript
+   * import { env } from 'cloudflare:workers';
+   *
+   * const app = createApplication({ plugins: [RuntimePlugin({ env })] });
+   * ```
+   * @since 0.2.0
+   */
+  env?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -83,6 +105,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const platform: RuntimePlatform = options?.platform ?? detectRuntime();
   const runtimeAdapters = options?.adapters;
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
+  const workerEnv = options?.env;
 
   return {
     name: 'runtime',
@@ -95,11 +118,13 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       // a second copy of the platform → adapter map, so a caller that needs
       // services before start() (config resolution) gets the same resolution
       // this plugin does.
-      const services = createRuntimeServices(
-        // `exactOptionalPropertyTypes`: omit `adapters` entirely rather than
-        // passing undefined, so the factory's own default map applies.
-        runtimeAdapters === undefined ? { platform } : { platform, adapters: runtimeAdapters },
-      );
+      const services = createRuntimeServices({
+        platform,
+        // `exactOptionalPropertyTypes`: omit each entirely rather than passing
+        // undefined, so the factory's own defaults apply.
+        ...(runtimeAdapters === undefined ? {} : { adapters: runtimeAdapters }),
+        ...(workerEnv === undefined ? {} : { env: workerEnv }),
+      });
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 
       // Register HTTP adapter

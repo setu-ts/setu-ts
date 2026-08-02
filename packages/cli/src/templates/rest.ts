@@ -6,8 +6,19 @@
 
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
 
-/** Always first: the kernel makes the `runtime` capability mandatory at `start()`. */
-export const RUNTIME_WIRING: Wiring = { pkg: 'runtime', symbol: 'RuntimePlugin' };
+/**
+ * Always first: the kernel makes the `runtime` capability mandatory at `start()`.
+ *
+ * On Cloudflare Workers it takes the Worker's `env`, which is the only way any
+ * variable or secret reaches the application there — without it `runtime.env`
+ * is empty and `ConfigPlugin` reads nothing. Object bindings (KV, R2, D1) are
+ * filtered out of `runtime.env` and reached through `CloudflarePlugin`.
+ */
+export const RUNTIME_WIRING: Wiring = {
+  pkg: 'runtime',
+  symbol: 'RuntimePlugin',
+  workersArgs: '{ env }',
+};
 
 /**
  * The REST plugin set, exported so `microservice` composes from it rather than

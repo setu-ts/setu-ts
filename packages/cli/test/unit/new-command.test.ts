@@ -205,16 +205,21 @@ describe('runNewCommand', () => {
       expect(config).toContain('{ env }');
     });
 
-    it('leaves the Workers entry untouched for a template without a factory', async () => {
-      // The env parameter exists only because a factory resolves config early;
-      // an inline-wiring template must render exactly as it did before.
+    it('threads env through the Workers entry for a template without a factory too', async () => {
+      // Not only the factory path needs it: with no ambient environment on the
+      // edge, an inline-wiring app whose RuntimePlugin never receives `env`
+      // registers runtime services whose `env` is empty, so ConfigPlugin and
+      // the secrets EnvProvider read nothing.
       const h = harness();
       await h.run(['api', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/api/src/index.ts');
+      const config = h.fs.read('/work/api/honoe.config.ts');
 
-      expect(entry).toContain('async fetch(request: Request): Promise<Response>');
-      expect(entry).toContain('booted ??= boot();');
-      expect(entry).not.toContain('createApp(env)');
+      expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
+      expect(entry).toContain('booted ??= boot(env);');
+      expect(entry).toContain('createApp(env)');
+      expect(config).toContain('export function createApp(env: Readonly<Record<string, unknown>>');
+      expect(config).toContain('RuntimePlugin({ env })');
     });
 
     it('leaves templates without a factory rendering exactly as before', async () => {
@@ -455,12 +460,36 @@ describe('runNewCommand', () => {
       expect(wrangler).toContain('main = "src/index.ts"');
     });
 
+    it('pins a compatibility date that can import waitUntil', async () => {
+      // `import { waitUntil } from 'cloudflare:workers'` shipped 2025-08-08. A
+      // project scaffolded against an earlier date cannot import it, so
+      // CloudflarePlugin's background-work seam would be unreachable.
+      const h = harness();
+      await h.run(['app', '--runtime', 'cloudflare-workers']);
+      const wrangler = h.fs.read('/work/app/wrangler.toml');
+
+      const match = /compatibility_date = "(\d{4}-\d{2}-\d{2})"/.exec(wrangler ?? '');
+      expect(match).not.toBeNull();
+      // ISO dates sort lexicographically, so a plain comparison is the check.
+      expect((match?.[1] ?? '') > '2025-08-08').toBe(true);
+    });
+
+    it('shows where platform bindings are declared', async () => {
+      const h = harness();
+      await h.run(['app', '--runtime', 'cloudflare-workers']);
+      const wrangler = h.fs.read('/work/app/wrangler.toml');
+
+      expect(wrangler).toContain('[[kv_namespaces]]');
+      expect(wrangler).toContain('[[r2_buckets]]');
+      expect(wrangler).toContain('cloudflare-plugin');
+    });
+
     it('emits a fetch entry with no listen call', async () => {
       const h = harness();
       await h.run(['app', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/app/src/index.ts');
       expect(entry).toContain('export default {');
-      expect(entry).toContain('async fetch(request: Request)');
+      expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).not.toContain('listen');
       expect(entry).not.toContain('port: 3000');
     });
@@ -479,7 +508,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/app/src/index.ts');
-      expect(entry).toContain('booted ??= boot();');
+      expect(entry).toContain('booted ??= boot(env);');
       expect(entry).toContain('const app = await booted;');
     });
 

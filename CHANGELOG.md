@@ -8,6 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@hono-enterprise/cloudflare-plugin`** (Milestone 52) — a new package registering
+  `ICloudflareBindings` under a new `CAPABILITIES.CLOUDFLARE` token. The framework has served
+  traffic on Workers since the Hono migration but could not reach a single platform binding; this
+  publishes them as one typed accessor (`kv`, `r2`, `d1`, `queue`, `service`, `durableObject`,
+  `get<T>`, `vars`, `waitUntil`), and optionally serves the committed cache and storage capabilities
+  from KV and R2. **Zero npm dependencies**, and nothing in the package imports `cloudflare:workers`
+  — the application passes `env` (and `waitUntil`) in, which keeps the package type-checkable on
+  every runtime. `KvCacheStore` reconciles `ICacheStore`'s unbounded TTL with KV's 60-second
+  `expirationTtl` floor by carrying a logical deadline inside the value, so a 5-second entry expires
+  in 5 seconds rather than surviving a minute; `clear()` requires a key prefix, because the binding
+  has no bulk delete and an unprefixed sweep would remove keys the store does not own. `R2Storage`
+  implements the optional `getStream`, heads before `delete` so its committed `Promise<boolean>` is
+  honest, and **throws** from `getSignedUrl` — the R2 Workers binding has no presign operation.
+  `KvSessionStore` is constructed by the application and handed to `SessionPlugin({ store })`, since
+  that option is read before any application exists. No binding I/O happens at registration, where
+  the platform forbids it, and the `cloudflare` health indicator performs none either.
+- **`splitWorkerEnv` and `SplitWorkerEnv` in `@hono-enterprise/common`** (Milestone 52) — the pure
+  partition of a Workers `env` record into string variables and object bindings. In `common` because
+  both `runtime` and `cloudflare-plugin` need the identical rule and no plugin may import another.
+
 - **`@hono-enterprise/service-discovery-plugin`** (Milestone 50) — a new package registering an
   `IServiceDiscovery` under a new `CAPABILITIES.SERVICE_DISCOVERY` token, so an application can turn
   a logical service name into a reachable address. Five provider arms — `'static'`, `'consul'`,
@@ -148,6 +168,19 @@ All notable changes to this project are documented here. The format follows
   never appears once a backplane is registered.
 
 ### Changed
+
+- **`runtime.env` is now populated on Cloudflare Workers** (Milestone 52). `RuntimePlugin` and
+  `createRuntimeServices` gain an `env` option; passing the Worker's `env` makes `ConfigPlugin` and
+  the secrets `EnvProvider` work on the edge, where previously they read an empty record. Only
+  **string** entries reach `runtime.env`, which is contracted as a string record — object bindings
+  are filtered out rather than stringified to `[object Object]`. Behaviour on Deno, Node, and Bun is
+  unchanged; the option is ignored there.
+- **`honoe new --runtime cloudflare-workers`** (Milestone 52) now threads `env` from the `fetch`
+  handler into `createApp(env)` and renders `RuntimePlugin({ env })` on that target, bumps the
+  scaffolded `compatibility_date` to `2025-09-01` (`import { waitUntil } from 'cloudflare:workers'`
+  shipped 2025-08-08, so the previous `2024-09-23` could not import it), and emits commented
+  `[[kv_namespaces]]` / `[[r2_buckets]]` stanzas in `wrangler.toml`. Generated output for the Deno,
+  Node, and Bun targets is unchanged.
 
 - **`DecoratorPlugin` now prefers the DI container for any class registered in it, with or without
   `@Injectable`.** `instantiate()` required service metadata before consulting the container, so a

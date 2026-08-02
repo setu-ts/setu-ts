@@ -5925,6 +5925,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                    |
 | DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                       |
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                    |
+| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                |
 
 Contract notes:
 
@@ -5986,6 +5987,9 @@ Contract notes:
 - `CAPABILITIES.GRPC` (`'grpc'`) — the capability token under which `GrpcPlugin` registers the
   `IGrpcService`. The service provides gRPC/Connect co-serving on the same port as ordinary Hono
   routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49.
+- `CAPABILITIES.CLOUDFLARE` (`'cloudflare'`) — the capability token under which `CloudflarePlugin`
+  registers `ICloudflareBindings`: typed access to a Worker's KV, R2, D1, Queues, service and
+  Durable Object bindings, its string variables, and `waitUntil`. Added in Milestone 52.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
@@ -6115,8 +6119,8 @@ Per-runtime upgrade seams:
 
 | Export                              | Kind | Purpose                                                                        |
 | ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
-| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)                 |
-| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`)                   |
+| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`platform`, `env`)                                |
+| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`, `env`)            |
 | `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                         |
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
@@ -6232,6 +6236,24 @@ Contract notes:
   facades over platform globals, holding no connection, cache, or handle registry, and nothing
   compares them by identity. One caveat — `env` is a **snapshot taken at construction**, not a live
   view, so a variable set between two constructions is visible only to the later instance.
+
+- **`env` on Cloudflare Workers.** There is no ambient environment on the edge: bindings and
+  variables arrive as the `env` argument of the `fetch` handler. Both `RuntimePlugin` and
+  `createRuntimeServices` therefore take an `env` option, and without it `runtime.env` is empty on
+  Workers, so `ConfigPlugin` and the secrets `EnvProvider` read nothing. Pass what the platform
+  provides:
+
+  ```typescript
+  import { env } from 'cloudflare:workers';
+
+  const app = createApplication({ plugins: [RuntimePlugin({ env })] });
+  ```
+
+  Only the record's **string** entries populate `runtime.env`, which is contracted as
+  `Readonly<Record<string, string | undefined>>`; object bindings are filtered out by the pure
+  `splitWorkerEnv` in `common` and reached through `CAPABILITIES.CLOUDFLARE` instead. Passing them
+  through unfiltered would hand `ConfigPlugin` a `[object Object]` for every KV namespace. The
+  option is ignored on Deno, Node, and Bun, which read their own ambient environment.
 
 ---
 
@@ -6975,6 +6997,110 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
   protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
   support.
+
+---
+
+## API Reference: @hono-enterprise/cloudflare-plugin
+
+Cloudflare Workers platform bindings, published under `CAPABILITIES.CLOUDFLARE`, plus optional
+KV-backed cache and R2-backed storage. Zero npm dependencies. Added in Milestone 52.
+
+### Registration
+
+```typescript
+import { env, waitUntil } from 'cloudflare:workers';
+import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
+
+app.register(CloudflarePlugin({
+  env, // required — the Worker's bindings and variables
+  waitUntil, // the platform background-work sink
+  requireBindings: ['CACHE_KV'], // fail at register() rather than at first use
+  cache: { binding: 'CACHE_KV', prefix: 'cache:', defaultTtlSeconds: 300 },
+  storage: { binding: 'UPLOADS', prefix: 'user-uploads/' },
+}));
+```
+
+Nothing in the package imports `cloudflare:workers`; the application passes `env` in. That specifier
+is unresolvable outside a Worker toolchain, so importing it here would break `deno check` on every
+other runtime — and injection is what the platform docs recommend for testability.
+
+### Options
+
+| Option                    | Type                  | Default     | Consumer / behavior                                            |
+| ------------------------- | --------------------- | ----------- | -------------------------------------------------------------- |
+| `env`                     | `CloudflareWorkerEnv` | required    | `BindingRegistry` — the record every accessor reads            |
+| `waitUntil`               | `WaitUntilHost`       | —           | `resolveWaitUntil` — delegated to; omit off Workers            |
+| `requireBindings`         | `readonly string[]`   | `[]`        | `register()` — throws naming every absent entry                |
+| `cache.binding`           | `string`              | —           | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE` |
+| `cache.name`              | `string`              | `'default'` | Plugin factory — derives `cache.<name>` when not `'default'`   |
+| `cache.prefix`            | `string`              | —           | `KvCacheStore` — key prefix; **required to call `clear()`**    |
+| `cache.defaultTtlSeconds` | `number`              | —           | `KvCacheStore.set` — applied when `ttlSeconds` is omitted      |
+| `storage.binding`         | `string`              | —           | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`     |
+| `storage.name`            | `string`              | `'default'` | Plugin factory — derives `storage.<name>` when not `'default'` |
+| `storage.prefix`          | `string`              | —           | `R2Storage` — object-key prefix                                |
+
+### Exports
+
+| Export                                                                                                                                                                                                                                                                   | Kind          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| `CloudflarePlugin`                                                                                                                                                                                                                                                       | factory       |
+| `ICloudflareBindings`                                                                                                                                                                                                                                                    | interface     |
+| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`                                                                                                                                                                                                              | types         |
+| `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                      | class + types |
+| `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                | class + types |
+| `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                          | class + types |
+| `WaitUntilHost`                                                                                                                                                                                                                                                          | type          |
+| `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
+| `isKvNamespace`, `isR2Bucket`                                                                                                                                                                                                                                            | guards        |
+| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                           | errors        |
+
+### `ICloudflareBindings`
+
+`has(name)`, `names()`, `vars()`, `get<T>(name)`, `kv(name)`, `r2(name)`, `d1(name)`, `queue(name)`,
+`service(name)`, `durableObject(name)`, `waitUntil(promise)`.
+
+Every accessor **throws** `CloudflareBindingMissingError` for an absent name — naming the binding
+and listing the ones that are present — rather than returning `undefined`; a missing binding is a
+deployment error, not an expected case. Use `has` when absence is expected. `kv` and `r2`
+additionally validate the binding's shape, so an R2 bucket wired into a KV option fails at
+`register()` with a message rather than at first use with a `TypeError`.
+
+### Notes
+
+- **Registration is opt-in and instance-named.** `CAPABILITIES.CLOUDFLARE` is always registered;
+  `CAPABILITIES.CACHE` and `CAPABILITIES.STORAGE` only when their arm is configured. `name` derives
+  `cache.<name>` / `storage.<name>` exactly as `CachePlugin` does, so a KV cache can sit beside a
+  memory one. Registering an unnamed instance beside `CachePlugin()` is a startup error, because the
+  kernel rejects two providers of one token.
+- **KV's `expirationTtl` minimum is 60 seconds, and `ICacheStore.set` is unbounded.** Values carry a
+  `{ v, e }` envelope whose logical deadline is checked against `runtime.now()` on every read, while
+  the physical `expirationTtl` is floored at 60 so KV can still reclaim the key. A 5-second entry
+  therefore expires in 5 seconds. The same envelope backs `KvSessionStore`.
+- **`clear()` requires a prefix.** The binding has no bulk delete, so the sweep pages `list` (1000
+  keys maximum) and deletes each key. Without a prefix it would delete keys the store does not own,
+  so it throws `CloudflareUnsupportedError` instead.
+- **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
+- **`R2Storage.getSignedUrl` throws.** The R2 Workers binding exposes no presign operation at all.
+  `getStream` is implemented, so serving through a route is a zero-copy alternative.
+- **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the
+  committed `Promise<boolean>` costs one extra round trip rather than a constant `true`.
+- **`KvSessionStore` is constructed by the application**, not registered by the plugin:
+  `SessionPluginOptions.store` is read at plugin construction, before any application exists.
+- **No binding I/O at registration.** Cloudflare prohibits I/O outside a request context, so the
+  plugin only captures and shape-checks bindings at `register()`. The `cloudflare` health indicator
+  performs no binding I/O either — a KV read per probe interval is billable. It reports `degraded`
+  when `runtime.platform()` is not `cloudflare-workers`.
+- **`waitUntil` reports its failures.** A rejection handler is attached whether or not a host was
+  injected, so background work never fails silently. With no host the promise still runs: no runtime
+  off Workers cuts work off at the response.
+- **Compatibility date.** `import { waitUntil } from 'cloudflare:workers'` shipped 2025-08-08;
+  `honoe new --runtime cloudflare-workers` scaffolds a later date.
+- **Unverified against a live Worker.** Every binding is exercised against a fake built from the
+  documented signatures — including KV's 60-second floor and R2's void `delete` — but CI holds no
+  Cloudflare account.
+- **Not in this package.** D1 as a database backend, Queues, Cron Triggers, Durable Objects, and the
+  Cache API response cache are Milestone 52b: each needs a new module-level handler export from the
+  application's Worker, or a contract promotion in `common`.
 
 ---
 
