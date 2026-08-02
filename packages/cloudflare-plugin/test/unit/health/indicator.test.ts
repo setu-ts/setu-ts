@@ -15,6 +15,7 @@ const BASE = {
   cache: true,
   storage: true,
   queue: true,
+  durableObject: true,
   waitUntil: true,
 } as const;
 
@@ -31,6 +32,7 @@ describe('createCloudflareIndicator', () => {
       cache: true,
       storage: true,
       queue: true,
+      durableObject: true,
       waitUntil: 'injected',
     });
   });
@@ -65,6 +67,7 @@ describe('createCloudflareIndicator', () => {
       cache: false,
       storage: false,
       queue: false,
+      durableObject: false,
       waitUntil: false,
       platform: 'cloudflare-workers',
     });
@@ -73,6 +76,7 @@ describe('createCloudflareIndicator', () => {
     expect(result.data?.cache).toBe(false);
     expect(result.data?.storage).toBe(false);
     expect(result.data?.queue).toBe(false);
+    expect(result.data?.durableObject).toBe(false);
     expect(result.data?.bindings).toEqual([]);
   });
 });

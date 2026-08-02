@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { IRealtimeBackplane } from '@hono-enterprise/common';
 import { SseService } from '../../src/services/sse-service.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -79,5 +80,93 @@ describe('SseService', () => {
     // Close via closeAll simulates shutdown.
     service.closeAll();
     expect(service.connectionCount).toBe(0);
+  });
+});
+
+describe('SseService opening the backplane transport on first connection', () => {
+  /** A backplane recording connects, optionally failing the first attempt. */
+  function recordingBackplane(failFirst = false): IRealtimeBackplane & {
+    readonly connects: number[];
+  } {
+    const connects: number[] = [];
+    let attempts = 0;
+    return {
+      connects,
+      origin: 'node-a',
+      connect: (): Promise<void> => {
+        attempts++;
+        connects.push(attempts);
+        return failFirst && attempts === 1
+          ? Promise.reject(new Error('transport unreachable'))
+          : Promise.resolve();
+      },
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as unknown as IRealtimeBackplane & { readonly connects: number[] };
+  }
+
+  it('opens the transport when the first client connects', () => {
+    // Without this a listen-only replica never opens a transport and receives
+    // nothing: `subscribe()` registers a handler, it does not open a transport.
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const backplane = recordingBackplane();
+    const service = new SseService({}, runtime, backplane);
+
+    service.open(createFakeContext({ runtime }));
+
+    expect(backplane.connects).toEqual([1]);
+  });
+
+  it('opens once across many connections', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const backplane = recordingBackplane();
+    const service = new SseService({}, runtime, backplane);
+
+    service.open(createFakeContext({ runtime }));
+    service.open(createFakeContext({ runtime }));
+
+    expect(backplane.connects).toEqual([1]);
+  });
+
+  it('retries on a later connection after a failed open, and reports it', async () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const warnings: string[] = [];
+    const logger = { warn: (message: string): void => void warnings.push(message) };
+    const backplane = recordingBackplane(true);
+    const service = new SseService(
+      {},
+      runtime,
+      backplane,
+      logger as unknown as undefined,
+    );
+
+    service.open(createFakeContext({ runtime }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warnings[0]).toContain('backplane connect failed');
+    service.open(createFakeContext({ runtime }));
+    expect(backplane.connects).toEqual([1, 2]);
+  });
+
+  it('reports a non-Error rejection without losing the value', async () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const warnings: unknown[] = [];
+    const logger = {
+      warn: (_message: string, meta?: unknown): void => void warnings.push(meta),
+    };
+    const backplane = {
+      origin: 'node-a',
+      connect: (): Promise<void> => Promise.reject('transport gone'),
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => Promise.resolve(() => {}),
+      close: (): Promise<void> => Promise.resolve(),
+    } as unknown as IRealtimeBackplane;
+    const service = new SseService({}, runtime, backplane, logger as unknown as undefined);
+
+    service.open(createFakeContext({ runtime }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warnings[0]).toMatchObject({ error: 'transport gone' });
   });
 });

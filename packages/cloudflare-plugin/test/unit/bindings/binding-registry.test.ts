@@ -115,6 +115,44 @@ describe('BindingRegistry', () => {
     }
   });
 
+  it('rejects a Durable Object binding of the wrong shape', () => {
+    const { bindings } = registry();
+
+    // Before the guard this cast through silently, and the application booted
+    // clean and failed on the first `idFromName` with a bare TypeError — the
+    // same hole M52c's review closed for D1.
+    expect(() => bindings.durableObject('CACHE_KV')).toThrow(CloudflareBindingMissingError);
+    try {
+      bindings.durableObject('CACHE_KV');
+    } catch (error) {
+      expect(String(error)).toContain('a Durable Object namespace');
+      expect(String(error)).toContain('CACHE_KV');
+    }
+  });
+
+  it('reports an absent Durable Object binding with the names that are present', () => {
+    const { bindings } = registry();
+
+    try {
+      bindings.durableObject('ROOMS');
+      throw new Error('expected a throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CloudflareBindingMissingError);
+      expect(String(error)).toContain('ROOMS');
+      expect(String(error)).toContain('CACHE_KV');
+    }
+  });
+
+  it('accepts a binding carrying only a partial Durable Object shape as wrong', () => {
+    const bindings = new BindingRegistry(
+      { ROOMS: { idFromName: () => {} } },
+      {},
+      noopWaitUntil,
+    );
+
+    expect(() => bindings.durableObject('ROOMS')).toThrow(CloudflareBindingMissingError);
+  });
+
   it('treats an inherited Object.prototype key as absent, agreeing with has()', () => {
     // The binding record is a plain object, so a bare index read would resolve
     // `constructor` to the Object constructor and `toString` to a function —

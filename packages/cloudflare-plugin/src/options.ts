@@ -77,6 +77,42 @@ export interface WorkersQueueArm {
 }
 
 /**
+ * Wires a Durable Object namespace up as the application's
+ * {@linkcode IRealtimeBackplane} under `CAPABILITIES.REALTIME_BACKPLANE`, so
+ * WebSocket rooms and SSE channels reach clients on other replicas.
+ *
+ * The namespace's `class_name` must be a Durable Object class the application
+ * exports, delegating to {@linkcode RealtimeBackplaneObjectCore}. No plugin
+ * option can export that class on the application's behalf, which is why the
+ * DO class is a documented deliverable rather than an implementation detail.
+ *
+ * Registering this arm **and** `RealtimeBackplanePlugin` in one application
+ * fails at startup: the kernel rejects two providers of one capability token.
+ * Register exactly one.
+ *
+ * @since 0.2.0
+ */
+export interface DurableObjectArm {
+  /** The Durable Object namespace binding name from `wrangler.toml`. */
+  readonly binding: string;
+  /**
+   * Instance name. `'default'` (the default) claims the bare
+   * `realtime-backplane` token; anything else derives
+   * `realtime-backplane.<name>`.
+   */
+  readonly name?: string;
+  /**
+   * The object name every replica shares, passed to `idFromName`.
+   *
+   * Two applications sharing one namespace must set different topics, or each
+   * receives the other's frames.
+   *
+   * @default 'realtime'
+   */
+  readonly topic?: string;
+}
+
+/**
  * Options for {@linkcode CloudflarePlugin}.
  *
  * @example Bindings only
@@ -131,4 +167,9 @@ export interface CloudflarePluginOptions {
    * registers nothing.
    */
   readonly queue?: WorkersQueueArm;
+  /**
+   * Serve `CAPABILITIES.REALTIME_BACKPLANE` from a Durable Object namespace.
+   * Omitted registers nothing.
+   */
+  readonly durableObject?: DurableObjectArm;
 }

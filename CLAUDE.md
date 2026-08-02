@@ -1099,12 +1099,63 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that overstated the parameter-cap check. All `src` files touched are at 100% branch/function/line)
   — complete (PR #114)
 - **Milestone 52d** (`packages/cloudflare-plugin` — Durable Objects: a DO-backed
-  `IRealtimeBackplane` (the M47 port is already in `common`, so no contract change) and a DO-backed
-  distributed lock handed to `SchedulerPlugin({ lock })` structurally. Both need the application to
-  export a DO class plus a wrangler migration stanza, and DOs expose **no pub/sub primitive**, so
-  the backplane means each replica holding a WebSocket to the object) — planned, not started
-- **Next milestone** — **M52d** (Durable Objects) or **M37** (example applications under `apps/*`),
-  then M38–M40 unless reprioritized.
+  `IRealtimeBackplane` registered under the committed `CAPABILITIES.REALTIME_BACKPLANE` and a
+  DO-backed distributed lock handed to `SchedulerPlugin({ distributedLock: { lock } })`
+  structurally. **No `common` change and no new token** — M47 and M18 committed both contracts. The
+  ROADMAP's `SchedulerPlugin({ lock })` was one level too shallow, and `enabled: true` turns out
+  **not** to be required: `resolveLock` consults `lock` before `enabled`, verified from source
+  rather than assumed. Because `cloudflare:workers` is unresolvable off a Worker toolchain, the
+  package ships two plain cores (`RealtimeBackplaneObjectCore`, `DistributedLockObjectCore`) that
+  the application's exported DO class delegates to; a mixin reads better but **cannot be typed
+  without `any`** — the TS mixin constructor constraint requires it and the `unknown[]` form rejects
+  a `(ctx, env)` constructor — so delegation is the design, and it also lets the app's class extend
+  the real base class. **Six platform facts were verified against current Cloudflare docs, and two
+  changed the design.** `ctx.acceptWebSocket` is the **hibernation** API: the runtime may evict the
+  object and **re-run its constructor** while sockets stay open, so the fan-out core holds **zero**
+  in-memory state and reads `getWebSockets()` as the only membership — a `Set` in a field would
+  empty itself on the first hibernation while every non-hibernating test passed, which is the single
+  most likely way this milestone could have shipped green and broken; the test therefore builds a
+  FRESH core over the same state. And **a Worker isolate cannot be relied on to hold a long-lived
+  outbound WebSocket**, which the ROADMAP's "each replica holds a WebSocket to the DO" did not say —
+  so the socket opens lazily and reopens on failure, and the real guarantee is documented in four
+  places rather than implied: a subscription lives exactly as long as the isolate holding the
+  members it serves, and since those members are client sockets in the SAME isolate (an
+  HTTP-triggered Worker has no duration limit while its clients stay connected), losing one loses
+  both **together**. Also checked and recorded so a reviewer does not re-raise them: the
+  6-connection limit counts only connections **awaiting response headers**, so an established socket
+  costs no slot; and DO eviction is ~10 s to hibernation, else 70–140 s. That last one is why the
+  lock persists its holder in `ctx.storage` and never a field — a TTL routinely outlives eviction,
+  and an in-memory deadline would hand the same lock to a second holder. Lock correctness comes from
+  the platform's **input gate** ("while a storage operation is executing, no events shall be
+  delivered to the object"), making the read-compare-write atomic with no transaction; **the test
+  fake had to reproduce that gate** — without it the fake reported five simultaneous winners for one
+  lock, which was a defect in the double, not the code. A non-2xx from the lock object **throws**
+  rather than reporting "not acquired", since a 404 means the binding names the wrong class and
+  folding that into contention would silently disable every scheduled job. Payloads are re-broadcast
+  **verbatim** and never parsed, so the object stays schema-ignorant and a future `RealtimeFrame`
+  widening needs no redeploy of the application's class. `isRealtimeFrame`/`dispatchFrame` are a
+  deliberate local copy of `realtime-backplane-plugin`'s (the M30b `pemToDer` precedent — §2.2
+  forbids the import). Closed the last hole in the binding-guard family:
+  `BindingRegistry.durableObject` cast **unvalidated**, so a missing stanza or mistyped `class_name`
+  let an app boot clean and fail on the first `idFromName` with a bare `TypeError` — exactly what
+  M52c's review found on D1 — now `isDurableObjectNamespace` plus constructor validation. Doc
+  deliverables C1–C5 shipped, including the ARCHITECTURE note that `cloudflare-plugin` is now a
+  **second provider** of `REALTIME_BACKPLANE` and an application must register exactly one. All 28
+  `src` files at **100%** branch/function/line. **Verified against real workerd** via `wrangler dev`
+  (12/12 checks): the whole surface was driven through a bundled Worker exporting both DO classes
+  under the documented wrangler stanza. That harness settled the milestone's last open design
+  question empirically — **a plain DO class WITHOUT `extends DurableObject` is accepted by
+  workerd**, which is what makes the delegation design (forced by §5.2, since a mixin cannot be
+  typed without `any`) correct rather than merely convenient. It also proved the three things no
+  fake could: a real `stub.fetch` WebSocket upgrade answering a 101 that carries a `webSocket`, a
+  real `WebSocketPair` + `state.acceptWebSocket` inside the object, and the real **input gate** — 8
+  concurrent contenders on one lock object yielded exactly 1 winner, the property the Deno fake had
+  to hand-simulate. The code-review fix was verified there too, with a negative control: with the
+  `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
+  restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
+  Cloudflare account) — complete (PR #115)
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
+  reprioritized.
 
 ## Verification (run before declaring any work done)
 

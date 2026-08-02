@@ -5088,9 +5088,10 @@ follow-up milestone; the maintainer split it three ways once the cost of each wa
   `packages/database-plugin` and absent from `common`, whose `IOrmAdapter` is lifecycle-only.
   Shipping D1 means promoting a port to `common` — a contract decision. D1 also has no imperative
   `BEGIN`/`COMMIT`, which has to be reconciled with `ITransaction` before an adapter is honest.
-- **Durable Objects — M52d.** Needs the application to export a DO class plus a wrangler migration
-  stanza, and a DO-backed backplane is its own design: Durable Objects expose no pub/sub primitive,
-  so each replica has to hold a WebSocket to the object.
+- **Durable Objects — shipped in M52d.** The application exports a DO class delegating to a core
+  this package ships, plus a wrangler stanza. Durable Objects expose no pub/sub primitive, so each
+  replica holds a WebSocket to the object; the subscription lives as long as the isolate holding the
+  members it serves, which is stated rather than implied.
 - **A `cloudflare` arm on any starter** — M36-series work, needing a Workers-portability review of
   the whole plugin set.
 
@@ -5198,36 +5199,49 @@ arm), `packages/cloudflare-plugin` (the D1 backend)
 
 ---
 
-## Milestone 52d: Durable Objects — realtime backplane and distributed lock
+## Milestone 52d: Durable Objects — realtime backplane and distributed lock ✅ COMPLETE
 
 **Objective:** Reach Durable Objects as first-class capabilities. Both deliverables need the
-application to export a **DO class** plus a `wrangler.toml` migration stanza — a contract the
-framework does not have yet, and the reason this is not M52b.
+application to export a **DO class** plus a `wrangler.toml` stanza — a contract the framework did
+not have, and the reason this was not M52b.
 
 **Package:** `packages/cloudflare-plugin` (extended)
+
+**Plan:** `plans/archive/milestone-52-d-durable-objects.md`
 
 ### Scope
 
 - A **DO-backed `IRealtimeBackplane`** (the M47 port, already in `common`, so this registers
-  `CAPABILITIES.REALTIME_BACKPLANE` directly with no plugin-to-plugin import). The hard part is that
-  Durable Objects expose **no pub/sub primitive**: each replica holds a WebSocket to the DO, which
-  fans out. That brings hibernation, reconnection, and per-replica subscription lifecycle with it.
-- A **DO-backed distributed lock**. `SchedulerPlugin` takes `IDistributedLock` as an option, so a
-  structurally-compatible class handed in needs no contract change — the `KvSessionStore` →
-  `SessionPlugin({ store })` precedent from M52.
-- The DO class the application exports, and the wrangler migration stanza it needs, documented as a
+  `CAPABILITIES.REALTIME_BACKPLANE` directly with no plugin-to-plugin import). Durable Objects
+  expose **no pub/sub primitive**, so each replica holds a WebSocket to the DO, which fans out.
+- A **DO-backed distributed lock**. `SchedulerPlugin` accepts an injected lock at
+  `distributedLock.lock` — verified from `resolveLock`, which consults `lock` **before** `enabled`,
+  so `enabled: true` is not required — and a structurally-compatible class needs no contract change.
+  The `KvSessionStore` → `SessionPlugin({ store })` precedent from M52.
+- The DO class the application exports, and the wrangler stanza it needs, documented as a
   deliverable rather than assumed.
+
+**The subscription guarantee is narrower than "each replica holds a WebSocket" implies, and the
+implementation states the real one.** A Worker isolate is evicted at Cloudflare's discretion and its
+outbound WebSockets go with it, so no Worker can hold a subscription indefinitely. That is sound
+rather than lossy because the members the subscription serves are client sockets held by the _same_
+isolate, and an HTTP-triggered Worker stays alive while its clients remain connected — losing the
+isolate loses both together. The socket therefore opens lazily and reopens after any failure.
 
 ### Deliverables
 
-- [ ] A DO class the application exports, with its wrangler stanza documented
-- [ ] DO-backed `IRealtimeBackplane` registered under `CAPABILITIES.REALTIME_BACKPLANE`
-- [ ] DO-backed distributed lock, structurally satisfying `IDistributedLock`
-- [ ] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
+- [x] A DO class the application exports, with its wrangler stanza documented
+- [x] DO-backed `IRealtimeBackplane` registered under `CAPABILITIES.REALTIME_BACKPLANE`
+- [x] DO-backed distributed lock, structurally satisfying `IDistributedLock`
+- [x] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
 
 ### Out of scope
 
 - Anything requiring a live Cloudflare account in CI — M39 owns deployment manifests.
+- A cluster-wide `Room.size` / `SseChannel.size`. M47 established this as a **contract** decision (a
+  cluster-wide count is inherently async and cannot satisfy the synchronous committed `size`
+  getter), deferred to a presence milestone. A DO makes it implementable, which is precisely why it
+  must not be smuggled in without the contract change.
 
 ---
 
@@ -5457,4 +5471,4 @@ app.register(MyPlugin({ option1: 'value' }));
 | 52        | ✅     | cloudflare-plugin                     |
 | 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |
-| 52d       | ⬜     | cloudflare-plugin (durable objects)   |
+| 52d       | ✅     | cloudflare-plugin (durable objects)   |

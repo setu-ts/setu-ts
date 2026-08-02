@@ -15,7 +15,7 @@ import type {
   IR2Bucket,
   IServiceBinding,
 } from './facades.ts';
-import { isKvNamespace, isR2Bucket } from './facades.ts';
+import { isDurableObjectNamespace, isKvNamespace, isR2Bucket } from './facades.ts';
 
 /**
  * Typed access to a Cloudflare Worker's platform bindings.
@@ -214,7 +214,11 @@ export class BindingRegistry implements ICloudflareBindings {
   }
 
   durableObject(name: string): IDurableObjectNamespace {
-    return this.#require(name) as IDurableObjectNamespace;
+    const binding = this.#require(name);
+    if (!isDurableObjectNamespace(binding)) {
+      throw CloudflareBindingMissingError.wrongShape(name, 'a Durable Object namespace');
+    }
+    return binding;
   }
 
   waitUntil(promise: Promise<unknown>): void {

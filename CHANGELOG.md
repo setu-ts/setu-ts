@@ -8,6 +8,64 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Durable Objects: a realtime backplane and a distributed lock** (Milestone 52d).
+  `@hono-enterprise/cloudflare-plugin` gains a `durableObject` arm registering
+  **`DurableObjectBackplane`** under the committed `CAPABILITIES.REALTIME_BACKPLANE`, so
+  `websocket-plugin` and `sse-plugin` reach clients on other replicas with no application change —
+  and **`DurableObjectLock`**, which structurally satisfies `scheduler-plugin`'s `IDistributedLock`
+  and is handed to `SchedulerPlugin({ distributedLock: { lock } })` (an injected lock wins outright;
+  `enabled: true` is not required). No `common` change and no new capability token: both contracts
+  were already committed. Register **either** this arm or `RealtimeBackplanePlugin`, never both —
+  the kernel rejects two providers of one token.
+
+  Both need a Durable Object class the **application** exports, plus a wrangler stanza; the package
+  ships the behaviour as two plain cores (**`RealtimeBackplaneObjectCore`**,
+  **`DistributedLockObjectCore`**) that the exported class delegates to. A mixin taking the base
+  class would read better but cannot be typed without `any`, and delegation additionally keeps
+  `cloudflare:workers` — unresolvable off a Worker toolchain — out of the package.
+
+  Two platform facts shaped the implementation rather than being worked around. Sockets are accepted
+  with `ctx.acceptWebSocket`, the **hibernation** API, which lets the runtime evict the object and
+  re-run its constructor while connections stay open; the fan-out core therefore holds **zero**
+  in-memory state and treats `getWebSockets()` as the only membership, because a `Set` in a field
+  would empty itself on the first hibernation while every non-hibernating test still passed. And a
+  Worker isolate cannot be relied on to hold a long-lived outbound WebSocket, so the socket opens
+  lazily and reopens after any failure; the guarantee is stated rather than overstated — a
+  subscription lives exactly as long as the isolate holding the members it serves, and since those
+  members are client sockets in the same isolate, losing one loses both together. The lock persists
+  its holder in the object's storage, never a field, because an object is evicted after 70–140
+  seconds idle; correctness comes from the platform's input gate ("while a storage operation is
+  executing, no events shall be delivered to the object"), which makes the read-compare-write atomic
+  with no transaction. A non-2xx from the lock object **throws** rather than reporting "not
+  acquired", since a 404 means the binding names the wrong class and folding that into contention
+  would silently disable every scheduled job.
+
+  Also closes the last hole in the binding-guard family: `BindingRegistry.durableObject` cast its
+  binding **unvalidated**, so a missing `durable_objects` stanza or a mistyped `class_name` let an
+  application boot clean and fail on the first `idFromName` with a bare `TypeError` — the defect
+  M52c's review found on D1. Adds the exported **`isDurableObjectNamespace`** guard and constructor
+  validation. Verified against real workerd via `wrangler dev` (12/12 checks), which also settled
+  the design question the milestone could not answer from docs: **a plain Durable Object class
+  without `extends DurableObject` is accepted**, so the delegation design is correct and not merely
+  convenient. Not verified against a deployed Worker — CI holds no Cloudflare account.
+
+### Fixed
+
+- **A listen-only replica received nothing from a realtime backplane.**
+  `IRealtimeBackplane.connect()` had exactly one caller — `RealtimeBackplanePlugin.register()` — and
+  `websocket-plugin` / `sse-plugin` relied on the provider having connected before they subscribed.
+  `subscribe()` registers a handler; it does not open a transport. Any provider that cannot connect
+  at registration therefore left every replica that only listens silently receiving nothing, which a
+  Cloudflare Durable Object backplane is the first transport to hit: a Worker runs `register()` at
+  module scope, where the platform forbids the I/O `connect()` performs.
+
+  Both consumers now open the transport on first local use, inside a request context on every
+  runtime — `WebSocketService` when a connection joins its first room, `SseService` when a client
+  connects. The call is fire-and-forget so an upgrade never waits on the transport, idempotent per
+  the committed contract, and retried on the next join if it fails. Applications registering
+  `RealtimeBackplanePlugin` are unaffected: its provider still connects at registration, and the
+  extra call is a no-op.
+
 - **Cloudflare D1 as a first-class database backend, and the `common` data-access promotion that
   made it possible** (Milestone 52c). The seam a database backend implements was `IDatabaseAdapter`,
   declared **inside** `@hono-enterprise/database-plugin` and never exported, while `common` shipped

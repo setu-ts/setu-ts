@@ -1444,6 +1444,10 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 | **Extension Points** | Custom transport via the `'custom'` arm                                                  |
 | **Rules**            | Consumed OPTIONALLY — absent, rooms and channels stay in-process. Never imports a plugin |
 
+`cloudflare-plugin` is a **second provider** of `CAPABILITIES.REALTIME_BACKPLANE` (M52d, over a
+Durable Object). An application registers exactly one of the two: the kernel rejects two providers
+of a single capability token at startup.
+
 #### @hono-enterprise/multi-tenancy-plugin
 
 | Aspect               | Detail                                                                            |
