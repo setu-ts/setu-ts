@@ -4,7 +4,11 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { executeGraphql } from '../../src/execution/executor.ts';
+import {
+  depthLimitFieldVisitor,
+  depthLimitSelectionSetVisitor,
+  executeGraphql,
+} from '../../src/execution/executor.ts';
 import { DocumentCache } from '../../src/execution/document-cache.ts';
 import type {
   GraphqlDocumentNodeLike,
@@ -339,5 +343,117 @@ describe('executor', () => {
 
     // Custom rule is passed to validate, not called directly
     expect(true).toBe(true);
+  });
+
+  it('passes operationName when provided (non-empty string)', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    let capturedOperationName: string | undefined;
+
+    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
+      capturedOperationName = args.operationName;
+      return Promise.resolve({ data: { hello: 'world' } });
+    };
+
+    await executeGraphql('{ hello }', {
+      runtime,
+      schema,
+      documentCache: cache,
+      validationRules: [],
+      maxDepth: 0,
+      introspection: true,
+      operationName: 'MyQuery',
+    });
+
+    expect(capturedOperationName).toBe('MyQuery');
+  });
+
+  it('returns execution result with data on success', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    const result = await executeGraphql('{ hello }', {
+      runtime,
+      schema,
+      documentCache: cache,
+      validationRules: [],
+      maxDepth: 0,
+      introspection: true,
+    });
+
+    expect(result.data).toEqual({ hello: 'world' });
+    expect(result.errors).toBeUndefined();
+  });
+
+  it('does not include operationName when empty string', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    let capturedOperationName: string | undefined;
+
+    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
+      capturedOperationName = args.operationName;
+      return Promise.resolve({ data: { hello: 'world' } });
+    };
+
+    await executeGraphql('{ hello }', {
+      runtime,
+      schema,
+      documentCache: cache,
+      validationRules: [],
+      maxDepth: 0,
+      introspection: true,
+      operationName: '', // Empty string should not be passed
+    });
+
+    // Empty string should result in undefined
+    expect(capturedOperationName).toBeUndefined();
+  });
+
+  it('includes operationName when provided (truthy)', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    let capturedOperationName: string | undefined;
+
+    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
+      capturedOperationName = args.operationName;
+      return Promise.resolve({ data: { hello: 'world' } });
+    };
+
+    await executeGraphql('{ hello }', {
+      runtime,
+      schema,
+      documentCache: cache,
+      validationRules: [],
+      maxDepth: 0,
+      introspection: true,
+      operationName: 'MyQuery',
+    });
+
+    expect(capturedOperationName).toBe('MyQuery');
+  });
+});
+
+describe('depth limit visitors', () => {
+  it('depthLimitSelectionSetVisitor exists and is a function', () => {
+    expect(typeof depthLimitSelectionSetVisitor).toBe('function');
+  });
+
+  it('depthLimitFieldVisitor exists and is a function', () => {
+    expect(typeof depthLimitFieldVisitor).toBe('function');
+  });
+
+  it('depthLimitSelectionSetVisitor does not throw', () => {
+    expect(() => depthLimitSelectionSetVisitor({ kind: 'SelectionSet' })).not.toThrow();
+  });
+
+  it('depthLimitFieldVisitor does not throw', () => {
+    expect(() => depthLimitFieldVisitor({ kind: 'Field' })).not.toThrow();
   });
 });

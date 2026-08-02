@@ -33,22 +33,32 @@ function parseDocument(runtime: GraphqlRuntime, query: string): GraphqlDocumentN
 }
 
 /**
+ * SelectionSet visitor for depth limit rule.
+ */
+export function depthLimitSelectionSetVisitor(_node: unknown) {
+  // Track selection set depth
+}
+
+/**
+ * Field visitor for depth limit rule.
+ */
+export function depthLimitFieldVisitor(_node: unknown) {
+  // Check depth
+}
+
+/**
  * Create a depth limit validation rule.
  */
 function createDepthRule(_maxDepth: number) {
   return function (
     _context: unknown,
   ): {
-    SelectionSet: (_node: unknown) => void;
-    Field: (_node: unknown) => void;
+    SelectionSet: typeof depthLimitSelectionSetVisitor;
+    Field: typeof depthLimitFieldVisitor;
   } {
     return {
-      SelectionSet(_node) {
-        // Track selection set depth
-      },
-      Field(_node) {
-        // Check depth
-      },
+      SelectionSet: depthLimitSelectionSetVisitor,
+      Field: depthLimitFieldVisitor,
     };
   };
 }

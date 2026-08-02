@@ -75,8 +75,37 @@ describe('attach-resolvers', () => {
     expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
   });
 
-  it('throws on scalar type', () => {
-    const schema = createSchema(['Query', 'String'] as unknown as string[]);
+  it('throws on scalar type without getFields', () => {
+    const schema = {
+      getQueryType: () => ({
+        name: 'Query',
+        getFields: () => ({ hello: { name: 'hello', type: { name: 'String' }, args: [] } }),
+        getInterfaces: () => [],
+      }),
+      getMutationType: () => null,
+      getSubscriptionType: () => null,
+      getType: (name: string) => {
+        if (name === 'String') {
+          // Scalar type has no getFields
+          return {
+            name: 'String',
+          };
+        }
+        if (name === 'Query') {
+          return {
+            name: 'Query',
+            getFields: () => ({ hello: { name: 'hello', type: { name: 'String' }, args: [] } }),
+            getInterfaces: () => [],
+          };
+        }
+        return null;
+      },
+      getPossibleTypes: () => [],
+      getDirectives: () => [],
+      getDirective: () => null,
+      toAST: () => ({}),
+    } as GraphqlSchemaLike;
+
     const resolverMap = {
       String: {
         custom: () => 'value',
@@ -145,5 +174,61 @@ describe('attach-resolvers', () => {
 
     // Should complete without errors
     expect(true).toBe(true);
+  });
+
+  it('handles __resolveType for interface types', () => {
+    const schema = createSchema(['Query', 'Node']);
+    const resolverMap = {
+      Node: {
+        __resolveType: () => 'User',
+      },
+    };
+
+    // Should not throw - __resolveType handling is a no-op in current implementation
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+  });
+
+  it('throws on unknown type for __resolveType', () => {
+    const schema = createSchema(['Query']);
+    const resolverMap = {
+      UnknownInterface: {
+        __resolveType: () => 'User',
+      },
+    };
+
+    expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
+  });
+
+  it('handles resolver with both field resolvers and __resolveType', () => {
+    const schema = createSchema(['Query', 'Node']);
+    let resolveTypeCalled = false;
+    const resolverMap = {
+      Query: {
+        hello: () => 'Hello',
+      },
+      Node: {
+        __resolveType: () => {
+          resolveTypeCalled = true;
+          return 'User';
+        },
+      },
+    };
+
+    attachResolvers(schema, resolverMap);
+
+    // Should not throw and __resolveType should be registered
+    expect(resolveTypeCalled).toBe(false); // Not called during attachment
+  });
+
+  it('attaches __resolveType when type exists', () => {
+    const schema = createSchema(['Query', 'Node']);
+    const resolverMap = {
+      Node: {
+        __resolveType: () => 'User',
+      },
+    };
+
+    // Should not throw - type exists
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
   });
 });

@@ -13,6 +13,20 @@ import { GraphqlService } from '../services/graphql-service.ts';
 import { createGraphqlHandler } from '../http/graphql-handler.ts';
 
 /**
+ * Create a handler logger wrapper from a plugin context logger.
+ * This is extracted as a named function for testability.
+ * @internal - exported for testing only
+ */
+export function createHandlerLogger(
+  logger: NonNullable<IPluginContext['logger']>,
+): { info: (msg: string) => void; error: (msg: string, err?: unknown) => void } {
+  return {
+    info: (msg: string) => logger.info(msg),
+    error: (msg: string, err?: unknown) => logger.error(msg, err as Record<string, unknown>),
+  };
+}
+
+/**
  * Create a GraphQL plugin.
  *
  * @param options - The plugin options
@@ -81,13 +95,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
       ctx.services.register(CAP.GRAPHQL, graphqlService);
 
       // Register routes - handle optional logger with exactOptionalPropertyTypes
-      const handlerLogger = ctx.logger
-        ? {
-          info: (msg: string) => ctx.logger!.info(msg),
-          error: (msg: string, err?: unknown) =>
-            ctx.logger!.error(msg, err as Record<string, unknown>),
-        }
-        : undefined;
+      const handlerLogger = ctx.logger ? createHandlerLogger(ctx.logger) : undefined;
       const { post, get } = createGraphqlHandler(graphqlService, path, {
         graphiql,
         ...(handlerLogger && { logger: handlerLogger }),

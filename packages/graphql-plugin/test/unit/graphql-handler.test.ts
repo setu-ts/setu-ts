@@ -379,6 +379,44 @@ describe('createGraphqlHandler', () => {
     expect(logEntries.some((e) => e.includes('ERROR'))).toBe(true);
   });
 
+  it('logs parse error in POST when logger is provided', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const service = new GraphqlService(runtime, schema, {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+    });
+
+    const logEntries: string[] = [];
+    const logger = {
+      info: (msg: string) => logEntries.push(`INFO: ${msg}`),
+      error: (msg: string) => logEntries.push(`ERROR: ${msg}`),
+    };
+
+    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, logger });
+    const { mock } = createMockResponse();
+
+    const mockCtx = {
+      request: {
+        method: 'POST',
+        url: 'http://test.com/graphql',
+        path: '/graphql',
+        json: () => Promise.resolve({}), // Empty body causes parse error
+        headers: new Map([['content-type', 'application/json']]) as unknown as Headers,
+      } as unknown as Request,
+      response: mock,
+      query: {},
+      params: {},
+      get: () => undefined,
+    } as unknown as IRequestContext;
+
+    await post(mockCtx);
+    expect(logEntries.some((e) => e.includes('ERROR'))).toBe(true);
+  });
+
   it('handles parse error in GET request', async () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
@@ -507,5 +545,67 @@ describe('createGraphqlHandler', () => {
     await get(mockCtx);
     // Should complete without error
     expect(true).toBe(true);
+  });
+
+  it('handles GET with parse error from query param', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const service = new GraphqlService(runtime, schema, {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+    });
+
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false });
+    const { mock, captureStatus } = createMockResponse();
+
+    const mockCtx = {
+      request: {
+        method: 'GET',
+        url: 'http://test.com/graphql?query=%7Bhello%7D',
+        path: '/graphql',
+        headers: new Map() as unknown as Headers,
+      } as unknown as Request,
+      response: mock,
+      query: { query: '{ hello', variables: 'invalid json' },
+      params: {},
+      get: () => undefined,
+    } as unknown as IRequestContext;
+
+    await get(mockCtx);
+    expect(captureStatus()).toBe(400);
+  });
+
+  it('returns 400 for GET when graphiql enabled but accept is not text/html', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const service = new GraphqlService(runtime, schema, {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+    });
+
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { mock, captureStatus } = createMockResponse();
+
+    const mockCtx = {
+      request: {
+        method: 'GET',
+        url: 'http://test.com/graphql',
+        path: '/graphql',
+        headers: new Map([['accept', 'application/json']]) as unknown as Headers,
+      } as unknown as Request,
+      response: mock,
+      query: {},
+      params: {},
+      get: () => undefined,
+    } as unknown as IRequestContext;
+
+    await get(mockCtx);
+    expect(captureStatus()).toBe(400);
   });
 });

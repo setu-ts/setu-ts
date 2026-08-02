@@ -104,4 +104,17 @@ describe('build-schema', () => {
       )
     ).toThrow();
   });
+
+  it('throws when typeDefs provided without resolvers', () => {
+    expect(() =>
+      buildSchema(
+        { typeDefs: 'type Query { hello: String }' } as GraphqlPluginOptions,
+        fakeRuntime,
+      )
+    ).toThrow(GraphqlSchemaError);
+  });
+
+  it('throws when neither typeDefs nor schema provided', () => {
+    expect(() => buildSchema({} as GraphqlPluginOptions, fakeRuntime)).toThrow(GraphqlSchemaError);
+  });
 });
