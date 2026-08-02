@@ -222,6 +222,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Every application failed to boot on Cloudflare Workers** — `packages/kernel`'s request-context
+  factory built its never-aborting `ctx.signal` sentinel from a **module-scope**
+  `new AbortController()`. workerd refuses that with
+  `Disallowed operation called within global
+  scope`, because an `AbortController` is bound to an
+  I/O context, so the isolate threw at import time and no handler ever ran. Introduced with
+  `IRequestContext.signal` in Milestone 42 and invisible to every gate: the whole suite runs on
+  Deno, where a module-scope controller is legal, and the Workers path had only ever been exercised
+  through `app.fetch` under Deno rather than under the real runtime. Found by driving the framework
+  under `wrangler dev` (workerd) for the first time. The sentinel is now constructed **per
+  request**; caching one lazily would not have been a fix either, since workerd then refuses to use
+  a controller created for one request on behalf of another. A regression test pins that two
+  contexts never share a fallback signal — it fails against the previous code.
+
 - **`honoe new` now refuses a project plan containing the same path twice** (Milestone 36c). The
   overwrite check probes the filesystem, so it could not see a duplicate inside one plan: both files
   were written and the last silently won. A template emitting `deno.json` would have overwritten the
