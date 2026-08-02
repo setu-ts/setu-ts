@@ -20,9 +20,9 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 > [!IMPORTANT]
 > **Status: 38 packages were published in `v0.1.0-alpha.3` and are live on JSR.** The workspace has
-> since grown to 43 packages; the five added after that release ship with the next one.
+> since grown to 45 packages; the seven added after that release ship with the next one.
 >
-> The kernel, the runtime layer, 33 plugins, the three starters, the test utilities, the client SDK,
+> The kernel, the runtime layer, 35 plugins, the three starters, the test utilities, the client SDK,
 > and the `honoe` CLI are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
@@ -131,6 +131,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature           | Status | Package                    | Description                                                     |
 | ----------------- | ------ | -------------------------- | --------------------------------------------------------------- |
 | Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection |
+| Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, KV sessions, `waitUntil` |
 
 ### Real-time and rendering
 

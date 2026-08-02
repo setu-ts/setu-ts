@@ -219,6 +219,10 @@ export type {
 export { decodeFrameData, encodeFrameData } from './realtime-codec.ts';
 export type { EncodedPayload } from './realtime-codec.ts';
 
+// Cloudflare Workers env partition — shared by `runtime` and `cloudflare-plugin`
+export { splitWorkerEnv } from './cloudflare.ts';
+export type { SplitWorkerEnv } from './cloudflare.ts';
+
 // WebSocket contracts
 export type {
   IWebSocketConnection,

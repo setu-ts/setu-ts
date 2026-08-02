@@ -4985,6 +4985,161 @@ server side — has no way to turn a logical service name into an address.
 
 ---
 
+## Milestone 52: Cloudflare Workers Plugin — Reaching the Platform's Bindings ✅ COMPLETE
+
+**Objective:** Cloudflare Workers has been a _serving_ target since M23 — the fetch adapter
+(`cf-http-adapter.ts`), the WebSocket upgrader (M46), and the RPC interceptor (M49) all work there —
+but the framework cannot reach a single Cloudflare **platform binding**. Nothing under `packages/`
+mentions KV, R2, D1, Durable Objects, Queues, or `waitUntil`. Worse, the Workers runtime adapter
+defaults its env source to `{}` and `createRuntimeServices` calls the platform factory with no
+arguments, so `runtime.env` is **empty** on Workers: `ConfigPlugin` reads no variables and
+`SecretsPlugin`'s `EnvProvider` resolves nothing. Every stateful capability — cache, storage,
+sessions — therefore has no backend that exists on the edge. M52 closes the access gap.
+
+**Package:** `packages/cloudflare-plugin` (plus edits to `common`, `runtime`, and `cli`)
+
+**Plan:** `plans/milestone-52-cloudflare-plugin.md`
+
+### Scope
+
+- `CloudflarePlugin` registering `ICloudflareBindings` under a new
+  `CAPABILITIES.CLOUDFLARE = 'cloudflare'` token, with typed accessors (`kv`, `r2`, `d1`, `queue`,
+  `service`, `durableObject`, `get<T>`, `has`, `names`, `vars`) that throw a named
+  `CloudflareBindingMissingError` rather than handing back `undefined`.
+- **Zero dependencies.** The binding shapes are hand-written structural facades (`IKvNamespace`,
+  `IR2Bucket`, `ID1Database`, …), not `@cloudflare/workers-types`, following the M25/M29/M50
+  precedent.
+- **No file under `packages/` imports `cloudflare:workers`.** The application imports `env` (and
+  `waitUntil`) from that module and passes them in — `RuntimePlugin({ env })` for string variables,
+  `CloudflarePlugin({ env, waitUntil })` for bindings. Deno cannot resolve the specifier, so a
+  static import breaks `deno check` everywhere else and a non-literal dynamic import is the
+  smuggled-loader smell CLAUDE.md bans; injection is also what the platform docs recommend.
+- **KV as `ICacheStore`.** KV's minimum `expirationTtl` is **60 seconds** while `ICacheStore.set`
+  accepts any TTL, so a 5-second entry is physically inexpressible. Values carry a `{ v, e }`
+  envelope holding a logical expiry checked on read, while `expirationTtl` is floored at 60 for
+  physical reclamation. `clear()` is a paginated list-then-delete sweep (no bulk delete exists on
+  the binding) and **requires** a configured prefix, so it cannot wipe keys the store does not own.
+- **R2 as `IStorage`**, including the optional `getStream` over `R2ObjectBody.body`. `delete` heads
+  first so its committed `Promise<boolean>` is honest, and `getSignedUrl` throws — the R2 binding
+  has no presigned-URL capability, the `LocalStorageProvider` precedent from M28.
+- **`KvSessionStore`**, an exported class the application passes to `SessionPlugin({ store })`.
+  `SessionPluginOptions.store` already accepts a custom `ISessionStore`, so session-plugin is
+  untouched.
+- **`waitUntil`** for post-response work, with a rejection handler attached on both the delegating
+  and the non-Workers path so a background failure is logged instead of becoming an unhandled
+  rejection.
+- Binding I/O never happens at registration time — the platform prohibits I/O outside a request
+  context, so a probe read at `register()` would throw on a real deployment while passing against
+  every fake. The `cloudflare` health indicator performs no binding I/O for the same reason (and
+  because a KV read per liveness probe bills).
+- Cache and storage registration are **opt-in and instance-named** (`cache.<name>` /
+  `storage.<name>`, the `cache-plugin.ts:67` precedent), because the kernel's plugin resolver
+  rejects two providers of one token at startup.
+
+### One flagged widening outside the package
+
+- **`RuntimeOptions.env` / `CreateRuntimeServicesOptions.env`**, forwarded to the platform factory.
+  `createCloudflareRuntimeServices` runs it through a new pure `splitWorkerEnv` that keeps only
+  string values, because `IRuntimeServices.env` is typed `Record<string, string | undefined>` and
+  the current adapter casts a binding-bearing record straight into it — a KV namespace reaching
+  `ConfigPlugin` stringifies to `[object Object]`. Object bindings are reachable only through
+  `ICloudflareBindings`. This makes `runtime.env` non-empty on Workers for the first time, which is
+  a CHANGELOG'd behaviour change rather than a silent fix.
+
+### Implementation files
+
+- `packages/common/src/tokens.ts` (edit)
+- `packages/runtime/src/adapters/workers/split-worker-env.ts`, `src/adapters/workers/cf-runtime.ts`
+  (edit), `src/adapters/shared/runtime-services-factory.ts` (edit), `src/plugin/runtime-plugin.ts`
+  (edit), `src/index.ts` (edit)
+- `packages/cli/src/commands/new.ts` (edit — `compatibility_date` bump, `env` wiring in the Workers
+  entry, commented binding stanzas in `wrangler.toml`)
+- `packages/cloudflare-plugin/src/`: `index.ts`, `options.ts`, `errors.ts`,
+  `bindings/{facades,binding-registry}.ts`, `background/wait-until.ts`,
+  `stores/{kv-envelope,kv-cache-store,kv-session-store}.ts`, `storage/r2-storage.ts`,
+  `health/indicator.ts`, `plugin/cloudflare-plugin.ts`
+
+### Deliverables
+
+- [x] `CAPABILITIES.CLOUDFLARE` token in `common`
+- [x] `CloudflarePlugin` and `ICloudflareBindings` with typed, throwing accessors
+- [x] Structural binding facades, zero npm dependencies
+- [x] `KvCacheStore` with the logical-expiry envelope and the prefixed `clear()` sweep
+- [x] `R2Storage` including `getStream`, with the documented `getSignedUrl` throw
+- [x] `KvSessionStore` driven by a real `SessionPlugin` in an integration test
+- [x] `waitUntil` seam with rejection reporting on both paths
+- [x] `cloudflare` health indicator that performs no binding I/O
+- [x] `RuntimeOptions.env` passthrough and `splitWorkerEnv` string filtering
+- [x] CLI Workers template: `compatibility_date` bump, `env` wiring, binding stanzas
+- [x] Doc deliverables C1–C5 (PUBLIC_API, ARCHITECTURE, README, ROADMAP, CHANGELOG)
+- [x] Workspace and `scripts/release-packages.ts` registration (first JSR publish — run
+      `release:create-packages` and `release:link-repos` before the next tag)
+
+### Out of scope
+
+Everything below is **M52b**, deferred for a stated reason rather than for time:
+
+- **D1.** The data-access seam is `IDatabaseAdapter`, declared inside `packages/database-plugin` and
+  absent from `common`, whose `IOrmAdapter` is lifecycle-only. Shipping D1 means promoting a port to
+  `common` — a contract decision. D1 also has no imperative `BEGIN`/`COMMIT`, which has to be
+  reconciled with `ITransaction` before an adapter is honest.
+- **Queues, Cron Triggers, Durable Objects.** All three need the application's Worker module to
+  export an additional handler (`queue`, `scheduled`, a DO class), which is a new contract this
+  milestone does not invent. `IQueue.process` is additionally a pull/registration model with no
+  Cloudflare counterpart — there is no poll API.
+- **Cache API response caching.** `caches.default` carries its own rule set and belongs beside a
+  middleware, not inside an `ICacheStore`.
+- **A `cloudflare` arm on any starter** — M36-series work, needing a Workers-portability review of
+  the whole plugin set.
+
+---
+
+## Milestone 52b: Cloudflare Platform Handlers — D1, Queues, Cron, Durable Objects, Cache API
+
+**Objective:** M52 reaches every binding and satisfies the two committed ports that need nothing
+beyond a request-scoped call. The remainder share one shape: they need either a **new module-level
+handler export** from the application's Worker, or a **contract promotion in `common`**. Both are
+design decisions large enough to plan on their own evidence rather than to improvise inside M52.
+
+**Package:** `packages/cloudflare-plugin` (extended), plus a `common` contract decision for D1
+
+### Scope
+
+- **D1.** Decide and ship the data-access port. Today `common` exposes only the lifecycle-shaped
+  `IOrmAdapter`, while the seam a backend actually implements (`IDatabaseAdapter`) lives inside
+  `database-plugin`, so no separate package can supply a backend without importing another plugin.
+  Also reconcile `ITransaction` with D1's batch-only atomicity.
+- **Queues.** A producer satisfying `IQueue.add`, plus a `createQueueHandler(app)` the deployer
+  exports as `queue`, dispatching a `MessageBatch` into processors registered through
+  `IQueue.process`. `addRecurring` has no counterpart and gets a documented throw.
+- **Cron Triggers.** A `createScheduledHandler(app)` exported as `scheduled`, and the decision on
+  whether a Workers `IScheduler` can honour runtime `schedule()` calls at all given that cron
+  expressions are wrangler-config-only. This is also why `scheduler-plugin`'s `setInterval` jobs
+  cannot work on Workers.
+- **Durable Objects.** A DO-backed `IRealtimeBackplane` (M47) and a DO-backed distributed lock, both
+  requiring the application to export a DO class plus a wrangler migration stanza.
+- **Cache API.** A response cache over `caches.default` honouring the platform's own refusals
+  (`Set-Cookie`, `206`, `Vary: *`, GET-only) and its per-datacenter scope.
+- **Hyperdrive, Vectorize, Workers AI, Analytics Engine.** Each is already reachable through
+  `bindings.get<T>(name)`; promote one to a first-class capability port only when an application
+  needs it.
+
+### Deliverables
+
+- [ ] The `common` data-access contract decision, and a D1 backend on it
+- [ ] Queues producer plus `createQueueHandler`
+- [ ] `createScheduledHandler` and the Workers scheduler decision
+- [ ] Durable-Object backplane and distributed lock
+- [ ] Cache API response cache
+- [ ] Doc deliverables (PUBLIC_API, ARCHITECTURE, README, CHANGELOG)
+
+### Out of scope
+
+- Running any of it against a live Cloudflare account in CI. M39 owns deployment manifests; the
+  README states plainly which paths are unverified against a real Worker.
+
+---
+
 ## Plugin-First vs NestJS Comparison
 
 | Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
@@ -5208,3 +5363,5 @@ app.register(MyPlugin({ option1: 'value' }));
 | 48        | ✅     | session-plugin                    |
 | 49        | ✅     | grpc-plugin                       |
 | 50        | ✅     | service-discovery-plugin          |
+| 52        | ✅     | cloudflare-plugin                 |
+| 52b       | ⬜     | cloudflare-plugin (platform)      |

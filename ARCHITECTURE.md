@@ -1001,6 +1001,7 @@ graph TB
         queue[queue-plugin]
         storage[storage-plugin]
         service-discovery[service-discovery-plugin]
+        cloudflare[cloudflare-plugin]
     end
 
     subgraph Security Plugins
@@ -1100,6 +1101,7 @@ graph TB
     common --> multi-tenancy
     kernel --> multi-tenancy
     common --> service-discovery
+    common --> cloudflare
 ```
 
 ### Package Details

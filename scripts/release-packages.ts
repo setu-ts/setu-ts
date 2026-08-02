@@ -34,6 +34,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/audit-plugin',
   'packages/auth-plugin',
   'packages/cache-plugin',
+  'packages/cloudflare-plugin',
   'packages/config-plugin',
   'packages/cqrs-plugin',
   'packages/database-plugin',

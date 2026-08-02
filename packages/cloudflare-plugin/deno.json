@@ -1,0 +1,11 @@
+{
+  "name": "@hono-enterprise/cloudflare-plugin",
+  "version": "0.1.0-alpha.3",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "env": true
+    }
+  }
+}

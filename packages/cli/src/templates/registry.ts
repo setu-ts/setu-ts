@@ -42,6 +42,18 @@ export interface Wiring {
    * fails the build.
    */
   readonly args?: string;
+  /**
+   * Replaces {@linkcode Wiring.args} when the target is `cloudflare-workers`.
+   *
+   * Workers has no ambient environment: bindings and variables arrive as the
+   * `env` argument of the `fetch` handler, so a plugin that reads the
+   * environment has to be handed it explicitly. The generated `createApp`
+   * takes an `env` parameter on that target only, and this string may name it.
+   *
+   * Omitted → `args` is used on every target, which is what every wiring did
+   * before this field existed.
+   */
+  readonly workersArgs?: string;
 }
 
 /**

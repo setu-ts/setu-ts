@@ -932,8 +932,60 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   no-op that let the plugin register a router silently answering `404` when Connect was absent; a
   missing dependency now throws `GrpcRuntimeLoadError` naming the specifier. All 11 `src` files at
   100% branch/function/line) — complete (PR #110)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
-  reprioritized.
+- **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
+  not _reach_:
+  `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
+  cloudflare:workers" packages/*/src`
+  returned NOTHING, and `cf-runtime.ts` defaulted its env source to `{}` while
+  `createRuntimeServices` called the platform factory with no arguments — so `runtime.env` was
+  **empty** on Workers and `ConfigPlugin` plus the secrets `EnvProvider` read nothing there.
+  `CloudflarePlugin` registers `ICloudflareBindings` under a new `CAPABILITIES.CLOUDFLARE` token
+  with typed accessors (`kv`/`r2`/`d1`/`queue`/`service`/
+  `durableObject`/`get<T>`/`vars`/`waitUntil`), each throwing `CloudflareBindingMissingError` naming
+  the binding AND the ones that are present rather than returning `undefined`. **Zero npm
+  dependencies and nothing under `packages/` imports `cloudflare:workers`** — the application passes
+  `env` (and `waitUntil`) in. That is not a style choice: the specifier is unresolvable by Deno, so
+  a static import breaks `deno check` on every other runtime and a non-literal dynamic import is the
+  fake-lazy-import smell CLAUDE.md bans; injection is also what the platform docs recommend. Four
+  platform facts were verified against current docs and each one shaped the design: `env` is
+  importable at module scope but binding **methods** may not run there (so `register()` captures and
+  shape-checks bindings and never reads through one — a probe read would throw on a real deployment
+  while passing against every fake, and the health indicator performs no binding I/O either, since a
+  KV read per probe interval bills); `waitUntil` became importable only on **2025-08-08**, which
+  postdated the CLI's scaffolded `compatibility_date = "2024-09-23"` (conflict C3, bumped); **KV
+  rejects an `expirationTtl` below 60 seconds** while `ICacheStore.set` accepts anything, so values
+  carry a `{ v, e }` envelope whose logical deadline is checked on every read against
+  `runtime.now()` while the physical TTL is floored at 60 — a 5-second entry expires in 5 seconds
+  instead of surviving a minute, and disabling that one check fails **9** tests including the
+  real-`SessionPlugin` one; and **R2 bindings cannot presign at all**, so `getSignedUrl` throws (the
+  M28 `LocalStorageProvider` precedent) while `getStream` gives the zero-copy alternative.
+  `R2Storage.delete` heads first because R2's `delete` returns void and reports nothing, so the
+  committed `Promise<boolean>` costs a round trip rather than a constant `true`.
+  `KvCacheStore.clear()` **requires** a prefix — the binding has no bulk delete, so the sweep pages
+  `list` and deletes each key, and unprefixed it would delete keys the store does not own.
+  `KvSessionStore` is app-constructed and handed to `SessionPlugin({ store })`, because that option
+  is read at plugin construction before any application exists. Cache and storage registration are
+  opt-in and instance-named (`cache.<name>`, the `cache-plugin.ts:67` precedent), since the kernel
+  rejects two providers of one token. Two deviations from the committed plan, both recorded in it:
+  `splitWorkerEnv` lives in **`common`**, not `runtime`, because `cloudflare-plugin` needs the
+  identical partition and no plugin may import another (the M47 frame-codec precedent) — keeping it
+  in `runtime` would have forced the duplicated copy §11.1 forbids; and the CLI threads the
+  platform's own `fetch(request, env)` argument through a new `Wiring.workersArgs` field instead of
+  emitting `import { env } from 'cloudflare:workers'` into `honoe.config.ts`, because `honoe` itself
+  imports that module to discover plugin commands and the specifier is unresolvable off a Worker
+  toolchain. Verified beyond the gates by scaffolding a real Workers project, repointing it at this
+  workspace, `deno check`ing it, and driving its own `fetch(request, env)` export with a KV-shaped
+  binding: 200, value read back, envelope visible in the store. All 11 `src` files at 100%
+  branch/function/line. **Not verified against a live Worker** — CI holds no Cloudflare account) —
+  complete (PR pending)
+- **Milestone 52b** (Cloudflare platform handlers — D1, Queues, Cron Triggers, Durable Objects, and
+  the Cache API response cache. Each is blocked on the same two things rather than on effort: a new
+  module-level handler export from the application's Worker (`queue`, `scheduled`, a DO class), or a
+  contract promotion in `common` — D1's data-access seam is `IDatabaseAdapter`, declared inside
+  `packages/database-plugin`, while `common`'s `IOrmAdapter` is lifecycle-only) — planned, not
+  started
+- **Next milestone** — **M52b** (the Cloudflare platform handlers above) or **M37** (example
+  applications under `apps/*`), then M38–M40 unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
