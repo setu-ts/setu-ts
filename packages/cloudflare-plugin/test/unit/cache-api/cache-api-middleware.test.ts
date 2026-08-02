@@ -487,6 +487,25 @@ describe('cacheApiMiddleware — the write path', () => {
     expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Response body too large' });
   });
 
+  it('reports a non-Error rejection as a string', async () => {
+    const failing: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: () => Promise.reject('a bare string'),
+      delete: () => Promise.resolve(false),
+    };
+    const logger = new RecordingLogger();
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.LOGGER, logger);
+    const ctx = contextFor('https://example.test/big', { services });
+
+    await cacheApiMiddleware({ cache: failing })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'a bare string' });
+  });
+
   it('stays silent, and still succeeds, when no logger is registered', async () => {
     const failing: ICacheApi = {
       match: () => Promise.resolve(undefined),

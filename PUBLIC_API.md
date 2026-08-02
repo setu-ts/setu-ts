@@ -7072,7 +7072,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `CloudflarePlugin`                                                                                                                                                                                                                                                                                                                      | factory       |
 | `ICloudflareBindings`                                                                                                                                                                                                                                                                                                                   | interface     |
-| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`                                                                                                                                                                                                                                                                             | types         |
+| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`, `WorkersQueueArm`                                                                                                                                                                                                                                                          | types         |
 | `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                                                                                     | class + types |
 | `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                                                                               | class + types |
 | `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                                                                                         | class + types |
@@ -7179,6 +7179,15 @@ additionally validate the binding's shape, so an R2 bucket wired into a KV optio
   `cacheableStatuses: [200, 206]`, at which point only the explicit rule stops the platform
   throwing. `Cache-Control: private=Set-Cookie` is the platform's documented opt-in and clears the
   `set-cookie` refusal.
+- **Only GET requests touch the edge cache — on the read as well as the write.** The cache key is a
+  URL string, which the Cache API resolves as a GET request, so consulting it for a `POST` would
+  serve the cached GET body and skip the handler entirely: a mutation silently discarded behind a
+  200. Any non-GET request passes straight through with `X-Cache-Api: BYPASS`, which matters most
+  when the middleware sits on the global pipeline rather than a single GET route.
+- **A failed cache write never fails the request.** `Cache.put` rejects for an oversized response or
+  a quota error, and by then the response already exists — so both write paths report and continue
+  rather than turning a 200 into a 500. With the plugin registered `waitUntil` carries that
+  reporting; without it the middleware logs through `CAPABILITIES.LOGGER` when one is present.
 - **A cache HIT is replayed as a stream**, so a cached response of any size reaches the client
   without being buffered — which means `app.inject()` cannot read its body. Drive a cached route
   with `app.fetch` and a web `Request`, the entry point a Worker invokes anyway. A **streaming**

@@ -197,6 +197,13 @@ SessionPlugin({
   process can read that file. `cron.expressions()` lets you assert your own coverage, and a trigger
   that fires with nothing registered is logged every time. Matching is exact — whitespace is not
   normalized.
+- **Only GET requests touch the edge cache.** The cache key is a URL, which the Cache API resolves
+  as a GET request, so a `POST` to a cached path would otherwise be served the cached GET body and
+  never reach your handler. Non-GET requests pass through with `X-Cache-Api: BYPASS`. This matters
+  most if you add the middleware globally rather than to one GET route.
+- **A failed cache write never fails your response.** `Cache.put` rejects for an oversized body or a
+  quota error; the response is already built by then, so the failure is reported and the request
+  succeeds uncached.
 - **`caches.default` is per-datacenter.** `cacheApiMiddleware` is a latency optimisation, not a
   shared store: a hit in one colo says nothing about another, and a `delete` does not evict
   globally. It reports under `X-Cache-Api`, so it composes with `cache-plugin`'s `cacheMiddleware`

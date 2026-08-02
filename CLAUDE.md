@@ -1014,7 +1014,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   exact mistake M52 documented and fixed on the `waitUntil` seam — a logger registered imperatively
   afterwards would have silenced every dispatch report — so it is now a thunk, with a test that
   fails without the fix. All 20 `src` files at **100%** branch/function/line. **Not verified against
-  a live Worker** — CI holds no Cloudflare account) — complete (PR pending)
+  a live Worker** — CI holds no Cloudflare account, though the whole surface WAS driven against real
+  **workerd** via `wrangler dev`: queues (producer + a real `MessageBatch`, with an unroutable
+  message observed being redelivered exactly `max_retries` times), a real `ScheduledController`,
+  `caches.default`, KV and R2. That harness is what caught the kernel's module-scope
+  `AbortController` (fix/PR #112) — every application failed to boot on Workers and no gate could
+  see it, because the suite runs on Deno where a module-scope controller is legal.
+  Post-implementation code review then found five more defects the green gates had passed, all fixed
+  on this branch with tests that fail without the fix. The important one: `cacheApiMiddleware`
+  consulted the cache on **every method**, and since the key is a URL string — which the Cache API
+  resolves as a GET request — a `POST` to a path with a cached GET response was served that response
+  and its handler never ran, a mutation silently discarded behind a 200. Reachable on the documented
+  global-pipeline usage; the method is now checked before the read, verified on workerd. Also: an
+  inline cache write that rejected propagated out of the middleware and turned a good 200 into the
+  kernel's 500 (`Cache.put` rejects for an oversized body or a quota error, and the response already
+  exists by then, so both write paths now report and continue); `createQueueHandler` returned a
+  function that threw **synchronously** despite being typed `=> Promise<void>` and assigned straight
+  to the Worker's `queue` export; `message.ack()` sat inside the processor's `try`, so a throwing
+  ack was reported as a processor failure AND retried, giving one message two dispositions; and
+  `WorkersQueueArm` was exported without a PUBLIC_API entry) — complete (PR pending)
 - **Milestone 52c** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
   D1 as a first-class backend, gated on promoting the data-access port: the seam a backend
   implements is `IDatabaseAdapter`, declared inside `database-plugin`, while `common` ships only the
