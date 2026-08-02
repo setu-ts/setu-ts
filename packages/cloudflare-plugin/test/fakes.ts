@@ -258,6 +258,20 @@ export class FakeQueueMessage implements IQueueMessage {
   }
 }
 
+/**
+ * A message whose `ack()` throws, reproducing a platform-side ack failure.
+ *
+ * Its whole point is to prove `ack()` is not called inside the processor's
+ * `try`: there, a throwing ack would be caught as a processor failure and the
+ * message would ALSO be retried.
+ */
+export class AckFailsQueueMessage extends FakeQueueMessage {
+  override ack(): void {
+    super.ack();
+    throw new Error('cannot ack: batch already finalized');
+  }
+}
+
 /** A delivered batch. */
 export class FakeQueueBatch implements IQueueMessageBatch {
   constructor(

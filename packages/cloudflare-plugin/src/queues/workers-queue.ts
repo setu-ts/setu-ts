@@ -294,7 +294,6 @@ export class WorkersQueue implements IQueue {
 
     try {
       await registration.processor(job);
-      message.ack();
     } catch (error: unknown) {
       this.#logger?.()?.error('cloudflare-queue: processor failed, message retried', {
         queue,
@@ -304,7 +303,14 @@ export class WorkersQueue implements IQueue {
         error: error instanceof Error ? error.message : String(error),
       });
       message.retry();
+      return;
     }
+
+    // Outside the try, deliberately. Inside it, a throwing `ack()` would be
+    // caught by the handler above — reporting a processor failure that did not
+    // happen and then also calling `retry()`, so one message would carry two
+    // dispositions instead of the exactly-one this method promises.
+    message.ack();
   }
 
   /**

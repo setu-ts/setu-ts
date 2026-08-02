@@ -80,7 +80,13 @@ export function createQueueHandler(
 ): QueueHandler {
   const token = queueToken(options?.name);
 
-  return (batch: IQueueMessageBatch): Promise<void> => {
+  // `async`, so a resolution failure arrives as a REJECTED promise rather than
+  // a synchronous throw. `QueueHandler` is declared `=> Promise<void>`, and the
+  // application assigns this straight to its `queue` export — the same reason
+  // `app.fetch()` rejects instead of throwing (PUBLIC_API, kernel contract
+  // notes). A caller writing `queue: (b) => handler(b).catch(report)` would not
+  // catch a synchronous throw.
+  return async (batch: IQueueMessageBatch): Promise<void> => {
     const service = app.services.get<IQueue>(token);
 
     // A runtime `instanceof` on an exported class, not a cast to a different
@@ -96,7 +102,7 @@ export function createQueueHandler(
       );
     }
 
-    return service.dispatch(batch);
+    await service.dispatch(batch);
   };
 }
 

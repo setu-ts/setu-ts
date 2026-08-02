@@ -15,6 +15,7 @@ import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { WorkersQueue } from '../../../src/queues/workers-queue.ts';
 import { isJobEnvelope } from '../../../src/queues/job-envelope.ts';
 import {
+  AckFailsQueueMessage,
   FakeQueueBatch,
   FakeQueueMessage,
   FakeQueueProducer,
@@ -365,6 +366,31 @@ describe('WorkersQueue.dispatch', () => {
       'retried',
       'acked',
     ]);
+  });
+
+  it('does not retry — or blame the processor — when ack() itself throws', async () => {
+    // `ack()` inside the processor's try meant a platform-side ack failure was
+    // reported as "processor failed" and the message was ALSO retried, giving
+    // one message two dispositions.
+    const { queue, logger } = build();
+    let ran = 0;
+    queue.process('j', () => {
+      ran += 1;
+    });
+
+    const message = new AckFailsQueueMessage('cf-1', {
+      v: 1,
+      name: 'j',
+      id: 'id-1',
+      data: null,
+    });
+
+    await expect(queue.dispatch(new FakeQueueBatch('q', [message])))
+      .rejects.toThrow('cannot ack');
+
+    expect(ran).toBe(1);
+    expect(message.retried).toBe(0);
+    expect(logger.messages()).toEqual([]);
   });
 
   it('does nothing for an empty batch', async () => {

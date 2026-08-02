@@ -11,7 +11,12 @@
  * @module
  */
 
-import type { IRequestContext, IResponse, MiddlewareFunction } from '@hono-enterprise/common';
+import type {
+  ILogger,
+  IRequestContext,
+  IResponse,
+  MiddlewareFunction,
+} from '@hono-enterprise/common';
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import type { ICacheApi } from './cache-api.ts';
@@ -120,7 +125,17 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
   const cache = options?.cache ?? resolveCacheApi();
 
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
-    if (cache === undefined || (bypassFn !== undefined && bypassFn(ctx))) {
+    // The method is checked BEFORE the read, not only before the write. The
+    // cache key is a URL string, which the Cache API resolves as a GET request,
+    // so a POST to a path with a cached GET response would otherwise be served
+    // that response and its handler would never run — a mutation silently
+    // discarded behind a 200. Reachable whenever this sits on the global
+    // pipeline rather than a single GET route.
+    if (
+      cache === undefined ||
+      ctx.request.method !== 'GET' ||
+      (bypassFn !== undefined && bypassFn(ctx))
+    ) {
       await next();
       ctx.response.header(STATUS_HEADER, 'BYPASS');
       return;
@@ -214,6 +229,15 @@ function buildStoredResponse(
 /**
  * Writes to the cache off the response path when the plugin is registered.
  *
+ * **A failed write never fails the request.** The response has already been
+ * produced by the time this runs, and a cache is an accelerator: letting
+ * `put`'s rejection propagate would turn a perfectly good 200 into the kernel's
+ * 500. `Cache.put` rejects for real and reachable reasons — an oversized
+ * response, or a quota error — so this is a live path, not a defensive one. Both
+ * branches below report rather than throw, which also keeps them behaviourally
+ * identical: with the plugin registered `waitUntil` already attaches that
+ * reporting (background/wait-until.ts), and without it this does.
+ *
  * `ctx.services.has` rather than a `try`/`catch` around `get`: the registry
  * throws on an unregistered token (common/src/registry.ts:96), and catching
  * would also swallow a genuine failure from the resolved service.
@@ -227,14 +251,25 @@ async function store(
   const put = cache.put(key, response);
 
   if (ctx.services.has(CAPABILITIES.CLOUDFLARE)) {
-    const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
-    // waitUntil already attaches rejection reporting (background/wait-until.ts),
-    // so a failed write is logged rather than becoming an unhandled rejection.
-    bindings.waitUntil(put);
+    ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE).waitUntil(put);
     return;
   }
 
   // No plugin to extend the invocation past the response: awaiting is the only
   // way the write is not simply abandoned when the isolate is released.
-  await put;
+  try {
+    await put;
+  } catch (error: unknown) {
+    reportWriteFailure(ctx, key, error);
+  }
+}
+
+/** Reports a cache-write failure through the logger, when one is registered. */
+function reportWriteFailure(ctx: IRequestContext, key: string, error: unknown): void {
+  if (!ctx.services.has(CAPABILITIES.LOGGER)) return;
+
+  ctx.services.get<ILogger>(CAPABILITIES.LOGGER).error(
+    'cloudflare-cache-api: edge cache write failed, response served uncached',
+    { key, error: error instanceof Error ? error.message : String(error) },
+  );
 }

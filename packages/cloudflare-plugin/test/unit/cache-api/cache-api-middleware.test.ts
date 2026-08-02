@@ -12,7 +12,8 @@ import { createTestContext, MockServiceRegistry } from '@hono-enterprise/testing
 
 import { cacheApiMiddleware } from '../../../src/cache-api/cache-api-middleware.ts';
 import type { ICloudflareBindings } from '../../../src/bindings/binding-registry.ts';
-import { FakeCacheApi } from '../../fakes.ts';
+import type { ICacheApi } from '../../../src/cache-api/cache-api.ts';
+import { FakeCacheApi, RecordingLogger } from '../../fakes.ts';
 
 /** A bindings service whose `waitUntil` records rather than extends anything. */
 function bindingsWithWaitUntil(sink: Promise<unknown>[]): ICloudflareBindings {
@@ -322,6 +323,57 @@ describe('cacheApiMiddleware — skips', () => {
     expect(cache.puts).toEqual([]);
   });
 
+  it('never READS the cache for a non-GET request, so a mutation still runs', async () => {
+    // The cache key is a URL string, which the Cache API resolves as a GET
+    // request. Consulting it for a POST would serve the cached GET body and
+    // skip the handler — a mutation silently discarded behind a 200. Reachable
+    // whenever the middleware sits on the global pipeline.
+    const cache = new FakeCacheApi();
+    await cache.put('https://example.test/cart', new Response('{"items":0}', { status: 200 }));
+
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+      const ctx = contextFor('https://example.test/cart', { method });
+      let mutationRan = false;
+
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        mutationRan = true;
+        ctx.response.json({ items: 1 });
+        return Promise.resolve();
+      });
+
+      expect(mutationRan).toBe(true);
+      expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+    }
+
+    // The primed entry was neither read nor overwritten.
+    expect(cache.matches).toEqual([]);
+    expect(cache.puts).toHaveLength(1);
+  });
+
+  it('still serves a GET from the cache after a non-GET passed through', async () => {
+    // Guards the fix from being over-broad: the method check must skip only the
+    // non-GET request, not disable caching for the route.
+    const cache = new FakeCacheApi();
+    const seed = contextFor('https://example.test/mixed');
+    await cacheApiMiddleware({ cache })(seed, () => {
+      seed.response.json({ v: 1 });
+      return Promise.resolve();
+    });
+
+    const post = contextFor('https://example.test/mixed', { method: 'POST' });
+    await cacheApiMiddleware({ cache })(post, () => Promise.resolve());
+
+    const get = contextFor('https://example.test/mixed');
+    let handlerRan = false;
+    await cacheApiMiddleware({ cache })(get, () => {
+      handlerRan = true;
+      return Promise.resolve();
+    });
+
+    expect(handlerRan).toBe(false);
+    expect(get.response.snapshot().headers.get('X-Cache-Api')).toBe('HIT');
+  });
+
   it('honours a widened cacheableStatuses set', async () => {
     const cache = new FakeCacheApi();
     const ctx = contextFor('https://example.test/moved');
@@ -391,6 +443,64 @@ describe('cacheApiMiddleware — the write path', () => {
     expect(sink).toHaveLength(1);
     await Promise.all(sink);
     expect(cache.puts).toHaveLength(1);
+  });
+
+  it('does NOT fail the response when an inline cache write rejects', async () => {
+    // The response is already produced by the time the write runs, and
+    // `Cache.put` rejects for real reasons (oversized body, quota). Letting
+    // that propagate turned a good 200 into the kernel's 500.
+    const failing: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: () => Promise.reject(new Error('Response body too large')),
+      delete: () => Promise.resolve(false),
+    };
+    const ctx = contextFor('https://example.test/big');
+
+    await cacheApiMiddleware({ cache: failing })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(ctx.response.snapshot().status).toBe(200);
+    expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('MISS');
+  });
+
+  it('reports an inline write failure through a registered logger', async () => {
+    const failing: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: () => Promise.reject(new Error('Response body too large')),
+      delete: () => Promise.resolve(false),
+    };
+    const logger = new RecordingLogger();
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.LOGGER, logger);
+    const ctx = contextFor('https://example.test/big', { services });
+
+    await cacheApiMiddleware({ cache: failing })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(logger.messages()).toEqual([
+      'cloudflare-cache-api: edge cache write failed, response served uncached',
+    ]);
+    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Response body too large' });
+  });
+
+  it('stays silent, and still succeeds, when no logger is registered', async () => {
+    const failing: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: () => Promise.reject(new Error('nope')),
+      delete: () => Promise.resolve(false),
+    };
+    const ctx = contextFor('https://example.test/big');
+
+    await expect(
+      cacheApiMiddleware({ cache: failing })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('awaits the put inline when the bindings capability is absent', async () => {

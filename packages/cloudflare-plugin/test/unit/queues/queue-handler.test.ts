@@ -134,18 +134,26 @@ describe('createQueueHandler', () => {
     const handler = createQueueHandler(app);
     const message = new FakeQueueMessage('cf-1', { v: 1, name: 'j', id: 'i', data: null });
 
-    expect(() => handler(new FakeQueueBatch('q', [message]))).toThrow(CloudflareUnsupportedError);
-    expect(() => handler(new FakeQueueBatch('q', [message]))).toThrow(/'queue'/);
+    // REJECTS rather than throwing synchronously: the handler is declared
+    // `=> Promise<void>` and is assigned straight to the Worker's `queue`
+    // export, so `handler(b).catch(report)` has to be able to see this.
+    await expect(handler(new FakeQueueBatch('q', [message])))
+      .rejects.toBeInstanceOf(CloudflareUnsupportedError);
+    await expect(handler(new FakeQueueBatch('q', [message]))).rejects.toThrow(/'queue'/);
     // The message is left unsettled rather than wrongly acked.
     expect(message.disposition).toBe('unsettled');
     await app.stop();
   });
 
-  it('lets the registry error surface when no queue is registered at all', async () => {
+  it('rejects rather than throwing when no queue is registered at all', async () => {
     const app = createApplication({ plugins: [RuntimePlugin()] });
     await app.start();
 
-    expect(() => createQueueHandler(app)(new FakeQueueBatch('q', []))).toThrow();
+    // The registry throws synchronously; the handler must still surface it as
+    // a rejection, not an exception escaping the promise contract.
+    const pending = createQueueHandler(app)(new FakeQueueBatch('q', []));
+    expect(pending).toBeInstanceOf(Promise);
+    await expect(pending).rejects.toThrow();
     await app.stop();
   });
 });
