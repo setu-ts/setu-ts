@@ -90,19 +90,25 @@ describe('resolveWaitUntil', () => {
     // registered imperatively after this seam is built. Capturing the value up
     // front would swallow every later report.
     const { logger, errors } = recordingLogger();
-    let current: ILogger | undefined;
     const settled: Promise<unknown>[] = [];
+    let source: ILogger | undefined = undefined;
     const waitUntil = resolveWaitUntil((p) => {
       settled.push(p);
-    }, () => current);
+    }, () => source);
 
-    // Built while no logger was resolvable...
-    current = logger; // ...and one appears before the failure happens.
+    // Nothing resolvable yet: this failure has nowhere to go, and must not throw.
+    waitUntil(Promise.reject(new Error('too early')));
+    await Promise.all(settled);
+    expect(errors).toEqual([]);
+
+    // A logger appears afterwards — the case an eagerly captured value loses.
+    source = logger;
     waitUntil(Promise.reject(new Error('late-logger failure')));
     await Promise.all(settled);
 
     expect(errors).toHaveLength(1);
     expect(errors[0]?.message).toBe('cloudflare: background task failed');
+    expect(errors[0]?.meta).toEqual({ error: 'late-logger failure' });
   });
 
   it('still runs and still reports the work with no host injected', async () => {
