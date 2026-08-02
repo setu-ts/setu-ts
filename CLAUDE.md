@@ -1153,7 +1153,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   to hand-simulate. The code-review fix was verified there too, with a negative control: with the
   `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
   restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
-  Cloudflare account) — complete (PR pending)
+  Cloudflare account) — complete (PR #115)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
   reprioritized.
 
