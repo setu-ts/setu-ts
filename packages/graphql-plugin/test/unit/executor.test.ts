@@ -170,6 +170,68 @@ describe('executor', () => {
     expect(result.data).toEqual({ hello: 'world' });
   });
 
+  it('returns parse errors when runtime.parse throws', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    // Override parse to throw a parse error with locations
+    (runtime as unknown as GraphqlRuntime).parse = () => {
+      const err = new Error('Syntax Error: Unexpected token') as Error & {
+        locations?: Array<{ line: number; column: number }>;
+      };
+      err.locations = [{ line: 1, column: 2 }];
+      throw err;
+    };
+
+    const result = await executeGraphql('{ hello }', {
+      runtime,
+      schema,
+      documentCache: cache,
+      validationRules: [],
+      maxDepth: 0,
+      introspection: true,
+    });
+
+    expect(result.errors).toBeDefined();
+    expect(result.errors?.length).toBe(1);
+    expect(result.errors![0].message).toBe('Syntax Error: Unexpected token');
+    expect(result.errors![0].locations).toEqual([{ line: 1, column: 2 }]);
+    // Exercise the toJSON method on the error object
+    expect(result.errors![0].toJSON()).toEqual({
+      message: 'Syntax Error: Unexpected token',
+      locations: [{ line: 1, column: 2 }],
+    });
+  });
+
+  it('returns parse errors with fallback message when error has no message', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    // Override parse to throw an error without a message
+    (runtime as unknown as GraphqlRuntime).parse = () => {
+      const err = new Error() as Error & {
+        locations?: Array<{ line: number; column: number }>;
+      };
+      err.message = '';
+      throw err;
+    };
+
+    const result = await executeGraphql('{ hello }', {
+      runtime,
+      schema,
+      documentCache: cache,
+      validationRules: [],
+      maxDepth: 0,
+      introspection: true,
+    });
+
+    expect(result.errors).toBeDefined();
+    expect(result.errors?.length).toBe(1);
+    expect(result.errors![0].message).toBe('Parse error');
+  });
+
   it('returns validation errors when present', async () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
