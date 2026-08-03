@@ -1211,6 +1211,35 @@ deno task test
 
 All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
 
+**A milestone that adds or changes a package ALSO runs the two publish gates — the four above cannot
+see a publish-blocking defect.**
+
+```bash
+deno task publish:check              # deno publish --dry-run, on a COMMITTED tree
+deno task release:verify <version>   # version agreement, specifier resolvability, workspace
+                                     # coverage, no stub in the list, @module-first
+```
+
+M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
+passed over, each of which would have stopped the package reaching JSR:
+
+- **A slow type.** `createDepthLimitRule` was exported from the barrel with an inferred return type.
+  JSR rejects that because it blocks automatic `.d.ts` generation — and the CI comment is explicit
+  that the generated `.d.ts` is what the Node and Bun compat jobs consume, so the dry run gates
+  both. Every exported function needs a written-out return type; `deno check` does not care.
+- **A package in neither release list.** `packages/graphql-plugin` was a workspace member absent
+  from both `PUBLISHED_PACKAGES` and `UNPUBLISHED_PACKAGES`, so it would simply never have
+  published. Only `release:verify` looks for this.
+- **A README suppressed on jsr.io.** `src/index.ts` opened its module JSDoc with the description
+  instead of `@module`, which makes JSR render that blurb as the whole package page instead of the
+  README. The README still ships in the tarball, so nothing else can see the loss — `release:verify`
+  check 5 exists precisely for it.
+
+`publish:check` refuses a dirty tree (`--allow-dirty` is deliberately not passed), so run it AFTER
+committing — a "failure" that turns out to be uncommitted changes is not a result. Note also that a
+green `--dry-run` does NOT prove a real publish works: it skips the already-published check, which
+is what needs `--allow-net` (see the `alpha.2` entry above).
+
 ## Common pitfalls (these fail the gates)
 
 - `exactOptionalPropertyTypes` is on: never assign `undefined` to an optional property — omit it.
@@ -1357,8 +1386,12 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
   NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
   points, confirm one test drives BOTH under a non-default configuration.
-- **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table and
-  the grep result. "Done" without that evidence is not done.
+- **Run the two publish gates on the committed tree.** `deno task publish:check` and
+  `deno task release:verify <version>` — see the Verification section for the three M51 defects that
+  every other gate passed over. A milestone whose package cannot publish is not done, and CI's
+  `JSR publish dry-run` job will say so on the PR after you have handed it back.
+- **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table, the
+  grep result, and the exit status of both publish gates. "Done" without that evidence is not done.
 - **Flip the milestone's status IN the milestone PR, before it merges.** A completed milestone is
   not done until its ROADMAP.md "Progress Tracking" row is `✅` AND the CLAUDE.md "Current status"
   section reflects it (mark the finished milestone complete with its PR number and point "Next
