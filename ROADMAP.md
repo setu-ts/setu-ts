@@ -5353,5 +5353,5 @@ app.register(MyPlugin({ option1: 'value' }));
 | 48        | ✅     | session-plugin                    |
 | 49        | ✅     | grpc-plugin                       |
 | 50        | ✅     | service-discovery-plugin          |
-| 51        | ⬜     | graphql-plugin                    |
+| 51        | ✅     | graphql-plugin                    |
 | 51b       | ⬜     | graphql-plugin (subscriptions)    |

@@ -932,7 +932,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   no-op that let the plugin register a router silently answering `404` when Connect was absent; a
   missing dependency now throws `GrpcRuntimeLoadError` naming the specifier. All 11 `src` files at
   100% branch/function/line) — complete (PR #110)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
+- **Milestone 51** (`packages/graphql-plugin` — GraphQL plugin: schema-first and code-first arms,
+  GraphQL-over-HTTP transport with media-type negotiation and status-code watershed, bounded
+  parse+validate document cache, error masking, depth limiting, introspection switch, GraphiQL page,
+  `npm:graphql@^16` inject-or-lazy seam, `graphql` health indicator, `onClose`) — complete (PR
+  pending)
+- **Next milestone** — **M51b** (GraphQL subscriptions over WebSocket/SSE, request batching,
+  Automatic Persisted Queries, custom scalar resolvers, starter arm), then M37–M40 unless
   reprioritized.
 
 ## Verification (run before declaring any work done)

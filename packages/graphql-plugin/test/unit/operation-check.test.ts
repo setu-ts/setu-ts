@@ -158,7 +158,8 @@ describe('operation-check', () => {
   describe('getOperationAST edge cases', () => {
     it('returns undefined when ast.operation is falsy', () => {
       const runtime = createFakeRuntime();
-      (runtime as unknown as GraphqlRuntime).getOperationAST = () => ({ kind: 'OperationDefinition' } as never);
+      (runtime as unknown as GraphqlRuntime).getOperationAST =
+        () => ({ kind: 'OperationDefinition' } as never);
       const kind = getOperationAST(runtime, '{ hello }');
       expect(kind).toBeUndefined();
     });
