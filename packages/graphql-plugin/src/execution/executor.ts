@@ -98,6 +98,7 @@ export interface PreparedDocument {
  */
 export interface PreparedRefusal {
   refused: true;
+  executed: false;
   status: number;
   result: GraphqlExecutionResultLike;
 }
@@ -130,6 +131,7 @@ export function checkOperation(
   if (!ast) {
     return {
       refused: true,
+      executed: false,
       status: 400,
       result: {
         errors: [
@@ -228,7 +230,7 @@ export function prepareDocument(
     }
     // HTTP transport refusal — convert to PreparedRefusal
     if (guard.executed === false) {
-      return { refused: true, status: guard.status, result: guard.result };
+      return { refused: true, executed: false, status: guard.status, result: guard.result };
     }
   }
 
@@ -249,6 +251,7 @@ export function prepareDocument(
   if (!operation) {
     return {
       refused: true,
+      executed: false,
       status: 400,
       result: {
         errors: [

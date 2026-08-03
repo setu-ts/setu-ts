@@ -75,7 +75,7 @@ describe('attach-resolvers', () => {
     expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
   });
 
-  it('throws on scalar type without getFields', () => {
+  it('attaches scalar resolver methods on a type without getFields', () => {
     const schema = {
       getQueryType: () => ({
         name: 'Query',
@@ -108,11 +108,13 @@ describe('attach-resolvers', () => {
 
     const resolverMap = {
       String: {
-        custom: () => 'value',
+        serialize: (v: unknown) => String(v),
+        parseValue: (v: unknown) => v,
       },
     };
 
-    expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
+    // Should not throw — scalar resolvers are attached instead
+    attachResolvers(schema, resolverMap);
   });
 
   it('skips __resolveType for field resolver', () => {
