@@ -30,6 +30,14 @@ export function attachResolvers(
   resolverMap: ResolverMap,
 ): void {
   for (const [typeName, fieldResolvers] of Object.entries(resolverMap)) {
+    // Skip types that only have __resolveType — handled in the second loop
+    const hasFieldResolvers = Object.keys(fieldResolvers).some(
+      (k) => k !== '__resolveType',
+    );
+    if (!hasFieldResolvers) {
+      continue;
+    }
+
     const type = schema.getType(typeName);
     if (!type) {
       throw new GraphqlSchemaError(

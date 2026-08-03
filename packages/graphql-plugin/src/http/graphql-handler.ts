@@ -188,9 +188,30 @@ function sendGraphqlResult(
   let status: number;
   if (mediaType === 'graphql-response') {
     status = outcome.status;
-  } else if (isPost && outcome.status === 200) {
+  } else if (isPost) {
     // Under 'json' media type, POST requests that succeed get 200 (even with validation errors)
-    status = 200;
+    // This is the watershed: 400 for validation errors under graphql-response, 200 under json
+    // Preserve only true transport errors (405 for mutation-over-GET, 400 for subscription)
+    if (outcome.status === 405 || outcome.status === 400) {
+      // Check if this is a transport error (mutation-over-GET or subscription)
+      // These are identified by having specific error codes
+      let hasTransportError = false;
+      if (outcome.result.errors) {
+        for (const e of outcome.result.errors) {
+          const err = e as { extensions?: { code?: string } };
+          if (
+            err.extensions?.code === 'METHOD_NOT_ALLOWED' ||
+            err.extensions?.code === 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP'
+          ) {
+            hasTransportError = true;
+            break;
+          }
+        }
+      }
+      status = hasTransportError ? outcome.status : 200;
+    } else {
+      status = 200;
+    }
   } else {
     // Preserve transport-level status codes (405 for mutation-over-GET, 400 for subscription)
     status = outcome.status;

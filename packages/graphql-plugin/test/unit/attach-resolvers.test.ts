@@ -255,4 +255,106 @@ describe('attach-resolvers', () => {
     // Should not throw and __resolveType should be registered
     expect(resolveTypeCalled).toBe(false); // Not called during attachment
   });
+
+  it('attaches __resolveType to union types (no getFields)', () => {
+    // Union types don't have getFields
+    const unionType = {
+      name: 'SearchResult',
+      resolveType: undefined as unknown,
+    };
+
+    const schema = {
+      getQueryType: () => ({
+        name: 'Query',
+        getFields: () => ({ search: { name: 'search', type: { name: 'SearchResult' }, args: [] } }),
+        getInterfaces: () => [],
+      }),
+      getMutationType: () => null,
+      getSubscriptionType: () => null,
+      getType: (name: string) => {
+        if (name === 'SearchResult') {
+          return unionType;
+        }
+        if (name === 'Query') {
+          return {
+            name: 'Query',
+            getFields: () => ({
+              search: { name: 'search', type: { name: 'SearchResult' }, args: [] },
+            }),
+            getInterfaces: () => [],
+          };
+        }
+        return null;
+      },
+      getPossibleTypes: () => [],
+      getDirectives: () => [],
+      getDirective: () => null,
+      toAST: () => ({}),
+    } as GraphqlSchemaLike;
+
+    const resolveTypeFn = () => 'User';
+    const resolverMap = {
+      SearchResult: {
+        __resolveType: resolveTypeFn,
+      },
+    };
+
+    attachResolvers(schema, resolverMap);
+
+    // Union type should also get resolveType attached
+    expect(unionType.resolveType).toBe(resolveTypeFn);
+  });
+
+  it('skips __resolveType when not a function', () => {
+    const schema = createSchema(['Query']);
+    const resolverMap = {
+      Query: {
+        hello: () => 'Hello',
+        __resolveType: 'not-a-function' as unknown as () => string,
+      },
+    };
+
+    // Should not throw - non-function __resolveType is skipped
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+  });
+
+  it('handles type that exists but has wrong kind for __resolveType', () => {
+    // A scalar type exists but doesn't have getFields
+    const schema = {
+      getQueryType: () => ({
+        name: 'Query',
+        getFields: () => ({ hello: { name: 'hello', type: { name: 'String' }, args: [] } }),
+        getInterfaces: () => [],
+      }),
+      getMutationType: () => null,
+      getSubscriptionType: () => null,
+      getType: (name: string) => {
+        if (name === 'String') {
+          // Scalar type - no getFields, but truthy
+          return { name: 'String' };
+        }
+        if (name === 'Query') {
+          return {
+            name: 'Query',
+            getFields: () => ({ hello: { name: 'hello', type: { name: 'String' }, args: [] } }),
+            getInterfaces: () => [],
+          };
+        }
+        return null;
+      },
+      getPossibleTypes: () => [],
+      getDirectives: () => [],
+      getDirective: () => null,
+      toAST: () => ({}),
+    } as GraphqlSchemaLike;
+
+    const resolverMap = {
+      String: {
+        __resolveType: () => 'User',
+      },
+    };
+
+    // Should not throw - scalar types are skipped in the second loop
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+  });
 });

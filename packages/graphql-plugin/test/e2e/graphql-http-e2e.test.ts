@@ -140,6 +140,7 @@ describe('GraphQL HTTP E2E', () => {
       const json = await res.json() as { errors?: unknown[] };
 
       // Under 'json' media type, well-formed GraphQL requests (even with validation errors) return 200
+      // The handler should force 200 for POST requests under JSON media type
       expect(res.statusCode).toBe(200);
       expect(json.errors).toBeDefined();
 
@@ -220,7 +221,7 @@ describe('GraphQL HTTP E2E', () => {
   });
 
   describe('parse errors (B3)', () => {
-    it('returns 400 with locations for parse error', async () => {
+    it('returns 200 with locations for parse error under JSON media type', async () => {
       const app = createApplication({
         plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers })],
       });
@@ -238,6 +239,37 @@ describe('GraphQL HTTP E2E', () => {
         errors?: Array<{ message?: string; locations?: unknown[] }>;
       };
 
+      // Under JSON media type, parse errors return 200 (B1 watershed)
+      expect(res.statusCode).toBe(200);
+      expect(json.errors).toBeDefined();
+      expect(json.errors?.[0]?.message).toBeDefined();
+      expect(json.errors?.[0]?.locations).toBeDefined();
+
+      await app.stop();
+    });
+
+    it('returns 400 with locations for parse error under graphql-response media type', async () => {
+      const app = createApplication({
+        plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers })],
+      });
+
+      await app.start({ port: 0 });
+
+      // Invalid syntax: missing closing brace
+      const res = await app.inject({
+        method: 'POST',
+        url: '/graphql',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/graphql-response+json',
+        },
+        body: JSON.stringify({ query: '{ hello' }),
+      });
+      const json = await res.json() as {
+        errors?: Array<{ message?: string; locations?: unknown[] }>;
+      };
+
+      // Under graphql-response media type, parse errors return 400
       expect(res.statusCode).toBe(400);
       expect(json.errors).toBeDefined();
       expect(json.errors?.[0]?.message).toBeDefined();
@@ -341,8 +373,10 @@ describe('GraphQL HTTP E2E', () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.headers.get('content-type')?.includes('text/html')).toBe(true);
-      const body = await res.json() as unknown;
-      void body; // Skip body check for now
+      // Body is available directly on the response
+      const body = res.body;
+      expect(typeof body).toBe('string');
+      expect(body).toContain('<!DOCTYPE html>');
 
       await app.stop();
     });

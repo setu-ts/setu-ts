@@ -39,7 +39,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
   const maxDepth = options.maxDepth ?? 10;
   const maskInternalErrors = options.maskInternalErrors ?? true;
   const documentCacheSize = options.documentCacheSize ?? 1000;
-  const formatError = options.formatError ?? ((_e: unknown) => undefined);
+  const formatError = options.formatError ?? ((_e: unknown) => _e);
   const buildContext = options.buildContext ?? ((_i: unknown) => ({}));
   const rootValue = options.rootValue;
 

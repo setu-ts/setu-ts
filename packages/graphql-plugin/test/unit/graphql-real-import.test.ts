@@ -20,7 +20,7 @@ describe('graphql real import', () => {
       return;
     }
 
-    expect(graphql).not.toBeNull();
+    expect(graphql !== null).toBe(true);
     expect(graphql!.parse).toBeDefined();
     expect(graphql!.validate).toBeDefined();
     expect(graphql!.execute).toBeDefined();

@@ -14,7 +14,7 @@ import { expect } from '@std/expect';
 
 describe('GraphQL security', () => {
   describe('depth limit', () => {
-    it('rejects queries exceeding maxDepth with 400', async () => {
+    it('rejects queries exceeding maxDepth with 200 under JSON media type', async () => {
       const typeDefs = `
         type Query {
           nested: Nested
@@ -50,6 +50,53 @@ describe('GraphQL security', () => {
       });
       const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
 
+      // Under JSON media type, validation errors (including depth limit) return 200 (B1 watershed)
+      expect(res.statusCode).toBe(200);
+      expect(json.errors?.[0]?.message?.includes('too deep')).toBe(true);
+
+      await app.stop();
+    });
+
+    it('rejects queries exceeding maxDepth with 400 under graphql-response media type', async () => {
+      const typeDefs = `
+        type Query {
+          nested: Nested
+        }
+        type Nested {
+          level1: Nested
+          value: String
+        }
+      `;
+      const resolvers = {
+        Query: {
+          nested: () => ({ level1: { level1: { value: 'deep' } } }),
+        },
+        Nested: {
+          level1: () => ({ value: 'nested' }),
+          value: () => 'nested',
+        },
+      };
+
+      const app = createApplication({
+        plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers, maxDepth: 2 })],
+      });
+
+      await app.start({ port: 0 });
+
+      // Query with depth 3: nested { level1 { level1 { value } } }
+      const deepQuery = '{ nested { level1 { level1 { value } } } }';
+      const res = await app.inject({
+        method: 'POST',
+        url: '/graphql',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/graphql-response+json',
+        },
+        body: JSON.stringify({ query: deepQuery }),
+      });
+      const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+
+      // Under graphql-response media type, validation errors return 400
       expect(res.statusCode).toBe(400);
       expect(json.errors?.[0]?.message?.includes('too deep')).toBe(true);
 
