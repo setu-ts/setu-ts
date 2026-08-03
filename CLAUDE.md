@@ -974,9 +974,231 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   check 5 caught it), and `inject()` exposes no response headers, so the `Allow` fix had to be
   proven through `app.fetch` — an `inject`-based test would have passed either way) — complete (PR
   pending)
-- **Next milestone** — **M51b** (GraphQL subscriptions over WebSocket/SSE, request batching,
-  Automatic Persisted Queries, custom scalar resolvers, starter arm), then M37–M40 unless
-  reprioritized.
+- **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
+  not _reach_:
+  `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
+  cloudflare:workers" packages/*/src`
+  returned NOTHING, and `cf-runtime.ts` defaulted its env source to `{}` while
+  `createRuntimeServices` called the platform factory with no arguments — so `runtime.env` was
+  **empty** on Workers and `ConfigPlugin` plus the secrets `EnvProvider` read nothing there.
+  `CloudflarePlugin` registers `ICloudflareBindings` under a new `CAPABILITIES.CLOUDFLARE` token
+  with typed accessors (`kv`/`r2`/`d1`/`queue`/`service`/
+  `durableObject`/`get<T>`/`vars`/`waitUntil`), each throwing `CloudflareBindingMissingError` naming
+  the binding AND the ones that are present rather than returning `undefined`. **Zero npm
+  dependencies and nothing under `packages/` imports `cloudflare:workers`** — the application passes
+  `env` (and `waitUntil`) in. That is not a style choice: the specifier is unresolvable by Deno, so
+  a static import breaks `deno check` on every other runtime and a non-literal dynamic import is the
+  fake-lazy-import smell CLAUDE.md bans; injection is also what the platform docs recommend. Four
+  platform facts were verified against current docs and each one shaped the design: `env` is
+  importable at module scope but binding **methods** may not run there (so `register()` captures and
+  shape-checks bindings and never reads through one — a probe read would throw on a real deployment
+  while passing against every fake, and the health indicator performs no binding I/O either, since a
+  KV read per probe interval bills); `waitUntil` became importable only on **2025-08-08**, which
+  postdated the CLI's scaffolded `compatibility_date = "2024-09-23"` (conflict C3, bumped); **KV
+  rejects an `expirationTtl` below 60 seconds** while `ICacheStore.set` accepts anything, so values
+  carry a `{ v, e }` envelope whose logical deadline is checked on every read against
+  `runtime.now()` while the physical TTL is floored at 60 — a 5-second entry expires in 5 seconds
+  instead of surviving a minute, and disabling that one check fails **9** tests including the
+  real-`SessionPlugin` one; and **R2 bindings cannot presign at all**, so `getSignedUrl` throws (the
+  M28 `LocalStorageProvider` precedent) while `getStream` gives the zero-copy alternative.
+  `R2Storage.delete` heads first because R2's `delete` returns void and reports nothing, so the
+  committed `Promise<boolean>` costs a round trip rather than a constant `true`.
+  `KvCacheStore.clear()` **requires** a prefix — the binding has no bulk delete, so the sweep pages
+  `list` and deletes each key, and unprefixed it would delete keys the store does not own.
+  `KvSessionStore` is app-constructed and handed to `SessionPlugin({ store })`, because that option
+  is read at plugin construction before any application exists. Cache and storage registration are
+  opt-in and instance-named (`cache.<name>`, the `cache-plugin.ts:67` precedent), since the kernel
+  rejects two providers of one token. Two deviations from the committed plan, both recorded in it:
+  `splitWorkerEnv` lives in **`common`**, not `runtime`, because `cloudflare-plugin` needs the
+  identical partition and no plugin may import another (the M47 frame-codec precedent) — keeping it
+  in `runtime` would have forced the duplicated copy §11.1 forbids; and the CLI threads the
+  platform's own `fetch(request, env)` argument through a new `Wiring.workersArgs` field instead of
+  emitting `import { env } from 'cloudflare:workers'` into `honoe.config.ts`, because `honoe` itself
+  imports that module to discover plugin commands and the specifier is unresolvable off a Worker
+  toolchain. Verified beyond the gates by scaffolding a real Workers project, repointing it at this
+  workspace, `deno check`ing it, and driving its own `fetch(request, env)` export with a KV-shaped
+  binding: 200, value read back, envelope visible in the store. All 11 `src` files at 100%
+  branch/function/line. **Not verified against a live Worker** — CI holds no Cloudflare account) —
+  complete (PR #111)
+- **Milestone 52b** (`packages/cloudflare-plugin` — Cloudflare Queues, Cron Triggers, and the Cache
+  API: the three platform features that need a **module-level handler export** from the
+  application's Worker rather than anything reachable through `fetch`. The original M52b scope also
+  carried D1 and Durable Objects; it was **split at the maintainer's direction** into M52b / M52c /
+  M52d, because D1 alone is a `common` contract promotion spanning three packages and a DO backplane
+  is its own design. No `common` change and no new capability token. **Queues:** `WorkersQueue`
+  satisfies the committed `IQueue` over a producer binding, opt-in through a `queue` arm and
+  registered under `CAPABILITIES.QUEUE` (or `queue.<name>`, the `cache.<name>` precedent). A
+  Cloudflare message body is arbitrary JSON carrying neither a job name nor an id, and
+  `producer.send()` resolves to `void`, so a `{ v, name, id, data, maxAttempts? }` envelope carries
+  both and the id `add` returns IS the id the processor sees as `job.id` — using `Message.id`
+  instead would have made them two different values. An unroutable message (unreadable envelope, or
+  a name with no processor) is **retried, never acked**, because acking discards it permanently and
+  silently; `maxAttempts` is enforced at dispatch since Cloudflare's `max_retries` is queue-wide
+  config; `delayMs` converts to whole `delaySeconds` **rounded up** so a job is never early; and
+  `ProcessOptions.concurrency` bounds one name's messages without throttling another's.
+  `addRecurring` throws, naming Cron Triggers. **Cron:** `WorkersCron` + `createScheduledHandler`,
+  and the decision the ROADMAP asked for — a Workers `IScheduler` **cannot** honour runtime
+  `schedule()` calls, so `CAPABILITIES.SCHEDULER` is deliberately NOT registered: `every`/`delay`
+  arm timers across an isolate eviction (which is also the real reason `scheduler-plugin` cannot run
+  on Workers), `pause`/`resume`/`remove` need state that does not survive an invocation, and
+  `getNextRun` is owned by `wrangler.toml`; six of eight methods throwing violates Liskov. That
+  decision is also why `createScheduledHandler` takes the `WorkersCron` while `createQueueHandler`
+  takes the app — the cron registry is not in the service registry to resolve. **Cache API:**
+  `cacheApiMiddleware` over `caches.default`, reporting under `X-Cache-Api` so it composes with
+  `cache-plugin`'s `X-Cache` store-backed middleware rather than colliding; the platform's refusals
+  (non-GET, 206, `Vary: *`, uncleared `Set-Cookie`) are checked first via the pure exported
+  `assessCacheability` rather than discovered from a thrown `put`, and the 206 rule is
+  **unconditional** because `cacheableStatuses: [200, 206]` is a legal configuration that would
+  otherwise let the platform throw. A HIT replays through `IResponse.stream`, which is what made
+  `app.inject()` unusable for cached routes and moved the tests to `app.fetch` — more faithful,
+  since that is the entry point a Worker invokes. One defect found by chasing a coverage gap rather
+  than by a failing test: `WorkersQueueOptions.logger` captured `ctx.logger` at `register()`, the
+  exact mistake M52 documented and fixed on the `waitUntil` seam — a logger registered imperatively
+  afterwards would have silenced every dispatch report — so it is now a thunk, with a test that
+  fails without the fix. All 20 `src` files at **100%** branch/function/line. **Not verified against
+  a live Worker** — CI holds no Cloudflare account, though the whole surface WAS driven against real
+  **workerd** via `wrangler dev`: queues (producer + a real `MessageBatch`, with an unroutable
+  message observed being redelivered exactly `max_retries` times), a real `ScheduledController`,
+  `caches.default`, KV and R2. That harness is what caught the kernel's module-scope
+  `AbortController` (fix/PR #112) — every application failed to boot on Workers and no gate could
+  see it, because the suite runs on Deno where a module-scope controller is legal.
+  Post-implementation code review then found five more defects the green gates had passed, all fixed
+  on this branch with tests that fail without the fix. The important one: `cacheApiMiddleware`
+  consulted the cache on **every method**, and since the key is a URL string — which the Cache API
+  resolves as a GET request — a `POST` to a path with a cached GET response was served that response
+  and its handler never ran, a mutation silently discarded behind a 200. Reachable on the documented
+  global-pipeline usage; the method is now checked before the read, verified on workerd. Also: an
+  inline cache write that rejected propagated out of the middleware and turned a good 200 into the
+  kernel's 500 (`Cache.put` rejects for an oversized body or a quota error, and the response already
+  exists by then, so both write paths now report and continue); `createQueueHandler` returned a
+  function that threw **synchronously** despite being typed `=> Promise<void>` and assigned straight
+  to the Worker's `queue` export; `message.ack()` sat inside the processor's `try`, so a throwing
+  ack was reported as a processor failure AND retried, giving one message two dispositions; and
+  `WorkersQueueArm` was exported without a PUBLIC_API entry) — complete (PR pending)
+- **Milestone 52c** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
+  D1 as a first-class backend, gated on promoting the data-access port. The seam a backend
+  implements was `IDatabaseAdapter`, declared **inside** `database-plugin` and never exported, while
+  `common` shipped only the lifecycle-shaped `IOrmAdapter` — so a backend in another package was
+  literally inexpressible (§2.2 forbids a plugin importing a plugin). Promoted `IDatabaseAdapter`,
+  `IAdapterTransaction`, `IDataSource`, `NormalizedQuery` and `OrderDirection` into `common`, and
+  **deleted** `database-plugin/src/adapters/adapter.ts` so exactly one definition exists. The
+  promotion adds ONE member — a non-transactional `createDataSource(entity)` — and that addition is
+  the whole point: `createDataSourceFactory` was a second closed switch that **cast the adapter to
+  each concrete class** (`adapter as PrismaAdapter`) to reach `createDataSourceForEntity`, which is
+  the real reason the seam was closed, not the arm list. It is now deleted, all three built-in
+  adapters carry `createDataSource`, and `createDataSourceForEntity` is deprecated-not-removed
+  (§9.2). `DatabasePluginOptions` became a union discriminated on `type` with a `'custom'` arm
+  requiring `adapter`, so a missing backend is a **compile** error (the M30 `ChannelConfig` / M50
+  precedent); named `'custom'` rather than `'external'` to match M31/M50. `DataSource` survives as a
+  deprecated alias of `IDataSource`. The promotion also fixes a latent public-API defect: the barrel
+  exported `DataSource` whose `findAll` parameter is `NormalizedQuery`, which the barrel did **not**
+  export — the type was unnameable by any consumer. **D1's transaction reconciliation is deferred
+  batch.** D1 rejects `BEGIN TRANSACTION` outright (the platform error names
+  `state.storage.transaction()` as the alternative) and `batch()` is its only unit of atomicity, so
+  `beginTransaction()` buffers every write and flushes the whole buffer as ONE `batch()` at commit;
+  `rollback()` discards and sends nothing. Refusing with a throw was rejected — the platform does
+  offer atomicity, so refusing would strand the committed `IDatabaseService.transaction()`. The two
+  costs are documented, tested, and in PUBLIC_API rather than left to discovery: **no
+  read-your-own-writes** inside a transaction (reads hit committed state), and an in-transaction
+  `create()` **requires an explicit primary key** (a deferred INSERT cannot report a generated key
+  to a caller awaiting `create()` before the flush; outside a transaction `RETURNING *` supplies the
+  real row). `update`/`delete` read first so both honor their committed return contracts. Values are
+  always bound (`?N`); identifiers cannot be, so table/column names are validated against
+  `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, and every builder refuses a statement exceeding D1's
+  **100-bound-parameter** limit rather than letting D1 fail with a message pointing at the SQL.
+  `D1Result` was deliberately NOT widened with `meta`: `delete` uses `DELETE … RETURNING <pk>` and
+  `update` uses `UPDATE … RETURNING *`, so row counts come from `results.length` and the M52 facade
+  is untouched. `D1Adapter` is app-constructed and handed to `DatabasePlugin({ type: 'custom' })` —
+  the `KvSessionStore` precedent, because those options are read before any application exists.
+  **The test double is a real SQLite engine** (`node:sqlite`, the engine D1 runs) rather than a
+  scripted fake, so the generated SQL is genuinely parsed and executed and batch rollback is real; a
+  scripted fake can only prove which calls were made. Writing the tests caught a defect in the new
+  code — several methods typed `Promise<T>` threw **synchronously**, bypassing any caller using
+  `.catch()` (the M52b `createQueueHandler` defect class) — and one already merged on `main`:
+  `resolveLogger` extracted `logger.debug` into a local and invoked it **detached**, and both
+  loggers `logger-plugin` ships implement `debug` via a private `#` field, so `logQueries: true`
+  threw `TypeError` on **every** repository call whenever a real logger was registered. Every
+  existing test injected a plain-object logger, where a detached method works fine. `cache-plugin`
+  carries a regression test for the identical bug; `database-plugin` never got one, and now has it,
+  driving the REAL `ConsoleLogger` — verified to fail without the fix. Deliberately NOT fixed:
+  `DatabaseService.query()` throws synchronously for the memory adapter despite returning a promise
+  (`migrate()` beside it rejects). Two committed tests pin that behavior and correcting it is a
+  behavior change outside this milestone's scope — flagged in a JSDoc note instead. **Not verified
+  against live D1** — CI holds no Cloudflare account. Code review then found the defect no gate
+  could see: `D1Adapter` stored its binding **unvalidated**, so an absent binding (a name typo, a
+  missing `d1_databases` stanza) let the app boot clean, report `up` from the `database` health
+  indicator, and fail every query with a bare `TypeError` — the M50 `KubernetesProvider.authHeader`
+  class, and a contradiction of this package's own principle, since `facades.ts:402` states the
+  guard family exists "to fail at `register()` with a name rather than at the first request with a
+  bare `TypeError`" while `isKvNamespace`/`isR2Bucket` had no D1 member. Coverage could not have
+  caught it — there was no branch to cover, and all three new files were already at 100%. Added
+  `isD1Database` plus constructor validation throwing `CloudflareBindingMissingError`; five tests,
+  all five verified to fail without the guard. Review also closed a test gap where
+  `LIMIT -1 OFFSET ?N` and the `IS NULL` filter were asserted only as SQL **strings** and never
+  executed (both were correct), and corrected three doc claims — a barrel test claiming "exactly the
+  documented public surface" while omitting `D1Adapter`, `IDataSource.create`/`delete` promising
+  persistence with no caveat for the deferred-write path, and a PUBLIC_API "every builder refuses"
+  that overstated the parameter-cap check. All `src` files touched are at 100% branch/function/line)
+  — complete (PR #114)
+- **Milestone 52d** (`packages/cloudflare-plugin` — Durable Objects: a DO-backed
+  `IRealtimeBackplane` registered under the committed `CAPABILITIES.REALTIME_BACKPLANE` and a
+  DO-backed distributed lock handed to `SchedulerPlugin({ distributedLock: { lock } })`
+  structurally. **No `common` change and no new token** — M47 and M18 committed both contracts. The
+  ROADMAP's `SchedulerPlugin({ lock })` was one level too shallow, and `enabled: true` turns out
+  **not** to be required: `resolveLock` consults `lock` before `enabled`, verified from source
+  rather than assumed. Because `cloudflare:workers` is unresolvable off a Worker toolchain, the
+  package ships two plain cores (`RealtimeBackplaneObjectCore`, `DistributedLockObjectCore`) that
+  the application's exported DO class delegates to; a mixin reads better but **cannot be typed
+  without `any`** — the TS mixin constructor constraint requires it and the `unknown[]` form rejects
+  a `(ctx, env)` constructor — so delegation is the design, and it also lets the app's class extend
+  the real base class. **Six platform facts were verified against current Cloudflare docs, and two
+  changed the design.** `ctx.acceptWebSocket` is the **hibernation** API: the runtime may evict the
+  object and **re-run its constructor** while sockets stay open, so the fan-out core holds **zero**
+  in-memory state and reads `getWebSockets()` as the only membership — a `Set` in a field would
+  empty itself on the first hibernation while every non-hibernating test passed, which is the single
+  most likely way this milestone could have shipped green and broken; the test therefore builds a
+  FRESH core over the same state. And **a Worker isolate cannot be relied on to hold a long-lived
+  outbound WebSocket**, which the ROADMAP's "each replica holds a WebSocket to the DO" did not say —
+  so the socket opens lazily and reopens on failure, and the real guarantee is documented in four
+  places rather than implied: a subscription lives exactly as long as the isolate holding the
+  members it serves, and since those members are client sockets in the SAME isolate (an
+  HTTP-triggered Worker has no duration limit while its clients stay connected), losing one loses
+  both **together**. Also checked and recorded so a reviewer does not re-raise them: the
+  6-connection limit counts only connections **awaiting response headers**, so an established socket
+  costs no slot; and DO eviction is ~10 s to hibernation, else 70–140 s. That last one is why the
+  lock persists its holder in `ctx.storage` and never a field — a TTL routinely outlives eviction,
+  and an in-memory deadline would hand the same lock to a second holder. Lock correctness comes from
+  the platform's **input gate** ("while a storage operation is executing, no events shall be
+  delivered to the object"), making the read-compare-write atomic with no transaction; **the test
+  fake had to reproduce that gate** — without it the fake reported five simultaneous winners for one
+  lock, which was a defect in the double, not the code. A non-2xx from the lock object **throws**
+  rather than reporting "not acquired", since a 404 means the binding names the wrong class and
+  folding that into contention would silently disable every scheduled job. Payloads are re-broadcast
+  **verbatim** and never parsed, so the object stays schema-ignorant and a future `RealtimeFrame`
+  widening needs no redeploy of the application's class. `isRealtimeFrame`/`dispatchFrame` are a
+  deliberate local copy of `realtime-backplane-plugin`'s (the M30b `pemToDer` precedent — §2.2
+  forbids the import). Closed the last hole in the binding-guard family:
+  `BindingRegistry.durableObject` cast **unvalidated**, so a missing stanza or mistyped `class_name`
+  let an app boot clean and fail on the first `idFromName` with a bare `TypeError` — exactly what
+  M52c's review found on D1 — now `isDurableObjectNamespace` plus constructor validation. Doc
+  deliverables C1–C5 shipped, including the ARCHITECTURE note that `cloudflare-plugin` is now a
+  **second provider** of `REALTIME_BACKPLANE` and an application must register exactly one. All 28
+  `src` files at **100%** branch/function/line. **Verified against real workerd** via `wrangler dev`
+  (12/12 checks): the whole surface was driven through a bundled Worker exporting both DO classes
+  under the documented wrangler stanza. That harness settled the milestone's last open design
+  question empirically — **a plain DO class WITHOUT `extends DurableObject` is accepted by
+  workerd**, which is what makes the delegation design (forced by §5.2, since a mixin cannot be
+  typed without `any`) correct rather than merely convenient. It also proved the three things no
+  fake could: a real `stub.fetch` WebSocket upgrade answering a 101 that carries a `webSocket`, a
+  real `WebSocketPair` + `state.acceptWebSocket` inside the object, and the real **input gate** — 8
+  concurrent contenders on one lock object yielded exactly 1 winner, the property the Deno fake had
+  to hand-simulate. The code-review fix was verified there too, with a negative control: with the
+  `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
+  restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
+  Cloudflare account) — complete (PR #115)
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40, with **M51b**
+  (GraphQL subscriptions over WebSocket/SSE, request batching, Automatic Persisted Queries, custom
+  scalar resolvers, starter arm) queued behind them — unless reprioritized.
 
 ## Verification (run before declaring any work done)
 

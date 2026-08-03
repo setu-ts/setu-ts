@@ -129,6 +129,11 @@ export const CAPABILITIES = {
   METADATA_STORE: 'metadata-store',
   /** gRPC plugin — server-side Connect/gRPC/gRPC-Web co-serving. */
   GRPC: 'grpc',
+  /**
+   * Cloudflare Workers platform bindings (KV, R2, D1, Queues, service and
+   * Durable Object namespaces) published as one typed accessor.
+   */
+  CLOUDFLARE: 'cloudflare',
   /** GraphQL plugin — schema-first and code-first GraphQL-over-HTTP. */
   GRAPHQL: 'graphql',
 } as const;

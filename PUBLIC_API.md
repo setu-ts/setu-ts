@@ -876,8 +876,13 @@ app.router.post('/orders', async (ctx) => {
     const paymentRepo = uow.getRepository<Payment>('Payment');
 
     // All operations in same transaction
-    const newOrder = await orderRepo.create(ctx.request.body);
-    await inventoryRepo.decrement(newOrder.productId, newOrder.quantity);
+    const newOrder = await orderRepo.create(await ctx.request.json());
+
+    const stock = await inventoryRepo.findById(newOrder.productId);
+    await inventoryRepo.update(newOrder.productId, {
+      quantity: stock!.quantity - newOrder.quantity,
+    });
+
     await paymentRepo.create({ orderId: newOrder.id, amount: newOrder.total });
 
     return newOrder;
@@ -909,6 +914,76 @@ interface IRepository<Entity> {
   count(options?: CountOptions): Promise<number>;
 }
 ```
+
+### Custom Adapters (external backends)
+
+`DatabasePluginOptions` is a union discriminated on `type`. The `'custom'` arm accepts any
+`IDatabaseAdapter` from `@hono-enterprise/common`, which is how a backend implemented outside this
+package is registered — no plugin imports another plugin.
+
+```typescript
+import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+
+app.register(DatabasePlugin({
+  type: 'custom',
+  adapter: new D1Adapter(env.DB as ID1Database),
+}));
+```
+
+`adapter` is required by the union, so a `'custom'` registration that omits it is a compile error
+rather than a startup throw. The plugin calls `connect()` on the adapter during `register()` and
+`disconnect()` on shutdown; it never constructs or replaces it. `name` and `options` apply as usual
+— `logQueries` routes a custom adapter's data sources through the same single logging wrapper every
+built-in adapter uses.
+
+The port to implement:
+
+```typescript
+interface IDatabaseAdapter extends IOrmAdapter {
+  createDataSource(entity: string): IDataSource;
+  beginTransaction(): Promise<IAdapterTransaction>;
+  rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]>;
+}
+
+interface IDataSource {
+  findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]>;
+  findById(id: string | number): Promise<Record<string, unknown> | null>;
+  create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>>;
+  update(
+    id: string | number,
+    data: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown>>;
+  delete(id: string | number): Promise<boolean>;
+  count(where: Record<string, unknown>): Promise<number>;
+}
+```
+
+A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
+`select` itself, and `BaseRepository` must not re-apply any of them.
+
+### Exports
+
+| Export                                                                                                  | Kind                              |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `DatabasePlugin`                                                                                        | factory                           |
+| `DatabaseService`                                                                                       | class                             |
+| `BaseRepository`, `UnitOfWork`                                                                          | classes                           |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                      | classes                           |
+| `PrismaRepository`, `DrizzleRepository`                                                                 | classes                           |
+| `createPrismaDataSource`, `createDrizzleDataSource`                                                     | functions                         |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                        | interfaces                        |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions` | types                             |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                         | types                             |
+| `FindOptions`, `CountOptions`, `OrderDirection`                                                         | types                             |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                             | re-exports from `common`          |
+| `DataSource`                                                                                            | deprecated alias of `IDataSource` |
+
+`DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
+the promoted `IDataSource` (the same type), and will be removed in the next major version.
+
+`DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
+`type`. Both are additive for callers — every existing registration compiles unchanged.
 
 ### Multiple Databases
 
@@ -5903,7 +5978,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                                                                                                    |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                     |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                     |
-| Database            | `IOrmAdapter`, `ITransaction`                                                                                                                                                                                                                                                                                     |
+| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                            |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                     |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                  |
 | Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                     |
@@ -5926,6 +6001,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                    |
 | DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                       |
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                    |
+| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                |
 
 Contract notes:
 
@@ -5987,6 +6063,9 @@ Contract notes:
 - `CAPABILITIES.GRPC` (`'grpc'`) — the capability token under which `GrpcPlugin` registers the
   `IGrpcService`. The service provides gRPC/Connect co-serving on the same port as ordinary Hono
   routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49.
+- `CAPABILITIES.CLOUDFLARE` (`'cloudflare'`) — the capability token under which `CloudflarePlugin`
+  registers `ICloudflareBindings`: typed access to a Worker's KV, R2, D1, Queues, service and
+  Durable Object bindings, its string variables, and `waitUntil`. Added in Milestone 52.
 - `CAPABILITIES.GRAPHQL` (`'graphql'`) — the capability token under which `GraphqlPlugin` registers
   the `IGraphqlService`. The service provides schema-first and code-first GraphQL execution over
   ordinary kernel routes with media-type negotiation. Added in Milestone 51.
@@ -6119,8 +6198,8 @@ Per-runtime upgrade seams:
 
 | Export                              | Kind | Purpose                                                                        |
 | ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
-| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`{ platform?: RuntimePlatform }`)                 |
-| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`)                   |
+| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`platform`, `env`)                                |
+| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`, `env`)            |
 | `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                         |
 | `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
 | `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
@@ -6236,6 +6315,24 @@ Contract notes:
   facades over platform globals, holding no connection, cache, or handle registry, and nothing
   compares them by identity. One caveat — `env` is a **snapshot taken at construction**, not a live
   view, so a variable set between two constructions is visible only to the later instance.
+
+- **`env` on Cloudflare Workers.** There is no ambient environment on the edge: bindings and
+  variables arrive as the `env` argument of the `fetch` handler. Both `RuntimePlugin` and
+  `createRuntimeServices` therefore take an `env` option, and without it `runtime.env` is empty on
+  Workers, so `ConfigPlugin` and the secrets `EnvProvider` read nothing. Pass what the platform
+  provides:
+
+  ```typescript
+  import { env } from 'cloudflare:workers';
+
+  const app = createApplication({ plugins: [RuntimePlugin({ env })] });
+  ```
+
+  Only the record's **string** entries populate `runtime.env`, which is contracted as
+  `Readonly<Record<string, string | undefined>>`; object bindings are filtered out by the pure
+  `splitWorkerEnv` in `common` and reached through `CAPABILITIES.CLOUDFLARE` instead. Passing them
+  through unfiltered would hand `ConfigPlugin` a `[object Object]` for every KV namespace. The
+  option is ignored on Deno, Node, and Bun, which read their own ambient environment.
 
 ---
 
@@ -6979,6 +7076,363 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
   protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
   support.
+
+---
+
+## API Reference: @hono-enterprise/cloudflare-plugin
+
+Cloudflare Workers platform bindings, published under `CAPABILITIES.CLOUDFLARE`, plus optional
+KV-backed cache, R2-backed storage, and a Queues-backed `IQueue`. Zero npm dependencies. Added in
+Milestone 52; Queues, Cron Triggers, and the Cache API response cache added in Milestone 52b.
+
+### Registration
+
+```typescript
+import { env, waitUntil } from 'cloudflare:workers';
+import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
+
+app.register(CloudflarePlugin({
+  env, // required — the Worker's bindings and variables
+  waitUntil, // the platform background-work sink
+  requireBindings: ['CACHE_KV'], // fail at register() rather than at first use
+  cache: { binding: 'CACHE_KV', prefix: 'cache:', defaultTtlSeconds: 300 },
+  storage: { binding: 'UPLOADS', prefix: 'user-uploads/' },
+  queue: { binding: 'JOBS' },
+}));
+```
+
+Consuming a queue and receiving Cron Triggers need **module-level handler exports** the platform
+invokes directly — `fetch` is not involved — so the application assembles them beside it:
+
+```typescript
+import {
+  createQueueHandler,
+  createScheduledHandler,
+  WorkersCron,
+} from '@hono-enterprise/cloudflare-plugin';
+
+await app.start();
+
+const cron = new WorkersCron();
+cron.on('0 3 * * *', () => rebuildReports(app)); // must match wrangler.toml [triggers] crons
+
+export default {
+  fetch: app.fetch,
+  queue: createQueueHandler(app),
+  scheduled: createScheduledHandler(cron),
+};
+```
+
+Nothing in the package imports `cloudflare:workers`; the application passes `env` in. That specifier
+is unresolvable outside a Worker toolchain, so importing it here would break `deno check` on every
+other runtime — and injection is what the platform docs recommend for testability.
+
+### Options
+
+| Option                    | Type                  | Default      | Consumer / behavior                                                                                              |
+| ------------------------- | --------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `env`                     | `CloudflareWorkerEnv` | required     | `BindingRegistry` — the record every accessor reads                                                              |
+| `waitUntil`               | `WaitUntilHost`       | —            | `resolveWaitUntil` — delegated to; omit off Workers                                                              |
+| `requireBindings`         | `readonly string[]`   | `[]`         | `register()` — throws naming every absent entry                                                                  |
+| `cache.binding`           | `string`              | —            | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE`                                                   |
+| `cache.name`              | `string`              | `'default'`  | Plugin factory — derives `cache.<name>` when not `'default'`                                                     |
+| `cache.prefix`            | `string`              | —            | `KvCacheStore` — key prefix; **required to call `clear()`**                                                      |
+| `cache.defaultTtlSeconds` | `number`              | —            | `KvCacheStore.set` — applied when `ttlSeconds` is omitted                                                        |
+| `storage.binding`         | `string`              | —            | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`                                                       |
+| `storage.name`            | `string`              | `'default'`  | Plugin factory — derives `storage.<name>` when not `'default'`                                                   |
+| `storage.prefix`          | `string`              | —            | `R2Storage` — object-key prefix                                                                                  |
+| `queue.binding`           | `string`              | —            | `WorkersQueue` — the producer binding serving `CAPABILITIES.QUEUE`                                               |
+| `queue.name`              | `string`              | `'default'`  | Plugin factory — derives `queue.<name>` when not `'default'`                                                     |
+| `queue.maxDelaySeconds`   | `number`              | `86400`      | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated                                       |
+| `durableObject.binding`   | `string`              | —            | `DurableObjectBackplane` — the namespace serving `CAPABILITIES.REALTIME_BACKPLANE`; validated at `register()`    |
+| `durableObject.name`      | `string`              | `'default'`  | Plugin factory — derives `realtime-backplane.<name>` when not `'default'`                                        |
+| `durableObject.topic`     | `string`              | `'realtime'` | `DurableObjectBackplane` — the `idFromName` value every replica shares; two apps sharing a namespace must differ |
+
+### Exports
+
+| Export                                                                                                                                                                                                                                                                                                                                  | Kind          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `CloudflarePlugin`                                                                                                                                                                                                                                                                                                                      | factory       |
+| `ICloudflareBindings`                                                                                                                                                                                                                                                                                                                   | interface     |
+| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`, `WorkersQueueArm`, `DurableObjectArm`                                                                                                                                                                                                                                      | types         |
+| `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                                                                                     | class + types |
+| `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                                                                               | class + types |
+| `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                                                                                         | class + types |
+| `D1Adapter`, `D1AdapterOptions`, `D1EntityMapping`                                                                                                                                                                                                                                                                                      | class + types |
+| `WaitUntilHost`, `LoggerSource`                                                                                                                                                                                                                                                                                                         | types         |
+| `WorkersQueue`, `WorkersQueueOptions`, `JobIdSource`                                                                                                                                                                                                                                                                                    | class + types |
+| `createQueueHandler`, `QueueHandler`, `QueueHandlerOptions`                                                                                                                                                                                                                                                                             | fn + types    |
+| `WorkersCron`, `WorkersCronOptions`, `CronHandler`                                                                                                                                                                                                                                                                                      | class + types |
+| `createScheduledHandler`, `ScheduledHandler`                                                                                                                                                                                                                                                                                            | fn + type     |
+| `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`                                                                                                                                                                                                                                                                          | fn + types    |
+| `assessCacheability`, `CacheabilityInput`, `CacheRefusal`                                                                                                                                                                                                                                                                               | fn + types    |
+| `RealtimeBackplaneObjectCore`, `RealtimeBackplaneObjectCoreOptions`                                                                                                                                                                                                                                                                     | class + type  |
+| `DistributedLockObjectCore`, `DistributedLockObjectCoreOptions`                                                                                                                                                                                                                                                                         | class + type  |
+| `DurableObjectBackplane`, `DurableObjectBackplaneOptions`                                                                                                                                                                                                                                                                               | class + type  |
+| `DurableObjectLock`, `DurableObjectLockOptions`                                                                                                                                                                                                                                                                                         | class + type  |
+| `asUpgradeResponse`, `DurableObjectUpgradeResponse`                                                                                                                                                                                                                                                                                     | fn + type     |
+| `createDefaultDurableObjectWebSocketHost`, `DurableObjectWebSocketHost`, `DurableObjectWebSocketPair`                                                                                                                                                                                                                                   | fn + types    |
+| `IDurableObjectState`, `IDurableObjectStorage`, `IDurableObjectWebSocket`, `IDurableObjectClientSocket`, `DurableObjectMessageEvent`                                                                                                                                                                                                    | types         |
+| `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
+| `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isDurableObjectNamespace`                                                                                                                                                                                                                                                               | guards        |
+| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                                                                                          | errors        |
+
+### `D1Adapter` — D1 as a first-class database
+
+Implements the committed `IDatabaseAdapter` (from `@hono-enterprise/common`), so a Worker serves
+`CAPABILITIES.DATABASE` through the ordinary repository and Unit-of-Work surface. Constructed by the
+application and handed to `DatabasePlugin`, matching `KvSessionStore`: those plugin options are read
+when the plugin is **constructed**, before any application exists, so an adapter published in the
+service registry could never reach it.
+
+```typescript
+import { env } from 'cloudflare:workers';
+import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+
+app.register(DatabasePlugin({
+  type: 'custom',
+  adapter: new D1Adapter(env.DB as ID1Database, {
+    tables: { User: { table: 'users', primaryKey: 'user_id' } },
+  }),
+}));
+```
+
+| Option                       | Default         | Behavior                                                          |
+| ---------------------------- | --------------- | ----------------------------------------------------------------- |
+| `tables`                     | `{}`            | Per-entity `{ table, primaryKey }` overrides                      |
+| `D1EntityMapping.table`      | the entity name | Physical table name; validated as a SQL identifier before quoting |
+| `D1EntityMapping.primaryKey` | `'id'`          | Key column used by `findById` / `update` / `delete`               |
+
+**Transactions.** D1 has **no interactive transaction** — `BEGIN TRANSACTION` is rejected by the
+platform — and `batch()` is its only unit of atomicity. `beginTransaction()` therefore **buffers**
+every write and flushes the whole buffer as one `batch()` at `commit()`; `rollback()` discards the
+buffer and sends nothing. Two consequences, both deliberate:
+
+- **No read-your-own-writes inside a transaction.** Reads run immediately against committed state,
+  so a row written earlier in the same transaction is not visible to a later read within it.
+- **`create()` inside a transaction requires an explicit primary key**, and throws
+  `CloudflareUnsupportedError` naming the constraint when one is absent — a deferred `INSERT` cannot
+  report a generated key to a caller that awaits `create()` before the flush. Outside a transaction
+  `create()` uses `RETURNING *` and returns the real persisted row, generated columns included.
+
+**Identifiers and limits.** Values are always bound (`?N`); identifiers cannot be, so table and
+column names are validated against `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, throwing
+`CloudflareUnsupportedError` otherwise. D1 binds at most **100 parameters per query**, and every
+builder whose parameter count varies with the caller's query — select, insert, update, count —
+refuses a statement that would exceed it rather than letting D1 fail with a message that points at
+the SQL instead of the caller's query. (Find-by-id and delete bind exactly one value and so cannot.)
+
+**The binding is validated where the adapter is built.** `new D1Adapter(env.DB)` throws
+`CloudflareBindingMissingError` when the binding is absent or not D1-shaped, naming what arrived and
+pointing at the `d1_databases` stanza. Without that check a mistyped binding name would register
+cleanly, report `up` from the `database` health indicator, and fail every query with a bare
+`TypeError`. The `isD1Database` guard is exported alongside `isKvNamespace` / `isR2Bucket`.
+
+**Not verified against live D1.** CI holds no Cloudflare account. Every generated statement is
+asserted verbatim, and the whole surface is driven against a real SQLite engine (the engine D1
+runs), including batch rollback.
+
+### Durable Objects — realtime backplane and distributed lock
+
+Both need a Durable Object class the **application** exports plus a wrangler stanza; no plugin
+option can export a class on an application's behalf. This package ships the behaviour as two plain
+cores that the exported class delegates to. A mixin taking the base class would read better but
+cannot be typed without `any` — the TypeScript mixin constructor constraint requires it, and the
+`unknown[]` form rejects a class whose constructor takes `(ctx, env)` — so delegation is the design,
+and it also keeps `cloudflare:workers` (unresolvable off a Worker toolchain) out of the package.
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import { RealtimeBackplaneObjectCore } from '@hono-enterprise/cloudflare-plugin';
+
+export class RealtimeBackplaneObject extends DurableObject {
+  #core = new RealtimeBackplaneObjectCore(this.ctx);
+  override fetch(request: Request): Promise<Response> {
+    return this.#core.fetch(request);
+  }
+  webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    this.#core.webSocketMessage(ws, message);
+  }
+  webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    this.#core.webSocketClose(ws, code, reason);
+  }
+  webSocketError(ws: WebSocket): void {
+    this.#core.webSocketError(ws);
+  }
+}
+```
+
+```toml
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeBackplaneObject"
+
+[exports.RealtimeBackplaneObject]
+type = "durable-object"
+storage = "sqlite"
+```
+
+`storage = "sqlite"` is required on the Workers Free plan. The legacy `migrations` +
+`new_sqlite_classes` flow still works, but a Worker may use only one of the two flows.
+
+**Backplane.** The `durableObject` arm registers `DurableObjectBackplane` under
+`CAPABILITIES.REALTIME_BACKPLANE` (or `realtime-backplane.<name>`), which `websocket-plugin` and
+`sse-plugin` resolve on their own. Register this arm **or** `RealtimeBackplanePlugin`, never both —
+the kernel rejects two providers of one token.
+
+The Durable Object holds **zero in-memory state**. Sockets are accepted with `ctx.acceptWebSocket`,
+the hibernation API, which lets the runtime evict the object and re-run its constructor while
+connections stay open; `getWebSockets()` is the only membership that survives, so it is the only
+membership used. The payload is re-broadcast verbatim and never parsed, which keeps the object
+schema-ignorant — a future widening of `RealtimeFrame` needs no redeploy of the application's class.
+
+**The subscription guarantee is narrower than "durable", deliberately.** A Worker isolate is evicted
+at Cloudflare's discretion and its outbound WebSockets go with it. That is sound rather than lossy
+because the members the subscription serves are client sockets held by the _same_ isolate, and an
+HTTP-triggered Worker stays alive while its clients remain connected — so losing the isolate loses
+the subscription and its members together. The socket opens lazily on first publish and reopens
+after any failure.
+
+**Lock.** `DurableObjectLock` structurally satisfies `scheduler-plugin`'s `IDistributedLock` without
+importing it (a plugin may not import a plugin), and is app-constructed then handed over, matching
+`KvSessionStore` and `D1Adapter`:
+
+```typescript
+const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, { runtime });
+// `enabled: true` is NOT required — resolveLock consults `lock` before `enabled`.
+app.register(SchedulerPlugin({ distributedLock: { lock } }));
+```
+
+One object per lock key. Correctness comes from the platform: a Durable Object processes one event
+at a time and holds back delivery while a storage operation runs, so the read-compare-write is
+atomic with no transaction and no quorum. The holder is persisted in `ctx.storage`, never a field,
+because an object is evicted after 70–140 seconds of inactivity and a lock TTL routinely outlives
+that. A non-2xx from the object **throws** rather than reporting "not acquired": a 404 means the
+binding names the wrong class, and folding that into contention would silently disable every
+scheduled job.
+
+**Verified against real workerd** (`wrangler dev`, 12/12 checks) — including a plain Durable Object
+class without `extends DurableObject`, a real `stub.fetch` WebSocket upgrade, real
+`state.acceptWebSocket` hibernation, and the real input gate serializing 8 concurrent lock
+contenders down to one winner. **Not verified against a deployed Worker**: CI holds no Cloudflare
+account.
+
+### `ICloudflareBindings`
+
+`has(name)`, `names()`, `vars()`, `get<T>(name)`, `kv(name)`, `r2(name)`, `d1(name)`, `queue(name)`,
+`service(name)`, `durableObject(name)`, `waitUntil(promise)`.
+
+Every accessor **throws** `CloudflareBindingMissingError` for an absent name — naming the binding
+and listing the ones that are present — rather than returning `undefined`; a missing binding is a
+deployment error, not an expected case. Use `has` when absence is expected. `kv`, `r2` and
+`durableObject` additionally validate the binding's shape, so an R2 bucket wired into a KV option
+fails at `register()` with a message rather than at first use with a `TypeError`. (`d1` is validated
+by `D1Adapter`'s constructor instead, where the adapter is built.)
+
+### Notes
+
+- **Registration is opt-in and instance-named.** `CAPABILITIES.CLOUDFLARE` is always registered;
+  `CAPABILITIES.CACHE` and `CAPABILITIES.STORAGE` only when their arm is configured. `name` derives
+  `cache.<name>` / `storage.<name>` exactly as `CachePlugin` does, so a KV cache can sit beside a
+  memory one. Registering an unnamed instance beside `CachePlugin()` is a startup error, because the
+  kernel rejects two providers of one token.
+- **KV's `expirationTtl` minimum is 60 seconds, and `ICacheStore.set` is unbounded.** Values carry a
+  `{ v, e }` envelope whose logical deadline is checked against `runtime.now()` on every read, while
+  the physical `expirationTtl` is floored at 60 so KV can still reclaim the key. A 5-second entry
+  therefore expires in 5 seconds. The same envelope backs `KvSessionStore`.
+- **`clear()` requires a prefix.** The binding has no bulk delete, so the sweep pages `list` (1000
+  keys maximum) and deletes each key. Without a prefix it would delete keys the store does not own,
+  so it throws `CloudflareUnsupportedError` instead.
+- **A read never deletes a key the store does not own.** The envelope decoder reports three
+  outcomes, not two — live, _this store's_ expired entry, and neither — and only the middle one is
+  swept. That is what makes a shared namespace safe, and it is also why a deliberately cached `null`
+  survives: `get` answers `null` for it (the contract has no other way to say so) while `has` and
+  `delete` report it as present, and no path removes it.
+- **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
+- **`R2Storage.getSignedUrl` throws.** The R2 Workers binding exposes no presign operation at all.
+  `getStream` is implemented, so serving through a route is a zero-copy alternative.
+- **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the
+  committed `Promise<boolean>` costs one extra round trip rather than a constant `true`.
+- **`KvSessionStore` is constructed by the application**, not registered by the plugin:
+  `SessionPluginOptions.store` is read at plugin construction, before any application exists.
+- **No binding I/O at registration.** Cloudflare prohibits I/O outside a request context, so the
+  plugin only captures and shape-checks bindings at `register()`. The `cloudflare` health indicator
+  performs no binding I/O either — a KV read per probe interval is billable. It reports `degraded`
+  when `runtime.platform()` is not `cloudflare-workers`.
+- **`waitUntil` reports its failures.** A rejection handler is attached whether or not a host was
+  injected, so background work never fails silently. With no host the promise still runs: no runtime
+  off Workers cuts work off at the response.
+- **Compatibility date.** `import { waitUntil } from 'cloudflare:workers'` shipped 2025-08-08;
+  `honoe new --runtime cloudflare-workers` scaffolds a later date.
+- **Unverified against a live Worker.** Every binding is exercised against a fake built from the
+  documented signatures — including KV's 60-second floor and R2's void `delete` — but CI holds no
+  Cloudflare account.
+- **Queues: `addRecurring` throws.** Cloudflare Queues has no recurring message. The error names
+  Cron Triggers and `WorkersCron` as the platform's own mechanism. `add` and `process` map directly:
+  `AddJobOptions.delayMs` is converted to the platform's whole-second `delaySeconds` **rounded up**
+  (so a job is never delivered early) and refused above `maxDelaySeconds`, while
+  `ProcessOptions.concurrency` bounds how many of one batch's messages for that name run at a time —
+  per name, so one processor's limit never throttles another's.
+- **A job's id comes from this package, not the platform.** `producer.send()` resolves to `void`, so
+  the id `add` returns is minted from `runtime.uuid()` and travels inside a `{ v, name, id, data }`
+  envelope — which is also what carries the job **name**, since a Cloudflare message body is
+  arbitrary JSON and `IQueue.process` dispatches by name. The id the caller receives is therefore
+  the id the processor sees as `job.id`.
+- **An unroutable message is RETRIED, never acked.** A body that is not a readable envelope, or a
+  name with no registered processor, is returned for redelivery and reported through the logger —
+  acking it would discard it permanently and silently, which is the failure a queue exists to
+  prevent. A processor that throws is likewise retried, leaving the queue's own `max_retries` and
+  dead-letter configuration to decide what happens next. `AddJobOptions.maxAttempts` is enforced at
+  dispatch, because Cloudflare's `max_retries` is queue-wide configuration rather than per message.
+- **Cron Triggers do NOT register `CAPABILITIES.SCHEDULER`, deliberately.** Of `IScheduler`'s eight
+  methods only `cron` is expressible on Workers: `every` and `delay` arm a timer and the isolate is
+  evicted between invocations (the same reason `scheduler-plugin` cannot run on Workers);
+  `pause`/`resume`/`remove` need state that does not survive between invocations; and `getNextRun`
+  is owned by the `wrangler.toml` `[triggers]` block. An `IScheduler` where six of eight methods
+  throw would violate Liskov substitution, so `WorkersCron` is a purpose-built registry reached
+  directly instead — which is why `createScheduledHandler` takes it while `createQueueHandler` takes
+  the application.
+- **A `WorkersCron` expression must match `wrangler.toml` exactly.** Nothing in the process can read
+  that file, so an expression registered here but absent from `[triggers] crons` never fires, and a
+  configured trigger with nothing registered here is reported on every occurrence. `expressions()`
+  exists so an application can assert its own coverage. Matching is exact — whitespace is not
+  normalized.
+- **`cacheApiMiddleware` is a different layer from `cache-plugin`'s `cacheMiddleware`**, and the two
+  compose: this one serves from the datacenter the request landed in with no round trip, while
+  `cacheMiddleware` reads an `ICacheStore` every colo shares. It therefore reports under
+  **`X-Cache-Api`** (`HIT`/`MISS`/`BYPASS`), never `X-Cache`, so an operator can tell which layer
+  answered. `caches.default` is **per-datacenter**: a hit rate measured in one location says nothing
+  about another, and a `delete` does not evict globally.
+- **The platform's cache refusals are checked before the write, not discovered by it.**
+  `caches.default.put` throws for a non-GET request, status 206, `Vary: *`, and an uncleared
+  `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the
+  write. The 206 and `Vary: *` checks are unconditional — an operator may legitimately configure
+  `cacheableStatuses: [200, 206]`, at which point only the explicit rule stops the platform
+  throwing. `Cache-Control: private=Set-Cookie` is the platform's documented opt-in and clears the
+  `set-cookie` refusal.
+- **Only GET requests touch the edge cache — on the read as well as the write.** The cache key is a
+  URL string, which the Cache API resolves as a GET request, so consulting it for a `POST` would
+  serve the cached GET body and skip the handler entirely: a mutation silently discarded behind a
+  200. Any non-GET request passes straight through with `X-Cache-Api: BYPASS`, which matters most
+  when the middleware sits on the global pipeline rather than a single GET route.
+- **A failed cache write never fails the request.** `Cache.put` rejects for an oversized response or
+  a quota error, and by then the response already exists — so both write paths report and continue
+  rather than turning a 200 into a 500. With the plugin registered `waitUntil` carries that
+  reporting; without it the middleware logs through `CAPABILITIES.LOGGER` when one is present.
+- **A cache HIT is replayed as a stream**, so a cached response of any size reaches the client
+  without being buffered — which means `app.inject()` cannot read its body. Drive a cached route
+  with `app.fetch` and a web `Request`, the entry point a Worker invokes anyway. A **streaming**
+  response is never cached: teeing it would double the memory the stream exists to avoid.
+- **The cache write rides `waitUntil` when the plugin is registered**, so it never delays the
+  response; with `CAPABILITIES.CLOUDFLARE` absent the middleware awaits it inline rather than
+  abandoning it, and with no cache handle at all it passes through with `BYPASS` rather than
+  throwing.
+- **Not in this package.** D1 as a database backend is Milestone 52c — the seam a backend implements
+  (`IDatabaseAdapter`) lives inside `database-plugin` and is not a committed `common` port, so
+  shipping it means a contract promotion. A Durable-Object realtime backplane and distributed lock
+  are Milestone 52d: both need the application to export a DO class plus a wrangler migration
+  stanza.
 
 ---
 

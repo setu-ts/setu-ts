@@ -54,18 +54,48 @@ export interface CreateRuntimeServicesOptions {
   /**
    * Replace the built-in platform → factory map.
    *
+   * Supplying one also opts out of {@linkcode CreateRuntimeServicesOptions.env}:
+   * the map is used verbatim, so a replacement factory owns its own env source.
+   *
    * @internal
    */
   readonly adapters?: RuntimeAdapterFactories;
+  /**
+   * The Cloudflare Workers `env` record, which is the only way bindings and
+   * variables reach a Worker — there is no ambient `process.env` on the edge.
+   *
+   * Pass the `env` the platform provides, typically
+   * `import { env } from 'cloudflare:workers'`. Only its **string** entries
+   * become {@linkcode IRuntimeServices.env}; object bindings (KV, R2, D1, …)
+   * are reached through `CAPABILITIES.CLOUDFLARE` instead, because
+   * `IRuntimeServices.env` is contracted as a string record.
+   *
+   * Ignored on Deno, Node, and Bun, which read their own ambient environment.
+   *
+   * @since 0.2.0
+   */
+  readonly env?: Readonly<Record<string, unknown>>;
 }
 
-/** The built-in platform → factory map. */
-const defaultRuntimeAdapters: RuntimeAdapterFactories = {
-  deno: createDenoRuntimeServices,
-  node: createNodeRuntimeServices,
-  bun: createBunRuntimeServices,
-  'cloudflare-workers': createCloudflareRuntimeServices,
-};
+/**
+ * Builds the platform → factory map.
+ *
+ * A function rather than a module constant because the Cloudflare factory has
+ * to close over the caller's `env`, and the three ambient-environment platforms
+ * take unrelated first parameters that must not receive it.
+ */
+function defaultRuntimeAdapters(
+  env: Readonly<Record<string, unknown>> | undefined,
+): RuntimeAdapterFactories {
+  return {
+    deno: createDenoRuntimeServices,
+    node: createNodeRuntimeServices,
+    bun: createBunRuntimeServices,
+    'cloudflare-workers': (): IRuntimeServices =>
+      // `exactOptionalPropertyTypes`: omit `env` rather than pass undefined.
+      createCloudflareRuntimeServices(env === undefined ? undefined : { env }),
+  };
+}
 
 /**
  * Creates runtime services for the current platform.
@@ -86,6 +116,9 @@ const defaultRuntimeAdapters: RuntimeAdapterFactories = {
  * observe the environment as it was at each of those moments, so a variable set
  * in between is visible only to the later one.
  *
+ * On Cloudflare Workers there is no ambient environment to snapshot, so `env`
+ * stays empty unless {@linkcode CreateRuntimeServicesOptions.env} is supplied.
+ *
  * @example Resolving configuration before choosing plugins
  * ```typescript
  * import { createRuntimeServices } from '@hono-enterprise/runtime';
@@ -93,6 +126,13 @@ const defaultRuntimeAdapters: RuntimeAdapterFactories = {
  *
  * const config = await loadConfig(createRuntimeServices());
  * const url = config.getOrThrow<string>('DATABASE_URL');
+ * ```
+ * @example The same, on Cloudflare Workers
+ * ```typescript
+ * import { env } from 'cloudflare:workers';
+ * import { createRuntimeServices } from '@hono-enterprise/runtime';
+ *
+ * const config = await loadConfig(createRuntimeServices({ env }));
  * ```
  * @param options - Platform override and adapter injection
  * @returns Runtime services for the resolved platform
@@ -103,7 +143,7 @@ export function createRuntimeServices(
   options?: CreateRuntimeServicesOptions,
 ): IRuntimeServices {
   const platform: RuntimePlatform = options?.platform ?? detectRuntime();
-  const adapters = options?.adapters ?? defaultRuntimeAdapters;
+  const adapters = options?.adapters ?? defaultRuntimeAdapters(options?.env);
 
   const factory = (adapters as Record<string, (() => IRuntimeServices) | undefined>)[platform];
   if (factory === undefined) {

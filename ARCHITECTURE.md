@@ -1001,6 +1001,7 @@ graph TB
         queue[queue-plugin]
         storage[storage-plugin]
         service-discovery[service-discovery-plugin]
+        cloudflare[cloudflare-plugin]
     end
 
     subgraph Security Plugins
@@ -1100,6 +1101,7 @@ graph TB
     common --> multi-tenancy
     kernel --> multi-tenancy
     common --> service-discovery
+    common --> cloudflare
 ```
 
 ### Package Details
@@ -1441,6 +1443,10 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
 | **Public API**       | `RealtimeBackplanePlugin()`; `IRealtimeBackplane`                                        |
 | **Extension Points** | Custom transport via the `'custom'` arm                                                  |
 | **Rules**            | Consumed OPTIONALLY — absent, rooms and channels stay in-process. Never imports a plugin |
+
+`cloudflare-plugin` is a **second provider** of `CAPABILITIES.REALTIME_BACKPLANE` (M52d, over a
+Durable Object). An application registers exactly one of the two: the kernel rejects two providers
+of a single capability token at startup.
 
 #### @hono-enterprise/multi-tenancy-plugin
 
@@ -2371,17 +2377,36 @@ class ApiController {
 
 ### Creating a Database Adapter
 
-```typescript
-import { IOrmAdapter, ITransaction } from '@hono-enterprise/common';
+`IDatabaseAdapter` is the full backend port — lifecycle plus data access. It lives in `common`
+(promoted there in M52c) precisely so a backend can be implemented in **any** package, including one
+outside this repository, without importing `database-plugin`. Register it through the plugin's
+`'custom'` arm.
 
-export class MyOrmAdapter implements IOrmAdapter {
+There is no `migrate()` on the contract: programmatic migration is not honestly implementable across
+the supported backends, and each one owns migrations through its own CLI.
+
+```typescript
+import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@hono-enterprise/common';
+
+export class MyAdapter implements IDatabaseAdapter {
   async connect(): Promise<void> {/* ... */}
   async disconnect(): Promise<void> {/* ... */}
   isReady(): boolean {/* ... */}
-  createTransaction(): ITransaction {/* ... */}
-  async migrate(): Promise<void> {/* ... */}
+
+  // One data source per entity; it owns query evaluation end to end.
+  createDataSource(entity: string): IDataSource {/* ... */}
+
+  // The handle also opens transaction-scoped data sources, which is what makes
+  // a Unit of Work spanning several entities atomic.
+  async beginTransaction(): Promise<IAdapterTransaction> {/* ... */}
+
+  async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {/* ... */}
 }
+
+app.register(DatabasePlugin({ type: 'custom', adapter: new MyAdapter() }));
 ```
+
+`@hono-enterprise/cloudflare-plugin`'s `D1Adapter` is the worked example.
 
 ### Creating a Cache Adapter
 

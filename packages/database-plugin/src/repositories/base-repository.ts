@@ -5,38 +5,29 @@
  *
  * @module
  */
+import type { IDataSource } from '@hono-enterprise/common';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
-import {
-  normalizeCountOptions,
-  type NormalizedQuery,
-  normalizeQuery,
-} from '../query/query-builder.ts';
+import { normalizeCountOptions, normalizeQuery } from '../query/query-builder.ts';
 import type { IRepository } from '../interfaces/index.ts';
 
 /**
- * Internal data-source contract that adapter-specific implementations
- * provide. This keeps {@linkcode BaseRepository} decoupled from concrete
- * ORM clients.
+ * The data-access seam adapter-specific implementations provide, keeping
+ * {@linkcode BaseRepository} decoupled from concrete ORM clients.
  *
- * @internal
+ * @deprecated Use {@linkcode IDataSource} from `@hono-enterprise/common`
+ * instead — the port was promoted there in M52c so a backend living in
+ * another package can implement it. This alias is the same type and keeps
+ * working; it will be removed in the next major version.
+ * @example
+ * ```typescript
+ * // Before
+ * import type { DataSource } from '@hono-enterprise/database-plugin';
+ * // After
+ * import type { IDataSource } from '@hono-enterprise/common';
+ * ```
+ * @since 0.1.0
  */
-export interface DataSource {
-  /** Find all entities matching the normalized query. */
-  findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]>;
-  /** Find a single entity by its primary key value. */
-  findById(id: string | number): Promise<Record<string, unknown> | null>;
-  /** Insert a new entity and return it with generated fields. */
-  create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>>;
-  /** Update an existing entity by primary key. */
-  update(
-    id: string | number,
-    data: Partial<Record<string, unknown>>,
-  ): Promise<Record<string, unknown>>;
-  /** Delete by primary key; returns `true` when deleted. */
-  delete(id: string | number): Promise<boolean>;
-  /** Count entities matching the filter. */
-  count(where: Record<string, unknown>): Promise<number>;
-}
+export type DataSource = IDataSource;
 
 /**
  * Shared repository implementation that normalizes options and delegates

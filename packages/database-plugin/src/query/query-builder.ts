@@ -4,25 +4,21 @@
  *
  * @module
  */
-import type { CountOptions, FindOptions, OrderDirection } from './find-options.ts';
+import type { NormalizedQuery, OrderDirection } from '@hono-enterprise/common';
+import type { CountOptions, FindOptions } from './find-options.ts';
 
 /**
  * Normalized query representation that adapters can evaluate.
  *
+ * Re-exported from `@hono-enterprise/common`, where it was promoted in M52c
+ * so a backend in another package can name the type its `findAll` receives.
+ * Before the promotion this type was reachable only through an internal path
+ * while the exported `DataSource` interface referenced it — so a consumer
+ * could not annotate against it at all.
+ *
  * @since 0.1.0
  */
-export interface NormalizedQuery {
-  /** Filter conditions. */
-  readonly where: Record<string, unknown>;
-  /** Field-to-direction sort specification. */
-  readonly orderBy: Record<string, OrderDirection>;
-  /** Maximum results or `-1` for unlimited. */
-  readonly limit: number;
-  /** Skip count. */
-  readonly offset: number;
-  /** Field projection (empty means all fields). */
-  readonly select: readonly string[];
-}
+export type { NormalizedQuery };
 
 /** Default limit when none is specified (unbounded). */
 const UNLIMITED = -1;

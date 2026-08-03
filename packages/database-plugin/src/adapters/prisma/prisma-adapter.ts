@@ -11,7 +11,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
-import type { IAdapterTransaction, IDatabaseAdapter } from '../adapter.ts';
+import type { IAdapterTransaction, IDatabaseAdapter } from '@hono-enterprise/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
 // ---------------------------------------------------------------------------
@@ -218,17 +218,29 @@ export class PrismaAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Create a DataSource for the named entity using the main client.
-   * Used by the plugin's service-level data-source factory.
+   * @inheritdoc
    *
-   * @param entity - Entity name
-   * @returns DataSource bound to the entity
+   * Builds a non-transactional data source over the main client.
    */
-  createDataSourceForEntity(entity: string): DataSource {
+  createDataSource(entity: string): DataSource {
     if (!this._client) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
     }
     return createPrismaDataSourceInner(this._client, entity);
+  }
+
+  /**
+   * Create a DataSource for the named entity using the main client.
+   *
+   * @deprecated Use {@linkcode PrismaAdapter.createDataSource} instead — it is
+   * the promoted {@linkcode IDatabaseAdapter} member, so the plugin reaches it
+   * without casting to this concrete class. Will be removed in the next major
+   * version.
+   * @param entity - Entity name
+   * @returns DataSource bound to the entity
+   */
+  createDataSourceForEntity(entity: string): DataSource {
+    return this.createDataSource(entity);
   }
 
   /**

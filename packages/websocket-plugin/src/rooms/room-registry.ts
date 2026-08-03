@@ -214,10 +214,18 @@ export class RoomRegistry {
    * @param publish - Forwards every room broadcast to other replicas. Omit for
    *   purely in-process rooms, which is the behavior when no backplane
    *   capability is registered.
+   * @param onMemberJoined - Invoked whenever a connection joins any room on
+   *   this replica. Used to open the backplane transport on demand: a replica
+   *   with a local member has to be able to RECEIVE, and subscribing does not
+   *   open a transport.
    */
-  constructor(publish?: RoomPublisher) {
+  constructor(publish?: RoomPublisher, onMemberJoined?: () => void) {
     this.#publish = publish;
+    this.#onMemberJoined = onMemberJoined;
   }
+
+  /** Notified on the first join of every connection. */
+  readonly #onMemberJoined: (() => void) | undefined;
 
   /**
    * Reverse index: which rooms each connection currently belongs to.
@@ -262,6 +270,7 @@ export class RoomRegistry {
     // the constructor has returned.
     const room: Room = new Room(name, {
       onJoin: (conn: IWebSocketConnection): void => {
+        this.#onMemberJoined?.();
         this.#neverJoined.delete(room);
         let joined = this.#membership.get(conn);
         if (joined === undefined) {

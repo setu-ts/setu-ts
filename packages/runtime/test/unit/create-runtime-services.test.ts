@@ -219,3 +219,66 @@ describe('createRuntimeServices | one implementation, two entry points', () => {
     }
   });
 });
+
+describe('createRuntimeServices | Cloudflare Workers env passthrough', () => {
+  it('populates env from the supplied Worker env', () => {
+    // Without this, `runtime.env` is empty on Workers: there is no ambient
+    // environment on the edge, so ConfigPlugin reads nothing.
+    const services = createRuntimeServices({
+      platform: 'cloudflare-workers',
+      env: { API_KEY: 'secret', REGION: 'weur' },
+    });
+
+    expect(services.platform()).toBe('cloudflare-workers');
+    expect(services.env).toEqual({ API_KEY: 'secret', REGION: 'weur' });
+  });
+
+  it('leaves env empty on Workers when none is supplied', () => {
+    const services = createRuntimeServices({ platform: 'cloudflare-workers' });
+    expect(Object.keys(services.env)).toEqual([]);
+  });
+
+  it('keeps object bindings out of the string-typed env', () => {
+    const services = createRuntimeServices({
+      platform: 'cloudflare-workers',
+      env: { API_KEY: 'secret', CACHE_KV: { get: () => {} } },
+    });
+
+    expect(services.env).toEqual({ API_KEY: 'secret' });
+  });
+
+  it('ignores env on the ambient-environment platforms', () => {
+    // Deno reads Deno.env; passing a Worker env must not shadow or corrupt it,
+    // and must not be handed to a factory whose first parameter is a host.
+    const services = createRuntimeServices({
+      platform: 'deno',
+      env: { HONOE_M52_NEVER: 'should not appear' },
+    });
+
+    expect(services.platform()).toBe('deno');
+    expect(services.env['HONOE_M52_NEVER']).toBeUndefined();
+  });
+});
+
+describe('RuntimePlugin | Cloudflare Workers env passthrough', () => {
+  it('registers services whose env carries the Worker variables', () => {
+    const { ctx, registry } = createRegistryContext();
+
+    RuntimePlugin({
+      platform: 'cloudflare-workers',
+      env: { API_KEY: 'secret', CACHE_KV: { get: () => {} } },
+    }).register(ctx);
+
+    const services = registry.get(CAPABILITIES.RUNTIME) as IRuntimeServices;
+    expect(services.env).toEqual({ API_KEY: 'secret' });
+  });
+
+  it('leaves env empty when the application passes none', () => {
+    const { ctx, registry } = createRegistryContext();
+
+    RuntimePlugin({ platform: 'cloudflare-workers' }).register(ctx);
+
+    const services = registry.get(CAPABILITIES.RUNTIME) as IRuntimeServices;
+    expect(Object.keys(services.env)).toEqual([]);
+  });
+});

@@ -13,9 +13,12 @@ export { DatabasePlugin } from './plugin/database-plugin.ts';
 
 // Public interfaces
 export type {
+  BuiltInDatabaseOptions,
   CountOptions,
+  CustomDatabaseOptions,
   DatabaseAdapterOptions,
   DatabaseAdapterType,
+  DatabaseConnectionOptions,
   DatabasePluginOptions,
   FindOptions,
   IDatabaseService,
@@ -23,6 +26,16 @@ export type {
   IUnitOfWork,
   OrderDirection,
 } from './interfaces/index.ts';
+
+// The data-access port, promoted to `common` in M52c. Re-exported here so a
+// backend author can reach the whole contract from one import, and so the
+// already-exported `DataSource.findAll` parameter type is finally nameable.
+export type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  NormalizedQuery,
+} from '@hono-enterprise/common';
 
 // Services
 export { DatabaseService } from './services/database-service.ts';

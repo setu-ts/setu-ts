@@ -8,6 +8,164 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Durable Objects: a realtime backplane and a distributed lock** (Milestone 52d).
+  `@hono-enterprise/cloudflare-plugin` gains a `durableObject` arm registering
+  **`DurableObjectBackplane`** under the committed `CAPABILITIES.REALTIME_BACKPLANE`, so
+  `websocket-plugin` and `sse-plugin` reach clients on other replicas with no application change —
+  and **`DurableObjectLock`**, which structurally satisfies `scheduler-plugin`'s `IDistributedLock`
+  and is handed to `SchedulerPlugin({ distributedLock: { lock } })` (an injected lock wins outright;
+  `enabled: true` is not required). No `common` change and no new capability token: both contracts
+  were already committed. Register **either** this arm or `RealtimeBackplanePlugin`, never both —
+  the kernel rejects two providers of one token.
+
+  Both need a Durable Object class the **application** exports, plus a wrangler stanza; the package
+  ships the behaviour as two plain cores (**`RealtimeBackplaneObjectCore`**,
+  **`DistributedLockObjectCore`**) that the exported class delegates to. A mixin taking the base
+  class would read better but cannot be typed without `any`, and delegation additionally keeps
+  `cloudflare:workers` — unresolvable off a Worker toolchain — out of the package.
+
+  Two platform facts shaped the implementation rather than being worked around. Sockets are accepted
+  with `ctx.acceptWebSocket`, the **hibernation** API, which lets the runtime evict the object and
+  re-run its constructor while connections stay open; the fan-out core therefore holds **zero**
+  in-memory state and treats `getWebSockets()` as the only membership, because a `Set` in a field
+  would empty itself on the first hibernation while every non-hibernating test still passed. And a
+  Worker isolate cannot be relied on to hold a long-lived outbound WebSocket, so the socket opens
+  lazily and reopens after any failure; the guarantee is stated rather than overstated — a
+  subscription lives exactly as long as the isolate holding the members it serves, and since those
+  members are client sockets in the same isolate, losing one loses both together. The lock persists
+  its holder in the object's storage, never a field, because an object is evicted after 70–140
+  seconds idle; correctness comes from the platform's input gate ("while a storage operation is
+  executing, no events shall be delivered to the object"), which makes the read-compare-write atomic
+  with no transaction. A non-2xx from the lock object **throws** rather than reporting "not
+  acquired", since a 404 means the binding names the wrong class and folding that into contention
+  would silently disable every scheduled job.
+
+  Also closes the last hole in the binding-guard family: `BindingRegistry.durableObject` cast its
+  binding **unvalidated**, so a missing `durable_objects` stanza or a mistyped `class_name` let an
+  application boot clean and fail on the first `idFromName` with a bare `TypeError` — the defect
+  M52c's review found on D1. Adds the exported **`isDurableObjectNamespace`** guard and constructor
+  validation. Verified against real workerd via `wrangler dev` (12/12 checks), which also settled
+  the design question the milestone could not answer from docs: **a plain Durable Object class
+  without `extends DurableObject` is accepted**, so the delegation design is correct and not merely
+  convenient. Not verified against a deployed Worker — CI holds no Cloudflare account.
+
+### Fixed
+
+- **A listen-only replica received nothing from a realtime backplane.**
+  `IRealtimeBackplane.connect()` had exactly one caller — `RealtimeBackplanePlugin.register()` — and
+  `websocket-plugin` / `sse-plugin` relied on the provider having connected before they subscribed.
+  `subscribe()` registers a handler; it does not open a transport. Any provider that cannot connect
+  at registration therefore left every replica that only listens silently receiving nothing, which a
+  Cloudflare Durable Object backplane is the first transport to hit: a Worker runs `register()` at
+  module scope, where the platform forbids the I/O `connect()` performs.
+
+  Both consumers now open the transport on first local use, inside a request context on every
+  runtime — `WebSocketService` when a connection joins its first room, `SseService` when a client
+  connects. The call is fire-and-forget so an upgrade never waits on the transport, idempotent per
+  the committed contract, and retried on the next join if it fails. Applications registering
+  `RealtimeBackplanePlugin` are unaffected: its provider still connects at registration, and the
+  extra call is a no-op.
+
+- **Cloudflare D1 as a first-class database backend, and the `common` data-access promotion that
+  made it possible** (Milestone 52c). The seam a database backend implements was `IDatabaseAdapter`,
+  declared **inside** `@hono-enterprise/database-plugin` and never exported, while `common` shipped
+  only the lifecycle-shaped `IOrmAdapter` — so a backend living in any other package was literally
+  inexpressible, because AI_GUIDELINES §2.2 forbids one plugin importing another.
+  `@hono-enterprise/common` now exports **`IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`,
+  `NormalizedQuery` and `OrderDirection`**. The promoted port is the old shape plus one member — a
+  non-transactional `createDataSource(entity)` — and that addition is the substance of the change:
+  the plugin previously reached each adapter's data-source factory by **casting to the concrete
+  class**, which is what actually kept the seam closed. That cast is gone, all three built-in
+  adapters carry `createDataSource`, and `createDataSourceForEntity` is **deprecated, not removed**
+  (§9.2). `DatabasePluginOptions` is now a union discriminated on `type` with a **`'custom'` arm**
+  requiring an `adapter`, so registering an external backend without one is a compile error rather
+  than a startup throw; every existing registration compiles unchanged. `DataSource` is retained as
+  a deprecated alias of `IDataSource`. The promotion also repairs a latent public-API defect: the
+  barrel exported `DataSource`, whose `findAll` parameter is `NormalizedQuery`, while
+  `NormalizedQuery` itself was not exported — no consumer could name the type.
+
+  `@hono-enterprise/cloudflare-plugin` gains **`D1Adapter`** (plus `D1AdapterOptions`,
+  `D1EntityMapping`), constructed by the application from its D1 binding and handed to
+  `DatabasePlugin({ type: 'custom', adapter })` — the `KvSessionStore` precedent, since those plugin
+  options are read before any application exists. **D1 has no interactive transaction**: it rejects
+  `BEGIN TRANSACTION` outright, and `batch()` is its only unit of atomicity. `beginTransaction()`
+  therefore **buffers every write and flushes the whole buffer as one `batch()` at commit**;
+  `rollback()` discards it and sends nothing. Atomicity is genuine, and the two costs are documented
+  and tested rather than left to discovery: there is **no read-your-own-writes** inside a
+  transaction (reads run against committed state), and an in-transaction `create()` **requires an
+  explicit primary key**, throwing `CloudflareUnsupportedError` when absent — a deferred `INSERT`
+  cannot report a generated key to a caller that awaits `create()` before the flush. Outside a
+  transaction `create()` uses `RETURNING *` and returns the real persisted row. Values are always
+  bound (`?N`); identifiers cannot be, so table and column names are validated against
+  `[A-Za-z_][A-Za-z0-9_]*` and double-quoted, and every builder refuses a statement that would
+  exceed D1's documented **100-bound-parameter** limit. Not verified against live D1 — CI holds no
+  Cloudflare account — though the whole surface is driven against a real SQLite engine, the engine
+  D1 runs, including batch rollback.
+
+- **Cloudflare Queues, Cron Triggers, and the Cache API in `@hono-enterprise/cloudflare-plugin`**
+  (Milestone 52b) — the three platform features that need a **module-level handler export** from the
+  application's Worker rather than anything reachable through `fetch`. No `common` change and no new
+  capability token. `WorkersQueue` satisfies the committed `IQueue` over a Queues producer binding,
+  opt-in through a `queue` arm and registered under `CAPABILITIES.QUEUE` (or `queue.<name>`); the
+  job's **name and id travel in a `{ v, name, id, data, maxAttempts? }` envelope**, because a
+  Cloudflare message body is arbitrary JSON carrying neither and `producer.send()` resolves to
+  `void`, so the id `add` returns is the id the processor sees as `job.id`.
+  `createQueueHandler(app)` builds the `queue` export. A message whose body is not a readable
+  envelope, or whose name has no processor, is **retried rather than acked** — acking would discard
+  it permanently and silently, the failure a queue exists to prevent — and
+  `AddJobOptions.maxAttempts` is enforced at dispatch, since Cloudflare's `max_retries` is
+  queue-wide configuration rather than per message. `addRecurring` throws, naming Cron Triggers as
+  the platform's own mechanism. Cron Triggers ship as `WorkersCron` plus
+  `createScheduledHandler(cron)`, and **deliberately do not register `CAPABILITIES.SCHEDULER`**: of
+  `IScheduler`'s eight methods only `cron` is expressible on Workers — `every` and `delay` arm
+  timers across an isolate eviction (the same reason `scheduler-plugin` cannot run there),
+  `pause`/`resume`/`remove` need state that does not survive an invocation, and `getNextRun` is
+  owned by the `wrangler.toml` `[triggers]` block. An implementation where six of eight methods
+  throw would violate Liskov substitution, so a small honest surface was chosen instead. An
+  expression is matched against `ScheduledController.cron` **exactly**, and `expressions()` exists
+  so an application can assert its own coverage against `wrangler.toml`, which no code in the
+  process can read. `cacheApiMiddleware` caches responses in `caches.default`. It is a **different
+  layer** from `cache-plugin`'s `cacheMiddleware` and composes with it, so it reports under
+  **`X-Cache-Api`** rather than `X-Cache`. The platform's own refusals — non-GET, status 206,
+  `Vary: *`, and an uncleared `Set-Cookie` — are checked first through the pure exported
+  `assessCacheability` rather than discovered from a thrown `put`; the 206 and `Vary: *` rules are
+  unconditional, because an operator may legitimately configure `cacheableStatuses: [200, 206]` and
+  only the explicit rule then stops the platform throwing. The write rides
+  `ICloudflareBindings.waitUntil` when the plugin is registered and is awaited inline when it is
+  not, so it is never simply abandoned; with no cache handle at all the middleware passes through
+  rather than throwing, so an application composed for several targets still serves off Workers. A
+  HIT is replayed with `IResponse.stream`, so a cached response of any size reaches the client
+  unbuffered — which means `app.inject()` cannot read it and cached routes are tested with
+  `app.fetch`. `caches.default` is **per-datacenter**: a latency optimisation, not a shared store.
+  D1 as a database backend moved to **Milestone 52c** (it needs the `IDatabaseAdapter` seam promoted
+  from `database-plugin` into `common`, plus reconciling `ITransaction` with D1's batch-only
+  atomicity) and Durable Objects to **Milestone 52d** (both the realtime backplane and the
+  distributed lock need the application to export a DO class, and Durable Objects expose no pub/sub
+  primitive, so a backplane means each replica holding a WebSocket to the object).
+
+- **`@hono-enterprise/cloudflare-plugin`** (Milestone 52) — a new package registering
+  `ICloudflareBindings` under a new `CAPABILITIES.CLOUDFLARE` token. The framework has served
+  traffic on Workers since the Hono migration but could not reach a single platform binding; this
+  publishes them as one typed accessor (`kv`, `r2`, `d1`, `queue`, `service`, `durableObject`,
+  `get<T>`, `vars`, `waitUntil`), and optionally serves the committed cache and storage capabilities
+  from KV and R2. **Zero npm dependencies**, and nothing in the package imports `cloudflare:workers`
+  — the application passes `env` (and `waitUntil`) in, which keeps the package type-checkable on
+  every runtime. `KvCacheStore` reconciles `ICacheStore`'s unbounded TTL with KV's 60-second
+  `expirationTtl` floor by carrying a logical deadline inside the value, so a 5-second entry expires
+  in 5 seconds rather than surviving a minute. The decoder reports three outcomes rather than two —
+  live, _this store's_ expired entry, and neither — so a read never deletes a key the store does not
+  own and a deliberately cached `null` survives; `clear()` additionally requires a key prefix,
+  because the binding has no bulk delete and an unprefixed sweep would remove foreign keys.
+  `R2Storage` implements the optional `getStream`, heads before `delete` so its committed
+  `Promise<boolean>` is honest, and **throws** from `getSignedUrl` — the R2 Workers binding has no
+  presign operation. `KvSessionStore` is constructed by the application and handed to
+  `SessionPlugin({ store })`, since that option is read before any application exists. No binding
+  I/O happens at registration, where the platform forbids it, and the `cloudflare` health indicator
+  performs none either.
+- **`splitWorkerEnv` and `SplitWorkerEnv` in `@hono-enterprise/common`** (Milestone 52) — the pure
+  partition of a Workers `env` record into string variables and object bindings. In `common` because
+  both `runtime` and `cloudflare-plugin` need the identical rule and no plugin may import another.
+
 - **`@hono-enterprise/service-discovery-plugin`** (Milestone 50) — a new package registering an
   `IServiceDiscovery` under a new `CAPABILITIES.SERVICE_DISCOVERY` token, so an application can turn
   a logical service name into a reachable address. Five provider arms — `'static'`, `'consul'`,
@@ -149,6 +307,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`runtime.env` is now populated on Cloudflare Workers** (Milestone 52). `RuntimePlugin` and
+  `createRuntimeServices` gain an `env` option; passing the Worker's `env` makes `ConfigPlugin` and
+  the secrets `EnvProvider` work on the edge, where previously they read an empty record. Only
+  **string** entries reach `runtime.env`, which is contracted as a string record — object bindings
+  are filtered out rather than stringified to `[object Object]`. Behaviour on Deno, Node, and Bun is
+  unchanged; the option is ignored there.
+- **`honoe new --runtime cloudflare-workers`** (Milestone 52) now threads `env` from the `fetch`
+  handler into `createApp(env)` and renders `RuntimePlugin({ env })` on that target, bumps the
+  scaffolded `compatibility_date` to `2025-09-01` (`import { waitUntil } from 'cloudflare:workers'`
+  shipped 2025-08-08, so the previous `2024-09-23` could not import it), and emits commented
+  `[[kv_namespaces]]` / `[[r2_buckets]]` stanzas in `wrangler.toml`. Generated output for the Deno,
+  Node, and Bun targets is unchanged.
+
 - **`DecoratorPlugin` now prefers the DI container for any class registered in it, with or without
   `@Injectable`.** `instantiate()` required service metadata before consulting the container, so a
   `@Controller` — which carries no `@Injectable` — took the service-registry path even in an
@@ -185,6 +356,36 @@ All notable changes to this project are documented here. The format follows
   under the `REALTIME_BACKPLANE` token removes it.
 
 ### Fixed
+
+- **`DatabasePlugin({ options: { logQueries: true } })` threw on every repository call whenever a
+  real logger was registered** (found in Milestone 52c). `resolveLogger` extracted `logger.debug`
+  into a local and invoked it **detached**, so `this` was `undefined` at the call. Both loggers
+  `logger-plugin` ships — `ConsoleLogger` and `PinoLogger` — implement `debug` in terms of a private
+  `#` field, and a private-field access on an unbound method throws `TypeError`, so the documented
+  `logQueries` option could not be used at all with `LoggerPlugin` present. Every existing test
+  injected a plain-object logger, where a detached method works fine, which is exactly why no gate
+  saw it. `cache-plugin` carries a regression test for the identical bug; `database-plugin` now has
+  one too, driving the real `ConsoleLogger` through a running kernel application.
+
+- **Every application failed to boot on Cloudflare Workers** — `packages/kernel`'s request-context
+  factory built its never-aborting `ctx.signal` sentinel from a **module-scope**
+  `new AbortController()`. workerd refuses that with
+  `Disallowed operation called within global
+  scope`, because an `AbortController` is bound to an
+  I/O context, so the isolate threw at import time and no handler ever ran. Introduced with
+  `IRequestContext.signal` in Milestone 42 and invisible to every gate: the whole suite runs on
+  Deno, where a module-scope controller is legal, and the Workers path had only ever been exercised
+  through `app.fetch` under Deno rather than under the real runtime. Found by driving the framework
+  under `wrangler dev` (workerd) for the first time. The sentinel is now constructed **per
+  request**; caching one lazily would not have been a fix either, since workerd then refuses to use
+  a controller created for one request on behalf of another. A regression test pins that two
+  contexts never share a fallback signal — it fails against the previous code.
+- **`@hono-enterprise/cloudflare-plugin` queue reporting reaches a logger registered after the
+  plugin** (Milestone 52b) — `WorkersQueueOptions.logger` is a thunk rather than an `ILogger`, for
+  the reason `resolveWaitUntil` already takes one: `ctx.logger` resolves lazily through a Proxy that
+  answers `undefined` until a logger is registered, and a capability may be registered imperatively
+  with no `provides` declaration for the resolver to order against. Capturing the value during
+  `register()` would silence every dispatch report in an application whose logger registers later.
 
 - **`honoe new` now refuses a project plan containing the same path twice** (Milestone 36c). The
   overwrite check probes the filesystem, so it could not see a duplicate inside one plan: both files

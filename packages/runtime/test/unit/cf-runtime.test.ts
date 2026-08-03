@@ -113,6 +113,21 @@ describe('cf-runtime | env', () => {
     const services = createCloudflareRuntimeServices();
     expect(Object.keys(services.env).length).toBe(0);
   });
+
+  it('keeps object bindings out of env, which is contracted as a string record', () => {
+    const services = createCloudflareRuntimeServices({
+      env: {
+        API_KEY: 'secret',
+        CACHE_KV: { get: () => {}, put: () => {}, delete: () => {}, list: () => {} },
+        UPLOADS: { head: () => {} },
+      },
+    });
+
+    // A binding reaching `env` would stringify to '[object Object]' the moment
+    // ConfigPlugin read it. Only the variable survives.
+    expect(services.env).toEqual({ API_KEY: 'secret' });
+    expect(services.env['CACHE_KV']).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

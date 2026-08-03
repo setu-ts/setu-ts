@@ -8,7 +8,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
-import type { IAdapterTransaction, IDatabaseAdapter } from '../adapter.ts';
+import type { IAdapterTransaction, IDatabaseAdapter } from '@hono-enterprise/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
   applyOrderBy,
@@ -261,13 +261,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Create a DataSource for the named entity using the main instance.
-   * Used by the plugin's service-level data-source factory.
+   * @inheritdoc
    *
-   * @param entity - Entity name
-   * @returns DataSource bound to the entity
+   * Builds a non-transactional data source over the main instance.
    */
-  createDataSourceForEntity(entity: string): DataSource {
+  createDataSource(entity: string): DataSource {
     if (!this._db) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
@@ -277,6 +275,20 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       this.resolveTables(),
       this._operators!,
     );
+  }
+
+  /**
+   * Create a DataSource for the named entity using the main instance.
+   *
+   * @deprecated Use {@linkcode DrizzleAdapter.createDataSource} instead — it is
+   * the promoted {@linkcode IDatabaseAdapter} member, so the plugin reaches it
+   * without casting to this concrete class. Will be removed in the next major
+   * version.
+   * @param entity - Entity name
+   * @returns DataSource bound to the entity
+   */
+  createDataSourceForEntity(entity: string): DataSource {
+    return this.createDataSource(entity);
   }
 
   /** Resolve the drizzleTables option (defaults to empty). */

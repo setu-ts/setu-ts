@@ -133,7 +133,15 @@ export type {
   RbacConfig,
   RoleDefinition,
 } from './services/auth.ts';
-export type { IOrmAdapter, ITransaction } from './services/database.ts';
+export type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  IOrmAdapter,
+  ITransaction,
+  NormalizedQuery,
+  OrderDirection,
+} from './services/database.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';
 export type {
@@ -218,6 +226,10 @@ export type {
 } from './services/realtime.ts';
 export { decodeFrameData, encodeFrameData } from './realtime-codec.ts';
 export type { EncodedPayload } from './realtime-codec.ts';
+
+// Cloudflare Workers env partition — shared by `runtime` and `cloudflare-plugin`
+export { splitWorkerEnv } from './cloudflare.ts';
+export type { SplitWorkerEnv } from './cloudflare.ts';
 
 // WebSocket contracts
 export type {

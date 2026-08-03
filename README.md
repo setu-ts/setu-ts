@@ -20,9 +20,9 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 > [!IMPORTANT]
 > **Status: 38 packages were published in `v0.1.0-alpha.3` and are live on JSR.** The workspace has
-> since grown to 45 packages; the seven added after that release ship with the next one.
+> since grown to 46 packages; the eight added after that release ship with the next one.
 >
-> The kernel, the runtime layer, 35 plugins, the three starters, the test utilities, the client SDK,
+> The kernel, the runtime layer, 36 plugins, the three starters, the test utilities, the client SDK,
 > and the `honoe` CLI are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
@@ -133,6 +133,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | ----------------- | ------ | -------------------------- | --------------------------------------------------------------- |
 | Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection |
 | gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port           |
+| Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, KV sessions, `waitUntil` |
 
 ### Real-time and rendering
 
@@ -211,11 +212,11 @@ cd my-app && honoe generate service billing
 
 The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
-38 of the 45 workspace members are published on JSR, in `v0.1.0-alpha.3`: the core (`common`,
+38 of the 46 workspace members are published on JSR, in `v0.1.0-alpha.3`: the core (`common`,
 `kernel`, `runtime`, `exceptions`, `testing`), most plugins in the tables above, the `sdk`, and the
-`cli`. The seven added since that release — `session-plugin`, `service-discovery-plugin`,
-`grpc-plugin`, `graphql-plugin` and the three starters — ship with the next one and cannot be
-`deno add`ed yet.
+`cli`. The eight added since that release — `session-plugin`, `service-discovery-plugin`,
+`grpc-plugin`, `graphql-plugin`, `cloudflare-plugin` and the three starters — ship with the next one
+and cannot be `deno add`ed yet.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -316,7 +317,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 hono-enterprise/
-├── packages/              # 45 workspace members, 38 published on JSR
+├── packages/              # 46 workspace members, 38 published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

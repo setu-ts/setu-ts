@@ -11,8 +11,20 @@ import type { IRuntimeServices } from '@hono-enterprise/common';
 import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';
 
-/** Opaque non-aborting sentinel — only used when the incoming request has no signal. */
-const NEVER_ABORT_CONTROLLER = new AbortController();
+/**
+ * Opaque non-aborting sentinel — only used when the incoming request has no
+ * signal.
+ *
+ * Constructed **per request**, never once at module scope: Cloudflare Workers
+ * refuses `new AbortController()` in global scope ("Disallowed operation called
+ * within global scope"), because an AbortController is bound to an I/O context.
+ * A module-scope one made every application fail to boot on workerd. Caching a
+ * single instance lazily is not a fix either — workerd would then refuse to use
+ * a controller created for one request on behalf of another.
+ */
+function neverAbortingSignal(): AbortSignal {
+  return new AbortController().signal;
+}
 
 /**
  * Internal result of {@linkcode createRequestContext}: the immutable
@@ -59,7 +71,7 @@ export function createRequestContext(
   // Populate signal from the request's optional AbortSignal; fall back to
   // a never-aborting sentinel so that handlers reading ctx.signal always
   // have a live signal they can call .addEventListener('abort', …) on.
-  const signal = request.signal ?? NEVER_ABORT_CONTROLLER.signal;
+  const signal = request.signal ?? neverAbortingSignal();
 
   const ctx: IRequestContext = {
     id: runtime.uuid(),

@@ -128,6 +128,13 @@ export class WebSocketService implements IWebSocketService {
   #pending = 0;
   /** The cross-replica transport, when one was registered. */
   readonly #backplane: IRealtimeBackplane | undefined;
+  /**
+   * Whether the backplane transport has been asked to open.
+   *
+   * Reset on failure so a later upgrade retries rather than leaving the replica
+   * permanently deaf — see {@linkcode WebSocketService.#openBackplane}.
+   */
+  #backplaneOpening = false;
 
   /**
    * Creates the service.
@@ -175,6 +182,9 @@ export class WebSocketService implements IWebSocketService {
           });
         });
       },
+      // A local member has just joined, so this replica must be able to
+      // RECEIVE — and `subscribe()` alone does not open a transport.
+      () => this.#openBackplane(),
     );
     this.#heartbeat = new HeartbeatSweeper(
       runtime,
@@ -328,6 +338,34 @@ export class WebSocketService implements IWebSocketService {
       this.#pending--;
       throw error;
     }
+  }
+
+  /**
+   * Opens the backplane transport, once, on first local use.
+   *
+   * `IRealtimeBackplane.connect()` is contracted as idempotent, and a
+   * subscriber cannot receive anything until it has been called — `subscribe()`
+   * only registers a handler. Until this existed the only caller was
+   * `RealtimeBackplanePlugin.register()`, so a transport whose provider could
+   * not connect at registration (a Cloudflare Durable Object, where
+   * `register()` runs at module scope and the platform forbids I/O there) left
+   * every listen-only replica silently receiving nothing.
+   *
+   * Fire-and-forget: an upgrade must not wait on the transport, and a broadcast
+   * this replica cannot yet receive is strictly better than a refused
+   * connection. The flag is cleared on failure so the next upgrade retries.
+   */
+  #openBackplane(): void {
+    if (this.#backplane === undefined || this.#backplaneOpening) {
+      return;
+    }
+    this.#backplaneOpening = true;
+    void this.#backplane.connect().catch((error: unknown) => {
+      this.#backplaneOpening = false;
+      this.#logger?.warn('websocket: backplane connect failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /**

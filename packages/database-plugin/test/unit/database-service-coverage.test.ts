@@ -9,7 +9,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createMemoryDataSource, DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
-import type { IDatabaseAdapter } from '../../src/adapters/adapter.ts';
+import type { IDatabaseAdapter } from '@hono-enterprise/common';
 import type { IUnitOfWork } from '../../src/interfaces/index.ts';
 
 describe('DatabaseService — CRUD read-back and logging coverage', () => {

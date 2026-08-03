@@ -44,6 +44,7 @@
     "./packages/session-plugin",
     "./packages/service-discovery-plugin",
     "./packages/grpc-plugin",
+    "./packages/cloudflare-plugin",
     "./packages/graphql-plugin"
   ],
   "tasks": {
