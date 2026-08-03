@@ -100,6 +100,11 @@ export class HeartbeatSweeper {
       if (!conn.isOpen) {
         continue;
       }
+      // Skip connections whose route opted out of the shared heartbeat (e.g.
+      // graphql-transport-ws routes that speak their own ping/pong protocol).
+      if (!conn.participatesInHeartbeat) {
+        continue;
+      }
       try {
         if (idleTimeoutMs > 0 && now - conn.lastSeenAt >= idleTimeoutMs) {
           conn.close(CLOSE_GOING_AWAY, 'Idle timeout');

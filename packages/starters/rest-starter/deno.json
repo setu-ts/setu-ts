@@ -25,6 +25,7 @@
     "@hono-enterprise/websocket-plugin": "jsr:@hono-enterprise/websocket-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/sse-plugin": "jsr:@hono-enterprise/sse-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/realtime-backplane-plugin": "jsr:@hono-enterprise/realtime-backplane-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/graphql-plugin": "jsr:@hono-enterprise/graphql-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/exceptions": "jsr:@hono-enterprise/exceptions@^0.1.0-alpha.3"
   }
 }

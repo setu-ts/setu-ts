@@ -23,6 +23,7 @@
     "@hono-enterprise/queue-plugin": "jsr:@hono-enterprise/queue-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/resilience-plugin": "jsr:@hono-enterprise/resilience-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/telemetry-plugin": "jsr:@hono-enterprise/telemetry-plugin@^0.1.0-alpha.3",
+    "@hono-enterprise/graphql-plugin": "jsr:@hono-enterprise/graphql-plugin@^0.1.0-alpha.3",
     "@hono-enterprise/rest-starter": "jsr:@hono-enterprise/rest-starter@^0.1.0-alpha.3"
   }
 }

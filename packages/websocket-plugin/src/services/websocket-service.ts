@@ -459,6 +459,7 @@ export class WebSocketService implements IWebSocketService {
           route.path,
           transport,
           this.#runtime.hrtime(),
+          route.heartbeat,
         );
         conn = opened;
         this.#connections.add(opened);

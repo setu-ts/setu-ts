@@ -4,19 +4,26 @@
  * @module
  */
 
+import type {
+  GraphqlConnectionInfo,
+  GraphqlOperationContext,
+  GraphqlSubscriptionOutcome,
+} from '@hono-enterprise/common';
 import type { GraphqlModuleLike, GraphqlSchemaLike } from './graphql-runtime.ts';
 
 /**
  * Resolver map for schema-first construction.
  *
- * Keys are type names, values are objects mapping field names to resolvers.
+ * Keys are type names, values are objects mapping field names to resolvers
+ * or scalar resolver maps ({@linkcode GraphqlScalarResolver}).
  */
 export type ResolverMap = Record<
   string,
-  Record<
+  | Record<
     string,
     FieldResolver | (() => unknown) // resolveType for interfaces
   >
+  | GraphqlScalarResolver
 >;
 
 /**
@@ -32,6 +39,97 @@ export type FieldResolver = (
 ) => unknown;
 
 /**
+ * Custom scalar resolver methods.
+ *
+ * Supply any subset of `serialize`, `parseValue`, and `parseLiteral`; omitted
+ * members leave graphql's identity default in place.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlScalarResolver {
+  /** Serialize an internal value to JSON-safe output. */
+  serialize?(): unknown;
+  /** Parse a client input value (variable). */
+  parseValue?(): unknown;
+  /** Parse a literal AST value (inline). */
+  parseLiteral?(): unknown;
+}
+
+/**
+ * Subscription transport configuration.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlSubscriptionsOptions {
+  /**
+   * WebSocket transport options. `false` disables WS subscriptions;
+   * `{}` enables with defaults. Absent defaults to enabled when
+   * `CAPABILITIES.WEBSOCKET` is available.
+   */
+  websocket?: GraphqlWsTransportOptions | false;
+  /**
+   * SSE transport options. `false` disables SSE subscriptions;
+   * `{}` enables with defaults. Present by default.
+   */
+  sse?: GraphqlSseTransportOptions | false;
+}
+
+/**
+ * WebSocket transport options for GraphQL subscriptions.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlWsTransportOptions {
+  /** The WebSocket endpoint path; defaults to `` `${path}/ws` ``. */
+  path?: string;
+  /**
+   * Milliseconds to wait for `connection_init` before closing with code 4408.
+   * Default `3000`.
+   */
+  connectionInitWaitMs?: number;
+  /**
+   * Milliseconds between protocol `ping` frames. `0` disables.
+   * Default `0`.
+   */
+  heartbeatMs?: number;
+  /**
+   * Called on `connection_init` BEFORE the ack. Returning `false` closes
+   * the socket with `4403: Forbidden`. May write to `conn.data` to establish
+   * identity for the default resolver context.
+   */
+  onConnect?: (
+    info: GraphqlConnectionInfo,
+  ) => false | void | Promise<false | void>;
+}
+
+/**
+ * SSE transport options for GraphQL subscriptions.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlSseTransportOptions {
+  /** The SSE endpoint path; defaults to `` `${path}/stream` ``. */
+  path?: string;
+  /**
+   * Milliseconds between `:keep-alive` comment frames. `0` disables.
+   * Default `0`.
+   */
+  heartbeatMs?: number;
+}
+
+/**
+ * APQ (Automatic Persisted Queries) options.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlApqOptions {
+  /** TTL in seconds for cache-store entries. Default `300`. */
+  ttlSeconds?: number;
+  /** Maximum entries in the in-memory LRU fallback. Default `1000`. */
+  maxEntries?: number;
+}
+
+/**
  * The error sink the plugin hands to the service and the route handler.
  *
  * Structural on purpose: it is satisfied by `IPluginContext.logger` without the
@@ -43,10 +141,15 @@ export interface GraphqlLogger {
 
 /**
  * Context input for custom context building.
+ *
+ * Widened in M51b to carry an optional {@linkcode GraphqlConnectionInfo} when
+ * the operation arrives over a WebSocket subscription.
  */
 export interface GraphqlContextInput {
   services: unknown;
   request?: unknown;
+  /** Present when the operation arrives over a WebSocket subscription. */
+  connection?: GraphqlConnectionInfo;
 }
 
 /**
@@ -150,4 +253,27 @@ export type GraphqlPluginOptions =
      * Required when the application uses its own graphql copy.
      */
     graphqlModule?: GraphqlModuleLike;
+
+    /**
+     * Subscription transport configuration. Absent → no transport routes are
+     * registered (byte-identical to M51 behavior).
+     *
+     * @since 0.3.0
+     */
+    subscriptions?: GraphqlSubscriptionsOptions;
+
+    /**
+     * APQ (Automatic Persisted Queries) configuration. Absent → APQ disabled.
+     *
+     * @since 0.3.0
+     */
+    apq?: GraphqlApqOptions;
+
+    /**
+     * Maximum number of requests in a batch. `0` (default) disables batching;
+     * an array body is still refused with `400`. Set above `0` to enable.
+     *
+     * @since 0.3.0
+     */
+    maxBatchSize?: number;
   };

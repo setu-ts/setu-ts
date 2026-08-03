@@ -49,6 +49,18 @@ export interface GraphqlNamedTypeLike {
   name: string;
 }
 
+/**
+ * Structural facade for a graphql@16 scalar type, exposing the three
+ * settable resolver properties.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlScalarTypeLike extends GraphqlNamedTypeLike {
+  serialize?: () => unknown;
+  parseValue?: () => unknown;
+  parseLiteral?: () => unknown;
+}
+
 export type GraphqlOutputTypeLike = GraphqlNamedTypeLike;
 export type GraphqlInputTypeLike = GraphqlNamedTypeLike;
 

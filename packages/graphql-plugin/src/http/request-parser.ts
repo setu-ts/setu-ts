@@ -13,10 +13,13 @@ export type GraphqlErrorCode =
   | 'INVALID_JSON'
   | 'BAD_REQUEST'
   | 'INVALID_VARIABLES'
+  | 'INVALID_EXTENSIONS'
   | 'UNSUPPORTED_MEDIA_TYPE'
   | 'OPERATION_RESOLUTION_FAILED'
   | 'METHOD_NOT_ALLOWED'
-  | 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP';
+  | 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP'
+  | 'BATCH_TOO_LARGE'
+  | 'BATCHING_NOT_SUPPORTED';
 
 /**
  * Parsing error with code.
@@ -81,6 +84,18 @@ export function parsePostBody(body: unknown): GraphqlRequestParams {
   if (typeof obj.variables === 'object' && obj.variables !== null) {
     // Pass variables through verbatim (B2)
     result.variables = obj.variables as Record<string, unknown>;
+  }
+
+  // Parse extensions (object-or-absent)
+  if (obj.extensions !== undefined) {
+    if (
+      typeof obj.extensions !== 'object' || obj.extensions === null || Array.isArray(obj.extensions)
+    ) {
+      const err = new Error('Extensions must be a JSON object') as ParseError;
+      err.code = 'INVALID_EXTENSIONS';
+      throw err;
+    }
+    result.extensions = obj.extensions as Record<string, unknown>;
   }
 
   return result;

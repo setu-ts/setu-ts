@@ -20,6 +20,7 @@ import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
 import { SsePlugin } from '@hono-enterprise/sse-plugin';
 import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
 import { SessionPlugin } from '@hono-enterprise/session-plugin';
+import { GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
 import { errorHandler } from '@hono-enterprise/exceptions';
 import type { RestStarterOptions } from './options.ts';
 
@@ -56,6 +57,7 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     ...(options.auth ? [AuthPlugin(options.auth)] : []),
     ...(options.session ? [SessionPlugin(options.session)] : []),
     ...(options.di ? [DiPlugin(options.di)] : []),
+    ...(options.graphql ? [GraphqlPlugin(options.graphql)] : []),
     ...(options.realtime?.backplane ? [RealtimeBackplanePlugin(options.realtime.backplane)] : []),
     ...(options.realtime?.websocket ? [WebSocketPlugin(options.realtime.websocket)] : []),
     ...(options.realtime?.sse ? [SsePlugin(options.realtime.sse)] : []),

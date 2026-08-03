@@ -5,11 +5,15 @@
  */
 
 import type {
+  GraphqlConnectionInfo,
   GraphqlExecutionOutcome,
   GraphqlExecutionResult,
+  GraphqlOperationContext,
   GraphqlRequestParams,
+  GraphqlSubscriptionOutcome,
   IGraphqlService,
   IRequestContext,
+  IServiceRegistry,
 } from '@hono-enterprise/common';
 import type { GraphqlLogger } from '../interfaces/options.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../interfaces/graphql-runtime.ts';
@@ -36,6 +40,8 @@ export class GraphqlService implements IGraphqlService {
   #buildContext: ((input: GraphqlContextInput) => unknown | Promise<unknown>) | null;
   #rootValue?: unknown;
   #logger: GraphqlLogger | undefined;
+  /** Plugin-level service registry for building context on the WS path. */
+  #serviceRegistry: IServiceRegistry;
 
   constructor(
     runtime: GraphqlRuntime,
@@ -56,6 +62,8 @@ export class GraphqlService implements IGraphqlService {
        * the only path by which a masked error reaches an operator.
        */
       logger?: GraphqlLogger;
+      /** Plugin-level registry (for WS subscription context). */
+      serviceRegistry: IServiceRegistry;
     },
   ) {
     this.#runtime = runtime;
@@ -71,6 +79,7 @@ export class GraphqlService implements IGraphqlService {
     this.#buildContext = options.buildContext ?? null;
     this.#rootValue = options.rootValue;
     this.#logger = options.logger;
+    this.#serviceRegistry = options.serviceRegistry;
 
     // A1: Build validation rules once at construction time (not per request)
     this.#validationRules = this.#buildValidationRules();
@@ -84,6 +93,22 @@ export class GraphqlService implements IGraphqlService {
     return this.#documentCache.size;
   }
 
+  #buildContextValue(
+    context: GraphqlOperationContext,
+  ): GraphqlContextInput {
+    const services = context.requestContext?.services ??
+        context.connection
+      ? this.#serviceRegistry
+      : {};
+    const request = context.requestContext?.request;
+    const connection = context.connection;
+    const input: GraphqlContextInput = { services, request };
+    if (connection) {
+      input.connection = connection;
+    }
+    return input;
+  }
+
   async execute(
     params: GraphqlRequestParams,
     requestContext?: IRequestContext,
@@ -91,17 +116,18 @@ export class GraphqlService implements IGraphqlService {
   ): Promise<GraphqlExecutionOutcome> {
     // Build context
     let contextValue: unknown;
+    const opContext: GraphqlOperationContext = requestContext ? { requestContext } : {};
     if (this.#buildContext !== null) {
-      contextValue = await this.#buildContext({
-        services: requestContext?.services ?? {},
-        request: requestContext?.request,
-      });
+      contextValue = await this.#buildContext(this.#buildContextValue(opContext));
     } else {
+      const ctxInput = this.#buildContextValue(opContext);
       const defaultContext: DefaultGraphqlContext = {
-        services: requestContext?.services ?? {},
+        services: ctxInput.services,
         requestContext: requestContext,
-        user: (requestContext?.request as { user?: unknown })?.user,
-        tenant: (requestContext?.request as { tenant?: unknown })?.tenant,
+        user: requestContext ? (requestContext.request as { user?: unknown })?.user : undefined,
+        tenant: requestContext
+          ? (requestContext.request as { tenant?: unknown })?.tenant
+          : undefined,
       };
       contextValue = defaultContext;
     }
@@ -131,6 +157,66 @@ export class GraphqlService implements IGraphqlService {
       status: outcome.status,
       result: masked as GraphqlExecutionResult,
     };
+  }
+
+  async subscribe(
+    params: GraphqlRequestParams,
+    context?: GraphqlOperationContext,
+  ): Promise<GraphqlSubscriptionOutcome> {
+    // Build context
+    let contextValue: unknown;
+    const opContext = context ?? {};
+    if (this.#buildContext !== null) {
+      contextValue = await this.#buildContext(this.#buildContextValue(opContext));
+    } else {
+      const ctxInput = this.#buildContextValue(opContext);
+      const defaultContext: Record<string, unknown> = {
+        services: ctxInput.services,
+        requestContext: opContext.requestContext,
+        user: opContext.requestContext
+          ? (opContext.requestContext.request as { user?: unknown })?.user
+          : opContext.connection?.data.get('user'),
+        tenant: opContext.requestContext
+          ? (opContext.requestContext.request as { tenant?: unknown })?.tenant
+          : opContext.connection?.data.get('tenant'),
+      };
+      if (opContext.connection) {
+        defaultContext.connection = opContext.connection;
+      }
+      contextValue = defaultContext;
+    }
+
+    const { subscribeGraphql } = await import('../execution/subscribe.ts');
+    const outcome = await subscribeGraphql(params.query, {
+      schema: this.#schema,
+      runtime: this.#runtime,
+      documentCache: this.#documentCache,
+      validationRules: this.#validationRules,
+      ...(params.operationName ? { operationName: params.operationName } : {}),
+      variableValues: params.variables ?? {},
+      contextValue,
+      rootValue: this.#rootValue,
+    });
+
+    // Apply masking to error/single results
+    const maskErrorsOptions = {
+      maskInternalErrors: this.#maskInternalErrors,
+      formatError: this.#formatError,
+      ...(this.#logger && { logger: this.#logger }),
+    };
+
+    if (outcome.kind === 'error') {
+      const masked = maskErrors(outcome.result, maskErrorsOptions);
+      return { kind: 'error', status: outcome.status, result: masked as GraphqlExecutionResult };
+    }
+    if (outcome.kind === 'single') {
+      const masked = maskErrors(outcome.result, maskErrorsOptions);
+      return { kind: 'single', status: outcome.status, result: masked as GraphqlExecutionResult };
+    }
+
+    // Stream: masking applied lazily as results arrive
+    // (the transport wraps the stream to mask each result)
+    return outcome;
   }
 
   /**

@@ -21,6 +21,7 @@ import { graphiqlHtml } from '../ui/graphiql.ts';
 interface HandlerOptions {
   graphiql: boolean;
   logger?: { info(message: string): void; error(message: string, error?: unknown): void };
+  maxBatchSize: number;
 }
 
 /**
@@ -56,7 +57,7 @@ async function handleGraphqlPost(
   graphqlService: GraphqlService,
   options: HandlerOptions,
 ): Promise<HandlerResult> {
-  const { logger } = options;
+  const { logger, maxBatchSize } = options;
 
   // Negotiated once, up front: every response this handler can produce answers
   // in the media type the client asked for, transport failures included.
@@ -83,8 +84,60 @@ async function handleGraphqlPost(
     }, mediaType);
   }
 
+  // Batching: detect array body before parsePostBody
+  if (Array.isArray(body)) {
+    if (maxBatchSize <= 0) {
+      return sendGraphqlError(response, 400, {
+        message: 'Batching is not enabled',
+        extensions: { code: 'BAD_REQUEST' },
+      }, mediaType);
+    }
+
+    // Strict media type refuses batches
+    if (mediaType === 'graphql-response') {
+      return sendGraphqlError(response, 400, {
+        message: 'Batching is not supported with application/graphql-response+json',
+        extensions: { code: 'BATCHING_NOT_SUPPORTED' },
+      }, mediaType);
+    }
+
+    if (body.length === 0) {
+      return sendGraphqlError(response, 400, {
+        message: 'Batch must contain at least one request',
+        extensions: { code: 'BAD_REQUEST' },
+      }, mediaType);
+    }
+
+    if (body.length > maxBatchSize) {
+      return sendGraphqlError(response, 400, {
+        message: `Batch size exceeds limit of ${maxBatchSize}`,
+        extensions: { code: 'BATCH_TOO_LARGE' },
+      }, mediaType);
+    }
+
+    // Execute each element concurrently
+    const outcomes = await Promise.all(
+      body.map(async (item: unknown) => {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+          return {
+            status: 400,
+            result: { errors: [{ message: 'Batch item must be a JSON object' }] },
+          };
+        }
+        const params = parsePostBody(item);
+        return await graphqlService.execute(params, ctx, 'POST');
+      }),
+    );
+
+    // Answer array of results
+    const results = outcomes.map((outcome) => outcome.result);
+    const encoder = new TextEncoder();
+    response.status(200).header('Content-Type', 'application/json');
+    return response.send(encoder.encode(JSON.stringify(results)));
+  }
+
   // Parse request params
-  let params: { query: string; operationName?: string; variables?: Record<string, unknown> };
+  let params: GraphqlRequestParams;
   try {
     params = parsePostBody(body);
   } catch (e) {

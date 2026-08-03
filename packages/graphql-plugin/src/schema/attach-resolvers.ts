@@ -9,9 +9,10 @@
 import type {
   GraphqlAbstractTypeLike,
   GraphqlObjectTypeLike,
+  GraphqlScalarTypeLike,
   GraphqlSchemaLike,
 } from '../interfaces/graphql-runtime.ts';
-import type { ResolverMap } from '../interfaces/options.ts';
+import type { GraphqlScalarResolver, ResolverMap } from '../interfaces/options.ts';
 import { GraphqlSchemaError } from '../errors/graphql-errors.ts';
 
 /**
@@ -44,13 +45,22 @@ export function attachResolvers(
       );
     }
 
-    // Check if it's an object type
+    // Check if it's an object type or scalar
     const objectType = type as GraphqlObjectTypeLike;
     if (!objectType.getFields) {
-      // It's a scalar or other non-object type
-      throw new GraphqlSchemaError(
-        `Cannot attach resolvers to scalar type: "${typeName}"`,
-      );
+      // It's a scalar — attach scalar resolver methods
+      const scalarType = type as GraphqlScalarTypeLike;
+      const scalarResolver = fieldResolvers as GraphqlScalarResolver;
+      if (typeof scalarResolver.serialize === 'function') {
+        scalarType.serialize = scalarResolver.serialize;
+      }
+      if (typeof scalarResolver.parseValue === 'function') {
+        scalarType.parseValue = scalarResolver.parseValue;
+      }
+      if (typeof scalarResolver.parseLiteral === 'function') {
+        scalarType.parseLiteral = scalarResolver.parseLiteral;
+      }
+      continue;
     }
 
     const fields = objectType.getFields();
