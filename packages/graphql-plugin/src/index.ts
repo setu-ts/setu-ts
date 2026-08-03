@@ -1,10 +1,10 @@
 /**
+ * @module
+ *
  * @hono-enterprise/graphql-plugin — GraphQL plugin for Hono Enterprise.
  *
  * This plugin provides schema-first and code-first GraphQL support
  * over the kernel router.
- *
- * @module
  */
 
 // Plugin

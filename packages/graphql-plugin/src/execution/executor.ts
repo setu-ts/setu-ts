@@ -1,5 +1,9 @@
 /**
- * GraphQL executor — parse, validate, and execute.
+ * GraphQL executor — parse, operation-kind guard, validate, and execute.
+ *
+ * The pipeline is ordered so that the operation-kind guard runs **after** parse
+ * and **before** validate, and so that a cached document is never re-parsed:
+ * the guard reads the AST the cache already holds.
  *
  * @module
  */
@@ -14,48 +18,183 @@ import type {
 import type { DocumentCache } from './document-cache.ts';
 
 /**
+ * The outcome of one execution pass.
+ *
+ * `status` is the HTTP status implied under strict
+ * (`application/graphql-response+json`) negotiation; `executed` records whether
+ * the GraphQL operation actually ran, which is what separates a *request* error
+ * (parse, validate, operation resolution) from a *field* error. A field error
+ * that nulls `data` is still a `200` — the request itself succeeded.
+ */
+export interface ExecutionPhaseOutcome {
+  /** HTTP status implied by the phase that produced this outcome. */
+  status: number;
+  /** True when the operation was handed to `execute`. */
+  executed: boolean;
+  /** The result to serialize. */
+  result: GraphqlExecutionResultLike;
+}
+
+/**
  * Execution options for the executor.
  */
 export interface ExecuteOptions {
   schema: GraphqlSchemaLike;
   runtime: GraphqlRuntime;
   documentCache: DocumentCache;
+  /** The rule list assembled once at construction time. */
   validationRules: unknown[];
-  maxDepth: number;
-  introspection: boolean;
 }
 
 /**
- * Parse a query string into a document.
+ * Build a synthetic, client-facing error carrying a stable code.
+ *
+ * The shape matches what `mask-errors.ts` treats as exposable (a `message` and
+ * no `originalError`), so these survive masking verbatim.
  */
-function parseDocument(runtime: GraphqlRuntime, query: string): GraphqlDocumentNodeLike {
-  return runtime.parse(query);
+function codedError(message: string, code: string): GraphqlGraphQLErrorLike {
+  return {
+    message,
+    extensions: { code },
+    toJSON() {
+      return { message, extensions: { code } };
+    },
+  };
 }
 
 /**
- * Validate a document against a schema.
+ * Normalize a thrown parse failure into an error the wire can carry.
+ *
+ * A real `graphql` syntax error is already a `GraphQLError` with `locations`
+ * and no `originalError`, so it passes through untouched.
  */
-function validateDocument(
+function toParseError(thrown: unknown): GraphqlGraphQLErrorLike {
+  const err = thrown as Partial<GraphqlGraphQLErrorLike> & { message?: string };
+  const message = typeof err?.message === 'string' && err.message.length > 0
+    ? err.message
+    : 'Parse error';
+  const locations = err?.locations;
+  return {
+    message,
+    ...(locations && { locations }),
+    toJSON() {
+      return { message, ...(locations && { locations }) };
+    },
+  };
+}
+
+/**
+ * Guard the resolved operation: refuse an unresolvable operation, a
+ * subscription over HTTP, and a mutation over `GET`.
+ *
+ * Runs against an already-parsed document, so a cache hit costs no parse.
+ *
+ * @returns An outcome to short-circuit with, or `null` to continue.
+ */
+export function checkOperation(
   runtime: GraphqlRuntime,
-  schema: GraphqlSchemaLike,
   document: GraphqlDocumentNodeLike,
-  rules: unknown[],
-): GraphqlGraphQLErrorLike[] {
-  return runtime.validate(schema, document, rules);
-}
-
-/**
- * Execute a document.
- */
-function executeDocument(
-  runtime: GraphqlRuntime,
-  schema: GraphqlSchemaLike,
-  document: GraphqlDocumentNodeLike,
-  rootValue?: unknown,
-  contextValue?: unknown,
-  variableValues?: Record<string, unknown>,
   operationName?: string,
-): Promise<GraphqlExecutionResultLike> {
+  method?: 'GET' | 'POST',
+): ExecutionPhaseOutcome | null {
+  const name = operationName && operationName.length > 0 ? operationName : undefined;
+  const ast = runtime.getOperationAST(document, name);
+
+  if (!ast) {
+    return {
+      status: 400,
+      executed: false,
+      result: {
+        errors: [
+          codedError(
+            'Could not resolve which operation to execute. Provide `operationName`.',
+            'OPERATION_RESOLUTION_FAILED',
+          ),
+        ],
+      },
+    };
+  }
+
+  if (ast.operation === 'subscription') {
+    return {
+      status: 400,
+      executed: false,
+      result: {
+        errors: [
+          codedError(
+            'Subscriptions are not supported over HTTP',
+            'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+          ),
+        ],
+      },
+    };
+  }
+
+  if (ast.operation === 'mutation' && method === 'GET') {
+    return {
+      status: 405,
+      executed: false,
+      result: {
+        errors: [codedError('Mutations are not allowed over GET', 'METHOD_NOT_ALLOWED')],
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Execute a GraphQL query.
+ *
+ * @param query - The raw query document
+ * @param options - The execution options
+ * @returns The phase outcome carrying an HTTP status and the result
+ */
+export async function executeGraphql(
+  query: string,
+  options: ExecuteOptions & {
+    operationName?: string;
+    variableValues?: Record<string, unknown>;
+    rootValue?: unknown;
+    contextValue?: unknown;
+    method?: 'GET' | 'POST';
+  },
+): Promise<ExecutionPhaseOutcome> {
+  const { runtime, schema, documentCache, validationRules } = options;
+
+  // Parse (cache hit reuses both the document and its validation result).
+  const cached = documentCache.get(query);
+  let document: GraphqlDocumentNodeLike;
+  let validationErrors: GraphqlGraphQLErrorLike[] | null;
+
+  if (cached) {
+    document = cached.document;
+    validationErrors = cached.validationErrors;
+  } else {
+    try {
+      document = runtime.parse(query);
+    } catch (e) {
+      return { status: 400, executed: false, result: { errors: [toParseError(e)] } };
+    }
+    validationErrors = null;
+  }
+
+  // Operation-kind guard: after parse, before validate — so a refused operation
+  // never pays for validation.
+  const guard = checkOperation(runtime, document, options.operationName, options.method);
+  if (guard) {
+    return guard;
+  }
+
+  if (!cached) {
+    validationErrors = runtime.validate(schema, document, validationRules);
+    documentCache.set(query, { document, validationErrors });
+  }
+
+  if (validationErrors && validationErrors.length > 0) {
+    return { status: 400, executed: false, result: { errors: validationErrors } };
+  }
+
   const execArgs: {
     schema: GraphqlSchemaLike;
     document: GraphqlDocumentNodeLike;
@@ -66,83 +205,17 @@ function executeDocument(
   } = {
     schema,
     document,
-    rootValue,
-    contextValue,
-    variableValues: variableValues ?? {},
+    rootValue: options.rootValue,
+    contextValue: options.contextValue,
+    variableValues: options.variableValues ?? {},
   };
-  if (operationName && operationName.length > 0) {
-    execArgs.operationName = operationName;
-  }
-  return runtime.execute(execArgs);
-}
-
-/**
- * Execute a GraphQL query.
- */
-export function executeGraphql(
-  query: string,
-  options: ExecuteOptions & {
-    operationName?: string;
-    variableValues?: Record<string, unknown>;
-    rootValue?: unknown;
-    contextValue?: unknown;
-  },
-): Promise<GraphqlExecutionResultLike> {
-  const { runtime, schema, documentCache, validationRules } = options;
-
-  // Parse (with cache)
-  const cached = documentCache.get(query);
-  let document: GraphqlDocumentNodeLike;
-  let validationErrors: GraphqlGraphQLErrorLike[] | null;
-
-  if (cached) {
-    document = cached.document;
-    validationErrors = cached.validationErrors;
-  } else {
-    // B3: Wrap parse in try/catch to return 400 with locations
-    try {
-      document = parseDocument(runtime, query);
-      validationErrors = null;
-    } catch (e) {
-      // Parse error - return as GraphQLError-like with locations
-      const parseError = e as Error & { locations?: Array<{ line: number; column: number }> };
-      const errorObj = {
-        message: parseError.message || 'Parse error',
-        locations: parseError.locations,
-        toJSON() {
-          return {
-            message: parseError.message || 'Parse error',
-            locations: parseError.locations,
-          };
-        },
-      };
-      return Promise.resolve({ errors: [errorObj as unknown as GraphqlGraphQLErrorLike] });
-    }
+  if (options.operationName && options.operationName.length > 0) {
+    execArgs.operationName = options.operationName;
   }
 
-  // Build validation rules - validationRules from caller already includes depth limit and introspection rules
-  const rules: unknown[] = [...validationRules];
+  const result = await runtime.execute(execArgs);
 
-  // Validate (if not cached)
-  if (!cached) {
-    validationErrors = validateDocument(runtime, schema, document, rules);
-    documentCache.set(query, { document, validationErrors });
-  }
-
-  if (validationErrors && validationErrors.length > 0) {
-    // Return execution result with errors
-    const result: GraphqlExecutionResultLike = { errors: validationErrors };
-    return Promise.resolve(result);
-  }
-
-  // Execute
-  return executeDocument(
-    runtime,
-    schema,
-    document,
-    options.rootValue,
-    options.contextValue,
-    options.variableValues,
-    options.operationName,
-  );
+  // The operation ran. Field errors — including one that nulls `data` — are not
+  // request errors, so this is a 200 even under strict negotiation.
+  return { status: 200, executed: true, result };
 }

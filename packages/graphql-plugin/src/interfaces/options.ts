@@ -32,6 +32,16 @@ export type FieldResolver = (
 ) => unknown;
 
 /**
+ * The error sink the plugin hands to the service and the route handler.
+ *
+ * Structural on purpose: it is satisfied by `IPluginContext.logger` without the
+ * plugin depending on the logger plugin.
+ */
+export interface GraphqlLogger {
+  error(message: string, error?: unknown): void;
+}
+
+/**
  * Context input for custom context building.
  */
 export interface GraphqlContextInput {

@@ -166,14 +166,15 @@ describe('attach-resolvers', () => {
     expect(receivedArgs).toEqual({ name: 'World' });
   });
 
-  it('handles empty resolver map', () => {
+  it('leaves every field untouched for an empty resolver map', () => {
     const schema = createSchema(['Query']);
-    const resolverMap = {};
+    const before = Object.values(schema.getQueryType()!.getFields()).map((f) => f.resolve);
 
-    attachResolvers(schema, resolverMap);
+    attachResolvers(schema, {});
 
-    // Should complete without errors
-    expect(true).toBe(true);
+    const after = Object.values(schema.getQueryType()!.getFields()).map((f) => f.resolve);
+    expect(after).toEqual(before);
+    expect(after.every((r) => r === undefined)).toBe(true);
   });
 
   it('attaches __resolveType to interface types (B5)', () => {

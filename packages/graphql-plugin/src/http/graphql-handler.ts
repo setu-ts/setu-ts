@@ -18,6 +18,25 @@ import { parseGetQuery, parsePostBody } from './request-parser.ts';
 import { graphiqlHtml } from '../ui/graphiql.ts';
 
 /**
+ * Error codes whose HTTP status is a **transport** decision rather than a
+ * GraphQL one, so it survives the `application/json` status watershed.
+ *
+ * Everything else answers `200` under `application/json`, because a client
+ * predating `application/graphql-response+json` reads a non-200 as a network
+ * failure and never looks at the `errors` array.
+ */
+const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'METHOD_NOT_ALLOWED',
+  'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+]);
+
+/** Handler options shared by both verbs. */
+interface HandlerOptions {
+  graphiql: boolean;
+  logger?: { info(message: string): void; error(message: string, error?: unknown): void };
+}
+
+/**
  * Create a GraphQL route handler.
  *
  * @param graphqlService - The GraphQL service
@@ -28,13 +47,10 @@ import { graphiqlHtml } from '../ui/graphiql.ts';
 export function createGraphqlHandler(
   graphqlService: GraphqlService,
   path: string,
-  options: {
-    graphiql: boolean;
-    logger?: { info(message: string): void; error(message: string, error?: unknown): void };
-  },
+  options: HandlerOptions,
 ): { post: RouteHandler; get: RouteHandler } {
   const postHandler: RouteHandler = async (ctx: IRequestContext) => {
-    return await handleGraphqlPost(ctx, ctx.response, graphqlService, path, options);
+    return await handleGraphqlPost(ctx, ctx.response, graphqlService, options);
   };
 
   const getHandler: RouteHandler = async (ctx: IRequestContext) => {
@@ -51,11 +67,7 @@ async function handleGraphqlPost(
   ctx: IRequestContext,
   response: IResponse,
   graphqlService: GraphqlService,
-  _path: string,
-  options: {
-    graphiql: boolean;
-    logger?: { info(message: string): void; error(message: string, error?: unknown): void };
-  },
+  options: HandlerOptions,
 ): Promise<HandlerResult> {
   const { logger } = options;
 
@@ -93,12 +105,11 @@ async function handleGraphqlPost(
     });
   }
 
-  // Execute (pass method for B6 operation kind check)
   const outcome = await graphqlService.execute(params, ctx, 'POST');
 
   // Wire media-type negotiation (B1)
   const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
-  return sendGraphqlResult(response, outcome, mediaType, true);
+  return sendGraphqlResult(response, outcome, mediaType);
 }
 
 /**
@@ -109,10 +120,7 @@ async function handleGraphqlGet(
   response: IResponse,
   graphqlService: GraphqlService,
   path: string,
-  options: {
-    graphiql: boolean;
-    logger?: { info(message: string): void; error(message: string, error?: unknown): void };
-  },
+  options: HandlerOptions,
 ): Promise<HandlerResult> {
   const { logger, graphiql } = options;
 
@@ -148,12 +156,11 @@ async function handleGraphqlGet(
     });
   }
 
-  // Execute (pass method for B6 operation kind check - parse-based, handles comments too)
   const outcome = await graphqlService.execute(params, ctx, 'GET');
 
   // Wire media-type negotiation (B1)
   const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
-  return sendGraphqlResult(response, outcome, mediaType, false);
+  return sendGraphqlResult(response, outcome, mediaType);
 }
 
 /**
@@ -170,71 +177,43 @@ function sendGraphqlError(
 }
 
 /**
+ * Report whether an outcome carries a transport-level refusal, whose status
+ * survives the `application/json` watershed.
+ */
+function hasTransportError(outcome: GraphqlExecutionOutcome): boolean {
+  for (const e of outcome.result.errors ?? []) {
+    const code = (e as { extensions?: { code?: unknown } }).extensions?.code;
+    if (typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Send a GraphQL result response.
+ *
+ * Under `application/graphql-response+json` the outcome's status is used
+ * verbatim. Under `application/json` every well-formed GraphQL request answers
+ * `200` — only a transport refusal keeps its status. The rule is identical for
+ * `POST` and `GET`; the verb never affects it.
  */
 function sendGraphqlResult(
   response: IResponse,
   outcome: GraphqlExecutionOutcome,
   mediaType: 'json' | 'graphql-response',
-  isPost: boolean,
 ): HandlerResult {
   const contentType = mediaType === 'graphql-response' ? CONTENT_TYPE_GRAPHQL : CONTENT_TYPE_JSON;
-
   const body = JSON.stringify(outcome.result);
 
-  // B1: Status code watershed — under 'json' force 200 for well-formed GraphQL requests
-  // (validation errors, execution errors), but preserve transport errors (405, 400 for subscription)
-  // under 'graphql-response' use outcome.status for all cases
-  let status: number;
-  if (mediaType === 'graphql-response') {
-    status = outcome.status;
-  } else if (isPost) {
-    // Under 'json' media type, POST requests that succeed get 200 (even with validation errors)
-    // This is the watershed: 400 for validation errors under graphql-response, 200 under json
-    // Preserve only true transport errors (405 for mutation-over-GET, 400 for subscription)
-    if (outcome.status === 405 || outcome.status === 400) {
-      // Check if this is a transport error (mutation-over-GET or subscription)
-      // These are identified by having specific error codes
-      let hasTransportError = false;
-      if (outcome.result.errors) {
-        for (const e of outcome.result.errors) {
-          const err = e as { extensions?: { code?: string } };
-          if (
-            err.extensions?.code === 'METHOD_NOT_ALLOWED' ||
-            err.extensions?.code === 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP'
-          ) {
-            hasTransportError = true;
-            break;
-          }
-        }
-      }
-      status = hasTransportError ? outcome.status : 200;
-    } else {
-      status = 200;
-    }
-  } else {
-    // GET + json: same watershed as POST — force 200 for well-formed GraphQL requests
-    // (validation errors, parse errors), but preserve transport errors (405, 400 for subscription)
-    if (outcome.status === 405 || outcome.status === 400) {
-      let hasTransportError = false;
-      if (outcome.result.errors) {
-        for (const e of outcome.result.errors) {
-          const err = e as { extensions?: { code?: string } };
-          if (
-            err.extensions?.code === 'METHOD_NOT_ALLOWED' ||
-            err.extensions?.code === 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP'
-          ) {
-            hasTransportError = true;
-            break;
-          }
-        }
-      }
-      status = hasTransportError ? outcome.status : 200;
-    } else {
-      status = 200;
-    }
-  }
+  const transport = hasTransportError(outcome);
+  const status = mediaType === 'graphql-response' || transport ? outcome.status : 200;
 
   response.status(status).header('Content-Type', contentType);
+  // A `405` must advertise what IS allowed (RFC 9110 §15.5.6). The GraphQL
+  // endpoint refuses a mutation over GET and accepts it over POST.
+  if (outcome.status === 405) {
+    response.header('Allow', 'POST');
+  }
   return response.send(new TextEncoder().encode(body));
 }

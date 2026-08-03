@@ -4,7 +4,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { executeGraphql } from '../../src/execution/executor.ts';
+import { checkOperation, executeGraphql } from '../../src/execution/executor.ts';
 import { DocumentCache } from '../../src/execution/document-cache.ts';
 import type {
   GraphqlDocumentNodeLike,
@@ -12,193 +12,127 @@ import type {
   GraphqlSchemaLike,
 } from '../../src/interfaces/graphql-runtime.ts';
 
+interface RuntimeCounters {
+  parse: number;
+  validate: number;
+  execute: number;
+}
+
+/**
+ * A fake runtime whose `getOperationAST` reflects the operation kind recorded on
+ * the document its `parse` produced — the real module's behaviour, which the
+ * operation guard depends on.
+ */
+const createFakeRuntime = (
+  operation: 'query' | 'mutation' | 'subscription' = 'query',
+): GraphqlRuntime & { counters: RuntimeCounters } => {
+  const counters: RuntimeCounters = { parse: 0, validate: 0, execute: 0 };
+
+  const runtime = {
+    counters,
+    parse: (_src: string) => {
+      counters.parse++;
+      return {
+        kind: 'Document',
+        definitions: [{
+          kind: 'OperationDefinition',
+          operation,
+          selectionSet: { kind: 'SelectionSet', selections: [] },
+        }],
+      } as unknown as GraphqlDocumentNodeLike;
+    },
+    validate: (
+      _schema: GraphqlSchemaLike,
+      _document: GraphqlDocumentNodeLike,
+      _rules: unknown[],
+    ) => {
+      counters.validate++;
+      return [] as never;
+    },
+    execute: (_args: { operationName?: string }) => {
+      counters.execute++;
+      return Promise.resolve({ data: { hello: 'world' } });
+    },
+    subscribe: () => Promise.resolve({ data: {} }),
+    buildSchema: (_src: string) => createFakeSchema(),
+    validateSchema: () => [],
+    getOperationAST: (document: GraphqlDocumentNodeLike) => document.definitions[0] ?? null,
+    GraphQLError: class extends Error {
+      override name = 'GraphQLError';
+      toJSON() {
+        return { message: this.message };
+      }
+    },
+    NoSchemaIntrospectionCustomRule: {},
+    specifiedRules: [],
+  } as unknown as GraphqlRuntime & { counters: RuntimeCounters };
+
+  return runtime;
+};
+
+const createFakeSchema = (): GraphqlSchemaLike =>
+  ({
+    getQueryType: () => ({
+      name: 'Query',
+      getFields: () => ({ hello: { name: 'hello', type: { name: 'String' }, args: [] } }),
+      getInterfaces: () => [],
+    }),
+    getMutationType: () => null,
+    getSubscriptionType: () => null,
+    getType: (name: string) => ({ name }),
+    getPossibleTypes: () => [],
+    getDirectives: () => [],
+    getDirective: () => null,
+    toAST: () => ({}),
+  }) as GraphqlSchemaLike;
+
+const baseOptions = (runtime: GraphqlRuntime, cache: DocumentCache) => ({
+  runtime,
+  schema: createFakeSchema(),
+  documentCache: cache,
+  validationRules: [],
+});
+
 describe('executor', () => {
-  const createFakeRuntime = (): GraphqlRuntime => {
-    let parseCallCount = 0;
-    let validateCallCount = 0;
-    let executeCallCount = 0;
-
-    return {
-      parse: (_src: string) => {
-        parseCallCount++;
-        return {
-          kind: 'Document',
-          definitions: [{
-            kind: 'OperationDefinition',
-            operation: 'query',
-            selectionSet: { kind: 'SelectionSet', selections: [] },
-          }],
-        } as unknown as GraphqlDocumentNodeLike;
-      },
-      validate: (
-        _schema: GraphqlSchemaLike,
-        _document: GraphqlDocumentNodeLike,
-        rules: unknown[],
-      ) => {
-        validateCallCount++;
-        const errors: Array<{ message: string }> = [];
-        const mockContext = {
-          reportError: (error: { message: string }) => errors.push(error),
-        };
-        for (const rule of rules) {
-          if (typeof rule === 'function') {
-            try {
-              const visitor = rule(mockContext as never);
-              if (visitor && typeof visitor === 'object' && typeof visitor.Field === 'function') {
-                try {
-                  // Pass empty ancestors to avoid depth-limit rule throwing on undefined
-                  visitor.Field(undefined, undefined, undefined, []);
-                } catch (e) {
-                  // Custom rules may throw to signal validation errors
-                  errors.push({ message: (e as Error).message });
-                }
-              }
-            } catch {
-              // Built-in rules may throw; ignore
-            }
-          }
-        }
-        return errors as never;
-      },
-      execute: (
-        _args: {
-          schema: GraphqlSchemaLike;
-          document: GraphqlDocumentNodeLike;
-          contextValue?: unknown;
-          variableValues?: Record<string, unknown>;
-          operationName?: string;
-        },
-      ) => {
-        executeCallCount++;
-        return Promise.resolve({ data: { hello: 'world' } });
-      },
-      subscribe: () => Promise.resolve({ data: {} }),
-      buildSchema: (_src: string) => ({
-        getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
-        getMutationType: () => null,
-        getSubscriptionType: () => null,
-        getType: (name: string) => ({ name }),
-        getPossibleTypes: () => [],
-        getDirectives: () => [],
-        getDirective: () => null,
-        toAST: () => ({}),
-      }),
-      validateSchema: () => [],
-      getOperationAST: () => null,
-      GraphQLError: class extends Error {
-        override name = 'GraphQLError';
-        toJSON() {
-          return { message: this.message };
-        }
-      },
-      NoSchemaIntrospectionCustomRule: {},
-      specifiedRules: [],
-    } as GraphqlRuntime;
-  };
-
-  const createFakeSchema = (): GraphqlSchemaLike =>
-    ({
-      getQueryType: () => ({
-        name: 'Query',
-        getFields: () => ({ hello: { name: 'hello', type: { name: 'String' }, args: [] } }),
-        getInterfaces: () => [],
-      }),
-      getMutationType: () => null,
-      getSubscriptionType: () => null,
-      getType: (name: string) => ({ name }),
-      getPossibleTypes: () => [],
-      getDirectives: () => [],
-      getDirective: () => null,
-      toAST: () => ({}),
-    }) as GraphqlSchemaLike;
-
-  it('executes a query successfully', async () => {
+  it('executes a query and reports status 200 with executed true', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+    const outcome = await executeGraphql('{ hello }', baseOptions(runtime, new DocumentCache(100)));
 
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-    });
-
-    expect(result.data).toEqual({ hello: 'world' });
+    expect(outcome.status).toBe(200);
+    expect(outcome.executed).toBe(true);
+    expect(outcome.result.data).toEqual({ hello: 'world' });
+    expect(outcome.result.errors).toBeUndefined();
   });
 
-  it('uses cached document on second call', async () => {
+  it('parses and validates once across repeated identical queries', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
     const cache = new DocumentCache(100);
 
-    // First call - should parse and validate
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-    });
+    for (let i = 0; i < 4; i++) {
+      await executeGraphql('{ hello }', baseOptions(runtime, cache));
+    }
 
-    // Second call - should use cache
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-    });
-
-    // Should have succeeded
-    expect(true).toBe(true);
+    // The cache holds the document AND its validation result, and the operation
+    // guard reads the cached AST rather than re-parsing.
+    expect(runtime.counters.parse).toBe(1);
+    expect(runtime.counters.validate).toBe(1);
+    expect(runtime.counters.execute).toBe(4);
   });
 
-  it('adds depth limit rule when maxDepth > 0', async () => {
+  it('re-parses every request when the cache is disabled', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+    const cache = new DocumentCache(0);
 
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 5,
-      introspection: true,
-    });
+    await executeGraphql('{ hello }', baseOptions(runtime, cache));
+    await executeGraphql('{ hello }', baseOptions(runtime, cache));
 
-    expect(result.data).toEqual({ hello: 'world' });
+    expect(runtime.counters.parse).toBe(2);
+    expect(runtime.counters.validate).toBe(2);
   });
 
-  it('adds introspection rule when introspection is false', async () => {
+  it('returns a 400 parse error carrying locations when parse throws', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: false,
-    });
-
-    expect(result.data).toEqual({ hello: 'world' });
-  });
-
-  it('returns parse errors when runtime.parse throws', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    // Override parse to throw a parse error with locations
-    (runtime as unknown as GraphqlRuntime).parse = () => {
+    runtime.parse = () => {
       const err = new Error('Syntax Error: Unexpected token') as Error & {
         locations?: Array<{ line: number; column: number }>;
       };
@@ -206,316 +140,259 @@ describe('executor', () => {
       throw err;
     };
 
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-    });
+    const outcome = await executeGraphql('{ hello', baseOptions(runtime, new DocumentCache(100)));
 
-    expect(result.errors).toBeDefined();
-    expect(result.errors?.length).toBe(1);
-    expect(result.errors![0].message).toBe('Syntax Error: Unexpected token');
-    expect(result.errors![0].locations).toEqual([{ line: 1, column: 2 }]);
-    // Exercise the toJSON method on the error object
-    expect(result.errors![0].toJSON()).toEqual({
+    expect(outcome.status).toBe(400);
+    expect(outcome.executed).toBe(false);
+    expect(outcome.result.errors?.length).toBe(1);
+    expect(outcome.result.errors![0].message).toBe('Syntax Error: Unexpected token');
+    expect(outcome.result.errors![0].locations).toEqual([{ line: 1, column: 2 }]);
+    expect(outcome.result.errors![0].toJSON()).toEqual({
       message: 'Syntax Error: Unexpected token',
       locations: [{ line: 1, column: 2 }],
     });
   });
 
-  it('returns parse errors with fallback message when error has no message', async () => {
+  it('falls back to a generic parse message when the thrown error has none', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    // Override parse to throw an error without a message
-    (runtime as unknown as GraphqlRuntime).parse = () => {
-      const err = new Error() as Error & {
-        locations?: Array<{ line: number; column: number }>;
-      };
+    runtime.parse = () => {
+      const err = new Error();
       err.message = '';
       throw err;
     };
 
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-    });
+    const outcome = await executeGraphql('{ hello }', baseOptions(runtime, new DocumentCache(100)));
 
-    expect(result.errors).toBeDefined();
-    expect(result.errors?.length).toBe(1);
-    expect(result.errors![0].message).toBe('Parse error');
+    expect(outcome.status).toBe(400);
+    expect(outcome.result.errors![0].message).toBe('Parse error');
+    expect(outcome.result.errors![0].toJSON()).toEqual({ message: 'Parse error' });
   });
 
-  it('returns validation errors when present', async () => {
+  it('does not validate or execute when parse fails', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+    runtime.parse = () => {
+      throw new Error('boom');
+    };
 
-    // Override validate to return errors
-    (runtime as unknown as GraphqlRuntime).validate = () => [
-      new runtime.GraphQLError('Validation failed'),
-    ];
+    await executeGraphql('{ hello }', baseOptions(runtime, new DocumentCache(100)));
 
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-    });
-
-    expect(result.errors).toBeDefined();
-    expect(result.errors?.length).toBeGreaterThan(0);
+    expect(runtime.counters.validate).toBe(0);
+    expect(runtime.counters.execute).toBe(0);
   });
 
-  it('passes operationName when provided', async () => {
+  it('returns a 400 with the validation errors and never executes', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
+    runtime.validate = () => [new runtime.GraphQLError('Validation failed')] as never;
+
+    const outcome = await executeGraphql('{ hello }', baseOptions(runtime, new DocumentCache(100)));
+
+    expect(outcome.status).toBe(400);
+    expect(outcome.executed).toBe(false);
+    expect(outcome.result.errors?.length).toBe(1);
+    expect(outcome.result.errors![0].message).toBe('Validation failed');
+    expect(runtime.counters.execute).toBe(0);
+  });
+
+  it('reuses cached validation errors without re-validating', async () => {
+    const runtime = createFakeRuntime();
     const cache = new DocumentCache(100);
+    runtime.validate = () => {
+      runtime.counters.validate++;
+      return [new runtime.GraphQLError('Validation failed')] as never;
+    };
 
-    let capturedOperationName: string | undefined;
+    const first = await executeGraphql('{ hello }', baseOptions(runtime, cache));
+    const second = await executeGraphql('{ hello }', baseOptions(runtime, cache));
 
-    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
-      capturedOperationName = args.operationName;
+    expect(first.status).toBe(400);
+    expect(second.status).toBe(400);
+    expect(second.result.errors?.length).toBe(1);
+    expect(runtime.counters.validate).toBe(1);
+  });
+
+  it('reports 200 with executed true when a field error nulls data', async () => {
+    const runtime = createFakeRuntime();
+    runtime.execute = () =>
+      Promise.resolve({
+        data: null,
+        errors: [{ message: 'resolver blew up' }] as never,
+      });
+
+    const outcome = await executeGraphql('{ hello }', baseOptions(runtime, new DocumentCache(100)));
+
+    // The operation ran. A field error is not a request error, so this must not
+    // become a 400 even under strict negotiation.
+    expect(outcome.status).toBe(200);
+    expect(outcome.executed).toBe(true);
+    expect(outcome.result.data).toBeNull();
+    expect(outcome.result.errors?.length).toBe(1);
+  });
+
+  it('refuses a subscription over HTTP with a coded 400', async () => {
+    const runtime = createFakeRuntime('subscription');
+    const outcome = await executeGraphql(
+      'subscription { hello }',
+      baseOptions(runtime, new DocumentCache(100)),
+    );
+
+    expect(outcome.status).toBe(400);
+    expect(outcome.executed).toBe(false);
+    expect(outcome.result.errors![0].extensions?.code).toBe(
+      'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+    );
+    expect(runtime.counters.validate).toBe(0);
+    expect(runtime.counters.execute).toBe(0);
+  });
+
+  it('refuses a mutation over GET with a coded 405, but allows it over POST', async () => {
+    const cache = new DocumentCache(100);
+    const getRuntime = createFakeRuntime('mutation');
+    const refused = await executeGraphql('mutation { m }', {
+      ...baseOptions(getRuntime, cache),
+      method: 'GET',
+    });
+
+    expect(refused.status).toBe(405);
+    expect(refused.executed).toBe(false);
+    expect(refused.result.errors![0].extensions?.code).toBe('METHOD_NOT_ALLOWED');
+    expect(getRuntime.counters.execute).toBe(0);
+
+    const postRuntime = createFakeRuntime('mutation');
+    const allowed = await executeGraphql('mutation { m }', {
+      ...baseOptions(postRuntime, new DocumentCache(100)),
+      method: 'POST',
+    });
+
+    expect(allowed.status).toBe(200);
+    expect(postRuntime.counters.execute).toBe(1);
+  });
+
+  it('reports OPERATION_RESOLUTION_FAILED when the operation cannot be resolved', async () => {
+    const runtime = createFakeRuntime();
+    runtime.getOperationAST = () => null;
+
+    const outcome = await executeGraphql(
+      'query A { hello } query B { hello }',
+      baseOptions(runtime, new DocumentCache(100)),
+    );
+
+    expect(outcome.status).toBe(400);
+    expect(outcome.executed).toBe(false);
+    expect(outcome.result.errors![0].extensions?.code).toBe('OPERATION_RESOLUTION_FAILED');
+    expect(outcome.result.errors![0].toJSON().extensions?.code).toBe(
+      'OPERATION_RESOLUTION_FAILED',
+    );
+    expect(runtime.counters.validate).toBe(0);
+  });
+
+  it('passes operationName through only when it is non-empty', async () => {
+    const captured: Array<string | undefined> = [];
+    const runtime = createFakeRuntime();
+    runtime.execute = (args: { operationName?: string }) => {
+      captured.push(args.operationName);
       return Promise.resolve({ data: { hello: 'world' } });
     };
 
     await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
+      ...baseOptions(runtime, new DocumentCache(100)),
       operationName: 'MyQuery',
     });
-
-    expect(capturedOperationName).toBe('MyQuery');
-  });
-
-  it('does not pass operationName when empty', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    let capturedOperationName: string | undefined;
-
-    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
-      capturedOperationName = args.operationName;
-      return Promise.resolve({ data: { hello: 'world' } });
-    };
-
     await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
+      ...baseOptions(runtime, new DocumentCache(100)),
       operationName: '',
     });
 
-    // Empty string should not be passed
-    expect(capturedOperationName).toBeUndefined();
+    expect(captured).toEqual(['MyQuery', undefined]);
   });
 
-  it('passes variableValues when provided', async () => {
+  it('passes variableValues, contextValue and rootValue through to execute', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    let capturedVariables: Record<string, unknown> | undefined;
-
-    (runtime as unknown as GraphqlRuntime).execute = (
-      args: { variableValues?: Record<string, unknown> },
-    ) => {
-      capturedVariables = args.variableValues;
+    let args: {
+      variableValues?: Record<string, unknown>;
+      contextValue?: unknown;
+      rootValue?: unknown;
+    } = {};
+    runtime.execute = (received) => {
+      args = received;
       return Promise.resolve({ data: { hello: 'world' } });
     };
 
     await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
+      ...baseOptions(runtime, new DocumentCache(100)),
       variableValues: { name: 'World' },
-    });
-
-    expect(capturedVariables).toEqual({ name: 'World' });
-  });
-
-  it('passes contextValue when provided', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    let capturedContext: unknown;
-
-    (runtime as unknown as GraphqlRuntime).execute = (args: { contextValue?: unknown }) => {
-      capturedContext = args.contextValue;
-      return Promise.resolve({ data: { hello: 'world' } });
-    };
-
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
       contextValue: { user: 'test' },
-    });
-
-    expect(capturedContext).toEqual({ user: 'test' });
-  });
-
-  it('passes rootValue when provided', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    let capturedRootValue: unknown;
-
-    (runtime as unknown as GraphqlRuntime).execute = (args: { rootValue?: unknown }) => {
-      capturedRootValue = args.rootValue;
-      return Promise.resolve({ data: { hello: 'world' } });
-    };
-
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
       rootValue: { custom: 'value' },
     });
 
-    expect(capturedRootValue).toEqual({ custom: 'value' });
+    expect(args.variableValues).toEqual({ name: 'World' });
+    expect(args.contextValue).toEqual({ user: 'test' });
+    expect(args.rootValue).toEqual({ custom: 'value' });
   });
 
-  it('uses custom validation rules', async () => {
+  it('defaults variableValues to an empty object when absent', async () => {
     const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+    let captured: Record<string, unknown> | undefined;
+    runtime.execute = (args: { variableValues?: Record<string, unknown> }) => {
+      captured = args.variableValues;
+      return Promise.resolve({ data: { hello: 'world' } });
+    };
 
+    await executeGraphql('{ hello }', baseOptions(runtime, new DocumentCache(100)));
+
+    expect(captured).toEqual({});
+  });
+
+  it('hands the assembled rule list to validate verbatim', async () => {
+    const runtime = createFakeRuntime();
     const customRule = () => ({});
+    let receivedRules: unknown[] | undefined;
+    runtime.validate = (_s, _d, rules) => {
+      receivedRules = rules;
+      return [] as never;
+    };
 
     await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
+      ...baseOptions(runtime, new DocumentCache(100)),
       validationRules: [customRule],
-      maxDepth: 0,
-      introspection: true,
     });
 
-    // Custom rule is passed to validate, not called directly
-    expect(true).toBe(true);
+    expect(receivedRules).toEqual([customRule]);
   });
 
-  it('passes operationName when provided (non-empty string)', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+  describe('checkOperation', () => {
+    it('returns null for a query, letting execution continue', () => {
+      const runtime = createFakeRuntime();
+      const document = runtime.parse('{ hello }');
 
-    let capturedOperationName: string | undefined;
-
-    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
-      capturedOperationName = args.operationName;
-      return Promise.resolve({ data: { hello: 'world' } });
-    };
-
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-      operationName: 'MyQuery',
+      expect(checkOperation(runtime, document)).toBeNull();
     });
 
-    expect(capturedOperationName).toBe('MyQuery');
-  });
+    it('treats an empty operationName as absent', () => {
+      const runtime = createFakeRuntime();
+      let received: string | undefined = 'sentinel';
+      runtime.getOperationAST = (document, name) => {
+        received = name;
+        return document.definitions[0] ?? null;
+      };
+      const document = runtime.parse('{ hello }');
 
-  it('returns execution result with data on success', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+      checkOperation(runtime, document, '');
 
-    const result = await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
+      expect(received).toBeUndefined();
     });
 
-    expect(result.data).toEqual({ hello: 'world' });
-    expect(result.errors).toBeUndefined();
-  });
+    it('forwards a non-empty operationName', () => {
+      const runtime = createFakeRuntime();
+      let received: string | undefined;
+      runtime.getOperationAST = (document, name) => {
+        received = name;
+        return document.definitions[0] ?? null;
+      };
+      const document = runtime.parse('query A { hello }');
 
-  it('does not include operationName when empty string', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
+      checkOperation(runtime, document, 'A');
 
-    let capturedOperationName: string | undefined;
-
-    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
-      capturedOperationName = args.operationName;
-      return Promise.resolve({ data: { hello: 'world' } });
-    };
-
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-      operationName: '', // Empty string should not be passed
+      expect(received).toBe('A');
     });
-
-    // Empty string should result in undefined
-    expect(capturedOperationName).toBeUndefined();
-  });
-
-  it('includes operationName when provided (truthy)', async () => {
-    const runtime = createFakeRuntime();
-    const schema = createFakeSchema();
-    const cache = new DocumentCache(100);
-
-    let capturedOperationName: string | undefined;
-
-    (runtime as unknown as GraphqlRuntime).execute = (args: { operationName?: string }) => {
-      capturedOperationName = args.operationName;
-      return Promise.resolve({ data: { hello: 'world' } });
-    };
-
-    await executeGraphql('{ hello }', {
-      runtime,
-      schema,
-      documentCache: cache,
-      validationRules: [],
-      maxDepth: 0,
-      introspection: true,
-      operationName: 'MyQuery',
-    });
-
-    expect(capturedOperationName).toBe('MyQuery');
   });
 });

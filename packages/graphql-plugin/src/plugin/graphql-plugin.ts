@@ -40,7 +40,11 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
   const maskInternalErrors = options.maskInternalErrors ?? true;
   const documentCacheSize = options.documentCacheSize ?? 1000;
   const formatError = options.formatError ?? ((_e: unknown) => _e);
-  const buildContext = options.buildContext ?? ((_i: unknown) => ({}));
+  // NOT defaulted: an absent `buildContext` must reach the service as absent, so
+  // the service builds its documented default context
+  // (`services`/`requestContext`/`user`/`tenant`). Defaulting it here to a
+  // stub made that default unreachable and handed resolvers an empty object.
+  const buildContext = options.buildContext;
   const rootValue = options.rootValue;
 
   let graphqlService: GraphqlService | null = null;
@@ -80,6 +84,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
       }
 
       // Create service
+      const handlerLogger = ctx.logger ? createHandlerLogger(ctx.logger) : undefined;
       graphqlService = new GraphqlService(runtime, schema, {
         endpoint: path,
         documentCacheSize,
@@ -88,15 +93,15 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         introspection,
         maskInternalErrors,
         formatError,
-        buildContext,
+        ...(buildContext && { buildContext }),
         rootValue,
+        ...(handlerLogger && { logger: handlerLogger }),
       });
 
       // Register service
       ctx.services.register(CAP.GRAPHQL, graphqlService);
 
       // Register routes - handle optional logger with exactOptionalPropertyTypes
-      const handlerLogger = ctx.logger ? createHandlerLogger(ctx.logger) : undefined;
       const { post, get } = createGraphqlHandler(graphqlService, path, {
         graphiql,
         ...(handlerLogger && { logger: handlerLogger }),

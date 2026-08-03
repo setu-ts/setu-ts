@@ -4,6 +4,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { CAPABILITIES } from '@hono-enterprise/common';
 import { GraphqlPlugin } from '../../src/plugin/graphql-plugin.ts';
 import type { ResolverMap } from '../../src/interfaces/options.ts';
 import { createHandlerLogger } from '../../src/plugin/graphql-plugin.ts';
@@ -228,11 +229,64 @@ describe('GraphqlPlugin', () => {
       expect(logged).toBe(true);
     });
 
-    it('handles schema-first mode', async () => {
+    it('logs a masked internal error through the plugin context logger', async () => {
+      // Masking without logging discards the error entirely. `IRequestContext`
+      // carries no logger, so the sink must come from the plugin context.
+      const errorCalls: { msg: string; err?: unknown }[] = [];
+
+      const plugin = GraphqlPlugin({
+        typeDefs: 'type Query { boom: String }',
+        resolvers: {
+          Query: {
+            boom: () => {
+              throw new Error('SECRET internal detail');
+            },
+          },
+        },
+      });
+
+      let registeredService: unknown;
+
+      await plugin.register(
+        {
+          logger: {
+            info: () => {},
+            error: (msg: string, err?: unknown) => errorCalls.push({ msg, err }),
+          },
+          router: { post: () => {}, get: () => {} },
+          services: {
+            register: (_token: string, service: unknown) => {
+              registeredService = service;
+            },
+          },
+          health: { register: () => {} },
+        } as unknown as Parameters<typeof plugin.register>[0],
+      );
+
+      const service = registeredService as {
+        execute(params: { query: string }): Promise<{ result: { errors?: unknown[] } }>;
+      };
+      const outcome = await service.execute({ query: '{ boom }' });
+
+      // The client sees nothing...
+      expect(JSON.stringify(outcome.result)).not.toContain('SECRET internal detail');
+      // ...but the operator does.
+      const masked = errorCalls.filter((c) => c.msg === 'Internal GraphQL error');
+      expect(masked.length).toBe(1);
+      expect(String((masked[0]!.err as { message?: string })?.message)).toContain(
+        'SECRET internal detail',
+      );
+    });
+
+    it('registers the service and both routes in schema-first mode', async () => {
       const plugin = GraphqlPlugin({
         typeDefs: 'type Query { hello: String }',
         resolvers: { Query: { hello: () => 'world' } },
+        path: '/api/graphql',
       });
+
+      const registered: Array<[string, unknown]> = [];
+      const routes: Array<[string, string]> = [];
 
       await plugin.register(
         {
@@ -241,11 +295,11 @@ describe('GraphqlPlugin', () => {
             error: () => {},
           },
           router: {
-            post: () => {},
-            get: () => {},
+            post: (p: string) => routes.push(['post', p]),
+            get: (p: string) => routes.push(['get', p]),
           },
           services: {
-            register: () => {},
+            register: (token: string, service: unknown) => registered.push([token, service]),
           },
           health: {
             register: () => {},
@@ -253,14 +307,10 @@ describe('GraphqlPlugin', () => {
         } as unknown as Parameters<typeof plugin.register>[0],
       );
 
-      // Should complete without throwing
-      expect(true).toBe(true);
-    });
-
-    it('handles code-first mode', () => {
-      // Skip this test - code-first mode requires a real GraphQL schema from graphql package
-      // The code-first path is tested through integration tests with real schema
-      expect(true).toBe(true);
+      expect(registered.length).toBe(1);
+      expect(registered[0]![0]).toBe(CAPABILITIES.GRAPHQL);
+      expect((registered[0]![1] as { endpoint: string }).endpoint).toBe('/api/graphql');
+      expect(routes).toEqual([['post', '/api/graphql'], ['get', '/api/graphql']]);
     });
 
     it('handles schema build error', async () => {
@@ -380,6 +430,8 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
+      const registered: Array<[string, unknown]> = [];
+
       await plugin.register(
         {
           router: {
@@ -387,7 +439,7 @@ describe('GraphqlPlugin', () => {
             get: () => {},
           },
           services: {
-            register: () => {},
+            register: (token: string, service: unknown) => registered.push([token, service]),
           },
           health: {
             register: () => {},
@@ -395,8 +447,13 @@ describe('GraphqlPlugin', () => {
         } as unknown as Parameters<typeof plugin.register>[0],
       );
 
-      // Should complete without logger
-      expect(true).toBe(true);
+      // `logger` is an optional dependency: the service must still register, and
+      // must still execute, with no logger anywhere in the context.
+      expect(registered.map(([token]) => token)).toEqual([CAPABILITIES.GRAPHQL]);
+      const service = registered[0]![1] as {
+        execute(params: { query: string }): Promise<{ status: number }>;
+      };
+      expect((await service.execute({ query: '{ hello }' })).status).toBe(200);
     });
 
     it('executes health indicator callback', async () => {
@@ -435,8 +492,7 @@ describe('GraphqlPlugin', () => {
       // Execute the health callback
       const healthResult = await healthCallback!();
       expect(healthResult.status).toBe('up');
-      expect(healthResult.data).toHaveProperty('endpoint');
-      expect(healthResult.data).toHaveProperty('cachedDocuments');
+      expect(healthResult.data).toEqual({ endpoint: '/graphql', cachedDocuments: 0 });
     });
 
     it('executes logger wrapper functions', async () => {
@@ -634,10 +690,21 @@ describe('GraphqlPlugin', () => {
 
     it('handles code-first mode with injected schema', async () => {
       // Test code-first mode using an injected graphqlModule
+      const executedSchemas: unknown[] = [];
       const fakeModule = {
-        parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
+        parse: (_src: string) => ({
+          kind: 'Document',
+          definitions: [{
+            kind: 'OperationDefinition',
+            operation: 'query',
+            selectionSet: { kind: 'SelectionSet', selections: [] },
+          }],
+        }),
         validate: () => [],
-        execute: () => Promise.resolve({ data: { hello: 'world' } }),
+        execute: (args: { schema: unknown }) => {
+          executedSchemas.push(args.schema);
+          return Promise.resolve({ data: { hello: 'world' } });
+        },
         subscribe: () => Promise.resolve({ data: {} }),
         buildSchema: (_src: string) => ({
           getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
@@ -650,7 +717,8 @@ describe('GraphqlPlugin', () => {
           toAST: () => ({}),
         }),
         validateSchema: () => [],
-        getOperationAST: () => null,
+        getOperationAST: (document: { definitions: Array<{ kind: string; operation?: string }> }) =>
+          document.definitions[0] ?? null,
         GraphQLError: class extends Error {
           override name = 'GraphQLError';
           toJSON() {
@@ -661,10 +729,13 @@ describe('GraphqlPlugin', () => {
         specifiedRules: [],
       };
 
+      const providedSchema = fakeModule.buildSchema('type Query { hello: String }');
       const plugin = GraphqlPlugin({
-        schema: fakeModule.buildSchema('type Query { hello: String }'),
+        schema: providedSchema,
         graphqlModule: fakeModule,
       });
+
+      let registeredService: unknown;
 
       await plugin.register(
         {
@@ -677,7 +748,9 @@ describe('GraphqlPlugin', () => {
             get: () => {},
           },
           services: {
-            register: () => {},
+            register: (_token: string, service: unknown) => {
+              registeredService = service;
+            },
           },
           health: {
             register: () => {},
@@ -685,44 +758,71 @@ describe('GraphqlPlugin', () => {
         } as unknown as Parameters<typeof plugin.register>[0],
       );
 
-      // Should complete without throwing
-      expect(true).toBe(true);
+      // The code-first arm must execute against the schema the application
+      // handed over, untouched.
+      expect(executedSchemas).toEqual([]);
+      const service = registeredService as {
+        execute(params: { query: string }): Promise<{ status: number }>;
+      };
+      expect((await service.execute({ query: '{ hello }' })).status).toBe(200);
+      expect(executedSchemas).toEqual([providedSchema]);
     });
 
-    it('handles graphqlModule option', async () => {
+    it('uses the injected graphqlModule instead of loading one', async () => {
       // Shared field object so mutations persist
       const helloField = { name: 'hello', type: { name: 'String' }, args: [] };
       const queryFields = { hello: helloField };
+      const calls: string[] = [];
 
       const fakeModule = {
-        parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
-        validate: () => [],
-        execute: () => Promise.resolve({ data: { hello: 'world' } }),
+        parse: (_src: string) => {
+          calls.push('parse');
+          return {
+            kind: 'Document',
+            definitions: [{
+              kind: 'OperationDefinition',
+              operation: 'query',
+              selectionSet: { kind: 'SelectionSet', selections: [] },
+            }],
+          };
+        },
+        validate: () => {
+          calls.push('validate');
+          return [];
+        },
+        execute: () => {
+          calls.push('execute');
+          return Promise.resolve({ data: { hello: 'world' } });
+        },
         subscribe: () => Promise.resolve({ data: {} }),
-        buildSchema: (_src: string) => ({
-          getQueryType: () => ({
-            name: 'Query',
-            getFields: () => queryFields,
-            getInterfaces: () => [],
-          }),
-          getMutationType: () => null,
-          getSubscriptionType: () => null,
-          getType: (name: string) => {
-            if (name === 'Query') {
-              return {
-                name,
-                getFields: () => queryFields,
-              };
-            }
-            return null;
-          },
-          getPossibleTypes: () => [],
-          getDirectives: () => [],
-          getDirective: () => null,
-          toAST: () => ({}),
-        }),
+        buildSchema: (_src: string) => {
+          calls.push('buildSchema');
+          return {
+            getQueryType: () => ({
+              name: 'Query',
+              getFields: () => queryFields,
+              getInterfaces: () => [],
+            }),
+            getMutationType: () => null,
+            getSubscriptionType: () => null,
+            getType: (name: string) => {
+              if (name === 'Query') {
+                return {
+                  name,
+                  getFields: () => queryFields,
+                };
+              }
+              return null;
+            },
+            getPossibleTypes: () => [],
+            getDirectives: () => [],
+            getDirective: () => null,
+            toAST: () => ({}),
+          };
+        },
         validateSchema: () => [],
-        getOperationAST: () => null,
+        getOperationAST: (document: { definitions: Array<{ kind: string; operation?: string }> }) =>
+          document.definitions[0] ?? null,
         GraphQLError: class extends Error {
           override name = 'GraphQLError';
           toJSON() {
@@ -739,6 +839,8 @@ describe('GraphqlPlugin', () => {
         graphqlModule: fakeModule,
       });
 
+      let registeredService: unknown;
+
       await plugin.register(
         {
           logger: {
@@ -750,7 +852,9 @@ describe('GraphqlPlugin', () => {
             get: () => {},
           },
           services: {
-            register: () => {},
+            register: (_token: string, service: unknown) => {
+              registeredService = service;
+            },
           },
           health: {
             register: () => {},
@@ -758,8 +862,20 @@ describe('GraphqlPlugin', () => {
         } as unknown as Parameters<typeof plugin.register>[0],
       );
 
-      // Should use injected graphqlModule
-      expect(true).toBe(true);
+      // The injected module built the schema (had the loader run instead, this
+      // fake's methods would never be reached).
+      expect(calls).toContain('buildSchema');
+
+      const service = registeredService as {
+        execute(params: { query: string }): Promise<{ status: number }>;
+      };
+      const outcome = await service.execute({ query: '{ hello }' });
+
+      expect(outcome.status).toBe(200);
+      // ...and every execution step ran through the injected module.
+      expect(calls).toContain('parse');
+      expect(calls).toContain('validate');
+      expect(calls).toContain('execute');
     });
 
     it('invokes handlerLogger error wrapper', async () => {

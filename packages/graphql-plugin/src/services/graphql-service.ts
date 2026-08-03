@@ -11,6 +11,7 @@ import type {
   IGraphqlService,
   IRequestContext,
 } from '@hono-enterprise/common';
+import type { GraphqlLogger } from '../interfaces/options.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../interfaces/graphql-runtime.ts';
 import type { DefaultGraphqlContext, GraphqlContextInput } from '../interfaces/options.ts';
 import { DocumentCache } from '../execution/document-cache.ts';
@@ -34,6 +35,7 @@ export class GraphqlService implements IGraphqlService {
   #formatError: (error: unknown) => unknown;
   #buildContext: ((input: GraphqlContextInput) => unknown | Promise<unknown>) | null;
   #rootValue?: unknown;
+  #logger: GraphqlLogger | undefined;
 
   constructor(
     runtime: GraphqlRuntime,
@@ -48,6 +50,12 @@ export class GraphqlService implements IGraphqlService {
       formatError?: (error: unknown) => unknown;
       buildContext?: (input: GraphqlContextInput) => unknown | Promise<unknown>;
       rootValue?: unknown;
+      /**
+       * Sink for masked internal errors. Supplied by the plugin from
+       * `IPluginContext.logger`; `IRequestContext` carries no logger, so this is
+       * the only path by which a masked error reaches an operator.
+       */
+      logger?: GraphqlLogger;
     },
   ) {
     this.#runtime = runtime;
@@ -62,6 +70,7 @@ export class GraphqlService implements IGraphqlService {
     this.#formatError = options.formatError ?? ((e: unknown) => e);
     this.#buildContext = options.buildContext ?? null;
     this.#rootValue = options.rootValue;
+    this.#logger = options.logger;
 
     // A1: Build validation rules once at construction time (not per request)
     this.#validationRules = this.#buildValidationRules();
@@ -80,37 +89,6 @@ export class GraphqlService implements IGraphqlService {
     requestContext?: IRequestContext,
     method?: 'GET' | 'POST',
   ): Promise<GraphqlExecutionOutcome> {
-    // B6: Check operation kind with parse-based detection (before validate/execute)
-    const operationKind = this.#checkOperationKind(params.query, params.operationName);
-    if (operationKind === 'subscription') {
-      // Subscription over HTTP → 400 for ANY method
-      return {
-        status: 400,
-        result: {
-          errors: [
-            {
-              message: 'Subscriptions are not supported over HTTP',
-              extensions: { code: 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP' },
-            },
-          ],
-        },
-      };
-    }
-    if (operationKind === 'mutation' && method === 'GET') {
-      // Mutation over GET → 405
-      return {
-        status: 405,
-        result: {
-          errors: [
-            {
-              message: 'Mutations are not allowed over GET',
-              extensions: { code: 'METHOD_NOT_ALLOWED' },
-            },
-          ],
-        },
-      };
-    }
-
     // Build context
     let contextValue: unknown;
     if (this.#buildContext !== null) {
@@ -128,38 +106,29 @@ export class GraphqlService implements IGraphqlService {
       contextValue = defaultContext;
     }
 
-    // Execute
-    const result = await executeGraphql(params.query, {
+    // Parse → operation guard → validate → execute. The executor owns the
+    // status, so `execute()` and the HTTP route can never disagree about it.
+    const outcome = await executeGraphql(params.query, {
       schema: this.#schema,
       runtime: this.#runtime,
       documentCache: this.#documentCache,
       validationRules: this.#validationRules, // A1: use pre-built rules
-      maxDepth: this.#maxDepth,
-      introspection: this.#introspection,
       operationName: params.operationName ?? '',
       variableValues: params.variables ?? {},
       contextValue,
       rootValue: this.#rootValue,
+      ...(method && { method }),
     });
 
-    // Mask errors
-    const logger = (requestContext as { logger?: { error: (m: string, e?: unknown) => void } })
-      ?.logger;
     const maskErrorsOptions = {
       maskInternalErrors: this.#maskInternalErrors,
       formatError: this.#formatError,
-      ...(logger && { logger }),
+      ...(this.#logger && { logger: this.#logger }),
     };
-    const masked = maskErrors(result, maskErrorsOptions);
-
-    // Check if this is a validation error (has errors but no data)
-    // Validation errors should return 400, not 200
-    const hasErrors = masked.errors && masked.errors.length > 0;
-    const hasData = masked.data !== undefined && masked.data !== null;
-    const isValidationError = hasErrors && !hasData;
+    const masked = maskErrors(outcome.result, maskErrorsOptions);
 
     return {
-      status: isValidationError ? 400 : 200,
+      status: outcome.status,
       result: masked as GraphqlExecutionResult,
     };
   }
@@ -189,28 +158,6 @@ export class GraphqlService implements IGraphqlService {
     }
 
     return rules;
-  }
-
-  /**
-   * Check operation kind using parse-based detection.
-   * Returns undefined if parse fails (will be handled during execution).
-   * B6: This replaces the text-based getOperationKindFromQuery.
-   */
-  #checkOperationKind(
-    query: string,
-    operationName?: string,
-  ): 'query' | 'mutation' | 'subscription' | undefined {
-    try {
-      const document = this.#runtime.parse(query);
-      const ast = this.#runtime.getOperationAST(document, operationName);
-      if (!ast) {
-        return undefined;
-      }
-      return (ast.operation as 'query' | 'mutation' | 'subscription') ?? undefined;
-    } catch {
-      // Parse error - will be caught during execution
-      return undefined;
-    }
   }
 
   /**

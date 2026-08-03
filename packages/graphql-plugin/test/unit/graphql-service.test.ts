@@ -11,7 +11,16 @@ import type { IRequestContext } from '@hono-enterprise/common';
 describe('GraphqlService', () => {
   const createFakeRuntime = (): GraphqlRuntime =>
     ({
-      parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
+      // The document carries a real operation node, because the operation guard
+      // resolves the kind off the AST the parse produced.
+      parse: (_src: string) => ({
+        kind: 'Document',
+        definitions: [{
+          kind: 'OperationDefinition',
+          operation: 'query',
+          selectionSet: { kind: 'SelectionSet', selections: [] },
+        }],
+      }),
       validate: (_schema: unknown, _document: unknown, rules: unknown[]) => {
         const errors: Array<{ message: string }> = [];
         const mockContext = {
@@ -50,7 +59,7 @@ describe('GraphqlService', () => {
         toAST: () => ({}),
       }),
       validateSchema: () => [],
-      getOperationAST: () => null,
+      getOperationAST: (document: { definitions: unknown[] }) => document.definitions[0] ?? null,
       GraphQLError: class extends Error {
         override name = 'GraphQLError';
         toJSON() {

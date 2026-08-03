@@ -78,6 +78,39 @@ describe('DocumentCache', () => {
     expect(cache.size).toBe(2);
   });
 
+  it('replaces an existing key in place rather than growing', () => {
+    const cache = new DocumentCache(10);
+    const first = { document: { kind: 'Document', definitions: [] }, validationErrors: null };
+    const second = {
+      document: { kind: 'Document', definitions: [{ kind: 'OperationDefinition' }] },
+      validationErrors: null,
+    };
+
+    cache.set('key1', first);
+    cache.set('key1', second);
+
+    expect(cache.size).toBe(1);
+    expect(cache.get('key1')).toBe(second);
+  });
+
+  it('re-setting an existing key makes it most recently used', () => {
+    const cache = new DocumentCache(2);
+    const entry = () => ({
+      document: { kind: 'Document', definitions: [] },
+      validationErrors: null,
+    });
+
+    cache.set('a', entry());
+    cache.set('b', entry());
+    // Re-setting 'a' must move it to the front, so 'b' becomes the LRU victim.
+    cache.set('a', entry());
+    cache.set('c', entry());
+
+    expect(cache.get('b')).toBeUndefined();
+    expect(cache.get('a')).toBeDefined();
+    expect(cache.get('c')).toBeDefined();
+  });
+
   it('handles cache with no entries when evicting', () => {
     // Covers the branch where lruKey is undefined after keys().next()
     const cache = new DocumentCache(1);

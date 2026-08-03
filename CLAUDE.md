@@ -935,7 +935,44 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 51** (`packages/graphql-plugin` — GraphQL plugin: schema-first and code-first arms,
   GraphQL-over-HTTP transport with media-type negotiation and status-code watershed, bounded
   parse+validate document cache, error masking, depth limiting, introspection switch, GraphiQL page,
-  `npm:graphql@^16` inject-or-lazy seam, `graphql` health indicator, `onClose`) — complete (PR
+  `npm:graphql@^16` inject-or-lazy seam, `graphql` health indicator, `onClose`. Post-implementation
+  verification found five defects and four missed deliverables that all four green gates and a 97%
+  coverage table had passed, every one of them because a test asserted the defect or asserted
+  nothing. **The headline defect made the plugin's core promise non-functional**: the factory
+  defaulted `buildContext` to a stub returning `{}`, so the service's `#buildContext !== null`
+  branch always won and the documented `DefaultGraphqlContext` was unreachable — through the ONLY
+  real entry point, resolvers received an empty object and could reach no capability at all. The
+  unit test passed because it constructed `GraphqlService` directly (no `buildContext`), and the
+  "integration" test passed because it supplied its own; that file drove a hand-rolled mock plugin
+  context and never a kernel app, so it could not have seen it, and the plan-mandated
+  both-entry-points-under-a-non-default-config test was never written. It is now a real
+  `createApplication` + `inject` suite whose regression case asserts the four context members and
+  resolves a live capability. Also fixed: the `405` carried no `Allow: POST`; `data: null` from a
+  field error was misclassified as a request error and answered `400` under `graphql-response`
+  (`isValidationError = hasErrors && !hasData`) when an executed operation is always `200`; masked
+  internal errors were logged NOWHERE, because the sink was read off `IRequestContext`, which has no
+  `logger` member, so the cast always yielded `undefined` — the sink now comes from
+  `IPluginContext`; and the document cache never saved a parse, because `#checkOperationKind` parsed
+  outside it on every request (measured: 5 parses for 5 cached repeats, now 0). The parse →
+  operation-guard → validate → execute pipeline moved into the executor behind an
+  `ExecutionPhaseOutcome` carrying `status` + `executed`, which is what lets a field error and a
+  request error be told apart, and it made the plan's `OPERATION_RESOLUTION_FAILED` row real —
+  previously an ambiguous document leaked graphql's own uncoded message. Dead surface removed:
+  `execution/operation-check.ts` (49 lines whose only importer was its own test),
+  `ExecuteOptions.maxDepth`/`introspection` (never read), `GraphqlExecutionOutcome.streaming` in
+  `common` (the plan omitted `extensions` for exactly this reason and then shipped `streaming`), and
+  the `isPost` parameter over two byte-identical watershed branches. 15 `expect(true).toBe(true)`
+  assertions are gone; six of them sat in `depth-limit.test.ts` feeding the rule
+  `{ kind: 'SelectionSet' }` objects while `getDepth` counts the literal `'selectionSet'` **path
+  key**, so those fixtures measured depth 0 and the rule could never fire — the tests documented a
+  fiction. Missed deliverables shipped: the package was in **neither** release list, so it would
+  never have published (`release:verify` says so in as many words); ARCHITECTURE still listed
+  GraphQL in the Future subgraph and Future Additions; README still had it under "Not yet built" as
+  `🚧 Planned`; and `PUBLIC_API.md` carried the GraphQL section **twice**, the duplicate pair
+  disagreeing on the status rules. Two traps this closed that nothing else sees: `index.ts` opened
+  its module JSDoc description-first, which on jsr.io **suppresses the README** (`release:verify`
+  check 5 caught it), and `inject()` exposes no response headers, so the `Allow` fix had to be
+  proven through `app.fetch` — an `inject`-based test would have passed either way) — complete (PR
   pending)
 - **Next milestone** — **M51b** (GraphQL subscriptions over WebSocket/SSE, request batching,
   Automatic Persisted Queries, custom scalar resolvers, starter arm), then M37–M40 unless

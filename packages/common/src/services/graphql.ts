@@ -68,12 +68,18 @@ export interface GraphqlExecutionResult {
  * @since 0.1.0
  */
 export interface GraphqlExecutionOutcome {
-  /** The HTTP status code to return. */
+  /**
+   * The HTTP status code to return under
+   * `application/graphql-response+json` negotiation.
+   *
+   * A request error (parse, validation, operation resolution) is `400`; a
+   * mutation over `GET` is `405`. An operation that actually executed is `200`
+   * even when a field error nulls `data` — a field error is not a request
+   * error.
+   */
   status: number;
   /** The execution result (may contain errors). */
   result: GraphqlExecutionResult;
-  /** Whether the result was streamed (reserved for M51b subscriptions). */
-  streaming?: boolean;
 }
 
 /**
