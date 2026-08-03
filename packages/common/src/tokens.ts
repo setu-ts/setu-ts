@@ -134,6 +134,8 @@ export const CAPABILITIES = {
    * Durable Object namespaces) published as one typed accessor.
    */
   CLOUDFLARE: 'cloudflare',
+  /** GraphQL plugin — schema-first and code-first GraphQL-over-HTTP. */
+  GRAPHQL: 'graphql',
 } as const;
 
 /**

@@ -42,6 +42,8 @@
     "npm:amqplib@0.10": "0.10.9",
     "npm:drizzle-orm@0.45.2": "0.45.2_@opentelemetry+api@1.9.1_@prisma+client@7.8.0",
     "npm:drizzle-orm@~0.45.2": "0.45.2_@opentelemetry+api@1.9.1_@prisma+client@7.8.0",
+    "npm:graphql@*": "16.14.2",
+    "npm:graphql@16": "16.14.2",
     "npm:ioredis@5": "5.11.1",
     "npm:kafkajs@2": "2.2.4",
     "npm:nats@2": "2.29.3",
@@ -1242,6 +1244,9 @@
     },
     "gopd@1.2.0": {
       "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg=="
+    },
+    "graphql@16.14.2": {
+      "integrity": "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA=="
     },
     "gtoken@7.1.0": {
       "integrity": "sha512-pCcEwRi+TKpMlxAQObHDQ56KawURgyAf6jtIY046fJ5tIv3zDe/LEIubckAO8fj6JnAxLdmWkUfNyulQ2iKdEw==",

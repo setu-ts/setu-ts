@@ -4985,6 +4985,149 @@ server side — has no way to turn a logical service name into an address.
 
 ---
 
+## Milestone 51: GraphQL Plugin — Schema-First and Code-First over HTTP
+
+**Objective:** GraphQL is the last mainstream API paradigm the framework cannot serve. REST rides
+the kernel router, gRPC/Connect rides the M49 adapter seam, real-time rides M43/M46 — a GraphQL
+request has no home at all. `README.md` still lists GraphQL under "Not yet built" and
+`ARCHITECTURE.md` still lists it under "Future Additions".
+
+**Package:** `packages/graphql-plugin`
+
+**Plan:** `plans/milestone-51-graphql-plugin.md`
+
+### The plugin needs no adapter seam — and that is a deliverable
+
+M46 widened `IHttpAdapter` with `setUpgradeRouter?` because an RFC 6455 handshake needs the native
+`Request` and answers with a 101 carrying a socket. M49 widened it with `setRpcHandler?` because a
+gRPC exchange needs a raw streaming body and trailers. A GraphQL-over-HTTP exchange is a `POST` of
+`application/json` answered with JSON — every byte of it fits `IRequest.json()` and
+`IResponse.send()` as already committed. So this plugin registers two ordinary routes and touches no
+adapter and no runtime code. The ARCHITECTURE note added in this milestone says so explicitly, so
+the next reader does not copy the M46/M49 seam by pattern-matching.
+
+### Scope
+
+- `IGraphqlService` + `GraphqlRequestParams`/`GraphqlFormattedError`/`GraphqlExecutionResult`/
+  `GraphqlExecutionOutcome` in `common`, plus a new `CAPABILITIES.GRAPHQL = 'graphql'` token.
+- Two schema-construction arms with mutually exclusive keys (each declares the other `?: never`, so
+  supplying both is a **compile** error): schema-first (`typeDefs` + `resolvers`, attached by an
+  internal `attachResolvers`) and code-first (an application-built schema used as-is). Both run
+  `validateSchema` at `register()`, so an invalid schema fails at startup and never at first
+  request. `attachResolvers` **throws** on an unknown type, an unknown field, or a scalar type — a
+  silently ignored resolver typo is indistinguishable from a legitimate `null` at the wire.
+- The GraphQL-over-HTTP transport on `POST`/`GET`, including `Accept` negotiation between
+  `application/graphql-response+json` and legacy `application/json` and the spec's status-code
+  watershed (a client predating the new media type treats a non-200 as a transport failure and never
+  reads the `errors` array, so it must get `200`).
+- A bounded parse+validate document cache — internal and synchronous, deliberately **not**
+  `CAPABILITIES.CACHE`: that surface is async and possibly remote, and an AST is neither
+  serializable nor worth a network hop.
+- Security defaults: internal-error masking keyed on an explicit exposure predicate rather than
+  `instanceof GraphQLError` (which is the one check guaranteed to misfire here — see the cross-copy
+  risk below), a query-depth limit defaulting to `10`, and an introspection switch defaulting to
+  `true`.
+- A GraphiQL page mirroring the M21 Swagger UI precedent, served on the `GET` route only when the
+  request carries no `query` parameter and an `Accept` including `text/html`.
+- The `npm:graphql@^16` inject-or-lazy runtime seam (a pure `adaptGraphqlModule` plus a
+  `loadGraphqlModule` owning the one real `import()`), a `graphql` health indicator, and an
+  `onClose` that clears the document cache.
+
+### Facts established by probing the real package, not by recall
+
+`npm:graphql@^16` resolves to 16.14.2, and each of these had already produced a design consequence:
+
+- Attaching resolvers by mutating `field.resolve` on a `buildSchema()` result **works**, so the
+  schema-first arm needs no `@graphql-tools/schema` dependency.
+- A schema built by one copy of `graphql` and executed by another throws
+  `Cannot use GraphQLSchema … from another module or realm`. The `graphqlModule` injection option is
+  therefore a correctness fix, not an optimisation, and it is why masking cannot use `instanceof`.
+- Error shapes: a resolver throwing a plain `Error` surfaces with `extensions: {}` and an
+  `originalError`; a `GraphQLError` carrying `extensions.code` keeps that code; a validation error
+  has no `originalError` at all. The masking predicate keys off exactly those three observations,
+  with the documented consequence that a bare `new GraphQLError('x')` **is** masked — attaching a
+  code is how a resolver surfaces a message to clients.
+- `getOperationAST` returns `null` for a multi-operation document with no `operationName`, which is
+  where the `400` comes from.
+- `graphql` reads `process.env.NODE_ENV` at module scope, so it needs `--allow-env` under Deno and
+  the `nodejs_compat` flag on Cloudflare Workers. Stated in the README rather than claimed away.
+- `ResponseBuilder.json()` overwrites `content-type` while `send()` preserves a pre-set one, which
+  is how `application/graphql-response+json` is emitted without the set-header-after-terminal hack
+  the M21 Swagger route uses.
+
+### Implementation files
+
+- `packages/common/src/services/graphql.ts`, `tokens.ts` (edit), `index.ts` (edit)
+- `packages/graphql-plugin/src/`: `index.ts`, `plugin/graphql-plugin.ts`,
+  `services/graphql-service.ts`, `execution/{executor,document-cache}.ts`,
+  `schema/{build-schema,attach-resolvers}.ts`,
+  `http/{graphql-handler,request-parser,media-type}.ts`, `security/{depth-limit,mask-errors}.ts`,
+  `runtime/graphql-loader.ts`, `interfaces/{graphql-runtime,options}.ts`, `ui/graphiql.ts`,
+  `errors/graphql-errors.ts`
+- `deno.json` (workspace list, edit), `scripts/release-packages.ts` (Tier 4, edit)
+
+### Deliverables
+
+- [ ] `IGraphqlService` contract and `GRAPHQL` token in `common`
+- [ ] `GraphqlPlugin` with the schema-first and code-first arms
+- [ ] GraphQL-over-HTTP transport with media-type negotiation and the status watershed
+- [ ] Bounded parse+validate document cache
+- [ ] Error masking, depth limiting, and the introspection switch
+- [ ] GraphiQL page, `graphql` health indicator, `onClose`
+- [ ] `npm:graphql@^16` inject-or-lazy seam with a guarded real-import test
+- [ ] Doc deliverables C1–C6 (ROADMAP, ARCHITECTURE, README ×2, PUBLIC_API)
+
+### Out of scope
+
+- **Subscriptions over every transport — M51b.** Until then a subscription operation over HTTP
+  answers a tested `400` carrying `SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`, so the gap is visible at
+  the wire rather than silent.
+- Request batching and Automatic Persisted Queries — M51b, together with the
+  `GraphqlRequestParams.extensions` member APQ needs. It is omitted here rather than declared
+  unread, because a field no code branches on is dead surface.
+- Custom scalar resolvers in the schema-first arm — M51b. M51 throws rather than ignoring the entry.
+- Federation, schema stitching, and a gateway — a separate milestone; nothing here forecloses it.
+- A code-first schema **builder** (a Pothos/Nexus-style DSL). The arm consumes a schema the
+  application already built.
+- A starter arm. M36's rule is that a starter bundles nothing an application cannot use out of the
+  box, and this plugin cannot boot without an application-supplied schema.
+- Client-side GraphQL — `packages/sdk` (M35) owns HTTP clients.
+
+---
+
+## Milestone 51b: GraphQL Subscriptions, Batching, and Persisted Queries
+
+**Objective:** close the transports M51 deferred. Split from M51 on the M14→M14c/M16→M16b precedent:
+M51's HTTP surface is a complete, shippable capability on its own, and the `graphql-transport-ws`
+protocol is a state machine (connection init/ack, subscribe, next, complete, error, ping/pong,
+per-connection subscription registries) that deserves its own plan rather than being appended to
+one.
+
+**Package:** `packages/graphql-plugin` (extends M51; no new package)
+
+### Scope
+
+- The `graphql-transport-ws` protocol over `CAPABILITIES.WEBSOCKET`, resolved **optionally** so an
+  application with no WebSocket plugin registered is unaffected. M46's `IWebSocketService.route()`
+  already accepts a `protocols` allow-list, so no further `common` widening is expected — verified
+  during M51 planning, not assumed.
+- GraphQL-over-SSE (distinct-connections mode) over M42 `IResponse.stream()`, which needs no other
+  plugin at all.
+- Request batching (an array body) and Automatic Persisted Queries, the latter adding the
+  `GraphqlRequestParams.extensions` member together with the code that reads it, and reusing
+  `CAPABILITIES.CACHE` for the hash→document map.
+- Custom scalar resolvers in the schema-first arm, replacing M51's throw.
+- Re-evaluating the `^16` pin: `graphql@17` changes `subscribe` and adds incremental delivery.
+- A `graphql` arm on the starter tiers, once the option shape has settled.
+
+### Deliverables
+
+- [ ] `graphql-transport-ws` over the optional WebSocket capability
+- [ ] GraphQL-over-SSE transport
+- [ ] Request batching and Automatic Persisted Queries
+- [ ] Custom scalar resolvers
+- [ ] Starter arm
+
 ## Milestone 52: Cloudflare Workers Plugin — Reaching the Platform's Bindings ✅ COMPLETE
 
 **Objective:** Cloudflare Workers has been a _serving_ target since M23 — the fetch adapter
@@ -5468,6 +5611,8 @@ app.register(MyPlugin({ option1: 'value' }));
 | 48        | ✅     | session-plugin                        |
 | 49        | ✅     | grpc-plugin                           |
 | 50        | ✅     | service-discovery-plugin              |
+| 51        | ✅     | graphql-plugin                        |
+| 51b       | ⬜     | graphql-plugin (subscriptions)        |
 | 52        | ✅     | cloudflare-plugin                     |
 | 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |

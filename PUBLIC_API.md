@@ -45,7 +45,8 @@
 36. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
 37. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
 38. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
-39. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
+39. [API Reference: @hono-enterprise/graphql-plugin](#api-reference-hono-enterprisegraphql-plugin)
+40. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
 
 ---
 
@@ -6065,6 +6066,9 @@ Contract notes:
 - `CAPABILITIES.CLOUDFLARE` (`'cloudflare'`) — the capability token under which `CloudflarePlugin`
   registers `ICloudflareBindings`: typed access to a Worker's KV, R2, D1, Queues, service and
   Durable Object bindings, its string variables, and `waitUntil`. Added in Milestone 52.
+- `CAPABILITIES.GRAPHQL` (`'graphql'`) — the capability token under which `GraphqlPlugin` registers
+  the `IGraphqlService`. The service provides schema-first and code-first GraphQL execution over
+  ordinary kernel routes with media-type negotiation. Added in Milestone 51.
 - **Contribution-token pattern**: `HTTP_ADAPTER` and the five contribution tokens
   (`HEALTH_INDICATOR`, `METRIC_REGISTRATION`, `OPENAPI_SCHEMA`, `CLI_COMMAND`, `DECORATOR_HANDLER`)
   are multi-provider capabilities. The kernel collects plugin contributions registered under these
@@ -7429,6 +7433,144 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   shipping it means a contract promotion. A Durable-Object realtime backplane and distributed lock
   are Milestone 52d: both need the application to export a DO class plus a wrangler migration
   stanza.
+
+---
+
+## GraphQL
+
+Schema-first and code-first GraphQL support over the kernel router.
+
+### Overview
+
+GraphQL plugin providing schema construction, execution, and HTTP transport. Supports both SDL-based
+schema definition with resolver maps and pre-built schemas. Includes media-type negotiation for
+`application/graphql-response+json`, error masking, query-depth limiting, and optional GraphiQL UI.
+
+### Capability Token
+
+- `CAPABILITIES.GRAPHQL` (`'graphql'`) — the capability token under which `GraphqlPlugin` registers
+  the `IGraphqlService`.
+
+### Usage
+
+```typescript
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IGraphqlService } from '@hono-enterprise/common';
+
+// Schema-first
+app.use(
+  GraphqlPlugin({
+    typeDefs: `
+      type Query {
+        hello(name: String!): String
+      }
+    `,
+    resolvers: {
+      Query: {
+        hello: (_, { name }) => `Hello, ${name}!`,
+      },
+    },
+  }),
+);
+
+// Code-first
+import { buildSchema } from 'npm:graphql@^16';
+const schema = buildSchema(`type Query { hello: String }`);
+
+app.use(
+  GraphqlPlugin({
+    schema,
+  }),
+);
+
+// Resolve the service
+const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+```
+
+### Options
+
+| Option               | Type                                      | Default    | Description                                                               |
+| -------------------- | ----------------------------------------- | ---------- | ------------------------------------------------------------------------- |
+| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                                 |
+| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                                          |
+| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                                        |
+| `path`               | `string`                                  | `/graphql` | Endpoint path                                                             |
+| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                                        |
+| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                               |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                                        |
+| `validationRules`    | `unknown[]`                               | omitted    | Extra rules, appended after the built-ins, assembled once at registration |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                               |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                              |
+| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                                       |
+| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                                    |
+| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                                  |
+| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios)             |
+
+### Exports
+
+| Export                      | Kind     | Purpose                                                                   |
+| --------------------------- | -------- | ------------------------------------------------------------------------- |
+| `GraphqlPlugin`             | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL` |
+| `GraphqlService`            | class    | The `IGraphqlService` implementation; exported for testing                |
+| `adaptGraphqlModule`        | function | Structural adaptation of graphql module into internal runtime port        |
+| `graphiqlHtml`              | function | Generates GraphiQL UI HTML page                                           |
+| `createDepthLimitRule`      | function | Creates a validation rule for query depth limiting                        |
+| `GraphqlSchemaError`        | class    | Thrown when schema construction or resolver attachment fails              |
+| `GraphqlRuntimeLoadError`   | class    | Thrown when graphql runtime cannot be loaded                              |
+| `loadGraphqlModule`         | function | Loads `npm:graphql@^16` through a real dynamic import                     |
+| `GraphqlPluginOptions`      | type     | The factory parameter shape (union of the two arms)                       |
+| `GraphqlSchemaFirstOptions` | type     | The schema-first arm of that union                                        |
+| `GraphqlCodeFirstOptions`   | type     | The code-first arm of that union                                          |
+| `ResolverMap`               | type     | Resolver map for schema-first mode                                        |
+| `FieldResolver`             | type     | Field resolver function type                                              |
+| `GraphqlSchemaLike`         | type     | Structural constraint for pre-built schemas                               |
+| `GraphqlModuleLike`         | type     | Structural constraint for injected graphql modules                        |
+| `DefaultGraphqlContext`     | type     | Default context shape passed to resolvers                                 |
+| `GraphqlContextInput`       | type     | Input type for custom context builder                                     |
+
+> `GraphqlRuntime` and the structural graphql facades are **not** exported. They are an internal
+> port.
+
+### Notes
+
+- **Two schema construction arms.** Schema-first (`typeDefs` + `resolvers`) and code-first
+  (`schema`) are mutually exclusive; supplying both is a compile error.
+- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` of
+  `{ services, requestContext, user, tenant }` — `services` is the live `IServiceRegistry`, so a
+  resolver reaches any other capability through it, and `user`/`tenant` are whatever the auth and
+  multi-tenancy middleware published on the request. Supplying `buildContext` replaces that object
+  wholesale.
+- **Media-type negotiation and the status watershed.** Responds with
+  `application/graphql-response+json` when the client requests it, otherwise `application/json` —
+  including for failures raised before execution, so a client is never handed a media type it did
+  not ask for. Under `graphql-response`, a **request** error (parse, validation, operation
+  resolution) is `400`, a subscription over HTTP is `400`, and a mutation over `GET` is `405`. Under
+  `application/json`, every request the endpoint processed as GraphQL answers `200` with the error
+  in the body, because a client predating the newer media type reads a non-200 as a network failure
+  and never reads the `errors` array. Exactly three cases keep their status under `application/json`
+  — an unsupported request content type (`415`), a malformed JSON body (`400`), and a mutation over
+  `GET` (`405`) — because none of them is a GraphQL result. The status is decided from the outcome
+  alone and never from the response body, so a `formatError` hook cannot change it.
+- **An executed operation is always `200`.** A field error that nulls `data` is not a request error,
+  so it does not become a `400` even under `graphql-response`.
+- **`405` carries `Allow: POST`.** A mutation sent over `GET` is refused with `METHOD_NOT_ALLOWED`
+  and the endpoint advertises the verb that would work.
+- **Ambiguous operations.** A document whose operation cannot be resolved — several operations with
+  no `operationName`, or a name absent from the document — is a `400` with code
+  `OPERATION_RESOLUTION_FAILED`, decided after parse and before validation.
+- **Error masking.** Internal errors (resolvers throwing without a `code` in extensions) are masked
+  by default. The original is logged through the plugin context's `logger` when one is registered,
+  so masking never silently discards it.
+- **Query depth limiting.** Defaults to 10 levels; set to 0 to disable.
+- **Document caching.** Parse and validation results are cached together, keyed on the raw query
+  string, and the operation guard reads the cached AST — so a repeated query is neither re-parsed
+  nor re-validated. `documentCacheSize: 0` disables the cache.
+- **GraphiQL UI.** Enabled by default, served on `GET /graphql` when the request has no `query`
+  parameter and accepts `text/html`.
+- **Platform notes.** The `graphql` package reads `process.env.NODE_ENV` at import time. Deno
+  requires `--allow-env`; Cloudflare Workers requires `nodejs_compat`.
+- **Subscriptions.** Not supported in this milestone. Subscription operations return a 400 error
+  with code `SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`.
 
 ---
 

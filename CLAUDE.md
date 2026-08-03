@@ -932,6 +932,48 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   no-op that let the plugin register a router silently answering `404` when Connect was absent; a
   missing dependency now throws `GrpcRuntimeLoadError` naming the specifier. All 11 `src` files at
   100% branch/function/line) — complete (PR #110)
+- **Milestone 51** (`packages/graphql-plugin` — GraphQL plugin: schema-first and code-first arms,
+  GraphQL-over-HTTP transport with media-type negotiation and status-code watershed, bounded
+  parse+validate document cache, error masking, depth limiting, introspection switch, GraphiQL page,
+  `npm:graphql@^16` inject-or-lazy seam, `graphql` health indicator, `onClose`. Post-implementation
+  verification found five defects and four missed deliverables that all four green gates and a 97%
+  coverage table had passed, every one of them because a test asserted the defect or asserted
+  nothing. **The headline defect made the plugin's core promise non-functional**: the factory
+  defaulted `buildContext` to a stub returning `{}`, so the service's `#buildContext !== null`
+  branch always won and the documented `DefaultGraphqlContext` was unreachable — through the ONLY
+  real entry point, resolvers received an empty object and could reach no capability at all. The
+  unit test passed because it constructed `GraphqlService` directly (no `buildContext`), and the
+  "integration" test passed because it supplied its own; that file drove a hand-rolled mock plugin
+  context and never a kernel app, so it could not have seen it, and the plan-mandated
+  both-entry-points-under-a-non-default-config test was never written. It is now a real
+  `createApplication` + `inject` suite whose regression case asserts the four context members and
+  resolves a live capability. Also fixed: the `405` carried no `Allow: POST`; `data: null` from a
+  field error was misclassified as a request error and answered `400` under `graphql-response`
+  (`isValidationError = hasErrors && !hasData`) when an executed operation is always `200`; masked
+  internal errors were logged NOWHERE, because the sink was read off `IRequestContext`, which has no
+  `logger` member, so the cast always yielded `undefined` — the sink now comes from
+  `IPluginContext`; and the document cache never saved a parse, because `#checkOperationKind` parsed
+  outside it on every request (measured: 5 parses for 5 cached repeats, now 0). The parse →
+  operation-guard → validate → execute pipeline moved into the executor behind an
+  `ExecutionPhaseOutcome` carrying `status` + `executed`, which is what lets a field error and a
+  request error be told apart, and it made the plan's `OPERATION_RESOLUTION_FAILED` row real —
+  previously an ambiguous document leaked graphql's own uncoded message. Dead surface removed:
+  `execution/operation-check.ts` (49 lines whose only importer was its own test),
+  `ExecuteOptions.maxDepth`/`introspection` (never read), `GraphqlExecutionOutcome.streaming` in
+  `common` (the plan omitted `extensions` for exactly this reason and then shipped `streaming`), and
+  the `isPost` parameter over two byte-identical watershed branches. 15 `expect(true).toBe(true)`
+  assertions are gone; six of them sat in `depth-limit.test.ts` feeding the rule
+  `{ kind: 'SelectionSet' }` objects while `getDepth` counts the literal `'selectionSet'` **path
+  key**, so those fixtures measured depth 0 and the rule could never fire — the tests documented a
+  fiction. Missed deliverables shipped: the package was in **neither** release list, so it would
+  never have published (`release:verify` says so in as many words); ARCHITECTURE still listed
+  GraphQL in the Future subgraph and Future Additions; README still had it under "Not yet built" as
+  `🚧 Planned`; and `PUBLIC_API.md` carried the GraphQL section **twice**, the duplicate pair
+  disagreeing on the status rules. Two traps this closed that nothing else sees: `index.ts` opened
+  its module JSDoc description-first, which on jsr.io **suppresses the README** (`release:verify`
+  check 5 caught it), and `inject()` exposes no response headers, so the `Allow` fix had to be
+  proven through `app.fetch` — an `inject`-based test would have passed either way) — complete (PR
+  pending)
 - **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
   not _reach_:
   `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
@@ -1154,8 +1196,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
   restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
   Cloudflare account) — complete (PR #115)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40 unless
-  reprioritized.
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40, with **M51b**
+  (GraphQL subscriptions over WebSocket/SSE, request batching, Automatic Persisted Queries, custom
+  scalar resolvers, starter arm) queued behind them — unless reprioritized.
 
 ## Verification (run before declaring any work done)
 
@@ -1167,6 +1210,35 @@ deno task test
 ```
 
 All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
+
+**A milestone that adds or changes a package ALSO runs the two publish gates — the four above cannot
+see a publish-blocking defect.**
+
+```bash
+deno task publish:check              # deno publish --dry-run, on a COMMITTED tree
+deno task release:verify <version>   # version agreement, specifier resolvability, workspace
+                                     # coverage, no stub in the list, @module-first
+```
+
+M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
+passed over, each of which would have stopped the package reaching JSR:
+
+- **A slow type.** `createDepthLimitRule` was exported from the barrel with an inferred return type.
+  JSR rejects that because it blocks automatic `.d.ts` generation — and the CI comment is explicit
+  that the generated `.d.ts` is what the Node and Bun compat jobs consume, so the dry run gates
+  both. Every exported function needs a written-out return type; `deno check` does not care.
+- **A package in neither release list.** `packages/graphql-plugin` was a workspace member absent
+  from both `PUBLISHED_PACKAGES` and `UNPUBLISHED_PACKAGES`, so it would simply never have
+  published. Only `release:verify` looks for this.
+- **A README suppressed on jsr.io.** `src/index.ts` opened its module JSDoc with the description
+  instead of `@module`, which makes JSR render that blurb as the whole package page instead of the
+  README. The README still ships in the tarball, so nothing else can see the loss — `release:verify`
+  check 5 exists precisely for it.
+
+`publish:check` refuses a dirty tree (`--allow-dirty` is deliberately not passed), so run it AFTER
+committing — a "failure" that turns out to be uncommitted changes is not a result. Note also that a
+green `--dry-run` does NOT prove a real publish works: it skips the already-published check, which
+is what needs `--allow-net` (see the `alpha.2` entry above).
 
 ## Common pitfalls (these fail the gates)
 
@@ -1314,8 +1386,12 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
   NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
   points, confirm one test drives BOTH under a non-default configuration.
-- **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table and
-  the grep result. "Done" without that evidence is not done.
+- **Run the two publish gates on the committed tree.** `deno task publish:check` and
+  `deno task release:verify <version>` — see the Verification section for the three M51 defects that
+  every other gate passed over. A milestone whose package cannot publish is not done, and CI's
+  `JSR publish dry-run` job will say so on the PR after you have handed it back.
+- **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table, the
+  grep result, and the exit status of both publish gates. "Done" without that evidence is not done.
 - **Flip the milestone's status IN the milestone PR, before it merges.** A completed milestone is
   not done until its ROADMAP.md "Progress Tracking" row is `✅` AND the CLAUDE.md "Current status"
   section reflects it (mark the finished milestone complete with its PR number and point "Next

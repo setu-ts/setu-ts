@@ -20,9 +20,9 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 > [!IMPORTANT]
 > **Status: 38 packages were published in `v0.1.0-alpha.3` and are live on JSR.** The workspace has
-> since grown to 45 packages; the seven added after that release ship with the next one.
+> since grown to 46 packages; the eight added after that release ship with the next one.
 >
-> The kernel, the runtime layer, 35 plugins, the three starters, the test utilities, the client SDK,
+> The kernel, the runtime layer, 36 plugins, the three starters, the test utilities, the client SDK,
 > and the `honoe` CLI are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
@@ -105,6 +105,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | HTTP security  | ✅     | `http-security-plugin` | CORS, security headers, CSRF, request size, IP rules                             |
 | Authentication | ✅     | `auth-plugin`          | JWT (HS256/RS256 via Web Crypto), API keys, local, refresh tokens, rate limiting |
 | Authorization  | ✅     | `auth-plugin`          | RBAC with transitive role hierarchy and permission guards                        |
+| GraphQL        | ✅     | `graphql-plugin`       | Schema-first and code-first, GraphQL-over-HTTP, depth limit, GraphiQL            |
 
 ### Data
 
@@ -131,6 +132,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature           | Status | Package                    | Description                                                     |
 | ----------------- | ------ | -------------------------- | --------------------------------------------------------------- |
 | Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection |
+| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port           |
 | Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, KV sessions, `waitUntil` |
 
 ### Real-time and rendering
@@ -173,13 +175,6 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Test utilities  | ✅     | `testing`                                                    | `createTestApp`, mock plugins/registry, fixtures, stream reads                                                     |
 | Starter bundles | ✅     | `rest-starter`, `microservice-starter`, `full-stack-starter` | `createRestApp`, `createMicroserviceApp`, `createFullStackApp` — pre-wired plugin sets with per-plugin option arms |
 
-### Not yet built
-
-| Feature | Status     | Description                                                           |
-| ------- | ---------- | --------------------------------------------------------------------- |
-| GraphQL | 🚧 Planned | Schema-first and code-first GraphQL plugin                            |
-| gRPC    | ✅         | `grpc-plugin` — Co-serve gRPC, Connect, and gRPC-Web on the same port |
-
 ---
 
 ## Installation
@@ -217,8 +212,11 @@ cd my-app && honoe generate service billing
 
 The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 43 packages are published: the core (`common`, `kernel`, `runtime`, `exceptions`, `testing`),
-every plugin in the tables above, the three starters, the `sdk`, and the `cli`.
+38 of the 46 workspace members are published on JSR, in `v0.1.0-alpha.3`: the core (`common`,
+`kernel`, `runtime`, `exceptions`, `testing`), most plugins in the tables above, the `sdk`, and the
+`cli`. The eight added since that release — `session-plugin`, `service-discovery-plugin`,
+`grpc-plugin`, `graphql-plugin`, `cloudflare-plugin` and the three starters — ship with the next one
+and cannot be `deno add`ed yet.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -319,7 +317,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 hono-enterprise/
-├── packages/              # 43 workspace members, all published
+├── packages/              # 46 workspace members, 38 published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
