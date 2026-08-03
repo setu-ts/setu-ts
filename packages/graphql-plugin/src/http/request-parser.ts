@@ -103,20 +103,21 @@ export function parseGetQuery(query: Record<string, string | string[]>): Graphql
   }
 
   if (typeof query.variables === 'string') {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(query.variables);
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        const err = new Error('Variables must be a JSON object') as ParseError;
-        err.code = 'INVALID_VARIABLES';
-        throw err;
-      }
-      // Pass variables through verbatim (B2)
-      result.variables = parsed as Record<string, unknown>;
-    } catch (_e) {
+      parsed = JSON.parse(query.variables);
+    } catch {
       const err = new Error('Invalid JSON in variables parameter') as ParseError;
       err.code = 'INVALID_VARIABLES';
       throw err;
     }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      const err = new Error('Variables must be a JSON object') as ParseError;
+      err.code = 'INVALID_VARIABLES';
+      throw err;
+    }
+    // Pass variables through verbatim (B2)
+    result.variables = parsed as Record<string, unknown>;
   }
 
   return result;

@@ -33,10 +33,32 @@ describe('executor', () => {
       validate: (
         _schema: GraphqlSchemaLike,
         _document: GraphqlDocumentNodeLike,
-        _rules: unknown[],
+        rules: unknown[],
       ) => {
         validateCallCount++;
-        return [];
+        const errors: Array<{ message: string }> = [];
+        const mockContext = {
+          reportError: (error: { message: string }) => errors.push(error),
+        };
+        for (const rule of rules) {
+          if (typeof rule === 'function') {
+            try {
+              const visitor = rule(mockContext as never);
+              if (visitor && typeof visitor === 'object' && typeof visitor.Field === 'function') {
+                try {
+                  // Pass empty ancestors to avoid depth-limit rule throwing on undefined
+                  visitor.Field(undefined, undefined, undefined, []);
+                } catch (e) {
+                  // Custom rules may throw to signal validation errors
+                  errors.push({ message: (e as Error).message });
+                }
+              }
+            } catch {
+              // Built-in rules may throw; ignore
+            }
+          }
+        }
+        return errors as never;
       },
       execute: (
         _args: {

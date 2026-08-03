@@ -213,8 +213,26 @@ function sendGraphqlResult(
       status = 200;
     }
   } else {
-    // Preserve transport-level status codes (405 for mutation-over-GET, 400 for subscription)
-    status = outcome.status;
+    // GET + json: same watershed as POST — force 200 for well-formed GraphQL requests
+    // (validation errors, parse errors), but preserve transport errors (405, 400 for subscription)
+    if (outcome.status === 405 || outcome.status === 400) {
+      let hasTransportError = false;
+      if (outcome.result.errors) {
+        for (const e of outcome.result.errors) {
+          const err = e as { extensions?: { code?: string } };
+          if (
+            err.extensions?.code === 'METHOD_NOT_ALLOWED' ||
+            err.extensions?.code === 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP'
+          ) {
+            hasTransportError = true;
+            break;
+          }
+        }
+      }
+      status = hasTransportError ? outcome.status : 200;
+    } else {
+      status = 200;
+    }
   }
 
   response.status(status).header('Content-Type', contentType);

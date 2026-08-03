@@ -4,11 +4,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import {
-  getOperationAST,
-  getOperationKindFromQuery,
-  hasSubscription,
-} from '../../src/execution/operation-check.ts';
+import { getOperationAST, hasSubscription } from '../../src/execution/operation-check.ts';
 import type { GraphqlRuntime } from '../../src/interfaces/graphql-runtime.ts';
 
 describe('operation-check', () => {
@@ -109,41 +105,26 @@ describe('operation-check', () => {
       const kind = getOperationAST(runtime, '');
       expect(kind).toBe('query');
     });
-  });
 
-  describe('getOperationKindFromQuery', () => {
-    it('returns query for query keyword', () => {
-      const kind = getOperationKindFromQuery('query { hello }');
+    it('handles getOperationAST with operationName', () => {
+      const runtime = createFakeRuntime();
+      const kind = getOperationAST(runtime, 'query MyQuery { hello }', 'MyQuery');
       expect(kind).toBe('query');
     });
 
-    it('returns query for bare query', () => {
-      const kind = getOperationKindFromQuery('{ hello }');
-      expect(kind).toBe('query');
-    });
-
-    it('returns mutation for mutation keyword', () => {
-      const kind = getOperationKindFromQuery('mutation { setMessage }');
-      expect(kind).toBe('mutation');
-    });
-
-    it('returns subscription for subscription keyword', () => {
-      const kind = getOperationKindFromQuery('subscription { onMessage }');
-      expect(kind).toBe('subscription');
-    });
-
-    it('handles leading whitespace', () => {
-      expect(getOperationKindFromQuery('  query { hello }')).toBe('query');
-      expect(getOperationKindFromQuery('  mutation { x }')).toBe('mutation');
-    });
-
-    it('returns undefined for unknown query kind', () => {
-      const kind = getOperationKindFromQuery('unknown { x }');
+    it('handles parse errors gracefully', () => {
+      const runtime = createFakeRuntime();
+      (runtime as unknown as GraphqlRuntime).parse = () => {
+        throw new Error('Parse error');
+      };
+      const kind = getOperationAST(runtime, 'invalid query');
       expect(kind).toBeUndefined();
     });
 
-    it('returns undefined for empty string', () => {
-      const kind = getOperationKindFromQuery('');
+    it('handles getOperationAST returning null', () => {
+      const runtime = createFakeRuntime();
+      (runtime as unknown as GraphqlRuntime).getOperationAST = () => null;
+      const kind = getOperationAST(runtime, '{ hello }');
       expect(kind).toBeUndefined();
     });
   });
@@ -172,25 +153,12 @@ describe('operation-check', () => {
       const result = hasSubscription(runtime, 'invalid');
       expect(result).toBe(false);
     });
+  });
 
-    it('handles getOperationAST with operationName', () => {
+  describe('getOperationAST edge cases', () => {
+    it('returns undefined when ast.operation is falsy', () => {
       const runtime = createFakeRuntime();
-      const kind = getOperationAST(runtime, 'query MyQuery { hello }', 'MyQuery');
-      expect(kind).toBe('query');
-    });
-
-    it('handles parse errors gracefully', () => {
-      const runtime = createFakeRuntime();
-      (runtime as unknown as GraphqlRuntime).parse = () => {
-        throw new Error('Parse error');
-      };
-      const kind = getOperationAST(runtime, 'invalid query');
-      expect(kind).toBeUndefined();
-    });
-
-    it('handles getOperationAST returning null', () => {
-      const runtime = createFakeRuntime();
-      (runtime as unknown as GraphqlRuntime).getOperationAST = () => null;
+      (runtime as unknown as GraphqlRuntime).getOperationAST = () => ({ kind: 'OperationDefinition' } as never);
       const kind = getOperationAST(runtime, '{ hello }');
       expect(kind).toBeUndefined();
     });

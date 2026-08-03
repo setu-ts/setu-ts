@@ -469,7 +469,7 @@ describe('createGraphqlHandler', () => {
     });
 
     const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
-    const { mock } = createMockResponse();
+    const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
       request: {
@@ -485,8 +485,45 @@ describe('createGraphqlHandler', () => {
     } as unknown as IRequestContext;
 
     await get(mockCtx);
-    // Should handle parse errors gracefully
-    expect(true).toBe(true);
+    // Parse errors under json media type should yield 200 (watershed)
+    expect(captureStatus()).toBe(200);
+  });
+
+  it('GET+json validation error returns 200 (watershed)', async () => {
+    const runtime = createFakeRuntime();
+    const schema = createFakeSchema();
+    const service = new GraphqlService(runtime, schema, {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+    });
+
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { mock, captureStatus } = createMockResponse();
+
+    // Override validate to return errors
+    (runtime as unknown as GraphqlRuntime).validate = () => [
+      new runtime.GraphQLError('Unknown field'),
+    ];
+
+    const mockCtx = {
+      request: {
+        method: 'GET',
+        url: 'http://test.com/graphql?query={unknownField}',
+        path: '/graphql',
+        headers: new Map() as unknown as Headers,
+      } as unknown as Request,
+      response: mock,
+      query: { query: '{ unknownField }' },
+      params: {},
+      get: () => undefined,
+    } as unknown as IRequestContext;
+
+    await get(mockCtx);
+    // Validation errors under json media type should yield 200 (watershed)
+    expect(captureStatus()).toBe(200);
   });
 
   it('returns 400 for GET with graphiql disabled and no query', async () => {
@@ -564,7 +601,7 @@ describe('createGraphqlHandler', () => {
     });
 
     const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
-    const { mock } = createMockResponse();
+    const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
       request: {
@@ -583,8 +620,8 @@ describe('createGraphqlHandler', () => {
     } as unknown as IRequestContext;
 
     await get(mockCtx);
-    // Should complete without error
-    expect(true).toBe(true);
+    // Should complete successfully with 200
+    expect(captureStatus()).toBe(200);
   });
 
   it('handles GET with parse error from query param', async () => {

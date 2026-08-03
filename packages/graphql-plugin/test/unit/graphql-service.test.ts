@@ -12,7 +12,31 @@ describe('GraphqlService', () => {
   const createFakeRuntime = (): GraphqlRuntime =>
     ({
       parse: (_src: string) => ({ kind: 'Document', definitions: [] }),
-      validate: () => [],
+      validate: (_schema: unknown, _document: unknown, rules: unknown[]) => {
+        const errors: Array<{ message: string }> = [];
+        const mockContext = {
+          reportError: (error: { message: string }) => errors.push(error),
+        };
+        for (const rule of rules) {
+          if (typeof rule === 'function') {
+            try {
+              const visitor = rule(mockContext as never);
+              if (visitor && typeof visitor === 'object' && typeof visitor.Field === 'function') {
+                try {
+                  // Pass empty ancestors to avoid depth-limit rule throwing on undefined
+                  visitor.Field(undefined, undefined, undefined, []);
+                } catch (e) {
+                  // Custom rules may throw to signal validation errors
+                  errors.push({ message: (e as Error).message });
+                }
+              }
+            } catch {
+              // Built-in rules may throw; ignore
+            }
+          }
+        }
+        return errors as never;
+      },
       execute: () => Promise.resolve({ data: { hello: 'world' } }),
       subscribe: () => Promise.resolve({ data: {} }),
       buildSchema: (_src: string) => ({
@@ -142,8 +166,34 @@ describe('GraphqlService', () => {
 
     await service.execute({ query: '{ hello }' });
 
-    // Custom rule should be included in validation rules
-    expect(customRuleCalled).toBe(false); // Rule is a function, not called during execute
+    // Custom rule must be invoked by the runtime's validate
+    expect(customRuleCalled).toBe(true);
+  });
+
+  it('custom validation rules have observable effect on execution', async () => {
+    const rejectRule = () => {
+      return {
+        Field: () => {
+          throw new Error('rejected by custom rule');
+        },
+      };
+    };
+
+    const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      endpoint: '/graphql',
+      documentCacheSize: 100,
+      maxDepth: 10,
+      introspection: true,
+      maskInternalErrors: true,
+      validationRules: [rejectRule],
+    });
+
+    const result = await service.execute({ query: '{ hello }' });
+
+    // Custom rule should cause validation to fail
+    expect(result.status).toBe(400);
+    expect(result.result.errors).toBeDefined();
+    expect(result.result.errors!.length).toBeGreaterThan(0);
   });
 
   it('disables introspection when option is false', async () => {

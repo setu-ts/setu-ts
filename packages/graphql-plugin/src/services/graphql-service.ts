@@ -26,6 +26,7 @@ export class GraphqlService implements IGraphqlService {
   #schema: GraphqlSchemaLike;
   #endpoint: string;
   #documentCache: DocumentCache;
+  #customValidationRules: unknown[] | undefined;
   #validationRules: unknown[]; // A1: built once at construction, reused per request
   #maxDepth: number;
   #introspection: boolean;
@@ -53,6 +54,7 @@ export class GraphqlService implements IGraphqlService {
     this.#schema = schema;
     this.#endpoint = options.endpoint;
     this.#documentCache = new DocumentCache(options.documentCacheSize);
+    this.#customValidationRules = options.validationRules;
     this.#maxDepth = options.maxDepth;
     this.#introspection = options.introspection;
     this.#maskInternalErrors = options.maskInternalErrors;
@@ -171,8 +173,8 @@ export class GraphqlService implements IGraphqlService {
     const rules: unknown[] = [...this.#runtime.specifiedRules];
 
     // Add custom validation rules from options
-    if (this.#validationRules && this.#validationRules.length > 0) {
-      rules.push(...this.#validationRules);
+    if (this.#customValidationRules && this.#customValidationRules.length > 0) {
+      rules.push(...this.#customValidationRules);
     }
 
     // Add depth limit rule

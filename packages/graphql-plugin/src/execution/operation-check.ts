@@ -37,27 +37,6 @@ export function getOperationAST(
 }
 
 /**
- * Get operation kind from query string by simple text search.
- * This is a lightweight alternative that doesn't require parsing.
- *
- * @param query - The query string
- * @returns The operation kind or undefined
- */
-export function getOperationKindFromQuery(query: string): OperationKind | undefined {
-  const trimmed = query.trim();
-  if (trimmed.startsWith('mutation') || trimmed.startsWith('mutation ')) {
-    return 'mutation';
-  }
-  if (trimmed.startsWith('subscription') || trimmed.startsWith('subscription ')) {
-    return 'subscription';
-  }
-  if (trimmed.startsWith('query') || trimmed.startsWith('query ') || trimmed.startsWith('{')) {
-    return 'query';
-  }
-  return undefined;
-}
-
-/**
  * Check if a query contains a subscription operation.
  *
  * @param runtime - The graphql runtime

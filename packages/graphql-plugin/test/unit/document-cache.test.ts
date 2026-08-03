@@ -77,4 +77,14 @@ describe('DocumentCache', () => {
     cache.set('key2', { document: { kind: 'Document', definitions: [] }, validationErrors: null });
     expect(cache.size).toBe(2);
   });
+
+  it('handles cache with no entries when evicting', () => {
+    // Covers the branch where lruKey is undefined after keys().next()
+    const cache = new DocumentCache(1);
+    // Don't add any entries - just verify size is 0
+    expect(cache.size).toBe(0);
+    // set with maxSize=1 and no existing entries should not crash
+    cache.set('key1', { document: { kind: 'Document', definitions: [] }, validationErrors: null });
+    expect(cache.size).toBe(1);
+  });
 });

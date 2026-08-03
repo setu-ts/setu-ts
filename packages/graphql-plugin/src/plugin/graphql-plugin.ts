@@ -83,6 +83,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
       graphqlService = new GraphqlService(runtime, schema, {
         endpoint: path,
         documentCacheSize,
+        ...(options.validationRules && { validationRules: options.validationRules }),
         maxDepth,
         introspection,
         maskInternalErrors,

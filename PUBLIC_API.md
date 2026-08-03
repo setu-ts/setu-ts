@@ -7008,7 +7008,7 @@ app.register(GraphqlPlugin({
   maskInternalErrors: true, // default — mask internal error messages
   introspection: true, // default — enable introspection (can be disabled in production)
   graphiql: true, // default — serve GraphiQL UI at GET /graphql
-  endpoint: '/graphql', // default
+  path: '/graphql', // default
 }));
 
 // Code-first (application-built schema)
@@ -7168,7 +7168,6 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 | `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                        |
 | `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                      |
 | `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios) |
-| `graphqlModule`      | `GraphqlModuleLike`                       | -          | Injected graphql module                                       |
 
 ### Exports
 

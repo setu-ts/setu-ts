@@ -91,11 +91,13 @@ export interface IGraphqlService {
    *
    * @param params - The parsed GraphQL request parameters
    * @param requestContext - Optional request context for service resolution
+   * @param method - Optional HTTP method (used for operation-kind guard)
    * @returns The execution outcome with HTTP status
    */
   execute(
     params: GraphqlRequestParams,
     requestContext?: IRequestContext,
+    method?: 'GET' | 'POST',
   ): Promise<GraphqlExecutionOutcome>;
 
   /**
