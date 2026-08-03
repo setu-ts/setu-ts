@@ -6,6 +6,7 @@
 
 import type {
   GraphqlExecutionOutcome,
+  GraphqlRequestParams,
   HandlerResult,
   IRequestContext,
   IResponse,

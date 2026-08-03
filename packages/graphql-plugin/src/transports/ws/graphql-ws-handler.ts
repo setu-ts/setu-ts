@@ -11,6 +11,7 @@
 import type {
   GraphqlConnectionInfo,
   GraphqlOperationContext,
+  GraphqlRequestParams,
   IGraphqlService,
   IWebSocketConnection,
   WebSocketConnectionContext,

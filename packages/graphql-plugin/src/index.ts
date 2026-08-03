@@ -30,7 +30,7 @@ export type {
   ResolverMap,
 } from './interfaces/options.ts';
 
-// Re-export common subscription types for single-package import
+// Re-export common types for single-package import
 export type {
   GraphqlConnectionInfo,
   GraphqlExecutionResult,
