@@ -61,6 +61,8 @@ export { graphiqlHtml } from './ui/graphiql.ts';
 export { createDepthLimitRule } from './security/depth-limit.ts';
 
 // APQ
+export { ApqResolver } from './apq/apq-resolver.ts';
+export type { ApqResolveResult } from './apq/apq-resolver.ts';
 export { extractPersistedQuery, persistedQueryHash } from './apq/persisted-query.ts';
 
 // SSE transport

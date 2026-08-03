@@ -16,32 +16,40 @@ import type {
   IGraphqlService,
   IRequestContext,
   IResponse,
+  RouteHandler,
 } from '@hono-enterprise/common';
+import type { ApqResolver, ApqResolveResult } from '../../apq/apq-resolver.ts';
 import { encodeSseComment, encodeSseComplete, encodeSseEvent } from './sse-frame.ts';
 
 /**
- * Create an SSE route handler.
+ * Create an SSE route handler supporting both GET and POST (C7).
  *
  * @param graphqlService - The GraphQL service
  * @param heartbeatMs - Milliseconds between keep-alive comments (0 disables)
- * @returns A handler function for POST and GET
+ * @param apqResolver - Optional APQ resolver for persisted queries
+ * @returns POST and GET route handlers
  */
 export function createSseHandler(
   graphqlService: IGraphqlService,
   heartbeatMs: number = 0,
-): { post: (ctx: IRequestContext) => Promise<HandlerResult> } {
+  apqResolver: ApqResolver | null = null,
+): { post: RouteHandler; get: RouteHandler } {
   return {
     post: async (ctx: IRequestContext): Promise<HandlerResult> => {
-      return await handleSsePost(ctx, ctx.response, graphqlService, heartbeatMs);
+      return await handleSseRequest(ctx, ctx.response, graphqlService, heartbeatMs, apqResolver);
+    },
+    get: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      return await handleSseGet(ctx, ctx.response, graphqlService, heartbeatMs, apqResolver);
     },
   };
 }
 
-async function handleSsePost(
+async function handleSseRequest(
   ctx: IRequestContext,
   response: IResponse,
   graphqlService: IGraphqlService,
   heartbeatMs: number,
+  apqResolver: ApqResolver | null,
 ): Promise<HandlerResult> {
   // Parse body
   let body: unknown;
@@ -71,7 +79,7 @@ async function handleSsePost(
 
   const obj = body as Record<string, unknown>;
 
-  // Build params
+  // Build params — APQ may supply query
   const params: GraphqlRequestParams = {
     query: typeof obj.query === 'string' ? obj.query : '',
   };
@@ -97,6 +105,103 @@ async function handleSsePost(
     })));
   }
 
+  // Resolve APQ before subscribe
+  if (apqResolver !== null && !params.query) {
+    const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof params.extensions === 'object' && params.extensions !== null) {
+      apqParams.extensions = params.extensions;
+    }
+    const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
+    if (!apqResult.ok) {
+      // APQ miss is a transport failure — not found means no document to subscribe
+      response.status(400);
+      response.header('Content-Type', 'application/json');
+      const encoder = new TextEncoder();
+      return response.send(encoder.encode(JSON.stringify({
+        errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
+      })));
+    }
+    params.query = apqResult.query;
+  }
+
+  return streamSseResult(ctx, response, graphqlService, heartbeatMs, params);
+}
+
+async function handleSseGet(
+  ctx: IRequestContext,
+  response: IResponse,
+  graphqlService: IGraphqlService,
+  heartbeatMs: number,
+  apqResolver: ApqResolver | null,
+): Promise<HandlerResult> {
+  const query = ctx.query.query;
+  if (typeof query !== 'string' || query.length === 0) {
+    // Transport failure — no query parameter
+    response.status(400);
+    response.header('Content-Type', 'application/json');
+    const encoder = new TextEncoder();
+    return response.send(encoder.encode(JSON.stringify({
+      errors: [{ message: 'Query parameter is required', extensions: { code: 'BAD_REQUEST' } }],
+    })));
+  }
+
+  const params: GraphqlRequestParams = { query };
+  if (typeof ctx.query.operationName === 'string') {
+    params.operationName = ctx.query.operationName;
+  }
+  if (typeof ctx.query.variables === 'string') {
+    try {
+      const parsed = JSON.parse(ctx.query.variables);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        params.variables = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Ignore malformed variables
+    }
+  }
+  if (typeof ctx.query.extensions === 'string') {
+    try {
+      const parsed = JSON.parse(ctx.query.extensions);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        params.extensions = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Ignore malformed extensions
+    }
+  }
+
+  // Resolve APQ if query is a hash-only request
+  if (apqResolver !== null) {
+    const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof params.query === 'string') apqParams.query = params.query;
+    if (typeof params.extensions === 'object' && params.extensions !== null) {
+      apqParams.extensions = params.extensions;
+    }
+    const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
+    if (!apqResult.ok) {
+      response.status(400);
+      response.header('Content-Type', 'application/json');
+      const encoder = new TextEncoder();
+      return response.send(encoder.encode(JSON.stringify({
+        errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
+      })));
+    }
+    params.query = apqResult.query;
+  }
+
+  return streamSseResult(ctx, response, graphqlService, heartbeatMs, params);
+}
+
+/**
+ * Shared SSE streaming logic for both POST and GET.
+ */
+async function streamSseResult(
+  ctx: IRequestContext,
+  response: IResponse,
+  graphqlService: IGraphqlService,
+  heartbeatMs: number,
+  params: GraphqlRequestParams,
+): Promise<HandlerResult> {
   // Build operation context (SSE path supplies requestContext)
   const context: GraphqlOperationContext = {
     requestContext: ctx,
@@ -115,7 +220,7 @@ async function handleSsePost(
 
   // Handle outcome
   if (outcome.kind === 'error') {
-    // GraphQL request error: emit inside stream as next + complete
+    // GraphQL request error: emit inside stream as next + complete (C4)
     controller.enqueue(encodeSseEvent(outcome.result));
     controller.enqueue(encodeSseComplete());
     controller.close();

@@ -17,7 +17,7 @@
 export function extractPersistedQuery(
   extensions?: Record<string, unknown>,
 ): { version: number; sha256Hash: string } | null {
-  if (extensions === undefined || typeof extensions !== 'object') {
+  if (extensions === undefined || extensions === null || typeof extensions !== 'object') {
     return null;
   }
   const pq = extensions.persistedQuery;

@@ -144,6 +144,7 @@ describe('createGraphqlHandler', () => {
     const { post, get } = createGraphqlHandler(service, '/graphql', {
       graphiql: true,
       maxBatchSize: 0,
+      apqResolver: null,
     });
 
     expect(typeof post).toBe('function');
@@ -162,7 +163,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { post } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock } = createMockResponse();
 
     const mockCtx = {
@@ -195,7 +200,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { post } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -228,7 +237,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { post } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -261,7 +274,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -293,7 +310,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: false,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -325,7 +346,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -357,7 +382,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -389,7 +418,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -432,6 +465,7 @@ describe('createGraphqlHandler', () => {
     const { post } = createGraphqlHandler(service, '/graphql', {
       graphiql: true,
       maxBatchSize: 0,
+      apqResolver: null,
       logger,
     });
     const { mock } = createMockResponse();
@@ -475,6 +509,7 @@ describe('createGraphqlHandler', () => {
     const { post } = createGraphqlHandler(service, '/graphql', {
       graphiql: true,
       maxBatchSize: 0,
+      apqResolver: null,
       logger,
     });
     const { mock } = createMockResponse();
@@ -509,7 +544,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -542,7 +581,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     // Override validate to return errors
@@ -580,7 +623,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: false,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -612,7 +659,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { post } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -645,7 +696,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -681,7 +736,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: false,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -713,7 +772,11 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
+    const { get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      apqResolver: null,
+    });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {

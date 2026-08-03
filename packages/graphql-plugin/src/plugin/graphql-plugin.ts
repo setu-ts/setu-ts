@@ -4,7 +4,13 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext, IWebSocketService } from '@hono-enterprise/common';
+import type {
+  ICacheStore,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+  IWebSocketService,
+} from '@hono-enterprise/common';
 import { CAPABILITIES as CAP } from '@hono-enterprise/common';
 import type { GraphqlPluginOptions } from '../interfaces/options.ts';
 import { adaptGraphqlModule, loadGraphqlModule } from '../runtime/graphql-loader.ts';
@@ -12,6 +18,7 @@ import { buildSchema } from '../schema/build-schema.ts';
 import { GraphqlService } from '../services/graphql-service.ts';
 import { createGraphqlHandler } from '../http/graphql-handler.ts';
 import { GRAPHQL_TRANSPORT_WS } from '../transports/ws/ws-protocol.ts';
+import { ApqResolver } from '../apq/apq-resolver.ts';
 
 /**
  * Create a handler logger wrapper from a plugin context logger.
@@ -44,13 +51,13 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
   const buildContext = options.buildContext;
   const rootValue = options.rootValue;
   const subscriptions = options.subscriptions;
-  const _apq = options.apq;
-  void _apq; // reserved for future APQ resolver wiring
+  const apq = options.apq;
   const maxBatchSize = options.maxBatchSize ?? 0;
 
   let graphqlService: GraphqlService | null = null;
   let wsService: IWebSocketService | null = null;
   let wsAvailable = false;
+  let apqResolver: ApqResolver | null = null;
 
   return {
     name: 'graphql-plugin',
@@ -60,6 +67,17 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const logger = ctx.logger;
+
+      // C5 — APQ RUNTIME guard: when APQ is configured, CAPABILITIES.RUNTIME
+      // must be present (needed for subtle crypto hashing).
+      if (apq !== undefined) {
+        if (!ctx.services.has(CAP.RUNTIME)) {
+          throw new Error(
+            'APQ requires CAPABILITIES.RUNTIME for hash verification. ' +
+              'Register the RuntimePlugin or disable APQ.',
+          );
+        }
+      }
 
       // Load graphql runtime
       const runtime = options.graphqlModule
@@ -105,10 +123,23 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
       // Register service
       ctx.services.register(CAP.GRAPHQL, graphqlService);
 
+      // B1 — Instantiate ApqResolver when APQ is configured
+      if (apq !== undefined) {
+        const runtimeServices = ctx.services.get<IRuntimeServices>(CAP.RUNTIME);
+        const cacheStore = ctx.services.has(CAP.CACHE)
+          ? ctx.services.get<ICacheStore>(CAP.CACHE)
+          : null;
+        const apqOpts: { ttlSeconds?: number; maxEntries?: number } = {};
+        if (apq.ttlSeconds !== undefined) apqOpts.ttlSeconds = apq.ttlSeconds;
+        if (apq.maxEntries !== undefined) apqOpts.maxEntries = apq.maxEntries;
+        apqResolver = new ApqResolver(cacheStore, runtimeServices.subtle, apqOpts);
+      }
+
       // Register HTTP routes
       const { post, get } = createGraphqlHandler(graphqlService, path, {
         graphiql,
         maxBatchSize,
+        apqResolver,
         ...(handlerLogger && { logger: handlerLogger }),
       });
 
@@ -150,8 +181,13 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
           const { createSseHandler } = await import('../transports/sse/graphql-sse-handler.ts');
           const ssePath = (sseOpt as { path?: string })?.path ?? `${path}/stream`;
           const sseHeartbeat = (sseOpt as { heartbeatMs?: number })?.heartbeatMs ?? 0;
-          const sseHandler = createSseHandler(graphqlService, sseHeartbeat);
+          const sseHandler = createSseHandler(
+            graphqlService,
+            sseHeartbeat,
+            apqResolver,
+          );
           ctx.router.post(ssePath, sseHandler.post);
+          ctx.router.get(ssePath, sseHandler.get);
           logger?.info(`GraphQL SSE subscriptions registered at ${ssePath}`);
         }
       }

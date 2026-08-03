@@ -12,10 +12,11 @@ import type {
   IResponse,
   RouteHandler,
 } from '@hono-enterprise/common';
+import type { ApqResolver, ApqResolveResult } from '../apq/apq-resolver.ts';
 import type { GraphqlService } from '../services/graphql-service.ts';
 import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON, negotiateMediaType } from './media-type.ts';
 import type { ParseError } from './request-parser.ts';
-import { parseGetQuery, parsePostBody } from './request-parser.ts';
+import { parseGetQuery } from './request-parser.ts';
 import { graphiqlHtml } from '../ui/graphiql.ts';
 
 /** Handler options shared by both verbs. */
@@ -23,6 +24,7 @@ interface HandlerOptions {
   graphiql: boolean;
   logger?: { info(message: string): void; error(message: string, error?: unknown): void };
   maxBatchSize: number;
+  apqResolver: ApqResolver | null;
 }
 
 /**
@@ -58,7 +60,7 @@ async function handleGraphqlPost(
   graphqlService: GraphqlService,
   options: HandlerOptions,
 ): Promise<HandlerResult> {
-  const { logger, maxBatchSize } = options;
+  const { logger, maxBatchSize, apqResolver } = options;
 
   // Negotiated once, up front: every response this handler can produce answers
   // in the media type the client asked for, transport failures included.
@@ -116,7 +118,7 @@ async function handleGraphqlPost(
       }, mediaType);
     }
 
-    // Execute each element concurrently
+    // Execute each element concurrently — APQ resolves per-element
     const outcomes = await Promise.all(
       body.map(async (item: unknown) => {
         if (typeof item !== 'object' || item === null || Array.isArray(item)) {
@@ -125,7 +127,42 @@ async function handleGraphqlPost(
             result: { errors: [{ message: 'Batch item must be a JSON object' }] },
           };
         }
-        const params = parsePostBody(item);
+        const obj = item as Record<string, unknown>;
+
+        // B1: Resolve APQ per-element before parsing
+        let query = obj.query;
+        const extensions = obj.extensions;
+        if (apqResolver !== null) {
+          const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+          if (typeof query === 'string') apqParams.query = query;
+          if (typeof extensions === 'object' && extensions !== null) {
+            apqParams.extensions = extensions as Record<string, unknown>;
+          }
+          const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
+          if (!apqResult.ok) {
+            return {
+              status: 400,
+              result: {
+                errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
+              },
+            };
+          }
+          query = apqResult.query;
+        }
+
+        const params: GraphqlRequestParams = { query: query as string };
+        if (typeof obj.operationName === 'string') {
+          params.operationName = obj.operationName;
+        }
+        if (
+          typeof obj.variables === 'object' && obj.variables !== null &&
+          !Array.isArray(obj.variables)
+        ) {
+          params.variables = obj.variables as Record<string, unknown>;
+        }
+        if (typeof obj.extensions === 'object' && obj.extensions !== null) {
+          params.extensions = obj.extensions as Record<string, unknown>;
+        }
         return await graphqlService.execute(params, ctx, 'POST');
       }),
     );
@@ -137,17 +174,68 @@ async function handleGraphqlPost(
     return response.send(encoder.encode(JSON.stringify(results)));
   }
 
-  // Parse request params
-  let params: GraphqlRequestParams;
-  try {
-    params = parsePostBody(body);
-  } catch (e) {
-    const err = e as ParseError;
-    logger?.error('Failed to parse GraphQL request', err);
+  // Must be an object (not array, already handled)
+  if (typeof body !== 'object' || body === null) {
     return sendGraphqlError(response, 400, {
-      message: err.message,
-      extensions: { code: err.code },
+      message: 'Request body must be a JSON object',
+      extensions: { code: 'BAD_REQUEST' },
     }, mediaType);
+  }
+
+  const obj = body as Record<string, unknown>;
+
+  // B1 + B2: Resolve APQ BEFORE parsePostBody, allowing hash-only requests
+  let query = obj.query;
+  const extensions = obj.extensions;
+  if (apqResolver != null) {
+    const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof query === 'string') apqParams.query = query;
+    if (typeof extensions === 'object' && extensions !== null) {
+      apqParams.extensions = extensions as Record<string, unknown>;
+    }
+    const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
+    if (!apqResult.ok) {
+      return sendGraphqlError(response, 400, {
+        message: apqResult.message,
+        extensions: { code: apqResult.code },
+      }, mediaType);
+    }
+    query = apqResult.query;
+  }
+
+  // Now parse request params with the resolved query
+  // Validate that query is present (required by GraphQL spec)
+  if (typeof query !== 'string') {
+    logger?.error('Query parameter is required');
+    return sendGraphqlError(response, 400, {
+      message: 'Query parameter is required',
+      extensions: { code: 'BAD_REQUEST' },
+    }, mediaType);
+  }
+
+  const params: GraphqlRequestParams = { query };
+  if (typeof obj.operationName === 'string') {
+    params.operationName = obj.operationName;
+  }
+  // Variables must be a JSON object (not array) — matches GET behavior
+  if (obj.variables !== undefined) {
+    if (
+      obj.variables !== null && (typeof obj.variables !== 'object' || Array.isArray(obj.variables))
+    ) {
+      if (logger) {
+        logger.error('Variables must be a JSON object');
+      }
+      return sendGraphqlError(response, 400, {
+        message: 'Variables must be a JSON object',
+        extensions: { code: 'INVALID_VARIABLES' },
+      }, mediaType);
+    }
+    if (obj.variables !== null) {
+      params.variables = obj.variables as Record<string, unknown>;
+    }
+  }
+  if (typeof obj.extensions === 'object' && obj.extensions !== null) {
+    params.extensions = obj.extensions as Record<string, unknown>;
   }
 
   const outcome = await graphqlService.execute(params, ctx, 'POST');

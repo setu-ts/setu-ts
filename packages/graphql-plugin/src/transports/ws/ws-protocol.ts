@@ -68,7 +68,8 @@ export function decodeFrame(raw: string): InboundFrame | null {
   }
 
   if (obj.payload !== undefined) {
-    if (typeof obj.payload !== 'object' || obj.payload === null || Array.isArray(obj.payload)) {
+    // Payload can be an object (for subscribe) or an array (for error frames).
+    if (typeof obj.payload !== 'object' || obj.payload === null) {
       return null;
     }
     frame.payload = obj.payload as Record<string, unknown>;
