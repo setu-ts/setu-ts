@@ -5,7 +5,6 @@
  */
 
 import type {
-  GraphqlConnectionInfo,
   GraphqlExecutionOutcome,
   GraphqlExecutionResult,
   GraphqlOperationContext,

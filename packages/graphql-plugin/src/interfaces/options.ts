@@ -4,11 +4,7 @@
  * @module
  */
 
-import type {
-  GraphqlConnectionInfo,
-  GraphqlOperationContext,
-  GraphqlSubscriptionOutcome,
-} from '@hono-enterprise/common';
+import type { GraphqlConnectionInfo } from '@hono-enterprise/common';
 import type { GraphqlModuleLike, GraphqlSchemaLike } from './graphql-runtime.ts';
 
 /**

@@ -6,7 +6,18 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext, IServiceRegistry } from '@hono-enterprise/common';
+
+const mockServiceRegistry: IServiceRegistry = {
+  register: () => {},
+  registerFactory: () => {},
+  get: () => {
+    throw new Error('not registered');
+  },
+  getAll: () => [],
+  has: () => false,
+  unregister: () => true,
+};
 
 describe('GraphqlService', () => {
   const createFakeRuntime = (): GraphqlRuntime =>
@@ -88,6 +99,7 @@ describe('GraphqlService', () => {
 
   it('has endpoint property', () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -100,6 +112,7 @@ describe('GraphqlService', () => {
 
   it('reports cached document count', () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -112,6 +125,7 @@ describe('GraphqlService', () => {
 
   it('clears cache', () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -126,6 +140,7 @@ describe('GraphqlService', () => {
   it('builds context from buildContext option', async () => {
     let capturedContext: unknown;
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -144,6 +159,7 @@ describe('GraphqlService', () => {
 
   it('uses default context when buildContext is absent', async () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -165,6 +181,7 @@ describe('GraphqlService', () => {
     };
 
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -189,6 +206,7 @@ describe('GraphqlService', () => {
     };
 
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -207,6 +225,7 @@ describe('GraphqlService', () => {
 
   it('disables introspection when option is false', async () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -226,6 +245,7 @@ describe('GraphqlService', () => {
     });
 
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -241,6 +261,7 @@ describe('GraphqlService', () => {
 
   it('uses rootValue option', async () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -256,6 +277,7 @@ describe('GraphqlService', () => {
 
   it('handles empty validation rules array', async () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -271,6 +293,7 @@ describe('GraphqlService', () => {
 
   it('uses default formatError when not provided', async () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -286,6 +309,7 @@ describe('GraphqlService', () => {
   it('builds context with requestContext when provided', async () => {
     let capturedContext: unknown;
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,

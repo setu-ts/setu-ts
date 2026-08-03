@@ -71,7 +71,7 @@ export function decodeFrame(raw: string): InboundFrame | null {
     if (typeof obj.payload !== 'object' || obj.payload === null || Array.isArray(obj.payload)) {
       return null;
     }
-    frame.payload = obj.payload;
+    frame.payload = obj.payload as Record<string, unknown>;
   }
 
   return frame;

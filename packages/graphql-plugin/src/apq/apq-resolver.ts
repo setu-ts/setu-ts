@@ -37,18 +37,18 @@ class InMemoryLru {
     this.#maxEntries = maxEntries;
   }
 
-  async get(key: string): Promise<string | null> {
+  get(key: string): Promise<string | null> {
     const value = this.#map.get(key);
     if (value === undefined) {
-      return null;
+      return Promise.resolve(null);
     }
     // Move to end (most recently used)
     this.#map.delete(key);
     this.#map.set(key, value);
-    return value;
+    return Promise.resolve(value);
   }
 
-  async set(key: string, value: string): Promise<void> {
+  set(key: string, value: string): Promise<void> {
     this.#map.delete(key); // remove old entry if present
     if (this.#map.size >= this.#maxEntries) {
       // Evict oldest (first key)
@@ -58,10 +58,11 @@ class InMemoryLru {
       }
     }
     this.#map.set(key, value);
+    return Promise.resolve();
   }
 
-  async has(key: string): Promise<boolean> {
-    return this.#map.has(key);
+  has(key: string): Promise<boolean> {
+    return Promise.resolve(this.#map.has(key));
   }
 }
 

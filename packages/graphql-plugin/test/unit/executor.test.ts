@@ -364,7 +364,7 @@ describe('executor', () => {
       const runtime = createFakeRuntime();
       const document = runtime.parse('{ hello }');
 
-      expect(checkOperation(runtime, document)).toBeNull();
+      expect(checkOperation(runtime, document, { transport: 'http' })).toBeNull();
     });
 
     it('treats an empty operationName as absent', () => {
@@ -376,7 +376,7 @@ describe('executor', () => {
       };
       const document = runtime.parse('{ hello }');
 
-      checkOperation(runtime, document, '');
+      checkOperation(runtime, document, { operationName: '', transport: 'http' });
 
       expect(received).toBeUndefined();
     });
@@ -390,7 +390,7 @@ describe('executor', () => {
       };
       const document = runtime.parse('query A { hello }');
 
-      checkOperation(runtime, document, 'A');
+      checkOperation(runtime, document, { operationName: 'A', transport: 'http' });
 
       expect(received).toBe('A');
     });

@@ -23,7 +23,6 @@ import {
   CLOSE_FORBIDDEN,
   CLOSE_INIT_TIMEOUT,
   CLOSE_INVALID_MESSAGE,
-  CLOSE_NORMAL,
   CLOSE_SUBSCRIBE_BEFORE_ACK,
   CLOSE_TOO_MANY_INITS,
   decodeFrame,
@@ -46,7 +45,7 @@ interface ConnectionState {
   initialized: boolean;
   /** Active subscriptions keyed by id. */
   subscriptions: Map<string, {
-    iterator: AsyncIterableIterator<unknown>;
+    iterator: AsyncIterator<unknown>;
     suppressed: boolean;
   }>;
   /** Init timeout handle. */
@@ -153,7 +152,7 @@ export function createWsHandlers(
           // Build connection info with payload
           state.connectionInfo = {
             ...state.connectionInfo,
-            connectionParams: frame.payload ?? undefined,
+            ...(frame.payload ? { connectionParams: frame.payload } : {}),
           };
 
           // Run onConnect hook
@@ -301,7 +300,7 @@ export function createWsHandlers(
 async function pumpWsSubscription(
   conn: IWebSocketConnection,
   id: string,
-  iterator: AsyncIterableIterator<unknown>,
+  iterator: AsyncIterator<unknown>,
   state: ConnectionState,
 ): Promise<void> {
   try {

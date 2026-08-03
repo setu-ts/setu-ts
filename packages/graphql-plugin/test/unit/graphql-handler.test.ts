@@ -7,7 +7,23 @@ import { expect } from '@std/expect';
 import { createGraphqlHandler } from '../../src/http/graphql-handler.ts';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
-import type { HandlerResult, IRequestContext, IResponse } from '@hono-enterprise/common';
+import type {
+  HandlerResult,
+  IRequestContext,
+  IResponse,
+  IServiceRegistry,
+} from '@hono-enterprise/common';
+
+const mockServiceRegistry: IServiceRegistry = {
+  register: () => {},
+  registerFactory: () => {},
+  get: () => {
+    throw new Error('not registered');
+  },
+  getAll: () => [],
+  has: () => false,
+  unregister: () => true,
+};
 
 describe('createGraphqlHandler', () => {
   /**
@@ -117,6 +133,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -124,7 +141,10 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post, get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { post, get } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+    });
 
     expect(typeof post).toBe('function');
     expect(typeof get).toBe('function');
@@ -134,6 +154,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -141,7 +162,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock } = createMockResponse();
 
     const mockCtx = {
@@ -166,6 +187,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -173,7 +195,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -198,6 +220,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -205,7 +228,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -230,6 +253,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -237,7 +261,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -261,6 +285,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -268,7 +293,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -292,6 +317,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -299,7 +325,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -323,6 +349,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -330,7 +357,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -354,6 +381,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -361,7 +389,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -387,6 +415,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -400,7 +429,11 @@ describe('createGraphqlHandler', () => {
       error: (msg: string) => logEntries.push(`ERROR: ${msg}`),
     };
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, logger });
+    const { post } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      logger,
+    });
     const { mock } = createMockResponse();
 
     const mockCtx = {
@@ -425,6 +458,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -438,7 +472,11 @@ describe('createGraphqlHandler', () => {
       error: (msg: string) => logEntries.push(`ERROR: ${msg}`),
     };
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, logger });
+    const { post } = createGraphqlHandler(service, '/graphql', {
+      graphiql: true,
+      maxBatchSize: 0,
+      logger,
+    });
     const { mock } = createMockResponse();
 
     const mockCtx = {
@@ -463,6 +501,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -470,7 +509,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -495,6 +534,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -502,7 +542,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     // Override validate to return errors
@@ -532,6 +572,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -539,7 +580,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -563,6 +604,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -570,7 +612,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { post } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -595,6 +637,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -602,7 +645,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -630,6 +673,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -637,7 +681,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: false, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
@@ -661,6 +705,7 @@ describe('createGraphqlHandler', () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
+      serviceRegistry: mockServiceRegistry,
       endpoint: '/graphql',
       documentCacheSize: 100,
       maxDepth: 10,
@@ -668,7 +713,7 @@ describe('createGraphqlHandler', () => {
       maskInternalErrors: true,
     });
 
-    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true });
+    const { get } = createGraphqlHandler(service, '/graphql', { graphiql: true, maxBatchSize: 0 });
     const { mock, captureStatus } = createMockResponse();
 
     const mockCtx = {
