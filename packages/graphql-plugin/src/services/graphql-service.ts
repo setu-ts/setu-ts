@@ -141,11 +141,6 @@ export class GraphqlService implements IGraphqlService {
     // Start with GraphQL's standard validation rules
     const rules: unknown[] = [...this.#runtime.specifiedRules];
 
-    // Add custom validation rules from options
-    if (this.#customValidationRules && this.#customValidationRules.length > 0) {
-      rules.push(...this.#customValidationRules);
-    }
-
     // Add depth limit rule
     if (this.#maxDepth > 0) {
       // createDepthLimitRule returns a validation rule function (receives context, returns visitor)
@@ -155,6 +150,11 @@ export class GraphqlService implements IGraphqlService {
     // Add introspection rule if disabled
     if (!this.#introspection) {
       rules.push(this.#runtime.NoSchemaIntrospectionCustomRule);
+    }
+
+    // Application rules are appended LAST, per the milestone plan §3.8.
+    if (this.#customValidationRules && this.#customValidationRules.length > 0) {
+      rules.push(...this.#customValidationRules);
     }
 
     return rules;

@@ -7035,22 +7035,22 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ### Options
 
-| Option               | Type                                      | Default    | Description                                                   |
-| -------------------- | ----------------------------------------- | ---------- | ------------------------------------------------------------- |
-| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                     |
-| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                              |
-| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                            |
-| `path`               | `string`                                  | `/graphql` | Endpoint path                                                 |
-| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                            |
-| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                   |
-| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                            |
-| `validationRules`    | `unknown[]`                               | omitted    | Additional validation rules                                   |
-| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                   |
-| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                  |
-| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                           |
-| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                        |
-| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                      |
-| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios) |
+| Option               | Type                                      | Default    | Description                                                               |
+| -------------------- | ----------------------------------------- | ---------- | ------------------------------------------------------------------------- |
+| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                                 |
+| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                                          |
+| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                                        |
+| `path`               | `string`                                  | `/graphql` | Endpoint path                                                             |
+| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                                        |
+| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                               |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                                        |
+| `validationRules`    | `unknown[]`                               | omitted    | Extra rules, appended after the built-ins, assembled once at registration |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                               |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                              |
+| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                                       |
+| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                                    |
+| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                                  |
+| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios)             |
 
 ### Exports
 
@@ -7087,12 +7087,16 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   multi-tenancy middleware published on the request. Supplying `buildContext` replaces that object
   wholesale.
 - **Media-type negotiation and the status watershed.** Responds with
-  `application/graphql-response+json` when the client requests it, otherwise `application/json`.
-  Under `graphql-response`, a **request** error (parse, validation, operation resolution) is `400`
-  and a mutation over `GET` is `405`. Under `application/json`, every well-formed GraphQL request
-  answers `200` — only a transport refusal (`METHOD_NOT_ALLOWED`,
-  `SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`) keeps its status, because a client predating the new
-  media type reads a non-200 as a network failure and never reads the `errors` array.
+  `application/graphql-response+json` when the client requests it, otherwise `application/json` —
+  including for failures raised before execution, so a client is never handed a media type it did
+  not ask for. Under `graphql-response`, a **request** error (parse, validation, operation
+  resolution) is `400`, a subscription over HTTP is `400`, and a mutation over `GET` is `405`. Under
+  `application/json`, every request the endpoint processed as GraphQL answers `200` with the error
+  in the body, because a client predating the newer media type reads a non-200 as a network failure
+  and never reads the `errors` array. Exactly three cases keep their status under `application/json`
+  — an unsupported request content type (`415`), a malformed JSON body (`400`), and a mutation over
+  `GET` (`405`) — because none of them is a GraphQL result. The status is decided from the outcome
+  alone and never from the response body, so a `formatError` hook cannot change it.
 - **An executed operation is always `200`.** A field error that nulls `data` is not a request error,
   so it does not become a `400` even under `graphql-response`.
 - **`405` carries `Allow: POST`.** A mutation sent over `GET` is refused with `METHOD_NOT_ALLOWED`

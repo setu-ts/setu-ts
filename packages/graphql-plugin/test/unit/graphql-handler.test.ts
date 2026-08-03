@@ -350,7 +350,7 @@ describe('createGraphqlHandler', () => {
     expect(captureStatus()).toBe(405);
   });
 
-  it('returns 400 for GET with subscription query', async () => {
+  it('returns 200 for GET with a subscription query under the json watershed', async () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();
     const service = new GraphqlService(runtime, schema, {
@@ -378,7 +378,9 @@ describe('createGraphqlHandler', () => {
     } as unknown as IRequestContext;
 
     await get(mockCtx);
-    expect(captureStatus()).toBe(400);
+    // No `accept` header negotiates to `application/json`, under which only a
+    // 405 keeps its status; the subscription refusal rides the watershed.
+    expect(captureStatus()).toBe(200);
   });
 
   it('logs errors when logger is provided', async () => {

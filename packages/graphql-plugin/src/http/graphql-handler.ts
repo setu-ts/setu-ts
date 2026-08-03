@@ -17,19 +17,6 @@ import type { ParseError } from './request-parser.ts';
 import { parseGetQuery, parsePostBody } from './request-parser.ts';
 import { graphiqlHtml } from '../ui/graphiql.ts';
 
-/**
- * Error codes whose HTTP status is a **transport** decision rather than a
- * GraphQL one, so it survives the `application/json` status watershed.
- *
- * Everything else answers `200` under `application/json`, because a client
- * predating `application/graphql-response+json` reads a non-200 as a network
- * failure and never looks at the `errors` array.
- */
-const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
-  'METHOD_NOT_ALLOWED',
-  'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
-]);
-
 /** Handler options shared by both verbs. */
 interface HandlerOptions {
   graphiql: boolean;
@@ -71,13 +58,17 @@ async function handleGraphqlPost(
 ): Promise<HandlerResult> {
   const { logger } = options;
 
+  // Negotiated once, up front: every response this handler can produce answers
+  // in the media type the client asked for, transport failures included.
+  const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
+
   // Check content-type for POST
   const contentType = ctx.request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
     return sendGraphqlError(response, 415, {
       message: 'Unsupported media type. Expected application/json',
       extensions: { code: 'UNSUPPORTED_MEDIA_TYPE' },
-    });
+    }, mediaType);
   }
 
   // Parse body
@@ -89,7 +80,7 @@ async function handleGraphqlPost(
     return sendGraphqlError(response, 400, {
       message: 'Invalid JSON body',
       extensions: { code: 'INVALID_JSON' },
-    });
+    }, mediaType);
   }
 
   // Parse request params
@@ -102,13 +93,11 @@ async function handleGraphqlPost(
     return sendGraphqlError(response, 400, {
       message: err.message,
       extensions: { code: err.code },
-    });
+    }, mediaType);
   }
 
   const outcome = await graphqlService.execute(params, ctx, 'POST');
 
-  // Wire media-type negotiation (B1)
-  const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
   return sendGraphqlResult(response, outcome, mediaType);
 }
 
@@ -124,6 +113,7 @@ async function handleGraphqlGet(
 ): Promise<HandlerResult> {
   const { logger, graphiql } = options;
 
+  const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
   const queryParam = ctx.query.query;
 
   // Check for GraphiQL request
@@ -140,7 +130,7 @@ async function handleGraphqlGet(
     return sendGraphqlError(response, 400, {
       message: 'Query parameter is required',
       extensions: { code: 'BAD_REQUEST' },
-    });
+    }, mediaType);
   }
 
   // Parse query params
@@ -153,41 +143,33 @@ async function handleGraphqlGet(
     return sendGraphqlError(response, 400, {
       message: err.message,
       extensions: { code: err.code },
-    });
+    }, mediaType);
   }
 
   const outcome = await graphqlService.execute(params, ctx, 'GET');
 
-  // Wire media-type negotiation (B1)
-  const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
   return sendGraphqlResult(response, outcome, mediaType);
 }
 
 /**
- * Send a GraphQL error response.
+ * Send a GraphQL error response for a failure raised before execution
+ * (unsupported media type, malformed body, unusable parameters).
+ *
+ * These keep their HTTP status under both media types — they are transport
+ * failures, not GraphQL results — but they still answer in the media type the
+ * client negotiated, so a client that asked for
+ * `application/graphql-response+json` is not handed `application/json`.
  */
 function sendGraphqlError(
   response: IResponse,
   status: number,
   error: { message: string; extensions?: { code: string } },
+  mediaType: 'json' | 'graphql-response',
 ): HandlerResult {
+  const contentType = mediaType === 'graphql-response' ? CONTENT_TYPE_GRAPHQL : CONTENT_TYPE_JSON;
   const body = JSON.stringify({ errors: [error] });
-  response.status(status).header('Content-Type', CONTENT_TYPE_JSON);
+  response.status(status).header('Content-Type', contentType);
   return response.send(new TextEncoder().encode(body));
-}
-
-/**
- * Report whether an outcome carries a transport-level refusal, whose status
- * survives the `application/json` watershed.
- */
-function hasTransportError(outcome: GraphqlExecutionOutcome): boolean {
-  for (const e of outcome.result.errors ?? []) {
-    const code = (e as { extensions?: { code?: unknown } }).extensions?.code;
-    if (typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**
@@ -195,8 +177,18 @@ function hasTransportError(outcome: GraphqlExecutionOutcome): boolean {
  *
  * Under `application/graphql-response+json` the outcome's status is used
  * verbatim. Under `application/json` every well-formed GraphQL request answers
- * `200` — only a transport refusal keeps its status. The rule is identical for
- * `POST` and `GET`; the verb never affects it.
+ * `200` — a client predating the newer media type reads a non-200 as a network
+ * failure and never looks at the `errors` array. The one exception is `405`,
+ * which is a decision about the HTTP method rather than about GraphQL and which
+ * carries an `Allow` header a client needs in order to retry correctly.
+ *
+ * The test is deliberately made on `outcome.status` alone. Deriving it from
+ * error codes in the payload made the HTTP status depend on data the caller's
+ * `formatError` hook can rewrite: a hook that reshaped errors dropped
+ * `extensions`, and a refused mutation-over-GET answered `200`. The status must
+ * not be a function of the response body.
+ *
+ * The rule is identical for `POST` and `GET`; the verb never affects it.
  */
 function sendGraphqlResult(
   response: IResponse,
@@ -206,8 +198,7 @@ function sendGraphqlResult(
   const contentType = mediaType === 'graphql-response' ? CONTENT_TYPE_GRAPHQL : CONTENT_TYPE_JSON;
   const body = JSON.stringify(outcome.result);
 
-  const transport = hasTransportError(outcome);
-  const status = mediaType === 'graphql-response' || transport ? outcome.status : 200;
+  const status = mediaType === 'graphql-response' || outcome.status === 405 ? outcome.status : 200;
 
   response.status(status).header('Content-Type', contentType);
   // A `405` must advertise what IS allowed (RFC 9110 §15.5.6). The GraphQL

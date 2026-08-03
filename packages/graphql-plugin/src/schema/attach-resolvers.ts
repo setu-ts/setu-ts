@@ -8,7 +8,6 @@
 
 import type {
   GraphqlAbstractTypeLike,
-  GraphqlInterfaceTypeLike,
   GraphqlObjectTypeLike,
   GraphqlSchemaLike,
 } from '../interfaces/graphql-runtime.ts';
@@ -89,20 +88,11 @@ export function attachResolvers(
         );
       }
 
-      // Attach __resolveType to interface/union types
-      // In graphql@16, abstract types (interfaces/unions) have a resolveType property
+      // In graphql@16 both abstract kinds — interfaces and unions — carry a
+      // `resolveType` property, so the assignment is the same for each and no
+      // branch on the kind is needed.
       const abstractType = type as GraphqlAbstractTypeLike & { resolveType?: unknown };
-      if (abstractType) {
-        // Check if this is an interface or union by checking if getType returns an interface type
-        const interfaceType = type as GraphqlInterfaceTypeLike;
-        if (typeof interfaceType.getFields === 'function') {
-          // It's an interface type - attach resolveType
-          abstractType.resolveType = fieldResolvers.__resolveType;
-        } else {
-          // It might be a union - still try to attach resolveType
-          abstractType.resolveType = fieldResolvers.__resolveType;
-        }
-      }
+      abstractType.resolveType = fieldResolvers.__resolveType;
     }
   }
 }

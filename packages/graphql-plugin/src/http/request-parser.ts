@@ -56,9 +56,16 @@ export function parsePostBody(body: unknown): GraphqlRequestParams {
     throw err;
   }
 
-  // variables must be an object if present
-  if (obj.variables !== undefined && typeof obj.variables !== 'object') {
-    const err = new Error('Variables must be an object') as ParseError;
+  // variables must be a JSON object if present. `null` is permitted by the
+  // spec and simply means "no variables"; an array is NOT, and is refused here
+  // exactly as `parseGetQuery` refuses it — `typeof [] === 'object'`, so
+  // without the array check the two entry points disagree and an array reaches
+  // `execute` as the variable map.
+  if (
+    obj.variables !== undefined && obj.variables !== null &&
+    (typeof obj.variables !== 'object' || Array.isArray(obj.variables))
+  ) {
+    const err = new Error('Variables must be a JSON object') as ParseError;
     err.code = 'INVALID_VARIABLES';
     throw err;
   }

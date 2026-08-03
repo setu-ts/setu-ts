@@ -236,6 +236,41 @@ describe('GraphQL schema-first E2E', () => {
     await app.stop();
   });
 
+  it('keeps the 405 when a formatError hook reshapes errors', async () => {
+    // Regression: the watershed used to read the error CODE out of the response
+    // payload, which `formatError` runs last and may rewrite. A hook that
+    // dropped `extensions` turned a refused mutation-over-GET into a 200 — a
+    // success status for a request the server refused, alongside an `Allow`
+    // header. The status must not be a function of the body.
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        GraphqlPlugin({
+          typeDefs,
+          resolvers: { Query: { mustExist: () => 'x' } } as never,
+          formatError: (e) => ({ message: (e as { message: string }).message }),
+        }),
+      ],
+    });
+    await app.start();
+
+    const res = await app.fetch(
+      new Request(
+        'http://localhost/graphql?query=' +
+          encodeURIComponent('mutation { addNote(authorId: "u1", title: "x") { id } }'),
+        { headers: { accept: 'application/json' } },
+      ),
+    );
+
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
+    // ...and the hook really did strip the code, so the assertion is not vacuous.
+    const body = await res.json() as { errors: Array<{ extensions?: unknown }> };
+    expect(body.errors[0]?.extensions).toBeUndefined();
+
+    await app.stop();
+  });
+
   it('answers 200 when an executed operation nulls data via a field error', async () => {
     const app = createApp();
     await app.start();
@@ -248,6 +283,81 @@ describe('GraphQL schema-first E2E', () => {
     const body = await res.json() as { data: unknown; errors: Array<{ message: string }> };
     expect(body.data).toBeNull();
     expect(body.errors.length).toBe(1);
+
+    await app.stop();
+  });
+
+  it('answers transport failures in the negotiated media type', async () => {
+    const app = createApp();
+    await app.start();
+
+    // A client that asked for the strict media type must not be handed
+    // `application/json` just because the failure happened before execution.
+    const unsupported = await app.fetch(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain', accept: 'application/graphql-response+json' },
+        body: 'not json',
+      }),
+    );
+    expect(unsupported.status).toBe(415);
+    expect(unsupported.headers.get('content-type')).toBe(
+      'application/graphql-response+json; charset=utf-8',
+    );
+
+    const malformed = await app.fetch(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/graphql-response+json',
+        },
+        body: '{not json',
+      }),
+    );
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get('content-type')).toBe(
+      'application/graphql-response+json; charset=utf-8',
+    );
+
+    // A client that asked for nothing in particular still gets JSON.
+    const plain = await app.fetch(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: 'x',
+      }),
+    );
+    expect(plain.headers.get('content-type')).toBe('application/json; charset=utf-8');
+
+    await app.stop();
+  });
+
+  it('refuses an array as POST variables, exactly as GET does', async () => {
+    const app = createApp();
+    await app.start();
+
+    const query = 'query($limit: Int) { user(id: "u1") { notes(limit: $limit) { id } } }';
+
+    const viaPost = await post(app, { query, variables: [] }, 'application/graphql-response+json');
+    const viaGet = await app.fetch(
+      new Request(
+        'http://localhost/graphql?query=' + encodeURIComponent(query) +
+          '&variables=' + encodeURIComponent('[]'),
+        { headers: { accept: 'application/graphql-response+json' } },
+      ),
+    );
+
+    // `typeof [] === 'object'`, so POST used to accept the array and hand it to
+    // execute as the variable map while GET rejected the same input.
+    expect(viaPost.statusCode).toBe(400);
+    expect(viaGet.status).toBe(400);
+    const postBody = await viaPost.json() as { errors: Array<{ extensions?: { code?: string } }> };
+    expect(postBody.errors[0]?.extensions?.code).toBe('INVALID_VARIABLES');
+
+    // `null` remains valid — the spec allows it and it means "no variables".
+    const withNull = await post(app, { query: '{ user(id: "u1") { id } }', variables: null });
+    expect(withNull.statusCode).toBe(200);
 
     await app.stop();
   });

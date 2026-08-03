@@ -401,23 +401,48 @@ describe('GraphQL HTTP E2E', () => {
   });
 
   describe('operation kind (B6)', () => {
-    it('returns 400 for subscription over POST', async () => {
+    it('refuses a subscription over POST, following the media-type watershed', async () => {
       const app = createApplication({
         plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers })],
       });
 
       await app.start({ port: 0 });
 
-      const res = await app.inject({
+      // Under `application/json` the refusal follows the watershed to 200 with
+      // the error in the body — plan §3.5 lists only 415, malformed JSON and
+      // the 405 on a GET mutation as keeping their status, and a client
+      // predating the newer media type reads a non-200 as a network failure.
+      const asJson = await app.inject({
         method: 'POST',
         url: '/graphql',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: 'subscription { test }' }),
       });
-      const json = await res.json() as { errors?: Array<{ extensions?: { code?: string } }> };
+      const jsonBody = await asJson.json() as {
+        errors?: Array<{ extensions?: { code?: string } }>;
+      };
 
-      expect(res.statusCode).toBe(400);
-      expect(json.errors?.[0]?.extensions?.code).toBe('SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP');
+      expect(asJson.statusCode).toBe(200);
+      expect(jsonBody.errors?.[0]?.extensions?.code).toBe('SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP');
+
+      // Under the strict media type it keeps its 400.
+      const asGraphql = await app.inject({
+        method: 'POST',
+        url: '/graphql',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/graphql-response+json',
+        },
+        body: JSON.stringify({ query: 'subscription { test }' }),
+      });
+      const graphqlBody = await asGraphql.json() as {
+        errors?: Array<{ extensions?: { code?: string } }>;
+      };
+
+      expect(asGraphql.statusCode).toBe(400);
+      expect(graphqlBody.errors?.[0]?.extensions?.code).toBe(
+        'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+      );
 
       await app.stop();
     });
