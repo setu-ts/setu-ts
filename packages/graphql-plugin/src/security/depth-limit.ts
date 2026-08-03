@@ -17,6 +17,21 @@ interface ValidationRuleContext {
 }
 
 /**
+ * The visitor a validation rule hands back to `validate`.
+ *
+ * `Field` is optional because a disabled rule (`maxDepth <= 0`) returns an
+ * empty visitor, which contributes nothing to the traversal.
+ */
+interface DepthLimitVisitor {
+  Field?(
+    node: GraphqlSelectionNodeLike,
+    parent: unknown,
+    key: unknown,
+    ancestors: unknown[],
+  ): void;
+}
+
+/**
  * Get depth from ancestor chain by counting SelectionSet path entries.
  * The ancestors array contains path keys like ["definitions", 0, "selectionSet", "selections", 0, ...]
  * Each "selectionSet" in the path indicates one level of nesting.
@@ -40,6 +55,10 @@ function getDepth(ancestors: unknown[]): number {
  * returns a visitor object. The visitor object has methods for different
  * AST node kinds that are called during traversal.
  *
+ * The return type is written out rather than inferred: this function is part of
+ * the package's public API, and JSR rejects an inferred return type there
+ * ("slow types") because it blocks automatic `.d.ts` generation for Node.
+ *
  * @param maxDepth - Maximum allowed depth (0 to disable)
  * @param GraphQLError - The GraphQLError constructor to use for creating errors
  * @returns A validation rule function (receives context, returns visitor)
@@ -47,7 +66,7 @@ function getDepth(ancestors: unknown[]): number {
 export function createDepthLimitRule(
   maxDepth: number,
   GraphQLError: new (message: string) => GraphqlGraphQLErrorLike,
-) {
+): (context: ValidationRuleContext) => DepthLimitVisitor {
   if (maxDepth <= 0) {
     // Return a no-op rule that does nothing
     return (_context: ValidationRuleContext) => ({});
