@@ -14,21 +14,23 @@ describe('ApqResolver', () => {
   function createFakeCacheStore(): ICacheStore {
     const store = new Map<string, unknown>();
     return {
-      get: async <T>(key: string): Promise<T | null> => {
+      get: <T>(key: string): Promise<T | null> => {
         const v = store.get(key);
-        return v as T ?? null;
+        return Promise.resolve((v as T) ?? null);
       },
-      set: async <T>(key: string, value: T, _ttlSeconds?: number): Promise<void> => {
+      set: <T>(key: string, value: T, _ttlSeconds?: number): Promise<void> => {
         store.set(key, value as unknown);
+        return Promise.resolve();
       },
-      delete: async (key: string): Promise<boolean> => {
-        return store.delete(key);
+      delete: (key: string): Promise<boolean> => {
+        return Promise.resolve(store.delete(key));
       },
-      has: async (key: string): Promise<boolean> => {
-        return store.has(key);
+      has: (key: string): Promise<boolean> => {
+        return Promise.resolve(store.has(key));
       },
-      clear: async (): Promise<void> => {
+      clear: (): Promise<void> => {
         store.clear();
+        return Promise.resolve();
       },
     };
   }
@@ -185,13 +187,14 @@ describe('ApqResolver', () => {
   it('passes ttlSeconds to cache store set', async () => {
     let receivedTtl: number | undefined;
     const cacheStore: ICacheStore = {
-      get: async () => null,
-      set: async <T>(_key: string, _value: T, ttlSeconds?: number) => {
+      get: () => Promise.resolve(null),
+      set: <T>(_key: string, _value: T, ttlSeconds?: number) => {
         receivedTtl = ttlSeconds;
+        return Promise.resolve();
       },
-      delete: async () => true,
-      has: async () => false,
-      clear: async () => {},
+      delete: () => Promise.resolve(true),
+      has: () => Promise.resolve(false),
+      clear: () => Promise.resolve(),
     };
     const resolver = new ApqResolver(cacheStore, subtle, { ttlSeconds: 600 });
     const query = '{ hello }';
@@ -201,5 +204,99 @@ describe('ApqResolver', () => {
       extensions: { persistedQuery: { version: 1, sha256Hash: hash } },
     });
     expect(receivedTtl).toBe(600);
+  });
+
+  it('treats an empty-string query with a hash as hash-only (lookup, not verify)', async () => {
+    // The branch `params.query !== undefined && params.query.length > 0` is
+    // false for `''`, so the resolver falls through to the hash-only lookup.
+    const cacheStore = createFakeCacheStore();
+    const resolver = new ApqResolver(cacheStore, subtle, {});
+    const query = '{ hello }';
+    const hash = await persistedQueryHash(query, subtle);
+    await cacheStore.set(`apq:${hash}`, query);
+
+    const result = await resolver.resolve({
+      query: '',
+      extensions: { persistedQuery: { version: 1, sha256Hash: hash } },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.query).toBe(query);
+  });
+
+  it('returns PERSISTED_QUERY_NOT_FOUND when query is undefined and no APQ info', async () => {
+    const resolver = new ApqResolver(createFakeCacheStore(), subtle, {});
+    const result = await resolver.resolve({});
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('PERSISTED_QUERY_NOT_FOUND');
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it('InMemoryLru.has() returns true for existing keys and false for missing keys', async () => {
+    const resolver = new ApqResolver(null, subtle, { maxEntries: 2 });
+    const q1 = '{ a }';
+    const h1 = await persistedQueryHash(q1, subtle);
+
+    // Pre-populate via resolve
+    await resolver.resolve({
+      query: q1,
+      extensions: { persistedQuery: { version: 1, sha256Hash: h1 } },
+    });
+
+    // Access the internal LRU store via the resolver's resolve path to confirm has() works.
+    // We verify by checking that the key is present via a hash-only lookup.
+    const r = await resolver.resolve({
+      extensions: { persistedQuery: { version: 1, sha256Hash: h1 } },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.query).toBe(q1);
+
+    // A non-existent hash should miss
+    const r2 = await resolver.resolve({
+      extensions: { persistedQuery: { version: 1, sha256Hash: 'nonexistent' } },
+    });
+    expect(r2.ok).toBe(false);
+  });
+
+  it('InMemoryLru re-orders on get so the most-recently-used survives eviction', async () => {
+    const resolver = new ApqResolver(null, subtle, { maxEntries: 2 });
+    const q1 = '{ a }';
+    const h1 = await persistedQueryHash(q1, subtle);
+    const q2 = '{ b }';
+    const h2 = await persistedQueryHash(q2, subtle);
+
+    await resolver.resolve({
+      query: q1,
+      extensions: { persistedQuery: { version: 1, sha256Hash: h1 } },
+    });
+    await resolver.resolve({
+      query: q2,
+      extensions: { persistedQuery: { version: 1, sha256Hash: h2 } },
+    });
+
+    // Touch q1 so q2 becomes the LRU candidate.
+    let r = await resolver.resolve({
+      extensions: { persistedQuery: { version: 1, sha256Hash: h1 } },
+    });
+    expect(r.ok).toBe(true);
+
+    // Inserting a third entry evicts q2 (the least-recently-used), not q1.
+    const q3 = '{ c }';
+    const h3 = await persistedQueryHash(q3, subtle);
+    await resolver.resolve({
+      query: q3,
+      extensions: { persistedQuery: { version: 1, sha256Hash: h3 } },
+    });
+
+    r = await resolver.resolve({
+      extensions: { persistedQuery: { version: 1, sha256Hash: h1 } },
+    });
+    expect(r.ok).toBe(true); // q1 survived
+    r = await resolver.resolve({
+      extensions: { persistedQuery: { version: 1, sha256Hash: h2 } },
+    });
+    expect(r.ok).toBe(false); // q2 evicted
+    if (!r.ok) expect(r.code).toBe('PERSISTED_QUERY_NOT_FOUND');
   });
 });

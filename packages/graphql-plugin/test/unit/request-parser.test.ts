@@ -54,6 +54,35 @@ describe('request-parser', () => {
       };
       const params = parsePostBody(body);
       expect(params.query).toBe('query { hello }');
+      expect(params.extensions).toEqual({ persistedQuery: { sha256Hash: 'abc' } });
+    });
+
+    it('throws on non-string operationName', () => {
+      expect(() => parsePostBody({ query: 'q', operationName: 42 } as unknown)).toThrow();
+    });
+
+    it('throws on non-object extensions (INVALID_EXTENSIONS)', () => {
+      let thrown: { code?: string } | undefined;
+      try {
+        parsePostBody({ query: 'q', extensions: 'nope' } as unknown);
+      } catch (e) {
+        thrown = e as { code?: string };
+      }
+      expect(thrown).toBeDefined();
+      expect(thrown!.code).toBe('INVALID_EXTENSIONS');
+    });
+
+    it('throws on array extensions (INVALID_EXTENSIONS)', () => {
+      expect(() => parsePostBody({ query: 'q', extensions: [1] } as unknown)).toThrow();
+    });
+
+    it('rejects null operationName (null !== undefined)', () => {
+      expect(() => parsePostBody({ query: 'q', operationName: null } as unknown)).toThrow();
+    });
+
+    it('accepts null variables', () => {
+      const params = parsePostBody({ query: 'q', variables: null } as unknown);
+      expect(params.variables).toBeUndefined();
     });
   });
 

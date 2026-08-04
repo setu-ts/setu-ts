@@ -6,7 +6,12 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
-import type { IRequestContext, IServiceRegistry } from '@hono-enterprise/common';
+import type {
+  GraphqlConnectionInfo,
+  GraphqlOperationContext,
+  IRequestContext,
+  IServiceRegistry,
+} from '@hono-enterprise/common';
 
 const mockServiceRegistry: IServiceRegistry = {
   register: () => {},
@@ -329,5 +334,189 @@ describe('GraphqlService', () => {
     await service.execute({ query: '{ hello }' }, mockRequestContext as unknown as IRequestContext);
 
     expect(capturedContext).toBeDefined();
+  });
+
+  describe('subscribe', () => {
+    /** Fake runtime whose operation kind and parse behavior are controllable. */
+    function createSubscribeRuntime(opts: {
+      operation?: 'query' | 'subscription';
+      parseThrows?: boolean;
+      subscribeStream?: AsyncIterable<unknown>;
+    }): GraphqlRuntime {
+      return {
+        parse: (_src: string) => {
+          if (opts.parseThrows) throw new Error('syntax error');
+          return {
+            kind: 'Document',
+            definitions: [{
+              kind: 'OperationDefinition',
+              operation: opts.operation ?? 'query',
+              selectionSet: { kind: 'SelectionSet', selections: [] },
+            }],
+          };
+        },
+        validate: () => [],
+        execute: () => Promise.resolve({ data: { hello: 'world' } }),
+        subscribe: () =>
+          Promise.resolve(
+            opts.subscribeStream ?? (async function* () {
+              yield { data: { tick: 0 } };
+            })(),
+          ),
+        buildSchema: (_src: string) =>
+          ({
+            getQueryType: () => ({ name: 'Query', getFields: () => ({}), getInterfaces: () => [] }),
+            getMutationType: () => null,
+            getSubscriptionType: () => ({ name: 'Subscription' }),
+            getType: () => null,
+            getPossibleTypes: () => [],
+            getDirectives: () => [],
+            getDirective: () => null,
+            toAST: () => ({}),
+          }) as never,
+        validateSchema: () => [],
+        getOperationAST: (document: { definitions: Array<{ operation?: string }> }) =>
+          document.definitions[0] ?? null,
+        GraphQLError: class extends Error {
+          override name = 'GraphQLError';
+          toJSON() {
+            return { message: this.message };
+          }
+        },
+        NoSchemaIntrospectionCustomRule: {},
+        specifiedRules: [],
+      } as unknown as GraphqlRuntime;
+    }
+
+    function makeService(
+      runtime: GraphqlRuntime,
+      opts: { buildContext?: (input: unknown) => unknown } = {},
+    ) {
+      return new GraphqlService(runtime, createFakeSchema(), {
+        serviceRegistry: mockServiceRegistry,
+        endpoint: '/graphql',
+        documentCacheSize: 100,
+        maxDepth: 10,
+        introspection: true,
+        maskInternalErrors: true,
+        ...(opts.buildContext ? { buildContext: opts.buildContext as never } : {}),
+      });
+    }
+
+    it('returns a single outcome for a query', async () => {
+      const service = makeService(createSubscribeRuntime({ operation: 'query' }));
+      const outcome = await service.subscribe({ query: '{ hello }' });
+      expect(outcome.kind).toBe('single');
+      if (outcome.kind === 'single') {
+        expect(outcome.result.data).toEqual({ hello: 'world' });
+      }
+    });
+
+    it('returns a stream outcome for a subscription', async () => {
+      const service = makeService(createSubscribeRuntime({ operation: 'subscription' }));
+      const outcome = await service.subscribe({ query: 'subscription { tick }' });
+      expect(outcome.kind).toBe('stream');
+      if (outcome.kind === 'stream') {
+        const first = await outcome.stream[Symbol.asyncIterator]().next();
+        expect(first.value).toEqual({ data: { tick: 0 } });
+      }
+    });
+
+    it('returns an error outcome when the query fails to parse', async () => {
+      const service = makeService(
+        createSubscribeRuntime({ operation: 'query', parseThrows: true }),
+      );
+      const outcome = await service.subscribe({ query: '{ bad' });
+      expect(outcome.kind).toBe('error');
+      if (outcome.kind === 'error') {
+        expect(outcome.result.errors).toBeDefined();
+      }
+    });
+
+    it('builds WS-shaped context: services from the registry, user/tenant from conn.data', async () => {
+      let captured: { services?: unknown; user?: unknown; tenant?: unknown } = {};
+      const service = makeService(
+        createSubscribeRuntime({ operation: 'subscription' }),
+        {
+          buildContext: (input) => {
+            captured = input as typeof captured;
+            return { marker: 'ctx' };
+          },
+        },
+      );
+      const data = new Map<string, unknown>([['user', 'alice'], ['tenant', 't1']]);
+      const connection: GraphqlConnectionInfo = {
+        id: 'c1',
+        headers: new Headers(),
+        query: {},
+        data,
+      };
+      const context: GraphqlOperationContext = { connection };
+
+      await service.subscribe({ query: 'subscription { tick }' }, context);
+
+      // The plugin-level registry is handed to the WS path's context.
+      expect(captured.services).toBe(mockServiceRegistry);
+      // A custom buildContext receives the connection so it can read identity.
+      expect((captured as { connection?: GraphqlConnectionInfo }).connection).toBe(connection);
+    });
+
+    it('uses the default context (services from registry) when no buildContext, on the WS path', async () => {
+      let subscribedContext: unknown;
+      const runtime = createSubscribeRuntime({ operation: 'subscription' });
+      (runtime as unknown as { subscribe: (args: unknown) => Promise<unknown> }).subscribe = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve((async function* () {
+          yield { data: { tick: 0 } };
+        })());
+      };
+      const service = makeService(runtime);
+      const connection: GraphqlConnectionInfo = {
+        id: 'c1',
+        headers: new Headers(),
+        query: {},
+        data: new Map([['user', 'bob']]),
+      };
+
+      await service.subscribe({ query: 'subscription { tick }' }, { connection });
+
+      const ctx = subscribedContext as { services: unknown; user?: string };
+      expect(ctx.services).toBe(mockServiceRegistry);
+      expect(ctx.user).toBe('bob');
+    });
+
+    it('defaults services to {} when neither requestContext nor connection is supplied', async () => {
+      let subscribedContext: unknown;
+      const runtime = createSubscribeRuntime({ operation: 'query' });
+      (runtime as unknown as { execute: (args: unknown) => Promise<unknown> }).execute = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve({ data: { hello: 'world' } });
+      };
+      const service = makeService(runtime);
+
+      await service.subscribe({ query: '{ hello }' });
+
+      expect((subscribedContext as { services: unknown }).services).toEqual({});
+    });
+
+    it('honors a non-default maskInternalErrors identically to execute', async () => {
+      const runtime = createSubscribeRuntime({ operation: 'query', parseThrows: true });
+      const service = new GraphqlService(runtime, createFakeSchema(), {
+        serviceRegistry: mockServiceRegistry,
+        endpoint: '/graphql',
+        documentCacheSize: 100,
+        maxDepth: 10,
+        introspection: true,
+        maskInternalErrors: true,
+      });
+      const outcome = await service.subscribe({ query: '{ bad' });
+      expect(outcome.kind).toBe('error');
+    });
   });
 });

@@ -85,7 +85,7 @@ function createMockResponse() {
 const createMockContext = (body: unknown, accept = 'application/json') => {
   return {
     request: {
-      json: async () => body,
+      json: () => Promise.resolve(body),
       headers: new Headers({
         'content-type': 'application/json',
         'accept': accept,

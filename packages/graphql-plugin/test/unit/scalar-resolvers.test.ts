@@ -7,6 +7,18 @@ import { expect } from '@std/expect';
 import { attachResolvers } from '../../src/schema/attach-resolvers.ts';
 import type { GraphqlRuntime } from '../../src/interfaces/graphql-runtime.ts';
 
+/** Shape of a custom scalar type produced by the fake runtime's buildSchema. */
+interface ScalarLike {
+  serialize: () => unknown;
+  parseValue: (value?: unknown) => unknown;
+  parseLiteral: (node?: unknown) => unknown;
+}
+
+/** Shape of a field map returned by `getQueryType().getFields()`. */
+interface FieldsLike {
+  hello: { resolve: (...args: unknown[]) => unknown };
+}
+
 const createFakeRuntime = (): GraphqlRuntime =>
   ({
     parse: () => ({ kind: 'Document', definitions: [] }),
@@ -94,7 +106,7 @@ describe('attachResolvers — scalar', () => {
 
     const scalar = schema.getType('DateTime');
     expect(scalar).not.toBeNull();
-    const result = (scalar as any).serialize();
+    const result = (scalar as unknown as ScalarLike).serialize();
     expect(result).toBe('custom-serialized');
   });
 
@@ -109,7 +121,7 @@ describe('attachResolvers — scalar', () => {
     });
 
     const scalar = schema.getType('DateTime');
-    const result = (scalar as any).parseValue('2024-01-01');
+    const result = (scalar as unknown as ScalarLike).parseValue('2024-01-01');
     expect(result).toBeInstanceOf(Date);
   });
 
@@ -124,7 +136,10 @@ describe('attachResolvers — scalar', () => {
     });
 
     const scalar = schema.getType('DateTime');
-    const result = (scalar as any).parseLiteral({ kind: 'StringValue', value: '2024-01-01' });
+    const result = (scalar as unknown as ScalarLike).parseLiteral({
+      kind: 'StringValue',
+      value: '2024-01-01',
+    });
     expect(result).toBe('from-literal');
   });
 
@@ -141,9 +156,9 @@ describe('attachResolvers — scalar', () => {
     });
 
     const scalar = schema.getType('DateTime');
-    expect((scalar as any).serialize()).toBe('s');
-    expect((scalar as any).parseValue()).toBe('p');
-    expect((scalar as any).parseLiteral()).toBe('l');
+    expect((scalar as unknown as ScalarLike).serialize()).toBe('s');
+    expect((scalar as unknown as ScalarLike).parseValue()).toBe('p');
+    expect((scalar as unknown as ScalarLike).parseLiteral()).toBe('l');
   });
 
   it('omitted members leave graphql default', () => {
@@ -158,9 +173,9 @@ describe('attachResolvers — scalar', () => {
     });
 
     const scalar = schema.getType('DateTime');
-    expect((scalar as any).serialize()).toBe('custom');
+    expect((scalar as unknown as ScalarLike).serialize()).toBe('custom');
     // parseValue should still be the default
-    expect((scalar as any).parseValue()).toBe('default');
+    expect((scalar as unknown as ScalarLike).parseValue()).toBe('default');
   });
 
   it('object type field resolvers still work', () => {
@@ -175,7 +190,7 @@ describe('attachResolvers — scalar', () => {
 
     const queryType = schema.getQueryType();
     const fields = queryType!.getFields();
-    const helloResolver = (fields as any).hello.resolve;
+    const helloResolver = (fields as unknown as FieldsLike).hello.resolve;
     expect(typeof helloResolver).toBe('function');
     expect(helloResolver(null, {}, {}, {})).toBe('resolvers work');
   });
