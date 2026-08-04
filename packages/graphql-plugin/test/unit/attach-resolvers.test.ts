@@ -360,4 +360,58 @@ describe('attach-resolvers', () => {
     // Should not throw - scalar types are skipped in the second loop
     expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
   });
+
+  // N2: enum-skip — a GraphQLEnumType-like object (has `values`, lacks `getFields`/`serialize`)
+  // must NOT receive scalar methods attached.
+  it('skips enum types — no serialize/parseValue/parseLiteral attached', () => {
+    const enumType = {
+      name: 'Status',
+      values: { ACTIVE: { value: 'ACTIVE' }, INACTIVE: { value: 'INACTIVE' } },
+    };
+    const schema = {
+      getQueryType: () => ({
+        name: 'Query',
+        getFields: () => ({
+          status: { name: 'status', type: { name: 'Status' }, args: [] },
+        }),
+        getInterfaces: () => [],
+      }),
+      getMutationType: () => null,
+      getSubscriptionType: () => null,
+      getType: (name: string) => {
+        if (name === 'Status') return enumType;
+        if (name === 'Query') {
+          return {
+            name: 'Query',
+            getFields: () => ({
+              status: { name: 'status', type: { name: 'Status' }, args: [] },
+            }),
+            getInterfaces: () => [],
+          };
+        }
+        return null;
+      },
+      getPossibleTypes: () => [],
+      getDirectives: () => [],
+      getDirective: () => null,
+      toAST: () => ({}),
+    } as GraphqlSchemaLike;
+
+    // A bogus "resolver map" that pretends to be a scalar resolver — should be
+    // ignored because the type is an enum.
+    const resolverMap = {
+      Status: {
+        serialize: (v: unknown) => v,
+        parseValue: (v: unknown) => v,
+        parseLiteral: (v: unknown) => v,
+      } as unknown as Record<string, unknown>,
+    };
+
+    // Must not throw — enum types are skipped by the isEnum branch.
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+    // And the enum type must NOT have scalar methods attached.
+    expect(typeof (enumType as Record<string, unknown>).serialize).toBe('undefined');
+    expect(typeof (enumType as Record<string, unknown>).parseValue).toBe('undefined');
+    expect(typeof (enumType as Record<string, unknown>).parseLiteral).toBe('undefined');
+  });
 });

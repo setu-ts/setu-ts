@@ -736,49 +736,123 @@ describe('createWsHandlers', () => {
     // The subscriptions map must be empty after close.
     expect(state.subscriptions.size).toBe(0);
   });
-  it('C1: onClose releases active subscription iterators', async () => {
-    const returnCalls: string[] = [];
+
+  // C6: WS APQ path — hash-only subscribe returns PERSISTED_QUERY_NOT_FOUND.
+  it('WS APQ: hash-only subscribe with missing hash returns GQL_ERROR with PERSISTED_QUERY_NOT_FOUND', async () => {
     const service = createMockService(() => ({
-      kind: 'stream',
+      kind: 'single',
       status: 200,
-      stream: (async function* () {
-        yield { data: { tick: 0 } };
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
-        yield { data: { tick: 1 } };
-      })(),
+      result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    // First resolve call: hash not found.
+    let resolveCallCount = 0;
+    const apqResolver = {
+      resolve: (p: { query?: string; extensions?: Record<string, unknown> }) => {
+        resolveCallCount++;
+        if (resolveCallCount === 1) {
+          return {
+            ok: false as const,
+            message: 'PersistedQueryNotFound',
+            code: 'PERSISTED_QUERY_NOT_FOUND',
+            status: 400,
+          };
+        }
+        return { ok: true as const, query: p.query ?? '' };
+      },
+    };
+    const handlers = createWsHandlers(service, {}, undefined, apqResolver);
     const conn = createMockConnection();
 
-    handlers.onOpen!(conn, mockContext);
+    await init(handlers, conn);
+    // Hash-only subscribe (no query, only persistedQuery extension).
     await handlers.onMessage!(
       conn,
-      encodeFrame({ type: GQL_CONNECTION_INIT }),
+      encodeFrame({
+        type: GQL_SUBSCRIBE,
+        id: '1',
+        payload: {
+          extensions: { persistedQuery: { version: 1, sha256Hash: 'abc123' } },
+        },
+      }),
     );
+
+    // ack + error frame (no service call because APQ rejected).
+    expect(conn.sent.length).toBe(2);
+    const errorFrame = decodeFrame(conn.sent[1]);
+    expect(errorFrame!.type).toBe(GQL_ERROR);
+    expect(errorFrame!.id).toBe('1');
+    const payload = errorFrame!.payload as unknown as Array<
+      { message: string; extensions?: { code: string } }
+    >;
+    expect(payload[0].message).toBe('PersistedQueryNotFound');
+    expect(payload[0].extensions?.code).toBe('PERSISTED_QUERY_NOT_FOUND');
+    expect(resolveCallCount).toBe(1);
+  });
+
+  // C6: WS APQ path — retry with query+hash succeeds and query is passed through.
+  it('WS APQ: retry with query+hash persists and passes query to service', async () => {
+    let receivedParams: {
+      query?: string;
+      operationName?: string;
+      variables?: Record<string, unknown>;
+      extensions?: Record<string, unknown>;
+    } | undefined;
+    const service = createMockService((params) => {
+      receivedParams = params;
+      return { kind: 'single', status: 200, result: { data: { hello: 'world' } } };
+    });
+    // First resolve: hash not found. Second resolve: query+hash -> ok, persists.
+    let resolveCallCount = 0;
+    const apqResolver = {
+      resolve: (p: { query?: string; extensions?: Record<string, unknown> }) => {
+        resolveCallCount++;
+        if (resolveCallCount === 1) {
+          return {
+            ok: false as const,
+            message: 'PersistedQueryNotFound',
+            code: 'PERSISTED_QUERY_NOT_FOUND',
+            status: 400,
+          };
+        }
+        // Second call: query + hash present — accept and persist.
+        return { ok: true as const, query: p.query ?? '' };
+      },
+    };
+    const handlers = createWsHandlers(service, {}, undefined, apqResolver);
+    const conn = createMockConnection();
+
+    await init(handlers, conn);
+    // First attempt: hash-only, should get error.
     await handlers.onMessage!(
       conn,
-      encodeFrame({ type: GQL_SUBSCRIBE, id: '1', payload: { query: 'subscription { tick }' } }),
+      encodeFrame({
+        type: GQL_SUBSCRIBE,
+        id: '1',
+        payload: {
+          extensions: { persistedQuery: { version: 1, sha256Hash: 'abc123' } },
+        },
+      }),
     );
-    await new Promise((r) => setTimeout(r, 10));
+    expect(decodeFrame(conn.sent[1])!.type).toBe(GQL_ERROR);
+    expect(resolveCallCount).toBe(1);
 
-    // Intercept the iterator's return to track calls.
-    const state = conn.data.get('__wsState') as {
-      subscriptions: Map<string, { iterator: AsyncIterator<unknown>; suppressed: boolean }>;
-    };
-    const sub = state.subscriptions.get('1');
-    expect(sub).toBeDefined();
-    const origReturn = sub!.iterator.return;
-    sub!.iterator.return = () => {
-      returnCalls.push('1');
-      return origReturn!.call(sub!.iterator);
-    };
-
-    // Close the connection — this must release the iterator.
-    handlers.onClose!(conn, { code: 1000, reason: '' } as CloseEvent);
-
-    // The iterator's return() must have been called.
-    expect(returnCalls).toContain('1');
-    // The subscriptions map must be empty after close.
-    expect(state.subscriptions.size).toBe(0);
+    // Second attempt: query + hash — should succeed.
+    await handlers.onMessage!(
+      conn,
+      encodeFrame({
+        type: GQL_SUBSCRIBE,
+        id: '2',
+        payload: {
+          query: '{ hello }',
+          extensions: { persistedQuery: { version: 1, sha256Hash: 'abc123' } },
+        },
+      }),
+    );
+    // ack + error (id:1) + next (id:2) + complete (id:2)
+    expect(conn.sent.length).toBe(4);
+    expect(decodeFrame(conn.sent[2])!.type).toBe(GQL_NEXT);
+    expect(decodeFrame(conn.sent[3])!.type).toBe(GQL_COMPLETE);
+    expect(receivedParams?.query).toBe('{ hello }');
+    expect(resolveCallCount).toBe(2);
   });
 });
