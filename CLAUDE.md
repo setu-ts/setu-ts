@@ -1252,6 +1252,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
   restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
   Cloudflare account) — complete (PR #115)
+- **Milestone 50b** (`packages/cli` — wiring service discovery into the microservice template. M50
+  shipped the plugin and nothing consumed it: a project scaffolded with
+  `honoe new --template microservice` got messaging, queues, resilience and telemetry — the four
+  plugins a service needs to talk to others — and then hard-coded the URLs of the services it
+  called. Adds one `Wiring` to `MICROSERVICE_TEMPLATE`. The CLI emits inline wiring and never
+  imports a starter (M36b's rule), so only newly scaffolded projects change and no published
+  library's default moves; a `serviceDiscovery` arm on `MicroserviceStarterOptions` stays available
+  as a non-breaking addition and was deliberately NOT folded in. REST does not get it — the tier
+  boundary the repo already draws puts ingress on REST and egress on microservice. **This is the
+  only template wiring whose `args` is an option object checked against a discriminated union**:
+  `ServiceDiscoveryPluginOptions` has no default arm, so a bare call does not type-check and
+  something must be emitted, and `'static'` is the only arm needing no backend or credential. The
+  service map is left EMPTY rather than carrying a sample, because a sample fabricates a dependency
+  that resolves to a dead port, while an unknown name resolves to `[]`. The trap: `args` is a
+  rendered string, so a wrong discriminant or a misspelled field is invisible to the CLI's own
+  `deno check` and is a compile error only in the GENERATED project — and the microservice template
+  had **no e2e coverage whatsoever** before this, so nothing type-checked a scaffolded microservice
+  at all. It does now, and the gate was proven to discriminate by breaking the string (`servicez`)
+  and watching it fail, then restoring it. Also corrected the e2e comment claiming `nest` was "the
+  only" template carrying an `args` string, and a stale ROADMAP line recording the alpha.4
+  `release:create-packages`/`release:link-repos` step as still pending) — complete (PR pending)
 - **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40.
 
 ## Verification (run before declaring any work done)
