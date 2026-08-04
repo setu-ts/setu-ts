@@ -1,10 +1,10 @@
 {
   "name": "@hono-enterprise/kernel",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.3",
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.4",
     "@hono/hono": "jsr:@hono/hono@^4.12.30"
   }
 }

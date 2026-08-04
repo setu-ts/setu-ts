@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] — 2026-08-04
+
+**The largest release so far: eight packages publish for the first time, bringing the scope to 46.**
+The three starters (`rest-starter`, `microservice-starter`, `full-stack-starter`) ship at last,
+along with `session-plugin`, `service-discovery-plugin`, `grpc-plugin`, `graphql-plugin`, and
+`cloudflare-plugin`. Every other package is version-bumped so the scope stays on one version — the
+CLI requires this, because `honoe new` stamps generated projects with its own version as the range
+for every package it wires.
+
+**Two changes can alter behavior you already depend on.** Both are narrow, and neither is a
+capability regression, but the first is silent at compile time.
+
+> **⚠️ Breaking 1 of 2: `@Cookie` and `parseCookies` return different values.** Cookie values are
+> now percent-decoded, one layer of RFC 6265 quoting is stripped, and a repeated cookie name
+> resolves to the **first** occurrence rather than the last. Nothing stops compiling, so this
+> changes at runtime rather than at build time — if you were decoding values yourself after calling
+> `parseCookies`, remove that step, because double-decoding will corrupt any value containing a
+> literal `%`. Each difference is a defect fix; see _Changed_ for why they are being corrected
+> during `0.1.x` rather than frozen.
+
+> **⚠️ Breaking 2 of 2: `IGraphqlService` gains a required `subscribe` method.** Source-compatible
+> for every caller and **breaking only for anyone who implements the interface**. The framework's
+> own `GraphqlService` is the only implementor in this repository, so if you have not written your
+> own GraphQL service, nothing here applies to you.
+
+**Cloudflare is now a first-class target rather than merely a runtime that boots.** Four milestones
+add KV, R2, D1, Queues, Cron Triggers, the Cache API, and Durable Objects behind typed accessors
+that name a missing binding instead of handing you `undefined` — and they fixed the reason
+`runtime.env` was empty on Workers, which had left `ConfigPlugin` and the secrets `EnvProvider`
+reading nothing on the edge.
+
+Alongside that: gRPC, Connect, and gRPC-Web co-served on the same port as ordinary routes; a GraphQL
+plugin with subscriptions over both WebSocket and SSE; service discovery over Consul, Kubernetes,
+DNS-SRV and static configuration, with load balancing and outlier ejection; cookie sessions with
+form CSRF; and the starter and template work that makes all of it composable in one call.
+
 ### Added
 
 - **GraphQL subscriptions, batching, and persisted queries** (Milestone 51b).
@@ -465,6 +501,39 @@ All notable changes to this project are documented here. The format follows
   `RealtimeBackplanePlugin` calls `connect()` exactly once and `close()` only from `onClose`, so no
   application behavior changes — this closes the seam for callers driving the transport directly.
 
+### Known limitations
+
+**The Cloudflare surface has not been verified against a deployed Worker.** CI holds no Cloudflare
+account, so nothing in the pipeline reaches the platform. It was driven against real **workerd** via
+`wrangler dev` during development — Queues with a real `MessageBatch`, a real `ScheduledController`,
+`caches.default`, KV, R2, D1, and both Durable Object classes including a real `WebSocketPair`
+upgrade and the storage input gate — and that harness is what caught a kernel defect that broke
+every application on Workers (fixed here). But those runs were manual and the harness is not
+committed, so treat the edge story as well-exercised rather than continuously gated, and verify
+against your own account before you depend on it.
+
+**FCM push still has not been exercised against live FCM**, unchanged from `0.1.0-alpha.3`. The HTTP
+v1 request is asserted field by field and its RS256 assertion is signed and verified with real Web
+Crypto, but no test reaches Google.
+
+**D1 transactions are deferred batches, with two consequences worth knowing before you use them.**
+D1 rejects `BEGIN TRANSACTION` outright and `batch()` is its only unit of atomicity, so writes
+buffer until commit and flush as one batch. Inside a transaction there is **no
+read-your-own-writes** — reads see committed state — and `create()` **requires an explicit primary
+key**, because a deferred insert cannot report a generated key to a caller awaiting it before the
+flush. Both are documented in PUBLIC_API.md and covered by tests; neither applies outside a
+transaction.
+
+### Installing
+
+```bash
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.4
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.4/main
+```
+
+Within 24 hours of a release, Deno's minimum-dependency-age policy refuses the version unless you
+pass `--min-dep-age 0`.
+
 ## [0.1.0-alpha.3] — 2026-07-30
 
 **Two breaking changes ship in this release.** Both are narrow, but you meet them in production
@@ -527,6 +596,14 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
   `'messaging'` (over whatever broker is registered under `CAPABILITIES.MESSAGING`, reusing all five
   existing brokers with no new dependency), `'redis'` (pub/sub over an inject-or-lazy `ioredis`),
   and `'custom'`.
+
+  > **Correction, made in `0.1.0-alpha.4`.** "Adding the plugin is the entire change needed" is
+  > wrong, and the sentence is left in place because this section records what the release said.
+  > `RealtimeBackplanePlugin()` defaults to `transport: 'memory'`, a **single-process** bus, so
+  > registering it bare fans nothing out across replicas. You must also choose `'redis'` or
+  > `'messaging'`. The memory-default caveat did appear two sentences later, but the headline is
+  > what a reader acts on. The same looseness was corrected in the plugin log messages and both
+  > plugin READMEs by PR #102; this was the last remaining copy.
 - **A LaunchDarkly provider** for `@hono-enterprise/feature-flags-plugin`
   (`provider: 'launchdarkly'`), plus an optional `IFeatureFlags.isEnabledAsync` for callers that can
   await an answer carrying no cold-context caveat.
