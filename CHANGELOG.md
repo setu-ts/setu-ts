@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **GraphQL subscriptions, batching, and persisted queries** (Milestone 51b).
+  `@hono-enterprise/graphql-plugin` gains the `graphql-transport-ws` protocol handler
+  (`createWsHandlers`), GraphQL-over-SSE transport (`createSseHandlers`), APQ resolver
+  (`ApqResolver` with in-memory LRU fallback), request batch handler, and custom scalar resolver
+  support. Subscriptions over HTTP now answer `200` with a stream instead of
+  `400 SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`. `GraphqlRequestParams.extensions` is now a real
+  member used by the APQ path. All 20 `src` files at ≥90% branch/function/line.
+
 - **Durable Objects: a realtime backplane and a distributed lock** (Milestone 52d).
   `@hono-enterprise/cloudflare-plugin` gains a `durableObject` arm registering
   **`DurableObjectBackplane`** under the committed `CAPABILITIES.REALTIME_BACKPLANE`, so

@@ -974,6 +974,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   check 5 caught it), and `inject()` exposes no response headers, so the `Allow` fix had to be
   proven through `app.fetch` — an `inject`-based test would have passed either way) — complete (PR
   pending)
+- **Milestone 51b** (`packages/graphql-plugin` — GraphQL subscriptions over WebSocket/SSE, request
+  batching, Automatic Persisted Queries, custom scalar resolvers). Shipped `graphql-transport-ws`
+  protocol handler (`graphql-ws-handler.ts`) with full state machine (init/ack, ping/pong, subscribe
+  registry, next/error/complete), SSE transport handler (`graphql-sse-handler.ts`) with distinct
+  connections mode and in-stream error framing, APQ resolver with in-memory LRU fallback, request
+  batch handler, and custom scalar resolver support. Fixed StreamController `desiredSize`
+  backpressure defect that silently dropped the mandatory SSE `complete` frame, and fixed WS
+  `onClose` timer leak that failed Deno's op sanitizer. All 20 `src` files at ≥90%
+  branch/function/line. — complete (PR pending)
 - **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
   not _reach_:
   `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
@@ -1196,9 +1205,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
   restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
   Cloudflare account) — complete (PR #115)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40, with **M51b**
-  (GraphQL subscriptions over WebSocket/SSE, request batching, Automatic Persisted Queries, custom
-  scalar resolvers, starter arm) queued behind them — unless reprioritized.
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40.
 
 ## Verification (run before declaring any work done)
 

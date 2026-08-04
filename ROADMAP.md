@@ -5079,13 +5079,6 @@ the next reader does not copy the M46/M49 seam by pattern-matching.
 
 ### Out of scope
 
-- **Subscriptions over every transport — M51b.** Until then a subscription operation over HTTP
-  answers a tested `400` carrying `SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`, so the gap is visible at
-  the wire rather than silent.
-- Request batching and Automatic Persisted Queries — M51b, together with the
-  `GraphqlRequestParams.extensions` member APQ needs. It is omitted here rather than declared
-  unread, because a field no code branches on is dead surface.
-- Custom scalar resolvers in the schema-first arm — M51b. M51 throws rather than ignoring the entry.
 - Federation, schema stitching, and a gateway — a separate milestone; nothing here forecloses it.
 - A code-first schema **builder** (a Pothos/Nexus-style DSL). The arm consumes a schema the
   application already built.
@@ -5122,10 +5115,10 @@ one.
 
 ### Deliverables
 
-- [ ] `graphql-transport-ws` over the optional WebSocket capability
-- [ ] GraphQL-over-SSE transport
-- [ ] Request batching and Automatic Persisted Queries
-- [ ] Custom scalar resolvers
+- [x] `graphql-transport-ws` over the optional WebSocket capability
+- [x] GraphQL-over-SSE transport
+- [x] Request batching and Automatic Persisted Queries
+- [x] Custom scalar resolvers
 - [ ] Starter arm
 
 ## Milestone 52: Cloudflare Workers Plugin — Reaching the Platform's Bindings ✅ COMPLETE
@@ -5612,7 +5605,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 49        | ✅     | grpc-plugin                           |
 | 50        | ✅     | service-discovery-plugin              |
 | 51        | ✅     | graphql-plugin                        |
-| 51b       | ⬜     | graphql-plugin (subscriptions)        |
+| 51b       | ✅     | graphql-plugin (subscriptions)        |
 | 52        | ✅     | cloudflare-plugin                     |
 | 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |
