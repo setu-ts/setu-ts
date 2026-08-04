@@ -296,9 +296,13 @@ class StreamController {
   }
 
   enqueue(chunk: Uint8Array): void {
-    if (!this.#controller.desiredSize) {
-      return;
-    }
+    // NOTE: a hand-rolled `desiredSize` backpressure check here would silently
+    // drop the second frame of every stream — a fresh `ReadableStream` (no
+    // queuing strategy) has `desiredSize === 1`, so the FIRST enqueue drops it
+    // to 0 and the `complete` frame that must follow a `next` is skipped. The
+    // graphql-sse protocol REQUIRES that terminator, and native `EventSource`
+    // never fires its listener without it. The stream's own backpressure is
+    // applied via the underlying source, not by dropping protocol frames here.
     this.#controller.enqueue(chunk);
   }
 

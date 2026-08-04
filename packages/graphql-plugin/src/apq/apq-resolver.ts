@@ -60,10 +60,6 @@ class InMemoryLru {
     this.#map.set(key, value);
     return Promise.resolve();
   }
-
-  has(key: string): Promise<boolean> {
-    return Promise.resolve(this.#map.has(key));
-  }
 }
 
 /** Unified store interface for both paths. */

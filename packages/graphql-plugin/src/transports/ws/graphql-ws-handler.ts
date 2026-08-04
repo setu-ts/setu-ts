@@ -284,8 +284,21 @@ export function createWsHandlers(
       }
     },
 
-    onClose: () => {
-      // Cleanup happens via connection data being cleared
+    onClose: (conn: IWebSocketConnection) => {
+      // Release the init-timeout and heartbeat timers so a closed socket does
+      // not keep scheduling work (and so a `setInterval` heartbeat does not
+      // outlive the connection).
+      const state = conn.data.get('__wsState') as ConnectionState | undefined;
+      if (state) {
+        if (state.initTimer) {
+          clearTimeout(state.initTimer);
+          state.initTimer = null;
+        }
+        if (state.heartbeatTimer) {
+          clearInterval(state.heartbeatTimer);
+          state.heartbeatTimer = null;
+        }
+      }
     },
 
     onError: () => {
