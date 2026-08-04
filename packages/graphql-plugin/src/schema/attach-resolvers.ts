@@ -45,11 +45,25 @@ export function attachResolvers(
       );
     }
 
-    // Check if it's an object type or scalar
+    // Check if it's an object type, scalar, or enum.
+    // N2: `!getFields` also matches enum types (no fields), so we need a
+    // precise discriminator. Object types have `getFields`, scalars have
+    // `serialize`/`parseValue`/`parseLiteral`, enums have `values`.
     const objectType = type as GraphqlObjectTypeLike;
-    if (!objectType.getFields) {
+    const scalarType = type as GraphqlScalarTypeLike;
+    const isObject = typeof objectType.getFields === 'function';
+    const isScalar = typeof scalarType.serialize === 'function' ||
+      typeof scalarType.parseValue === 'function' ||
+      typeof scalarType.parseLiteral === 'function';
+    const isEnum = 'values' in scalarType;
+
+    if (isEnum) {
+      // Enum types are not scalar-attached; skip.
+      continue;
+    }
+
+    if (!isObject && isScalar) {
       // It's a scalar — attach scalar resolver methods
-      const scalarType = type as GraphqlScalarTypeLike;
       const scalarResolver = fieldResolvers as GraphqlScalarResolver;
       if (typeof scalarResolver.serialize === 'function') {
         scalarType.serialize = scalarResolver.serialize;
@@ -60,6 +74,11 @@ export function attachResolvers(
       if (typeof scalarResolver.parseLiteral === 'function') {
         scalarType.parseLiteral = scalarResolver.parseLiteral;
       }
+      continue;
+    }
+
+    if (!isObject) {
+      // Unknown type without getFields, serialize, or values — skip.
       continue;
     }
 

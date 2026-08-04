@@ -9,7 +9,6 @@
  */
 
 import type {
-  GraphqlDefinitionNodeLike,
   GraphqlDocumentNodeLike,
   GraphqlExecutionResultLike,
   GraphqlGraphQLErrorLike,
@@ -85,16 +84,7 @@ export function toParseError(thrown: unknown): GraphqlGraphQLErrorLike {
 }
 
 /**
- * The result of {@linkcode prepareDocument} when the document is ready.
- */
-export interface PreparedDocument {
-  document: GraphqlDocumentNodeLike;
-  validationErrors: GraphqlGraphQLErrorLike[] | null;
-  operation: GraphqlDefinitionNodeLike;
-}
-
-/**
- * The result of {@linkcode prepareDocument} when the operation is refused.
+ * The result of {@linkcode checkOperation} when the operation is refused.
  */
 export interface PreparedRefusal {
   refused: true;
@@ -173,98 +163,6 @@ export function checkOperation(
   }
 
   return null;
-}
-
-/**
- * Shared parse → guard → validate prologue used by both the HTTP executor
- * and the subscription pipeline.
- *
- * Returns `null` when the query fails to parse (the caller must handle the
- * parse error separately since different transports need different error
- * carriers). Returns a refusal when the operation cannot be resolved.
- * Returns a {@linkcode PreparedDocument} on success.
- *
- * @param query - The raw query string
- * @param runtime - The GraphQL runtime
- * @param documentCache - The document cache
- * @param validationRules - The pre-built validation rule list
- * @param options - Operation options
- * @returns The prepared document, a refusal, or `null` on parse failure
- */
-export function prepareDocument(
-  query: string,
-  runtime: GraphqlRuntime,
-  documentCache: DocumentCache,
-  validationRules: unknown[],
-  options: {
-    operationName?: string;
-    transport: 'http' | 'stream';
-  },
-): PreparedDocument | PreparedRefusal | null {
-  // Parse (cache hit reuses both the document and its validation result)
-  const cached = documentCache.get(query);
-  let document: GraphqlDocumentNodeLike;
-  let validationErrors: GraphqlGraphQLErrorLike[] | null;
-
-  if (cached) {
-    document = cached.document;
-    validationErrors = cached.validationErrors;
-  } else {
-    try {
-      document = runtime.parse(query);
-    } catch {
-      return null; // parse failure — caller handles
-    }
-    validationErrors = null;
-  }
-
-  // Operation-kind guard: after parse, before validate
-  const guard = checkOperation(runtime, document, {
-    ...(options.operationName ? { operationName: options.operationName } : {}),
-    transport: options.transport,
-  });
-
-  if (guard) {
-    if ('refused' in guard) {
-      return guard;
-    }
-    // HTTP transport refusal — convert to PreparedRefusal
-    if (guard.executed === false) {
-      return { refused: true, executed: false, status: guard.status, result: guard.result };
-    }
-  }
-
-  if (!cached) {
-    validationErrors = runtime.validate(
-      document as unknown as GraphqlSchemaLike,
-      document,
-      validationRules,
-    );
-    documentCache.set(query, { document, validationErrors });
-  }
-
-  // Resolve the operation AST for the caller
-  const name = options.operationName && options.operationName.length > 0
-    ? options.operationName
-    : undefined;
-  const operation = runtime.getOperationAST(document, name);
-  if (!operation) {
-    return {
-      refused: true,
-      executed: false,
-      status: 400,
-      result: {
-        errors: [
-          codedError(
-            'Could not resolve which operation to execute.',
-            'OPERATION_RESOLUTION_FAILED',
-          ),
-        ],
-      },
-    };
-  }
-
-  return { document, validationErrors, operation };
 }
 
 /**

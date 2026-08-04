@@ -20,7 +20,8 @@ const encoder = new TextEncoder();
  */
 export function encodeSseEvent(data: unknown): Uint8Array {
   const json = JSON.stringify(data);
-  return encoder.encode(`data: ${json}\n\n`);
+  // C3: The graphql-sse protocol requires `event: next` for result frames.
+  return encoder.encode(`event: next\ndata: ${json}\n\n`);
 }
 
 /**

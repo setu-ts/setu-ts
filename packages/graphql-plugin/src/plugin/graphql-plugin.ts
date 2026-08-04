@@ -157,10 +157,13 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
               wsAvailable = true;
               const { createWsHandlers } = await import('../transports/ws/graphql-ws-handler.ts');
               const wsPath = (wsOpt as { path?: string })?.path ?? `${path}/ws`;
+              // C6: thread apqResolver into WS handlers so hash-only subscribe
+              // returns PERSISTED_QUERY_NOT_FOUND instead of a parse error.
               const wsHandlers = createWsHandlers(
                 graphqlService,
                 wsOpt ?? {},
                 ctx.services,
+                apqResolver,
               );
               wsService.route(wsPath, wsHandlers, {
                 protocols: [GRAPHQL_TRANSPORT_WS],

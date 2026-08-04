@@ -71,7 +71,17 @@ const createFakeRuntime = (): GraphqlRuntime =>
         getSubscriptionType: () => null,
         getType: (name: string) => {
           if (name === 'DateTime' && scalarType) return scalarType;
-          if (name === 'String') return { name: 'String', kind: 'SCALAR' };
+          // N2: String is a built-in scalar — give it the scalar methods so
+          // the attach-resolvers scalar discriminator recognizes it.
+          if (name === 'String') {
+            return {
+              name: 'String',
+              kind: 'SCALAR',
+              serialize: (v: unknown) => v,
+              parseValue: (v: unknown) => v,
+              parseLiteral: (v: unknown) => v,
+            };
+          }
           if (name === 'Query') return queryType;
           return null;
         },

@@ -105,9 +105,11 @@ async function handleSseRequest(
     })));
   }
 
-  // Resolve APQ before subscribe
-  if (apqResolver !== null && !params.query) {
+  // Resolve APQ before subscribe — C6: resolve unconditionally so the
+  // query+hash verify+persist path also works (cache gets warmed via SSE POST).
+  if (apqResolver !== null) {
     const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof params.query === 'string') apqParams.query = params.query;
     if (typeof params.extensions === 'object' && params.extensions !== null) {
       apqParams.extensions = params.extensions;
     }
@@ -257,12 +259,30 @@ async function pumpStream(
     }, heartbeatMs)
     : null;
 
+  // C5: Proactive abort listener so an idle subscription source is cancelled
+  // promptly on disconnect (not only when the next value arrives).
+  let iteratorReturn: (() => Promise<unknown>) | undefined;
+  const abortListener = () => {
+    if (typeof iteratorReturn === 'function') {
+      void iteratorReturn();
+    }
+  };
+  signal?.addEventListener('abort', abortListener, { once: true });
+
   try {
-    for await (const result of stream) {
+    const iterator = stream[Symbol.asyncIterator]();
+    iteratorReturn = typeof iterator.return === 'function'
+      ? iterator.return.bind(iterator)
+      : undefined;
+    while (true) {
       if (signal?.aborted) {
         break;
       }
-      controller.enqueue(encodeSseEvent(result));
+      const { done, value } = await iterator.next();
+      if (done) {
+        break;
+      }
+      controller.enqueue(encodeSseEvent(value));
     }
     controller.enqueue(encodeSseComplete());
     controller.close();
@@ -276,6 +296,7 @@ async function pumpStream(
     if (heartbeatTimer !== null) {
       clearInterval(heartbeatTimer);
     }
+    signal?.removeEventListener('abort', abortListener);
   }
 }
 

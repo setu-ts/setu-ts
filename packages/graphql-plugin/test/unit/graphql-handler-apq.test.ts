@@ -463,5 +463,33 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
       expect(captures.status).toBe(400);
       expect(dec(captures.body!)).toContain('INVALID_VARIABLES');
     });
+
+    // C6 regression: GET must parse extensions and resolve APQ.
+    it('C6: GET resolves APQ query+hash verify path', async () => {
+      const resolver = new ApqResolver(null, subtle, { maxEntries: 5 });
+      const query = '{ hello }';
+      const hash = await persistedQueryHash(query, subtle);
+
+      const { mock, captures } = createMockResponse();
+      const { get } = createGraphqlHandler(makeService(), '/graphql', {
+        graphiql: true,
+        maxBatchSize: 0,
+        apqResolver: resolver,
+      });
+      // Query + matching hash: the resolver verifies and persists.
+      const ctx = createMockContext({
+        query: {
+          query,
+          extensions: JSON.stringify({ persistedQuery: { version: 1, sha256Hash: hash } }),
+        },
+        method: 'GET',
+      });
+      (ctx as { response?: IResponse }).response = mock;
+
+      await get(ctx);
+
+      expect(captures.status).toBe(200);
+      expect(dec(captures.body!)).toContain('"hello":"world"');
+    });
   });
 });

@@ -104,11 +104,13 @@ export class ApqResolver {
 
     // No APQ info — pass through unchanged
     if (pqInfo === null) {
+      // N3: A missing query without persisted-query extensions is a bad request,
+      // not a persisted-query miss. Use a distinct error code.
       if (params.query === undefined) {
         return {
           ok: false,
-          message: 'Query is required when no persisted query info is present',
-          code: NOT_FOUND,
+          message: 'Query is required',
+          code: 'BAD_REQUEST',
           status: 400,
         };
       }

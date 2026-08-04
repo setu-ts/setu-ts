@@ -146,8 +146,12 @@ describe('decodeFrame', () => {
     expect(frame!.id).toBe('1');
   });
 
-  it('returns null for null payload', () => {
-    expect(decodeFrame(JSON.stringify({ type: 'next', id: '1', payload: null }))).toBeNull();
+  it('accepts null payload (connection_init per protocol)', () => {
+    // N1: connection_init permits payload: null; the protocol allows it.
+    const frame = decodeFrame(JSON.stringify({ type: 'connection_init', payload: null }));
+    expect(frame).not.toBeNull();
+    expect(frame!.type).toBe('connection_init');
+    expect(frame!.payload).toBeNull();
   });
 
   it('round-trips frame encode/decode', () => {

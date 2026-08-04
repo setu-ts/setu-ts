@@ -142,5 +142,20 @@ export function parseGetQuery(query: Record<string, string | string[]>): Graphql
     result.variables = parsed as Record<string, unknown>;
   }
 
+  // C6: parse extensions from GET query string so APQ works over GET.
+  if (typeof query.extensions === 'string') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(query.extensions);
+    } catch {
+      const err = new Error('Invalid JSON in extensions parameter') as ParseError;
+      err.code = 'INVALID_EXTENSIONS';
+      throw err;
+    }
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      result.extensions = parsed as Record<string, unknown>;
+    }
+  }
+
   return result;
 }

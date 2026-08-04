@@ -505,6 +505,33 @@ describe('GraphqlService', () => {
       expect((subscribedContext as { services: unknown }).services).toEqual({});
     });
 
+    // C4 regression: HTTP path must use requestContext.services, not the plugin registry.
+    it('uses requestContext.services on the HTTP path (C4)', async () => {
+      let subscribedContext: unknown;
+      const requestServices = { 'request-scoped': true };
+      const runtime = createSubscribeRuntime({ operation: 'query' });
+      (runtime as unknown as { execute: (args: unknown) => Promise<unknown> }).execute = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve({ data: { hello: 'world' } });
+      };
+      const service = makeService(runtime);
+
+      const requestContext = {
+        services: requestServices,
+        request: { url: 'http://test.com' },
+      } as never;
+
+      await service.execute({ query: '{ hello }' }, requestContext);
+
+      const ctx = subscribedContext as { services: unknown };
+      // C4: HTTP path must hand resolvers the REQUEST-SCOPED services, not the plugin registry.
+      expect(ctx.services).toBe(requestServices);
+      expect(ctx.services).not.toBe(mockServiceRegistry);
+    });
+
     it('honors a non-default maskInternalErrors identically to execute', async () => {
       const runtime = createSubscribeRuntime({ operation: 'query', parseThrows: true });
       const service = new GraphqlService(runtime, createFakeSchema(), {

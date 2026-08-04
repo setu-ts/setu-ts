@@ -571,6 +571,51 @@ describe('createSseHandler', () => {
       expect(iterated).toBeGreaterThanOrEqual(1);
     });
 
+    // C5 regression: abort listener must call iterator.return() on idle disconnect.
+    it('C5: abort while idle calls iterator.return() and stops the pump', async () => {
+      const ac = new AbortController();
+      let returnCalled = false;
+      // Build a custom async iterable where we can observe iterator.return().
+      const iter = {
+        [Symbol.asyncIterator]: () => iter,
+        next: () =>
+          new Promise<{ done: boolean; value: unknown }>((resolve) => {
+            setTimeout(() => resolve({ done: false, value: { data: { tick: 0 } } }), 50);
+          }),
+        return: () => {
+          returnCalled = true;
+          return Promise.resolve({ done: true, value: undefined });
+        },
+        throw: (e: unknown) => Promise.reject(e),
+      };
+
+      const service = createMockService(() => ({
+        kind: 'stream',
+        status: 200,
+        stream: iter as never,
+      }));
+      const { mock, captures } = createMockResponse();
+      const ctx = createMockRequest({
+        body: { query: 'subscription { tick }' },
+        response: mock,
+        signal: ac.signal,
+      });
+
+      const { post } = createSseHandler(service);
+      // Start the pump, then abort after a short delay so the abort listener
+      // fires while the pump is idle (waiting for the next value).
+      const postPromise = post(ctx);
+      await new Promise((r) => setTimeout(r, 5));
+      ac.abort();
+      await postPromise;
+      const body = await drain(captures.stream!);
+
+      // The pump should have stopped and emitted complete.
+      expect(body).toContain('event: complete');
+      // The abort listener must have called iterator.return().
+      expect(returnCalled).toBe(true);
+    });
+
     it('maps a thrown stream into next(error) + complete', async () => {
       const service = createMockService(() => ({
         kind: 'stream',

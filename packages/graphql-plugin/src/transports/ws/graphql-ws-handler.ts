@@ -68,6 +68,9 @@ export function createWsHandlers(
   graphqlService: IGraphqlService,
   wsOptions: GraphqlWsTransportOptions,
   _serviceRegistry?: unknown,
+  // C6: optional APQ resolver wired from the plugin so hash-only subscribe
+  // returns PERSISTED_QUERY_NOT_FOUND instead of a parse error.
+  apqResolver?: unknown,
 ): WebSocketHandlers {
   const connectionInitWaitMs = wsOptions.connectionInitWaitMs ?? 3000;
   const heartbeatMs = wsOptions.heartbeatMs ?? 0;
@@ -223,6 +226,31 @@ export function createWsHandlers(
             params.extensions = payload.extensions as Record<string, unknown>;
           }
 
+          // C6: resolve APQ before subscribe so a hash-only request gets
+          // PERSISTED_QUERY_NOT_FOUND rather than a parse error.
+          if (apqResolver !== null && apqResolver !== undefined) {
+            const { resolve } = apqResolver as {
+              resolve: (
+                p: { query?: string; extensions?: Record<string, unknown> | undefined },
+              ) => Promise<
+                { ok: boolean; query?: string; message?: string; code?: string; status?: number }
+              >;
+            };
+            const apqResult = await resolve({ query: params.query, extensions: params.extensions });
+            if (!apqResult.ok) {
+              conn.send(encodeFrame({
+                type: GQL_ERROR,
+                id: frame.id,
+                payload: [{
+                  message: apqResult.message ?? 'APQ error',
+                  extensions: { code: apqResult.code ?? 'PERSISTED_QUERY_NOT_FOUND' },
+                }],
+              }));
+              return;
+            }
+            params.query = apqResult.query ?? params.query;
+          }
+
           // Build operation context (WS path supplies connection)
           const context: GraphqlOperationContext = {
             connection: state.connectionInfo,
@@ -288,6 +316,8 @@ export function createWsHandlers(
       // Release the init-timeout and heartbeat timers so a closed socket does
       // not keep scheduling work (and so a `setInterval` heartbeat does not
       // outlive the connection).
+      // Also release every active subscription iterator so the producer's
+      // resources (DB watch / timer / event listener) are freed.
       const state = conn.data.get('__wsState') as ConnectionState | undefined;
       if (state) {
         if (state.initTimer) {
@@ -298,6 +328,14 @@ export function createWsHandlers(
           clearInterval(state.heartbeatTimer);
           state.heartbeatTimer = null;
         }
+        // C1: release every active subscription iterator
+        for (const sub of state.subscriptions.values()) {
+          sub.suppressed = true;
+          if (typeof sub.iterator.return === 'function') {
+            void sub.iterator.return();
+          }
+        }
+        state.subscriptions.clear();
       }
     },
 
@@ -316,6 +354,8 @@ async function pumpWsSubscription(
   iterator: AsyncIterator<unknown>,
   state: ConnectionState,
 ): Promise<void> {
+  // E2: terminal .catch() so a conn.send throw in the catch block does not
+  // become an unhandled rejection.
   try {
     while (true) {
       if (state.subscriptions.get(id)?.suppressed) {
@@ -340,11 +380,16 @@ async function pumpWsSubscription(
     }
   } catch (err) {
     if (conn.isOpen) {
-      conn.send(encodeFrame({
-        type: GQL_ERROR,
-        id,
-        payload: [{ message: err instanceof Error ? err.message : 'Stream error' }],
-      }));
+      try {
+        conn.send(encodeFrame({
+          type: GQL_ERROR,
+          id,
+          payload: [{ message: err instanceof Error ? err.message : 'Stream error' }],
+        }));
+      } catch {
+        // send may throw after isOpen was true (race); swallow to avoid
+        // unhandled rejection — E2.
+      }
     }
   } finally {
     state.subscriptions.delete(id);

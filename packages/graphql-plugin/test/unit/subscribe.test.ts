@@ -225,4 +225,38 @@ describe('subscribeGraphql', () => {
       expect(outcome.result.errors![0].message).toContain('Could not resolve');
     }
   });
+
+  // C2 regression: non-iterable subscribe result is delivered as error, not thrown.
+  it('returns kind:error when subscribe returns a non-iterable result (C2)', async () => {
+    const runtime = createFakeRuntime({
+      parse: (_src: string) => ({
+        kind: 'Document',
+        definitions: [{
+          kind: 'OperationDefinition',
+          operation: 'subscription',
+          selectionSet: { kind: 'SelectionSet', selections: [] },
+        }],
+      }),
+      subscribe: () =>
+        Promise.resolve({
+          errors: [{ message: 'setup failed', toJSON: () => ({ message: 'setup failed' }) }],
+        }),
+    });
+    const schema = createFakeSchema();
+    const cache = new DocumentCache(100);
+
+    const outcome = await subscribeGraphql('subscription { tick }', {
+      schema,
+      runtime,
+      documentCache: cache,
+      validationRules: [],
+    });
+
+    // C2: the non-iterable result is delivered as kind:'error', not thrown.
+    expect(outcome.kind).toBe('error');
+    if (outcome.kind === 'error') {
+      expect(outcome.result.errors).toBeDefined();
+      expect(outcome.result.errors![0].message).toBe('setup failed');
+    }
+  });
 });

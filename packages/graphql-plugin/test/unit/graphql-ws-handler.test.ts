@@ -689,4 +689,96 @@ describe('createWsHandlers', () => {
     expect(state.heartbeatTimer).toBeNull();
     expect(state.initTimer).toBeNull();
   });
+
+  // C1 regression: onClose must release every active subscription iterator.
+  it('C1: onClose releases active subscription iterators', async () => {
+    const returnCalls: string[] = [];
+    const service = createMockService(() => ({
+      kind: 'stream',
+      status: 200,
+      stream: (async function* () {
+        yield { data: { tick: 0 } };
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        yield { data: { tick: 1 } };
+      })(),
+    }));
+    const handlers = createWsHandlers(service, {});
+    const conn = createMockConnection();
+
+    handlers.onOpen!(conn, mockContext);
+    await handlers.onMessage!(
+      conn,
+      encodeFrame({ type: GQL_CONNECTION_INIT }),
+    );
+    await handlers.onMessage!(
+      conn,
+      encodeFrame({ type: GQL_SUBSCRIBE, id: '1', payload: { query: 'subscription { tick }' } }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Intercept the iterator's return to track calls.
+    const state = conn.data.get('__wsState') as {
+      subscriptions: Map<string, { iterator: AsyncIterator<unknown>; suppressed: boolean }>;
+    };
+    const sub = state.subscriptions.get('1');
+    expect(sub).toBeDefined();
+    const origReturn = sub!.iterator.return;
+    sub!.iterator.return = () => {
+      returnCalls.push('1');
+      return origReturn!.call(sub!.iterator);
+    };
+
+    // Close the connection — this must release the iterator.
+    handlers.onClose!(conn, { code: 1000, reason: '' } as CloseEvent);
+
+    // The iterator's return() must have been called.
+    expect(returnCalls).toContain('1');
+    // The subscriptions map must be empty after close.
+    expect(state.subscriptions.size).toBe(0);
+  });
+  it('C1: onClose releases active subscription iterators', async () => {
+    const returnCalls: string[] = [];
+    const service = createMockService(() => ({
+      kind: 'stream',
+      status: 200,
+      stream: (async function* () {
+        yield { data: { tick: 0 } };
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        yield { data: { tick: 1 } };
+      })(),
+    }));
+    const handlers = createWsHandlers(service, {});
+    const conn = createMockConnection();
+
+    handlers.onOpen!(conn, mockContext);
+    await handlers.onMessage!(
+      conn,
+      encodeFrame({ type: GQL_CONNECTION_INIT }),
+    );
+    await handlers.onMessage!(
+      conn,
+      encodeFrame({ type: GQL_SUBSCRIBE, id: '1', payload: { query: 'subscription { tick }' } }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Intercept the iterator's return to track calls.
+    const state = conn.data.get('__wsState') as {
+      subscriptions: Map<string, { iterator: AsyncIterator<unknown>; suppressed: boolean }>;
+    };
+    const sub = state.subscriptions.get('1');
+    expect(sub).toBeDefined();
+    const origReturn = sub!.iterator.return;
+    sub!.iterator.return = () => {
+      returnCalls.push('1');
+      return origReturn!.call(sub!.iterator);
+    };
+
+    // Close the connection — this must release the iterator.
+    handlers.onClose!(conn, { code: 1000, reason: '' } as CloseEvent);
+
+    // The iterator's return() must have been called.
+    expect(returnCalls).toContain('1');
+    // The subscriptions map must be empty after close.
+    expect(state.subscriptions.size).toBe(0);
+  });
 });

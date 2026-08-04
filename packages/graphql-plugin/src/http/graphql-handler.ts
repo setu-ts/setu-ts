@@ -253,7 +253,7 @@ async function handleGraphqlGet(
   path: string,
   options: HandlerOptions,
 ): Promise<HandlerResult> {
-  const { logger, graphiql } = options;
+  const { logger, graphiql, apqResolver } = options;
 
   const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
   const queryParam = ctx.query.query;
@@ -276,7 +276,12 @@ async function handleGraphqlGet(
   }
 
   // Parse query params
-  let params: { query: string; operationName?: string; variables?: Record<string, unknown> };
+  let params: {
+    query: string;
+    operationName?: string;
+    variables?: Record<string, unknown>;
+    extensions?: Record<string, unknown>;
+  };
   try {
     params = parseGetQuery(ctx.query as Record<string, string | string[]>);
   } catch (e) {
@@ -286,6 +291,23 @@ async function handleGraphqlGet(
       message: err.message,
       extensions: { code: err.code },
     }, mediaType);
+  }
+
+  // C6: resolve APQ for GET so hash-only requests are served from cache.
+  if (apqResolver !== null) {
+    const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof params.query === 'string') apqParams.query = params.query;
+    if (typeof params.extensions === 'object' && params.extensions !== null) {
+      apqParams.extensions = params.extensions;
+    }
+    const apqResult = await apqResolver.resolve(apqParams);
+    if (!apqResult.ok) {
+      return sendGraphqlError(response, apqResult.status, {
+        message: apqResult.message,
+        extensions: { code: apqResult.code },
+      }, mediaType);
+    }
+    params.query = apqResult.query;
   }
 
   const outcome = await graphqlService.execute(params, ctx, 'GET');

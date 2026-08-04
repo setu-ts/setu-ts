@@ -121,6 +121,18 @@ export async function subscribeGraphql(
   // Dispatch: subscription → stream; query/mutation → execute
   if (ast.operation === 'subscription') {
     const result = await runtime.subscribe(execArgs);
+    // C2: graphql 16 may return a single {errors:[…]} when the event stream
+    // cannot be created (resolver throws at setup, returns a non-iterable, etc).
+    // Detect whether the result is actually async-iterable; if not, deliver it
+    // as a single error result rather than casting/throwing.
+    const maybeIterable = result as { [Symbol.asyncIterator]?: unknown };
+    if (typeof maybeIterable[Symbol.asyncIterator] !== 'function') {
+      return {
+        kind: 'error',
+        status: 200,
+        result: result as GraphqlExecutionResult,
+      };
+    }
     return {
       kind: 'stream',
       status: 200,

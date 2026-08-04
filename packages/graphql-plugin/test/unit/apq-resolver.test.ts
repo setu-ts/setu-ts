@@ -223,12 +223,14 @@ describe('ApqResolver', () => {
     if (result.ok) expect(result.query).toBe(query);
   });
 
-  it('returns PERSISTED_QUERY_NOT_FOUND when query is undefined and no APQ info', async () => {
+  it('returns BAD_REQUEST when query is undefined and no APQ info (N3)', async () => {
+    // N3: missing query without persisted-query extensions is a bad request,
+    // not a persisted-query-not-found.
     const resolver = new ApqResolver(createFakeCacheStore(), subtle, {});
     const result = await resolver.resolve({});
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.code).toBe('PERSISTED_QUERY_NOT_FOUND');
+      expect(result.code).toBe('BAD_REQUEST');
       expect(result.status).toBe(400);
     }
   });

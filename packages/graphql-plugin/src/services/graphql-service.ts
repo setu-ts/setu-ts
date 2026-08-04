@@ -95,10 +95,12 @@ export class GraphqlService implements IGraphqlService {
   #buildContextValue(
     context: GraphqlOperationContext,
   ): GraphqlContextInput {
+    // C4: `??` binds tighter than `?:`, so the original expression parsed as
+    // `(requestContext?.services ?? connection) ? serviceRegistry : {}`.
+    // Fix precedence so HTTP uses request-scoped services, WS uses the plugin
+    // registry, and neither falls back to `{}`.
     const services = context.requestContext?.services ??
-        context.connection
-      ? this.#serviceRegistry
-      : {};
+      (context.connection ? this.#serviceRegistry : {});
     const request = context.requestContext?.request;
     const connection = context.connection;
     const input: GraphqlContextInput = { services, request };

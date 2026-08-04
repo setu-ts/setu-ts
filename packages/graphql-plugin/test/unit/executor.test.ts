@@ -1,11 +1,8 @@
 /**
  * Tests for execution/executor.ts
  *
- * Directly exercises the shared `prepareDocument` prologue and the
- * `checkOperation` operation-kind guard across both transport arms (`'http'`
- * and `'stream'`). These seams are exported but the only in-repo caller of the
- * `'http'` arm is `executeGraphql`; the `'stream'` arm and `prepareDocument`
- * itself are reached here so the per-file function-coverage bar holds.
+ * Exercises the `checkOperation` operation-kind guard across both transport
+ * arms (`'http'` and `'stream'`) and the `executeGraphql` pipeline.
  */
 
 import { describe, it } from '@std/testing/bdd';
@@ -14,7 +11,6 @@ import {
   checkOperation,
   codedError,
   executeGraphql,
-  prepareDocument,
   toParseError,
 } from '../../src/execution/executor.ts';
 import { DocumentCache } from '../../src/execution/document-cache.ts';
@@ -190,88 +186,6 @@ describe('checkOperation', () => {
       operationName: '',
     });
     expect(seenName).toBeUndefined();
-  });
-});
-
-describe('prepareDocument', () => {
-  it('returns null when the query fails to parse', () => {
-    const runtime = createRuntime({ parseThrows: true, operation: { operation: 'query' } });
-    const cache = new DocumentCache(10);
-    expect(prepareDocument('{ x }', runtime, cache, [], { transport: 'http' })).toBeNull();
-  });
-
-  it('returns a PreparedRefusal when the http guard refuses (subscription)', () => {
-    const runtime = createRuntime({ operation: { operation: 'subscription' } });
-    const cache = new DocumentCache(10);
-    const result = prepareDocument('subscription { x }', runtime, cache, [], { transport: 'http' });
-    expect((result as { refused?: boolean }).refused).toBe(true);
-  });
-
-  it('returns a PreparedDocument on a cache hit and does not re-validate', () => {
-    const document = { kind: 'Document', definitions: [] };
-    const cachedErrors = [{ message: 'cached' }];
-    const runtime = createRuntime({ operation: { operation: 'query' } });
-    const cache = new DocumentCache(10);
-    cache.set('{ x }', {
-      document: document as unknown as GraphqlDocumentNodeLike,
-      validationErrors: cachedErrors as never,
-    });
-    const validateSpy: string[] = [];
-    (runtime as unknown as { validate: () => unknown[] }).validate = () => {
-      validateSpy.push('called');
-      return [];
-    };
-
-    const result = prepareDocument('{ x }', runtime, cache, [], { transport: 'http' });
-    expect((result as { document?: unknown }).document).toBe(document);
-    // Cached validation result is reused; validate is not invoked.
-    expect(validateSpy).toEqual([]);
-  });
-
-  it('validates and caches on a cache miss', () => {
-    const runtime = createRuntime({ operation: { operation: 'query' } });
-    const cache = new DocumentCache(10);
-    let validateCalls = 0;
-    (runtime as unknown as { validate: () => unknown[] }).validate = () => {
-      validateCalls++;
-      return [];
-    };
-
-    const first = prepareDocument('{ x }', runtime, cache, [], { transport: 'http' });
-    expect((first as { document?: unknown }).document).toBeDefined();
-    expect(validateCalls).toBe(1);
-    expect(cache.size).toBe(1);
-
-    // Second call for the same query hits the cache → no second validate.
-    prepareDocument('{ x }', runtime, cache, [], { transport: 'http' });
-    expect(validateCalls).toBe(1);
-  });
-
-  it('refuses when the operation cannot be resolved after validation', () => {
-    // First getOperationAST call (inside checkOperation) resolves to a query,
-    // the second (after validate) returns null → OPERATION_RESOLUTION_FAILED.
-    const runtime = createRuntime({
-      operation: { operation: 'query' },
-      operationSecond: null,
-    });
-    const cache = new DocumentCache(10);
-    const result = prepareDocument('{ x }', runtime, cache, [], { transport: 'http' });
-    expect((result as { refused?: boolean }).refused).toBe(true);
-    const errors =
-      (result as unknown as { result: { errors: Array<{ extensions: { code: string } }> } }).result
-        .errors;
-    expect(errors[0].extensions.code).toBe('OPERATION_RESOLUTION_FAILED');
-  });
-
-  it('uses the stream transport so a subscription is not refused', () => {
-    const runtime = createRuntime({ operation: { operation: 'subscription' } });
-    const cache = new DocumentCache(10);
-    const result = prepareDocument('subscription { x }', runtime, cache, [], {
-      transport: 'stream',
-    });
-    expect((result as { operation?: { operation: string } }).operation?.operation).toBe(
-      'subscription',
-    );
   });
 });
 

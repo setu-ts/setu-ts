@@ -13,29 +13,30 @@ import {
 const decoder = new TextDecoder();
 
 describe('encodeSseEvent', () => {
-  it('encodes data as SSE event', () => {
+  it('encodes data as SSE event with event: next', () => {
     const data = { data: { hello: 'world' } };
     const bytes = encodeSseEvent(data);
     const text = decoder.decode(bytes);
-    expect(text).toBe('data: {"data":{"hello":"world"}}\n\n');
+    expect(text).toBe('event: next\ndata: {"data":{"hello":"world"}}\n\n');
   });
 
-  it('encodes error result', () => {
+  it('encodes error result with event: next', () => {
     const data = { errors: [{ message: 'field error' }] };
     const bytes = encodeSseEvent(data);
     const text = decoder.decode(bytes);
-    expect(text).toBe('data: {"errors":[{"message":"field error"}]}\n\n');
+    expect(text).toBe('event: next\ndata: {"errors":[{"message":"field error"}]}\n\n');
   });
 
   it('handles multi-line JSON without breaking frame', () => {
     const data = { data: { nested: { a: 1, b: 2 } } };
     const bytes = encodeSseEvent(data);
     const text = decoder.decode(bytes);
-    // Should be a single data line followed by double newline
+    // Should start with event: next, then a single data line, followed by double newline
     const lines = text.split('\n');
-    expect(lines[0].startsWith('data: ')).toBe(true);
-    expect(lines[1]).toBe('');
+    expect(lines[0]).toBe('event: next');
+    expect(lines[1].startsWith('data: ')).toBe(true);
     expect(lines[2]).toBe('');
+    expect(lines[3]).toBe('');
   });
 });
 
