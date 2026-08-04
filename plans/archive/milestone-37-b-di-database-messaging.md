@@ -1,6 +1,6 @@
 # Milestone 37b — DI, database, and messaging examples (`apps/*`)
 
-> **Status:** Planning. Branch: `feat/m37-examples` — M37b rides M37's branch at the maintainer's
+> **Status:** Complete. Branch: `feat/m37-examples` — M37b rides M37's branch at the maintainer's
 > direction (the M47 precedent for combined scope on one branch), so both milestones merge in a
 > single PR. `main` is protected; all work stays on that branch until it merges.
 

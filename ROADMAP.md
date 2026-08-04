@@ -3834,6 +3834,26 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 
 ---
 
+## Milestone 37b: DI, Database, and Messaging Examples ✅ COMPLETE
+
+**Objective:** fill the remaining high-value example gaps from M37 and correct the Redis startup
+defect that blocked a real cross-service messaging proof.
+
+### Deliverables
+
+- [x] `apps/di-decorators` — a decorated controller receives a parameter-level `@Inject` service;
+      the smoke proves singleton and explicitly-created scoped lifetimes. The framework does not
+      create request scopes automatically.
+- [x] `apps/database` — memory-adapter repository routes create, read, and update a row; its smoke
+      proves a throwing transaction rolls back.
+- [x] `apps/microservices` — service B owns the Redis Streams `respond` handler and service A issues
+      the request. The Redis half reports a skip with exit 77 when `REDIS_URL` is unavailable.
+- [x] Cache, queue, and messaging Redis clients construct with ioredis `lazyConnect: true`, so their
+      existing explicit startup `connect()` no longer fails after eager construction.
+- [x] `apps/README.md`, `CHANGELOG.md`, and milestone tracking updated.
+
+---
+
 ## Milestone 38: Documentation
 
 **Objective:** Generate comprehensive documentation.
@@ -5647,6 +5667,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 36b       | ✅     | starters + decorator-plugin + cli     |
 | 36c       | ✅     | cli + starters + config + runtime     |
 | 37        | ✅     | examples                              |
+| 37b       | ✅     | examples + Redis startup fix          |
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |

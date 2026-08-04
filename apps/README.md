@@ -10,6 +10,8 @@ dependencies cannot enter a published package graph. Run its `smoke` task to ver
 | [`cqrs`](./cqrs)                             | A command mutation is observable through a separate query bus.            |
 | [`multi-tenant`](./multi-tenant)             | A write under one tenant is invisible to another tenant.                  |
 | [`microservices`](./microservices)           | Service A discovers and calls B, plus brokered request/reply.             |
+| [`di-decorators`](./di-decorators)           | A decorated route uses `@Inject`; manual scopes distinguish lifetimes.    |
+| [`database`](./database)                     | Repository writes read back, updates persist, and transactions roll back. |
 | [`plugin-development`](./plugin-development) | A custom plugin registers and resolves a capability from a route.         |
 | [`compiled-binary`](./compiled-binary)       | `deno compile` creates a binary that serves `/health`.                    |
 | [`graphql-demo`](./graphql-demo)             | The adopted GraphQL example answers a basic operation.                    |

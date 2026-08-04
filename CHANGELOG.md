@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.
+  Their explicit startup `connect()` call no longer fails because ioredis connected eagerly during
+  construction.
+
 ## [0.1.0-alpha.4] — 2026-08-04
 
 **The largest release so far: eight packages publish for the first time, bringing the scope to 46.**

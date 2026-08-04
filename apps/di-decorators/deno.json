@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
+    "@hono-enterprise/di-plugin": "../../packages/di-plugin/src/index.ts",
+    "@hono-enterprise/decorator-plugin": "../../packages/decorator-plugin/src/index.ts"
+  },
+  "compilerOptions": {
+    "experimentalDecorators": true
+  }
+}

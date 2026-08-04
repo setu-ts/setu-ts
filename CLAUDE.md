@@ -1274,9 +1274,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and watching it fail, then restoring it. Also corrected the e2e comment claiming `nest` was "the
   only" template carrying an `args` string, and a stale ROADMAP line recording the alpha.4
   `release:create-packages`/`release:link-repos` step as still pending) — complete (PR pending)
-- **Milestone 37** (`apps/*` — eleven runnable example applications and the `check:apps` gate that
-  keeps them working. Every capability the framework ships was proven by tests inside `packages/`
-  and by nothing a reader could run; the ROADMAP's example list predated 22 milestones and named no
+- **Milestone 37** (`apps/*` — runnable example applications and the `check:apps` gate that keeps
+  them working. Every capability the framework ships was proven by tests inside `packages/` and by
+  nothing a reader could run; the ROADMAP's example list predated 22 milestones and named no
   capability added after M34, so it was corrected rather than implemented as written. Ten examples
   are new and `apps/graphql-demo` (M51b) is **adopted** rather than rebuilt. Examples stay OUT of
   the Deno workspace and each carries its own `deno.json` mapping `@hono-enterprise/*` at
@@ -1318,6 +1318,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `publish:check`) aborts with "uncommitted changes" on any machine with wrangler installed — CI is
   unaffected only because `publish-dry-run` is a separate job with a fresh checkout) — complete (PR
   pending)
+- **Milestone 37b** (`apps/*` — DI/decorators and memory-database examples, plus a microservices
+  correction). `apps/di-decorators` proves a decorated controller's parameter-level `@Inject` and
+  makes manual `container.createScope()` explicit: singleton instances span scopes while scoped
+  instances do not; the framework creates no request scope automatically. `apps/database` writes,
+  reads, updates, and rolls back through the memory adapter's public repository surface. The
+  microservices Redis smoke now registers its `respond` handler on service B and issues the
+  `request` from service A, so it proves actual cross-service brokered request/reply rather than a
+  self-reply. Fixed the ioredis eager-connect defect in cache, queue, and messaging: each lazy
+  loader constructs with `{ lazyConnect: true }`, then preserves its existing explicit `connect()`
+  startup path. Redis-backed instances previously failed at `app.start()` because ioredis had
+  already connected. — complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40.
 
 ## Verification (run before declaring any work done)

@@ -6,9 +6,13 @@ import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
 import { RuntimePlugin } from '@hono-enterprise/runtime';
 import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
 
-/** Builds service B with a network endpoint that service A reaches through discovery. */
-export function createServiceB(): IKernelApplication {
-  const app = createApplication({ plugins: [RuntimePlugin()] });
+/** Builds service B with a network endpoint and optional Redis broker. */
+export function createServiceB(redisUrl?: string): IKernelApplication {
+  const plugins = [RuntimePlugin()];
+  if (redisUrl !== undefined) {
+    plugins.push(MessagingPlugin({ broker: 'redis-streams', url: redisUrl }));
+  }
+  const app = createApplication({ plugins });
   app.router.get(
     '/hello',
     (ctx) => ctx.response.json({ greeting: 'Hello, service-a!' }),
@@ -16,18 +20,19 @@ export function createServiceB(): IKernelApplication {
   return app;
 }
 
-/** Builds service A with a static route to service B and an in-memory RPC broker. */
-export function createServiceA(serviceBPort: number): IKernelApplication {
-  return createApplication({
-    plugins: [
-      RuntimePlugin(),
-      MessagingPlugin(),
-      ServiceDiscoveryPlugin({
-        provider: 'static',
-        services: { 'service-b': [{ host: '127.0.0.1', port: serviceBPort }] },
-      }),
-    ],
-  });
+/** Builds service A with a static route to service B and optional Redis broker. */
+export function createServiceA(serviceBPort: number, redisUrl?: string): IKernelApplication {
+  const plugins = [RuntimePlugin()];
+  if (redisUrl !== undefined) {
+    plugins.push(MessagingPlugin({ broker: 'redis-streams', url: redisUrl }));
+  }
+  plugins.push(
+    ServiceDiscoveryPlugin({
+      provider: 'static',
+      services: { 'service-b': [{ host: '127.0.0.1', port: serviceBPort }] },
+    }),
+  );
+  return createApplication({ plugins });
 }
 
 /** Resolves service B then calls its independent HTTP endpoint. */
@@ -48,10 +53,10 @@ export async function callServiceB(app: IKernelApplication): Promise<string> {
   return body.greeting;
 }
 
-/** Exercises the messaging plugin's brokered request/reply surface. */
-export async function brokeredGreeting(
+/** Registers service B's Redis-backed request/reply handler. */
+export async function registerGreetingResponder(
   app: IKernelApplication,
-): Promise<string> {
+): Promise<() => Promise<void>> {
   const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
   const subscription = await broker.respond<
     { readonly name: string },
@@ -60,16 +65,18 @@ export async function brokeredGreeting(
     'service-b.greet',
     (request) => ({ greeting: `Hello, ${request.name}!` }),
   );
-  try {
-    const reply = await broker.request<
-      { readonly name: string },
-      { readonly greeting: string }
-    >(
-      'service-b.greet',
-      { name: 'service-a' },
-    );
-    return reply.greeting;
-  } finally {
-    await subscription.unsubscribe();
-  }
+  return () => subscription.unsubscribe();
+}
+
+/** Asks service B for a greeting through service A's networked broker. */
+export async function brokeredGreeting(app: IKernelApplication): Promise<string> {
+  const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+  const reply = await broker.request<
+    { readonly name: string },
+    { readonly greeting: string }
+  >(
+    'service-b.greet',
+    { name: 'service-a' },
+  );
+  return reply.greeting;
 }
