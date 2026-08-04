@@ -81,6 +81,14 @@ async function checkApps(): Promise<boolean> {
     } else if (outcome === 'failed') {
       failed = true;
     }
+
+    if (config.tasks.test !== undefined) {
+      console.log(`==> ${directory}: test`);
+      const tested = await run(['deno', 'task', 'test'], cwd);
+      if (!tested.success) {
+        failed = true;
+      }
+    }
   }
 
   return failed;

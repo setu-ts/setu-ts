@@ -31,6 +31,9 @@ jobs:
       - name: Example applications
         run: deno task check:apps
 
+      - name: Test
+        run: deno task test
+
       - name: Test with coverage
         run: deno task test:coverage
 

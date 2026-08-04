@@ -1,6 +1,6 @@
 # Milestone 37 — Example Applications (`apps/*`)
 
-> **Status:** Planning. Branch: `feat/m37-examples`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m37-examples`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
