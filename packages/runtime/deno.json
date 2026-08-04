@@ -1,14 +1,14 @@
 {
   "name": "@hono-enterprise/runtime",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./worker": "./src/worker/define-worker-task.ts"
   },
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.3",
-    "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0-alpha.3"
+    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.4",
+    "@hono-enterprise/kernel": "jsr:@hono-enterprise/kernel@^0.1.0-alpha.4"
   },
   "test": {
     "permissions": {

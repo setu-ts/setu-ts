@@ -13,13 +13,13 @@ type-level from `@hono-enterprise/common`.
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/sdk@^0.1.0-alpha.3
+deno add jsr:@hono-enterprise/sdk@^0.1.0-alpha.4
 
 # npm / pnpm / yarn
-npx jsr add @hono-enterprise/sdk@^0.1.0-alpha.3
+npx jsr add @hono-enterprise/sdk@^0.1.0-alpha.4
 
 # Bun
-bunx jsr add @hono-enterprise/sdk@^0.1.0-alpha.3
+bunx jsr add @hono-enterprise/sdk@^0.1.0-alpha.4
 ```
 
 ## Quick Start

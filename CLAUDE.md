@@ -611,7 +611,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   disagreement with HEAD, not with a published snapshot) and necessary: `honoe new` pins generated
   projects to the CLI's own version, so during a version bump the pinned version is not published
   yet, and checking against JSR would deadlock the release workflow's own test step against the
-  publish that would fix it) — complete (PR pending)
+  publish that would fix it) — complete (PR #89)
 - **Milestone 47** (alpha-3 limitation closeout — the three `CHANGELOG.md` "Known limitations" from
   `v0.1.0-alpha.1` that were real capability gaps rather than wording problems. Taken out of order,
   before M35/M36, because they gate the `v0.1.0-alpha.3` release; delivered on ONE combined branch
@@ -973,7 +973,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   its module JSDoc description-first, which on jsr.io **suppresses the README** (`release:verify`
   check 5 caught it), and `inject()` exposes no response headers, so the `Allow` fix had to be
   proven through `app.fetch` — an `inject`-based test would have passed either way) — complete (PR
-  pending)
+  #116)
 - **Milestone 51b** (`packages/graphql-plugin` + `websocket-plugin` + `common` — GraphQL
   subscriptions over WebSocket and SSE, request batching, Automatic Persisted Queries, custom scalar
   resolvers. Ships the `graphql-transport-ws` state machine over the OPTIONAL
@@ -1130,7 +1130,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   function that threw **synchronously** despite being typed `=> Promise<void>` and assigned straight
   to the Worker's `queue` export; `message.ack()` sat inside the processor's `try`, so a throwing
   ack was reported as a processor failure AND retried, giving one message two dispositions; and
-  `WorkersQueueArm` was exported without a PUBLIC_API entry) — complete (PR pending)
+  `WorkersQueueArm` was exported without a PUBLIC_API entry) — complete (PR #113)
 - **Milestone 52c** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
   D1 as a first-class backend, gated on promoting the data-access port. The seam a backend
   implements was `IDatabaseAdapter`, declared **inside** `database-plugin` and never exported, while

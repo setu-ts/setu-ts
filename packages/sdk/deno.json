@@ -1,9 +1,9 @@
 {
   "name": "@hono-enterprise/sdk",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "jsr:@hono-enterprise/common@^0.1.0-alpha.3": "jsr:@hono-enterprise/common@0.1.0-alpha.3"
+    "jsr:@hono-enterprise/common@^0.1.0-alpha.4": "jsr:@hono-enterprise/common@0.1.0-alpha.4"
   }
 }

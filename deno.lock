@@ -1796,154 +1796,154 @@
     "members": {
       "packages/cli": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.4"
         ]
       },
       "packages/config-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4"
         ]
       },
       "packages/decorator-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4"
         ]
       },
       "packages/di-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4"
         ]
       },
       "packages/kernel": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
           "jsr:@hono/hono@^4.12.30"
         ]
       },
       "packages/logger-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4"
         ]
       },
       "packages/metrics-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4"
         ]
       },
       "packages/openapi-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.3",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.4",
           "npm:zod@^3.24.0"
         ]
       },
       "packages/runtime": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.4"
         ]
       },
       "packages/sdk": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@0.1.0-alpha.4"
         ]
       },
       "packages/starters/full-stack-starter": {
         "dependencies": [
-          "jsr:@hono-enterprise/audit-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/auth-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/cache-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/cqrs-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/events-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/feature-flags-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/graphql-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/mail-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/messaging-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/microservice-starter@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/multi-tenancy-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/notification-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/queue-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/react-router-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/resilience-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/scheduler-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/secrets-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/session-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/storage-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/telemetry-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/audit-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/auth-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/cache-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/cqrs-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/events-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/feature-flags-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/graphql-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/mail-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/messaging-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/microservice-starter@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/multi-tenancy-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/notification-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/queue-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/react-router-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/resilience-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/scheduler-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/secrets-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/session-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/storage-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/telemetry-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.4"
         ]
       },
       "packages/starters/microservice-starter": {
         "dependencies": [
-          "jsr:@hono-enterprise/auth-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/graphql-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/messaging-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/queue-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/resilience-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/rest-starter@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/session-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/telemetry-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/auth-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/graphql-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/messaging-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/queue-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/resilience-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/rest-starter@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/session-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/telemetry-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.4"
         ]
       },
       "packages/starters/rest-starter": {
         "dependencies": [
-          "jsr:@hono-enterprise/auth-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/di-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/graphql-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/realtime-backplane-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/session-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/sse-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/websocket-plugin@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/auth-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/config-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/database-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/decorator-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/di-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/exceptions@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/graphql-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/health-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/http-security-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/logger-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/metrics-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/openapi-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/realtime-backplane-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/runtime@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/session-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/sse-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/validation-plugin@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/websocket-plugin@~0.1.0-alpha.4"
         ]
       },
       "packages/telemetry-plugin": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4"
         ]
       },
       "packages/testing": {
         "dependencies": [
-          "jsr:@hono-enterprise/common@~0.1.0-alpha.3",
-          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.3"
+          "jsr:@hono-enterprise/common@~0.1.0-alpha.4",
+          "jsr:@hono-enterprise/kernel@~0.1.0-alpha.4"
         ]
       }
     }

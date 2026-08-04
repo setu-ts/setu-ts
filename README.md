@@ -19,8 +19,9 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: 38 packages were published in `v0.1.0-alpha.3` and are live on JSR.** The workspace has
-> since grown to 46 packages; the eight added after that release ship with the next one.
+> **Status: all 46 packages are published in `v0.1.0-alpha.4` and are live on JSR.** The eight that
+> `v0.1.0-alpha.3` did not carry — `session-plugin`, `service-discovery-plugin`, `grpc-plugin`,
+> `graphql-plugin`, `cloudflare-plugin`, and the three starters — publish for the first time here.
 >
 > The kernel, the runtime layer, 36 plugins, the three starters, the test utilities, the client SDK,
 > and the `honoe` CLI are implemented, tested, and documented.
@@ -181,21 +182,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3 jsr:@hono-enterprise/runtime@^0.1.0-alpha.3
+deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.4 jsr:@hono-enterprise/runtime@^0.1.0-alpha.4
 
 # Node
-npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.3 @hono-enterprise/runtime@^0.1.0-alpha.3
+npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.4 @hono-enterprise/runtime@^0.1.0-alpha.4
 
 # Bun
-bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.3 @hono-enterprise/runtime@^0.1.0-alpha.3
+bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.4 @hono-enterprise/runtime@^0.1.0-alpha.4
 ```
 
-**The `@^0.1.0-alpha.3` is required, not decorative.** JSR does not point `latest` at a prerelease,
+**The `@^0.1.0-alpha.4` is required, not decorative.** JSR does not point `latest` at a prerelease,
 so omitting the version fails outright:
 
 ```
 error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3
+Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.4
 ```
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
@@ -204,7 +205,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
+deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.4/main
 
 honoe new my-app
 cd my-app && honoe generate service billing
@@ -212,11 +213,9 @@ cd my-app && honoe generate service billing
 
 The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
 
-38 of the 46 workspace members are published on JSR, in `v0.1.0-alpha.3`: the core (`common`,
-`kernel`, `runtime`, `exceptions`, `testing`), most plugins in the tables above, the `sdk`, and the
-`cli`. The eight added since that release — `session-plugin`, `service-discovery-plugin`,
-`grpc-plugin`, `graphql-plugin`, `cloudflare-plugin` and the three starters — ship with the next one
-and cannot be `deno add`ed yet.
+All 46 workspace members are published on JSR, in `v0.1.0-alpha.4`: the core (`common`, `kernel`,
+`runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the
+`sdk`, and the `cli`.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -317,7 +316,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 hono-enterprise/
-├── packages/              # 46 workspace members, 38 published on JSR
+├── packages/              # 46 workspace members, all published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
@@ -337,7 +336,7 @@ hono-enterprise/
 ├── ARCHITECTURE.md        # Technical architecture guide
 ├── PUBLIC_API.md          # Public API contract
 ├── AI_GUIDELINES.md       # Engineering guidelines
-├── ROADMAP.md             # 46-milestone implementation roadmap
+├── ROADMAP.md             # Implementation roadmap, milestones 0–52
 ├── CHANGELOG.md           # Release notes
 └── README.md              # This file
 ```
@@ -372,8 +371,9 @@ Each package also carries its own README with options, semantics, and a worked e
 
 ## Roadmap
 
-**46 of 53 milestones are complete** (numbered 0–46, some with lettered follow-ups such as 14b and
-24c). The framework itself is built; what remains is tooling, examples, and release engineering.
+**64 of 68 milestones are complete** (numbered 0–52, some with lettered follow-ups such as 14b and
+24c). The framework itself is built; what remains is examples, documentation, and release
+engineering.
 
 | Phase               | Milestones | Status | Focus                                                            |
 | ------------------- | ---------- | ------ | ---------------------------------------------------------------- |
@@ -389,6 +389,9 @@ Each package also carries its own README with options, semantics, and a worked e
 | Real-time & SSR     | 41–46      | ✅     | HTTP adapters, streaming, SSE, React SSR, worker pool, WebSocket |
 | Testing             | 33         | ✅     | Test utilities                                                   |
 | Tooling             | 34–36      | ✅     | CLI, SDK, starter bundles                                        |
+| Sessions            | 47–48      | ✅     | Alpha-3 limitation closeout, cookie sessions, form CSRF          |
+| Service protocols   | 49–51      | ✅     | gRPC/Connect/gRPC-Web, service discovery, GraphQL                |
+| Cloudflare platform | 52         | ✅     | KV, R2, D1, Queues, Cron, Cache API, Durable Objects             |
 | Release engineering | 37–40      | ⬜     | Examples, documentation, Docker/K8s, final release               |
 
 Detailed milestones, file structures, and interface definitions are documented in
