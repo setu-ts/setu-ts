@@ -24,6 +24,28 @@
  * Idempotent: a package whose description and flags already match is reported and
  * skipped, so this is safe to re-run after a partial failure, and safe to run on
  * every release to pick up newly added packages.
+ *
+ * WHY TWO REQUESTS PER PACKAGE. The endpoint takes an externally-tagged enum,
+ * not a partial object:
+ *
+ * ```rust
+ * pub enum ApiUpdatePackageRequest {
+ *   Description(String),
+ *   GithubRepository(Option<…>),
+ *   RuntimeCompat(ApiRuntimeCompat),
+ *   ReadmeSource(ApiReadmeSource),
+ *   IsFeatured(bool),
+ *   IsArchived(bool),
+ * }
+ * ```
+ *
+ * So exactly one variant travels per request, and a body carrying both fields is
+ * rejected with `400 malformedRequest` — serde stops at the second key, which is
+ * why the reported column landed on the opening quote of `"runtimeCompat"` rather
+ * than anywhere meaningful. `link-jsr-repos.ts` never met this because it happens
+ * to send a single field. Each field is therefore PATCHed separately and skipped
+ * independently, so a package can have a current description and a stale compat
+ * matrix without either request being wasted.
  */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 import { PACKAGE_METADATA, type RuntimeCompat } from './jsr-metadata.ts';
@@ -87,14 +109,32 @@ async function current(
   return await response.json() as { description: string; runtimeCompat: RuntimeCompat };
 }
 
-/** Whether the live settings already equal the intended ones. */
-function matches(
-  live: { description: string; runtimeCompat: RuntimeCompat },
-  want: { description: string; runtimeCompat: RuntimeCompat },
-): boolean {
-  if (live.description !== want.description) return false;
+/** Whether the live compat flags already equal the intended ones. */
+function compatMatches(live: RuntimeCompat, want: RuntimeCompat): boolean {
   const keys: (keyof RuntimeCompat)[] = ['browser', 'deno', 'node', 'workerd', 'bun'];
-  return keys.every((k) => live.runtimeCompat[k] === want.runtimeCompat[k]);
+  return keys.every((k) => live[k] === want[k]);
+}
+
+/**
+ * Sends one enum variant. Returns the failure, or undefined on success.
+ *
+ * `body` carries exactly one key because the endpoint's request type admits
+ * exactly one — see the module comment.
+ */
+async function patch(
+  name: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: string } | undefined> {
+  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) return undefined;
+  return { status: response.status, body: await response.text() };
 }
 
 const updated: string[] = [];
@@ -119,33 +159,30 @@ for (const [index, name] of names.entries()) {
   }
 
   const live = await current(name);
-  if (live !== undefined && matches(live, want)) {
+  const needsDescription = live === undefined || live.description !== want.description;
+  const needsCompat = live === undefined || !compatMatches(live.runtimeCompat, want.runtimeCompat);
+
+  if (!needsDescription && !needsCompat) {
     console.log(`${position} current  @${SCOPE}/${name}`);
     already.push(name);
     continue;
   }
 
-  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    method: 'PATCH',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      description: want.description,
-      runtimeCompat: want.runtimeCompat,
-    }),
-  });
+  // One request per field: the endpoint accepts a single enum variant.
+  const failure =
+    (needsDescription ? await patch(name, { description: want.description }) : undefined) ??
+      (needsCompat ? await patch(name, { runtimeCompat: want.runtimeCompat }) : undefined);
 
-  if (response.ok) {
-    console.log(`${position} setting  @${SCOPE}/${name}`);
+  if (failure === undefined) {
+    const what = [needsDescription ? 'description' : null, needsCompat ? 'compat' : null]
+      .filter((s) => s !== null).join(' + ');
+    console.log(`${position} setting  @${SCOPE}/${name} (${what})`);
     updated.push(name);
     continue;
   }
 
-  const body = await response.text();
-  console.error(`${position} FAILED   @${SCOPE}/${name} — ${response.status} ${body}`);
-  failed.push({ name, status: response.status, body });
+  console.error(`${position} FAILED   @${SCOPE}/${name} — ${failure.status} ${failure.body}`);
+  failed.push({ name, ...failure });
 }
 
 if (dryRun) {
