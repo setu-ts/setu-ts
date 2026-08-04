@@ -1307,17 +1307,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   broken tenant repository for multi-tenancy. Doc deliverables C1–C4 shipped: `examples/.gitkeep`
   deleted so one concept has one directory, the M0 directory list and the M37 example list
   rewritten, `graphql-demo` indexed in `apps/README.md`, and the M51b entry's "Not run by CI"
-  sentence amended to say which part is now gated. **Outstanding, all found in verification and
-  deliberately left for a follow-up:** `apps/plugin-development/test/greeting-plugin.test.ts` is a
-  named deliverable that NO gate runs — `check:apps` type-checks only `main.ts`/`smoke.ts`/
-  `worker.ts` and runs only `smoke`, so a type error injected into that file leaves the gate at exit
-  0; `test/apps-gate.test.ts` never runs in CI, because the root `test` task gained the `test`
-  directory but `test:coverage` did not and CI runs only the latter, which loses the assertion that
-  no `apps/` path enters the root `workspace` array; and `check:apps` leaves an untracked
-  `apps/cloudflare/.wrangler/` behind, so the plan's own §7 order (`check:apps` then
-  `publish:check`) aborts with "uncommitted changes" on any machine with wrangler installed — CI is
-  unaffected only because `publish-dry-run` is a separate job with a fresh checkout) — complete (PR
-  pending)
+  sentence amended to say which part is now gated. Verification also found three holes in the gate
+  itself, all closed in M37b on this same branch rather than deferred: the example's own test was
+  run by nothing, `test/apps-gate.test.ts` never ran in CI, and `check:apps` left an untracked
+  `apps/cloudflare/.wrangler/` that made a following `publish:check` abort) — complete (PR pending)
 - **Milestone 37b** (`apps/*` — DI/decorators and memory-database examples, plus a microservices
   correction). `apps/di-decorators` proves a decorated controller's parameter-level `@Inject` and
   makes manual `container.createScope()` explicit: singleton instances span scopes while scoped
@@ -1328,7 +1321,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   self-reply. Fixed the ioredis eager-connect defect in cache, queue, and messaging: each lazy
   loader constructs with `{ lazyConnect: true }`, then preserves its existing explicit `connect()`
   startup path. Redis-backed instances previously failed at `app.start()` because ioredis had
-  already connected. — complete (PR pending)
+  already connected — so `CachePlugin({ store: 'redis' })`, `QueuePlugin({ adapter: 'redis' })` and
+  `MessagingPlugin({ broker: 'redis-streams' })` could never start on the documented lazy path, and
+  no gate could see it because every test injects a fake client whose `connect()` is a harmless
+  no-op. That is the same contract-violating-double root cause the pre-M18 review campaign found;
+  the defect was discovered by building the example, which is the argument for the example. The fix
+  is verified through `app.start()` against a real Redis 7 for all three, plus a cache round trip,
+  because the seam test alone cannot prove it. Also closed the three M37 gate holes: `check:apps`
+  now runs an app's `test` task when one is declared (proven by breaking `apps/plugin-development`'s
+  test and watching the gate exit 1), CI gained a `deno task test` step so `test/apps-gate.test.ts`
+  runs there, and `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the
+  tree ahead of `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to
+  `unusedPort()`) — complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40.
 
 ## Verification (run before declaring any work done)
