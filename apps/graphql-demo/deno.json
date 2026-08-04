@@ -1,6 +1,7 @@
 {
   "tasks": {
     "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts",
     "interop": "deno run -A interop.ts"
   },
   "imports": {

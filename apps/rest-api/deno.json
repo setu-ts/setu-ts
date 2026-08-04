@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/rest-starter": "../../packages/starters/rest-starter/src/index.ts"
+  }
+}

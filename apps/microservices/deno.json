@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
+    "@hono-enterprise/messaging-plugin": "../../packages/messaging-plugin/src/index.ts",
+    "@hono-enterprise/service-discovery-plugin": "../../packages/service-discovery-plugin/src/index.ts"
+  }
+}

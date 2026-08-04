@@ -292,9 +292,14 @@ hono-enterprise/
 │   ├── minimal/                 # Minimal app (no plugins)
 │   ├── rest-api/                # REST API with common plugins
 │   ├── microservices/           # Microservices example
-│   ├── cqrs-example/             # CQRS example
+│   ├── cqrs/                     # CQRS example
 │   ├── multi-tenant/            # Multi-tenancy example
-│   └── plugin-development/      # How to build a custom plugin
+│   ├── plugin-development/      # How to build a custom plugin
+│   ├── compiled-binary/         # Standalone `deno compile` binary
+│   ├── graphql-demo/            # GraphQL interop demo
+│   ├── grpc/                    # gRPC/Connect co-serving example
+│   ├── cloudflare/              # Cloudflare Workers bindings example
+│   └── realtime/                # Cross-replica realtime backplane example
 ├── packages/
 │   ├── kernel/                   # Plugin kernel, pipeline, router, service registry
 │   ├── common/                   # Shared types, interfaces, capability tokens
@@ -406,14 +411,14 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 1. **Initialize Monorepo**
    - Initialize the git repository (`git init`, initial commit of design docs)
    - Replace the scaffold `deno.json`/`main.ts`/`main_test.ts` with a root workspace `deno.json`
-   - Configure workspace members (`packages/*`, `apps/*`)
+   - Configure workspace members (`packages/*`; applications stay standalone under `apps/`)
    - Define root tasks: `check`, `test`, `test:coverage`, `lint`, `fmt`, `fmt:check`
    - Set strict TypeScript `compilerOptions` in the root `deno.json`
    - Configure `deno lint` rules and `deno fmt` options
    - Create `.gitignore`, `.editorconfig`
 
 2. **Create Directory Structure**
-   - Create `apps/`, `packages/`, `examples/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
+   - Create `apps/`, `packages/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
    - Create stub `deno.json` for each package with `@hono-enterprise/[name]` JSR naming, version,
      and exports
 
@@ -3808,19 +3813,24 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 
 ### Examples
 
-1. **Minimal** — Single file, no plugins, just kernel
-2. **REST API** — REST starter with CRUD, auth, OpenAPI
-3. **Microservices** — Multiple services with messaging
-4. **CQRS** — Command/query separation example
-5. **Multi-tenant** — Multi-tenancy example
-6. **Plugin Development** — How to build a custom plugin
-7. **Compiled Binary** — Shipping an application as a standalone `deno compile` binary
+1. **Minimal** — Kernel + runtime with one `200` route
+2. **REST API** — REST starter CRUD, auth capability, and generated OpenAPI
+3. **Microservices** — Static service discovery plus brokered request/reply
+4. **CQRS** — Command/query separation with distinct buses
+5. **Multi-tenant** — Header-resolved tenant isolation
+6. **Plugin Development** — A custom capability, route, and testing-package test
+7. **Compiled Binary** — A standalone `deno compile` binary serving `/health`
+8. **GraphQL** — The adopted GraphQL-over-HTTP/WebSocket/SSE interop demo
+9. **gRPC** — Connect/gRPC co-serving with an ordinary HTTP route
+10. **Cloudflare Workers** — KV bindings and a scheduled handler through `wrangler dev`
+11. **Realtime** — Two replicas fanning out through a Redis backplane
 
 ### Deliverables
 
 - [ ] All example apps
 - [ ] Documentation for each
 - [ ] `deno compile` example produces a working standalone binary
+- [ ] `deno task check:apps` type-checks and smoke-runs every application
 
 ---
 

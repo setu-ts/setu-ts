@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
+    "@hono-enterprise/realtime-backplane-plugin": "../../packages/realtime-backplane-plugin/src/index.ts",
+    "@hono-enterprise/sse-plugin": "../../packages/sse-plugin/src/index.ts"
+  }
+}
