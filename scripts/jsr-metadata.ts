@@ -297,8 +297,17 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     description: 'createMicroserviceApp — REST plus messaging, queues, resilience, and telemetry',
     runtimeCompat: NO_EDGE,
   },
+  // `workerd: true` while `microservice-starter` is false, though this tier
+  // composes that one. Not an oversight: the flags track the CLI's own
+  // `unsupported` declarations, which are the repo's explicit statement of what
+  // is supported where. `full-stack` declares `unsupported: {}` and its e2e gate
+  // scaffolds the Workers target; `microservice` refuses Workers because it
+  // exists for broker-backed work that would deploy cleanly and fail at first
+  // use. Both tiers register `MessagingPlugin`/`QueuePlugin`, but their in-memory
+  // defaults boot on Workers and the scaffolded `wrangler.toml` sets
+  // `nodejs_compat`, so the `node:buffer` the RabbitMQ modules import resolves.
   'full-stack-starter': {
     description: 'createFullStackApp — the microservice set plus caching, CQRS, storage, and SSR',
-    runtimeCompat: NO_EDGE,
+    runtimeCompat: PORTABLE,
   },
 } as const;
