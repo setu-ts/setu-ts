@@ -1274,7 +1274,51 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and watching it fail, then restoring it. Also corrected the e2e comment claiming `nest` was "the
   only" template carrying an `args` string, and a stale ROADMAP line recording the alpha.4
   `release:create-packages`/`release:link-repos` step as still pending) — complete (PR pending)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40.
+- **Milestone 37** (`apps/*` — eleven runnable example applications and the `check:apps` gate that
+  keeps them working. Every capability the framework ships was proven by tests inside `packages/`
+  and by nothing a reader could run; the ROADMAP's example list predated 22 milestones and named no
+  capability added after M34, so it was corrected rather than implemented as written. Ten examples
+  are new and `apps/graphql-demo` (M51b) is **adopted** rather than rebuilt. Examples stay OUT of
+  the Deno workspace and each carries its own `deno.json` mapping `@hono-enterprise/*` at
+  `../../packages/<name>/src/index.ts` — load-bearing, not stylistic, because an example pulling
+  `npm:@connectrpc/connect` into the workspace would put it in a published package's resolution
+  graph; pointing at `src/` rather than JSR is also the correct target for a gate, since drift means
+  disagreement with HEAD (the M34b drift-gate reasoning). `fmt` and `lint` already covered `apps/`
+  with no config change — only `check` and `test` were scoped — so `scripts/check-apps.ts` closes
+  the whole remaining gap by type-checking each app's entry points and running its mandatory `smoke`
+  task, with exit code **77** reserved for a reported skip so an unavailable prerequisite can never
+  read as a pass. Examples are deliberately NOT coverage-measured: the 90% bar is a library standard
+  and applying it to demo code produces tests written to satisfy a number. **The bar for an example
+  is that it runs and proves something**, so each `smoke` asserts one behaviour — a written row read
+  back through the same REST API, a command mutation observed through a separate query bus, tenant
+  A's write invisible to tenant B, a `deno compile` binary serving `/health`, a descriptor-backed
+  Connect RPC and an ordinary Hono route answering on one port. Two are real external harnesses
+  rather than fakes: `apps/cloudflare` bundles and drives `wrangler dev` against workerd (KV
+  read/write plus a `__scheduled` trigger), which commits the throwaway harness that caught the
+  kernel's module-scope `AbortController` (PR #112), and `apps/realtime` runs two replicas over a
+  `'redis'` backplane. **The realtime check shipped non-discriminating and was fixed in
+  verification**: both replicas were created in ONE process, so the backplane's process-local
+  `'memory'` transport carried the message and the smoke stayed green with zero cross-replica
+  delivery — the precise failure §3.7 of the plan existed to prevent, and the one M47 capability no
+  in-package test can reach. The replicas are now separate `Deno.Command` processes, proven to
+  discriminate by swapping the transport to `'memory'` and watching it exit 1. Every smoke check was
+  verified against a real backend where one exists: Redis 7 in Docker for realtime, real workerd for
+  Cloudflare (whose scheduled path also discriminates — changing the cron pattern exits 1), and a
+  broken tenant repository for multi-tenancy. Doc deliverables C1–C4 shipped: `examples/.gitkeep`
+  deleted so one concept has one directory, the M0 directory list and the M37 example list
+  rewritten, `graphql-demo` indexed in `apps/README.md`, and the M51b entry's "Not run by CI"
+  sentence amended to say which part is now gated. **Outstanding, all found in verification and
+  deliberately left for a follow-up:** `apps/plugin-development/test/greeting-plugin.test.ts` is a
+  named deliverable that NO gate runs — `check:apps` type-checks only `main.ts`/`smoke.ts`/
+  `worker.ts` and runs only `smoke`, so a type error injected into that file leaves the gate at exit
+  0; `test/apps-gate.test.ts` never runs in CI, because the root `test` task gained the `test`
+  directory but `test:coverage` did not and CI runs only the latter, which loses the assertion that
+  no `apps/` path enters the root `workspace` array; and `check:apps` leaves an untracked
+  `apps/cloudflare/.wrangler/` behind, so the plan's own §7 order (`check:apps` then
+  `publish:check`) aborts with "uncommitted changes" on any machine with wrangler installed — CI is
+  unaffected only because `publish-dry-run` is a separate job with a fresh checkout) — complete (PR
+  pending)
+- **Next milestone** — **M38** (documentation), then M39–M40.
 
 ## Verification (run before declaring any work done)
 

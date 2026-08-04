@@ -1,5 +1,4 @@
 // deno-lint-ignore-file no-console -- a skipped prerequisite must be visible in CI.
-import { createRealtimeReplica } from './src/app.ts';
 const redisUrl = Deno.env.get('REDIS_URL');
 if (redisUrl === undefined) {
   console.warn(
@@ -14,6 +13,39 @@ function unusedPort(): number {
   listener.close();
   if (!('port' in address)) throw new Error('Expected a TCP listener.');
   return address.port;
+}
+
+/**
+ * Starts one replica in a process of its own.
+ *
+ * Separate processes are the whole point of this check: both replicas inside a
+ * single process would be carried by the backplane's process-local `'memory'`
+ * transport, so the check would stay green with no cross-replica delivery at
+ * all — the exact demonstration this example exists to make.
+ */
+function spawnReplica(port: number, url: string): Deno.ChildProcess {
+  return new Deno.Command('deno', {
+    args: ['run', '-A', 'main.ts', String(port)],
+    env: { REDIS_URL: url },
+    stdout: 'null',
+    stderr: 'inherit',
+  }).spawn();
+}
+
+async function waitForReady(port: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      // Any answer proves the socket is bound; this path is deliberately unrouted.
+      await fetch(`http://127.0.0.1:${port}/__ready`, {
+        signal: AbortSignal.timeout(250),
+      }).then((response) => response.body?.cancel());
+      return;
+    } catch {
+      // The replica has not started listening yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Replica on port ${port} did not start within ten seconds.`);
 }
 
 async function readMessage(
@@ -36,15 +68,15 @@ async function readMessage(
 
 const replicaAPort = unusedPort();
 const replicaBPort = unusedPort();
-const replicaA = createRealtimeReplica(redisUrl);
-const replicaB = createRealtimeReplica(redisUrl);
-const signal = new AbortController();
+const replicaA = spawnReplica(replicaAPort, redisUrl);
+const replicaB = spawnReplica(replicaBPort, redisUrl);
+const streaming = new AbortController();
 
 try {
-  await replicaA.start({ port: replicaAPort });
-  await replicaB.start({ port: replicaBPort });
+  await waitForReady(replicaAPort);
+  await waitForReady(replicaBPort);
   const events = await fetch(`http://127.0.0.1:${replicaBPort}/events`, {
-    signal: signal.signal,
+    signal: streaming.signal,
   });
   if (events.body === null || !events.ok) {
     throw new Error('Replica B did not open an SSE stream.');
@@ -71,6 +103,9 @@ try {
     }),
   ]);
 } finally {
-  signal.abort();
-  await Promise.all([replicaA.stop(), replicaB.stop()]);
+  streaming.abort();
+  for (const replica of [replicaA, replicaB]) {
+    replica.kill('SIGTERM');
+  }
+  await Promise.all([replicaA.status, replicaB.status]);
 }

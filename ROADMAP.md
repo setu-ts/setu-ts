@@ -3827,10 +3827,10 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 
 ### Deliverables
 
-- [ ] All example apps
-- [ ] Documentation for each
-- [ ] `deno compile` example produces a working standalone binary
-- [ ] `deno task check:apps` type-checks and smoke-runs every application
+- [x] All example apps
+- [x] Documentation for each
+- [x] `deno compile` example produces a working standalone binary
+- [x] `deno task check:apps` type-checks and smoke-runs every application
 
 ---
 
@@ -5646,7 +5646,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 36        | ✅     | starters                              |
 | 36b       | ✅     | starters + decorator-plugin + cli     |
 | 36c       | ✅     | cli + starters + config + runtime     |
-| 37        | ⬜     | examples                              |
+| 37        | ✅     | examples                              |
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
