@@ -1,5 +1,6 @@
 import { CAPABILITIES } from '@hono-enterprise/common';
 import type { IJwtService } from '@hono-enterprise/common';
+import { authMiddleware, requireAuth } from '@hono-enterprise/auth-plugin';
 import type { IKernelApplication } from '@hono-enterprise/kernel';
 import { createRestApp } from '@hono-enterprise/rest-starter';
 
@@ -20,16 +21,23 @@ export function createRestExampleApp(): IKernelApplication {
     },
     openapi: { title: 'Todo API', version: '1.0.0' },
   });
+  app.middleware.add(authMiddleware());
 
-  app.router.post('/todos', async (ctx) => {
-    const input = await ctx.request.json<{ title: string }>();
-    const todo = { id: String(todos.size + 1), title: input.title };
-    todos.set(todo.id, todo);
-    return ctx.response.status(201).json(todo);
+  app.router.post('/todos', {
+    middleware: [requireAuth()],
+    handler: async (ctx) => {
+      const input = await ctx.request.json<{ title: string }>();
+      const todo = { id: String(todos.size + 1), title: input.title };
+      todos.set(todo.id, todo);
+      return ctx.response.status(201).json(todo);
+    },
   });
-  app.router.get('/todos/:id', (ctx) => {
-    const todo = todos.get(ctx.params.id);
-    return todo ? ctx.response.json(todo) : ctx.response.status(404).json({ error: 'not found' });
+  app.router.get('/todos/:id', {
+    middleware: [requireAuth()],
+    handler: (ctx) => {
+      const todo = todos.get(ctx.params.id);
+      return todo ? ctx.response.json(todo) : ctx.response.status(404).json({ error: 'not found' });
+    },
   });
 
   return app;

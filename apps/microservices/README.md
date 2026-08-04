@@ -1,7 +1,7 @@
 # Microservices example
 
-Service A resolves service B through `ServiceDiscoveryPlugin`'s static provider, then sends B an
-in-memory brokered request/reply message.
+Service A resolves and calls service B through `ServiceDiscoveryPlugin`'s static provider. It also
+demonstrates a brokered in-memory request/reply exchange.
 
 ```bash
 cd apps/microservices

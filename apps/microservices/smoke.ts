@@ -1,11 +1,25 @@
-import { callServiceB, createServiceA } from './src/app.ts';
+import { brokeredGreeting, callServiceB, createServiceA, createServiceB } from './src/app.ts';
 
-const app = createServiceA();
-await app.start();
+function unusedPort(): number {
+  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
+  const address = listener.addr;
+  listener.close();
+  if (!('port' in address)) throw new Error('Expected a TCP listener.');
+  return address.port;
+}
+
+const serviceBPort = unusedPort();
+const serviceB = createServiceB();
+const serviceA = createServiceA(serviceBPort);
+await serviceB.start({ port: serviceBPort });
+await serviceA.start();
 try {
-  if (await callServiceB(app) !== 'Hello, service-a!') {
-    throw new Error("Service A did not receive Service B's brokered reply.");
+  if (await callServiceB(serviceA) !== 'Hello, service-a!') {
+    throw new Error("Service A did not receive Service B's network response.");
+  }
+  if (await brokeredGreeting(serviceA) !== 'Hello, service-a!') {
+    throw new Error('The messaging broker did not complete request/reply.');
   }
 } finally {
-  await app.stop();
+  await Promise.all([serviceA.stop(), serviceB.stop()]);
 }

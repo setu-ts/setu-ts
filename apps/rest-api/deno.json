@@ -5,6 +5,7 @@
   },
   "imports": {
     "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/auth-plugin": "../../packages/auth-plugin/src/index.ts",
     "@hono-enterprise/rest-starter": "../../packages/starters/rest-starter/src/index.ts"
   }
 }

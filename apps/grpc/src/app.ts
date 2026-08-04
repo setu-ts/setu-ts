@@ -2,6 +2,7 @@ import * as protobuf from '@bufbuild/protobuf';
 import * as wkt from '@bufbuild/protobuf/wkt';
 import * as connect from '@connectrpc/connect';
 import * as protocol from '@connectrpc/connect/protocol';
+import { createConnectTransport } from '@connectrpc/connect-web';
 import { adaptConnectModule, GrpcPlugin } from '@hono-enterprise/grpc-plugin';
 import type { ConnectModuleLike, GrpcServiceDefinition } from '@hono-enterprise/grpc-plugin';
 import { createApplication } from '@hono-enterprise/kernel';
@@ -24,6 +25,21 @@ if (echoService === undefined) {
   throw new Error('The embedded EchoService descriptor is invalid.');
 }
 
+interface EchoClient {
+  echo(
+    request: { readonly message: string },
+  ): Promise<{ readonly response: string }>;
+}
+
+/** Creates a Connect client for the descriptor-backed Echo service. */
+export function createEchoClient(baseUrl: string): EchoClient {
+  const client = connect.createClient(
+    echoService as unknown as protobuf.DescService,
+    createConnectTransport({ baseUrl }),
+  );
+  return client as unknown as EchoClient;
+}
+
 /** Builds a shared-port HTTP and Connect server with a real descriptor-backed Echo service. */
 export function createGrpcApp(): IKernelApplication {
   const app = createApplication({
@@ -34,7 +50,9 @@ export function createGrpcApp(): IKernelApplication {
         services: [{
           definition: echoService as GrpcServiceDefinition,
           implementation: {
-            echo: (request: { message: string }) => ({ response: `echo: ${request.message}` }),
+            echo: (request: { message: string }) => ({
+              response: `echo: ${request.message}`,
+            }),
             ping: () => ({ pong: true }),
           },
         }],

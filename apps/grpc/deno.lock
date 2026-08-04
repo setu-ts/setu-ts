@@ -3,6 +3,7 @@
   "specifiers": {
     "jsr:@hono/hono@^4.12.30": "4.12.34",
     "npm:@bufbuild/protobuf@^2.7.0": "2.13.0",
+    "npm:@connectrpc/connect-web@^2.1.2": "2.1.2_@bufbuild+protobuf@2.13.0_@connectrpc+connect@2.1.2__@bufbuild+protobuf@2.13.0",
     "npm:@connectrpc/connect@^2.1.2": "2.1.2_@bufbuild+protobuf@2.13.0",
     "npm:@hono/node-server@2": "2.0.12_hono@4.12.31",
     "npm:ws@^8.18.0": "8.21.1"
@@ -15,6 +16,13 @@
   "npm": {
     "@bufbuild/protobuf@2.13.0": {
       "integrity": "sha512-acq7c49vxfm1ggJ95P70TX7ABDM0vxr1SYD3BB0o0jnBLB4OAqeHyKuN+cD3w80gXEDQ2zxHpR6CUeA+O/aU9g=="
+    },
+    "@connectrpc/connect-web@2.1.2_@bufbuild+protobuf@2.13.0_@connectrpc+connect@2.1.2__@bufbuild+protobuf@2.13.0": {
+      "integrity": "sha512-1tfaK85MU+gJjwwmL31d2rzdf0XCYX99chZf63uG89SGBUd4XuZ4ZzhGo2u79TPXOE6nLIZQ2okrpyey42PYdg==",
+      "dependencies": [
+        "@bufbuild/protobuf",
+        "@connectrpc/connect"
+      ]
     },
     "@connectrpc/connect@2.1.2_@bufbuild+protobuf@2.13.0": {
       "integrity": "sha512-MXkBijtcX09R10Eb6sFeIetc6w6746eio6xtfuyVOH7oQAacT1X0GzMIQFux6Qy8cq3W/T5qX5Bei8YbFtmRGA==",
@@ -38,6 +46,7 @@
   "workspace": {
     "dependencies": [
       "npm:@bufbuild/protobuf@^2.7.0",
+      "npm:@connectrpc/connect-web@^2.1.2",
       "npm:@connectrpc/connect@^2.1.2"
     ],
     "links": {

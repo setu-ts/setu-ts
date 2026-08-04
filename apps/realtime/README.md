@@ -9,5 +9,5 @@ REDIS_URL=redis://127.0.0.1:6379 deno task start 3000
 REDIS_URL=redis://127.0.0.1:6379 deno task start 3001
 ```
 
-The smoke task reports a skip until `REDIS_URL` is available; the two-replica client harness remains
-to be completed.
+The smoke task starts two replicas, subscribes an SSE client to B, then proves a publish to A
+reaches that client. It reports a skip only when `REDIS_URL` is unavailable.
