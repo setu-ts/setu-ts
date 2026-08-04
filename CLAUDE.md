@@ -1029,7 +1029,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   own app on an ephemeral port and asserts the WIRE SEQUENCE, and both shapes were produced and
   observed (`["hash-only","document","hash-only"]` cold, `["hash-only","hash-only"]` warm), so the
   guard is known to discriminate. **Not run by CI** — the gates are scoped to `packages`) — complete
-  (PR pending)
+  (PR #117)
 - **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
   not _reach_:
   `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
