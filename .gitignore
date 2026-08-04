@@ -3,6 +3,7 @@
 coverage/
 .coverage/
 .cov/
+cov/
 coverage.lcov
 
 # Generated API docs
