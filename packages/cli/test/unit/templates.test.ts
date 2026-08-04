@@ -107,7 +107,28 @@ describe('microservice template', () => {
       'QueuePlugin',
       'ResiliencePlugin',
       'TelemetryPlugin',
+      'ServiceDiscoveryPlugin',
     ]);
+  });
+
+  it('wires service discovery with the static arm, the only one needing no backend', () => {
+    // `ServiceDiscoveryPluginOptions` is a union discriminated on `provider`
+    // with no default arm, so this wiring is the only one in any template that
+    // MUST carry args — a bare call does not type-check. The e2e drift gate is
+    // what proves the string itself compiles against the real union; this pins
+    // which arm was chosen and that the map is empty.
+    const wiring = MICROSERVICE_TEMPLATE.plugins.find(
+      (p) => p.symbol === 'ServiceDiscoveryPlugin',
+    );
+
+    expect(wiring?.pkg).toBe('service-discovery-plugin');
+    expect(wiring?.args).toBe("{ provider: 'static', services: {} }");
+  });
+
+  it('leaves the rest template without service discovery', () => {
+    // The tier boundary: rest carries ingress concerns, microservice adds the
+    // egress ones. Resolving other services is egress, so it stops here.
+    expect(symbols(REST_PLUGINS)).not.toContain('ServiceDiscoveryPlugin');
   });
 
   it('shares rest middleware rather than redeclaring it', () => {

@@ -4985,6 +4985,51 @@ server side — has no way to turn a logical service name into an address.
 
 ---
 
+## Milestone 50b: Wiring Service Discovery into the Microservice Template ✅ COMPLETE
+
+**Package:** `packages/cli`
+
+**Objective:** M50 shipped the plugin; nothing wired it. A project scaffolded with
+`honoe new --template microservice` got the four plugins a service needs to talk to others —
+messaging, queues, resilience, telemetry — and then hard-coded the URLs of the services it called.
+This adds `ServiceDiscoveryPlugin` to that one template.
+
+**Why the template and not the starter.** The CLI emits inline wiring and never imports a starter
+(M36b's rule), so the two are separate surfaces with separate audiences. Only newly scaffolded
+projects change; no published library's default moves. A `serviceDiscovery` arm on
+`MicroserviceStarterOptions` remains available as a non-breaking addition and is not this milestone.
+
+**Why REST does not get it.** The tier boundary the repo already draws: REST carries ingress
+concerns, microservice adds the egress ones. Resolving _other_ services is egress.
+
+**The one non-obvious detail.** This is the only template wiring whose `args` is an option
+**object** checked against a discriminated union. `ServiceDiscoveryPluginOptions` has no default
+arm, so a bare `ServiceDiscoveryPlugin()` does not type-check and something must be emitted;
+`'static'` is the only arm needing no backend and no credential. The map is left **empty** rather
+than carrying a sample service, because a sample would fabricate a dependency resolving to a dead
+port — an unknown name resolves to `[]`, so an empty map is inert.
+
+`args` is a rendered string, so a wrong discriminant or a misspelled field is invisible to the CLI's
+own `deno check` and is a compile error only in the **generated** project. The microservice template
+had **no e2e coverage at all** before this, so that check did not exist; it does now, and the gate
+was verified to discriminate by breaking the string and watching it fail.
+
+### Deliverables
+
+- [x] `ServiceDiscoveryPlugin` wiring on `MICROSERVICE_TEMPLATE`, with the `'static'` arm
+- [x] Widened `unsupported['cloudflare-workers']` reason (DNS-SRV needs `IRuntimeServices.dns`)
+- [x] Unit tests: the appended plugin list, the exact `args` string, REST left untouched
+- [x] e2e drift gate: the scaffolded microservice project type-checks against this workspace
+- [x] Doc deliverables C1 (stale ROADMAP release-gate line) and C2 (template JSDoc + reason)
+
+### Out of scope
+
+- A `serviceDiscovery` arm on `MicroserviceStarterOptions` — non-breaking, deferred.
+- An example application resolving against a live Consul or Kubernetes — M37.
+- A `honoe generate` schematic for a discovery-backed client — unowned.
+
+---
+
 ## Milestone 51: GraphQL Plugin — Schema-First and Code-First over HTTP
 
 **Objective:** GraphQL is the last mainstream API paradigm the framework cannot serve. REST rides
@@ -5208,8 +5253,9 @@ sessions — therefore has no backend that exists on the edge. M52 closes the ac
 - [x] `RuntimeOptions.env` passthrough and `splitWorkerEnv` string filtering
 - [x] CLI Workers template: `compatibility_date` bump, `env` wiring, binding stanzas
 - [x] Doc deliverables C1–C5 (PUBLIC_API, ARCHITECTURE, README, ROADMAP, CHANGELOG)
-- [x] Workspace and `scripts/release-packages.ts` registration (first JSR publish — run
-      `release:create-packages` and `release:link-repos` before the next tag)
+- [x] Workspace and `scripts/release-packages.ts` registration (published in `v0.1.0-alpha.4`; the
+      standing rule is that any release adding a package runs `release:create-packages` and
+      `release:link-repos` before the tag, because tokenless OIDC can do neither)
 
 ### Out of scope
 
@@ -5604,6 +5650,7 @@ app.register(MyPlugin({ option1: 'value' }));
 | 48        | ✅     | session-plugin                        |
 | 49        | ✅     | grpc-plugin                           |
 | 50        | ✅     | service-discovery-plugin              |
+| 50b       | ✅     | cli (microservice template wiring)    |
 | 51        | ✅     | graphql-plugin                        |
 | 51b       | ✅     | graphql-plugin (subscriptions)        |
 | 52        | ✅     | cloudflare-plugin                     |

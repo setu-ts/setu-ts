@@ -221,11 +221,12 @@ describe('template scaffolding — end to end', () => {
     });
   });
 
-  // The `nest` template is the only one whose plugin wiring carries an `args`
-  // string and whose config imports project-local modules. Both are rendered
-  // source that nothing else validates: an `args` string naming an undeclared
-  // identifier, or a `localImports` path that does not resolve, type-checks
-  // nowhere else in the suite. This is that check.
+  // The `nest` template is the only one whose config imports project-local
+  // modules, and one of two carrying an `args` string (see the `microservice`
+  // case below). Both are rendered source that nothing else validates: an
+  // `args` string naming an undeclared identifier, or a `localImports` path
+  // that does not resolve, type-checks nowhere else in the suite. This is that
+  // check.
   it('type-checks the scaffolded nest project, including its emitted classes', async () => {
     expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
     const project = `${root}/svc`;
@@ -240,6 +241,29 @@ describe('template scaffolding — end to end', () => {
       expect((await Deno.stat(source)).isFile).toBe(true);
     }
 
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // The `microservice` template had no e2e coverage at all until service
+  // discovery was wired into it, and it is now the only template whose `args`
+  // string is an option OBJECT checked against a discriminated union.
+  // `ServiceDiscoveryPluginOptions` has no default arm, so a wrong discriminant
+  // or a misspelled field is a compile error in the GENERATED project and
+  // nowhere else — `args` is an opaque string literal as far as the CLI's own
+  // `deno check` is concerned.
+  it('type-checks the scaffolded microservice project, including the discovery args', async () => {
+    expect(await run(['new', 'msvc', '--template', 'microservice'])).toBe(0);
+    const project = `${root}/msvc`;
+
+    const config = await Deno.readTextFile(`${project}/honoe.config.ts`);
+    expect(config).toContain(
+      "ServiceDiscoveryPlugin({ provider: 'static', services: {} })",
+    );
+
+    const sources = [`${project}/main.ts`, `${project}/honoe.config.ts`];
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
