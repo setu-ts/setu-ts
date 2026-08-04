@@ -27,6 +27,7 @@ export class WebSocketConnection implements IWebSocketConnection {
   readonly #id: string;
   readonly #path: string;
   readonly #data = new Map<string, unknown>();
+  readonly #heartbeat: boolean;
   #closed = false;
   #lastSeenAt: number;
 
@@ -37,12 +38,28 @@ export class WebSocketConnection implements IWebSocketConnection {
    * @param path - The path the connection was opened on
    * @param transport - The runtime-agnostic socket
    * @param now - The current monotonic timestamp (`runtime.hrtime()`)
+   * @param heartbeat - Whether this connection participates in the shared heartbeat sweep
    */
-  constructor(id: string, path: string, transport: IWebSocketTransport, now: number) {
+  constructor(
+    id: string,
+    path: string,
+    transport: IWebSocketTransport,
+    now: number,
+    heartbeat: boolean = true,
+  ) {
     this.#id = id;
     this.#path = path;
     this.#transport = transport;
     this.#lastSeenAt = now;
+    this.#heartbeat = heartbeat;
+  }
+
+  /**
+   * Whether the shared heartbeat sweeper should include this connection.
+   * When `false`, the sweeper skips both the payload send and idle eviction.
+   */
+  get participatesInHeartbeat(): boolean {
+    return this.#heartbeat;
   }
 
   get id(): string {

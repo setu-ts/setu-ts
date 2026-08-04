@@ -974,6 +974,62 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   check 5 caught it), and `inject()` exposes no response headers, so the `Allow` fix had to be
   proven through `app.fetch` — an `inject`-based test would have passed either way) — complete (PR
   pending)
+- **Milestone 51b** (`packages/graphql-plugin` + `websocket-plugin` + `common` — GraphQL
+  subscriptions over WebSocket and SSE, request batching, Automatic Persisted Queries, custom scalar
+  resolvers. Ships the `graphql-transport-ws` state machine over the OPTIONAL
+  `CAPABILITIES.WEBSOCKET`, GraphQL-over-SSE in distinct-connections mode over M42's
+  `IResponse.stream()`, and a starter arm. **Every new behaviour is opt-in** — `subscriptions`,
+  `apq`, and `maxBatchSize` all default off, so an upgrade with no config change is byte-identical,
+  and `POST/GET /graphql` still answers the tested `400 SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`.
+  Three flagged `common` widenings: `GraphqlRequestParams.extensions`, `IGraphqlService.subscribe`
+  (+ `GraphqlSubscriptionOutcome` / `GraphqlOperationContext` / `GraphqlConnectionInfo`) — a
+  REQUIRED member, so **breaking for implementors** though the framework's own service is the only
+  one in-repo — and `WebSocketRouteOptions.heartbeat`. That last one exists because
+  `HeartbeatSweeper` walks every connection on every route sending a RAW TEXT payload, which a
+  conformant `graphql-transport-ws` client must answer by closing `4400`:
+  `WebSocketPlugin({ heartbeatMs })` would have broken every subscription in the application, and
+  neither package could detect it. The GraphQL route claims the opt-out and runs the protocol's own
+  `ping`/`pong`.
+
+  **Verification found the headline deliverable non-functional, at 92–100% coverage with all six
+  gates green.** `attachResolvers` assigned the whole `{ subscribe, resolve }` entry to the field's
+  `resolve`, so `subscribe` was never set and graphql threw "Subscription field must return Async
+  Iterable. Received: undefined." — which escaped as a rejection and surfaced as the kernel's 500.
+  Schema-first subscriptions could not work at all. `ResolverMap` could not even express one (an
+  entry had to be a function), which is why the shipped integration test carried
+  `resolvers as never`. And **no test anywhere drove a real subscription**: both transport e2e files
+  declared a Query-only schema, so the test named "client complete tears down the subscription" ran
+  a QUERY, and every `subscription { … }` string in the suite hit either the HTTP-refusal test, a
+  fake runtime, or a fake service. That is why the rest shipped green. Separately, resolver errors
+  inside a LIVE subscription reached clients **verbatim** while the HTTP path masked the identical
+  error — the service's own comment claimed the transports masked; `grep` over `src/transports/`
+  found no masking at all. Masking now happens once, in the service. The plan's shared
+  `prepareDocument` prologue was never written either, so `subscribe.ts` duplicated
+  parse/guard/validate/cache and `checkOperation`'s `transport: 'stream'` arm had no src caller;
+  both pipelines now share one prologue and the guard returns the resolved operation kind so
+  dispatch costs no second AST walk. Also fixed: an unknown WS message type was ignored with a
+  comment claiming "protocol requires" when PROTOCOL.md requires closing `4400` (the ignore rule is
+  for unknown IDs); a client `complete` could not suppress an unresolved single-result operation;
+  the transports used global timers rather than `IRuntimeServices`; the SSE controller had no
+  `cancel` hook, so a departing consumer left the pump enqueueing into a dead controller. Code
+  review then caught two defects in those repairs — the guarded release of the source iterator could
+  raise an unhandled rejection out of a fire-and-forget pump, and an SSE persisted-query miss
+  answered a buffered `400`, reintroducing the exact `EventSource` failure in-stream errors exist to
+  avoid. Doc deliverables the milestone had skipped entirely shipped here: `PUBLIC_API.md`,
+  `ARCHITECTURE.md`, both package READMEs, and a CHANGELOG entry that had claimed subscriptions over
+  HTTP now answer `200` with a stream — the opposite of what ships. All 24 `src` files at ≥90%
+  branch/function/line.
+
+  **Interop is proven against the authorities, not against our own fakes** (`apps/graphql-demo`,
+  outside the workspace so its npm client deps never reach a published dependency graph):
+  `npm:graphql-ws`, the reference implementation of the protocol this hand-writes, and
+  `@apollo/client`'s persisted-query link. 15 checks. The suite is built around a false pass that
+  actually happened — an early run swept clean while both Apollo requests went out hash-only,
+  because the APQ cache was warm and the miss→retry handshake never executed. Each run now boots its
+  own app on an ephemeral port and asserts the WIRE SEQUENCE, and both shapes were produced and
+  observed (`["hash-only","document","hash-only"]` cold, `["hash-only","hash-only"]` warm), so the
+  guard is known to discriminate. **Not run by CI** — the gates are scoped to `packages`) — complete
+  (PR #117)
 - **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
   not _reach_:
   `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
@@ -1196,9 +1252,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `onMemberJoined` hook removed the listen-only replica received `[]` on workerd, and with it
   restored it received the broadcast. **Still not verified against a deployed Worker** — CI holds no
   Cloudflare account) — complete (PR #115)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40, with **M51b**
-  (GraphQL subscriptions over WebSocket/SSE, request batching, Automatic Persisted Queries, custom
-  scalar resolvers, starter arm) queued behind them — unless reprioritized.
+- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40.
 
 ## Verification (run before declaring any work done)
 

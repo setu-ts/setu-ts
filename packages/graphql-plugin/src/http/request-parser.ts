@@ -13,10 +13,13 @@ export type GraphqlErrorCode =
   | 'INVALID_JSON'
   | 'BAD_REQUEST'
   | 'INVALID_VARIABLES'
+  | 'INVALID_EXTENSIONS'
   | 'UNSUPPORTED_MEDIA_TYPE'
   | 'OPERATION_RESOLUTION_FAILED'
   | 'METHOD_NOT_ALLOWED'
-  | 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP';
+  | 'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP'
+  | 'BATCH_TOO_LARGE'
+  | 'BATCHING_NOT_SUPPORTED';
 
 /**
  * Parsing error with code.
@@ -83,6 +86,18 @@ export function parsePostBody(body: unknown): GraphqlRequestParams {
     result.variables = obj.variables as Record<string, unknown>;
   }
 
+  // Parse extensions (object-or-absent)
+  if (obj.extensions !== undefined) {
+    if (
+      typeof obj.extensions !== 'object' || obj.extensions === null || Array.isArray(obj.extensions)
+    ) {
+      const err = new Error('Extensions must be a JSON object') as ParseError;
+      err.code = 'INVALID_EXTENSIONS';
+      throw err;
+    }
+    result.extensions = obj.extensions as Record<string, unknown>;
+  }
+
   return result;
 }
 
@@ -125,6 +140,21 @@ export function parseGetQuery(query: Record<string, string | string[]>): Graphql
     }
     // Pass variables through verbatim (B2)
     result.variables = parsed as Record<string, unknown>;
+  }
+
+  // C6: parse extensions from GET query string so APQ works over GET.
+  if (typeof query.extensions === 'string') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(query.extensions);
+    } catch {
+      const err = new Error('Invalid JSON in extensions parameter') as ParseError;
+      err.code = 'INVALID_EXTENSIONS';
+      throw err;
+    }
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      result.extensions = parsed as Record<string, unknown>;
+    }
   }
 
   return result;

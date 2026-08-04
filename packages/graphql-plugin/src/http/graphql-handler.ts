@@ -6,21 +6,25 @@
 
 import type {
   GraphqlExecutionOutcome,
+  GraphqlRequestParams,
   HandlerResult,
   IRequestContext,
   IResponse,
   RouteHandler,
 } from '@hono-enterprise/common';
+import type { ApqResolver, ApqResolveResult } from '../apq/apq-resolver.ts';
 import type { GraphqlService } from '../services/graphql-service.ts';
 import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON, negotiateMediaType } from './media-type.ts';
 import type { ParseError } from './request-parser.ts';
-import { parseGetQuery, parsePostBody } from './request-parser.ts';
+import { parseGetQuery } from './request-parser.ts';
 import { graphiqlHtml } from '../ui/graphiql.ts';
 
 /** Handler options shared by both verbs. */
 interface HandlerOptions {
   graphiql: boolean;
   logger?: { info(message: string): void; error(message: string, error?: unknown): void };
+  maxBatchSize: number;
+  apqResolver: ApqResolver | null;
 }
 
 /**
@@ -56,7 +60,7 @@ async function handleGraphqlPost(
   graphqlService: GraphqlService,
   options: HandlerOptions,
 ): Promise<HandlerResult> {
-  const { logger } = options;
+  const { logger, maxBatchSize, apqResolver } = options;
 
   // Negotiated once, up front: every response this handler can produce answers
   // in the media type the client asked for, transport failures included.
@@ -83,17 +87,155 @@ async function handleGraphqlPost(
     }, mediaType);
   }
 
-  // Parse request params
-  let params: { query: string; operationName?: string; variables?: Record<string, unknown> };
-  try {
-    params = parsePostBody(body);
-  } catch (e) {
-    const err = e as ParseError;
-    logger?.error('Failed to parse GraphQL request', err);
+  // Batching: detect array body before parsePostBody
+  if (Array.isArray(body)) {
+    if (maxBatchSize <= 0) {
+      return sendGraphqlError(response, 400, {
+        message: 'Batching is not enabled',
+        extensions: { code: 'BAD_REQUEST' },
+      }, mediaType);
+    }
+
+    // Strict media type refuses batches
+    if (mediaType === 'graphql-response') {
+      return sendGraphqlError(response, 400, {
+        message: 'Batching is not supported with application/graphql-response+json',
+        extensions: { code: 'BATCHING_NOT_SUPPORTED' },
+      }, mediaType);
+    }
+
+    if (body.length === 0) {
+      return sendGraphqlError(response, 400, {
+        message: 'Batch must contain at least one request',
+        extensions: { code: 'BAD_REQUEST' },
+      }, mediaType);
+    }
+
+    if (body.length > maxBatchSize) {
+      return sendGraphqlError(response, 400, {
+        message: `Batch size exceeds limit of ${maxBatchSize}`,
+        extensions: { code: 'BATCH_TOO_LARGE' },
+      }, mediaType);
+    }
+
+    // Execute each element concurrently — APQ resolves per-element
+    const outcomes = await Promise.all(
+      body.map(async (item: unknown) => {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+          return {
+            status: 400,
+            result: { errors: [{ message: 'Batch item must be a JSON object' }] },
+          };
+        }
+        const obj = item as Record<string, unknown>;
+
+        // B1: Resolve APQ per-element before parsing
+        let query = obj.query;
+        const extensions = obj.extensions;
+        if (apqResolver !== null) {
+          const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+          if (typeof query === 'string') apqParams.query = query;
+          if (typeof extensions === 'object' && extensions !== null) {
+            apqParams.extensions = extensions as Record<string, unknown>;
+          }
+          const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
+          if (!apqResult.ok) {
+            return {
+              status: 400,
+              result: {
+                errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
+              },
+            };
+          }
+          query = apqResult.query;
+        }
+
+        const params: GraphqlRequestParams = { query: query as string };
+        if (typeof obj.operationName === 'string') {
+          params.operationName = obj.operationName;
+        }
+        if (
+          typeof obj.variables === 'object' && obj.variables !== null &&
+          !Array.isArray(obj.variables)
+        ) {
+          params.variables = obj.variables as Record<string, unknown>;
+        }
+        if (typeof obj.extensions === 'object' && obj.extensions !== null) {
+          params.extensions = obj.extensions as Record<string, unknown>;
+        }
+        return await graphqlService.execute(params, ctx, 'POST');
+      }),
+    );
+
+    // Answer array of results
+    const results = outcomes.map((outcome) => outcome.result);
+    const encoder = new TextEncoder();
+    response.status(200).header('Content-Type', 'application/json');
+    return response.send(encoder.encode(JSON.stringify(results)));
+  }
+
+  // Must be an object (not array, already handled)
+  if (typeof body !== 'object' || body === null) {
     return sendGraphqlError(response, 400, {
-      message: err.message,
-      extensions: { code: err.code },
+      message: 'Request body must be a JSON object',
+      extensions: { code: 'BAD_REQUEST' },
     }, mediaType);
+  }
+
+  const obj = body as Record<string, unknown>;
+
+  // B1 + B2: Resolve APQ BEFORE parsePostBody, allowing hash-only requests
+  let query = obj.query;
+  const extensions = obj.extensions;
+  if (apqResolver != null) {
+    const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof query === 'string') apqParams.query = query;
+    if (typeof extensions === 'object' && extensions !== null) {
+      apqParams.extensions = extensions as Record<string, unknown>;
+    }
+    const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
+    if (!apqResult.ok) {
+      return sendGraphqlError(response, 400, {
+        message: apqResult.message,
+        extensions: { code: apqResult.code },
+      }, mediaType);
+    }
+    query = apqResult.query;
+  }
+
+  // Now parse request params with the resolved query
+  // Validate that query is present (required by GraphQL spec)
+  if (typeof query !== 'string') {
+    logger?.error('Query parameter is required');
+    return sendGraphqlError(response, 400, {
+      message: 'Query parameter is required',
+      extensions: { code: 'BAD_REQUEST' },
+    }, mediaType);
+  }
+
+  const params: GraphqlRequestParams = { query };
+  if (typeof obj.operationName === 'string') {
+    params.operationName = obj.operationName;
+  }
+  // Variables must be a JSON object (not array) — matches GET behavior
+  if (obj.variables !== undefined) {
+    if (
+      obj.variables !== null && (typeof obj.variables !== 'object' || Array.isArray(obj.variables))
+    ) {
+      if (logger) {
+        logger.error('Variables must be a JSON object');
+      }
+      return sendGraphqlError(response, 400, {
+        message: 'Variables must be a JSON object',
+        extensions: { code: 'INVALID_VARIABLES' },
+      }, mediaType);
+    }
+    if (obj.variables !== null) {
+      params.variables = obj.variables as Record<string, unknown>;
+    }
+  }
+  if (typeof obj.extensions === 'object' && obj.extensions !== null) {
+    params.extensions = obj.extensions as Record<string, unknown>;
   }
 
   const outcome = await graphqlService.execute(params, ctx, 'POST');
@@ -111,7 +253,7 @@ async function handleGraphqlGet(
   path: string,
   options: HandlerOptions,
 ): Promise<HandlerResult> {
-  const { logger, graphiql } = options;
+  const { logger, graphiql, apqResolver } = options;
 
   const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
   const queryParam = ctx.query.query;
@@ -134,7 +276,12 @@ async function handleGraphqlGet(
   }
 
   // Parse query params
-  let params: { query: string; operationName?: string; variables?: Record<string, unknown> };
+  let params: {
+    query: string;
+    operationName?: string;
+    variables?: Record<string, unknown>;
+    extensions?: Record<string, unknown>;
+  };
   try {
     params = parseGetQuery(ctx.query as Record<string, string | string[]>);
   } catch (e) {
@@ -144,6 +291,23 @@ async function handleGraphqlGet(
       message: err.message,
       extensions: { code: err.code },
     }, mediaType);
+  }
+
+  // C6: resolve APQ for GET so hash-only requests are served from cache.
+  if (apqResolver !== null) {
+    const apqParams: { query?: string; extensions?: Record<string, unknown> } = {};
+    if (typeof params.query === 'string') apqParams.query = params.query;
+    if (typeof params.extensions === 'object' && params.extensions !== null) {
+      apqParams.extensions = params.extensions;
+    }
+    const apqResult = await apqResolver.resolve(apqParams);
+    if (!apqResult.ok) {
+      return sendGraphqlError(response, apqResult.status, {
+        message: apqResult.message,
+        extensions: { code: apqResult.code },
+      }, mediaType);
+    }
+    params.query = apqResult.query;
   }
 
   const outcome = await graphqlService.execute(params, ctx, 'GET');

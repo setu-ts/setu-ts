@@ -27,6 +27,15 @@ export interface GraphqlFieldLike {
   name: string;
   type: GraphqlOutputTypeLike;
   resolve?: GraphqlFieldResolverLike;
+  /**
+   * The event-source factory for a subscription field.
+   *
+   * graphql reads this — NOT `resolve` — to obtain the async iterable a
+   * subscription streams from. Assigning a `{ subscribe }` entry to `resolve`
+   * leaves this `undefined` and makes `graphql.subscribe()` throw
+   * "Subscription field must return Async Iterable".
+   */
+  subscribe?: GraphqlSubscribeFieldLike;
   args: GraphqlArgumentLike[];
 }
 
@@ -49,6 +58,18 @@ export interface GraphqlNamedTypeLike {
   name: string;
 }
 
+/**
+ * Structural facade for a graphql@16 scalar type, exposing the three
+ * settable resolver properties.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlScalarTypeLike extends GraphqlNamedTypeLike {
+  serialize?: (value: unknown) => unknown;
+  parseValue?: (value: unknown) => unknown;
+  parseLiteral?: (node: unknown, variables?: Record<string, unknown> | null) => unknown;
+}
+
 export type GraphqlOutputTypeLike = GraphqlNamedTypeLike;
 export type GraphqlInputTypeLike = GraphqlNamedTypeLike;
 
@@ -58,6 +79,13 @@ export type GraphqlFieldResolverLike = (
   context: unknown,
   info: unknown,
 ) => unknown;
+
+export type GraphqlSubscribeFieldLike = (
+  source: unknown,
+  args: Record<string, unknown>,
+  context: unknown,
+  info: unknown,
+) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
 
 export interface GraphqlDocumentNodeLike {
   kind: string;

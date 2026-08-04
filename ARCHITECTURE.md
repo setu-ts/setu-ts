@@ -2491,9 +2491,20 @@ graph TB
 > ordinary kernel routes (`POST` and `GET` at `path`, default `/graphql`), rides the normal
 > middleware pipeline, and widens neither `IHttpAdapter` nor any runtime. Do not copy the
 > `setUpgradeRouter`/`setRpcHandler` pattern by analogy — reach for an adapter seam only when the
-> exchange genuinely cannot be expressed as `IRequest`/`IResponse`. Subscriptions, which need a
-> long-lived transport, are deferred to Milestone 51b over the WebSocket and SSE capabilities; a
-> subscription operation over HTTP answers a coded `400`.
+> exchange genuinely cannot be expressed as `IRequest`/`IResponse`.
+>
+> **Milestone 51b added the two long-lived transports, and neither needed an adapter seam either.**
+> Subscriptions ride the OPTIONAL `CAPABILITIES.WEBSOCKET` — the plugin registers a
+> `graphql-transport-ws` route through `IWebSocketService.route()`, so M46 owns the upgrade and the
+> GraphQL plugin owns only the protocol state machine — and GraphQL-over-SSE in distinct-connections
+> mode, which is an ordinary kernel route returning `IResponse.stream()` and needs no other plugin
+> at all. Both are opt-in: with no `subscriptions` option neither route exists, and
+> `POST`/`GET /graphql` still answers a coded `400` for a subscription operation. The one widening
+> the transports did force is `WebSocketRouteOptions.heartbeat`, because `websocket-plugin`'s
+> heartbeat sweeper is global across routes and its raw text frame is not a protocol message: a
+> route that speaks its own liveness protocol has to be able to leave the sweep. `cloudflare-plugin`
+> and `graphql-plugin` are therefore both examples of the same rule — widen a committed option when
+> a second, legitimate consumer needs it, rather than duplicating the mechanism.
 
 ### Versioning
 

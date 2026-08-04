@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "interop": "deno run -A interop.ts"
+  },
+  "imports": {
+    "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
+    "@hono-enterprise/cache-plugin": "../../packages/cache-plugin/src/index.ts",
+    "@hono-enterprise/websocket-plugin": "../../packages/websocket-plugin/src/index.ts",
+    "@hono-enterprise/graphql-plugin": "../../packages/graphql-plugin/src/index.ts",
+    "graphql": "npm:graphql@^16"
+  }
+}

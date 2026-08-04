@@ -4,13 +4,21 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type {
+  ICacheStore,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+  IWebSocketService,
+} from '@hono-enterprise/common';
 import { CAPABILITIES as CAP } from '@hono-enterprise/common';
 import type { GraphqlPluginOptions } from '../interfaces/options.ts';
 import { adaptGraphqlModule, loadGraphqlModule } from '../runtime/graphql-loader.ts';
 import { buildSchema } from '../schema/build-schema.ts';
 import { GraphqlService } from '../services/graphql-service.ts';
 import { createGraphqlHandler } from '../http/graphql-handler.ts';
+import { GRAPHQL_TRANSPORT_WS } from '../transports/ws/ws-protocol.ts';
+import { ApqResolver } from '../apq/apq-resolver.ts';
 
 /**
  * Create a handler logger wrapper from a plugin context logger.
@@ -40,23 +48,42 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
   const maskInternalErrors = options.maskInternalErrors ?? true;
   const documentCacheSize = options.documentCacheSize ?? 1000;
   const formatError = options.formatError ?? ((_e: unknown) => _e);
-  // NOT defaulted: an absent `buildContext` must reach the service as absent, so
-  // the service builds its documented default context
-  // (`services`/`requestContext`/`user`/`tenant`). Defaulting it here to a
-  // stub made that default unreachable and handed resolvers an empty object.
   const buildContext = options.buildContext;
   const rootValue = options.rootValue;
+  const subscriptions = options.subscriptions;
+  const apq = options.apq;
+  const maxBatchSize = options.maxBatchSize ?? 0;
 
   let graphqlService: GraphqlService | null = null;
+  let wsService: IWebSocketService | null = null;
+  let wsAvailable = false;
+  let apqResolver: ApqResolver | null = null;
 
   return {
     name: 'graphql-plugin',
     version: '0.1.0',
     provides: [CAP.GRAPHQL],
-    optionalDependencies: ['logger', CAP.HEALTH],
+    optionalDependencies: ['logger', CAP.HEALTH, CAP.WEBSOCKET, CAP.CACHE, CAP.RUNTIME],
 
     async register(ctx: IPluginContext): Promise<void> {
       const logger = ctx.logger;
+
+      // Both APQ and the subscription transports need runtime services — APQ
+      // for `subtle` (hash verification), the transports for their timers.
+      // Fail at registration naming the requirement rather than at the first
+      // request with a bare TypeError.
+      if (apq !== undefined && !ctx.services.has(CAP.RUNTIME)) {
+        throw new Error(
+          'APQ requires CAPABILITIES.RUNTIME for hash verification. ' +
+            'Register the RuntimePlugin or disable APQ.',
+        );
+      }
+      if (subscriptions !== undefined && !ctx.services.has(CAP.RUNTIME)) {
+        throw new Error(
+          'GraphQL subscription transports require CAPABILITIES.RUNTIME for their timers. ' +
+            'Register the RuntimePlugin or disable subscriptions.',
+        );
+      }
 
       // Load graphql runtime
       const runtime = options.graphqlModule
@@ -96,19 +123,85 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         ...(buildContext && { buildContext }),
         rootValue,
         ...(handlerLogger && { logger: handlerLogger }),
+        serviceRegistry: ctx.services,
       });
 
       // Register service
       ctx.services.register(CAP.GRAPHQL, graphqlService);
 
-      // Register routes - handle optional logger with exactOptionalPropertyTypes
+      // B1 — Instantiate ApqResolver when APQ is configured
+      if (apq !== undefined) {
+        const runtimeServices = ctx.services.get<IRuntimeServices>(CAP.RUNTIME);
+        const cacheStore = ctx.services.has(CAP.CACHE)
+          ? ctx.services.get<ICacheStore>(CAP.CACHE)
+          : null;
+        const apqOpts: { ttlSeconds?: number; maxEntries?: number } = {};
+        if (apq.ttlSeconds !== undefined) apqOpts.ttlSeconds = apq.ttlSeconds;
+        if (apq.maxEntries !== undefined) apqOpts.maxEntries = apq.maxEntries;
+        apqResolver = new ApqResolver(cacheStore, runtimeServices.subtle, apqOpts);
+      }
+
+      // Register HTTP routes
       const { post, get } = createGraphqlHandler(graphqlService, path, {
         graphiql,
+        maxBatchSize,
+        apqResolver,
         ...(handlerLogger && { logger: handlerLogger }),
       });
 
       ctx.router.post(path, post);
       ctx.router.get(path, get);
+
+      // Register subscription transports (opt-in)
+      if (subscriptions) {
+        const runtimeServices = ctx.services.get<IRuntimeServices>(CAP.RUNTIME);
+        // WebSocket transport (optional capability)
+        if (subscriptions.websocket !== false) {
+          const wsOpt = subscriptions.websocket;
+          if (ctx.services.has(CAP.WEBSOCKET)) {
+            wsService = ctx.services.get<IWebSocketService>(CAP.WEBSOCKET);
+            if (wsService?.available) {
+              wsAvailable = true;
+              const { createWsHandlers } = await import('../transports/ws/graphql-ws-handler.ts');
+              const wsPath = wsOpt?.path ?? `${path}/ws`;
+              // C6: thread apqResolver into WS handlers so hash-only subscribe
+              // returns PERSISTED_QUERY_NOT_FOUND instead of a parse error.
+              const wsHandlers = createWsHandlers(
+                graphqlService,
+                wsOpt ?? {},
+                runtimeServices,
+                apqResolver,
+              );
+              wsService.route(wsPath, wsHandlers, {
+                protocols: [GRAPHQL_TRANSPORT_WS],
+                heartbeat: false,
+              });
+              logger?.info(`GraphQL WS subscriptions registered at ${wsPath}`);
+            } else {
+              logger?.warn('GraphQL WS subscriptions skipped: WebSocket not available');
+            }
+          } else {
+            logger?.warn('GraphQL WS subscriptions skipped: CAPABILITIES.WEBSOCKET absent');
+          }
+        }
+
+        // SSE transport (no capability needed)
+        if (subscriptions.sse !== false) {
+          const sseOpt = subscriptions.sse;
+          const { createSseHandler } = await import('../transports/sse/graphql-sse-handler.ts');
+          const ssePath = sseOpt?.path ?? `${path}/stream`;
+          const sseHeartbeat = sseOpt?.heartbeatMs ?? 0;
+          const sseHandler = createSseHandler(
+            graphqlService,
+            runtimeServices,
+            sseHeartbeat,
+            apqResolver,
+          );
+          ctx.router.post(ssePath, sseHandler.post);
+          ctx.router.get(ssePath, sseHandler.get);
+          logger?.info(`GraphQL SSE subscriptions registered at ${ssePath}`);
+        }
+      }
 
       // Register health indicator
       ctx.health.register('graphql', async () => {
@@ -117,6 +210,12 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
           data: {
             endpoint: path,
             cachedDocuments: graphqlService!.cachedDocumentCount,
+            subscriptions: subscriptions
+              ? {
+                websocket: wsAvailable,
+                sse: subscriptions.sse !== false,
+              }
+              : undefined,
           },
         });
       });

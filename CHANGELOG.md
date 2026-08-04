@@ -8,6 +8,56 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **GraphQL subscriptions, batching, and persisted queries** (Milestone 51b).
+  `@hono-enterprise/graphql-plugin` gains two subscription transports — the `graphql-transport-ws`
+  protocol over the OPTIONAL `CAPABILITIES.WEBSOCKET`, and GraphQL-over-SSE in distinct-connections
+  mode over M42's `IResponse.stream()`, which needs no other plugin — plus request batching,
+  Automatic Persisted Queries with server-side hash verification, and custom scalar resolvers in the
+  schema-first arm.
+
+  **Every new behaviour is opt-in.** `subscriptions`, `apq`, and `maxBatchSize` all default to off,
+  so an application that upgrades without changing its options registers exactly the routes it did
+  before and answers byte-identically. In particular the HTTP endpoint **still refuses a
+  subscription** with `400 SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`; subscriptions are reachable only
+  on the dedicated WebSocket and SSE routes, which default to the endpoint path plus `/ws` and
+  `/stream`.
+
+  A subscription is declared in the schema-first resolver map as `{ subscribe, resolve? }` — the new
+  exported `SubscriptionResolver` arm on `ResolverMap`. APQ verifies that a submitted hash matches
+  the submitted document before persisting it, so a shared `ICacheStore` cannot be poisoned with a
+  document under another client's hash; a mismatch answers `PERSISTED_QUERY_HASH_MISMATCH`. Resolver
+  errors raised inside a live subscription are masked by the same `maskInternalErrors` path the HTTP
+  transport uses.
+
+  Three `@hono-enterprise/common` widenings: `GraphqlRequestParams.extensions` (read by APQ),
+  `IGraphqlService.subscribe` with `GraphqlSubscriptionOutcome` / `GraphqlOperationContext` /
+  `GraphqlConnectionInfo`, and `WebSocketRouteOptions.heartbeat` (below).
+
+### Changed
+
+- **`IGraphqlService` gains a required `subscribe` method** (Milestone 51b) — source-compatible for
+  every CALLER, and **breaking for anyone who implements the interface**. The framework's own
+  `GraphqlService` is the only implementor in this repository. An external implementation adds:
+
+  ```typescript
+  subscribe(
+    params: GraphqlRequestParams,
+    context?: GraphqlOperationContext,
+  ): Promise<GraphqlSubscriptionOutcome>;
+  ```
+
+  The second parameter is deliberately NOT an `IRequestContext`: a WebSocket connection has none,
+  and reusing `execute`'s parameter is what would hand a subscription resolver an empty service
+  registry.
+
+- **`WebSocketRouteOptions.heartbeat`** (Milestone 51b). A route may now opt out of
+  `websocket-plugin`'s shared heartbeat sweep with `heartbeat: false`, which excludes its
+  connections from both the payload send and the idle eviction. Defaults to `true`, so no existing
+  route changes. This exists because the sweeper sends a raw text frame to every connection on every
+  route: a `graphql-transport-ws` client that receives one must close with `4400`, so
+  `WebSocketPlugin({ heartbeatMs })` would otherwise have broken every GraphQL subscription in the
+  application. The GraphQL WS route claims the opt-out and runs its own protocol `ping`/`pong`.
+
 - **Durable Objects: a realtime backplane and a distributed lock** (Milestone 52d).
   `@hono-enterprise/cloudflare-plugin` gains a `durableObject` arm registering
   **`DurableObjectBackplane`** under the committed `CAPABILITIES.REALTIME_BACKPLANE`, so

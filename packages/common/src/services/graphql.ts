@@ -26,8 +26,16 @@ export interface GraphqlRequestParams {
   operationName?: string;
   /** Variables as a record of unknown values (passed through verbatim). */
   variables?: Record<string, unknown>;
-  /** Optional extensions (reserved for M51b — Automatic Persisted Queries). */
-  // extensions?: Record<string, unknown>; // omitted in M51 — nothing reads it
+  /**
+   * Optional extensions carried with the request.
+   *
+   * Used by Automatic Persisted Queries (APQ) to pass `{ version, sha256Hash }`
+   * under the `persistedQuery` key. Other extensions are forwarded without
+   * interpretation by the framework.
+   *
+   * @since 0.3.0
+   */
+  extensions?: Record<string, unknown>;
 }
 
 /**
@@ -83,6 +91,66 @@ export interface GraphqlExecutionOutcome {
 }
 
 /**
+ * Information about a WebSocket connection used for subscription operations.
+ *
+ * Built from {@linkcode WebSocketConnectionContext} and the `connection_init`
+ * payload. Supplied by the WS transport path; absent on the SSE/HTTP paths.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlConnectionInfo {
+  /** Unique connection identifier. */
+  readonly id: string;
+  /** The payload sent with `connection_init`, if any. */
+  readonly connectionParams?: Record<string, unknown>;
+  /** The upgrade request headers. */
+  readonly headers: Headers;
+  /** Query string parameters from the upgrade request. */
+  readonly query: Readonly<Record<string, string>>;
+  /** The negotiated subprotocol, when one was selected. */
+  readonly protocol?: string;
+  /** Per-connection application state. */
+  readonly data: Map<string, unknown>;
+}
+
+/**
+ * Context for a subscription operation, carrying either an HTTP request context
+ * or a WebSocket connection info.
+ *
+ * The SSE path supplies {@linkcode requestContext}; the WS path supplies
+ * {@linkcode connection}. Using this type (instead of {@linkcode IRequestContext})
+ * prevents the WS path from silently handing resolvers an empty context.
+ *
+ * @since 0.3.0
+ */
+export interface GraphqlOperationContext {
+  /** The HTTP request context (supplied by the SSE path). */
+  readonly requestContext?: IRequestContext;
+  /** The WebSocket connection info (supplied by the WS path). */
+  readonly connection?: GraphqlConnectionInfo;
+}
+
+/**
+ * Discriminated outcome of a subscription operation.
+ *
+ * Three arms because the wire needs the distinction:
+ * - `'error'` — a request error (parse, validation, operation resolution);
+ *   the WS transport emits `error` and NO `complete`.
+ * - `'single'` — a query or mutation that executed; one `next` then `complete`.
+ * - `'stream'` — a true subscription; many `next` then `complete`.
+ *
+ * @since 0.3.0
+ */
+export type GraphqlSubscriptionOutcome =
+  | { kind: 'error'; status: number; result: GraphqlExecutionResult }
+  | { kind: 'single'; status: number; result: GraphqlExecutionResult }
+  | {
+    kind: 'stream';
+    status: number;
+    stream: AsyncIterable<GraphqlExecutionResult>;
+  };
+
+/**
  * The GraphQL service contract.
  *
  * Implementations register themselves under {@linkcode CAPABILITIES.GRAPHQL}
@@ -105,6 +173,22 @@ export interface IGraphqlService {
     requestContext?: IRequestContext,
     method?: 'GET' | 'POST',
   ): Promise<GraphqlExecutionOutcome>;
+
+  /**
+   * Subscribe to a GraphQL operation (query, mutation, or subscription).
+   *
+   * Accepts every operation kind and returns the matching discriminated outcome.
+   * The transports narrow on the `kind` field to emit conformant frames.
+   *
+   * @param params - The parsed GraphQL request parameters
+   * @param context - Optional operation context (request or connection)
+   * @returns The discriminated subscription outcome
+   * @since 0.3.0
+   */
+  subscribe(
+    params: GraphqlRequestParams,
+    context?: GraphqlOperationContext,
+  ): Promise<GraphqlSubscriptionOutcome>;
 
   /**
    * The endpoint path where GraphQL is served.

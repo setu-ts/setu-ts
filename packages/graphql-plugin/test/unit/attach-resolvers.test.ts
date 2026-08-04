@@ -7,6 +7,7 @@ import { expect } from '@std/expect';
 import { attachResolvers } from '../../src/schema/attach-resolvers.ts';
 import { GraphqlSchemaError } from '../../src/errors/graphql-errors.ts';
 import type { GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
+import type { FieldResolver } from '../../src/interfaces/options.ts';
 
 describe('attach-resolvers', () => {
   const createSchema = (types: string[] = ['Query']): GraphqlSchemaLike => {
@@ -75,7 +76,7 @@ describe('attach-resolvers', () => {
     expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
   });
 
-  it('throws on scalar type without getFields', () => {
+  it('attaches scalar resolver methods on a type without getFields', () => {
     const schema = {
       getQueryType: () => ({
         name: 'Query',
@@ -108,11 +109,13 @@ describe('attach-resolvers', () => {
 
     const resolverMap = {
       String: {
-        custom: () => 'value',
+        serialize: (v: unknown) => String(v),
+        parseValue: (v: unknown) => v,
       },
     };
 
-    expect(() => attachResolvers(schema, resolverMap)).toThrow(GraphqlSchemaError);
+    // Should not throw — scalar resolvers are attached instead
+    attachResolvers(schema, resolverMap);
   });
 
   it('skips __resolveType for field resolver', () => {
@@ -357,5 +360,84 @@ describe('attach-resolvers', () => {
 
     // Should not throw - scalar types are skipped in the second loop
     expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+  });
+
+  // N2: enum-skip — a GraphQLEnumType-like object (has `values`, lacks `getFields`/`serialize`)
+  // must NOT receive scalar methods attached.
+  it('skips enum types — no serialize/parseValue/parseLiteral attached', () => {
+    const enumType = {
+      name: 'Status',
+      values: { ACTIVE: { value: 'ACTIVE' }, INACTIVE: { value: 'INACTIVE' } },
+    };
+    const schema = {
+      getQueryType: () => ({
+        name: 'Query',
+        getFields: () => ({
+          status: { name: 'status', type: { name: 'Status' }, args: [] },
+        }),
+        getInterfaces: () => [],
+      }),
+      getMutationType: () => null,
+      getSubscriptionType: () => null,
+      getType: (name: string) => {
+        if (name === 'Status') return enumType;
+        if (name === 'Query') {
+          return {
+            name: 'Query',
+            getFields: () => ({
+              status: { name: 'status', type: { name: 'Status' }, args: [] },
+            }),
+            getInterfaces: () => [],
+          };
+        }
+        return null;
+      },
+      getPossibleTypes: () => [],
+      getDirectives: () => [],
+      getDirective: () => null,
+      toAST: () => ({}),
+    } as GraphqlSchemaLike;
+
+    // A bogus "resolver map" that pretends to be a scalar resolver — should be
+    // ignored because the type is an enum.
+    const resolverMap = {
+      Status: {
+        serialize: (v: unknown) => v,
+        parseValue: (v: unknown) => v,
+        parseLiteral: (v: unknown) => v,
+      } as unknown as Record<string, unknown>,
+    };
+
+    // Must not throw — enum types are skipped by the isEnum branch.
+    expect(() => attachResolvers(schema, resolverMap)).not.toThrow();
+    // And the enum type must NOT have scalar methods attached.
+    expect(typeof (enumType as Record<string, unknown>).serialize).toBe('undefined');
+    expect(typeof (enumType as Record<string, unknown>).parseValue).toBe('undefined');
+    expect(typeof (enumType as Record<string, unknown>).parseLiteral).toBe('undefined');
+  });
+});
+
+describe('attachResolvers — a malformed field entry', () => {
+  it('throws a named error rather than assigning a non-function to resolve', () => {
+    // Before subscription support this silently assigned whatever it was
+    // given, which is how a `{ subscribe }` entry ended up on `resolve` with
+    // `subscribe` left unset. Anything that is neither a function nor a
+    // subscription resolver is now refused at registration.
+    const schema = {
+      getType: (name: string) =>
+        name === 'Query'
+          ? {
+            name: 'Query',
+            getFields: () => ({ hello: { name: 'hello', args: [] } }),
+            getInterfaces: () => [],
+          }
+          : null,
+    } as unknown as GraphqlSchemaLike;
+
+    expect(() =>
+      attachResolvers(schema, {
+        Query: { hello: { nonsense: true } as unknown as FieldResolver },
+      })
+    ).toThrow(/must be a function/);
   });
 });

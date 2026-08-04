@@ -259,10 +259,13 @@ export type {
 
 // GraphQL contracts
 export type {
+  GraphqlConnectionInfo,
   GraphqlExecutionOutcome,
   GraphqlExecutionResult,
   GraphqlFormattedError,
+  GraphqlOperationContext,
   GraphqlRequestParams,
+  GraphqlSubscriptionOutcome,
   IGraphqlService,
 } from './services/graphql.ts';
 

@@ -323,6 +323,20 @@ export interface WebSocketRouteOptions {
    * omitted, no protocol is negotiated and none is echoed.
    */
   readonly protocols?: readonly string[];
+
+  /**
+   * Whether this route participates in the shared heartbeat sweep.
+   *
+   * When `false`, the {@linkcode HeartbeatSweeper} skips this route's connections
+   * for both the payload send and the idle eviction. Use this when the route
+   * speaks its own liveness protocol (e.g. `graphql-transport-ws` `ping`/`pong`)
+   * that would be corrupted by a generic text heartbeat.
+   *
+   * Defaults to `true` so existing routes are unaffected.
+   *
+   * @since 0.3.0
+   */
+  readonly heartbeat?: boolean;
 }
 
 /**

@@ -16,6 +16,7 @@ import type { WebSocketPluginOptions } from '@hono-enterprise/websocket-plugin';
 import type { SsePluginOptions } from '@hono-enterprise/sse-plugin';
 import type { RealtimeBackplanePluginOptions } from '@hono-enterprise/realtime-backplane-plugin';
 import type { SessionPluginOptions } from '@hono-enterprise/session-plugin';
+import type { GraphqlPluginOptions } from '@hono-enterprise/graphql-plugin';
 
 /**
  * The real-time arm: one option grouping the three plugins that together make a
@@ -157,4 +158,11 @@ export interface RestStarterOptions {
    * default composition stays identical to a starter app without it.
    */
   di?: DiPluginOptions;
+  /**
+   * Optional arm: `GraphqlPlugin`. Gated because the plugin cannot boot without
+   * an application-supplied schema — the rule that made `session` gated.
+   *
+   * @since 0.3.0
+   */
+  graphql?: GraphqlPluginOptions;
 }

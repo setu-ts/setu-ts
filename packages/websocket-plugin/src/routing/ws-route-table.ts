@@ -28,6 +28,11 @@ export interface WsRoute {
   readonly handlers: WebSocketHandlers;
   /** Subprotocols this route accepts, empty when none are configured. */
   readonly protocols: readonly string[];
+  /**
+   * Whether this route participates in the shared heartbeat sweep.
+   * Defaults to `true` so existing routes are unaffected.
+   */
+  readonly heartbeat: boolean;
 }
 
 /**
@@ -109,6 +114,7 @@ export class WsRouteTable {
       path,
       handlers,
       protocols: options?.protocols ?? [],
+      heartbeat: options?.heartbeat ?? true,
     });
   }
 
