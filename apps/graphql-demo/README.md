@@ -64,6 +64,15 @@ The persisted-query check therefore asserts the **wire sequence** rather than th
 Both shapes were produced and observed, so the guard is known to discriminate rather than assumed
 to.
 
+## What is covered in-repo instead
+
+The package's own real-socket e2e suite now covers the socket lifecycle, so those properties are
+gated by CI and do not depend on this app: two subscriptions multiplexed on one connection without
+cross-talk, completing one while the other keeps streaming, `onConnect` refusing a real client with
+`4403`, and `WebSocketRouteOptions.heartbeat` proven against a live sweeper with a control
+connection on an ordinary route that MUST be swept. This app's remaining unique value is interop
+with third-party clients, which is the part that cannot move in-repo.
+
 ## Relationship to the gates
 
 The app is not a workspace member, so `deno task check`, `deno task test`, `test:coverage`,
