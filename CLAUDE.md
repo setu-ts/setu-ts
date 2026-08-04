@@ -1333,7 +1333,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   runs there, and `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the
   tree ahead of `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to
   `unusedPort()`) — complete (PR pending)
-- **Next milestone** — **M38** (documentation), then M39–M40.
+- **Next milestone** — **M38** (documentation), then M39–M40. Two milestones were opened by M37b's
+  findings and are queued behind those: **M53** (real-backend CI — the Redis-backed example smokes
+  are skipped in CI, which is why the ioredis defect survived three milestones) and **M54** (cloud
+  message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP
+  Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
 
 ## Verification (run before declaring any work done)
 
