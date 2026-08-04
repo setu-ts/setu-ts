@@ -125,9 +125,81 @@ Enable `nodejs_compat` in your `wrangler.toml`:
 nodejs_compat = true
 ```
 
+## Subscriptions
+
+Subscriptions are **opt-in**. Without a `subscriptions` option no transport route is registered, and
+`POST`/`GET /graphql` continues to refuse a subscription operation with
+`400 SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`.
+
+```typescript
+GraphqlPlugin({
+  typeDefs,
+  resolvers,
+  subscriptions: {
+    // WebSocket registers only when CAPABILITIES.WEBSOCKET is present and the
+    // adapter can upgrade; otherwise the plugin logs a notice and carries on.
+    websocket: {
+      onConnect: (info) => {
+        const token = info.connectionParams?.authorization;
+        if (!isValid(token)) return false; // closes 4403: Forbidden
+        info.data.set('user', userFor(token)); // read back by the resolver context
+      },
+    },
+    sse: { heartbeatMs: 15_000 },
+  },
+});
+```
+
+Endpoints default to the GraphQL path plus `/ws` and `/stream`, so `path: '/api/graphql'` gives
+`/api/graphql/ws` and `/api/graphql/stream`.
+
+A schema-first subscription field takes a `{ subscribe, resolve? }` entry — `subscribe` returns the
+async iterable, and graphql reads the event source from there:
+
+```typescript
+const resolvers: ResolverMap = {
+  Subscription: {
+    tick: {
+      subscribe: () => tickStream(),
+      resolve: (payload) => (payload as { tick: number }).tick,
+    },
+  },
+};
+```
+
+The WebSocket route opts out of `websocket-plugin`'s shared heartbeat sweep, because that sweeper
+sends a raw text frame a `graphql-transport-ws` client must answer by closing `4400`. Liveness on
+this route is the protocol's own `ping`/`pong` via `subscriptions.websocket.heartbeatMs`.
+
+The SSE transport follows the graphql-sse protocol for distinct-connections mode: a GraphQL request
+error is delivered inside the accepted event stream as a `next` event, not as a `400`, because a
+`400` makes the user agent fail the connection and leaves native `EventSource` with nothing to read.
+
+## Batching and Automatic Persisted Queries
+
+Both are opt-in:
+
+```typescript
+GraphqlPlugin({
+  typeDefs,
+  resolvers,
+  maxBatchSize: 25, // 0 (the default) keeps refusing an array body with 400
+  apq: { ttlSeconds: 300 }, // omitted disables APQ entirely
+});
+```
+
+APQ stores documents under an `apq:` prefix in `CAPABILITIES.CACHE` when a cache store is
+registered, and in a bounded in-process LRU otherwise. A submitted hash is **verified** against the
+submitted document before it is persisted, so a shared store cannot be poisoned with a document
+under another client's hash. Hashing uses `IRuntimeServices.subtle`, so `apq` requires
+`CAPABILITIES.RUNTIME`.
+
 ## Security
 
 - Query depth limiting is enabled by default (max 10 levels)
+- Internal errors are masked by default — including errors raised inside a live subscription, which
+  are masked by the same code path the HTTP transport uses
+- APQ verifies a submitted hash against the submitted document before persisting it
 - Internal errors are masked by default
 - Introspection is enabled by default (disable in production if needed)
 - GraphiQL is enabled by default (disable in production with `graphiql: false`)

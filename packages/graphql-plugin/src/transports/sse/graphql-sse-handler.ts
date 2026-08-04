@@ -16,30 +16,47 @@ import type {
   IGraphqlService,
   IRequestContext,
   IResponse,
+  IRuntimeServices,
   RouteHandler,
 } from '@hono-enterprise/common';
-import type { ApqResolver, ApqResolveResult } from '../../apq/apq-resolver.ts';
+import type { ApqResolveResult, IApqResolver } from '../../apq/apq-resolver.ts';
 import { encodeSseComment, encodeSseComplete, encodeSseEvent } from './sse-frame.ts';
 
 /**
  * Create an SSE route handler supporting both GET and POST (C7).
  *
  * @param graphqlService - The GraphQL service
+ * @param runtime - Runtime services, for the keep-alive timer
  * @param heartbeatMs - Milliseconds between keep-alive comments (0 disables)
- * @param apqResolver - Optional APQ resolver for persisted queries
+ * @param apqResolver - APQ resolver for persisted queries; `null` when APQ is off
  * @returns POST and GET route handlers
  */
 export function createSseHandler(
   graphqlService: IGraphqlService,
+  runtime: IRuntimeServices,
   heartbeatMs: number = 0,
-  apqResolver: ApqResolver | null = null,
+  apqResolver: IApqResolver | null = null,
 ): { post: RouteHandler; get: RouteHandler } {
   return {
     post: async (ctx: IRequestContext): Promise<HandlerResult> => {
-      return await handleSseRequest(ctx, ctx.response, graphqlService, heartbeatMs, apqResolver);
+      return await handleSseRequest(
+        ctx,
+        ctx.response,
+        graphqlService,
+        runtime,
+        heartbeatMs,
+        apqResolver,
+      );
     },
     get: async (ctx: IRequestContext): Promise<HandlerResult> => {
-      return await handleSseGet(ctx, ctx.response, graphqlService, heartbeatMs, apqResolver);
+      return await handleSseGet(
+        ctx,
+        ctx.response,
+        graphqlService,
+        runtime,
+        heartbeatMs,
+        apqResolver,
+      );
     },
   };
 }
@@ -48,8 +65,9 @@ async function handleSseRequest(
   ctx: IRequestContext,
   response: IResponse,
   graphqlService: IGraphqlService,
+  runtime: IRuntimeServices,
   heartbeatMs: number,
-  apqResolver: ApqResolver | null,
+  apqResolver: IApqResolver | null,
 ): Promise<HandlerResult> {
   // Parse body
   let body: unknown;
@@ -126,15 +144,16 @@ async function handleSseRequest(
     params.query = apqResult.query;
   }
 
-  return streamSseResult(ctx, response, graphqlService, heartbeatMs, params);
+  return streamSseResult(ctx, response, graphqlService, runtime, heartbeatMs, params);
 }
 
 async function handleSseGet(
   ctx: IRequestContext,
   response: IResponse,
   graphqlService: IGraphqlService,
+  runtime: IRuntimeServices,
   heartbeatMs: number,
-  apqResolver: ApqResolver | null,
+  apqResolver: IApqResolver | null,
 ): Promise<HandlerResult> {
   const query = ctx.query.query;
   if (typeof query !== 'string' || query.length === 0) {
@@ -191,7 +210,7 @@ async function handleSseGet(
     params.query = apqResult.query;
   }
 
-  return streamSseResult(ctx, response, graphqlService, heartbeatMs, params);
+  return streamSseResult(ctx, response, graphqlService, runtime, heartbeatMs, params);
 }
 
 /**
@@ -201,6 +220,7 @@ async function streamSseResult(
   ctx: IRequestContext,
   response: IResponse,
   graphqlService: IGraphqlService,
+  runtime: IRuntimeServices,
   heartbeatMs: number,
   params: GraphqlRequestParams,
 ): Promise<HandlerResult> {
@@ -233,9 +253,9 @@ async function streamSseResult(
     controller.close();
   } else {
     // Stream: pump async iterable
-    const pump = pumpStream(controller, outcome.stream, heartbeatMs, ctx.signal);
-    // Fire-and-forget — the pump cleans up on abort/complete
-    void pump;
+    // Fire-and-forget — the pump cleans up on abort, on cancel, and on
+    // normal completion.
+    void pumpStream(controller, outcome.stream, runtime, heartbeatMs, ctx.signal);
   }
 
   return response.stream(controller.readable);
@@ -247,12 +267,13 @@ async function streamSseResult(
 async function pumpStream(
   controller: StreamController,
   stream: AsyncIterable<unknown>,
+  runtime: IRuntimeServices,
   heartbeatMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
   const heartbeatTimer = heartbeatMs > 0
-    ? setInterval(() => {
-      if (signal?.aborted) {
+    ? runtime.setInterval(() => {
+      if (signal?.aborted || controller.closed) {
         return;
       }
       controller.enqueue(encodeSseComment());
@@ -275,7 +296,7 @@ async function pumpStream(
       ? iterator.return.bind(iterator)
       : undefined;
     while (true) {
-      if (signal?.aborted) {
+      if (signal?.aborted || controller.closed) {
         break;
       }
       const { done, value } = await iterator.next();
@@ -286,17 +307,25 @@ async function pumpStream(
     }
     controller.enqueue(encodeSseComplete());
     controller.close();
-  } catch (err) {
+  } catch {
+    // The service already turns a source failure into a final MASKED payload,
+    // so reaching here means the iterator itself misbehaved. The message is
+    // deliberately generic rather than `err.message`, which would publish
+    // internals the HTTP path masks.
     controller.enqueue(encodeSseEvent({
-      errors: [{ message: err instanceof Error ? err.message : 'Stream error' }],
+      errors: [{
+        message: 'Internal server error',
+        extensions: { code: 'INTERNAL_SERVER_ERROR' },
+      }],
     }));
     controller.enqueue(encodeSseComplete());
     controller.close();
   } finally {
     if (heartbeatTimer !== null) {
-      clearInterval(heartbeatTimer);
+      runtime.clearInterval(heartbeatTimer);
     }
     signal?.removeEventListener('abort', abortListener);
+    await iteratorReturn?.();
   }
 }
 
@@ -305,6 +334,7 @@ async function pumpStream(
  */
 class StreamController {
   #controller!: ReadableStreamDefaultController<Uint8Array>;
+  #closed = false;
   readonly readable: ReadableStream<Uint8Array>;
 
   constructor() {
@@ -312,11 +342,25 @@ class StreamController {
       start: (controller) => {
         this.#controller = controller;
       },
+      // A consumer that goes away cancels the stream. Without this hook the
+      // pump keeps producing into a dead controller, and every `enqueue`
+      // throws `TypeError: Invalid state` out of a fire-and-forget promise.
+      cancel: () => {
+        this.#closed = true;
+      },
     });
     this.readable = stream;
   }
 
+  /** Whether the stream is finished — closed here, or cancelled downstream. */
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   enqueue(chunk: Uint8Array): void {
+    if (this.#closed) {
+      return;
+    }
     // NOTE: a hand-rolled `desiredSize` backpressure check here would silently
     // drop the second frame of every stream — a fresh `ReadableStream` (no
     // queuing strategy) has `desiredSize === 1`, so the FIRST enqueue drops it
@@ -328,10 +372,10 @@ class StreamController {
   }
 
   close(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
     this.#controller.close();
-  }
-
-  error(err: Error): void {
-    this.#controller.error(err);
   }
 }

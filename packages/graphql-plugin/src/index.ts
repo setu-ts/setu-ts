@@ -28,6 +28,8 @@ export type {
   GraphqlSubscriptionsOptions,
   GraphqlWsTransportOptions,
   ResolverMap,
+  SubscriptionResolver,
+  TypeResolverMap,
 } from './interfaces/options.ts';
 
 // Re-export common types for single-package import
@@ -62,7 +64,7 @@ export { createDepthLimitRule } from './security/depth-limit.ts';
 
 // APQ
 export { ApqResolver } from './apq/apq-resolver.ts';
-export type { ApqResolveResult } from './apq/apq-resolver.ts';
+export type { ApqResolveResult, IApqResolver } from './apq/apq-resolver.ts';
 export { extractPersistedQuery, persistedQueryHash } from './apq/persisted-query.ts';
 
 // SSE transport

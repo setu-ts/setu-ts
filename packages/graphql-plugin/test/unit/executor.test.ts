@@ -11,8 +11,10 @@ import {
   checkOperation,
   codedError,
   executeGraphql,
+  toInternalError,
   toParseError,
 } from '../../src/execution/executor.ts';
+import { isExposable } from '../../src/security/mask-errors.ts';
 import { DocumentCache } from '../../src/execution/document-cache.ts';
 import type {
   GraphqlDefinitionNodeLike,
@@ -98,73 +100,75 @@ describe('toParseError', () => {
 describe('checkOperation', () => {
   it('refuses an unresolvable operation (OPERATION_RESOLUTION_FAILED)', () => {
     const runtime = createRuntime({ operation: null });
-    const outcome = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' });
-    expect(outcome).not.toBeNull();
-    expect((outcome as { refused: boolean }).refused).toBe(true);
-    const result =
-      (outcome as unknown as { result: { errors: Array<{ extensions: { code: string } }> } })
-        .result;
-    expect(result.errors[0].extensions.code).toBe('OPERATION_RESOLUTION_FAILED');
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' });
+    expect(check.refused).not.toBeNull();
+    expect(check.refused?.status).toBe(400);
+    expect(check.refused?.executed).toBe(false);
+    const errors = check.refused?.result.errors ?? [];
+    expect(errors[0]?.extensions?.code).toBe('OPERATION_RESOLUTION_FAILED');
   });
 
   it('http arm refuses a subscription (SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP)', () => {
     const runtime = createRuntime({ operation: { operation: 'subscription' } });
-    const outcome = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' });
-    expect(outcome).not.toBeNull();
-    const o = outcome as unknown as {
-      status: number;
-      executed: boolean;
-      result: { errors: Array<{ extensions: { code: string } }> };
-    };
-    expect(o.status).toBe(400);
-    expect(o.executed).toBe(false);
-    expect(o.result.errors[0].extensions.code).toBe('SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP');
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' });
+    expect(check.refused?.status).toBe(400);
+    expect(check.refused?.executed).toBe(false);
+    expect(check.refused?.result.errors?.[0]?.extensions?.code).toBe(
+      'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+    );
   });
 
   it('http arm refuses a mutation over GET (METHOD_NOT_ALLOWED, 405)', () => {
     const runtime = createRuntime({ operation: { operation: 'mutation' } });
-    const outcome = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
       transport: 'http',
       method: 'GET',
     });
-    const o = outcome as unknown as {
-      status: number;
-      executed: boolean;
-      result: { errors: Array<{ extensions: { code: string } }> };
-    };
-    expect(o.status).toBe(405);
-    expect(o.executed).toBe(false);
-    expect(o.result.errors[0].extensions.code).toBe('METHOD_NOT_ALLOWED');
+    expect(check.refused?.status).toBe(405);
+    expect(check.refused?.executed).toBe(false);
+    expect(check.refused?.result.errors?.[0]?.extensions?.code).toBe('METHOD_NOT_ALLOWED');
   });
 
-  it('http arm allows a query (returns null)', () => {
+  it('http arm allows a query and reports its kind', () => {
     const runtime = createRuntime({ operation: { operation: 'query' } });
-    expect(checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' }))
-      .toBeNull();
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' });
+    expect(check.refused).toBeNull();
+    expect(check.refused === null ? check.operation : null).toBe('query');
   });
 
-  it('http arm allows a mutation over POST (returns null)', () => {
+  it('http arm allows a mutation over POST and reports its kind', () => {
     const runtime = createRuntime({ operation: { operation: 'mutation' } });
-    expect(
-      checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http', method: 'POST' }),
-    ).toBeNull();
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
+      transport: 'http',
+      method: 'POST',
+    });
+    expect(check.refused).toBeNull();
+    expect(check.refused === null ? check.operation : null).toBe('mutation');
   });
 
-  it('stream arm does not refuse a subscription (returns null)', () => {
+  it('stream arm allows a subscription and reports its kind', () => {
     const runtime = createRuntime({ operation: { operation: 'subscription' } });
-    expect(
-      checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'stream' }),
-    ).toBeNull();
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'stream' });
+    expect(check.refused).toBeNull();
+    // The kind is what lets `subscribeGraphql` dispatch without a second
+    // `getOperationAST` walk.
+    expect(check.refused === null ? check.operation : null).toBe('subscription');
   });
 
-  it('stream arm does not refuse a mutation over GET (returns null)', () => {
+  it('stream arm does not refuse a mutation over GET', () => {
     const runtime = createRuntime({ operation: { operation: 'mutation' } });
-    expect(
-      checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
-        transport: 'stream',
-        method: 'GET',
-      }),
-    ).toBeNull();
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
+      transport: 'stream',
+      method: 'GET',
+    });
+    expect(check.refused).toBeNull();
+  });
+
+  it('defaults an operation with no explicit kind to `query`', () => {
+    const runtime = createRuntime({ operation: {} as { operation: string } });
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, { transport: 'http' });
+    expect(check.refused).toBeNull();
+    expect(check.refused === null ? check.operation : null).toBe('query');
   });
 
   it('passes operationName through to getOperationAST only when non-empty', () => {
@@ -202,5 +206,31 @@ describe('executeGraphql', () => {
     expect(outcome.status).toBe(400);
     expect(outcome.executed).toBe(false);
     expect(outcome.result.errors).toBeDefined();
+  });
+});
+
+describe('toInternalError', () => {
+  it('preserves the message and keeps originalError so masking applies', () => {
+    const cause = new Error('connection string leaked');
+    const err = toInternalError(cause);
+    expect(err.message).toBe('connection string leaked');
+    // `originalError` is the whole point: it is what makes `isExposable`
+    // report false, so a throw escaping execute/subscribe is masked rather
+    // than reaching the client verbatim.
+    expect(err.originalError).toBe(cause);
+    expect(isExposable(err)).toBe(false);
+  });
+
+  it('wraps a non-Error throw', () => {
+    const err = toInternalError('string-thrown');
+    expect(err.message).toBe('string-thrown');
+    expect(err.originalError).toBeInstanceOf(Error);
+    expect(isExposable(err)).toBe(false);
+  });
+
+  it('falls back to a generic message for an empty-message Error', () => {
+    const err = toInternalError(new Error(''));
+    expect(err.message).toBe('Internal server error');
+    expect(err.toJSON()).toEqual({ message: 'Internal server error' });
   });
 });

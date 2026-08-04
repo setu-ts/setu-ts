@@ -13,10 +13,13 @@ import type {
   GraphqlOperationContext,
   GraphqlRequestParams,
   IGraphqlService,
+  IRuntimeServices,
   IWebSocketConnection,
+  TimerHandle,
   WebSocketConnectionContext,
   WebSocketHandlers,
 } from '@hono-enterprise/common';
+import type { IApqResolver } from '../../apq/apq-resolver.ts';
 import type { GraphqlWsTransportOptions } from '../../interfaces/options.ts';
 import {
   CLOSE_DUPLICATE_SUBSCRIBE,
@@ -43,15 +46,22 @@ interface ConnectionState {
   acknowledged: boolean;
   /** Whether `connection_init` was received and accepted. */
   initialized: boolean;
-  /** Active subscriptions keyed by id. */
+  /**
+   * Operations in flight or streaming, keyed by id.
+   *
+   * An entry is created BEFORE the operation is dispatched, so a client
+   * `complete` arriving while a single-result operation is still resolving can
+   * suppress its result — which the protocol requires and which is impossible
+   * if only live streams are tracked.
+   */
   subscriptions: Map<string, {
-    iterator: AsyncIterator<unknown>;
+    iterator: AsyncIterator<unknown> | null;
     suppressed: boolean;
   }>;
   /** Init timeout handle. */
-  initTimer: ReturnType<typeof setTimeout> | null;
+  initTimer: TimerHandle | null;
   /** Heartbeat interval handle. */
-  heartbeatTimer: ReturnType<typeof setInterval> | null;
+  heartbeatTimer: TimerHandle | null;
   /** The GraphqlConnectionInfo built from the upgrade. */
   connectionInfo: GraphqlConnectionInfo;
 }
@@ -61,16 +71,16 @@ interface ConnectionState {
  *
  * @param graphqlService - The GraphQL service
  * @param wsOptions - WebSocket transport options
- * @param serviceRegistry - Plugin-level service registry for context building
+ * @param runtime - Runtime services, for the init-timeout and heartbeat timers
+ * @param apqResolver - APQ resolver, so a hash-only `subscribe` answers
+ *   `PERSISTED_QUERY_NOT_FOUND` rather than a parse error; `null` when APQ is off
  * @returns WebSocket handlers
  */
 export function createWsHandlers(
   graphqlService: IGraphqlService,
   wsOptions: GraphqlWsTransportOptions,
-  _serviceRegistry?: unknown,
-  // C6: optional APQ resolver wired from the plugin so hash-only subscribe
-  // returns PERSISTED_QUERY_NOT_FOUND instead of a parse error.
-  apqResolver?: unknown,
+  runtime: IRuntimeServices,
+  apqResolver: IApqResolver | null = null,
 ): WebSocketHandlers {
   const connectionInitWaitMs = wsOptions.connectionInitWaitMs ?? 3000;
   const heartbeatMs = wsOptions.heartbeatMs ?? 0;
@@ -105,7 +115,7 @@ export function createWsHandlers(
       conn.data.set('__wsState', state);
 
       // Start init timeout
-      state.initTimer = setTimeout(() => {
+      state.initTimer = runtime.setTimeout(() => {
         if (!state.initialized) {
           conn.close(CLOSE_INIT_TIMEOUT, 'Connection initialisation timeout');
         }
@@ -113,7 +123,7 @@ export function createWsHandlers(
 
       // Start heartbeat if configured
       if (heartbeatMs > 0) {
-        state.heartbeatTimer = setInterval(() => {
+        state.heartbeatTimer = runtime.setInterval(() => {
           if (conn.isOpen) {
             try {
               conn.send(encodeFrame({ type: GQL_PING }));
@@ -148,7 +158,7 @@ export function createWsHandlers(
 
           state.initialized = true;
           if (state.initTimer) {
-            clearTimeout(state.initTimer);
+            runtime.clearTimeout(state.initTimer);
             state.initTimer = null;
           }
 
@@ -226,29 +236,40 @@ export function createWsHandlers(
             params.extensions = payload.extensions as Record<string, unknown>;
           }
 
-          // C6: resolve APQ before subscribe so a hash-only request gets
+          const id = frame.id;
+
+          // Claim the id BEFORE any await. The protocol says a client
+          // `complete` that arrives while a single-result operation is still
+          // resolving must suppress that result, which is unreachable if the
+          // id is only registered once a live stream exists.
+          const entry: { iterator: AsyncIterator<unknown> | null; suppressed: boolean } = {
+            iterator: null,
+            suppressed: false,
+          };
+          state.subscriptions.set(id, entry);
+
+          // Resolve APQ before subscribing so a hash-only request gets
           // PERSISTED_QUERY_NOT_FOUND rather than a parse error.
-          if (apqResolver !== null && apqResolver !== undefined) {
-            const { resolve } = apqResolver as {
-              resolve: (
-                p: { query?: string; extensions?: Record<string, unknown> | undefined },
-              ) => Promise<
-                { ok: boolean; query?: string; message?: string; code?: string; status?: number }
-              >;
-            };
-            const apqResult = await resolve({ query: params.query, extensions: params.extensions });
+          if (apqResolver !== null) {
+            const apqResult = await apqResolver.resolve({
+              query: params.query,
+              ...(params.extensions ? { extensions: params.extensions } : {}),
+            });
             if (!apqResult.ok) {
-              conn.send(encodeFrame({
-                type: GQL_ERROR,
-                id: frame.id,
-                payload: [{
-                  message: apqResult.message ?? 'APQ error',
-                  extensions: { code: apqResult.code ?? 'PERSISTED_QUERY_NOT_FOUND' },
-                }],
-              }));
+              state.subscriptions.delete(id);
+              if (!entry.suppressed && conn.isOpen) {
+                conn.send(encodeFrame({
+                  type: GQL_ERROR,
+                  id,
+                  payload: [{
+                    message: apqResult.message,
+                    extensions: { code: apqResult.code },
+                  }],
+                }));
+              }
               return;
             }
-            params.query = apqResult.query ?? params.query;
+            params.query = apqResult.query;
           }
 
           // Build operation context (WS path supplies connection)
@@ -256,14 +277,26 @@ export function createWsHandlers(
             connection: state.connectionInfo,
           };
 
-          // Subscribe
           const outcome = await graphqlService.subscribe(params, context);
 
+          // The client completed (or the socket closed) while we were
+          // resolving: send nothing.
+          if (entry.suppressed || !conn.isOpen) {
+            state.subscriptions.delete(id);
+            if (outcome.kind === 'stream') {
+              const it = outcome.stream[Symbol.asyncIterator]();
+              await it.return?.();
+            }
+            return;
+          }
+
           if (outcome.kind === 'error') {
-            // Request error: emit error and NO complete
+            // Request error: emit `error` and NO `complete` — the protocol
+            // states the error message terminates the operation on its own.
+            state.subscriptions.delete(id);
             conn.send(encodeFrame({
               type: GQL_ERROR,
-              id: frame.id,
+              id,
               payload: outcome.result.errors ?? [],
             }));
             return;
@@ -271,23 +304,15 @@ export function createWsHandlers(
 
           if (outcome.kind === 'single') {
             // Query/mutation: one next, then complete
-            conn.send(encodeFrame({
-              type: GQL_NEXT,
-              id: frame.id,
-              payload: outcome.result,
-            }));
-            conn.send(encodeFrame({
-              type: GQL_COMPLETE,
-              id: frame.id,
-            }));
+            state.subscriptions.delete(id);
+            conn.send(encodeFrame({ type: GQL_NEXT, id, payload: outcome.result }));
+            conn.send(encodeFrame({ type: GQL_COMPLETE, id }));
             return;
           }
 
           // Stream: start pumping
-          const iterator = outcome.stream[Symbol.asyncIterator]();
-          state.subscriptions.set(frame.id, { iterator, suppressed: false });
-
-          pumpWsSubscription(conn, frame.id, iterator, state);
+          entry.iterator = outcome.stream[Symbol.asyncIterator]();
+          void pumpWsSubscription(conn, id, entry.iterator, state);
           break;
         }
 
@@ -296,8 +321,9 @@ export function createWsHandlers(
             const sub = state.subscriptions.get(frame.id);
             if (sub) {
               sub.suppressed = true;
-              // Release the iterator
-              if (typeof sub.iterator.return === 'function') {
+              // Release the iterator when one already exists; when the
+              // operation is still resolving, `suppressed` is what stops it.
+              if (sub.iterator && typeof sub.iterator.return === 'function') {
                 void sub.iterator.return();
               }
               state.subscriptions.delete(frame.id);
@@ -307,7 +333,12 @@ export function createWsHandlers(
         }
 
         default:
-          // Unknown message type — ignore (protocol requires)
+          // PROTOCOL.md: "Receiving a message of a type or format which is not
+          // specified in this document will result in an immediate socket
+          // closure with the event 4400". The ignore rule applies to unknown
+          // IDs, not to unknown types — `next`, `error`, and `connection_ack`
+          // are server-to-client and are invalid inbound.
+          conn.close(CLOSE_INVALID_MESSAGE, `Invalid message type: ${frame.type}`);
           break;
       }
     },
@@ -321,17 +352,17 @@ export function createWsHandlers(
       const state = conn.data.get('__wsState') as ConnectionState | undefined;
       if (state) {
         if (state.initTimer) {
-          clearTimeout(state.initTimer);
+          runtime.clearTimeout(state.initTimer);
           state.initTimer = null;
         }
         if (state.heartbeatTimer) {
-          clearInterval(state.heartbeatTimer);
+          runtime.clearInterval(state.heartbeatTimer);
           state.heartbeatTimer = null;
         }
         // C1: release every active subscription iterator
         for (const sub of state.subscriptions.values()) {
           sub.suppressed = true;
-          if (typeof sub.iterator.return === 'function') {
+          if (sub.iterator && typeof sub.iterator.return === 'function') {
             void sub.iterator.return();
           }
         }
@@ -378,17 +409,24 @@ async function pumpWsSubscription(
         }));
       }
     }
-  } catch (err) {
+  } catch {
+    // The service already converts a source failure into a final MASKED
+    // payload, so reaching here means the iterator itself misbehaved. The
+    // message is deliberately generic: a raw `err.message` here is how the
+    // subscription path came to publish internals the HTTP path masks.
     if (conn.isOpen) {
       try {
         conn.send(encodeFrame({
           type: GQL_ERROR,
           id,
-          payload: [{ message: err instanceof Error ? err.message : 'Stream error' }],
+          payload: [{
+            message: 'Internal server error',
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          }],
         }));
       } catch {
         // send may throw after isOpen was true (race); swallow to avoid
-        // unhandled rejection — E2.
+        // an unhandled rejection.
       }
     }
   } finally {

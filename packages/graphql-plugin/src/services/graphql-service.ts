@@ -18,9 +18,48 @@ import type { GraphqlLogger } from '../interfaces/options.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../interfaces/graphql-runtime.ts';
 import type { DefaultGraphqlContext, GraphqlContextInput } from '../interfaces/options.ts';
 import { DocumentCache } from '../execution/document-cache.ts';
-import { executeGraphql } from '../execution/executor.ts';
+import { executeGraphql, toInternalError } from '../execution/executor.ts';
+import { subscribeGraphql } from '../execution/subscribe.ts';
 import { maskErrors } from '../security/mask-errors.ts';
 import { createDepthLimitRule } from '../security/depth-limit.ts';
+
+/** Options {@linkcode maskStream} forwards to {@linkcode maskErrors}. */
+interface MaskOptions {
+  maskInternalErrors: boolean;
+  formatError?: (error: unknown) => unknown;
+  logger?: GraphqlLogger;
+}
+
+/**
+ * Wrap a live subscription so every emitted payload is masked, and a throw
+ * from the source becomes a final masked error payload rather than a rejection
+ * the transport has to invent a wire shape for.
+ *
+ * `return()` is forwarded to the source in `finally`, so a client disconnect
+ * still runs a generator-based producer's own cleanup.
+ */
+async function* maskStream(
+  source: AsyncIterable<GraphqlExecutionResult>,
+  options: MaskOptions,
+): AsyncGenerator<GraphqlExecutionResult, void, undefined> {
+  const iterator = source[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const { done, value } = await iterator.next();
+      if (done) {
+        return;
+      }
+      yield maskErrors(value, options) as GraphqlExecutionResult;
+    }
+  } catch (e) {
+    yield maskErrors(
+      { errors: [toInternalError(e)] },
+      options,
+    ) as GraphqlExecutionResult;
+  } finally {
+    await iterator.return?.();
+  }
+}
 
 /**
  * GraphQL service implementation.
@@ -187,7 +226,6 @@ export class GraphqlService implements IGraphqlService {
       contextValue = defaultContext;
     }
 
-    const { subscribeGraphql } = await import('../execution/subscribe.ts');
     const outcome = await subscribeGraphql(params.query, {
       schema: this.#schema,
       runtime: this.#runtime,
@@ -215,9 +253,14 @@ export class GraphqlService implements IGraphqlService {
       return { kind: 'single', status: outcome.status, result: masked as GraphqlExecutionResult };
     }
 
-    // Stream: masking applied lazily as results arrive
-    // (the transport wraps the stream to mask each result)
-    return outcome;
+    // A live subscription's payloads are masked HERE, not in the transports:
+    // masking is one capability, and a per-transport copy is how the WS and SSE
+    // paths came to publish raw resolver errors while the HTTP path masked them.
+    return {
+      kind: 'stream',
+      status: outcome.status,
+      stream: maskStream(outcome.stream, maskErrorsOptions),
+    };
   }
 
   /**

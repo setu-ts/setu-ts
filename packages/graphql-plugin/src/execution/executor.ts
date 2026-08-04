@@ -83,26 +83,29 @@ export function toParseError(thrown: unknown): GraphqlGraphQLErrorLike {
   };
 }
 
-/**
- * The result of {@linkcode checkOperation} when the operation is refused.
- */
-export interface PreparedRefusal {
-  refused: true;
-  executed: false;
-  status: number;
-  result: GraphqlExecutionResultLike;
-}
+/** The operation kinds a resolved document can carry. */
+export type GraphqlOperationKind = 'query' | 'mutation' | 'subscription';
 
 /**
- * Guard the resolved operation: refuse an unresolvable operation, a
- * subscription over HTTP, and a mutation over `GET`.
+ * The result of {@linkcode checkOperation}: a refusal, or the resolved kind.
+ *
+ * Returning the kind is what lets the caller dispatch between `execute` and
+ * `subscribe` without a second `getOperationAST` walk.
+ */
+export type OperationCheck =
+  | { refused: ExecutionPhaseOutcome }
+  | { refused: null; operation: GraphqlOperationKind };
+
+/**
+ * Guard the resolved operation: refuse an unresolvable operation, and — on the
+ * `http` transport only — a subscription and a mutation over `GET`.
  *
  * Runs against an already-parsed document, so a cache hit costs no parse.
  *
  * @param runtime - The GraphQL runtime
  * @param document - The parsed document
  * @param options - Options controlling the transport arm
- * @returns An outcome to short-circuit with, or `null` to continue
+ * @returns A refusal to short-circuit with, or the resolved operation kind
  */
 export function checkOperation(
   runtime: GraphqlRuntime,
@@ -112,7 +115,7 @@ export function checkOperation(
     method?: 'GET' | 'POST';
     transport: 'http' | 'stream';
   },
-): ExecutionPhaseOutcome | PreparedRefusal | null {
+): OperationCheck {
   const name = options.operationName && options.operationName.length > 0
     ? options.operationName
     : undefined;
@@ -120,49 +123,151 @@ export function checkOperation(
 
   if (!ast) {
     return {
-      refused: true,
-      executed: false,
-      status: 400,
-      result: {
-        errors: [
-          codedError(
-            'Could not resolve which operation to execute. Provide `operationName`.',
-            'OPERATION_RESOLUTION_FAILED',
-          ),
-        ],
-      },
-    };
-  }
-
-  // HTTP transport: refuse subscriptions and mutations over GET
-  if (options.transport === 'http') {
-    if (ast.operation === 'subscription') {
-      return {
+      refused: {
         status: 400,
         executed: false,
         result: {
           errors: [
             codedError(
-              'Subscriptions are not supported over HTTP',
-              'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+              'Could not resolve which operation to execute. Provide `operationName`.',
+              'OPERATION_RESOLUTION_FAILED',
             ),
           ],
+        },
+      },
+    };
+  }
+
+  const operation = (ast.operation ?? 'query') as GraphqlOperationKind;
+
+  // HTTP transport: refuse subscriptions and mutations over GET
+  if (options.transport === 'http') {
+    if (operation === 'subscription') {
+      return {
+        refused: {
+          status: 400,
+          executed: false,
+          result: {
+            errors: [
+              codedError(
+                'Subscriptions are not supported over HTTP',
+                'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+              ),
+            ],
+          },
         },
       };
     }
 
-    if (ast.operation === 'mutation' && options.method === 'GET') {
+    if (operation === 'mutation' && options.method === 'GET') {
       return {
-        status: 405,
-        executed: false,
-        result: {
-          errors: [codedError('Mutations are not allowed over GET', 'METHOD_NOT_ALLOWED')],
+        refused: {
+          status: 405,
+          executed: false,
+          result: {
+            errors: [codedError('Mutations are not allowed over GET', 'METHOD_NOT_ALLOWED')],
+          },
         },
       };
     }
   }
 
-  return null;
+  return { refused: null, operation };
+}
+
+/**
+ * The outcome of the shared parse → guard → validate prologue.
+ */
+export type PreparedDocument =
+  | { ok: false; outcome: ExecutionPhaseOutcome }
+  | { ok: true; document: GraphqlDocumentNodeLike; operation: GraphqlOperationKind };
+
+/**
+ * Parse, guard, and validate a document — the prologue both pipelines share.
+ *
+ * Owning it in ONE place is what keeps the document cache honest: the cache
+ * holds the parsed document AND its validation result, so a repeat request
+ * costs neither a parse nor a validate, on any transport. It also guarantees
+ * that the depth limit, the introspection rule, and the application's own
+ * validation rules apply identically over HTTP, WebSocket, and SSE.
+ *
+ * @param query - The raw query document
+ * @param options - Execution options plus the transport arm
+ * @returns A short-circuit outcome, or the document and its operation kind
+ */
+export function prepareDocument(
+  query: string,
+  options: ExecuteOptions & {
+    operationName?: string;
+    method?: 'GET' | 'POST';
+    transport: 'http' | 'stream';
+  },
+): PreparedDocument {
+  const { runtime, schema, documentCache, validationRules } = options;
+
+  // Parse (a cache hit reuses both the document and its validation result).
+  const cached = documentCache.get(query);
+  let document: GraphqlDocumentNodeLike;
+  let validationErrors: GraphqlGraphQLErrorLike[] | null;
+
+  if (cached) {
+    document = cached.document;
+    validationErrors = cached.validationErrors;
+  } else {
+    try {
+      document = runtime.parse(query);
+    } catch (e) {
+      return {
+        ok: false,
+        outcome: { status: 400, executed: false, result: { errors: [toParseError(e)] } },
+      };
+    }
+    validationErrors = null;
+  }
+
+  // Operation-kind guard: after parse, before validate — so a refused
+  // operation never pays for validation.
+  const check = checkOperation(runtime, document, {
+    ...(options.operationName ? { operationName: options.operationName } : {}),
+    ...(options.method ? { method: options.method } : {}),
+    transport: options.transport,
+  });
+  if (check.refused) {
+    return { ok: false, outcome: check.refused };
+  }
+
+  if (!cached) {
+    validationErrors = runtime.validate(schema, document, validationRules);
+    documentCache.set(query, { document, validationErrors });
+  }
+
+  if (validationErrors && validationErrors.length > 0) {
+    return {
+      ok: false,
+      outcome: { status: 400, executed: false, result: { errors: validationErrors } },
+    };
+  }
+
+  return { ok: true, document, operation: check.operation };
+}
+
+/**
+ * Normalize a thrown execution failure into a maskable error.
+ *
+ * The `originalError` is what makes {@linkcode isExposable} report `false`, so
+ * a throw escaping `execute`/`subscribe` is masked exactly like any other
+ * internal error rather than reaching the client verbatim.
+ */
+export function toInternalError(thrown: unknown): GraphqlGraphQLErrorLike {
+  const original = thrown instanceof Error ? thrown : new Error(String(thrown));
+  const message = original.message.length > 0 ? original.message : 'Internal server error';
+  return {
+    message,
+    originalError: original,
+    toJSON() {
+      return { message };
+    },
+  };
 }
 
 /**
@@ -182,44 +287,13 @@ export async function executeGraphql(
     method?: 'GET' | 'POST';
   },
 ): Promise<ExecutionPhaseOutcome> {
-  const { runtime, schema, documentCache, validationRules } = options;
+  const { runtime, schema } = options;
 
-  // Parse (cache hit reuses both the document and its validation result).
-  const cached = documentCache.get(query);
-  let document: GraphqlDocumentNodeLike;
-  let validationErrors: GraphqlGraphQLErrorLike[] | null;
-
-  if (cached) {
-    document = cached.document;
-    validationErrors = cached.validationErrors;
-  } else {
-    try {
-      document = runtime.parse(query);
-    } catch (e) {
-      return { status: 400, executed: false, result: { errors: [toParseError(e)] } };
-    }
-    validationErrors = null;
+  const prepared = prepareDocument(query, { ...options, transport: 'http' });
+  if (!prepared.ok) {
+    return prepared.outcome;
   }
-
-  // Operation-kind guard: after parse, before validate — so a refused operation
-  // never pays for validation.
-  const guard = checkOperation(runtime, document, {
-    ...(options.operationName ? { operationName: options.operationName } : {}),
-    ...(options.method ? { method: options.method } : {}),
-    transport: 'http',
-  });
-  if (guard) {
-    return guard as ExecutionPhaseOutcome;
-  }
-
-  if (!cached) {
-    validationErrors = runtime.validate(schema, document, validationRules);
-    documentCache.set(query, { document, validationErrors });
-  }
-
-  if (validationErrors && validationErrors.length > 0) {
-    return { status: 400, executed: false, result: { errors: validationErrors } };
-  }
+  const { document } = prepared;
 
   const execArgs: {
     schema: GraphqlSchemaLike;

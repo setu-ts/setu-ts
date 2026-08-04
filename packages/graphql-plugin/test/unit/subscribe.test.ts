@@ -260,3 +260,58 @@ describe('subscribeGraphql', () => {
     }
   });
 });
+
+describe('subscribeGraphql — a throw from graphql is contained', () => {
+  const subscriptionDoc = {
+    kind: 'Document',
+    definitions: [{
+      kind: 'OperationDefinition',
+      operation: 'subscription',
+      selectionSet: { kind: 'SelectionSet', selections: [] },
+    }],
+  };
+
+  it('turns a throwing `subscribe` into a maskable error outcome, not a rejection', async () => {
+    // graphql throws exactly this when a subscription field has no event
+    // source — the failure that made the SSE route answer the kernel's 500.
+    const runtime = createFakeRuntime({
+      parse: () => subscriptionDoc,
+      subscribe: () => {
+        throw new Error('Subscription field must return Async Iterable. Received: undefined.');
+      },
+    } as Partial<GraphqlRuntime>);
+
+    const outcome = await subscribeGraphql('subscription { tick }', {
+      schema: createFakeSchema(),
+      runtime,
+      documentCache: new DocumentCache(10),
+      validationRules: [],
+    });
+
+    expect(outcome.kind).toBe('error');
+    if (outcome.kind !== 'error') return;
+    expect(outcome.status).toBe(500);
+    // `originalError` is carried, so the service's masking step catches it.
+    const first = outcome.result.errors?.[0] as { originalError?: Error } | undefined;
+    expect(first?.originalError).toBeInstanceOf(Error);
+  });
+
+  it('turns a throwing `execute` into a maskable error outcome', async () => {
+    const runtime = createFakeRuntime({
+      execute: () => {
+        throw new Error('resolver blew up at setup');
+      },
+    } as Partial<GraphqlRuntime>);
+
+    const outcome = await subscribeGraphql('{ hello }', {
+      schema: createFakeSchema(),
+      runtime,
+      documentCache: new DocumentCache(10),
+      validationRules: [],
+    });
+
+    expect(outcome.kind).toBe('error');
+    if (outcome.kind !== 'error') return;
+    expect(outcome.status).toBe(500);
+  });
+});

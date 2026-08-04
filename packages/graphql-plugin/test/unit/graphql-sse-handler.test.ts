@@ -19,6 +19,7 @@ import type {
   IResponse,
   IServiceRegistry,
 } from '@hono-enterprise/common';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createSseHandler } from '../../src/transports/sse/graphql-sse-handler.ts';
 import type { ApqResolver, ApqResolveResult } from '../../src/apq/apq-resolver.ts';
 
@@ -151,7 +152,7 @@ describe('createSseHandler', () => {
       status: 200,
       result: { data: {} },
     }));
-    const { post, get } = createSseHandler(service);
+    const { post, get } = createSseHandler(service, createFakeRuntime().runtime);
     expect(typeof post).toBe('function');
     expect(typeof get).toBe('function');
   });
@@ -166,7 +167,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ response: mock, jsonThrows: true });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       expect(captures.status).toBe(400);
@@ -185,7 +186,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: [{ query: '{ hello }' }], response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       expect(captures.status).toBe(400);
@@ -201,7 +202,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: null, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       expect(captures.status).toBe(400);
@@ -217,7 +218,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { operationName: 'X' }, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       expect(captures.status).toBe(400);
@@ -233,7 +234,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { query: '{ error }' }, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       // Stream opens with 200, even though the outcome is an error.
@@ -256,7 +257,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { query: '{ hello }' }, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       expect(captures.status).toBe(200);
@@ -282,7 +283,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
       await drain(captures.stream!);
 
@@ -304,7 +305,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
       await drain(captures.stream!);
 
@@ -329,7 +330,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { post } = createSseHandler(service, 0, apq);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime, 0, apq);
       await post(ctx);
 
       expect(captures.status).toBe(400);
@@ -349,7 +350,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { post } = createSseHandler(service, 0, apq);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime, 0, apq);
       await post(ctx);
       await drain(captures.stream!);
 
@@ -367,7 +368,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ response: mock });
 
-      const { get } = createSseHandler(service);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime);
       await get(ctx);
 
       expect(captures.status).toBe(400);
@@ -383,7 +384,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ query: { query: '{ hello }' }, response: mock });
 
-      const { get } = createSseHandler(service);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime);
       await get(ctx);
 
       expect(captures.status).toBe(200);
@@ -409,7 +410,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { get } = createSseHandler(service);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime);
       await get(ctx);
       await drain(captures.stream!);
 
@@ -430,7 +431,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { get } = createSseHandler(service);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime);
       await get(ctx);
 
       expect(captures.status).toBe(200);
@@ -448,7 +449,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { get } = createSseHandler(service);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime);
       await get(ctx);
       await drain(captures.stream!);
 
@@ -467,7 +468,7 @@ describe('createSseHandler', () => {
         response: mock,
       });
 
-      const { get } = createSseHandler(service);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime);
       await get(ctx);
 
       expect(captures.status).toBe(200);
@@ -488,7 +489,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ query: { query: '{ hello }' }, response: mock });
 
-      const { get } = createSseHandler(service, 0, apq);
+      const { get } = createSseHandler(service, createFakeRuntime().runtime, 0, apq);
       await get(ctx);
 
       expect(captures.status).toBe(400);
@@ -508,7 +509,7 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { query: 'subscription { tick }' }, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       const body = await drain(captures.stream!);
@@ -520,22 +521,33 @@ describe('createSseHandler', () => {
     });
 
     it('emits keep-alive comments when heartbeatMs > 0', async () => {
+      // Held open until the test releases it, so the heartbeat tick lands
+      // while the stream is genuinely idle.
+      const gate = Promise.withResolvers<void>();
       const service = createMockService(() => ({
         kind: 'stream',
         status: 200,
         stream: (async function* () {
-          await new Promise((r) => setTimeout(r, 25));
+          await gate.promise;
           yield { data: { tick: 0 } };
         })(),
       }));
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { query: 'subscription { tick }' }, response: mock });
 
-      const { post } = createSseHandler(service, 5);
+      const { fake, runtime } = createFakeRuntime();
+      const { post } = createSseHandler(service, runtime, 5);
       await post(ctx);
+
+      // Driven rather than waited on — the handler takes its timer from
+      // runtime services so this tick is deterministic.
+      fake.runTimers();
+      gate.resolve();
 
       const body = await drain(captures.stream!);
       expect(body).toContain(':keep-alive');
+      // The keep-alive interval must be released when the pump finishes.
+      expect(fake.activeTimerCount).toBe(0);
     });
 
     it('stops pumping when the request signal aborts', async () => {
@@ -561,7 +573,7 @@ describe('createSseHandler', () => {
         signal: ac.signal,
       });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
       const body = await drain(captures.stream!);
 
@@ -601,7 +613,7 @@ describe('createSseHandler', () => {
         signal: ac.signal,
       });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       // Start the pump, then abort after a short delay so the abort listener
       // fires while the pump is idle (waiting for the next value).
       const postPromise = post(ctx);
@@ -628,11 +640,15 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { query: 'subscription { tick }' }, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       const body = await drain(captures.stream!);
-      expect(body).toContain('stream blew up');
+      // The pump must NOT put a raw producer message into the stream. Masking
+      // is the service's job; this last-resort frame is generic so a
+      // misbehaving iterator cannot publish internals the HTTP path masks.
+      expect(body).not.toContain('stream blew up');
+      expect(body).toContain('Internal server error');
       expect(body).toContain('event: complete');
     });
 
@@ -648,12 +664,61 @@ describe('createSseHandler', () => {
       const { mock, captures } = createMockResponse();
       const ctx = createMockRequest({ body: { query: 'subscription { tick }' }, response: mock });
 
-      const { post } = createSseHandler(service);
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
       await post(ctx);
 
       const body = await drain(captures.stream!);
-      expect(body).toContain('Stream error');
+      expect(body).not.toContain('string-thrown');
+      expect(body).toContain('Internal server error');
       expect(body).toContain('event: complete');
     });
+  });
+});
+
+describe('createSseHandler — a consumer that goes away', () => {
+  it('stops the pump on cancel instead of throwing into a dead controller', async () => {
+    let produced = 0;
+    let released = false;
+    const gate = Promise.withResolvers<void>();
+    const service = createMockService(() => ({
+      kind: 'stream',
+      status: 200,
+      stream: {
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              produced++;
+              if (produced > 1) await gate.promise;
+              return { done: false, value: { data: { tick: produced } } };
+            },
+            // deno-lint-ignore require-await
+            async return() {
+              released = true;
+              return { done: true as const, value: undefined };
+            },
+          };
+        },
+      },
+    }));
+    const { mock, captures } = createMockResponse();
+    const ctx = createMockRequest({ body: { query: 'subscription { tick }' }, response: mock });
+
+    const { post } = createSseHandler(service, createFakeRuntime().runtime);
+    await post(ctx);
+
+    // Read one frame, then walk away — which is what a disconnecting client
+    // does. Without the controller's `cancel` hook the pump kept enqueueing
+    // into a dead controller and every call threw out of a fire-and-forget
+    // promise.
+    const reader = captures.stream!.getReader();
+    await reader.read();
+    await reader.cancel();
+
+    gate.resolve();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(released).toBe(true);
+    // Bounded: the pump noticed the cancel rather than running forever.
+    expect(produced).toBeLessThan(10);
   });
 });

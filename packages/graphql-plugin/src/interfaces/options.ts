@@ -13,13 +13,22 @@ import type { GraphqlModuleLike, GraphqlSchemaLike } from './graphql-runtime.ts'
  * Keys are type names, values are objects mapping field names to resolvers
  * or scalar resolver maps ({@linkcode GraphqlScalarResolver}).
  */
-export type ResolverMap = Record<
+export type ResolverMap = Record<string, TypeResolverMap | GraphqlScalarResolver>;
+
+/**
+ * The resolver entries for one object or interface type.
+ *
+ * A field maps to a plain {@linkcode FieldResolver}, or — for a field of the
+ * `Subscription` root type — to a {@linkcode SubscriptionResolver} carrying the
+ * event source.
+ *
+ * @since 0.3.0
+ */
+export type TypeResolverMap = Record<
   string,
-  | Record<
-    string,
-    FieldResolver | (() => unknown) // resolveType for interfaces
-  >
-  | GraphqlScalarResolver
+  | FieldResolver
+  | SubscriptionResolver
+  | (() => unknown) // __resolveType for interfaces
 >;
 
 /**
@@ -35,6 +44,32 @@ export type FieldResolver = (
 ) => unknown;
 
 /**
+ * A subscription field's resolver pair.
+ *
+ * `subscribe` returns the async iterable the field streams from and is
+ * attached to the schema field's `subscribe` slot; the optional `resolve` maps
+ * each emitted payload to the field value, exactly as graphql defines it.
+ *
+ * Without this arm a subscription is unexpressible in the schema-first map:
+ * an entry has to be a function, and assigning `{ subscribe }` to a field's
+ * `resolve` leaves `subscribe` unset, which makes `graphql.subscribe()` throw
+ * "Subscription field must return Async Iterable".
+ *
+ * @since 0.3.0
+ */
+export interface SubscriptionResolver {
+  /** Produces the event source for this subscription field. */
+  subscribe: (
+    source: unknown,
+    args: Record<string, unknown>,
+    context: unknown,
+    info: unknown,
+  ) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
+  /** Maps each emitted payload to the field value. Optional. */
+  resolve?: FieldResolver;
+}
+
+/**
  * Custom scalar resolver methods.
  *
  * Supply any subset of `serialize`, `parseValue`, and `parseLiteral`; omitted
@@ -44,11 +79,16 @@ export type FieldResolver = (
  */
 export interface GraphqlScalarResolver {
   /** Serialize an internal value to JSON-safe output. */
-  serialize?(): unknown;
+  serialize?(value: unknown): unknown;
   /** Parse a client input value (variable). */
-  parseValue?(): unknown;
-  /** Parse a literal AST value (inline). */
-  parseLiteral?(): unknown;
+  parseValue?(value: unknown): unknown;
+  /**
+   * Parse a literal AST value (inline argument).
+   *
+   * @param node - The literal AST node
+   * @param variables - Variable values in scope, when graphql supplies them
+   */
+  parseLiteral?(node: unknown, variables?: Record<string, unknown> | null): unknown;
 }
 
 /**

@@ -1758,6 +1758,19 @@ ws.route('/ws/chat', {
 }, { protocols: ['chat'] });
 ```
 
+#### Route options
+
+| Option      | Type                | Default | Purpose                                                                                                                 |
+| ----------- | ------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `protocols` | `readonly string[]` | omitted | Subprotocol allow-list; the first client match is echoed back                                                           |
+| `heartbeat` | `boolean`           | `true`  | `false` excludes this route's connections from the shared heartbeat sweep — both the payload send AND the idle eviction |
+
+> Set `heartbeat: false` when the route speaks its own liveness protocol. The sweeper sends
+> `heartbeatPayload` as a raw text frame to every connection on every route, which a protocol client
+> (a `graphql-transport-ws` peer, for instance) must treat as an invalid message; and it evicts on
+> inbound silence, which is the normal state of a listen-only subscriber. The GraphQL plugin's
+> WebSocket route claims this opt-out.
+
 ### Exports
 
 | Export                      | Kind     | Purpose                                                                |
@@ -7489,44 +7502,84 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ### Options
 
-| Option               | Type                                      | Default    | Description                                                               |
-| -------------------- | ----------------------------------------- | ---------- | ------------------------------------------------------------------------- |
-| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                                 |
-| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                                          |
-| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                                        |
-| `path`               | `string`                                  | `/graphql` | Endpoint path                                                             |
-| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                                        |
-| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                               |
-| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                                        |
-| `validationRules`    | `unknown[]`                               | omitted    | Extra rules, appended after the built-ins, assembled once at registration |
-| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                               |
-| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                              |
-| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                                       |
-| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                                    |
-| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                                  |
-| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios)             |
+| Option               | Type                                      | Default    | Description                                                                            |
+| -------------------- | ----------------------------------------- | ---------- | -------------------------------------------------------------------------------------- |
+| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                                              |
+| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                                                       |
+| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                                                     |
+| `path`               | `string`                                  | `/graphql` | Endpoint path                                                                          |
+| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                                                     |
+| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                                            |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                                                     |
+| `validationRules`    | `unknown[]`                               | omitted    | Extra rules, appended after the built-ins, assembled once at registration              |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                                            |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                                           |
+| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                                                    |
+| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                                                 |
+| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                                               |
+| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios)                          |
+| `subscriptions`      | `GraphqlSubscriptionsOptions`             | omitted    | Subscription transports. **Omitted registers no transport route at all.**              |
+| `apq`                | `GraphqlApqOptions`                       | omitted    | Automatic Persisted Queries. **Omitted disables APQ**; requires `CAPABILITIES.RUNTIME` |
+| `maxBatchSize`       | `number`                                  | `0`        | **`0` disables batching** and an array body is still refused with `400`                |
+
+#### `subscriptions`
+
+| Option                           | Type                                  | Default                | Purpose                                        |
+| -------------------------------- | ------------------------------------- | ---------------------- | ---------------------------------------------- |
+| `websocket`                      | `GraphqlWsTransportOptions \| false`  | enabled                | `false` disables the WebSocket transport       |
+| `websocket.path`                 | `string`                              | `` `${path}/ws` ``     | WebSocket endpoint                             |
+| `websocket.connectionInitWaitMs` | `number`                              | `3000`                 | Close `4408` when no `connection_init` arrives |
+| `websocket.heartbeatMs`          | `number`                              | `0`                    | Protocol `ping` interval; `0` disables         |
+| `websocket.onConnect`            | `(info) => false \| void`             | omitted                | Returning `false` closes `4403: Forbidden`     |
+| `sse`                            | `GraphqlSseTransportOptions \| false` | enabled                | `false` disables the SSE transport             |
+| `sse.path`                       | `string`                              | `` `${path}/stream` `` | SSE endpoint                                   |
+| `sse.heartbeatMs`                | `number`                              | `0`                    | `:keep-alive` comment interval; `0` disables   |
+
+#### `apq`
+
+| Option       | Type     | Default | Purpose                                                            |
+| ------------ | -------- | ------- | ------------------------------------------------------------------ |
+| `ttlSeconds` | `number` | `300`   | TTL for entries in a registered `ICacheStore`                      |
+| `maxEntries` | `number` | `1000`  | Bound on the in-process LRU used when no cache store is registered |
 
 ### Exports
 
-| Export                      | Kind     | Purpose                                                                   |
-| --------------------------- | -------- | ------------------------------------------------------------------------- |
-| `GraphqlPlugin`             | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL` |
-| `GraphqlService`            | class    | The `IGraphqlService` implementation; exported for testing                |
-| `adaptGraphqlModule`        | function | Structural adaptation of graphql module into internal runtime port        |
-| `graphiqlHtml`              | function | Generates GraphiQL UI HTML page                                           |
-| `createDepthLimitRule`      | function | Creates a validation rule for query depth limiting                        |
-| `GraphqlSchemaError`        | class    | Thrown when schema construction or resolver attachment fails              |
-| `GraphqlRuntimeLoadError`   | class    | Thrown when graphql runtime cannot be loaded                              |
-| `loadGraphqlModule`         | function | Loads `npm:graphql@^16` through a real dynamic import                     |
-| `GraphqlPluginOptions`      | type     | The factory parameter shape (union of the two arms)                       |
-| `GraphqlSchemaFirstOptions` | type     | The schema-first arm of that union                                        |
-| `GraphqlCodeFirstOptions`   | type     | The code-first arm of that union                                          |
-| `ResolverMap`               | type     | Resolver map for schema-first mode                                        |
-| `FieldResolver`             | type     | Field resolver function type                                              |
-| `GraphqlSchemaLike`         | type     | Structural constraint for pre-built schemas                               |
-| `GraphqlModuleLike`         | type     | Structural constraint for injected graphql modules                        |
-| `DefaultGraphqlContext`     | type     | Default context shape passed to resolvers                                 |
-| `GraphqlContextInput`       | type     | Input type for custom context builder                                     |
+| Export                        | Kind     | Purpose                                                                   |
+| ----------------------------- | -------- | ------------------------------------------------------------------------- |
+| `GraphqlPlugin`               | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL` |
+| `GraphqlService`              | class    | The `IGraphqlService` implementation; exported for testing                |
+| `adaptGraphqlModule`          | function | Structural adaptation of graphql module into internal runtime port        |
+| `graphiqlHtml`                | function | Generates GraphiQL UI HTML page                                           |
+| `createDepthLimitRule`        | function | Creates a validation rule for query depth limiting                        |
+| `GraphqlSchemaError`          | class    | Thrown when schema construction or resolver attachment fails              |
+| `GraphqlRuntimeLoadError`     | class    | Thrown when graphql runtime cannot be loaded                              |
+| `loadGraphqlModule`           | function | Loads `npm:graphql@^16` through a real dynamic import                     |
+| `GraphqlPluginOptions`        | type     | The factory parameter shape (union of the two arms)                       |
+| `GraphqlSchemaFirstOptions`   | type     | The schema-first arm of that union                                        |
+| `GraphqlCodeFirstOptions`     | type     | The code-first arm of that union                                          |
+| `ResolverMap`                 | type     | Resolver map for schema-first mode                                        |
+| `TypeResolverMap`             | type     | The resolver entries for one object or interface type                     |
+| `FieldResolver`               | type     | Field resolver function type                                              |
+| `SubscriptionResolver`        | type     | A subscription field's `{ subscribe, resolve? }` pair                     |
+| `GraphqlScalarResolver`       | type     | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods             |
+| `GraphqlSubscriptionsOptions` | type     | The `subscriptions` option (WebSocket and SSE arms)                       |
+| `GraphqlWsTransportOptions`   | type     | WebSocket transport options, including `onConnect`                        |
+| `GraphqlSseTransportOptions`  | type     | SSE transport options                                                     |
+| `GraphqlApqOptions`           | type     | Automatic Persisted Queries options                                       |
+| `ApqResolver`                 | class    | Verifies and resolves persisted-query hashes                              |
+| `IApqResolver`                | type     | The port the transports consume; implemented by `ApqResolver`             |
+| `ApqResolveResult`            | type     | The resolved query, or a refusal carrying its code                        |
+| `extractPersistedQuery`       | function | Reads `{ version, sha256Hash }` from a request's `extensions`             |
+| `persistedQueryHash`          | function | SHA-256 hex of a query, over an injected `SubtleCrypto`                   |
+| `encodeSseEvent`              | function | Encodes a `next` SSE frame                                                |
+| `encodeSseComplete`           | function | Encodes the `complete` SSE frame, empty `data:` field included            |
+| `encodeSseComment`            | function | Encodes a `:keep-alive` comment frame                                     |
+| `GRAPHQL_TRANSPORT_WS`        | const    | The `'graphql-transport-ws'` subprotocol identifier                       |
+| `GraphqlScalarTypeLike`       | type     | Structural constraint for a custom scalar type                            |
+| `GraphqlSchemaLike`           | type     | Structural constraint for pre-built schemas                               |
+| `GraphqlModuleLike`           | type     | Structural constraint for injected graphql modules                        |
+| `DefaultGraphqlContext`       | type     | Default context shape passed to resolvers                                 |
+| `GraphqlContextInput`         | type     | Input type for custom context builder                                     |
 
 > `GraphqlRuntime` and the structural graphql facades are **not** exported. They are an internal
 > port.
@@ -7569,8 +7622,56 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   parameter and accepts `text/html`.
 - **Platform notes.** The `graphql` package reads `process.env.NODE_ENV` at import time. Deno
   requires `--allow-env`; Cloudflare Workers requires `nodejs_compat`.
-- **Subscriptions.** Not supported in this milestone. Subscription operations return a 400 error
-  with code `SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`.
+- **Subscriptions are opt-in and never ride the HTTP endpoint.** Supply `subscriptions` to register
+  the transports; omit it and no transport route exists. `POST`/`GET /graphql` continues to refuse a
+  subscription operation with `400 SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP`, unchanged — a
+  subscription is served only on `` `${path}/ws` `` and `` `${path}/stream` ``.
+- **Declaring a subscription (schema-first).** A `Subscription` field's resolver entry is a
+  `SubscriptionResolver` — `{ subscribe, resolve? }` — not a bare function. `subscribe` returns the
+  async iterable the field streams from and is attached to the schema field's own `subscribe` slot;
+  graphql reads the event source from there and nowhere else.
+- **The WebSocket transport is optional and self-limiting.** It registers only when
+  `CAPABILITIES.WEBSOCKET` is present AND `IWebSocketService.available` is `true`; otherwise the
+  plugin logs a notice and everything else carries on. The route claims `heartbeat: false` on
+  `WebSocketRouteOptions`, because `websocket-plugin`'s shared sweeper sends a raw text frame that a
+  conformant `graphql-transport-ws` client must answer by closing `4400`. Liveness on that route is
+  the protocol's own `ping`/`pong`, configured by `subscriptions.websocket.heartbeatMs`.
+- **Authenticating a subscription.** `subscriptions.websocket.onConnect` runs on `connection_init`
+  before the ack, receives the `GraphqlConnectionInfo` (including `connectionParams` — the
+  protocol's auth channel — plus the upgrade headers and query), and closes the socket with
+  `4403: Forbidden` when it returns `false`. Writing to `conn.data` there sets the `user`/`tenant`
+  the default resolver context reads back. With no hook configured the socket is accepted.
+- **Resolver context over a socket.** A WebSocket carries no `IRequestContext`, so
+  `IGraphqlService.subscribe` takes a `GraphqlOperationContext` instead. On that path `services` is
+  the plugin-level `IServiceRegistry`, so a subscription resolver reaches every capability an HTTP
+  resolver can.
+- **Errors inside a live subscription are masked.** `maskInternalErrors` applies identically on
+  every transport: masking happens once, in the service, and the transports put the already-masked
+  payload on the wire.
+- **SSE follows the graphql-sse protocol, not the HTTP watershed.** In distinct-connections mode a
+  GraphQL **request** error (parse, validation, operation resolution) is delivered INSIDE the
+  accepted `text/event-stream` as a `next` event followed by `complete` — not as a `400`, which
+  would make the user agent fail the connection and give native `EventSource` nothing to read. A
+  **transport** failure that happens before any GraphQL request exists (unsupported content type,
+  unparseable body) is still an ordinary buffered HTTP error. The `complete` frame always carries an
+  empty `data:` field, without which `EventSource` never fires the listener.
+- **Automatic Persisted Queries verify the hash.** A request carrying both a query and a hash is
+  persisted only when `sha256(query)` matches the submitted `sha256Hash`; a mismatch answers
+  `PERSISTED_QUERY_HASH_MISMATCH`. Without that check any client could store a document under a hash
+  another client later executes — a cache-poisoning primitive, and worst when the store is a shared
+  Redis. A hash-only request that misses answers `PersistedQueryNotFound` /
+  `PERSISTED_QUERY_NOT_FOUND`, the standard retry signal. Entries live under the `apq:` namespace in
+  `CAPABILITIES.CACHE` when one is registered, and in a bounded in-process LRU otherwise. Hashing
+  uses `IRuntimeServices.subtle`, so configuring `apq` without `CAPABILITIES.RUNTIME` throws at
+  registration.
+- **Batching is opt-in.** `maxBatchSize: 0` (the default) keeps refusing an array body with `400`.
+  Above `0`, an array body executes its elements concurrently and answers a JSON array in request
+  order; over the limit is `400 BATCH_TOO_LARGE`. A batch always answers `application/json` — the
+  `application/graphql-response+json` media type describes a single result and cannot express an
+  array, so an array body from a client negotiating it is refused with `400 BATCHING_NOT_SUPPORTED`.
+- **Custom scalars.** In the schema-first arm a resolver-map entry for a scalar type supplies any
+  subset of `serialize`, `parseValue`, and `parseLiteral`; omitted members keep graphql's identity
+  default.
 
 ---
 

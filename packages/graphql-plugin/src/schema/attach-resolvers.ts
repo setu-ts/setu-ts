@@ -12,8 +12,27 @@ import type {
   GraphqlScalarTypeLike,
   GraphqlSchemaLike,
 } from '../interfaces/graphql-runtime.ts';
-import type { GraphqlScalarResolver, ResolverMap } from '../interfaces/options.ts';
+import type {
+  GraphqlFieldResolverLike,
+  GraphqlSubscribeFieldLike,
+} from '../interfaces/graphql-runtime.ts';
+import type {
+  GraphqlScalarResolver,
+  ResolverMap,
+  SubscriptionResolver,
+} from '../interfaces/options.ts';
 import { GraphqlSchemaError } from '../errors/graphql-errors.ts';
+
+/**
+ * Narrow a resolver-map entry to a subscription resolver.
+ *
+ * The discriminator is a callable `subscribe` member, which is the only shape
+ * graphql can stream from.
+ */
+function isSubscriptionResolver(entry: unknown): entry is SubscriptionResolver {
+  return typeof entry === 'object' && entry !== null &&
+    typeof (entry as SubscriptionResolver).subscribe === 'function';
+}
 
 /**
  * Attach resolvers from a resolver map to a schema.
@@ -97,13 +116,27 @@ export function attachResolvers(
         );
       }
 
-      // Attach the resolver
-      field.resolve = resolver as unknown as (
-        source: unknown,
-        args: Record<string, unknown>,
-        context: unknown,
-        info: unknown,
-      ) => unknown;
+      // A subscription field carries `{ subscribe, resolve? }`, and graphql
+      // reads the event source from the field's own `subscribe` slot. Assigning
+      // the whole entry to `resolve` — which is what this did before — leaves
+      // `subscribe` unset, and `graphql.subscribe()` then throws
+      // "Subscription field must return Async Iterable. Received: undefined."
+      if (isSubscriptionResolver(resolver)) {
+        field.subscribe = resolver.subscribe as GraphqlSubscribeFieldLike;
+        if (typeof resolver.resolve === 'function') {
+          field.resolve = resolver.resolve as GraphqlFieldResolverLike;
+        }
+        continue;
+      }
+
+      if (typeof resolver !== 'function') {
+        throw new GraphqlSchemaError(
+          `Resolver for "${typeName}.${fieldName}" must be a function, or an object ` +
+            `carrying a \`subscribe\` function for a subscription field`,
+        );
+      }
+
+      field.resolve = resolver as GraphqlFieldResolverLike;
     }
   }
 

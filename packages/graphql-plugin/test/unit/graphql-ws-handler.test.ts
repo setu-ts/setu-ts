@@ -19,6 +19,7 @@ import type {
   IWebSocketConnection,
   WebSocketConnectionContext,
 } from '@hono-enterprise/common';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createWsHandlers } from '../../src/transports/ws/graphql-ws-handler.ts';
 import {
   decodeFrame,
@@ -99,7 +100,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     expect(typeof handlers.onOpen).toBe('function');
     expect(typeof handlers.onMessage).toBe('function');
     expect(typeof handlers.onClose).toBe('function');
@@ -112,7 +113,11 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, { connectionInitWaitMs: 5000 });
+    const handlers = createWsHandlers(
+      service,
+      { connectionInitWaitMs: 5000 },
+      createFakeRuntime().runtime,
+    );
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -136,7 +141,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -152,7 +157,7 @@ describe('createWsHandlers', () => {
       seenCtx = ctx;
       return { kind: 'single', status: 200, result: { data: {} } };
     });
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -175,7 +180,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -191,7 +196,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -210,7 +215,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -226,7 +231,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -244,7 +249,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -261,7 +266,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -278,7 +283,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -297,7 +302,7 @@ describe('createWsHandlers', () => {
       received = params;
       return { kind: 'single', status: 200, result: { data: {} } };
     });
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -327,7 +332,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: { hello: 'world' } },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -352,7 +357,7 @@ describe('createWsHandlers', () => {
       status: 400,
       result: { errors: [{ message: 'Validation error' }] },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -380,7 +385,7 @@ describe('createWsHandlers', () => {
         });
       })(),
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -411,7 +416,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -427,7 +432,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -444,7 +449,7 @@ describe('createWsHandlers', () => {
         yield { data: { tick: 0 } };
       })(),
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -469,7 +474,7 @@ describe('createWsHandlers', () => {
         throw new Error('producer failed');
       })(),
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -481,7 +486,13 @@ describe('createWsHandlers', () => {
 
     const errorFrame = decodeFrame(conn.sent[2]);
     expect(errorFrame!.type).toBe(GQL_ERROR);
-    expect(JSON.stringify(errorFrame!.payload)).toContain('producer failed');
+    // The pump must NOT put a raw producer message on the wire. Masking is the
+    // service's job (it converts a source failure into a masked payload), and
+    // this last-resort frame is generic so a fake or misbehaving iterator
+    // cannot publish internals the HTTP path masks.
+    const payload = JSON.stringify(errorFrame!.payload);
+    expect(payload).not.toContain('producer failed');
+    expect(payload).toContain('Internal server error');
   });
 
   it('a closed connection suppresses pump output without throwing', async () => {
@@ -492,7 +503,7 @@ describe('createWsHandlers', () => {
         yield { data: { tick: 0 } };
       })(),
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -514,7 +525,11 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, { onConnect: () => false });
+    const handlers = createWsHandlers(
+      service,
+      { onConnect: () => false },
+      createFakeRuntime().runtime,
+    );
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -537,7 +552,7 @@ describe('createWsHandlers', () => {
       onConnect: () => {
         throw new Error('auth service down');
       },
-    });
+    }, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -554,7 +569,11 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, { onConnect: () => undefined });
+    const handlers = createWsHandlers(
+      service,
+      { onConnect: () => undefined },
+      createFakeRuntime().runtime,
+    );
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -564,17 +583,49 @@ describe('createWsHandlers', () => {
     expect(decodeFrame(conn.sent[0])!.type).toBe(GQL_CONNECTION_ACK);
   });
 
-  it('unknown message type is ignored (not closed)', async () => {
+  it('unknown message type closes with 4400', async () => {
     const service = createMockService(() => ({
       kind: 'single',
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
     await handlers.onMessage!(conn, JSON.stringify({ type: 'unknown_type' }));
+
+    // PROTOCOL.md: an unrecognised message TYPE is an immediate 4400. The
+    // ignore rule covers unknown IDs, which the next test pins.
+    expect(conn.closed?.code).toBe(4400);
+  });
+
+  it('a server-to-client type arriving inbound closes with 4400', async () => {
+    const service = createMockService(() => ({
+      kind: 'single',
+      status: 200,
+      result: { data: {} },
+    }));
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
+    const conn = createMockConnection();
+
+    await init(handlers, conn);
+    await handlers.onMessage!(conn, encodeFrame({ type: GQL_NEXT, id: '1' }));
+
+    expect(conn.closed?.code).toBe(4400);
+  });
+
+  it('a `complete` for an unknown id is ignored, never fatal', async () => {
+    const service = createMockService(() => ({
+      kind: 'single',
+      status: 200,
+      result: { data: {} },
+    }));
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
+    const conn = createMockConnection();
+
+    await init(handlers, conn);
+    await handlers.onMessage!(conn, encodeFrame({ type: GQL_COMPLETE, id: 'never-existed' }));
 
     expect(conn.isOpen).toBe(true);
     expect(conn.closed).toBeUndefined();
@@ -588,7 +639,7 @@ describe('createWsHandlers', () => {
         yield { data: {} };
       })(),
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -611,7 +662,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -627,7 +678,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
     // Note: onOpen NOT called → no __wsState on conn.data.
 
@@ -643,17 +694,24 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, { heartbeatMs: 5 });
+    const { fake, runtime } = createFakeRuntime();
+    const handlers = createWsHandlers(service, { heartbeatMs: 5 }, runtime);
     const conn = createMockConnection();
 
-    handlers.onOpen!(conn, mockContext);
-    // Allow the interval to fire at least once.
-    await new Promise((r) => setTimeout(r, 20));
+    // init() clears the connection-init timeout, leaving only the heartbeat
+    // armed — otherwise the init timer fires first and closes the socket.
+    await init(handlers, conn);
+    conn.sent.length = 0;
+    // Driven, not waited on: the transport takes its timers from runtime
+    // services precisely so a tick is deterministic here.
+    fake.runTimers();
 
     const pings = conn.sent.map((s) => decodeFrame(s)).filter((f) => f?.type === GQL_PING);
-    expect(pings.length).toBeGreaterThan(0);
-    // Tear down the heartbeat interval to satisfy the op sanitizer.
+    expect(pings.length).toBe(1);
+
+    // onClose must release BOTH timers, or a closed socket keeps scheduling.
     handlers.onClose!(conn, { code: 1000, reason: '' } as CloseEvent);
+    expect(fake.activeTimerCount).toBe(0);
   });
 
   it('onError is a no-op', () => {
@@ -662,7 +720,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -678,7 +736,7 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, { heartbeatMs: 5 });
+    const handlers = createWsHandlers(service, { heartbeatMs: 5 }, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -702,7 +760,7 @@ describe('createWsHandlers', () => {
         yield { data: { tick: 1 } };
       })(),
     }));
-    const handlers = createWsHandlers(service, {});
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime);
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -760,7 +818,7 @@ describe('createWsHandlers', () => {
         return { ok: true as const, query: p.query ?? '' };
       },
     };
-    const handlers = createWsHandlers(service, {}, undefined, apqResolver);
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime, apqResolver);
     const conn = createMockConnection();
 
     await init(handlers, conn);
@@ -818,7 +876,7 @@ describe('createWsHandlers', () => {
         return { ok: true as const, query: p.query ?? '' };
       },
     };
-    const handlers = createWsHandlers(service, {}, undefined, apqResolver);
+    const handlers = createWsHandlers(service, {}, createFakeRuntime().runtime, apqResolver);
     const conn = createMockConnection();
 
     await init(handlers, conn);

@@ -69,9 +69,31 @@ interface ApqStore {
 }
 
 /**
+ * The surface the transports consume.
+ *
+ * Declared as a port rather than the concrete class so a transport depends on
+ * the behaviour it uses, and a test can supply a double without casting past
+ * the class's private fields.
+ *
+ * @since 0.3.0
+ */
+export interface IApqResolver {
+  /**
+   * Resolve APQ for a request.
+   *
+   * @param params - The request parameters (may carry extensions)
+   * @returns The resolved query, or a refusal
+   */
+  resolve(params: {
+    query?: string;
+    extensions?: Record<string, unknown>;
+  }): Promise<ApqResolveResult> | ApqResolveResult;
+}
+
+/**
  * APQ resolver that verifies hashes before caching.
  */
-export class ApqResolver {
+export class ApqResolver implements IApqResolver {
   #store: ApqStore;
   #subtle: SubtleCrypto;
   #ttlSeconds: number;

@@ -68,15 +68,21 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
     async register(ctx: IPluginContext): Promise<void> {
       const logger = ctx.logger;
 
-      // C5 — APQ RUNTIME guard: when APQ is configured, CAPABILITIES.RUNTIME
-      // must be present (needed for subtle crypto hashing).
-      if (apq !== undefined) {
-        if (!ctx.services.has(CAP.RUNTIME)) {
-          throw new Error(
-            'APQ requires CAPABILITIES.RUNTIME for hash verification. ' +
-              'Register the RuntimePlugin or disable APQ.',
-          );
-        }
+      // Both APQ and the subscription transports need runtime services — APQ
+      // for `subtle` (hash verification), the transports for their timers.
+      // Fail at registration naming the requirement rather than at the first
+      // request with a bare TypeError.
+      if (apq !== undefined && !ctx.services.has(CAP.RUNTIME)) {
+        throw new Error(
+          'APQ requires CAPABILITIES.RUNTIME for hash verification. ' +
+            'Register the RuntimePlugin or disable APQ.',
+        );
+      }
+      if (subscriptions !== undefined && !ctx.services.has(CAP.RUNTIME)) {
+        throw new Error(
+          'GraphQL subscription transports require CAPABILITIES.RUNTIME for their timers. ' +
+            'Register the RuntimePlugin or disable subscriptions.',
+        );
       }
 
       // Load graphql runtime
@@ -148,6 +154,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
 
       // Register subscription transports (opt-in)
       if (subscriptions) {
+        const runtimeServices = ctx.services.get<IRuntimeServices>(CAP.RUNTIME);
         // WebSocket transport (optional capability)
         if (subscriptions.websocket !== false) {
           const wsOpt = subscriptions.websocket;
@@ -156,13 +163,13 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
             if (wsService?.available) {
               wsAvailable = true;
               const { createWsHandlers } = await import('../transports/ws/graphql-ws-handler.ts');
-              const wsPath = (wsOpt as { path?: string })?.path ?? `${path}/ws`;
+              const wsPath = wsOpt?.path ?? `${path}/ws`;
               // C6: thread apqResolver into WS handlers so hash-only subscribe
               // returns PERSISTED_QUERY_NOT_FOUND instead of a parse error.
               const wsHandlers = createWsHandlers(
                 graphqlService,
                 wsOpt ?? {},
-                ctx.services,
+                runtimeServices,
                 apqResolver,
               );
               wsService.route(wsPath, wsHandlers, {
@@ -182,10 +189,11 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         if (subscriptions.sse !== false) {
           const sseOpt = subscriptions.sse;
           const { createSseHandler } = await import('../transports/sse/graphql-sse-handler.ts');
-          const ssePath = (sseOpt as { path?: string })?.path ?? `${path}/stream`;
-          const sseHeartbeat = (sseOpt as { heartbeatMs?: number })?.heartbeatMs ?? 0;
+          const ssePath = sseOpt?.path ?? `${path}/stream`;
+          const sseHeartbeat = sseOpt?.heartbeatMs ?? 0;
           const sseHandler = createSseHandler(
             graphqlService,
+            runtimeServices,
             sseHeartbeat,
             apqResolver,
           );

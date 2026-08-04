@@ -92,6 +92,20 @@ ws.route('/ws/chat', {
 | `maxMessageBytes`  | `number`  | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                    |
 | `scalingNotice`    | `boolean` | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
 
+### Opting a route out of the sweep
+
+A route that speaks its own liveness protocol passes `heartbeat: false`:
+
+```typescript
+ws.route('/graphql/ws', handlers, { protocols: ['graphql-transport-ws'], heartbeat: false });
+```
+
+That excludes the route's connections from **both** halves of the sweep — the payload send and the
+idle eviction — and defaults to `true`, so no existing route is affected. It exists because the
+sweeper is global across routes and `heartbeatPayload` is a raw text frame, not a protocol message:
+a `graphql-transport-ws` peer that receives one must close the socket with `4400`, and a listen-only
+subscriber is inbound-silent by design so `idleTimeoutMs` would evict it.
+
 `idleTimeoutMs` requires `heartbeatMs > 0`, since the heartbeat tick performs the sweep. Configuring
 one without the other **throws at construction** rather than silently doing nothing.
 
