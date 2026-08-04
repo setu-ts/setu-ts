@@ -218,6 +218,24 @@ describe('GraphqlPlugin — subscriptions / APQ / lifecycle wiring', () => {
     await expect(plugin.register(wired.ctx)).rejects.toThrow(/CAPABILITIES.RUNTIME/);
   });
 
+  it('subscriptions without CAPABILITIES.RUNTIME throw naming the requirement', async () => {
+    // The transports take their timers from runtime services, so an absent
+    // runtime has to fail at registration with a name rather than at the first
+    // connection with a bare TypeError — the same contract as the APQ guard.
+    const wired = createWiredContext({ hasRuntime: false });
+    const plugin = GraphqlPlugin({ typeDefs, resolvers, subscriptions: {} });
+    await expect(plugin.register(wired.ctx)).rejects.toThrow(/CAPABILITIES.RUNTIME/);
+  });
+
+  it('APQ honours a non-default maxEntries on the in-memory fallback', async () => {
+    // No cache capability, so the bounded LRU is the store and `maxEntries` is
+    // the option that bounds it.
+    const wired = createWiredContext({ hasRuntime: true, hasCache: false });
+    const plugin = GraphqlPlugin({ typeDefs, resolvers, apq: { maxEntries: 2 } });
+    await expect(plugin.register(wired.ctx)).resolves.toBeUndefined();
+    expect(wired.routes.map(([r]) => r)).toContain('POST /graphql');
+  });
+
   it('APQ with RUNTIME registers and constructs the resolver', async () => {
     const wired = createWiredContext({ hasRuntime: true, hasCache: true });
     const plugin = GraphqlPlugin({ typeDefs, resolvers, apq: { ttlSeconds: 99 } });

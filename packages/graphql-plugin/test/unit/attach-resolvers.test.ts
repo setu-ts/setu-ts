@@ -7,6 +7,7 @@ import { expect } from '@std/expect';
 import { attachResolvers } from '../../src/schema/attach-resolvers.ts';
 import { GraphqlSchemaError } from '../../src/errors/graphql-errors.ts';
 import type { GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
+import type { FieldResolver } from '../../src/interfaces/options.ts';
 
 describe('attach-resolvers', () => {
   const createSchema = (types: string[] = ['Query']): GraphqlSchemaLike => {
@@ -413,5 +414,30 @@ describe('attach-resolvers', () => {
     expect(typeof (enumType as Record<string, unknown>).serialize).toBe('undefined');
     expect(typeof (enumType as Record<string, unknown>).parseValue).toBe('undefined');
     expect(typeof (enumType as Record<string, unknown>).parseLiteral).toBe('undefined');
+  });
+});
+
+describe('attachResolvers — a malformed field entry', () => {
+  it('throws a named error rather than assigning a non-function to resolve', () => {
+    // Before subscription support this silently assigned whatever it was
+    // given, which is how a `{ subscribe }` entry ended up on `resolve` with
+    // `subscribe` left unset. Anything that is neither a function nor a
+    // subscription resolver is now refused at registration.
+    const schema = {
+      getType: (name: string) =>
+        name === 'Query'
+          ? {
+            name: 'Query',
+            getFields: () => ({ hello: { name: 'hello', args: [] } }),
+            getInterfaces: () => [],
+          }
+          : null,
+    } as unknown as GraphqlSchemaLike;
+
+    expect(() =>
+      attachResolvers(schema, {
+        Query: { hello: { nonsense: true } as unknown as FieldResolver },
+      })
+    ).toThrow(/must be a function/);
   });
 });

@@ -133,13 +133,14 @@ async function handleSseRequest(
     }
     const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      // APQ miss is a transport failure — not found means no document to subscribe
-      response.status(400);
-      response.header('Content-Type', 'application/json');
-      const encoder = new TextEncoder();
-      return response.send(encoder.encode(JSON.stringify({
+      // A persisted-query miss is a GraphQL REQUEST error, not a transport
+      // failure, so it belongs inside the accepted event stream — a `400` here
+      // makes the user agent fail the connection and leaves native
+      // `EventSource` with nothing readable, which is the whole reason
+      // validation errors are reported in-stream.
+      return streamSseError(response, {
         errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
-      })));
+      });
     }
     params.query = apqResult.query;
   }
@@ -200,17 +201,41 @@ async function handleSseGet(
     }
     const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      response.status(400);
-      response.header('Content-Type', 'application/json');
-      const encoder = new TextEncoder();
-      return response.send(encoder.encode(JSON.stringify({
+      // Delivered in-stream for the same reason as the POST path above.
+      return streamSseError(response, {
         errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
-      })));
+      });
     }
     params.query = apqResult.query;
   }
 
   return streamSseResult(ctx, response, graphqlService, runtime, heartbeatMs, params);
+}
+
+/**
+ * Answer a GraphQL request error inside an accepted event stream.
+ *
+ * One `next` carrying the errors, then the `complete` terminator — the shape
+ * the graphql-sse protocol requires for anything that fails before execution.
+ *
+ * @param response - The response builder
+ * @param result - The error result to deliver
+ * @returns The streaming handler result
+ */
+function streamSseError(
+  response: IResponse,
+  result: { errors: Array<{ message: string; extensions?: Record<string, unknown> }> },
+): HandlerResult {
+  response.status(200);
+  response.header('Content-Type', 'text/event-stream');
+  response.header('Cache-Control', 'no-cache');
+  response.header('Connection', 'keep-alive');
+
+  const controller = new StreamController();
+  controller.enqueue(encodeSseEvent(result));
+  controller.enqueue(encodeSseComplete());
+  controller.close();
+  return response.stream(controller.readable);
 }
 
 /**
@@ -280,13 +305,33 @@ async function pumpStream(
     }, heartbeatMs)
     : null;
 
-  // C5: Proactive abort listener so an idle subscription source is cancelled
-  // promptly on disconnect (not only when the next value arrives).
+  // Release the source exactly once, and never let that release escape.
+  //
+  // Both matter because this pump is started fire-and-forget: a rejection from
+  // `return()` — a DB cursor whose close fails, a generator with a throwing
+  // `finally` — has nowhere to go and would surface as an unhandled rejection.
+  // And the abort path reaches this twice (the listener, then the `finally`
+  // after the loop breaks on `signal.aborted`), which would double-release an
+  // iterator whose `return()` is not idempotent.
   let iteratorReturn: (() => Promise<unknown>) | undefined;
-  const abortListener = () => {
-    if (typeof iteratorReturn === 'function') {
-      void iteratorReturn();
+  let released = false;
+  const releaseIterator = async (): Promise<void> => {
+    if (released || iteratorReturn === undefined) {
+      return;
     }
+    released = true;
+    try {
+      await iteratorReturn();
+    } catch {
+      // The stream is already finished for the client; a failed release is the
+      // producer's problem and must not become an unhandled rejection.
+    }
+  };
+
+  // Proactive abort listener so an idle subscription source is cancelled
+  // promptly on disconnect (not only when the next value arrives).
+  const abortListener = () => {
+    void releaseIterator();
   };
   signal?.addEventListener('abort', abortListener, { once: true });
 
@@ -325,7 +370,7 @@ async function pumpStream(
       runtime.clearInterval(heartbeatTimer);
     }
     signal?.removeEventListener('abort', abortListener);
-    await iteratorReturn?.();
+    await releaseIterator();
   }
 }
 

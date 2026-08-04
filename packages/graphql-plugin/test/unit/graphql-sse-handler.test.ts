@@ -312,7 +312,7 @@ describe('createSseHandler', () => {
       expect(received!.variables).toBeUndefined();
     });
 
-    it('APQ miss with hash-only → 400 (transport failure)', async () => {
+    it('APQ miss is delivered IN-STREAM as next + complete, not as a 400', async () => {
       const service = createMockService(() => ({
         kind: 'single',
         status: 200,
@@ -333,8 +333,15 @@ describe('createSseHandler', () => {
       const { post } = createSseHandler(service, createFakeRuntime().runtime, 0, apq);
       await post(ctx);
 
-      expect(captures.status).toBe(400);
-      expect(decoder.decode(captures.body!)).toContain('PERSISTED_QUERY_NOT_FOUND');
+      // A persisted-query miss is a GraphQL request error. Answering 400 makes
+      // the user agent fail the connection and leaves native `EventSource`
+      // with nothing readable — the same reason validation errors go in-stream.
+      expect(captures.status).toBe(200);
+      expect(captures.headers.get('Content-Type')).toBe('text/event-stream');
+      const body = await drain(captures.stream!);
+      expect(body).toContain('event: next');
+      expect(body).toContain('PERSISTED_QUERY_NOT_FOUND');
+      expect(body.endsWith('event: complete\ndata: \n\n')).toBe(true);
     });
 
     it('APQ hit injects the resolved query', async () => {
@@ -474,7 +481,7 @@ describe('createSseHandler', () => {
       expect(captures.status).toBe(200);
     });
 
-    it('APQ miss → 400', async () => {
+    it('APQ miss is delivered in-stream on the GET path too', async () => {
       const service = createMockService(() => ({
         kind: 'single',
         status: 200,
@@ -492,7 +499,10 @@ describe('createSseHandler', () => {
       const { get } = createSseHandler(service, createFakeRuntime().runtime, 0, apq);
       await get(ctx);
 
-      expect(captures.status).toBe(400);
+      expect(captures.status).toBe(200);
+      const body = await drain(captures.stream!);
+      expect(body).toContain('PERSISTED_QUERY_NOT_FOUND');
+      expect(body).toContain('event: complete');
     });
   });
 

@@ -7630,6 +7630,10 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   `SubscriptionResolver` — `{ subscribe, resolve? }` — not a bare function. `subscribe` returns the
   async iterable the field streams from and is attached to the schema field's own `subscribe` slot;
   graphql reads the event source from there and nowhere else.
+- **Both transports require `CAPABILITIES.RUNTIME`.** They take their timers (the connection-init
+  timeout, the protocol ping, the SSE keep-alive) from `IRuntimeServices` rather than global timers,
+  so configuring `subscriptions` without a registered runtime throws at registration naming the
+  requirement — rather than failing at the first connection.
 - **The WebSocket transport is optional and self-limiting.** It registers only when
   `CAPABILITIES.WEBSOCKET` is present AND `IWebSocketService.available` is `true`; otherwise the
   plugin logs a notice and everything else carries on. The route claims `heartbeat: false` on
@@ -7653,8 +7657,10 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   accepted `text/event-stream` as a `next` event followed by `complete` — not as a `400`, which
   would make the user agent fail the connection and give native `EventSource` nothing to read. A
   **transport** failure that happens before any GraphQL request exists (unsupported content type,
-  unparseable body) is still an ordinary buffered HTTP error. The `complete` frame always carries an
-  empty `data:` field, without which `EventSource` never fires the listener.
+  unparseable body, a missing `query` parameter) is still an ordinary buffered HTTP error. A
+  persisted-query miss counts as a request error and is therefore delivered in-stream too. The
+  `complete` frame always carries an empty `data:` field, without which `EventSource` never fires
+  the listener.
 - **Automatic Persisted Queries verify the hash.** A request carrying both a query and a hash is
   persisted only when `sha256(query)` matches the submitted `sha256Hash`; a mismatch answers
   `PERSISTED_QUERY_HASH_MISMATCH`. Without that check any client could store a document under a hash

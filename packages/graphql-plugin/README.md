@@ -151,7 +151,9 @@ GraphqlPlugin({
 ```
 
 Endpoints default to the GraphQL path plus `/ws` and `/stream`, so `path: '/api/graphql'` gives
-`/api/graphql/ws` and `/api/graphql/stream`.
+`/api/graphql/ws` and `/api/graphql/stream`. Both transports take their timers from
+`IRuntimeServices`, so `subscriptions` requires `CAPABILITIES.RUNTIME` and throws at registration
+without it.
 
 A schema-first subscription field takes a `{ subscribe, resolve? }` entry — `subscribe` returns the
 async iterable, and graphql reads the event source from there:
