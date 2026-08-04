@@ -3603,7 +3603,7 @@ approaches are complementary — M36 ships `createRestApp()` as a library, this 
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
 | `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
-| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry, ServiceDiscovery (`'static'` arm).                    |
 
 `--template microservice --runtime cloudflare-workers` is refused: messaging and queue need raw
 sockets. `database-plugin` and `auth-plugin` are excluded from `rest` despite M36's list — both need

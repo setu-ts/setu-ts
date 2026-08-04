@@ -16,9 +16,15 @@ import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
  * templates cannot drift.
  *
  * Refused on Cloudflare Workers: the messaging and queue plugins reach brokers
- * over raw sockets and the discovery plugin's DNS-SRV arm needs
- * `IRuntimeServices.dns`, none of which Workers provides. Scaffolding that
- * pairing would deploy cleanly and then fail at first use.
+ * over raw sockets, which Workers does not provide. Scaffolding that pairing
+ * would deploy cleanly and then fail at first use.
+ *
+ * Service discovery is deliberately NOT part of that refusal. The wiring below
+ * selects the `'static'` arm, which contacts no backend at all; only
+ * `DnsProvider` reads `IRuntimeServices.dns`, and nothing here selects it.
+ * Naming DNS-SRV in the refusal would state a blocker the generated config
+ * never meets, and would imply the plugin is unusable on Workers when its
+ * static, Consul and Kubernetes arms are plain HTTP.
  */
 export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   name: 'microservice',
@@ -45,7 +51,6 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   middleware: REST_MIDDLEWARE,
   unsupported: {
     'cloudflare-workers':
-      'the messaging and queue plugins reach brokers over raw sockets and service discovery ' +
-      'resolves DNS-SRV records, neither of which Workers provides',
+      'the messaging and queue plugins reach brokers over raw sockets, which Workers does not provide',
   },
 };

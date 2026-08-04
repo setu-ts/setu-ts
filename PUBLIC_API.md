@@ -4614,7 +4614,7 @@ export function createApp(): IApplication {
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
 | `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
-| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
+| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry, ServiceDiscovery (`'static'` arm).                    |
 | `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
 | `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
 

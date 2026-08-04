@@ -141,6 +141,22 @@ describe('microservice template', () => {
     expect(reason).toContain('sockets');
   });
 
+  it('states only blockers that apply to the config it actually generates', () => {
+    // The reason is shown verbatim to a user whose scaffold was refused, so it
+    // must describe THIS template's wiring. Service discovery is wired with the
+    // `'static'` arm, which contacts no backend — only `DnsProvider` reads
+    // `IRuntimeServices.dns`, and nothing here selects it. Citing DNS-SRV would
+    // name a blocker the generated config never meets, and would imply the
+    // discovery plugin is unusable on Workers when its static, Consul and
+    // Kubernetes arms are plain HTTP.
+    const reason = MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers'] ?? '';
+
+    expect(reason).toMatch(/messaging/i);
+    expect(reason).toMatch(/queue/i);
+    expect(reason).not.toMatch(/dns/i);
+    expect(reason).not.toMatch(/discovery/i);
+  });
+
   it('supports the three socket-capable runtimes', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
       expect(MICROSERVICE_TEMPLATE.unsupported[runtime]).toBeUndefined();
