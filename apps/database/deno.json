@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
+    "@hono-enterprise/database-plugin": "../../packages/database-plugin/src/index.ts"
+  }
+}

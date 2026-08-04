@@ -1028,8 +1028,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   because the APQ cache was warm and the miss→retry handshake never executed. Each run now boots its
   own app on an ephemeral port and asserts the WIRE SEQUENCE, and both shapes were produced and
   observed (`["hash-only","document","hash-only"]` cold, `["hash-only","hash-only"]` warm), so the
-  guard is known to discriminate. **Not run by CI** — the gates are scoped to `packages`) — complete
-  (PR #117)
+  guard is known to discriminate. The app's basic type-check and GraphQL smoke check are run by
+  `deno task check:apps`; the npm-client interop suite remains manual because CI does not install
+  its extra clients) — complete (PR #117)
 - **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
   not _reach_:
   `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
@@ -1273,7 +1274,70 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and watching it fail, then restoring it. Also corrected the e2e comment claiming `nest` was "the
   only" template carrying an `args` string, and a stale ROADMAP line recording the alpha.4
   `release:create-packages`/`release:link-repos` step as still pending) — complete (PR pending)
-- **Next milestone** — **M37** (example applications under `apps/*`), then M38–M40.
+- **Milestone 37** (`apps/*` — runnable example applications and the `check:apps` gate that keeps
+  them working. Every capability the framework ships was proven by tests inside `packages/` and by
+  nothing a reader could run; the ROADMAP's example list predated 22 milestones and named no
+  capability added after M34, so it was corrected rather than implemented as written. Ten examples
+  are new and `apps/graphql-demo` (M51b) is **adopted** rather than rebuilt. Examples stay OUT of
+  the Deno workspace and each carries its own `deno.json` mapping `@hono-enterprise/*` at
+  `../../packages/<name>/src/index.ts` — load-bearing, not stylistic, because an example pulling
+  `npm:@connectrpc/connect` into the workspace would put it in a published package's resolution
+  graph; pointing at `src/` rather than JSR is also the correct target for a gate, since drift means
+  disagreement with HEAD (the M34b drift-gate reasoning). `fmt` and `lint` already covered `apps/`
+  with no config change — only `check` and `test` were scoped — so `scripts/check-apps.ts` closes
+  the whole remaining gap by type-checking each app's entry points and running its mandatory `smoke`
+  task, with exit code **77** reserved for a reported skip so an unavailable prerequisite can never
+  read as a pass. Examples are deliberately NOT coverage-measured: the 90% bar is a library standard
+  and applying it to demo code produces tests written to satisfy a number. **The bar for an example
+  is that it runs and proves something**, so each `smoke` asserts one behaviour — a written row read
+  back through the same REST API, a command mutation observed through a separate query bus, tenant
+  A's write invisible to tenant B, a `deno compile` binary serving `/health`, a descriptor-backed
+  Connect RPC and an ordinary Hono route answering on one port. Two are real external harnesses
+  rather than fakes: `apps/cloudflare` bundles and drives `wrangler dev` against workerd (KV
+  read/write plus a `__scheduled` trigger), which commits the throwaway harness that caught the
+  kernel's module-scope `AbortController` (PR #112), and `apps/realtime` runs two replicas over a
+  `'redis'` backplane. **The realtime check shipped non-discriminating and was fixed in
+  verification**: both replicas were created in ONE process, so the backplane's process-local
+  `'memory'` transport carried the message and the smoke stayed green with zero cross-replica
+  delivery — the precise failure §3.7 of the plan existed to prevent, and the one M47 capability no
+  in-package test can reach. The replicas are now separate `Deno.Command` processes, proven to
+  discriminate by swapping the transport to `'memory'` and watching it exit 1. Every smoke check was
+  verified against a real backend where one exists: Redis 7 in Docker for realtime, real workerd for
+  Cloudflare (whose scheduled path also discriminates — changing the cron pattern exits 1), and a
+  broken tenant repository for multi-tenancy. Doc deliverables C1–C4 shipped: `examples/.gitkeep`
+  deleted so one concept has one directory, the M0 directory list and the M37 example list
+  rewritten, `graphql-demo` indexed in `apps/README.md`, and the M51b entry's "Not run by CI"
+  sentence amended to say which part is now gated. Verification also found three holes in the gate
+  itself, all closed in M37b on this same branch rather than deferred: the example's own test was
+  run by nothing, `test/apps-gate.test.ts` never ran in CI, and `check:apps` left an untracked
+  `apps/cloudflare/.wrangler/` that made a following `publish:check` abort) — complete (PR pending)
+- **Milestone 37b** (`apps/*` — DI/decorators and memory-database examples, plus a microservices
+  correction). `apps/di-decorators` proves a decorated controller's parameter-level `@Inject` and
+  makes manual `container.createScope()` explicit: singleton instances span scopes while scoped
+  instances do not; the framework creates no request scope automatically. `apps/database` writes,
+  reads, updates, and rolls back through the memory adapter's public repository surface. The
+  microservices Redis smoke now registers its `respond` handler on service B and issues the
+  `request` from service A, so it proves actual cross-service brokered request/reply rather than a
+  self-reply. Fixed the ioredis eager-connect defect in cache, queue, and messaging: each lazy
+  loader constructs with `{ lazyConnect: true }`, then preserves its existing explicit `connect()`
+  startup path. Redis-backed instances previously failed at `app.start()` because ioredis had
+  already connected — so `CachePlugin({ store: 'redis' })`, `QueuePlugin({ adapter: 'redis' })` and
+  `MessagingPlugin({ broker: 'redis-streams' })` could never start on the documented lazy path, and
+  no gate could see it because every test injects a fake client whose `connect()` is a harmless
+  no-op. That is the same contract-violating-double root cause the pre-M18 review campaign found;
+  the defect was discovered by building the example, which is the argument for the example. The fix
+  is verified through `app.start()` against a real Redis 7 for all three, plus a cache round trip,
+  because the seam test alone cannot prove it. Also closed the three M37 gate holes: `check:apps`
+  now runs an app's `test` task when one is declared (proven by breaking `apps/plugin-development`'s
+  test and watching the gate exit 1), CI gained a `deno task test` step so `test/apps-gate.test.ts`
+  runs there, and `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the
+  tree ahead of `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to
+  `unusedPort()`) — complete (PR pending)
+- **Next milestone** — **M38** (documentation), then M39–M40. Two milestones were opened by M37b's
+  findings and are queued behind those: **M53** (real-backend CI — the Redis-backed example smokes
+  are skipped in CI, which is why the ioredis defect survived three milestones) and **M54** (cloud
+  message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP
+  Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
 
 ## Verification (run before declaring any work done)
 

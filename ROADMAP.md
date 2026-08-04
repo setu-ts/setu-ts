@@ -292,9 +292,14 @@ hono-enterprise/
 │   ├── minimal/                 # Minimal app (no plugins)
 │   ├── rest-api/                # REST API with common plugins
 │   ├── microservices/           # Microservices example
-│   ├── cqrs-example/             # CQRS example
+│   ├── cqrs/                     # CQRS example
 │   ├── multi-tenant/            # Multi-tenancy example
-│   └── plugin-development/      # How to build a custom plugin
+│   ├── plugin-development/      # How to build a custom plugin
+│   ├── compiled-binary/         # Standalone `deno compile` binary
+│   ├── graphql-demo/            # GraphQL interop demo
+│   ├── grpc/                    # gRPC/Connect co-serving example
+│   ├── cloudflare/              # Cloudflare Workers bindings example
+│   └── realtime/                # Cross-replica realtime backplane example
 ├── packages/
 │   ├── kernel/                   # Plugin kernel, pipeline, router, service registry
 │   ├── common/                   # Shared types, interfaces, capability tokens
@@ -406,14 +411,14 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 1. **Initialize Monorepo**
    - Initialize the git repository (`git init`, initial commit of design docs)
    - Replace the scaffold `deno.json`/`main.ts`/`main_test.ts` with a root workspace `deno.json`
-   - Configure workspace members (`packages/*`, `apps/*`)
+   - Configure workspace members (`packages/*`; applications stay standalone under `apps/`)
    - Define root tasks: `check`, `test`, `test:coverage`, `lint`, `fmt`, `fmt:check`
    - Set strict TypeScript `compilerOptions` in the root `deno.json`
    - Configure `deno lint` rules and `deno fmt` options
    - Create `.gitignore`, `.editorconfig`
 
 2. **Create Directory Structure**
-   - Create `apps/`, `packages/`, `examples/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
+   - Create `apps/`, `packages/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
    - Create stub `deno.json` for each package with `@hono-enterprise/[name]` JSR naming, version,
      and exports
 
@@ -3808,19 +3813,44 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 
 ### Examples
 
-1. **Minimal** — Single file, no plugins, just kernel
-2. **REST API** — REST starter with CRUD, auth, OpenAPI
-3. **Microservices** — Multiple services with messaging
-4. **CQRS** — Command/query separation example
-5. **Multi-tenant** — Multi-tenancy example
-6. **Plugin Development** — How to build a custom plugin
-7. **Compiled Binary** — Shipping an application as a standalone `deno compile` binary
+1. **Minimal** — Kernel + runtime with one `200` route
+2. **REST API** — REST starter CRUD, auth capability, and generated OpenAPI
+3. **Microservices** — Static service discovery plus brokered request/reply
+4. **CQRS** — Command/query separation with distinct buses
+5. **Multi-tenant** — Header-resolved tenant isolation
+6. **Plugin Development** — A custom capability, route, and testing-package test
+7. **Compiled Binary** — A standalone `deno compile` binary serving `/health`
+8. **GraphQL** — The adopted GraphQL-over-HTTP/WebSocket/SSE interop demo
+9. **gRPC** — Connect/gRPC co-serving with an ordinary HTTP route
+10. **Cloudflare Workers** — KV bindings and a scheduled handler through `wrangler dev`
+11. **Realtime** — Two replicas fanning out through a Redis backplane
 
 ### Deliverables
 
-- [ ] All example apps
-- [ ] Documentation for each
-- [ ] `deno compile` example produces a working standalone binary
+- [x] All example apps
+- [x] Documentation for each
+- [x] `deno compile` example produces a working standalone binary
+- [x] `deno task check:apps` type-checks and smoke-runs every application
+
+---
+
+## Milestone 37b: DI, Database, and Messaging Examples ✅ COMPLETE
+
+**Objective:** fill the remaining high-value example gaps from M37 and correct the Redis startup
+defect that blocked a real cross-service messaging proof.
+
+### Deliverables
+
+- [x] `apps/di-decorators` — a decorated controller receives a parameter-level `@Inject` service;
+      the smoke proves singleton and explicitly-created scoped lifetimes. The framework does not
+      create request scopes automatically.
+- [x] `apps/database` — memory-adapter repository routes create, read, and update a row; its smoke
+      proves a throwing transaction rolls back.
+- [x] `apps/microservices` — service B owns the Redis Streams `respond` handler and service A issues
+      the request. The Redis half reports a skip with exit 77 when `REDIS_URL` is unavailable.
+- [x] Cache, queue, and messaging Redis clients construct with ioredis `lazyConnect: true`, so their
+      existing explicit startup `connect()` no longer fails after eager construction.
+- [x] `apps/README.md`, `CHANGELOG.md`, and milestone tracking updated.
 
 ---
 
@@ -5584,6 +5614,110 @@ app.register(MyPlugin({ option1: 'value' }));
 
 ---
 
+## Milestone 53: Real-Backend CI — Running the Examples Against Live Services
+
+**Package:** none — `.github/workflows/ci.yml`, `scripts/check-apps.ts`, and the `apps/*` smoke
+checks.
+
+**Objective:** every example whose proof needs a live backend is skipped in CI, so the proofs that
+matter most run only when a developer remembers to set an environment variable. `apps/realtime` and
+`apps/microservices` both exit 77 unless `REDIS_URL` is set, and no CI job sets it. This milestone
+makes the real-backend path run on every pull request.
+
+**Why this is the highest-value gap the examples exposed.** M37b fixed a defect where
+`CachePlugin({ store: 'redis' })`, `QueuePlugin({ adapter: 'redis' })` and
+`MessagingPlugin({ broker: 'redis-streams' })` **could never start** — ioredis connects eagerly on
+construction and the explicit startup `connect()` then threw. All four gates were green, per-file
+coverage was above 90 %, and the packages had guarded "REAL ioredis import" tests. None of it
+mattered: every test injects a fake client whose `connect()` is a harmless no-op, and the guarded
+tests only assert that the module imports and that `Redis` is a function — they never construct a
+client or connect one. The defect was found by building an example that talks to a real broker,
+three milestones after it shipped. A CI job with a Redis service container would have caught it the
+day it landed.
+
+**The four classes an example catches that no in-package test can.** Real external dependencies,
+where a fake hides the contract; cross-process and cross-replica behaviour, which a single test
+process cannot express; plugin composition, which per-package tests never see; and the public
+surface as a consumer actually imports it. Each has already produced a defect in this repo — the
+ioredis one above, the M52b workerd harness catching the kernel's module-scope `AbortController` (PR
+#112), and `apps/grpc` needing three casts to wire a descriptor from the plugin's own `getService`.
+
+**What this is NOT.** Examples stay outside the coverage bar. Coverage measures `packages`, and
+tests written against a demo application to move a number would defeat the purpose (M37 §3.3). The
+unit of measure here is "the smoke check ran against a real backend", not a percentage.
+
+### Deliverables
+
+- [ ] GitHub Actions `services:` containers for the backends the examples already target — Redis
+      first, since two examples need it today
+- [ ] `REDIS_URL` (and successors) exported to the `check:apps` step, so no example reports a skip
+      in CI that a service container could have satisfied
+- [ ] A CI assertion that the number of **skipped** examples is zero for backends CI provides — a
+      skip that a container should have covered is a regression, not a pass
+- [ ] Deepen the guarded real-import tests: construct a client and drive one command, rather than
+      asserting the module imports (this is what let the ioredis defect through)
+- [ ] `packages/queue-plugin` gains a guarded real-import test — the only one of the three Redis
+      consumers without one
+- [ ] `scripts/check-apps.ts` reports a malformed application directory by name instead of throwing
+      an unhandled `NotFound`
+
+### Out of scope
+
+- Cloud-provider backends that need credentials (AWS, GCP, Azure) — they cannot run from a fork's
+  pull request; M54 owns the brokers themselves and decides its own verification story.
+- Docker Compose and Kubernetes manifests for the examples — M39.
+- Adding `apps/*` to the coverage gate — deliberately never.
+
+---
+
+## Milestone 54: Cloud Message Brokers — SQS/SNS, Pub/Sub, and Service Bus
+
+**Package:** `packages/messaging-plugin` (plus `packages/queue-plugin` for SQS)
+
+**Objective:** the framework reaches exactly one cloud's messaging — Cloudflare Queues (M52b).
+`MessagingBrokerType` is `'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka'` and the
+factory is a **closed switch** that throws on anything else, with no `'custom'` arm and no way to
+inject a broker instance. An application on AWS, GCP, or Azure therefore cannot use its platform's
+message bus through the committed `IMessageBroker` contract at all.
+
+**The prerequisite is an extension point, not an arm.** `feature-flags`, `database` (M52c),
+`realtime-backplane` and `service-discovery` all ship a `'custom'` arm; messaging is the outlier.
+Adding one is a public API change that belongs here rather than being smuggled in beside a backend.
+`MessagingPluginOptions` becomes a union discriminated on `broker`, so a missing per-arm credential
+is a compile error (the M30 `ChannelConfig` / M50 precedent).
+
+**These are three different jobs, not one.** SQS is a queue with no fan-out: it fits `IQueue`
+(`queue-plugin`), not `IMessageBroker` — and M52b already set that precedent by implementing
+Cloudflare Queues as an `IQueue`. Publish/subscribe on AWS needs the **SNS→SQS** pair, so it is two
+adapters. GCP Pub/Sub and Azure Service Bus both map onto `IMessageBroker` cleanly (topics plus
+subscriptions). Service Bus is the only one of the three with **native** request-reply (`ReplyTo` /
+`SessionId`), which matters because M14c/M14d's RPC needs a per-instance reply inbox through the
+`openInbox` seam — each backend owes that decision explicitly, the way Kafka did in M14d.
+
+**Portability.** All three ship Node SDKs (`@aws-sdk/client-sqs`, `@google-cloud/pubsub`,
+`@azure/service-bus`), so §12.2's inject-or-lazy pattern applies. None is Workers-portable — they
+use gRPC or long-polling rather than `fetch` — so each needs a documented runtime gate, unlike the
+fetch-based providers elsewhere in the repo.
+
+### Deliverables
+
+- [ ] A `'custom'` arm on `MessagingPluginOptions`, with the option type a discriminated union
+- [ ] `MessagingPluginOptions` documented in `PUBLIC_API.md` as a public-surface change
+- [ ] GCP Pub/Sub and Azure Service Bus brokers implementing `IMessageBroker`
+- [ ] An SQS adapter implementing `IQueue`, and an SNS→SQS pairing for fan-out
+- [ ] A per-backend `openInbox` decision for request-reply, or an explicit documented refusal
+- [ ] Guarded real-import tests plus an injectable client facade per backend
+- [ ] Runtime gating and a documented no-op or throw on Cloudflare Workers
+
+### Out of scope
+
+- Running these against live cloud accounts in CI — credentials cannot be exposed to fork pull
+  requests; verification is emulator-based or manual and stated plainly, the way M52's "not verified
+  against a live Worker" is.
+- Kinesis, EventBridge, and Azure Event Hubs — streaming rather than brokered messaging.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -5636,7 +5770,8 @@ app.register(MyPlugin({ option1: 'value' }));
 | 36        | ✅     | starters                              |
 | 36b       | ✅     | starters + decorator-plugin + cli     |
 | 36c       | ✅     | cli + starters + config + runtime     |
-| 37        | ⬜     | examples                              |
+| 37        | ✅     | examples                              |
+| 37b       | ✅     | examples + Redis startup fix          |
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
@@ -5657,3 +5792,5 @@ app.register(MyPlugin({ option1: 'value' }));
 | 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |
 | 52d       | ✅     | cloudflare-plugin (durable objects)   |
+| 53        | ⬜     | real-backend CI (examples gate)       |
+| 54        | ⬜     | messaging-plugin (cloud brokers)      |

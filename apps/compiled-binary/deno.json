@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts",
+    "compile": "deno compile --allow-net --allow-env --output hono-example main.ts"
+  },
+  "imports": {
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts"
+  }
+}

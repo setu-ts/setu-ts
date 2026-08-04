@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
+    "@hono-enterprise/grpc-plugin": "../../packages/grpc-plugin/src/index.ts",
+    "@connectrpc/connect": "npm:@connectrpc/connect@^2.1.2",
+    "@connectrpc/connect-web": "npm:@connectrpc/connect-web@^2.1.2",
+    "@connectrpc/connect/protocol": "npm:@connectrpc/connect@^2.1.2/protocol",
+    "@bufbuild/protobuf": "npm:@bufbuild/protobuf@^2.7.0",
+    "@bufbuild/protobuf/wkt": "npm:@bufbuild/protobuf@^2.7.0/wkt"
+  }
+}

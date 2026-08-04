@@ -24,6 +24,14 @@ async function loadIoredis(): Promise<typeof import('npm:ioredis@5.x').Redis> {
   return mod.Redis;
 }
 
+/** Constructs an ioredis client without opening its socket before connect(). */
+export function createLazyRedisClient(
+  RedisCtor: new (url: string, options: { readonly lazyConnect: true }) => unknown,
+  url: string,
+): IRedisStreamsClient {
+  return new RedisCtor(url, { lazyConnect: true }) as IRedisStreamsClient;
+}
+
 /**
  * Validate that the supplied object has the structural shape required by
  * RedisStreamsBroker. Checks the exact methods the broker calls — no duplicates.
@@ -67,7 +75,7 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  return new RedisCtor(url) as unknown as IRedisStreamsClient;
+  return createLazyRedisClient(RedisCtor, url);
 }
 
 /**
