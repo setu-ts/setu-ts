@@ -524,6 +524,21 @@ key**, because a deferred insert cannot report a generated key to a caller await
 flush. Both are documented in PUBLIC_API.md and covered by tests; neither applies outside a
 transaction.
 
+All 46 packages are live on JSR at `0.1.0-alpha.4`, published by CI from the tag.
+
+Verified after publishing by querying every package on the registry, then installing `kernel` and
+`runtime` from JSR into a throwaway directory — not the workspace, whose import map resolves locally
+and would mask a broken published dependency — and serving a request (`200 {"ok":true}`). `common`
+resolved transitively at `0.1.0-alpha.4`, which is the only real evidence that the cross-package
+specifier bump landed inside the published tarballs: a dry run resolves those from the workspace and
+so cannot show it.
+
+Every package also carries a description and runtime-compat flags for the first time. Neither
+setting lives in a published version — `deno publish` never touches them — so all 46 pages had shown
+an empty description and "Compatibility unknown" through four releases. They are now set from
+`scripts/jsr-metadata.ts` and reapplied by `deno task release:set-metadata`, which is idempotent and
+refuses to run when a published package has no entry.
+
 ### Installing
 
 ```bash
