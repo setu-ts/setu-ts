@@ -49,14 +49,8 @@ export { GcpPubSubBroker } from './brokers/pubsub-broker.ts';
 export { ServiceBusBroker } from './brokers/service-bus-broker.ts';
 
 // Adapter / load helpers
-export {
-  adaptPubSubModule,
-  loadPubSubModule,
-} from './brokers/pubsub-broker.ts';
-export {
-  adaptServiceBusModule,
-  loadServiceBusModule,
-} from './brokers/service-bus-broker.ts';
+export { adaptPubSubModule, loadPubSubModule } from './brokers/pubsub-broker.ts';
+export { adaptServiceBusModule, loadServiceBusModule } from './brokers/service-bus-broker.ts';
 
 // Serializer
 export { JsonSerializer } from './serializers/json-serializer.ts';
@@ -91,10 +85,7 @@ export type {
 } from './interfaces/index.ts';
 
 // Port types
-export type {
-  IPubSubSubscription,
-  IPubSubTransport,
-} from './brokers/pubsub-broker.ts';
+export type { IPubSubSubscription, IPubSubTransport } from './brokers/pubsub-broker.ts';
 export type {
   IServiceBusSubscription,
   IServiceBusTransport,

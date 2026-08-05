@@ -76,10 +76,12 @@ export function adaptSnsModule(
 
   return {
     publish: async (topicArn: string, body: string): Promise<string | undefined> => {
-      const result = await client.send(new mod.PublishCommand({
-        TopicArn: topicArn,
-        Message: body,
-      }));
+      const result = await client.send(
+        new mod.PublishCommand({
+          TopicArn: topicArn,
+          Message: body,
+        }),
+      );
       return (result as { MessageId?: string }).MessageId;
     },
     close: async () => {

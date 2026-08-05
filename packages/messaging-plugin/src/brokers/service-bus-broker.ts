@@ -171,9 +171,7 @@ export function adaptServiceBusModule(
 
       const subHandle = receiver.subscribe({
         processMessage: async (msg) => {
-          const body = typeof msg.body === 'string'
-            ? msg.body
-            : String(msg.body ?? '');
+          const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
           onMessage({
             payload: body,
             ack: () => msg.complete(),

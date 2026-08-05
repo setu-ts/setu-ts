@@ -138,13 +138,15 @@ export function adaptSqsModule(
       max: number,
       visibilitySeconds: number,
     ): Promise<readonly SqsReceivedMessage[]> => {
-      const result = await client.send(new mod.ReceiveMessageCommand({
-        QueueUrl: queueUrl,
-        MaxNumberOfMessages: max,
-        VisibilityTimeout: visibilitySeconds,
-        MessageAttributeNames: [],
-        MessageSystemAttributeNames: ['ApproximateReceiveCount'],
-      }));
+      const result = await client.send(
+        new mod.ReceiveMessageCommand({
+          QueueUrl: queueUrl,
+          MaxNumberOfMessages: max,
+          VisibilityTimeout: visibilitySeconds,
+          MessageAttributeNames: [],
+          MessageSystemAttributeNames: ['ApproximateReceiveCount'],
+        }),
+      );
 
       const messages = (result as { Messages?: unknown[] }).Messages ?? [];
       return messages.map((m: unknown) => {
@@ -164,21 +166,25 @@ export function adaptSqsModule(
       });
     },
     delete: async (queueUrl: string, receiptHandle: string): Promise<void> => {
-      await client.send(new mod.DeleteMessageCommand({
-        QueueUrl: queueUrl,
-        ReceiptHandle: receiptHandle,
-      }));
+      await client.send(
+        new mod.DeleteMessageCommand({
+          QueueUrl: queueUrl,
+          ReceiptHandle: receiptHandle,
+        }),
+      );
     },
     changeVisibility: async (
       queueUrl: string,
       receiptHandle: string,
       seconds: number,
     ): Promise<void> => {
-      await client.send(new mod.ChangeMessageVisibilityCommand({
-        QueueUrl: queueUrl,
-        ReceiptHandle: receiptHandle,
-        VisibilityTimeout: seconds,
-      }));
+      await client.send(
+        new mod.ChangeMessageVisibilityCommand({
+          QueueUrl: queueUrl,
+          ReceiptHandle: receiptHandle,
+          VisibilityTimeout: seconds,
+        }),
+      );
     },
     close: async () => {
       await client.destroy();
@@ -245,7 +251,7 @@ export class SqsQueue implements QueueAdapter {
     } else {
       const mod = await loadSqsModule();
       this.#transport = adaptSqsModule(mod, {
-        region: (this.#injectedClient as undefined),
+        region: this.#injectedClient as undefined,
       } as unknown as { region?: string; credentials?: unknown; endpoint?: string });
     }
 
@@ -335,9 +341,7 @@ export class SqsQueue implements QueueAdapter {
       }
 
       // Attempts come from the platform's ApproximateReceiveCount.
-      const attempts = msg.approximateReceiveCount
-        ? Number(msg.approximateReceiveCount)
-        : 1;
+      const attempts = msg.approximateReceiveCount ? Number(msg.approximateReceiveCount) : 1;
 
       // Record the receipt handle, keyed by job id.
       this.#receipts.set(msg.receiptHandle, {

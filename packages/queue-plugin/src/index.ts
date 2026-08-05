@@ -46,14 +46,8 @@ export type { ISqsTransport, SqsReceivedMessage } from './adapters/sqs-queue.ts'
 export type { ISnsTransport } from './sns/sns-publisher.ts';
 
 // Adapter / load helpers
-export {
-  adaptSqsModule,
-  loadSqsModule,
-} from './adapters/sqs-queue.ts';
-export {
-  adaptSnsModule,
-  loadSnsModule,
-} from './sns/sns-publisher.ts';
+export { adaptSqsModule, loadSqsModule } from './adapters/sqs-queue.ts';
+export { adaptSnsModule, loadSnsModule } from './sns/sns-publisher.ts';
 
 // Error classes
 export {

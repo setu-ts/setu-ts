@@ -83,12 +83,12 @@ function createPluginName(name?: string): string {
 export function MessagingPlugin(
   options: MessagingPluginOptions = {},
 ): IPlugin {
-  const brokerType: string =
-    (options as { broker?: string }).broker ?? 'memory';
+  const brokerType: string = (options as { broker?: string }).broker ?? 'memory';
   const instanceName = (options as { name?: string }).name;
-  const serializer = (options as { serializer?: import('../serializers/serializer.ts').ISerializer })
-    .serializer
-    ?? new JsonSerializer();
+  const serializer =
+    (options as { serializer?: import('../serializers/serializer.ts').ISerializer })
+      .serializer ??
+      new JsonSerializer();
 
   // Determine the token based on whether this is a named instance
   const token = instanceName ? createNamedToken(instanceName) : CAPABILITIES.MESSAGING;
@@ -184,9 +184,13 @@ export function MessagingPlugin(
         };
         const pubSubOptions: import('../brokers/pubsub-broker.ts').PubSubOptions = {};
         if (pubSubOpts.projectId !== undefined) pubSubOptions.projectId = pubSubOpts.projectId;
-        if (pubSubOpts.credentials !== undefined) pubSubOptions.credentials = pubSubOpts.credentials;
+        if (pubSubOpts.credentials !== undefined) {
+          pubSubOptions.credentials = pubSubOpts.credentials;
+        }
         if (pubSubOpts.client !== undefined) pubSubOptions.client = pubSubOpts.client;
-        if (pubSubOpts.defaultQueue !== undefined) pubSubOptions.defaultQueue = pubSubOpts.defaultQueue;
+        if (pubSubOpts.defaultQueue !== undefined) {
+          pubSubOptions.defaultQueue = pubSubOpts.defaultQueue;
+        }
         if (pubSubOpts.replyTopic !== undefined) pubSubOptions.replyTopic = pubSubOpts.replyTopic;
         if (logger !== undefined) pubSubOptions.logger = logger;
         broker = new GcpPubSubBroker(ctx.runtime, serializer, pubSubOptions);
