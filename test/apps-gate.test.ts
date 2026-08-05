@@ -83,13 +83,24 @@ describe('real-backend CI wiring', () => {
   });
 
   it('grants each Redis package the net permission its guarded test needs', async () => {
-    for (const pkg of ['cache-plugin', 'messaging-plugin', 'queue-plugin']) {
+    const redisPackages = ['cache-plugin', 'messaging-plugin'];
+    for (const pkg of redisPackages) {
       const config = await readJson<{
         readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
       }>(`packages/${pkg}/deno.json`);
       // Scoped, not `true`: the grant exists for the Redis round trips alone.
       expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);
     }
+    // queue-plugin also needs ElasticMQ endpoints for SQS e2e.
+    const queueConfig = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/queue-plugin/deno.json');
+    expect(queueConfig.test?.permissions?.net).toEqual([
+      '127.0.0.1:6379',
+      'localhost:6379',
+      '127.0.0.1:9324',
+      'localhost:9324',
+    ]);
   });
 
   it('has REDIS_URL available whenever CI provides the container', () => {
