@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows
   in the `ZRANGEBYSCORE` command, so reserve works against a real Redis server. Previously the call
   sent positional offset/count arguments without the keyword, which caused Redis to return
   `ERR syntax error` on every reserve attempt.
+- `@hono-enterprise/messaging-plugin` — `RedisStreamsBroker` now hands a timer handle back to
+  `clearInterval` exactly as `setInterval` returned it. It previously stored the handle as a
+  `number`, and `TimerHandle` is deliberately opaque (`unknown`), so a runtime returning an
+  object-shaped handle had it coerced to `NaN` — making the cancel a silent no-op and leaking a poll
+  loop that kept issuing commands after `unsubscribe()` and `disconnect()`. The bundled Node, Deno,
+  and Bun runtimes were unaffected, because their handles happen to coerce to a numeric id; a custom
+  `IRuntimeServices` whose handle does not coerce leaked outright.
 
 ## [0.1.0-alpha.4] — 2026-08-04
 

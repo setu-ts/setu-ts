@@ -15,7 +15,7 @@ import type {
   ProcessOptions,
   RecurringOptions,
 } from '@hono-enterprise/common';
-import type { HealthIndicatorFn, IRuntimeServices } from '@hono-enterprise/common';
+import type { HealthIndicatorFn, IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
 import type { QueueAdapter } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { runJob } from '../processors/job-processor.ts';
@@ -62,8 +62,10 @@ export class QueueService implements IQueue {
   #defaultMaxAttempts: number;
   #pollIntervalMs: number;
   #processors: Map<string, ProcessorRegistration<unknown>>;
-  #workerHandle: number | null = null;
-  #recurringHandle: number | null = null;
+  // Opaque per the IRuntimeServices contract: store exactly what setInterval
+  // returned and hand that same value back to clearInterval.
+  #workerHandle: TimerHandle | null = null;
+  #recurringHandle: TimerHandle | null = null;
   #connected = false;
   #logger: QueueLogger | undefined;
 
@@ -213,7 +215,7 @@ export class QueueService implements IQueue {
       this.#poll().catch((error: unknown) => {
         this.#report('queue poll failed', error);
       });
-    }, this.#pollIntervalMs) as unknown as number;
+    }, this.#pollIntervalMs);
   }
 
   #startRecurringLoop(): void {
@@ -221,7 +223,7 @@ export class QueueService implements IQueue {
       this.#processRecurring().catch((error: unknown) => {
         this.#report('queue recurring scheduling failed', error);
       });
-    }, this.#pollIntervalMs) as unknown as number;
+    }, this.#pollIntervalMs);
   }
 
   async #poll(): Promise<void> {

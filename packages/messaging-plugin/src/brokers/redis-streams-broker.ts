@@ -6,7 +6,7 @@ import type {
   RequestOptions,
   SubscribeOptions,
 } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
@@ -106,7 +106,10 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   #client: IRedisStreamsClient | null = null;
   #ready = false;
   #activeSubscriptions: Map<string, ActiveSubscription>;
-  #pollIntervals: Map<string, number>; // subscription id -> interval id
+  // `TimerHandle` is opaque (`unknown` in common), so a handle must round-trip
+  // to clearInterval EXACTLY as setInterval returned it. Storing it as a number
+  // used to coerce it, which silently discarded object-shaped handles.
+  #pollIntervals: Map<string, TimerHandle>; // subscription id -> interval handle
   #rr: RequestReplyCore;
 
   /**
@@ -318,7 +321,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
 
     // Start the poll loop
     const intervalId = this.#runtime.setInterval(poll, this.#pollIntervalMs);
-    this.#pollIntervals.set(subscriptionId, Number(intervalId));
+    this.#pollIntervals.set(subscriptionId, intervalId);
 
     // deno-lint-ignore require-await
     const unsubscribe = async (): Promise<void> => {

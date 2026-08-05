@@ -291,6 +291,29 @@ changed `src` files, and the fix ships with a `CHANGELOG.md` entry.
   on `localhost:6379` (which is what CI provides and what previously broke them) and still fail if
   the drop-and-lazy-load behaviour they assert regresses.
 
+### 3.7 Timer handles must round-trip: `Number(handle)` destroys an opaque value
+
+- **Decision:** `RedisStreamsBroker` stores poll-interval handles as `TimerHandle`, not `number`,
+  and passes each back to `clearInterval` unchanged. `queue-plugin`'s `QueueService` gets the same
+  treatment — its `as unknown as number` casts on `#workerHandle` / `#recurringHandle` are replaced
+  by `TimerHandle`.
+- **Why:** `TimerHandle` is `unknown` in `common` (`runtime.ts:19`) — deliberately opaque, so the
+  only valid contract is "give back exactly what you got". The broker applied `Number(intervalId)`,
+  which yields `NaN` for an object-shaped handle, making `clearInterval` a silent no-op: every
+  subscription leaked a poll loop that kept issuing commands after `unsubscribe()` and
+  `disconnect()`. The bundled runtimes were saved only by coincidence — `globalThis.setInterval`
+  returns a Timeout that coerces to its numeric id — so this was a live defect for any custom
+  `IRuntimeServices`, and a latent one everywhere. The two `queue-plugin` sites are the same class
+  but were NOT defects: `as unknown as number` is a compile-time cast that preserves the value, so
+  those handles already round-tripped. They are corrected as typing hygiene, and no test claims
+  otherwise, because a test cannot fail for a bug that was not there.
+- **Scope note:** an earlier draft of this plan listed this as fixture-only and out of scope. That
+  was wrong — the fault is in `src`, and the fixture that exposed it (`createFakeRuntime` returning
+  `{ id }`) is CORRECT precisely because it exercises the opacity the contract promises.
+- **Test home:** `packages/messaging-plugin/test/unit/redis-streams-broker-timers.test.ts` — asserts
+  handle IDENTITY (`cleared[0]` is `started[0]`), and separately that no further client command is
+  issued after `unsubscribe()`. Both assertions verified to FAIL with `Number(intervalId)` restored.
+
 ## 4. Exported surface — every symbol names its consumer
 
 No package `src/index.ts` is touched, so no JSR-published surface changes. The new exports are
@@ -432,14 +455,10 @@ stays green because `ALLOW_SKIP=cloudflare`. The `Test`/`Test with coverage` log
   tests at an address outside it, and read the whole run rather than the exit code — the full suite
   was executed under both conditions (`REDIS_URL` set with Redis live, and unset with Redis
   stopped), each `1056 passed | 0 failed`.
-- **A leaked poll interval in the messaging round trip.** `RedisStreamsBroker` stores
-  `Number(intervalId)`, which is `NaN` under `createFakeRuntime`'s `{ id }` handle, so
-  `disconnect()` does not clear the poll loop (§1). Production is unaffected — real handles coerce
-  to a number. The prototype of §3.2's messaging test passed and tripped no sanitizer, so this is
-  not a blocker; the risk is a future test in the same file inheriting a still-polling interval.
-  Mitigation: keep the messaging round trip in its own file (as §3.2 already specifies) and note the
-  fixture defect in the PR description so it is not rediscovered as a mystery. Fixing the fixture is
-  not in scope.
+- **A leaked poll interval in the messaging round trip — FOUND AND FIXED (§3.7).** Raised here as a
+  tolerated risk while it was believed to be fixture-only. It is a `src` defect: the broker coerced
+  an opaque `TimerHandle` to a number, so cancelling was a silent no-op for any object-shaped
+  handle. Fixed in this milestone rather than deferred; see §3.7.
 - **Guarded-test flakiness against a live service container.** Risk: a CI Redis slow to start, or a
   poll timing out. Mitigation: the service uses a `redis-cli ping` healthcheck so the step does not
   start before Redis is ready; the messaging round trip uses a bounded wait (`pollIntervalMs: 50` +
@@ -474,9 +493,8 @@ stays green because `ALLOW_SKIP=cloudflare`. The `Test`/`Test with coverage` log
 - Adding `apps/*` to the coverage gate — **deliberately never** (ROADMAP §5669).
 - Any `PUBLIC_API.md` change, any new capability token, any `@hono-enterprise/common` change. The
   §3.5 fix is the only `packages/*/src` edit and touches no documented surface.
-- Fixing the `createFakeRuntime` timer-handle defect in `messaging-plugin` (§8). It is a real
-  fixture bug with no production effect; correcting it touches a fixture nine test files share,
-  which is a larger blast radius than this milestone should carry. Recorded in the PR description.
+- (Formerly listed here: the `messaging-plugin` timer-handle defect. It was mis-scoped — the fault
+  is in `src`, not the fixture — and is now IN scope, delivered as §3.7.)
 - (The status-flip of ROADMAP row 53 and the CLAUDE.md "Current status" entry happens in this
   milestone's own PR at merge, per CLAUDE.md "Before reporting a task done" — it is a tracking edit,
   not an implementation deliverable of this plan.)
