@@ -5861,4 +5861,4 @@ fetch-based providers elsewhere in the repo.
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |
 | 52d       | ✅     | cloudflare-plugin (durable objects)   |
 | 53        | ✅     | real-backend CI (examples gate)       |
-| 54        | ⬜     | messaging-plugin (cloud brokers)      |
+| 54        | ✅     | messaging-plugin (cloud brokers)      |
