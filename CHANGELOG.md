@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.
   Their explicit startup `connect()` call no longer fails because ioredis connected eagerly during
   construction.
+- `@hono-enterprise/queue-plugin` — `RedisQueue.reserve()` now sends the mandatory `LIMIT` keyword
+  in the `ZRANGEBYSCORE` command, so reserve works against a real Redis server. Previously the call
+  sent positional offset/count arguments without the keyword, which caused Redis to return
+  `ERR syntax error` on every reserve attempt.
 
 ## [0.1.0-alpha.4] — 2026-08-04
 

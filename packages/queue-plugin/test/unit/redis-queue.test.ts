@@ -83,7 +83,7 @@ describe('RedisQueue', () => {
       expect(calls.some((c) => c.method === 'zadd')).toBe(true);
     });
 
-    it('reserve emits ZRANGEBYSCORE then ZREM + ZADD processing', async () => {
+    it('reserve emits ZRANGEBYSCORE with LIMIT keyword then ZREM + ZADD processing', async () => {
       const now = Date.now();
       await queue.enqueue({
         id: '1',
@@ -100,7 +100,11 @@ describe('RedisQueue', () => {
       expect(reserved[0].id).toBe('1');
 
       const calls = fakeClient.calls;
-      expect(calls.some((c) => c.method === 'zrangebyscore')).toBe(true);
+      const zrangebyscoreCall = calls.find((c) => c.method === 'zrangebyscore');
+      expect(zrangebyscoreCall).toBeDefined();
+      // Assert the 'LIMIT' keyword is present (the fix for the ZRANGEBYSCORE bug)
+      expect(zrangebyscoreCall!.args).toContain('LIMIT');
+      expect(zrangebyscoreCall!.args).toEqual(['queue:test:ready', '-inf', now, 'LIMIT', 0, 1]);
       expect(calls.some((c) => c.method === 'zrem')).toBe(true);
     });
 

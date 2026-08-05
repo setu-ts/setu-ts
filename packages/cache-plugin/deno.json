@@ -8,6 +8,7 @@
       "read": true,
       "import": true,
       "env": true,
+      "net": true,
       "sys": ["hostname"]
     }
   }
