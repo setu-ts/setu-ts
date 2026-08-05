@@ -215,4 +215,292 @@ describe('SqsQueue', () => {
       expect(dueAfter).toHaveLength(0);
     });
   });
+
+  describe('ack()', () => {
+    it('deletes message via transport', async () => {
+      let deletedReceipt = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '1',
+          }]),
+        delete: (_q, receipt) => {
+          deletedReceipt = receipt;
+          return Promise.resolve();
+        },
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.ack('jobs', jobs[0].id);
+
+      expect(deletedReceipt).toBe('handle-j1');
+    });
+
+    it('ignores unknown id without throwing', async () => {
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      // Should not throw even with unknown id
+      await queue.ack('jobs', 'nonexistent-id');
+    });
+  });
+
+  describe('requeue()', () => {
+    it('calls changeVisibility with backoff seconds', async () => {
+      let visibilitySeconds = 0;
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '2',
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: (_q, _r, seconds) => {
+          visibilitySeconds = seconds;
+          return Promise.resolve();
+        },
+        close: () => Promise.resolve(),
+      };
+      const runtime = createRuntime();
+      const queue = new SqsQueue(runtime, {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.requeue('jobs', jobs[0].id, 1000000 + 60000, jobs[0].attempts);
+
+      expect(visibilitySeconds).toBe(60);
+    });
+
+    it('ignores unknown id without throwing', async () => {
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      await queue.requeue('jobs', 'nonexistent-id', 2000000, 2);
+    });
+  });
+
+  describe('deadLetter()', () => {
+    it('sends to DLQ then deletes from source', async () => {
+      let dlqSent = false;
+      let deletedReceipt = '';
+      const transport: ISqsTransport = {
+        send: (q) => {
+          if (q.includes('dlq')) dlqSent = true;
+          return Promise.resolve();
+        },
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '3',
+          }]),
+        delete: (_q, receipt) => {
+          deletedReceipt = receipt;
+          return Promise.resolve();
+        },
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+
+      expect(dlqSent).toBe(true);
+      expect(deletedReceipt).toBe('handle-j1');
+    });
+
+    it('deletes from source when no DLQ configured', async () => {
+      let deletedReceipt = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '3',
+          }]),
+        delete: (_q, receipt) => {
+          deletedReceipt = receipt;
+          return Promise.resolve();
+        },
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        // No deadLetterQueues
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+
+      expect(deletedReceipt).toBe('handle-j1');
+    });
+  });
+
+  describe('reserve() edge cases', () => {
+    it('skips messages with no receiptHandle', async () => {
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: '',
+            approximateReceiveCount: '1',
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      expect(jobs).toHaveLength(0);
+    });
+
+    it('skips malformed messages', async () => {
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: 'not-json',
+            receiptHandle: 'handle-1',
+            approximateReceiveCount: '1',
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      expect(jobs).toHaveLength(0);
+    });
+
+    it('defaults attempts to 1 when no ApproximateReceiveCount', async () => {
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-1',
+            approximateReceiveCount: undefined,
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].attempts).toBe(1);
+    });
+  });
+
+  describe('disconnect()', () => {
+    it('clears receipts and sets ready false', async () => {
+      let closed = false;
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => {
+          closed = true;
+          return Promise.resolve();
+        },
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+      expect(queue.isReady()).toBe(true);
+
+      await queue.disconnect();
+      expect(closed).toBe(true);
+      expect(queue.isReady()).toBe(false);
+    });
+  });
+
+  describe('not connected errors', () => {
+    it('throws when enqueue without connection', async () => {
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+      });
+
+      await expect(queue.enqueue({
+        id: 'j1',
+        name: 'jobs',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: 0,
+      })).rejects.toThrow('not connected');
+    });
+
+    it('throws when reserve without connection', async () => {
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+      });
+
+      await expect(queue.reserve('jobs', 1, 1000000)).rejects.toThrow('not connected');
+    });
+  });
 });

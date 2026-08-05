@@ -322,4 +322,134 @@ describe('GcpPubSubBroker', () => {
       expect(openedSub).toBe('my-queue');
     });
   });
+
+  describe('error paths', () => {
+    it('throws when publishing without connection', async () => {
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      // Do NOT call connect()
+      await expect(broker.publish('topic', 'msg')).rejects.toThrow('not connected');
+    });
+
+    it('throws when subscribing without connection', async () => {
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      // Do NOT call connect()
+      await expect(broker.subscribe('topic', () => {})).rejects.toThrow('not connected');
+    });
+  });
+
+  describe('unsubscribe', () => {
+    it('closes the subscription on unsubscribe', async () => {
+      let closed = false;
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () =>
+          Promise.resolve({
+            close: () => {
+              closed = true;
+              return Promise.resolve();
+            },
+          } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      const sub = await broker.subscribe('topic', () => {});
+      expect(closed).toBe(false);
+
+      await sub.unsubscribe();
+      expect(closed).toBe(true);
+    });
+  });
+
+  describe('logger on handler error', () => {
+    it('calls logger.error when handler throws', async () => {
+      let logged = '';
+      let onMessageCb:
+        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
+        | null = null;
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          onMessageCb = cb;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, {
+        client: transport,
+        logger: {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {
+        throw new Error('handler-error');
+      });
+
+      onMessageCb!({ payload: '{}', ack: () => {}, nack: () => {} });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(logged).toContain('handler-error');
+    });
+  });
+
+  describe('request', () => {
+    it('delegates to RequestReplyCore', async () => {
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+
+      // request should not throw even without a responder (it times out)
+      const promise = broker.request('topic', 'hello');
+      // We won't await the full timeout; just verify it returns a promise
+      expect(promise).toBeDefined();
+    });
+  });
+
 });

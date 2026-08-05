@@ -147,7 +147,13 @@ describe('ServiceBusBroker', () => {
       await broker.connect();
       await broker.subscribe('topic', () => {});
 
-      onMessageCb!({ payload: '{}', ack: () => { acked = true; }, nack: () => {} });
+      onMessageCb!({
+        payload: '{}',
+        ack: () => {
+          acked = true;
+        },
+        nack: () => {},
+      });
       await Promise.resolve();
       await Promise.resolve();
       expect(acked).toBe(true);
@@ -174,9 +180,17 @@ describe('ServiceBusBroker', () => {
       }, { client: transport });
 
       await broker.connect();
-      await broker.subscribe('topic', () => { throw new Error('boom'); });
+      await broker.subscribe('topic', () => {
+        throw new Error('boom');
+      });
 
-      onMessageCb!({ payload: '{}', ack: () => {}, nack: () => { nacked = true; } });
+      onMessageCb!({
+        payload: '{}',
+        ack: () => {},
+        nack: () => {
+          nacked = true;
+        },
+      });
       await Promise.resolve();
       await Promise.resolve();
       expect(nacked).toBe(true);
@@ -283,5 +297,134 @@ describe('ServiceBusBroker', () => {
       await broker.disconnect(); // should not throw
       expect(broker.isReady()).toBe(false);
     });
+  });
+
+  describe('error paths', () => {
+    it('throws when publishing without connection', async () => {
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await expect(broker.publish('topic', 'msg')).rejects.toThrow('not connected');
+    });
+
+    it('throws when subscribing without connection', async () => {
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await expect(broker.subscribe('topic', () => {})).rejects.toThrow('not connected');
+    });
+  });
+
+  describe('unsubscribe', () => {
+    it('closes the subscription on unsubscribe', async () => {
+      let closed = false;
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: () =>
+          Promise.resolve({
+            close: () => {
+              closed = true;
+              return Promise.resolve();
+            },
+          } as IServiceBusSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      const sub = await broker.subscribe('topic', () => {});
+      expect(closed).toBe(false);
+
+      await sub.unsubscribe();
+      expect(closed).toBe(true);
+    });
+  });
+
+  describe('logger on handler error', () => {
+    it('calls logger.error when handler throws', async () => {
+      let logged = '';
+      let onMessageCb:
+        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
+        | null = null;
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          onMessageCb = cb;
+          return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, {
+        client: transport,
+        logger: {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {
+        throw new Error('handler-error');
+      });
+
+      onMessageCb!({ payload: '{}', ack: () => {}, nack: () => {} });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(logged).toContain('handler-error');
+    });
+  });
+
+  describe('options', () => {
+    it('uses custom defaultQueue', async () => {
+      let openedSub = '';
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (_t: string, s: string) => {
+          openedSub = s;
+          return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport, defaultQueue: 'my-queue' });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {});
+      expect(openedSub).toBe('my-queue');
+    });
+
   });
 });
