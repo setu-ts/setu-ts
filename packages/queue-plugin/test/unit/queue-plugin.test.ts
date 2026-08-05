@@ -5,9 +5,10 @@ import type { IQueue, IRuntimeServices } from '@hono-enterprise/common';
 
 /**
  * A Redis address the test suite is deliberately NOT permitted to reach: the
- * `test` task grants `--allow-net` for port 6379 only, so a connect here always
- * fails, deterministically and immediately, whatever is running on the machine.
- * See plans/milestone-53-real-backend-ci.md §3.6.
+ * package's own `deno.json` grants `test.permissions.net` for port 6379 only, so
+ * a connect here always fails, deterministically and immediately, whatever is
+ * running on the machine. Widening that grant would break this test's premise.
+ * See plans/milestone-53-real-backend-ci.md §3.4 and §3.6.
  */
 const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:6390';
 

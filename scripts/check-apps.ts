@@ -30,7 +30,6 @@ export function unexpectedSkips(
   skipped: readonly string[],
   allowList: readonly string[],
 ): string[] {
-  if (skipped.length === 0) return [];
   return skipped.filter((name) => !allowList.includes(name));
 }
 
