@@ -128,7 +128,7 @@ export interface StoredRecurring {
 /**
  * Queue adapter type for plugin configuration.
  */
-export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq';
+export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq' | 'sqs';
 
 /**
  * Options for configuring the queue plugin.
@@ -148,6 +148,8 @@ export interface QueuePluginOptions {
   pollIntervalMs?: number;
   /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
   prefix?: string;
+  /** SQS-specific options (required when adapter is 'sqs'). */
+  sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
 }
 
 /**

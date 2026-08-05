@@ -21,6 +21,7 @@ import {
   RabbitMqQueue,
   validateClient as isAmqpQueueConnection,
 } from '../adapters/rabbitmq-queue.ts';
+import { SqsQueue } from '../adapters/sqs-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
 
@@ -81,6 +82,13 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             ...(client !== undefined && isAmqpQueueConnection(client) ? { client } : {}),
             ...(options?.prefix !== undefined ? { prefix: options.prefix } : {}),
           });
+          break;
+        }
+        case 'sqs': {
+          if (!options?.sqs) {
+            throw new Error('SQS adapter requires options.sqs configuration');
+          }
+          adapter = new SqsQueue(ctx.runtime, options.sqs);
           break;
         }
         default:
