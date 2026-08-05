@@ -3854,6 +3854,73 @@ defect that blocked a real cross-service messaging proof.
 
 ---
 
+## Milestone 37c: Full-Stack Example — the Largest Capability With Nothing to Run
+
+**Package:** none — `apps/full-stack` (plus whatever `scripts/check-apps.ts` and
+`.github/workflows/ci.yml` need to gate it).
+
+**Objective:** the framework's full-stack story ships in three places and has **no runnable
+example**. `packages/react-router-plugin` (M44) embeds React Router 8 in framework mode over a
+kernel catch-all; `packages/starters/full-stack-starter` (M36) composes it as `createFullStackApp`;
+and `honoe new --template full-stack` (M36c) scaffolds the `routes → features → services → models`
+skeleton. A reader can run none of it. Verified at the time of writing: 13 directories under
+`apps/`, none referencing `react-router` in source.
+
+**Why this is the example that matters most.** M37's own standard is that every capability is proven
+by something a reader can run, and this is the largest one exempt from it. It is also the only tier
+with two layers to prove at once — the plugin's SSR bridge AND the starter's composition — and no
+starter has an example either, so this closes both gaps with one application. The M36c deliverable
+that distinguishes this framework from `create-react-router` is a **removal**: a conventional React
+Router app's `lib/{session,csrf,sse,kv,service-logger}.server.ts` and its
+`config/services.server.ts` module-level caches are replaced by capabilities and the kernel
+registry. That claim is currently asserted by a CLI drift test and demonstrated by nothing.
+
+**The toolchain decision this milestone must make FIRST.** Every other example is pure Deno, and
+`scripts/check-apps.ts` runs exactly `deno check` on the entry points plus `deno task smoke`. A
+React Router app needs an npm install and a Vite build to produce the `ServerBuild` its SSR handler
+imports — the **sole documented exception** to the Deno-only toolchain (CLAUDE.md, AI_GUIDELINES
+§12.2). CI installs only Deno. Since M53, an unlisted skip is a **failure**, so this cannot be added
+without deciding how it is gated; adding it and appending `full-stack` to `ALLOW_SKIP` would ship an
+example whose proof never runs, which is the exact pattern M53 exists to end. Resolve in the plan,
+with the trade-off stated:
+
+- **Commit a pre-built `ServerBuild` fixture.** Smoke stays pure Deno and runs everywhere, but it
+  proves the SSR bridge and plugin wiring rather than the real build, and the fixture can drift from
+  the app source with nothing to catch it.
+- **Add Node/npm to the `deno` CI job (or a job of its own) and build for real.** Proves the whole
+  path including `vite build`, at the cost of a second toolchain in CI and a slower gate. This is
+  also what would let `apps/cloudflare` stop skipping, so the two may share the answer.
+
+Whichever is chosen, the milestone states plainly which part is gated and which is not — the M37
+precedent, where "Not run by CI" was amended to say exactly which half CI covers.
+
+### Deliverables
+
+- [ ] A toolchain decision recorded in the plan before implementation, per the two options above,
+      naming what CI proves and what it does not
+- [ ] `apps/full-stack` — a React Router 8 framework-mode application served by the kernel through
+      `react-router-plugin`, composed via `createFullStackApp` so the starter is exercised too
+- [ ] Its `smoke` task asserts one behaviour end to end: an SSR-rendered route returns HTML
+      containing data produced by a capability (not a hard-coded string), proving the `loadContext`
+      bridge rather than that a server started
+- [ ] A test pinning the removal claim — none of `lib/session.server.ts`, `lib/csrf.server.ts`,
+      `lib/sse.server.ts`, `lib/kv.server.ts`, `lib/service-logger.server.ts`, or
+      `config/services.server.ts` exists in the example, because capabilities replace them
+- [ ] `check:apps` gates it under the chosen toolchain, with `ALLOW_SKIP` used only if the plan
+      justifies it in writing
+- [ ] `apps/README.md` row, `CHANGELOG.md`, and milestone tracking updated
+
+### Out of scope
+
+- A second full-stack example per runtime — one application, with any Workers caveat documented
+  rather than duplicated (M36c already omits `assetsDir` on Workers).
+- Making `apps/cloudflare` stop skipping. If the Node/npm option is chosen and it happens to unblock
+  workerd too, that is a bonus noted in the plan, not a deliverable here.
+- Docker Compose and Kubernetes manifests for the example — M39.
+- Adding `apps/*` to the coverage gate — deliberately never.
+
+---
+
 ## Milestone 38: Documentation
 
 **Objective:** Generate comprehensive documentation.
@@ -5772,6 +5839,7 @@ fetch-based providers elsewhere in the repo.
 | 36c       | ✅     | cli + starters + config + runtime     |
 | 37        | ✅     | examples                              |
 | 37b       | ✅     | examples + Redis startup fix          |
+| 37c       | ⬜     | full-stack example (apps/full-stack)  |
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
