@@ -158,7 +158,7 @@ export class RedisQueue implements QueueAdapter {
     const jobsKey = `queue:${name}:jobs`;
 
     // Get due jobs (score <= nowMs)
-    const dueIds = await this.#client.zrangebyscore(readyKey, '-inf', nowMs, 0, limit);
+    const dueIds = await this.#client.zrangebyscore(readyKey, '-inf', nowMs, 'LIMIT', 0, limit);
 
     if (dueIds.length === 0) {
       return [];

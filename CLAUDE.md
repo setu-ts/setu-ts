@@ -1333,11 +1333,50 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   runs there, and `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the
   tree ahead of `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to
   `unusedPort()`) — complete (PR pending)
-- **Next milestone** — **M38** (documentation), then M39–M40. Two milestones were opened by M37b's
-  findings and are queued behind those: **M53** (real-backend CI — the Redis-backed example smokes
-  are skipped in CI, which is why the ioredis defect survived three milestones) and **M54** (cloud
-  message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP
-  Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
+- **Milestone 53** (`.github/workflows/ci.yml` + `scripts/check-apps.ts` + guarded Redis tests —
+  real-backend CI: making the proofs that matter actually run on every pull request. `apps/realtime`
+  and `apps/microservices` both exited **77** unless `REDIS_URL` was set and no CI job set it, so
+  the two examples whose whole purpose is cross-replica / cross-service behaviour against a live
+  broker were skipped. Adds a `redis:7` service container, job-level `REDIS_URL`, an `ALLOW_SKIP`
+  allowlist that turns a skip CI could have covered into a **failure**, malformed-app-directory
+  reporting by name instead of an unhandled `NotFound`, and three deepened guarded real-import tests
+  that construct a client over the real `loadIoredis` path and drive one command round trip. **The
+  milestone found three defects no gate could see, which is the entire argument for it.** (1)
+  `RedisQueue.reserve()` sent `ZRANGEBYSCORE` with a positional offset/count and **no `LIMIT`
+  keyword**, so every reserve against a real server answered `ERR syntax error` —
+  `QueuePlugin({ adapter: 'redis' })` could not dispatch a job at all. It survived because the test
+  fake is `zrangebyscore: () => []`, a zero-arity stub that accepts any arguments: the same
+  contract-violating-double root cause as the M37b ioredis defect. `IRedisQueueClient.zrangebyscore`
+  is widened to a limit-clause union so the broken positional form is now a **compile** error. (2)
+  `RedisStreamsBroker` stored poll-interval handles as `number` via `Number(intervalId)`, but
+  `TimerHandle` is `unknown` in `common` — deliberately opaque — so an object-shaped handle coerced
+  to `NaN` and `clearInterval` became a silent no-op, leaking a poll loop that kept issuing commands
+  after `unsubscribe()`/`disconnect()`. The bundled runtimes were saved only by coincidence
+  (`globalThis.setInterval` returns a Timeout that coerces to its id); any custom `IRuntimeServices`
+  leaked outright. The fixture that exposed it is CORRECT precisely because it exercises that
+  opacity. `queue-plugin`'s `as unknown as number` casts were the same class but not defects — a
+  cast preserves the value — so they are retyped with no test, because a test cannot fail for a bug
+  that was not there. (3) Two existing tests passed **only** because Redis was unreachable
+  (`rejects.toThrow()` against `localhost:6379`); providing a live one flipped them red. Both now
+  target an address the net grant deliberately does not cover. **Three wiring facts were established
+  by measurement, each having first produced a wrong answer:** a `services:` label is NOT a
+  resolvable hostname for a job running directly on the runner, so `REDIS_URL` must use a mapped
+  `localhost` port — and getting it wrong does not skip, it makes the smokes throw; `check:apps`
+  needs `--allow-env=ALLOW_SKIP` or the gate throws `NotCapable` on its first run; and a CLI
+  `--allow-net=<list>` **replaces** a package's `test.permissions` block rather than unioning with
+  it, so scoping at the root narrowed the nine packages already declaring `net: true` and broke 21
+  GraphQL/SSE/WebSocket e2e tests — the grant therefore lives in each Redis package's own manifest,
+  endpoint-scoped. A loopback-wide grant was also rejected with cause: it lets the tests see a real
+  `ECONNREFUSED`, but ioredis retries forever and the runner hung until killed at 110 s. Code review
+  then caught the milestone's own thesis applied incompletely — the three deepened tests guard on
+  `REDIS_URL` and skip silently, and **nothing asserted they had run**, so dropping the variable
+  from the workflow would skip all three while the job stayed green; `test/apps-gate.test.ts` now
+  pins the service, the port mapping, the variable, and the scoped grant, with both assertions
+  verified to fail when the wiring is broken. Suite green under BOTH conditions (Redis live and
+  Redis stopped), which is the real bar — 1058 passed each way) — complete (PR #123)
+- **Next milestone** — **M38** (documentation), then M39–M40. **M54** (cloud message brokers —
+  `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP Pub/Sub and Azure
+  Service Bus are not merely absent but inexpressible) remains queued behind those.
 
 ## Verification (run before declaring any work done)
 

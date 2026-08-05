@@ -1,6 +1,10 @@
 import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
-import { classifySmokeExitCode } from '../scripts/check-apps.ts';
+import {
+  classifySmokeExitCode,
+  malformedAppDirMessage,
+  unexpectedSkips,
+} from '../scripts/check-apps.ts';
 
 interface RootConfig {
   readonly workspace: readonly string[];
@@ -34,5 +38,88 @@ describe('application gate configuration', () => {
       .toBe('skipped');
     expect(classifySmokeExitCode({ code: 0, success: true, signal: null }))
       .toBe('passed');
+  });
+});
+
+describe('unexpectedSkips', () => {
+  it('returns empty array when no apps skipped', () => {
+    expect(unexpectedSkips([], ['cloudflare'])).toEqual([]);
+  });
+
+  it('returns empty array when all skipped apps are in the allowlist', () => {
+    expect(unexpectedSkips(['cloudflare'], ['cloudflare'])).toEqual([]);
+  });
+
+  it('returns the unexpected skips when allowlist does not cover them', () => {
+    expect(
+      unexpectedSkips(['realtime', 'cloudflare'], ['cloudflare']),
+    ).toEqual(['realtime']);
+  });
+
+  it('treats every skip as unexpected when ALLOW_SKIP is set but lists nothing', () => {
+    // Not the ALLOW_SKIP-unset case: checkApps() never calls this function when
+    // the variable is absent, so warn-only mode is the caller's branch, not this one.
+    expect(unexpectedSkips(['cloudflare'], [])).toEqual(['cloudflare']);
+  });
+});
+
+describe('real-backend CI wiring', () => {
+  // The three deepened Redis tests (cache/messaging/queue `redis-real-import`)
+  // guard on REDIS_URL and log SKIP when it is absent. That guard is right for
+  // local development and silent in CI: drop REDIS_URL from the workflow and all
+  // three skip while the job stays green — precisely the "a skip a provided
+  // backend should have covered is a regression, not a pass" failure that M53
+  // fixes for `apps/`. These assertions extend the same rule to the package
+  // tests M53 added, so the wiring cannot be removed without a red gate.
+
+  it('declares a Redis service and REDIS_URL on the deno job', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
+    expect(workflow).toContain('image: redis:7');
+    // The port mapping is load-bearing: the job runs directly on the runner,
+    // where a service label is not a resolvable hostname and only a mapped port
+    // on localhost is reachable.
+    expect(workflow).toContain('- 6379:6379');
+  });
+
+  it('grants each Redis package the net permission its guarded test needs', async () => {
+    for (const pkg of ['cache-plugin', 'messaging-plugin', 'queue-plugin']) {
+      const config = await readJson<{
+        readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+      }>(`packages/${pkg}/deno.json`);
+      // Scoped, not `true`: the grant exists for the Redis round trips alone.
+      expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);
+    }
+  });
+
+  it('has REDIS_URL available whenever CI provides the container', () => {
+    // Vacuous locally by design; in CI it fails if the job env stops reaching
+    // the test step, which the static checks above cannot observe.
+    if (Deno.env.get('CI') === undefined) return;
+    expect(Deno.env.get('REDIS_URL')).toBeDefined();
+  });
+});
+
+describe('malformedAppDirMessage', () => {
+  it('formats a missing deno.json message for NotFound', () => {
+    const msg = malformedAppDirMessage(
+      'foo',
+      new Deno.errors.NotFound('ENOENT'),
+    );
+    expect(msg).toContain('foo');
+    expect(msg).toContain('missing deno.json');
+    expect(msg).toContain('malformed application directory');
+  });
+
+  it('formats an invalid JSON message for SyntaxError', () => {
+    const msg = malformedAppDirMessage('bar', new SyntaxError('unexpected token'));
+    expect(msg).toContain('bar');
+    expect(msg).toContain('not valid JSON');
+    expect(msg).toContain('malformed application directory');
+  });
+
+  it('returns null for an unknown error type', () => {
+    const msg = malformedAppDirMessage('baz', new RangeError('out of range'));
+    expect(msg).toBeNull();
   });
 });

@@ -116,10 +116,9 @@ export class FakeRedisClient implements IRedisQueueClient {
     key: string,
     min: number | string,
     max: number | string,
-    offset?: number,
-    limit?: number,
+    ...limitClause: readonly ['LIMIT', number, number] | readonly []
   ): Promise<string[]> {
-    this.#record('zrangebyscore', [key, min, max, offset, limit].filter((v) => v !== undefined));
+    this.#record('zrangebyscore', [key, min, max, ...limitClause]);
 
     if (!this.#connected) {
       throw new Error('Not connected');
@@ -145,9 +144,13 @@ export class FakeRedisClient implements IRedisQueueClient {
     // Sort by score
     members.sort((a, b) => a.score - b.score);
 
-    // Apply offset and limit
-    const start = offset ?? 0;
-    const end = limit !== undefined ? start + limit : members.length;
+    // Apply offset and limit from LIMIT clause
+    let start = 0;
+    let end = members.length;
+    if (limitClause.length === 3 && limitClause[0] === 'LIMIT') {
+      start = limitClause[1];
+      end = start + limitClause[2];
+    }
     const sliced = members.slice(start, end);
 
     return sliced.map((m) => m.member);

@@ -17,6 +17,39 @@ export function classifySmokeExitCode(
   return status.success ? 'passed' : 'failed';
 }
 
+/**
+ * Returns the skipped app names that are NOT in the allowlist.
+ *
+ * Pure: it does not know whether `ALLOW_SKIP` is set. Warn-only mode is the
+ * CALLER's decision — `checkApps()` invokes this only once `ALLOW_SKIP` is
+ * defined, so an unset variable never reaches here. An empty allowlist
+ * therefore means "ALLOW_SKIP was set but listed nothing", under which every
+ * skip is unexpected.
+ */
+export function unexpectedSkips(
+  skipped: readonly string[],
+  allowList: readonly string[],
+): string[] {
+  return skipped.filter((name) => !allowList.includes(name));
+}
+
+/**
+ * Returns a human-readable message for a malformed application directory, or
+ * `null` when the error should be rethrown.
+ */
+export function malformedAppDirMessage(
+  directory: string,
+  error: unknown,
+): string | null {
+  if (error instanceof Deno.errors.NotFound) {
+    return `${directory}: missing deno.json — malformed application directory`;
+  }
+  if (error instanceof SyntaxError) {
+    return `${directory}: deno.json is not valid JSON — malformed application directory`;
+  }
+  return null;
+}
+
 async function readAppConfig(path: string): Promise<AppConfig> {
   return JSON.parse(await Deno.readTextFile(path)) as AppConfig;
 }
@@ -42,10 +75,24 @@ async function checkApps(): Promise<boolean> {
   }
   appDirectories.sort();
 
+  const skipped: string[] = [];
   let failed = false;
   for (const directory of appDirectories) {
     const cwd = `apps/${directory}`;
-    const config = await readAppConfig(`${cwd}/deno.json`);
+
+    let config: AppConfig;
+    try {
+      config = await readAppConfig(`${cwd}/deno.json`);
+    } catch (error) {
+      const msg = malformedAppDirMessage(directory, error);
+      if (msg !== null) {
+        console.error(msg);
+        failed = true;
+        continue;
+      }
+      throw error;
+    }
+
     if (!config.tasks?.start || !config.tasks.smoke) {
       console.error(
         `${directory}: every example must declare start and smoke tasks.`,
@@ -75,6 +122,7 @@ async function checkApps(): Promise<boolean> {
     const smoked = await run(['deno', 'task', 'smoke'], cwd);
     const outcome = classifySmokeExitCode(smoked);
     if (outcome === 'skipped') {
+      skipped.push(directory);
       console.warn(
         `${directory}: smoke skipped (external prerequisite unavailable).`,
       );
@@ -88,6 +136,24 @@ async function checkApps(): Promise<boolean> {
       if (!tested.success) {
         failed = true;
       }
+    }
+  }
+
+  // Report skipped summary
+  if (skipped.length > 0) {
+    console.warn(`Skipped: ${skipped.length} [${skipped.join(', ')}]`);
+  }
+
+  // ALLOW_SKIP enforcement
+  const allowRaw = Deno.env.get('ALLOW_SKIP');
+  if (allowRaw !== undefined) {
+    const allowList = allowRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const unexpected = unexpectedSkips(skipped, allowList);
+    if (unexpected.length > 0) {
+      console.error(
+        `Unexpected skips (not in ALLOW_SKIP=${allowRaw}): ${unexpected.join(', ')}`,
+      );
+      failed = true;
     }
   }
 

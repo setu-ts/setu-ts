@@ -20,8 +20,7 @@ export interface IRedisQueueClient {
     key: string,
     min: number | string,
     max: number | string,
-    offset?: number,
-    limit?: number,
+    ...limitClause: readonly ['LIMIT', number, number] | readonly []
   ): Promise<string[]>;
   /** Remove members from a sorted set. */
   zrem(key: string, ...members: string[]): Promise<number>;

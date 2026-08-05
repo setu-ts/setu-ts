@@ -19,4 +19,9 @@ dependencies cannot enter a published package graph. Run its `smoke` task to ver
 | [`cloudflare`](./cloudflare)                 | Worker bindings wire KV and cron (requires Wrangler).                     |
 | [`realtime`](./realtime)                     | A publish on A reaches B's SSE client through Redis (requires Redis).     |
 
-The root `deno task check:apps` gate type-checks every app and runs each smoke task.
+The root `deno task check:apps` gate type-checks every app and runs each smoke task. When a smoke
+task exits with code 77, the gate records it as a skip and prints a warning. In CI, the gate reads
+the `ALLOW_SKIP` environment variable (a comma-separated list of application names) and treats a
+skip for any app **not** listed there as a failure — so a newly added example whose backend CI does
+not provide must be added to `ALLOW_SKIP` or it fails the gate. Locally, `ALLOW_SKIP` is unset by
+default, so every skip remains a warning and the gate does not block.
