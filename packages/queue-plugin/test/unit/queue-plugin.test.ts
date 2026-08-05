@@ -4,6 +4,14 @@ import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import type { IQueue, IRuntimeServices } from '@hono-enterprise/common';
 
 /**
+ * A Redis address the test suite is deliberately NOT permitted to reach: the
+ * `test` task grants `--allow-net` for port 6379 only, so a connect here always
+ * fails, deterministically and immediately, whatever is running on the machine.
+ * See plans/milestone-53-real-backend-ci.md §3.6.
+ */
+const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:6390';
+
+/**
  * Fake runtime for testing.
  */
 class FakeRuntime implements IRuntimeServices {
@@ -236,14 +244,15 @@ describe('QueuePlugin', () => {
     const ctx = new FakeContext();
     const plugin = QueuePlugin({
       adapter: 'redis',
-      url: 'redis://localhost:6379',
+      // NOT the default 6379. The wrong-shaped client must be dropped and the
+      // lazy-load path taken, which we observe as a connect failure — so the
+      // target has to be unreachable. Hardcoding 6379 made this pass only while
+      // no Redis was listening; under M53's CI it is live, register() would
+      // succeed, and the test would fail.
+      url: UNREACHABLE_REDIS_URL,
       client: wrongShapedRedisClient as never,
     });
 
-    // The plugin should not throw; it falls through to lazy-load ioredis
-    // Since we don't have a real Redis, the lazy-load will fail at connect time
-    // We're testing that the wrong-shaped client is DROPPED (guard fails)
-    // and the code proceeds to the lazy-load path
     await expect(plugin.register(ctx as never)).rejects.toThrow();
   });
 

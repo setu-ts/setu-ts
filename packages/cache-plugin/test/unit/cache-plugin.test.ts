@@ -6,6 +6,14 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
 
 import { CachePlugin } from '../../src/plugin/cache-plugin.ts';
 
+/**
+ * A Redis address the test suite is deliberately NOT permitted to reach: the
+ * `test` task grants `--allow-net` for port 6379 only, so a connect here always
+ * fails, deterministically and immediately, whatever is running on the machine.
+ * See plans/milestone-53-real-backend-ci.md §3.6.
+ */
+const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:6390';
+
 describe('CachePlugin', () => {
   function createFakeContext(): {
     ctx: IPluginContext;
@@ -240,7 +248,13 @@ describe('CachePlugin', () => {
 
   describe('store type: redis', () => {
     it('throws when redis client cannot be resolved', async () => {
-      const plugin = CachePlugin({ store: 'redis' });
+      // Relying on the default redis://localhost:6379 made this pass only while
+      // no Redis was listening — under M53's CI, which serves a live Redis on
+      // exactly that address, register() would succeed and this test would fail.
+      const plugin = CachePlugin({
+        store: 'redis',
+        options: { url: UNREACHABLE_REDIS_URL },
+      });
       const { ctx } = createFakeContext();
       await expect(plugin.register(ctx)).rejects.toThrow();
     });

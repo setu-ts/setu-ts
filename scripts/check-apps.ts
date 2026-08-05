@@ -18,9 +18,13 @@ export function classifySmokeExitCode(
 }
 
 /**
- * Returns the list of skipped app names that are NOT in the allowlist.
- * When allowList is empty (ALLOW_SKIP unset), returns an array — warn-only mode.
- * When allowList is set (CI), any skip not listed is a regression.
+ * Returns the skipped app names that are NOT in the allowlist.
+ *
+ * Pure: it does not know whether `ALLOW_SKIP` is set. Warn-only mode is the
+ * CALLER's decision — `checkApps()` invokes this only once `ALLOW_SKIP` is
+ * defined, so an unset variable never reaches here. An empty allowlist
+ * therefore means "ALLOW_SKIP was set but listed nothing", under which every
+ * skip is unexpected.
  */
 export function unexpectedSkips(
   skipped: readonly string[],

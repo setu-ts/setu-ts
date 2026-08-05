@@ -56,7 +56,9 @@ describe('unexpectedSkips', () => {
     ).toEqual(['realtime']);
   });
 
-  it('returns all skips when allowlist is empty (unset ALLOW_SKIP behaviour)', () => {
+  it('treats every skip as unexpected when ALLOW_SKIP is set but lists nothing', () => {
+    // Not the ALLOW_SKIP-unset case: checkApps() never calls this function when
+    // the variable is absent, so warn-only mode is the caller's branch, not this one.
     expect(unexpectedSkips(['cloudflare'], [])).toEqual(['cloudflare']);
   });
 });
