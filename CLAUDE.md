@@ -1606,11 +1606,24 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `npm:` imports (AI_GUIDELINES §12.2).
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in
-  already-merged `main`. Commits: conventional format (`feat(scope): subject`); no direct commits to
-  `main`.
-- **Pushing the branch and opening the PR/MR are manual, human-only steps — do not attempt them.**
-  No remote credentials are available to the assistant, so `git push`, `git remote`, or any `gh`/API
-  call to create the PR will fail and waste time. Once all gates pass and the milestone is committed
-  on its `feat/…` branch, STOP: hand the human the exact `git push -u origin <branch>` and
-  PR-creation command to run, and await the PR number to finish the CLAUDE.md "Current status" entry
-  — record the milestone as "complete (PR pending)" until that number is known.
+  already-merged `main`; `docs/[description]` is for a documentation-only change that is not a
+  milestone's implementation work — opening a new ROADMAP milestone, correcting a committed doc,
+  amending these conventions. Use `docs/…` rather than `feat/…` for those: a `feat/[milestone]-…`
+  branch asserts that the milestone is being BUILT on it, so `feat/37c-…` carrying only a ROADMAP
+  section is a lie about the branch's contents (M37c was opened this way, PR #124). A doc edit that
+  belongs to a milestone still ships on that milestone's own `feat/…` branch — the status flip, the
+  PUBLIC_API correction, and the plan archival are part of the milestone, not separate work.
+  Commits: conventional format (`feat(scope): subject`); no direct commits to `main`.
+- **Pushing and opening the PR are yours to do — but only when asked.** Remote credentials ARE
+  available (`gh auth status` reports a logged-in account; SSH for git operations), so `git push`
+  and `gh pr create` work. This bullet previously said the opposite — that no credentials existed
+  and any attempt would fail and waste time — which was stale: PRs #123 and #124 were pushed and
+  opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
+  evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
+  time.
+- **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
+  which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
+  pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again.
+  That second commit lands on the same branch before merge, so the merged history never carries "PR
+  pending". Same for the ROADMAP row and the plan archival — all of it ships in the milestone's own
+  PR (see "Before reporting a task done").
