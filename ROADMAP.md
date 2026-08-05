@@ -5648,17 +5648,17 @@ unit of measure here is "the smoke check ran against a real backend", not a perc
 
 ### Deliverables
 
-- [ ] GitHub Actions `services:` containers for the backends the examples already target — Redis
+- [x] GitHub Actions `services:` containers for the backends the examples already target — Redis
       first, since two examples need it today
-- [ ] `REDIS_URL` (and successors) exported to the `check:apps` step, so no example reports a skip
+- [x] `REDIS_URL` (and successors) exported to the `check:apps` step, so no example reports a skip
       in CI that a service container could have satisfied
-- [ ] A CI assertion that the number of **skipped** examples is zero for backends CI provides — a
+- [x] A CI assertion that the number of **skipped** examples is zero for backends CI provides — a
       skip that a container should have covered is a regression, not a pass
-- [ ] Deepen the guarded real-import tests: construct a client and drive one command, rather than
+- [x] Deepen the guarded real-import tests: construct a client and drive one command, rather than
       asserting the module imports (this is what let the ioredis defect through)
-- [ ] `packages/queue-plugin` gains a guarded real-import test — the only one of the three Redis
+- [x] `packages/queue-plugin` gains a guarded real-import test — the only one of the three Redis
       consumers without one
-- [ ] `scripts/check-apps.ts` reports a malformed application directory by name instead of throwing
+- [x] `scripts/check-apps.ts` reports a malformed application directory by name instead of throwing
       an unhandled `NotFound`
 
 ### Out of scope
@@ -5792,5 +5792,5 @@ fetch-based providers elsewhere in the repo.
 | 52b       | ✅     | cloudflare-plugin (queues/cron/cache) |
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |
 | 52d       | ✅     | cloudflare-plugin (durable objects)   |
-| 53        | ⬜     | real-backend CI (examples gate)       |
+| 53        | ✅     | real-backend CI (examples gate)       |
 | 54        | ⬜     | messaging-plugin (cloud brokers)      |
