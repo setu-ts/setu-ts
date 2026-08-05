@@ -1373,7 +1373,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   from the workflow would skip all three while the job stayed green; `test/apps-gate.test.ts` now
   pins the service, the port mapping, the variable, and the scoped grant, with both assertions
   verified to fail when the wiring is broken. Suite green under BOTH conditions (Redis live and
-  Redis stopped), which is the real bar — 1058 passed each way) — complete (PR pending)
+  Redis stopped), which is the real bar — 1058 passed each way) — complete (PR #123)
 - **Next milestone** — **M38** (documentation), then M39–M40. **M54** (cloud message brokers —
   `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP Pub/Sub and Azure
   Service Bus are not merely absent but inexpressible) remains queued behind those.
