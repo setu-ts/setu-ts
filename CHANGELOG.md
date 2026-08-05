@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@hono-enterprise/messaging-plugin`** — GCP Pub/Sub (`GcpPubSubBroker`) and Azure Service Bus
+  (`ServiceBusBroker`) backends implementing `IMessageBroker` with request-reply over a shared reply
+  topic + per-instance subscription. `MessagingPluginOptions` is now a **discriminated union on
+  `broker`** with a `'custom'` arm (inject any `IMessageBroker`) and a default memory arm so
+  `MessagingPlugin()` / `MessagingPlugin({})` remain valid. `MessagingBrokerType` widened to 8
+  literals. Both cloud brokers throw `CloudBrokerUnavailableError` on Cloudflare Workers. **Not
+  verified against a live backend** (Pub/Sub and Service Bus emulators were declined; fake-driven
+  with guarded real-import tests).
+- **`@hono-enterprise/queue-plugin`** — SQS `SqsQueue` adapter (`QueueAdapter` seam, wrapped by
+  `QueueService`) with per-name queue URLs, receipt-handle bookkeeping, `ApproximateReceiveCount`
+  attempt ladder, visibility-timeout backoff, and dead-letter ordering. `SnsPublisher` for SNS
+  fan-out. `QueueAdapterType` widened to include `'sqs'`. `QueueBackendUnavailableError` thrown on
+  Cloudflare Workers. **SQS verified against ElasticMQ** in CI; SNS fake-driven.
+
+### Changed
+
+- **⚠️ Breaking 1 of 1: `MessagingPluginOptions` is now a discriminated union.** A caller holding a
+  widened variable (e.g. `let opts: MessagingPluginOptions = getOptions()`) must narrow before
+  passing to the factory. Single-arm literals, `MessagingPlugin()`, `MessagingPlugin({})`, and the
+  factory's own `= {}` default are unaffected. `MessagingBrokerType` includes `'pubsub'`,
+  `'service-bus'`, and `'custom'`.
+
 ### Fixed
 
 - Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.
