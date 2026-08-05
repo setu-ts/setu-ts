@@ -1374,13 +1374,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   pins the service, the port mapping, the variable, and the scoped grant, with both assertions
   verified to fail when the wiring is broken. Suite green under BOTH conditions (Redis live and
   Redis stopped), which is the real bar — 1058 passed each way) — complete (PR #123)
-- **M54** (cloud message brokers — SQS/SNS via `SqsQueue`/`SnsPublisher` in `queue-plugin`,
-  GCP Pub/Sub and Azure Service Bus via `GcpPubSubBroker`/`ServiceBusBroker` in `messaging-plugin`,
+- **M54** (cloud message brokers — SQS/SNS via `SqsQueue`/`SnsPublisher` in `queue-plugin`, GCP
+  Pub/Sub and Azure Service Bus via `GcpPubSubBroker`/`ServiceBusBroker` in `messaging-plugin`,
   `'custom'` arm on discriminated `MessagingPluginOptions` union, cloud-gate runtime checks,
-  inject-or-lazy SDK adapt/load seams, guarded real-import tests, SQS→ElasticMQ e2e) — complete
-  (PR pending)
-- **Next milestone** — **M37c** (full-stack example — `react-router-plugin`, `full-stack-starter` and
-  `honoe new --template full-stack` all ship with NOTHING a reader can run; 13 apps, none using
+  inject-or-lazy SDK adapt/load seams, guarded real-import tests, SQS→ElasticMQ e2e) — complete (PR
+  pending)
+- **Next milestone** — **M37c** (full-stack example — `react-router-plugin`, `full-stack-starter`
+  and `honoe new --template full-stack` all ship with NOTHING a reader can run; 13 apps, none using
   React Router. Its first task is a toolchain decision, because a React Router app needs an npm/Vite
   build — the sole documented exception to the Deno-only toolchain — while `check:apps` runs pure
   Deno and, since M53, an unlisted skip is a failure).
