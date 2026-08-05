@@ -33,11 +33,11 @@ describe('SqsQueue', () => {
   describe('connect()', () => {
     it('uses injected client', async () => {
       const transport: ISqsTransport = {
-        send: async () => {},
-        receive: async () => [],
-        delete: async () => {},
-        changeVisibility: async () => {},
-        close: async () => {},
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
@@ -61,13 +61,14 @@ describe('SqsQueue', () => {
     it('sends job envelope to correct queue', async () => {
       const sent: Array<{ queueUrl: string; body: string }> = [];
       const transport: ISqsTransport = {
-        send: async (q, b) => {
+        send: (q, b) => {
           sent.push({ queueUrl: q, body: b });
+          return Promise.resolve();
         },
-        receive: async () => [],
-        delete: async () => {},
-        changeVisibility: async () => {},
-        close: async () => {},
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
@@ -128,10 +129,10 @@ describe('SqsQueue', () => {
     it('receives with correct params', async () => {
       let receivedMax = 0;
       const transport: ISqsTransport = {
-        send: async () => {},
-        receive: async (_q, max) => {
+        send: () => Promise.resolve(),
+        receive: (_q, max) => {
           receivedMax = max;
-          return [{
+          return Promise.resolve([{
             body: JSON.stringify({
               v: 1,
               id: 'job-1',
@@ -141,11 +142,11 @@ describe('SqsQueue', () => {
             }),
             receiptHandle: 'handle-1',
             approximateReceiveCount: '2',
-          }];
+          }]);
         },
-        delete: async () => {},
-        changeVisibility: async () => {},
-        close: async () => {},
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
@@ -163,14 +164,14 @@ describe('SqsQueue', () => {
     it('clamps limit to 10', async () => {
       let receivedMax = 0;
       const transport: ISqsTransport = {
-        send: async () => {},
-        receive: async (_q, max) => {
+        send: () => Promise.resolve(),
+        receive: (_q, max) => {
           receivedMax = max;
-          return [];
+          return Promise.resolve([]);
         },
-        delete: async () => {},
-        changeVisibility: async () => {},
-        close: async () => {},
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
@@ -186,11 +187,11 @@ describe('SqsQueue', () => {
   describe('recurring (in-memory)', () => {
     it('stores and fetches due recurring jobs', async () => {
       const transport: ISqsTransport = {
-        send: async () => {},
-        receive: async () => [],
-        delete: async () => {},
-        changeVisibility: async () => {},
-        close: async () => {},
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },

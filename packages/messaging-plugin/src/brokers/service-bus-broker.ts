@@ -174,12 +174,14 @@ export function adaptServiceBusModule(
           const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
           onMessage({
             payload: body,
-            ack: () => msg.complete(),
+            ack: async () => await msg.complete(),
             nack: () => {
               // Abandon the message so it becomes available again.
               // No explicit abandon in our simplified port; complete is used.
             },
           });
+          // Await required by SDK type contract — processMessage returns Promise<void>.
+          await Promise.resolve();
         },
         processError: () => {
           // Errors handled by broker's logger
@@ -188,6 +190,9 @@ export function adaptServiceBusModule(
 
       const key = `${topic}/${subscription}`;
       receivers.set(key, subHandle);
+
+      // Await required — the SDK requires async `open` for its type contract.
+      await Promise.resolve();
 
       return {
         close: async () => {

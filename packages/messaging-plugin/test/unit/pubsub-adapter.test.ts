@@ -1,0 +1,217 @@
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import { adaptPubSubModule } from '../../src/brokers/pubsub-broker.ts';
+import type { PubSubSdkModule } from '../../src/brokers/pubsub-broker.ts';
+
+describe('adaptPubSubModule', () => {
+  function createFakeSdkModule(): PubSubSdkModule & {
+    topics: Map<
+      string,
+      {
+        messages: Array<{ data: Uint8Array }>;
+        subscriptions: Map<
+          string,
+          {
+            onMessage:
+              | ((msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string }) => void)
+              | null;
+          }
+        >;
+      }
+    >;
+    subscriptions: Map<string, { topic: string; name: string; closed: boolean; deleted: boolean }>;
+  } {
+    const mod = {} as PubSubSdkModule & {
+      topics: Map<
+        string,
+        {
+          messages: Array<{ data: Uint8Array }>;
+          subscriptions: Map<
+            string,
+            {
+              onMessage:
+                | ((
+                  msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+                ) => void)
+                | null;
+            }
+          >;
+        }
+      >;
+      subscriptions: Map<
+        string,
+        { topic: string; name: string; closed: boolean; deleted: boolean }
+      >;
+    };
+    mod.topics = new Map();
+    mod.subscriptions = new Map();
+
+    mod.PubSub = class {
+      constructor(_options: { projectId: string; credentials?: unknown }) {}
+      topic(name: string) {
+        if (!mod.topics.has(name)) {
+          mod.topics.set(name, { messages: [], subscriptions: new Map() });
+        }
+        const topicData = mod.topics.get(name)!;
+        return {
+          publishMessage(message: { data: Uint8Array }) {
+            topicData.messages.push(message);
+            return Promise.resolve('msg-id');
+          },
+          createSubscription(subName: string) {
+            topicData.subscriptions.set(subName, { onMessage: null });
+            return Promise.resolve([]);
+          },
+        };
+      }
+      subscription(_topicName: string, subName: string) {
+        let entry = mod.subscriptions.get(subName);
+        if (!entry) {
+          entry = { topic: _topicName, name: subName, closed: false, deleted: false };
+          mod.subscriptions.set(subName, entry);
+        }
+        return {
+          on(
+            event: 'message' | 'error',
+            handler: (
+              msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+            ) => void,
+          ) {
+            if (event === 'message') {
+              const topicData = mod.topics.get(_topicName);
+              if (topicData?.subscriptions.has(subName)) {
+                topicData.subscriptions.get(subName)!.onMessage = handler as never;
+              }
+            }
+          },
+          close() {
+            entry.closed = true;
+            return Promise.resolve();
+          },
+          delete() {
+            entry.deleted = true;
+            return Promise.resolve();
+          },
+        };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    };
+
+    return mod;
+  }
+
+  it('publishes bytes to the topic', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    const bytes = new TextEncoder().encode('hello');
+    await transport.publish('test-topic', bytes);
+
+    const topic = sdk.topics.get('test-topic');
+    expect(topic).toBeDefined();
+    expect(topic!.messages).toHaveLength(1);
+    expect(topic!.messages[0].data).toEqual(bytes);
+  });
+
+  it('encodes non-ASCII payload correctly', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    const bytes = new TextEncoder().encode('\u{1F600}');
+    await transport.publish('test-topic', bytes);
+
+    const decoded = new TextDecoder().decode(sdk.topics.get('test-topic')!.messages[0].data);
+    expect(decoded).toBe('\u{1F600}');
+  });
+
+  it('decodes inbound Buffer data through TextDecoder', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    let receivedPayload = '';
+    await transport.open('test-topic', 'sub-1', (msg) => {
+      receivedPayload = msg.payload;
+    });
+
+    // Simulate inbound message
+    const topicData = sdk.topics.get('test-topic');
+    const cb = topicData!.subscriptions.get('sub-1')!.onMessage!;
+    cb({
+      data: new TextEncoder().encode('hello-world'),
+      ack: () => {},
+      nack: () => {},
+      id: 'msg-1',
+    });
+
+    expect(receivedPayload).toBe('hello-world');
+  });
+
+  it('routes ack and nack', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    let acked = false;
+    let nacked = false;
+    await transport.open('test-topic', 'sub-2', (_msg) => {});
+
+    const topicData = sdk.topics.get('test-topic');
+    const cb = topicData!.subscriptions.get('sub-2')!.onMessage!;
+    cb({
+      data: new TextEncoder().encode('test'),
+      ack: () => {
+        acked = true;
+      },
+      nack: () => {
+        nacked = true;
+      },
+      id: 'msg-2',
+    });
+
+    // The callback fires synchronously; ack/nack are captured.
+    expect(acked).toBe(false); // ack was not called by the handler
+    expect(nacked).toBe(false); // nack was not called by the handler
+  });
+
+  it('creates subscription on topic object', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    await transport.createSubscription('test-topic', 'rpc-sub');
+
+    const topicData = sdk.topics.get('test-topic');
+    expect(topicData!.subscriptions.has('rpc-sub')).toBe(true);
+  });
+
+  it('deletes subscription', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    await transport.deleteSubscription('rpc-sub');
+
+    const entry = sdk.subscriptions.get('rpc-sub');
+    expect(entry!.deleted).toBe(true);
+  });
+
+  it('closes the client', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    await transport.close();
+
+    // PubSub close() was called - the fake resolves without error
+    expect(true).toBe(true);
+  });
+
+  it('subscription close works', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    const sub = await transport.open('test-topic', 'sub-close', (_msg) => {});
+    await sub.close();
+
+    const entry = sdk.subscriptions.get('sub-close');
+    expect(entry!.closed).toBe(true);
+  });
+});

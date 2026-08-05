@@ -14,15 +14,17 @@ describe('adaptSqsModule', () => {
 
     mod.SQSClient = class {
       constructor(_config: Record<string, unknown>) {}
-      async send(command: unknown) {
+      send(command: unknown) {
         const cmd = command as { commandName?: string; input?: Record<string, unknown> };
         mod.commands.push({
           name: cmd.commandName ?? 'unknown',
           input: cmd.input ?? {},
         });
-        return { Messages: [] };
+        return Promise.resolve({ Messages: [] });
       }
-      async destroy() {}
+      destroy() {
+        return Promise.resolve();
+      }
     };
 
     mod.SendMessageCommand = class {

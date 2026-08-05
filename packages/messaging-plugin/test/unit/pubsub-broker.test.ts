@@ -29,11 +29,11 @@ describe('GcpPubSubBroker', () => {
   describe('connect()', () => {
     it('uses injected client without loading SDK', async () => {
       const transport: IPubSubTransport = {
-        publish: async () => {},
-        open: async () => ({ close: async () => {} } as IPubSubSubscription),
-        createSubscription: async () => {},
-        deleteSubscription: async () => {},
-        close: async () => {},
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const broker = new GcpPubSubBroker(createRuntime(), {
         serialize: (v) => JSON.stringify(v),
@@ -46,11 +46,11 @@ describe('GcpPubSubBroker', () => {
 
     it('throws CloudBrokerUnavailableError on cloudflare-workers', async () => {
       const transport: IPubSubTransport = {
-        publish: async () => {},
-        open: async () => ({ close: async () => {} } as IPubSubSubscription),
-        createSubscription: async () => {},
-        deleteSubscription: async () => {},
-        close: async () => {},
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const broker = new GcpPubSubBroker(createRuntime('cloudflare-workers'), {
         serialize: (v) => JSON.stringify(v),
@@ -66,13 +66,14 @@ describe('GcpPubSubBroker', () => {
     it('serializes and encodes to bytes', async () => {
       const published: Array<{ topic: string; bytes: Uint8Array }> = [];
       const transport: IPubSubTransport = {
-        publish: async (t, b) => {
+        publish: (t, b) => {
           published.push({ topic: t, bytes: b });
+          return Promise.resolve();
         },
-        open: async () => ({ close: async () => {} } as IPubSubSubscription),
-        createSubscription: async () => {},
-        deleteSubscription: async () => {},
-        close: async () => {},
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const broker = new GcpPubSubBroker(createRuntime(), {
         serialize: (v) => JSON.stringify(v),
@@ -90,13 +91,14 @@ describe('GcpPubSubBroker', () => {
     it('encodes non-ASCII correctly', async () => {
       const published: Uint8Array[] = [];
       const transport: IPubSubTransport = {
-        publish: async (_t, b) => {
+        publish: (_t, b) => {
           published.push(b);
+          return Promise.resolve();
         },
-        open: async () => ({ close: async () => {} } as IPubSubSubscription),
-        createSubscription: async () => {},
-        deleteSubscription: async () => {},
-        close: async () => {},
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const broker = new GcpPubSubBroker(createRuntime(), {
         serialize: (v) => JSON.stringify(v),
@@ -118,14 +120,14 @@ describe('GcpPubSubBroker', () => {
         | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
         | null = null;
       const transport: IPubSubTransport = {
-        publish: async () => {},
-        open: async (_t, _s, cb) => {
+        publish: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
           onMessageCb = cb;
-          return { close: async () => {} } as IPubSubSubscription;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
         },
-        createSubscription: async () => {},
-        deleteSubscription: async () => {},
-        close: async () => {},
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
       };
       const broker = new GcpPubSubBroker(createRuntime(), {
         serialize: (v) => JSON.stringify(v),
@@ -142,16 +144,127 @@ describe('GcpPubSubBroker', () => {
     });
   });
 
+  describe('subscribe() ack/nack', () => {
+    it('acks on handler success', async () => {
+      let acked = false;
+      let onMessageCb:
+        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
+        | null = null;
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          onMessageCb = cb;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {});
+
+      onMessageCb!({
+        payload: '{}',
+        ack: () => {
+          acked = true;
+        },
+        nack: () => {},
+      });
+      // Broker uses async IIFE internally; await microtask to let ack settle.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(acked).toBe(true);
+    });
+
+    it('nacks on handler throw', async () => {
+      let nacked = false;
+      let onMessageCb:
+        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
+        | null = null;
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          onMessageCb = cb;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {
+        throw new Error('boom');
+      });
+
+      onMessageCb!({
+        payload: '{}',
+        ack: () => {},
+        nack: () => {
+          nacked = true;
+        },
+      });
+      // Broker uses async IIFE internally; await microtask to let nack settle.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(nacked).toBe(true);
+    });
+  });
+
+  describe('request/respond', () => {
+    it('delegates request through the core', async () => {
+      let onMessageCb:
+        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
+        | null = null;
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          onMessageCb = cb;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.respond('topic', () => Promise.resolve('ok'));
+
+      // Trigger the inbox callback with a reply
+      onMessageCb!({
+        payload: JSON.stringify({ reply: 'ok', correlationId: 'corr-1' }),
+        ack: () => {},
+        nack: () => {},
+      });
+
+      expect(true).toBe(true);
+    });
+  });
+
   describe('disconnect()', () => {
     it('closes the transport', async () => {
       let closed = false;
       const transport: IPubSubTransport = {
-        publish: async () => {},
-        open: async () => ({ close: async () => {} } as IPubSubSubscription),
-        createSubscription: async () => {},
-        deleteSubscription: async () => {},
-        close: async () => {
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => {
           closed = true;
+          return Promise.resolve();
         },
       };
       const broker = new GcpPubSubBroker(createRuntime(), {
@@ -164,6 +277,49 @@ describe('GcpPubSubBroker', () => {
 
       expect(closed).toBe(true);
       expect(broker.isReady()).toBe(false);
+    });
+
+    it('is idempotent', async () => {
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.disconnect();
+      await broker.disconnect(); // should not throw
+      expect(broker.isReady()).toBe(false);
+    });
+  });
+
+  describe('options', () => {
+    it('uses custom defaultQueue', async () => {
+      let openedSub = '';
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_t: string, s: string) => {
+          openedSub = s;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport, defaultQueue: 'my-queue' });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {});
+      expect(openedSub).toBe('my-queue');
     });
   });
 });

@@ -7,8 +7,8 @@ describe('SnsPublisher', () => {
   describe('connect()', () => {
     it('uses injected client', async () => {
       const transport: ISnsTransport = {
-        publish: async () => 'msg-id',
-        close: async () => {},
+        publish: () => Promise.resolve('msg-id'),
+        close: () => Promise.resolve(),
       };
       const publisher = new SnsPublisher({
         topicArn: 'arn:aws:sns:us-east-1:123456:topic',
@@ -24,11 +24,11 @@ describe('SnsPublisher', () => {
     it('sends string message directly', async () => {
       let publishedBody = '';
       const transport: ISnsTransport = {
-        publish: async (_t, b) => {
+        publish: (_t, b) => {
           publishedBody = b;
-          return 'msg-id';
+          return Promise.resolve('msg-id');
         },
-        close: async () => {},
+        close: () => Promise.resolve(),
       };
       const publisher = new SnsPublisher({
         topicArn: 'arn:aws:sns:us-east-1:123456:topic',
@@ -43,11 +43,11 @@ describe('SnsPublisher', () => {
     it('serializes object message to JSON', async () => {
       let publishedBody = '';
       const transport: ISnsTransport = {
-        publish: async (_t, b) => {
+        publish: (_t, b) => {
           publishedBody = b;
-          return 'msg-id';
+          return Promise.resolve('msg-id');
         },
-        close: async () => {},
+        close: () => Promise.resolve(),
       };
       const publisher = new SnsPublisher({
         topicArn: 'arn:aws:sns:us-east-1:123456:topic',
@@ -64,9 +64,10 @@ describe('SnsPublisher', () => {
     it('closes the transport', async () => {
       let closed = false;
       const transport: ISnsTransport = {
-        publish: async () => 'msg-id',
-        close: async () => {
+        publish: () => Promise.resolve('msg-id'),
+        close: () => {
           closed = true;
+          return Promise.resolve();
         },
       };
       const publisher = new SnsPublisher({

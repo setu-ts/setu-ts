@@ -444,25 +444,27 @@ export class SqsQueue implements QueueAdapter {
     this.#receipts.delete(id);
   }
 
-  async storeRecurring(rec: StoredRecurring): Promise<void> {
+  storeRecurring(rec: StoredRecurring): Promise<void> {
     this.#recurring.set(rec.id, rec);
+    return Promise.resolve();
   }
 
-  async fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
+  fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
     const due: StoredRecurring[] = [];
     for (const rec of this.#recurring.values()) {
       if (rec.nextRunAtMs <= nowMs) {
         due.push(rec);
       }
     }
-    return due;
+    return Promise.resolve(due as readonly StoredRecurring[]);
   }
 
-  async advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
+  advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
     const rec = this.#recurring.get(id);
     if (rec) {
       this.#recurring.set(id, { ...rec, nextRunAtMs });
     }
+    return Promise.resolve();
   }
 
   /** Find a receipt entry by job id or receipt handle. */

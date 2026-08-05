@@ -140,7 +140,7 @@ export class SnsPublisher {
    * @param message - The message payload (serialized to JSON)
    * @returns The SNS message ID, or undefined if not available
    */
-  async publish(message: unknown): Promise<string | undefined> {
+  publish(message: unknown): Promise<string | undefined> {
     if (!this.#transport) throw new Error('SnsPublisher is not connected');
 
     const body = typeof message === 'string' ? message : JSON.stringify(message);

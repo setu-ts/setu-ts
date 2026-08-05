@@ -234,7 +234,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
 
     try {
       await this.#transport.createSubscription(this.#replyTopic, inboxSub);
-    } catch (err) {
+    } catch {
       throw new ReplyInboxUnavailableError(this.#replyTopic);
     }
 
