@@ -425,6 +425,5 @@ describe('ServiceBusBroker', () => {
       await broker.subscribe('topic', () => {});
       expect(openedSub).toBe('my-queue');
     });
-
   });
 });

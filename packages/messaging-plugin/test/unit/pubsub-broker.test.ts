@@ -451,5 +451,4 @@ describe('GcpPubSubBroker', () => {
       expect(promise).toBeDefined();
     });
   });
-
 });
