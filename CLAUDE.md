@@ -1374,14 +1374,49 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   pins the service, the port mapping, the variable, and the scoped grant, with both assertions
   verified to fail when the wiring is broken. Suite green under BOTH conditions (Redis live and
   Redis stopped), which is the real bar — 1058 passed each way) — complete (PR #123)
-- **Next milestone** — **M38** (documentation), then M39–M40. Two milestones are queued behind
-  those: **M37c** (full-stack example — `react-router-plugin`, `full-stack-starter` and
-  `honoe new --template full-stack` all ship with NOTHING a reader can run; 13 apps, none using
-  React Router. Its first task is a toolchain decision, because a React Router app needs an npm/Vite
-  build — the sole documented exception to the Deno-only toolchain — while `check:apps` runs pure
-  Deno and, since M53, an unlisted skip is a failure) and **M54** (cloud message brokers —
-  `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP Pub/Sub and Azure
-  Service Bus are not merely absent but inexpressible).
+- **Milestone 37c** (`apps/full-stack` — the runnable React Router example the framework's largest
+  capability had none of. `react-router-plugin` (M44), `full-stack-starter` (M36/M36c) and
+  `honoe new --template full-stack` (M36c) all shipped with nothing a reader could run: 13 apps,
+  none referencing React Router. **The toolchain question the milestone was opened on was answered
+  by measurement, and the answer was neither of the two options the ROADMAP framed.** Both assumed
+  the real Vite build needs a Node toolchain — so the choice was "commit a `ServerBuild` fixture" or
+  "add Node/npm to CI". Deno's own npm support runs the identical build:
+  `deno install
+  --allow-scripts` took **4 s** and the build **0.6 s** against a project scaffolded
+  by the CLI and repointed at the workspace, after which the app served SSR HTML and completed a
+  CSRF-protected login. So the smoke performs the **real** build, CI gains no `setup-node` step, no
+  fixture is committed, and `full-stack` is deliberately **not** in `ALLOW_SKIP` — with
+  `test/apps-gate.test.ts` asserting it never becomes so, because the exemption would be a one-word
+  edit that leaves CI green. AI_GUIDELINES §12.2 is untouched: "npm toolchain" describes the package
+  ecosystem, not a required Node binary. The example is composed through
+  `createFullStackAppFromConfig`, whose final statement is `return createFullStackApp(...)`, so one
+  application exercises both starter entry points; the `reactRouter`, `session` and `database` arms
+  are all GATED, so a default-options full-stack app registers none of them and an example omitting
+  them would prove nothing. The smoke's bar is the ROADMAP's: an SSR page rendering rows **written
+  through the database capability** — carried by a fifth context key (`databaseContext`) the M36c
+  skeleton does not ship — then a `<Form>` login whose **302 rather than 403** proves the
+  synchronizer token round-tripped through the session plugin's middleware. It is driven with
+  `app.fetch`, never `inject()`, since the SSR body is a stream and step 3 reads `Set-Cookie`.
+  **Four negative controls were each observed failing and then reverted**, and the second is the one
+  worth keeping: replacing `contextKeyFor('app.database', …)` with a `{ defaultValue }` literal
+  **type-checks cleanly (exit 0) while the smoke fails** — the module exists twice at runtime (Vite
+  inlines a copy into the server build; the kernel loads the other from source), so two hand-written
+  key objects match nothing and every context read silently returns its default. Two facts the
+  implementation established that no gate would have: `apps/full-stack` needs the **workspace's
+  `compilerOptions`** in its own manifest, because its import graph reaches `telemetry-plugin`,
+  which only compiles under `exactOptionalPropertyTypes` — the same trap the CLI e2e documents for
+  scaffolded projects; and `smoke.ts` ends in an explicit `Deno.exit(0)`, because importing
+  `react-dom/server` under Deno keeps the process alive after `app.stop()` resolves, while
+  `deno test`'s op and resource sanitizers report nothing leaked (measured by importing it alone,
+  and by the same script with the `reactRouter` arm removed exiting cleanly). A ROADMAP deliverable
+  was **corrected rather than implemented as written** (C1): it required `config/services.server.ts`
+  to be ABSENT, but the M36c skeleton emits it deliberately and its own JSDoc says what a capability
+  replaces is the module-level CACHE, not the accessor file — so the test pins the five
+  `lib/*.server.ts` modules absent AND that the accessor holds no module-level state. No `packages/`
+  source changed) — complete (PR pending)
+- **Next milestone** — **M38** (documentation), then M39–M40. One milestone is queued behind those:
+  **M54** (cloud message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm,
+  so SQS/SNS, GCP Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
 
 ## Verification (run before declaring any work done)
 

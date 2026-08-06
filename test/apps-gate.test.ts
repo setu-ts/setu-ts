@@ -92,6 +92,20 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('does not exempt the full-stack example from the smoke gate', async () => {
+    // M37c's whole toolchain decision was that the frontend build is CHEAP
+    // enough to run for real (measured: ~4s install, <1s build under Deno's own
+    // npm support), so the example needs neither a committed ServerBuild
+    // fixture nor a Node toolchain in CI — and therefore no skip allowance.
+    // Adding `full-stack` to ALLOW_SKIP would ship an example whose proof never
+    // runs, which is the pattern M53 exists to end. Asserted rather than
+    // trusted, because the exemption would be a one-word edit and CI would stay
+    // green.
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const allowSkip = /ALLOW_SKIP:\s*(.+)/.exec(workflow)?.[1] ?? '';
+    expect(allowSkip.split(',').map((name) => name.trim())).not.toContain('full-stack');
+  });
+
   it('has REDIS_URL available whenever CI provides the container', () => {
     // Vacuous locally by design; in CI it fails if the job env stops reaching
     // the test step, which the static checks above cannot observe.

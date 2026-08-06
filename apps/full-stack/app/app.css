@@ -1,0 +1,24 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.app-shell nav {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.app-shell main,
+.auth-shell main {
+  padding: 1rem 2rem;
+}
+
+.error {
+  padding: 2rem;
+}

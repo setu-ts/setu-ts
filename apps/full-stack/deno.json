@@ -1,0 +1,30 @@
+{
+  "tasks": {
+    "install": "deno install --allow-scripts",
+    "build": "deno task install && deno run -A npm:@react-router/dev build",
+    "start": "deno task build && deno run --allow-net --allow-env --allow-read main.ts",
+    "smoke": "deno task build && deno run -A smoke.ts",
+    "test": "deno test -A test/"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true
+  },
+  "imports": {
+    "@std/expect": "jsr:@std/expect@^1.0.20",
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "@hono-enterprise/common": "../../packages/common/src/index.ts",
+    "@hono-enterprise/database-plugin": "../../packages/database-plugin/src/index.ts",
+    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
+    "@hono-enterprise/react-router-plugin": "../../packages/react-router-plugin/src/index.ts",
+    "@hono-enterprise/session-plugin": "../../packages/session-plugin/src/index.ts",
+    "@hono-enterprise/full-stack-starter": "../../packages/starters/full-stack-starter/src/index.ts",
+    "~/": "./app/"
+  }
+}

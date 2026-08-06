@@ -3881,8 +3881,8 @@ React Router app needs an npm install and a Vite build to produce the `ServerBui
 imports — the **sole documented exception** to the Deno-only toolchain (CLAUDE.md, AI_GUIDELINES
 §12.2). CI installs only Deno. Since M53, an unlisted skip is a **failure**, so this cannot be added
 without deciding how it is gated; adding it and appending `full-stack` to `ALLOW_SKIP` would ship an
-example whose proof never runs, which is the exact pattern M53 exists to end. Resolve in the plan,
-with the trade-off stated:
+example whose proof never runs, which is the exact pattern M53 exists to end. Two options were
+framed when this milestone was opened:
 
 - **Commit a pre-built `ServerBuild` fixture.** Smoke stays pure Deno and runs everywhere, but it
   proves the SSR bridge and plugin wiring rather than the real build, and the fixture can drift from
@@ -3891,24 +3891,45 @@ with the trade-off stated:
   path including `vite build`, at the cost of a second toolchain in CI and a slower gate. This is
   also what would let `apps/cloudflare` stop skipping, so the two may share the answer.
 
-Whichever is chosen, the milestone states plainly which part is gated and which is not — the M37
-precedent, where "Not run by CI" was amended to say exactly which half CI covers.
+**Decided: a third option, measured.** Both framings assume the real build needs the Node toolchain.
+It does not — Deno's own npm support runs the identical Vite build. Measured against a project
+scaffolded by `honoe new --template full-stack` and repointed at the workspace:
+`deno install
+--allow-scripts` took 4 s and the build 0.6 s, after which the app served SSR HTML and
+completed a CSRF-protected login. So the smoke performs the **real** build (`deno install` + the
+`@react-router/dev` CLI), CI gains no `setup-node` step, no `ServerBuild` fixture is committed, and
+`full-stack` is deliberately **not** in `ALLOW_SKIP` — `test/apps-gate.test.ts` asserts it never
+becomes so. AI_GUIDELINES §12.2 is untouched: the frontend build remains an app-level, build-time
+concern that never enters a published package's dependency graph; "npm toolchain" describes the
+package ecosystem, not a required Node binary. This does not unblock `apps/cloudflare`, which skips
+on Wrangler rather than on Node.
+
+CI therefore proves the whole path — install, Vite build, kernel serving the compiled build, SSR
+HTML carrying capability data. What it does not prove is a browser: hydration and client-side
+navigation are unexercised, and `.tsx` modules are type-checked by the frontend build rather than by
+`deno check`, whose entry points are fixed at `main.ts` and `smoke.ts`.
 
 ### Deliverables
 
-- [ ] A toolchain decision recorded in the plan before implementation, per the two options above,
-      naming what CI proves and what it does not
-- [ ] `apps/full-stack` — a React Router 8 framework-mode application served by the kernel through
-      `react-router-plugin`, composed via `createFullStackApp` so the starter is exercised too
-- [ ] Its `smoke` task asserts one behaviour end to end: an SSR-rendered route returns HTML
+- [x] A toolchain decision recorded in the plan before implementation, naming what CI proves and
+      what it does not
+- [x] `apps/full-stack` — a React Router 8 framework-mode application served by the kernel through
+      `react-router-plugin`, composed via `createFullStackAppFromConfig`, whose final statement is
+      `return createFullStackApp(...)` — so the plain factory the deliverable names is exercised
+      too, along with the config-driven path M36c added
+- [x] Its `smoke` task asserts one behaviour end to end: an SSR-rendered route returns HTML
       containing data produced by a capability (not a hard-coded string), proving the `loadContext`
       bridge rather than that a server started
-- [ ] A test pinning the removal claim — none of `lib/session.server.ts`, `lib/csrf.server.ts`,
-      `lib/sse.server.ts`, `lib/kv.server.ts`, `lib/service-logger.server.ts`, or
-      `config/services.server.ts` exists in the example, because capabilities replace them
-- [ ] `check:apps` gates it under the chosen toolchain, with `ALLOW_SKIP` used only if the plan
-      justifies it in writing
-- [ ] `apps/README.md` row, `CHANGELOG.md`, and milestone tracking updated
+- [x] A test pinning the removal claim — none of `lib/session.server.ts`, `lib/csrf.server.ts`,
+      `lib/sse.server.ts`, `lib/kv.server.ts` or `lib/service-logger.server.ts` exists in the
+      example, because capabilities replace them; and `config/services.server.ts` holds **no
+      module-level state**. That last clause is a correction: this deliverable originally required
+      `config/services.server.ts` to be absent, but the M36c skeleton emits it deliberately
+      (`packages/cli/src/templates/full-stack-app-files.ts`) and its own JSDoc is explicit that what
+      a capability replaces is the module-level CACHE, not the accessor file. Requiring its absence
+      would have made this test and the scaffolder permanently contradict each other
+- [x] `check:apps` gates it under the chosen toolchain, with `ALLOW_SKIP` deliberately NOT used
+- [x] `apps/README.md` row, `CHANGELOG.md`, and milestone tracking updated
 
 ### Out of scope
 
@@ -5839,7 +5860,7 @@ fetch-based providers elsewhere in the repo.
 | 36c       | ✅     | cli + starters + config + runtime     |
 | 37        | ✅     | examples                              |
 | 37b       | ✅     | examples + Redis startup fix          |
-| 37c       | ⬜     | full-stack example (apps/full-stack)  |
+| 37c       | ✅     | full-stack example (apps/full-stack)  |
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
