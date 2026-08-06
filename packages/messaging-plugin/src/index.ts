@@ -92,6 +92,9 @@ export type {
   PubSubOptions,
 } from './brokers/pubsub-broker.ts';
 export type {
+  IServiceBusProcessErrorArgs,
+  IServiceBusReceiver,
+  IServiceBusSubscribeOptions,
   IServiceBusSubscription,
   IServiceBusTransport,
   ServiceBusOptions,

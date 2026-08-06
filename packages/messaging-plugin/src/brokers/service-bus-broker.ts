@@ -37,6 +37,49 @@ const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 const DEFAULT_QUEUE = 'messaging-consumers';
 
 /**
+ * Structural type matching the real SDK's ProcessErrorArgs callback argument
+ * (npm:@azure/service-bus@^7).
+ */
+export interface IServiceBusProcessErrorArgs {
+  /** The underlying error. */
+  error: Error;
+  /** The operation where the error originated. */
+  errorSource: 'abandon' | 'complete' | 'processMessageCallback' | 'receive' | 'renewLock';
+  /** The entity path for the current receiver. */
+  entityPath: string;
+  /** The fully qualified namespace for the Service Bus. */
+  fullyQualifiedNamespace: string;
+  /** The identifier of the client that raised this event. */
+  identifier: string;
+}
+
+/**
+ * Structural receive-options matching the real SDK's SubscribeOptions
+ * (npm:@azure/service-bus@^7). The property is autoCompleteMessages, not autoComplete.
+ */
+export interface IServiceBusSubscribeOptions {
+  autoCompleteMessages?: boolean;
+  maxConcurrentCalls?: number;
+}
+
+/**
+ * Structural receiver type carrying the real SDK settlement methods.
+ * Settlement belongs to the receiver — NOT the received message.
+ */
+export interface IServiceBusReceiver {
+  subscribe(
+    handlers: {
+      processMessage: (message: unknown) => Promise<void>;
+      processError: (args: IServiceBusProcessErrorArgs) => Promise<void>;
+    },
+    options?: IServiceBusSubscribeOptions,
+  ): { close(): Promise<void> };
+  completeMessage(message: unknown): Promise<void>;
+  abandonMessage(message: unknown, propertiesToModify?: Record<string, unknown>): Promise<void>;
+  close(): Promise<void>;
+}
+
+/**
  * Declares the constructors used from the real Azure Service Bus SDK.
  */
 export interface ServiceBusSdkModule {
@@ -45,34 +88,12 @@ export interface ServiceBusSdkModule {
       sendMessages(messages: { body: unknown }): Promise<void>;
       close(): Promise<void>;
     };
-    createReceiver(queueName: string, options?: unknown): {
-      subscribe(
-        options: {
-          processMessage: (
-            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-          ) => Promise<void>;
-          processError: (err: unknown) => void | Promise<void>;
-        },
-        receiveOptions?: { autoComplete?: boolean },
-      ): { close: () => Promise<void> };
-      close(): Promise<void>;
-    };
+    createReceiver(queueName: string, options?: unknown): IServiceBusReceiver;
     createReceiver(
       topicName: string,
       subscriptionName: string,
       options?: unknown,
-    ): {
-      subscribe(
-        options: {
-          processMessage: (
-            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-          ) => Promise<void>;
-          processError: (err: unknown) => void | Promise<void>;
-        },
-        receiveOptions?: { autoComplete?: boolean },
-      ): { close: () => Promise<void> };
-      close(): Promise<void>;
-    };
+    ): IServiceBusReceiver;
     close(): Promise<void>;
   };
   ServiceBusAdministrationClient: new (connectionString: string) => {
@@ -179,32 +200,22 @@ export function adaptServiceBusModule(
       ) => void | Promise<void>,
     ): Promise<IServiceBusSubscription> => {
       // createReceiver(topicName, subscriptionName) — two positional strings.
-      const receiver = client.createReceiver(topic, subscription) as {
-        subscribe(
-          options: {
-            processMessage: (
-              msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-            ) => Promise<void>;
-            processError: (err: unknown) => void | Promise<void>;
-          },
-          receiveOptions?: { autoComplete?: boolean },
-        ): { close: () => Promise<void> };
-        close(): Promise<void>;
-      };
+      const receiver = client.createReceiver(topic, subscription) as IServiceBusReceiver;
 
       const subHandle = receiver.subscribe(
         {
-          processMessage: async (msg) => {
+          processMessage: async (rawMessage) => {
+            const msg = rawMessage as { body?: unknown };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
             // Deferred: only resolves when ack/nack settlement actually completes.
             // No premature-resolve fallback — processMessage MUST not resolve until
-            // the message is settled, otherwise autoComplete:false is pointless.
-            const settle = (fn: () => Promise<void>) => fn();
+            // the message is settled, otherwise autoCompleteMessages:false is pointless.
+            // Settlement belongs to the receiver (real SDK contract), not the message.
             try {
               const handlerResult = onMessage({
                 payload: body,
-                ack: () => settle(() => msg.complete()),
-                nack: () => settle(() => msg.abandon()),
+                ack: () => receiver.completeMessage(rawMessage),
+                nack: () => receiver.abandonMessage(rawMessage),
               });
               // Await the settlement promise returned by the handler.
               // If the handler returns void (old path), this awaits undefined.
@@ -212,12 +223,13 @@ export function adaptServiceBusModule(
               await handlerResult;
             } catch {
               // onMessage threw synchronously — abandon so the SDK redelivers.
-              await msg.abandon();
+              await receiver.abandonMessage(rawMessage);
             }
           },
-          processError: (err) => options.logger?.error(`Service Bus receiver error: ${err}`),
+          processError: (args: IServiceBusProcessErrorArgs) =>
+            Promise.resolve(options.logger?.error(`Service Bus receiver error: ${args.error}`)),
         },
-        { autoComplete: false },
+        { autoCompleteMessages: false },
       );
 
       const key = `${topic}/${subscription}`;

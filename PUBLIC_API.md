@@ -2891,20 +2891,59 @@ export { RedisStreamsBroker } from '@hono-enterprise/messaging-plugin';
 export { RabbitMqBroker } from '@hono-enterprise/messaging-plugin';
 export { NatsBroker } from '@hono-enterprise/messaging-plugin';
 export { KafkaBroker } from '@hono-enterprise/messaging-plugin';
+export { GcpPubSubBroker } from '@hono-enterprise/messaging-plugin';
+export { ServiceBusBroker } from '@hono-enterprise/messaging-plugin';
+
+// Adapter / load helpers
+export { adaptPubSubModule, loadPubSubModule } from '@hono-enterprise/messaging-plugin';
+export { adaptServiceBusModule, loadServiceBusModule } from '@hono-enterprise/messaging-plugin';
 
 // Serializer
 export { JsonSerializer } from '@hono-enterprise/messaging-plugin';
 export type { ISerializer } from '@hono-enterprise/messaging-plugin';
 
+// Request-reply error classes
+export {
+  CloudBrokerUnavailableError,
+  MessagingNotSupportedError,
+  RemoteHandlerError,
+  ReplyInboxUnavailableError,
+  RequestTimeoutError,
+} from '@hono-enterprise/messaging-plugin';
+
 // Option types
 export type {
+  CustomMessagingOptions,
   EventsMessagingBridgeOptions,
+  KafkaMessagingOptions,
   KafkaOptions,
+  MemoryMessagingOptions,
   MessagingBrokerType,
+  MessagingCommonOptions,
   MessagingPluginOptions,
+  NatsMessagingOptions,
   NatsOptions,
+  PubSubMessagingOptions,
+  RabbitMqMessagingOptions,
   RabbitMqOptions,
+  RedisStreamsMessagingOptions,
   RedisStreamsOptions,
+  ServiceBusMessagingOptions,
+} from '@hono-enterprise/messaging-plugin';
+
+// Port types (structural)
+export type {
+  IPubSubSubscription,
+  IPubSubTransport,
+  PubSubOptions,
+} from '@hono-enterprise/messaging-plugin';
+export type {
+  IServiceBusProcessErrorArgs,
+  IServiceBusReceiver,
+  IServiceBusSubscribeOptions,
+  IServiceBusSubscription,
+  IServiceBusTransport,
+  ServiceBusOptions,
 } from '@hono-enterprise/messaging-plugin';
 
 // Re-exported types from @hono-enterprise/common
@@ -2929,14 +2968,29 @@ Provides background job queue with Memory and Redis adapters.
 ### Exports
 
 - **`QueuePlugin`** — Plugin factory for registering the queue service
-- **`QueueAdapterType`** — `'memory' | 'redis' | 'rabbitmq'`
-- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`)
+- **`QueueAdapterType`** — `'memory' | 'redis' | 'rabbitmq' | 'sqs'`
+- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`, `sqs?`)
 - **`MemoryQueue`** — In-memory queue adapter for development/testing
 - **`RedisQueue`** — Redis-backed queue adapter for production
 - **`RedisQueueOptions`** — Redis adapter configuration
 - **`RabbitMqQueue`** — RabbitMQ queue adapter via amqplib (polling via basicGet, TTL+DLX for
   delays)
 - **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`)
+- **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
+  `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, dead-letter ordering)
+- **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
+  `credentials?`, `endpoint?`, `client?`)
+- **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`)
+- **`SqsReceivedMessage`** — SQS received message shape (body, receiptHandle, approximateReceiveCount)
+- **`SnsPublisher`** — SNS publisher for fan-out (SNS→SQS pairing)
+- **`SnsPublisherOptions`** — SNS publisher configuration
+- **`ISnsTransport`** — Structural SNS transport port
+- **`adaptSqsModule`** / **`loadSqsModule`** — SQS SDK adapter and lazy loader
+- **`adaptSnsModule`** / **`loadSnsModule`** — SNS SDK adapter and lazy loader
+- **`QueueBackendUnavailableError`** — Thrown when a cloud queue backend is unavailable (e.g., SQS on
+  Cloudflare Workers)
+- **`SqsDelayTooLongError`** — Thrown when SQS delay exceeds 900 s
+- **`SqsQueueNotConfiguredError`** — Thrown when a job name has no queue URL mapping
 - **`IQueue`** — Queue service interface (re-exported from `@hono-enterprise/common`)
 - **`IJob<T>`** — Job interface (re-exported)
 - **`JobProcessor<T>`** — Job processor type (re-exported)

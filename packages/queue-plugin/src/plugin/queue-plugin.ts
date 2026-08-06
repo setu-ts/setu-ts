@@ -88,7 +88,12 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
           if (!options?.sqs) {
             throw new Error('SQS adapter requires options.sqs configuration');
           }
-          adapter = new SqsQueue(ctx.runtime, options.sqs);
+          const sqsLogger = resolveLogger(ctx);
+          adapter = new SqsQueue(
+            ctx.runtime,
+            options.sqs,
+            sqsLogger ?? undefined,
+          );
           break;
         }
         default:

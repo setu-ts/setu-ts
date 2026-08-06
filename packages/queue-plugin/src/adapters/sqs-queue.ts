@@ -353,16 +353,19 @@ export class SqsQueue implements QueueAdapter {
       // Attempts come from the platform's ApproximateReceiveCount.
       const attempts = msg.approximateReceiveCount ? Number(msg.approximateReceiveCount) : 1;
 
-      // Record the receipt handle, keyed by receipt handle.
+      // Record the receipt entry keyed by the STABLE envelope id.
+      // When the same logical job is redelivered with a new receipt handle,
+      // this entry is overwritten so subsequent settlement targets the current receipt.
       const maxAttempts = envelope.maxAttempts ?? 3;
-      this.#receipts.set(msg.receiptHandle, {
+      this.#receipts.set(envelope.id, {
         receiptHandle: msg.receiptHandle,
         claimExpiresAtMs: nowMs + this.#visibilityTimeoutSeconds * 1000,
         body: msg.body,
       });
 
       jobs.push({
-        id: msg.receiptHandle,
+        // Expose the stable queue-generated ID, not the transient receipt handle.
+        id: envelope.id,
         name,
         data: envelope.data,
         attempts,
@@ -479,28 +482,17 @@ export class SqsQueue implements QueueAdapter {
     return Promise.resolve();
   }
 
-  /** Find a receipt entry by job id or receipt handle. */
+  /** Find a receipt entry by stable job id. */
   private findReceiptEntry(id: string): ReceiptEntry | undefined {
-    // Check direct key first.
-    if (this.#receipts.has(id)) {
-      const entry = this.#receipts.get(id)!;
-      // Sweep expired entries.
-      if (entry.claimExpiresAtMs < this.#runtime.now()) {
-        this.#receipts.delete(id);
-        return undefined;
-      }
-      return entry;
+    const entry = this.#receipts.get(id);
+    if (!entry) {
+      return undefined;
     }
-    // Linear scan by receipt handle value (bounded by in-flight work).
-    for (const [key, entry] of this.#receipts.entries()) {
-      if (entry.receiptHandle === id) {
-        if (entry.claimExpiresAtMs < this.#runtime.now()) {
-          this.#receipts.delete(key);
-          return undefined;
-        }
-        return entry;
-      }
+    // Sweep expired entries.
+    if (entry.claimExpiresAtMs < this.#runtime.now()) {
+      this.#receipts.delete(id);
+      return undefined;
     }
-    return undefined;
+    return entry;
   }
 }

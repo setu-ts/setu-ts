@@ -1,6 +1,6 @@
 # Milestone 54 — Cloud Message Brokers (`@hono-enterprise/messaging-plugin` + `@hono-enterprise/queue-plugin`)
 
-> **Status:** Planning. Branch: `feat/m54-cloud-message-brokers`. `main` is protected — all work
+> **Status:** Completed. Branch: `feat/m54-cloud-message-brokers`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope

@@ -752,9 +752,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
         processMessageCbs: Array<{
           topic: string;
           subscription: string;
-          processMessage: (
-            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-          ) => Promise<void>;
+          processMessage: (msg: unknown) => Promise<void>;
           processError: (err: unknown) => void | Promise<void>;
         }>;
       };
@@ -776,8 +774,6 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
               if (cb.topic === queueOrTopicName) {
                 void cb.processMessage({
                   body: messages.body,
-                  complete: () => Promise.resolve(),
-                  abandon: () => Promise.resolve(),
                 });
               }
             }
@@ -794,19 +790,26 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
         _options?: unknown,
       ) {
         return {
-          subscribe(options: {
-            processMessage: (
-              msg: { body: unknown; complete: () => Promise<void> },
-            ) => Promise<void>;
-            processError: (err: unknown) => void | Promise<void>;
-          }) {
+          subscribe(
+            options: {
+              processMessage: (msg: unknown) => Promise<void>;
+              processError: (args: unknown) => Promise<void>;
+            },
+            _opts?: { autoCompleteMessages?: boolean },
+          ) {
             mod.processMessageCbs.push({
               topic: _topicName,
               subscription: _subscriptionName,
               processMessage: options.processMessage,
-              processError: options.processError,
+              processError: options.processError as (err: unknown) => void | Promise<void>,
             });
             return { close: () => Promise.resolve() };
+          },
+          completeMessage(_msg: unknown): Promise<void> {
+            return Promise.resolve();
+          },
+          abandonMessage(_msg: unknown, _props?: Record<string, unknown>): Promise<void> {
+            return Promise.resolve();
           },
           close() {
             return Promise.resolve();
@@ -865,9 +868,64 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     await broker.disconnect();
   });
 
-  it('awaits broker nack settlement through the adapted SDK processMessage callback', async () => {
+  it('awaits broker nack settlement through receiver.abandonMessage', async () => {
     const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
-    const sdk = createFakeSdkModuleWithRouting();
+
+    // Standalone fake SDK with deferred abandonMessage on receiver.
+    let releaseAbandon: (() => void) | null = null;
+    let processMessageFn: ((msg: unknown) => Promise<void>) | null = null;
+
+    // deno-lint-ignore no-explicit-any
+    const sdk = {} as any;
+    sdk.sends = [];
+    sdk.receivers = [];
+    sdk.adminCreates = [];
+    sdk.adminDeletes = [];
+    sdk.processMessageCbs = [];
+
+    sdk.ServiceBusClient = class {
+      createSender() {
+        return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+      }
+      createReceiver(topic: string, subscription: string) {
+        sdk.receivers.push({ topic, subscription });
+        return {
+          subscribe(
+            opts: {
+              processMessage: (msg: unknown) => Promise<void>;
+              processError: (args: unknown) => Promise<void>;
+            },
+            _optsBag?: { autoCompleteMessages?: boolean },
+          ) {
+            processMessageFn = opts.processMessage;
+            return { close: () => Promise.resolve() };
+          },
+          completeMessage(): Promise<void> {
+            return Promise.resolve();
+          },
+          abandonMessage(): Promise<void> {
+            return new Promise<void>((resolve) => {
+              releaseAbandon = resolve;
+            });
+          },
+          close(): Promise<void> {
+            return Promise.resolve();
+          },
+        };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    };
+    sdk.ServiceBusAdministrationClient = class {
+      createSubscription() {
+        return Promise.resolve();
+      }
+      deleteSubscription() {
+        return Promise.resolve();
+      }
+    };
+
     const transport = adaptServiceBusModule(sdk, {
       connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
@@ -882,18 +940,10 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       throw new Error('boom');
     });
 
-    const processMessage =
-      sdk.processMessageCbs.find((entry) => entry.subscription === 'messaging-consumers')!
-        .processMessage;
-    let releaseAbandon: (() => void) | null = null;
-    const processing = processMessage({
-      body: JSON.stringify({ fail: true }),
-      complete: () => Promise.reject(new Error('complete should not run')),
-      abandon: () =>
-        new Promise<void>((resolve) => {
-          releaseAbandon = resolve;
-        }),
-    });
+    expect(processMessageFn).not.toBeNull();
+    // The raw SDK message has NO settlement methods.
+    const rawMessage = { body: JSON.stringify({ fail: true }) };
+    const processing = processMessageFn!(rawMessage);
     let resolved = false;
     processing.then(() => {
       resolved = true;
@@ -932,7 +982,16 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       sdk.processMessageCbs.find((entry) => entry.subscription === 'messaging-consumers')!
         .processError;
 
-    await processError(new Error('receiver-link-failed'));
+    // The real SDK passes a ProcessErrorArgs object with .error field.
+    await processError(
+      {
+        error: new Error('receiver-link-failed'),
+        errorSource: 'receive',
+        entityPath: 'orders',
+        fullyQualifiedNamespace: 'test.servicebus.windows.net',
+        identifier: 'receiver-1',
+      } as import('../../src/brokers/service-bus-broker.ts').IServiceBusProcessErrorArgs,
+    );
 
     expect(logged).toEqual([
       'Service Bus receiver error: Error: receiver-link-failed',
