@@ -56,6 +56,15 @@ Two consequences worth knowing:
 
 - `build/`, `node_modules/` and `deno.lock` here are generated and gitignored, and `build/` is in
   the root `deno.json` `exclude` so `fmt`, `lint` and `check` never walk bundled output.
+- `deno.json` sets `"nodeModulesDir": "auto"`. It is load-bearing, and CI is the only thing that
+  proves it: because this example carries a `package.json`, Deno resolves npm specifiers from
+  `node_modules` rather than its global cache — and `check:apps` type-checks an app **before** it
+  runs the smoke, which is what creates `node_modules` here. On a cold checkout
+  `deno check main.ts
+  smoke.ts` therefore failed with
+  `Could not find a matching package for 'npm:ws@^8.18.0'`, because the app's import graph reaches
+  plugins that lazily import npm drivers. `auto` lets Deno install what a check needs, so the order
+  stops mattering. A local run hides this completely once `node_modules` exists.
 - `smoke.ts` ends with an explicit `Deno.exit(0)`. Importing `react-dom/server` under Deno leaves
   the process alive after the application has stopped — measured by importing it alone in an
   otherwise empty script — while `deno test`'s op and resource sanitizers report nothing leaked, so

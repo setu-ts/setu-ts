@@ -1,4 +1,5 @@
 {
+  "nodeModulesDir": "auto",
   "tasks": {
     "install": "deno install --allow-scripts",
     "build": "deno task install && deno run -A npm:@react-router/dev build",
