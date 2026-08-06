@@ -1340,3 +1340,180 @@ describe('SqsQueue stable identity and current receipt', () => {
     expect(deletedReceipts).not.toContain('receipt-A');
   });
 });
+
+// B4 — SQS envelope validation
+describe('SqsQueue — B4 envelope validation', () => {
+  function baseTransport(
+    override?: Partial<ISqsTransport>,
+  ): ISqsTransport {
+    return {
+      send: () => Promise.resolve(),
+      receive: () => Promise.resolve([]),
+      delete: () => Promise.resolve(),
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+      ...override,
+    };
+  }
+
+  it('skips empty JSON object and still processes valid message after', async () => {
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([
+          { body: '{}', receiptHandle: 'h-bad', approximateReceiveCount: '1' },
+          {
+            body: JSON.stringify({
+              v: 1,
+              id: 'good',
+              name: 'jobs',
+              data: { ok: true },
+              maxAttempts: 3,
+            }),
+            receiptHandle: 'h-good',
+            approximateReceiveCount: '1',
+          },
+        ]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve<{ ok: boolean }>('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].id).toBe('good');
+  });
+
+  it('skips wrong version and reports diagnostic', async () => {
+    let diagnostic = '';
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([{
+          body: JSON.stringify({ v: 99, id: 'bad-v', name: 'jobs', data: {}, maxAttempts: 3 }),
+          receiptHandle: 'h-1',
+          approximateReceiveCount: '1',
+        }]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    }, {
+      error: (msg: string) => {
+        diagnostic = msg;
+      },
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(0);
+    expect(diagnostic).toContain('invalid envelope');
+  });
+
+  it('skips missing/non-string id', async () => {
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([{
+          body: JSON.stringify({ v: 1, id: 123, name: 'jobs', data: {}, maxAttempts: 3 }),
+          receiptHandle: 'h-1',
+          approximateReceiveCount: '1',
+        }]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(0);
+  });
+
+  it('skips mismatched name (cross-routed)', async () => {
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([{
+          body: JSON.stringify({ v: 1, id: 'j1', name: 'other-queue', data: {}, maxAttempts: 3 }),
+          receiptHandle: 'h-1',
+          approximateReceiveCount: '1',
+        }]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(0);
+  });
+
+  it('skips invalid maxAttempts (NaN)', async () => {
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([{
+          body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: NaN }),
+          receiptHandle: 'h-1',
+          approximateReceiveCount: '1',
+        }]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(0);
+  });
+
+  it('skips invalid ApproximateReceiveCount (NaN)', async () => {
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([{
+          body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+          receiptHandle: 'h-1',
+          approximateReceiveCount: 'not-a-number',
+        }]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    }, {
+      error: () => {},
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(0);
+  });
+
+  it('skips malformed JSON and processes valid message immediately after', async () => {
+    const transport = baseTransport({
+      receive: () =>
+        Promise.resolve([
+          { body: 'NOT-JSON{{{', receiptHandle: 'h-bad', approximateReceiveCount: '1' },
+          {
+            body: JSON.stringify({
+              v: 1,
+              id: 'j1',
+              name: 'jobs',
+              data: { ok: true },
+              maxAttempts: 3,
+            }),
+            receiptHandle: 'h-good',
+            approximateReceiveCount: '1',
+          },
+        ]),
+    });
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve<{ ok: boolean }>('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].id).toBe('j1');
+  });
+});

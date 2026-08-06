@@ -219,6 +219,9 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   ) {
     this.#runtime = runtime;
     this.#serializer = serializer;
+    // B3: Do not silently default projectId to empty string — the type system
+    // should prevent credential-less production usage. When client is injected,
+    // projectId is not used.
     this.#projectId = options?.projectId ?? '';
     this.#credentials = options?.credentials;
     this.#injectedClient = options?.client;
@@ -239,6 +242,12 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   /**
    * Opens the reply inbox on the shared reply topic with a per-instance
    * subscription.
+  /**
+   * Opens the reply inbox on the shared reply topic with a per-instance
+   * subscription.
+   *
+   * On failure after admin creation, compensates by deleting the subscription
+   * so a later retry can succeed (B6).
    */
   async #openReplyInbox(onReply: (message: unknown) => void): Promise<ReplyInbox> {
     if (!this.#transport) {
@@ -253,17 +262,42 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       throw new ReplyInboxUnavailableError(this.#replyTopic);
     }
 
-    const sub = await this.#transport.open(this.#replyTopic, inboxSub, (msg) => {
-      onReply(msg.payload);
-    });
+    let closed = false;
+    try {
+      const sub = await this.#transport.open(this.#replyTopic, inboxSub, async (msg) => {
+        if (closed) return;
+        try {
+          const deserialized = this.#serializer.deserialize(msg.payload);
+          onReply(deserialized);
+          await Promise.resolve();
+          msg.ack();
+        } catch (err) {
+          // Deserialization failure — nack so transport retries.
+          if (this.#logger) {
+            this.#logger.error(`Pub/Sub reply deserialization error: ${err}`);
+          }
+          msg.nack();
+        }
+      });
 
-    return {
-      address: this.#replyTopic,
-      close: async () => {
-        await sub.close();
-        await this.#transport!.deleteSubscription(inboxSub);
-      },
-    };
+      return {
+        address: this.#replyTopic,
+        close: async () => {
+          if (closed) return;
+          closed = true;
+          await sub.close();
+          await this.#transport!.deleteSubscription(inboxSub);
+        },
+      };
+    } catch (err) {
+      // Compensate: open failed after admin create, delete the subscription
+      try {
+        await this.#transport.deleteSubscription(inboxSub);
+      } catch {
+        // Best-effort cleanup; original error is more important.
+      }
+      throw err;
+    }
   }
 
   async connect(): Promise<void> {

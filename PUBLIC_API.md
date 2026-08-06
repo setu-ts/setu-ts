@@ -2701,16 +2701,18 @@ app.register(MessagingPlugin({
 
 ```typescript
 interface MessagingPluginOptions {
-  /** Broker type. @defaultValue 'memory' */
-  broker?: 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka';
+  /** Broker type. Defaults to 'memory' when omitted. */
+  broker?: 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka' | 'pubsub' | 'service-bus' | 'custom';
   /** Instance name for multi-instance support (registers under messaging.<name>). */
   name?: string;
   /** Serializer for message payloads. @defaultValue new JsonSerializer() */
   serializer?: ISerializer;
+
+  // Redis Streams / RabbitMQ / NATS — shared optional fields
   /** Connection URL (redis-streams / rabbitmq / nats). */
   url?: string;
   /** Injected client — bypasses the lazy npm import. Type depends on broker. */
-  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory;
+  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory | IPubSubTransport | IServiceBusTransport;
   /** Default consumer group / queue name. @defaultValue 'messaging-consumers' */
   defaultQueue?: string;
   /** Redis Streams poll interval in ms. @defaultValue 100 */
@@ -2721,13 +2723,58 @@ interface MessagingPluginOptions {
   exchangeName?: string;
   /** NATS JetStream stream name. @defaultValue 'MESSAGING' */
   streamName?: string;
+
+  // Kafka
   /** Kafka bootstrap brokers. @defaultValue ['localhost:9092'] */
   brokers?: readonly string[];
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
-  /** Kafka request-reply topic; must already exist. @defaultValue 'messaging.replies' */
+  /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
+
+  // GCP Pub/Sub (production arm)
+  /** GCP project ID. Required when broker is 'pubsub' and no client is injected. */
+  projectId?: string;
+  /** GCP service-account credentials. SDK ADC is used when omitted. */
+  credentials?: unknown;
+
+  // Azure Service Bus (production arm)
+  /** Service Bus connection string. Required when broker is 'service-bus' and no client is injected. */
+  connectionString?: string;
+  /** Service Bus administration connection string. Defaults to connectionString. */
+  adminConnectionString?: string;
+
+  // Custom broker
+  /** Pre-built IMessageBroker instance. Required when broker is 'custom'. */
+  instance?: IMessageBroker;
 }
+
+**Cloud brokers require production credentials OR an injected transport:**
+
+```typescript
+// GCP Pub/Sub — production (requires projectId)
+app.register(MessagingPlugin({
+  broker: 'pubsub',
+  projectId: 'my-gcp-project',
+}));
+
+// GCP Pub/Sub — injected transport
+app.register(MessagingPlugin({
+  broker: 'pubsub',
+  client: myPubSubTransport,
+}));
+
+// Azure Service Bus — production (requires connectionString)
+app.register(MessagingPlugin({
+  broker: 'service-bus',
+  connectionString: 'Endpoint=sb://...',
+}));
+
+// Azure Service Bus — injected transport
+app.register(MessagingPlugin({
+  broker: 'service-bus',
+  client: myServiceBusTransport,
+}));
 ````
 
 ### Publishing Messages

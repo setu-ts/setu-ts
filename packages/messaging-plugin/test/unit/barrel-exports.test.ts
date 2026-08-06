@@ -60,8 +60,11 @@ describe('barrel exports', () => {
     // the types are part of the module's exported surface.
     const _pubSubOpts: PubSubOptions = {};
     const _serviceBusOpts: ServiceBusOptions = {};
-    const _pubSubMessagingOpts: PubSubMessagingOptions = { broker: 'pubsub' };
-    const _serviceBusMessagingOpts: ServiceBusMessagingOptions = { broker: 'service-bus' };
+    const _pubSubMessagingOpts: PubSubMessagingOptions = { broker: 'pubsub', projectId: 'test' };
+    const _serviceBusMessagingOpts: ServiceBusMessagingOptions = {
+      broker: 'service-bus',
+      connectionString: 'test',
+    };
     expect(_pubSubOpts).toBeDefined();
     expect(_serviceBusOpts).toBeDefined();
     expect(_pubSubMessagingOpts).toBeDefined();

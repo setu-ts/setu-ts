@@ -179,32 +179,97 @@ export interface KafkaMessagingOptions extends MessagingCommonOptions {
 }
 
 /**
- * GCP Pub/Sub arm.
+ * GCP Pub/Sub arm — injected transport variant.
+ *
+ * When {@link client} is provided, production credentials are not required.
  *
  * @since 0.1.0
  */
-export interface PubSubMessagingOptions extends MessagingCommonOptions {
+export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   broker: 'pubsub';
+  /** Injected transport (bypasses lazy SDK load). Required for this arm. */
+  client: import('../brokers/pubsub-broker.ts').IPubSubTransport;
+  /** GCP project ID. Optional when {@link client} is injected. */
   projectId?: string;
+  /** Service-account credentials. Optional when {@link client} is injected. */
   credentials?: unknown;
-  client?: import('../brokers/pubsub-broker.ts').IPubSubTransport;
   defaultQueue?: string;
   replyTopic?: string;
 }
 
 /**
- * Azure Service Bus arm.
+ * GCP Pub/Sub arm — production variant.
+ *
+ * Requires {@link projectId} and does NOT accept an injected {@link client}.
  *
  * @since 0.1.0
  */
-export interface ServiceBusMessagingOptions extends MessagingCommonOptions {
-  broker: 'service-bus';
-  connectionString?: string;
-  adminConnectionString?: string;
-  client?: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
+export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** GCP project ID. Required for production. */
+  projectId: string;
+  /** Service-account credentials (object or key path). SDK ADC is used when omitted. */
+  credentials?: unknown;
+  /** Mutually exclusive with production arm — use {@link PubSubMessagingOptionsInjected} instead. */
+  client?: never;
   defaultQueue?: string;
   replyTopic?: string;
 }
+
+/**
+ * GCP Pub/Sub options — exclusive union of injected and production arms.
+ *
+ * @since 0.1.0
+ */
+export type PubSubMessagingOptions =
+  | PubSubMessagingOptionsInjected
+  | PubSubMessagingOptionsProduction;
+
+/**
+ * Azure Service Bus arm — injected transport variant.
+ *
+ * When {@link client} is provided, production credentials are not required.
+ *
+ * @since 0.1.0
+ */
+export interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Injected transport (bypasses lazy SDK load). Required for this arm. */
+  client: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
+  /** Connection string. Optional when {@link client} is injected. */
+  connectionString?: string;
+  adminConnectionString?: string;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/**
+ * Azure Service Bus arm — production variant.
+ *
+ * Requires {@link connectionString} and does NOT accept an injected {@link client}.
+ *
+ * @since 0.1.0
+ */
+export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Connection string for the Service Bus namespace. Required for production. */
+  connectionString: string;
+  /** Connection string for the administration client. Defaults to {@link connectionString}. */
+  adminConnectionString?: string;
+  /** Mutually exclusive with production arm — use {@link ServiceBusMessagingOptionsInjected} instead. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/**
+ * Azure Service Bus options — exclusive union of injected and production arms.
+ *
+ * @since 0.1.0
+ */
+export type ServiceBusMessagingOptions =
+  | ServiceBusMessagingOptionsInjected
+  | ServiceBusMessagingOptionsProduction;
 
 /**
  * Custom (inject-any-broker) arm.

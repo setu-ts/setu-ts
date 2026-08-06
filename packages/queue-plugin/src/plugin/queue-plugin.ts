@@ -57,6 +57,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
     name: pluginName,
     version: '0.1.0',
     provides: [token],
+    // B5: Declare optional logger dependency so kernel ordering resolves
+    // LoggerPlugin first when installed, but remains optional.
+    optionalDependencies: [CAPABILITIES.LOGGER],
     priority: 100,
 
     async register(ctx) {

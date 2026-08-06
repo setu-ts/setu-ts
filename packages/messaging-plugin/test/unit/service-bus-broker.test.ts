@@ -197,15 +197,17 @@ describe('ServiceBusBroker', () => {
     });
   });
 
-  describe('request/respond', () => {
-    it('responds through the core', async () => {
-      let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+  describe('request/respond RPC round-trip', () => {
+    it('reply payload is deserialized from serialized text and acked', async () => {
+      let ackCount = 0;
+      let nackCount = 0;
+      const opens: Array<
+        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
+      > = [];
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
-        open: (_t, _s, cb) => {
-          onMessageCb = cb;
+        open: (topic, sub, cb) => {
+          opens.push({ topic, subscription: sub, cb: cb as (...args: unknown[]) => unknown });
           return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
         },
         createSubscription: () => Promise.resolve(),
@@ -218,15 +220,73 @@ describe('ServiceBusBroker', () => {
       }, { client: transport });
 
       await broker.connect();
-      await broker.respond('topic', () => Promise.resolve('ok'));
+      await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
+      void broker.request('topic', 'hello');
+      await new Promise((r) => setTimeout(r, 0));
 
-      onMessageCb!({
-        payload: JSON.stringify({ reply: 'ok', correlationId: 'corr-1' }),
+      const inboxOpen = opens.find((o) => o.subscription.startsWith('rr-inbox-'));
+      expect(inboxOpen).toBeDefined();
+
+      (inboxOpen!.cb as (msg: { payload: string; ack: () => void; nack: () => void }) => void)(
+        {
+          payload: JSON.stringify({
+            kind: 'rr-reply',
+            correlationId: 'corr-1',
+            ok: true,
+            payload: { status: 'ok' },
+          }),
+          ack: () => {
+            ackCount++;
+          },
+          nack: () => {
+            nackCount++;
+          },
+        },
+      );
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(ackCount).toBe(1);
+      expect(nackCount).toBe(0);
+    });
+
+    it('malformed reply is nacked exactly once', async () => {
+      let nackCount = 0;
+      const opens: Array<
+        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
+      > = [];
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (topic, sub, cb) => {
+          opens.push({ topic, subscription: sub, cb: cb as (...args: unknown[]) => unknown });
+          return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
+      void broker.request('topic', 'hello');
+      await new Promise((r) => setTimeout(r, 0));
+
+      const inboxOpen = opens.find((o) => o.subscription.startsWith('rr-inbox-'));
+      (inboxOpen!.cb as (msg: { payload: string; ack: () => void; nack: () => void }) => void)({
+        payload: 'NOT-VALID-JSON{{{',
         ack: () => {},
-        nack: () => {},
+        nack: () => {
+          nackCount++;
+        },
       });
 
-      expect(true).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(nackCount).toBe(1);
     });
   });
 

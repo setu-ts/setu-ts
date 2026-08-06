@@ -335,23 +335,53 @@ export class SqsQueue implements QueueAdapter {
         continue;
       }
 
-      // Parse envelope — skip malformed messages.
-      let envelope: {
+      // B4: Parse envelope — skip malformed messages with diagnostics.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(msg.body);
+      } catch {
+        if (this.#logger) {
+          this.#logger.error(`SQS reserve: malformed JSON envelope skipped on "${name}"`);
+        }
+        continue;
+      }
+
+      // Validate envelope shape: unknown → structural checks, no unsafe casts.
+      if (!this.#validateEnvelope(parsed, name)) {
+        if (this.#logger) {
+          this.#logger.error(
+            `SQS reserve: invalid envelope skipped on "${name}": ${JSON.stringify(parsed)}`,
+          );
+        }
+        continue;
+      }
+
+      // Safe to cast after validation.
+      const envelope = parsed as {
         v: number;
         id: string;
         name: string;
         data: T;
         maxAttempts: number;
       };
-      try {
-        envelope = JSON.parse(msg.body) as typeof envelope;
-      } catch {
-        // Malformed message — skip.
-        continue;
-      }
 
       // Attempts come from the platform's ApproximateReceiveCount.
-      const attempts = msg.approximateReceiveCount ? Number(msg.approximateReceiveCount) : 1;
+      // Validate ApproximateReceiveCount is a finite positive integer.
+      let attempts: number;
+      if (msg.approximateReceiveCount) {
+        const count = Number(msg.approximateReceiveCount);
+        if (!Number.isFinite(count) || count < 1 || !Number.isInteger(count)) {
+          if (this.#logger) {
+            this.#logger.error(
+              `SQS reserve: invalid ApproximateReceiveCount "${msg.approximateReceiveCount}" skipped on "${name}"`,
+            );
+          }
+          continue;
+        }
+        attempts = count;
+      } else {
+        attempts = 1;
+      }
 
       // Record the receipt entry keyed by the STABLE envelope id.
       // When the same logical job is redelivered with a new receipt handle,
@@ -480,6 +510,50 @@ export class SqsQueue implements QueueAdapter {
       this.#recurring.set(id, { ...rec, nextRunAtMs });
     }
     return Promise.resolve();
+  }
+
+  /**
+   * B4: Validate an unknown parsed envelope against the expected SQS envelope
+   * schema. Returns true only when every required field passes structural and
+   * type checks.
+   */
+  #validateEnvelope(value: unknown, polledName: string): boolean {
+    if (typeof value !== 'object' || value === null) {
+      return false;
+    }
+    const obj = value as Record<string, unknown>;
+
+    // Version must be exactly 1.
+    if (obj.v !== 1) {
+      return false;
+    }
+
+    // id must be a non-empty string.
+    if (typeof obj.id !== 'string' || !obj.id) {
+      return false;
+    }
+
+    // name must be a non-empty string matching the polled queue name.
+    if (typeof obj.name !== 'string' || !obj.name || obj.name !== polledName) {
+      return false;
+    }
+
+    // data must be present (object or allowed primitives).
+    if (obj.data === undefined) {
+      return false;
+    }
+
+    // maxAttempts must be a finite positive integer.
+    if (
+      typeof obj.maxAttempts !== 'number' ||
+      !Number.isFinite(obj.maxAttempts) ||
+      obj.maxAttempts < 1 ||
+      !Number.isInteger(obj.maxAttempts)
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   /** Find a receipt entry by stable job id. */

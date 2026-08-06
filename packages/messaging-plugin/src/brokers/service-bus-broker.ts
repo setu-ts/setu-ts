@@ -207,23 +207,36 @@ export function adaptServiceBusModule(
           processMessage: async (rawMessage) => {
             const msg = rawMessage as { body?: unknown };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
-            // Deferred: only resolves when ack/nack settlement actually completes.
-            // No premature-resolve fallback — processMessage MUST not resolve until
-            // the message is settled, otherwise autoCompleteMessages:false is pointless.
-            // Settlement belongs to the receiver (real SDK contract), not the message.
+            // B2: Separate handler invocation failures from settlement failures.
+            // ack/nack wrap the receiver calls so settlement rejections do NOT
+            // propagate to the outer catch — that catch is for handler errors only
+            // and must abandon exactly once.
             try {
               const handlerResult = onMessage({
                 payload: body,
-                ack: () => receiver.completeMessage(rawMessage),
-                nack: () => receiver.abandonMessage(rawMessage),
+                ack: async () => {
+                  try {
+                    await receiver.completeMessage(rawMessage);
+                  } catch {
+                    // Settlement failure — do NOT then abandon.
+                  }
+                },
+                nack: async () => {
+                  try {
+                    await receiver.abandonMessage(rawMessage);
+                  } catch {
+                    // Settlement failure — do NOT abandon again.
+                  }
+                },
               });
-              // Await the settlement promise returned by the handler.
-              // If the handler returns void (old path), this awaits undefined.
-              // If it returns a Promise (fixed path), we await the actual settlement.
               await handlerResult;
             } catch {
-              // onMessage threw synchronously — abandon so the SDK redelivers.
-              await receiver.abandonMessage(rawMessage);
+              // Handler (synchronous or async) failed — abandon exactly once.
+              try {
+                await receiver.abandonMessage(rawMessage);
+              } catch {
+                // abandon itself rejected — propagate
+              }
             }
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
@@ -314,6 +327,9 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   /**
    * Opens the reply inbox on the shared reply topic with a per-instance
    * subscription created through the administration client.
+   *
+   * On failure after admin creation, compensates by deleting the subscription
+   * so a later retry can succeed (B6).
    */
   async #openReplyInbox(onReply: (message: unknown) => void): Promise<ReplyInbox> {
     if (!this.#transport) {
@@ -328,17 +344,41 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       throw new ReplyInboxUnavailableError(this.#replyTopic);
     }
 
-    const sub = await this.#transport.open(this.#replyTopic, inboxSub, (msg) => {
-      onReply(msg.payload);
-    });
+    let closed = false;
+    try {
+      const sub = await this.#transport.open(this.#replyTopic, inboxSub, async (msg) => {
+        if (closed) return;
+        try {
+          const deserialized = this.#serializer.deserialize(msg.payload);
+          onReply(deserialized);
+          await Promise.resolve();
+          msg.ack();
+        } catch (err) {
+          if (this.#logger) {
+            this.#logger.error(`Service Bus reply deserialization error: ${err}`);
+          }
+          msg.nack();
+        }
+      });
 
-    return {
-      address: this.#replyTopic,
-      close: async () => {
-        await sub.close();
-        await this.#transport!.deleteSubscription(this.#replyTopic, inboxSub);
-      },
-    };
+      return {
+        address: this.#replyTopic,
+        close: async () => {
+          if (closed) return;
+          closed = true;
+          await sub.close();
+          await this.#transport!.deleteSubscription(this.#replyTopic, inboxSub);
+        },
+      };
+    } catch (err) {
+      // Compensate: open failed after admin create, delete the subscription
+      try {
+        await this.#transport.deleteSubscription(this.#replyTopic, inboxSub);
+      } catch {
+        // Best-effort cleanup; original error is more important.
+      }
+      throw err;
+    }
   }
 
   async connect(): Promise<void> {
