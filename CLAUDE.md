@@ -1444,7 +1444,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   required `config/services.server.ts` to be ABSENT, but the M36c skeleton emits it deliberately and
   its own JSDoc says what a capability replaces is the module-level CACHE, not the accessor file —
   so the test pins the five `lib/*.server.ts` modules absent AND that the accessor holds no
-  module-level state. No `packages/` source changed) — complete (PR pending)
+  module-level state. No `packages/` source changed) — complete (PR #126)
 - **Next milestone** — **M38** (documentation), then M39–M40. One milestone is queued behind those:
   **M54** (cloud message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm,
   so SQS/SNS, GCP Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
