@@ -1033,3 +1033,107 @@ describe('adaptSqsModule', () => {
     await transport.close();
   });
 });
+
+// A2: C1 — class-level lazy SQS config
+describe('C1: class-level lazy SQS config', () => {
+  it('adaptSqsModule forwards region, endpoint, and credentials to SQSClient', async () => {
+    const { adaptSqsModule } = await import('../../src/adapters/sqs-queue.ts');
+    let capturedConfig: Record<string, unknown> | undefined;
+    const mod = {
+      SQSClient: class {
+        constructor(cfg: Record<string, unknown>) {
+          capturedConfig = cfg;
+        }
+        send = () => Promise.resolve({});
+        destroy = () => Promise.resolve();
+      },
+      SendMessageCommand: class {},
+      ReceiveMessageCommand: class {},
+      DeleteMessageCommand: class {},
+      ChangeMessageVisibilityCommand: class {},
+    };
+    adaptSqsModule(
+      mod as unknown as import('../../src/adapters/sqs-queue.ts').SqsSdkModule,
+      {
+        region: 'us-west-2',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret' },
+        endpoint: 'http://elasticmq:9324',
+      },
+    );
+    expect(capturedConfig).not.toBeUndefined();
+    expect(capturedConfig!.region).toBe('us-west-2');
+    expect(capturedConfig!.endpoint).toBe('http://elasticmq:9324');
+    expect(capturedConfig!.credentials).toEqual({ accessKeyId: 'AKIA', secretAccessKey: 'secret' });
+  });
+});
+
+// A2: C2 — maxAttempts preserved
+describe('C2: maxAttempts preserved', () => {
+  it('reserve returns StoredJob with maxAttempts from envelope (ne 3)', async () => {
+    const transport: import('../../src/adapters/sqs-queue.ts').ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () =>
+        Promise.resolve([{
+          body: JSON.stringify({ v: 1, id: 'job-1', name: 'jobs', data: { x: 1 }, maxAttempts: 5 }),
+          receiptHandle: 'handle-1',
+          approximateReceiveCount: '1',
+        }]),
+      delete: () => Promise.resolve(),
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve<{ x: number }>('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].maxAttempts).toBe(5);
+  });
+});
+
+// A2: C10 — DLQ receives original body (not '')
+describe('C10: DLQ receives original body', () => {
+  it('deadLetter forwards original envelope body to DLQ', async () => {
+    const sentAll: Array<{ queueUrl: string; body: string }> = [];
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-dlq',
+      name: 'jobs',
+      data: { important: true },
+      maxAttempts: 3,
+    });
+    const transport: import('../../src/adapters/sqs-queue.ts').ISqsTransport = {
+      send: (q, b) => {
+        sentAll.push({ queueUrl: q, body: b });
+        return Promise.resolve();
+      },
+      receive: () =>
+        Promise.resolve([{
+          body: originalBody,
+          receiptHandle: 'receipt-handle-1',
+          approximateReceiveCount: '3',
+        }]),
+      delete: () => Promise.resolve(),
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'http://localhost:9324/jobs-dlq' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve<{ important: boolean }>('jobs', 10, 1000000);
+    expect(jobs).toHaveLength(1);
+    await queue.deadLetter('jobs', jobs[0].id, 1000000);
+
+    const dlqSend = sentAll.find((s) => s.queueUrl === 'http://localhost:9324/jobs-dlq');
+    expect(dlqSend).not.toBeUndefined();
+    expect(dlqSend!.body).toBe(originalBody);
+    expect(dlqSend!.body).not.toBe('');
+  });
+});

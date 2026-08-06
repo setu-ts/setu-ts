@@ -31,10 +31,10 @@ describe('messaging errors', () => {
   });
 
   it('CloudBrokerUnavailableError names backend and specifier', () => {
-    const err = new CloudBrokerUnavailableError('GCP Pub/Sub', 'npm:@google-cloud/pubsub@5.x');
+    const err = new CloudBrokerUnavailableError('GCP Pub/Sub', 'npm:@google-cloud/pubsub@^6');
     expect(err.name).toBe('CloudBrokerUnavailableError');
     expect(err.message).toContain('GCP Pub/Sub');
-    expect(err.message).toContain('npm:@google-cloud/pubsub@5.x');
+    expect(err.message).toContain('npm:@google-cloud/pubsub@^6');
     expect(err.message).toContain('Cloudflare Workers');
     expect(err).toBeInstanceOf(Error);
   });

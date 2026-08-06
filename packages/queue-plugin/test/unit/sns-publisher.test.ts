@@ -256,3 +256,36 @@ describe('loadSnsModule (exported)', () => {
     }
   });
 });
+
+// A2: C4 — class-level lazy SNS config (adaptSnsModule forwards options)
+describe('C4: class-level lazy SNS config', () => {
+  it('adaptSnsModule forwards region, endpoint, and credentials to SNSClient', async () => {
+    const { adaptSnsModule } = await import('../../src/sns/sns-publisher.ts');
+    let capturedConfig: Record<string, unknown> | undefined;
+    const mod = {
+      SNSClient: class {
+        constructor(cfg: Record<string, unknown>) {
+          capturedConfig = cfg;
+        }
+        send = () => Promise.resolve({ MessageId: 'msg-id' });
+        destroy = () => Promise.resolve();
+      },
+      PublishCommand: class {},
+    };
+    adaptSnsModule(
+      mod as unknown as import('../../src/sns/sns-publisher.ts').SnsSdkModule,
+      {
+        region: 'eu-west-1',
+        credentials: { accessKeyId: 'SNS-KEY', secretAccessKey: 'sns-secret' },
+        endpoint: 'http://local-sns:4566',
+      },
+    );
+    expect(capturedConfig).not.toBeUndefined();
+    expect(capturedConfig!.region).toBe('eu-west-1');
+    expect(capturedConfig!.endpoint).toBe('http://local-sns:4566');
+    expect(capturedConfig!.credentials).toEqual({
+      accessKeyId: 'SNS-KEY',
+      secretAccessKey: 'sns-secret',
+    });
+  });
+});

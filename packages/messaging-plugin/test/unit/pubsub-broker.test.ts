@@ -522,7 +522,7 @@ describe('GcpPubSubBroker', () => {
 
 // Guarded real-import: exercises the lazy-load path through loadPubSubModule.
 // Mirrors the kafka-broker.test.ts pattern — connect() without an injected client
-// enters the real `import('npm:@google-cloud/pubsub@5.x')` path. The module is
+// enters the real `import('npm:@google-cloud/pubsub@^6')` path. The module is
 // pinned in deno.lock so the import resolves; connect() sets #ready to true
 // because the SDK module is available. Disconnect afterwards to clean up.
 describe('GcpPubSubBroker — lazy SDK load', () => {
@@ -875,7 +875,7 @@ describe('loadPubSubModule (exported)', () => {
 
   it('calling loadPubSubModule enters the real import path', async () => {
     const { loadPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
-    // This actually calls `await import('npm:@google-cloud/pubsub@5.x')`.
+    // This actually calls `await import('npm:@google-cloud/pubsub@^6')`.
     // It either resolves (module cached in deno.lock) or rejects (module absent).
     // Both outcomes cover the line.
     try {
@@ -883,5 +883,119 @@ describe('loadPubSubModule (exported)', () => {
     } catch {
       // Module absent — the import line was still reached.
     }
+  });
+});
+
+// A2: C6 — createSubscription NOT_FOUND rethrow
+describe('C6: createSubscription error discrimination', () => {
+  it('swallows ALREADY_EXISTS (grpc code 6)', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    // deno-lint-ignore no-explicit-any
+    const err: any = new Error('ALREADY_EXISTS');
+    err.code = 6;
+    const subObj = {
+      on: () => {},
+      close: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+    };
+    const mod = {
+      PubSub: class {
+        constructor() {}
+        topic() {
+          return {
+            createSubscription: () => {
+              throw err;
+            },
+          };
+        }
+        subscription() {
+          return subObj;
+        }
+        close() {
+          return Promise.resolve();
+        }
+      },
+    };
+    const transport = adaptPubSubModule(
+      // deno-lint-ignore no-explicit-any
+      mod as any,
+      { projectId: 'test' },
+    );
+    await expect(transport.open('topic', 'sub', () => {})).resolves.toBeDefined();
+  });
+
+  it('rethrows NOT_FOUND (grpc code 5)', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    // deno-lint-ignore no-explicit-any
+    const err: any = new Error('NOT_FOUND');
+    err.code = 5;
+    const mod = {
+      PubSub: class {
+        constructor() {}
+        topic() {
+          return {
+            createSubscription: () => {
+              throw err;
+            },
+          };
+        }
+        subscription() {
+          return { on: () => {}, close: () => Promise.resolve(), delete: () => Promise.resolve() };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      },
+    };
+    const transport = adaptPubSubModule(
+      // deno-lint-ignore no-explicit-any
+      mod as any,
+      { projectId: 'test' },
+    );
+    await expect(transport.open('topic', 'sub', () => {})).rejects.toThrow('NOT_FOUND');
+  });
+});
+
+// A2: C7 — on('error') wires to logger
+describe('C7: on(error) wires to logger', () => {
+  it('subscription error calls logger.error', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    let errorLoggerCalled = false;
+    const fakeLogger = {
+      error: (msg: string) => {
+        errorLoggerCalled = true;
+        expect(msg).toContain('subscription error');
+      },
+    };
+    let errorEmitter: ((e: unknown) => void) | null = null;
+    const mod = {
+      PubSub: class {
+        constructor() {}
+        topic() {
+          return { createSubscription: () => Promise.resolve([]) };
+        }
+        subscription() {
+          return {
+            on(event: string, fn: (e: unknown) => void) {
+              if (event === 'error') errorEmitter = fn;
+            },
+            close: () => Promise.resolve(),
+            delete: () => Promise.resolve(),
+          };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      },
+    };
+    const transport = adaptPubSubModule(
+      // deno-lint-ignore no-explicit-any
+      mod as any,
+      { projectId: 'test', logger: fakeLogger },
+    );
+    await transport.open('topic', 'sub', () => {});
+    expect(errorLoggerCalled).toBe(false);
+    errorEmitter!(new Error('boom'));
+    expect(errorLoggerCalled).toBe(true);
   });
 });

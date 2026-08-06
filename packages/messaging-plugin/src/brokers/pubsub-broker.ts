@@ -148,9 +148,11 @@ export function adaptPubSubModule(
       try {
         await pubsub.topic(topic).createSubscription(subscription);
       } catch (err) {
-        // Narrow catch to ALREADY_EXISTS only; rethrow everything else.
-        const message = String(err);
-        if (!message.includes('ALREADY_EXISTS') && !message.includes('Already exists')) {
+        // Narrow catch to ALREADY_EXISTS (gRPC code 6) only; rethrow everything else
+        // including NOT_FOUND (gRPC code 5). Match on the documented error-code
+        // discriminator rather than String(err) which is representation-dependent.
+        const grpcCode = (err as { code?: number }).code;
+        if (grpcCode !== 6 && !String(err).includes('ALREADY_EXISTS')) {
           throw err;
         }
       }

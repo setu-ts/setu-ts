@@ -46,12 +46,15 @@ export interface ServiceBusSdkModule {
       close(): Promise<void>;
     };
     createReceiver(queueName: string, options?: unknown): {
-      subscribe(options: {
-        processMessage: (
-          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-        ) => Promise<void>;
-        processError: (err: unknown) => void | Promise<void>;
-      }): { close: () => Promise<void> };
+      subscribe(
+        options: {
+          processMessage: (
+            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+          ) => Promise<void>;
+          processError: (err: unknown) => void | Promise<void>;
+        },
+        receiveOptions?: { autoComplete?: boolean },
+      ): { close: () => Promise<void> };
       close(): Promise<void>;
     };
     createReceiver(
@@ -59,12 +62,15 @@ export interface ServiceBusSdkModule {
       subscriptionName: string,
       options?: unknown,
     ): {
-      subscribe(options: {
-        processMessage: (
-          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-        ) => Promise<void>;
-        processError: (err: unknown) => void | Promise<void>;
-      }): { close: () => Promise<void> };
+      subscribe(
+        options: {
+          processMessage: (
+            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+          ) => Promise<void>;
+          processError: (err: unknown) => void | Promise<void>;
+        },
+        receiveOptions?: { autoComplete?: boolean },
+      ): { close: () => Promise<void> };
       close(): Promise<void>;
     };
     close(): Promise<void>;
@@ -166,39 +172,47 @@ export function adaptServiceBusModule(
     ): Promise<IServiceBusSubscription> => {
       // createReceiver(topicName, subscriptionName) — two positional strings.
       const receiver = client.createReceiver(topic, subscription) as {
-        subscribe(options: {
-          processMessage: (
-            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-          ) => Promise<void>;
-          processError: (err: unknown) => void | Promise<void>;
-        }): { close: () => Promise<void> };
+        subscribe(
+          options: {
+            processMessage: (
+              msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+            ) => Promise<void>;
+            processError: (err: unknown) => void | Promise<void>;
+          },
+          receiveOptions?: { autoComplete?: boolean },
+        ): { close: () => Promise<void> };
         close(): Promise<void>;
       };
 
-      const subHandle = receiver.subscribe({
-        processMessage: async (msg) => {
-          const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
-          await new Promise<void>((resolve) => {
-            onMessage({
-              payload: body,
-              ack: async () => {
-                await msg.complete();
-                resolve();
-              },
-              nack: async () => {
-                await msg.abandon();
-                resolve();
-              },
-            });
-            // If the handler never calls ack or nack, resolve after a microtask
-            // so the promise doesn't hang indefinitely.
-            Promise.resolve().then(resolve);
-          });
+      const subHandle = receiver.subscribe(
+        {
+          processMessage: async (msg) => {
+            const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
+            // Deferred: only resolves when ack/nack settlement actually completes.
+            // No premature-resolve fallback — processMessage MUST not resolve until
+            // the message is settled, otherwise autoComplete:false is pointless.
+            const settle = (fn: () => Promise<void>) => fn();
+            try {
+              const handlerResult = onMessage({
+                payload: body,
+                ack: () => settle(() => msg.complete()),
+                nack: () => settle(() => msg.abandon()),
+              });
+              // Await the settlement promise returned by the handler.
+              // If the handler returns void (old path), this awaits undefined.
+              // If it returns a Promise (fixed path), we await the actual settlement.
+              await handlerResult;
+            } catch {
+              // onMessage threw synchronously — abandon so the SDK redelivers.
+              await msg.abandon();
+            }
+          },
+          processError: () => {
+            // Errors handled by broker's logger
+          },
         },
-        processError: () => {
-          // Errors handled by broker's logger
-        },
-      });
+        { autoComplete: false },
+      );
 
       const key = `${topic}/${subscription}`;
       receivers.set(key, subHandle);
@@ -370,22 +384,20 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const subscriptionId = this.#runtime.uuid();
     const queue = options?.queue ?? this.#defaultQueue;
 
-    const sub = await this.#transport.open(topic, queue, (msg) => {
-      (async () => {
-        try {
-          const deserialized = this.#serializer.deserialize<T>(msg.payload);
-          const metadata: MessageMetadata = {
-            topic,
-          };
-          await handler(deserialized, metadata);
-          msg.ack();
-        } catch (err) {
-          msg.nack();
-          if (this.#logger) {
-            this.#logger.error(`Service Bus handler error: ${err}`);
-          }
+    const sub = await this.#transport.open(topic, queue, async (msg) => {
+      try {
+        const deserialized = this.#serializer.deserialize<T>(msg.payload);
+        const metadata: MessageMetadata = {
+          topic,
+        };
+        await handler(deserialized, metadata);
+        return msg.ack();
+      } catch (err) {
+        if (this.#logger) {
+          this.#logger.error(`Service Bus handler error: ${err}`);
         }
-      })();
+        return msg.nack();
+      }
     });
 
     this.#subscriptions.set(subscriptionId, sub);
