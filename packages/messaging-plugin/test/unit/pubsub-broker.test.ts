@@ -623,6 +623,247 @@ describe('subscribe ack/nack path', () => {
   });
 });
 
+// Broker tests using adaptPubSubModule(fakeSdk) — exercises adapter closures
+describe('GcpPubSubBroker with adapted fake SDK module', () => {
+  function createFakeSdkModuleWithRouting():
+    & import('../../src/brokers/pubsub-broker.ts').PubSubSdkModule
+    & {
+      publishes: Array<{ topic: string; data: Uint8Array }>;
+      messageCallbacks: Array<{
+        topic: string;
+        subscription: string;
+        onMessage: (
+          msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+        ) => void;
+      }>;
+    }
+    & {
+      topics: Map<
+        string,
+        {
+          messages: Array<{ data: Uint8Array }>;
+          subscriptions: Map<
+            string,
+            {
+              onMessage:
+                | ((
+                  msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+                ) => void)
+                | null;
+            }
+          >;
+        }
+      >;
+      subscriptions: Map<
+        string,
+        { topic: string; name: string; closed: boolean; deleted: boolean }
+      >;
+    } {
+    type FakeMod =
+      & import('../../src/brokers/pubsub-broker.ts').PubSubSdkModule
+      & {
+        publishes: Array<{ topic: string; data: Uint8Array }>;
+        messageCallbacks: Array<{
+          topic: string;
+          subscription: string;
+          onMessage: (
+            msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+          ) => void;
+        }>;
+      }
+      & {
+        topics: Map<
+          string,
+          {
+            messages: Array<{ data: Uint8Array }>;
+            subscriptions: Map<
+              string,
+              {
+                onMessage:
+                  | ((
+                    msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+                  ) => void)
+                  | null;
+              }
+            >;
+          }
+        >;
+        subscriptions: Map<
+          string,
+          { topic: string; name: string; closed: boolean; deleted: boolean }
+        >;
+      };
+    const mod = {} as FakeMod;
+    mod.topics = new Map();
+    mod.subscriptions = new Map();
+
+    mod.PubSub = class {
+      constructor(_options: { projectId: string; credentials?: unknown }) {}
+      topic(name: string) {
+        if (!mod.topics.has(name)) {
+          mod.topics.set(name, { messages: [], subscriptions: new Map() });
+        }
+        const td = mod.topics.get(name)!;
+        return {
+          publishMessage(message: { data: Uint8Array }) {
+            td.messages.push(message);
+            return Promise.resolve('msg-id');
+          },
+          createSubscription(subName: string) {
+            td.subscriptions.set(subName, { onMessage: null });
+            return Promise.resolve([]);
+          },
+        };
+      }
+      subscription(_topicName: string, subName: string) {
+        let entry = mod.subscriptions.get(subName);
+        if (!entry) {
+          entry = { topic: _topicName, name: subName, closed: false, deleted: false };
+          mod.subscriptions.set(subName, entry);
+        }
+        return {
+          on(
+            event: 'message' | 'error',
+            handler: (
+              msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+            ) => void,
+          ) {
+            if (event === 'message') {
+              const td = mod.topics.get(_topicName);
+              if (td?.subscriptions.has(subName)) {
+                td.subscriptions.get(subName)!.onMessage = handler as never;
+              }
+            }
+          },
+          close() {
+            entry.closed = true;
+            return Promise.resolve();
+          },
+          delete() {
+            entry.deleted = true;
+            return Promise.resolve();
+          },
+        };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    };
+    return mod;
+  }
+
+  it('exercises ack/nack/close closures through adapted SDK', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptPubSubModule(sdk, { projectId: 'test' });
+
+    const broker = new GcpPubSubBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
+
+    let handlerCalled = false;
+    await broker.subscribe('orders', () => {
+      handlerCalled = true;
+    });
+
+    // Deliver a message through the fake SDK's onMessage callback
+    const td = sdk.topics.get('orders');
+    const cb = td!.subscriptions.get('messaging-consumers')!.onMessage!;
+    cb({
+      data: new TextEncoder().encode(JSON.stringify({ item: 'widget' })),
+      ack: () => {},
+      nack: () => {},
+      id: 'msg-1',
+    });
+
+    // The adapter decodes raw.data, calls onMessage(payload), which reaches the broker's handler
+    await Promise.resolve();
+    expect(handlerCalled).toBe(true);
+
+    await broker.disconnect();
+  });
+
+  it('exercises subscription close closure through adapted SDK', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptPubSubModule(sdk, { projectId: 'test' });
+
+    const broker = new GcpPubSubBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+    const sub = await broker.subscribe('events', () => {});
+
+    // Unsubscribe exercises the adapter's close closure
+    await sub.unsubscribe();
+
+    // The SDK subscription should be closed
+    const entries = [...sdk.subscriptions.values()];
+    const closedEntry = entries.find((e) => e.closed);
+    expect(closedEntry).toBeDefined();
+
+    await broker.disconnect();
+  });
+
+  it('exercises publish through adapted SDK', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptPubSubModule(sdk, { projectId: 'test' });
+
+    const broker = new GcpPubSubBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+    await broker.publish('metrics', { value: 42 });
+
+    const topic = sdk.topics.get('metrics');
+    expect(topic).toBeDefined();
+    expect(topic!.messages).toHaveLength(1);
+    expect(new TextDecoder().decode(topic!.messages[0].data)).toBe('{"value":42}');
+
+    await broker.disconnect();
+  });
+
+  it('exercises nack closure through handler throw', async () => {
+    const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptPubSubModule(sdk, { projectId: 'test' });
+
+    const broker = new GcpPubSubBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+
+    await broker.subscribe('fail-topic', () => {
+      throw new Error('boom');
+    });
+
+    // Deliver a message — triggers nack path
+    const td = sdk.topics.get('fail-topic');
+    const cb = td!.subscriptions.get('messaging-consumers')!.onMessage!;
+    cb({
+      data: new TextEncoder().encode(JSON.stringify({ fail: true })),
+      ack: () => {},
+      nack: () => {},
+      id: 'msg-fail',
+    });
+
+    await Promise.resolve();
+
+    await broker.disconnect();
+  });
+});
+
 // Adapt function coverage — loadPubSubModule exported
 describe('loadPubSubModule (exported)', () => {
   it('is exported as a function', async () => {

@@ -697,3 +697,196 @@ describe('adaptServiceBusModule', () => {
     await transport.close();
   });
 });
+
+// Broker tests using adaptServiceBusModule(fakeSdk) — exercises adapter closures
+describe('ServiceBusBroker with adapted fake SDK module', () => {
+  function createRuntime(platform: string = 'node'): IRuntimeServices {
+    return {
+      platform: () => platform as ReturnType<IRuntimeServices['platform']>,
+      uuid: () => 'uuid-1',
+      now: () => 1000000,
+      setTimeout: (fn: () => void, ms: number) => {
+        setTimeout(fn, ms);
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimeout: () => {},
+      setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+      clearInterval: () => {},
+      randomBytes: () => new Uint8Array(16),
+      subtle: undefined,
+      hostname: 'test',
+      version: '0.1.0',
+      hrtime: () => 0,
+      fs: undefined,
+      env: {},
+      exit: () => {},
+    } as unknown as IRuntimeServices;
+  }
+
+  /**
+   * Fake SDK that routes produced messages to subscribed processMessage
+   * callbacks, enabling request-reply round trips.
+   */
+  function createFakeSdkModuleWithRouting():
+    & import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule
+    & {
+      sends: Array<{ topic: string; body: string }>;
+      processMessageCbs: Array<{
+        topic: string;
+        subscription: string;
+        processMessage: (
+          msg: { body: unknown; complete: () => Promise<void> },
+        ) => Promise<void>;
+      }>;
+    } {
+    type FakeMod =
+      & import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule
+      & {
+        sends: Array<{ topic: string; body: string }>;
+        processMessageCbs: Array<{
+          topic: string;
+          subscription: string;
+          processMessage: (
+            msg: { body: unknown; complete: () => Promise<void> },
+          ) => Promise<void>;
+        }>;
+      };
+    const mod = {} as FakeMod;
+    mod.sends = [];
+    mod.processMessageCbs = [];
+
+    mod.ServiceBusClient = class {
+      constructor(_connectionString: string) {}
+      createSender(queueOrTopicName: string) {
+        return {
+          sendMessages(messages: { body: unknown }) {
+            mod.sends.push({
+              topic: queueOrTopicName,
+              body: typeof messages.body === 'string' ? messages.body : String(messages.body ?? ''),
+            });
+            // Route to all receivers subscribed to this topic
+            for (const cb of mod.processMessageCbs) {
+              if (cb.topic === queueOrTopicName) {
+                void cb.processMessage({
+                  body: messages.body,
+                  complete: () => Promise.resolve(),
+                });
+              }
+            }
+            return Promise.resolve();
+          },
+          close() {
+            return Promise.resolve();
+          },
+        };
+      }
+      createReceiver(
+        _topicName: string,
+        _subscriptionName: string,
+        _options?: unknown,
+      ) {
+        return {
+          subscribe(options: {
+            processMessage: (
+              msg: { body: unknown; complete: () => Promise<void> },
+            ) => Promise<void>;
+            processError: (err: unknown) => void | Promise<void>;
+          }) {
+            mod.processMessageCbs.push({
+              topic: _topicName,
+              subscription: _subscriptionName,
+              processMessage: options.processMessage,
+            });
+            return { close: () => Promise.resolve() };
+          },
+          close() {
+            return Promise.resolve();
+          },
+        };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    };
+
+    mod.ServiceBusAdministrationClient = class {
+      constructor(_connectionString: string) {}
+      createSubscription(_topic: string, _sub: string) {
+        return Promise.resolve({});
+      }
+      deleteSubscription(_topic: string, _sub: string) {
+        return Promise.resolve({});
+      }
+    };
+
+    return mod;
+  }
+
+  it('exercises nack closure through adapted SDK', async () => {
+    const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptServiceBusModule(sdk, {
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
+    });
+
+    const broker = new ServiceBusBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+
+    await broker.subscribe('fail-topic', () => {
+      throw new Error('boom');
+    });
+
+    // Trigger via processMessage callback
+    const cb = sdk.processMessageCbs.find((c) => c.subscription === 'messaging-consumers')!
+      .processMessage;
+    await cb({
+      body: JSON.stringify({ fail: true }),
+      complete: () => Promise.resolve(),
+    });
+
+    // The nack in the adapter closure is a no-op (no abandon), but the closure itself is exercised
+    await Promise.resolve();
+
+    await broker.disconnect();
+  });
+
+  it('exercises RRCore closures via respond() and fire-and-forget request', async () => {
+    // This test exercises the uuid/setTimeout/publish/openInbox closures passed
+    // to RequestReplyCore in the constructor, by calling respond() and fire-and-forget
+    // request(). We do NOT await the request (it has no responder), so the closures
+    // are called but the test does not hang on a timeout.
+    const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptServiceBusModule(sdk, {
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
+    });
+
+    const broker = new ServiceBusBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+
+    // respond() exercises: uuid, openInbox, subscribe, publish (RRCore callbacks)
+    await broker.respond('svc.echo', (req) => String(req));
+
+    // Fire-and-forget request() exercises: publish, setTimeout (RRCore callbacks)
+    // Do NOT await — there is no responder, so it would hang. The closures run
+    // synchronously before the timer starts.
+    void broker.request('svc.echo', 'hello', { timeoutMs: 5_000 });
+
+    // Give microtasks time to run the RRCore setup
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await broker.disconnect();
+    // disconnect() exercises: clearTimeout (cancels pending timers), close (inbox closure)
+  });
+});

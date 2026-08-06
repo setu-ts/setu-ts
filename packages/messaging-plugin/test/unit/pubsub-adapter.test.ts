@@ -148,13 +148,16 @@ describe('adaptPubSubModule', () => {
     expect(receivedPayload).toBe('hello-world');
   });
 
-  it('routes ack and nack', async () => {
+  it('routes ack and nack through adapter closure', async () => {
     const sdk = createFakeSdkModule();
     const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
 
     let acked = false;
     let nacked = false;
-    await transport.open('test-topic', 'sub-2', (_msg) => {});
+    let capturedMsg: { payload: string; ack: () => void; nack: () => void } | null = null;
+    await transport.open('test-topic', 'sub-2', (msg) => {
+      capturedMsg = msg;
+    });
 
     const topicData = sdk.topics.get('test-topic');
     const cb = topicData!.subscriptions.get('sub-2')!.onMessage!;
@@ -169,9 +172,136 @@ describe('adaptPubSubModule', () => {
       id: 'msg-2',
     });
 
-    // The callback fires synchronously; ack/nack are captured.
-    expect(acked).toBe(false); // ack was not called by the handler
-    expect(nacked).toBe(false); // nack was not called by the handler
+    // The adapter closure captured raw.ack() as the message's ack.
+    // Call it to exercise the closure.
+    capturedMsg!.ack();
+    expect(acked).toBe(true);
+
+    capturedMsg!.nack();
+    expect(nacked).toBe(true);
+  });
+
+  it('exercises ack closure from the opened subscription', async () => {
+    const sdk = createFakeSdkModule();
+    let rawAckCalled = false;
+    // Monkey-patch the subscription's onMessage callback to capture raw ack
+    const origSubscription = sdk.PubSub.prototype.subscription;
+    sdk.PubSub.prototype.subscription = function (
+      _topicName: string,
+      _subName: string,
+    ) {
+      const sub = origSubscription.call(this, _topicName, _subName);
+      return {
+        ...sub,
+        on: (
+          event: 'message' | 'error',
+          handler: (
+            msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+          ) => void,
+        ) => {
+          if (event === 'message') {
+            sub.on(event, (raw: Parameters<typeof handler>[0]) => {
+              handler({
+                ...raw,
+                ack: () => {
+                  rawAckCalled = true;
+                  raw.ack();
+                },
+              });
+            });
+          } else {
+            sub.on(event, handler);
+          }
+        },
+      };
+    };
+
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    let capturedAck: (() => void) | undefined;
+    await transport.open('t', 's-ack', (msg) => {
+      capturedAck = msg.ack;
+    });
+
+    // Trigger the message via the fake SDK
+    const topicData = sdk.topics.get('t');
+    const cb = topicData!.subscriptions.get('s-ack')!.onMessage!;
+    cb({
+      data: new TextEncoder().encode('{}'),
+      ack: () => {},
+      nack: () => {},
+      id: '1',
+    });
+
+    // Call the captured ack from the broker's envelope
+    capturedAck!();
+    expect(rawAckCalled).toBe(true);
+  });
+
+  it('exercises nack closure from the opened subscription', async () => {
+    const sdk = createFakeSdkModule();
+    let rawNackCalled = false;
+    const origSubscription = sdk.PubSub.prototype.subscription;
+    sdk.PubSub.prototype.subscription = function (
+      _topicName: string,
+      _subName: string,
+    ) {
+      const sub = origSubscription.call(this, _topicName, _subName);
+      return {
+        ...sub,
+        on: (
+          event: 'message' | 'error',
+          handler: (
+            msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
+          ) => void,
+        ) => {
+          if (event === 'message') {
+            sub.on(event, (raw: Parameters<typeof handler>[0]) => {
+              handler({
+                ...raw,
+                nack: () => {
+                  rawNackCalled = true;
+                  raw.nack();
+                },
+              });
+            });
+          } else {
+            sub.on(event, handler);
+          }
+        },
+      };
+    };
+
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    let capturedNack: (() => void) | undefined;
+    await transport.open('t', 's-nack', (msg) => {
+      capturedNack = msg.nack;
+    });
+
+    const topicData = sdk.topics.get('t');
+    const cb = topicData!.subscriptions.get('s-nack')!.onMessage!;
+    cb({
+      data: new TextEncoder().encode('{}'),
+      ack: () => {},
+      nack: () => {},
+      id: '2',
+    });
+
+    capturedNack!();
+    expect(rawNackCalled).toBe(true);
+  });
+
+  it('subscription close closure exercises sub.close', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    const sub = await transport.open('t', 's-close-2', () => {});
+    // Close the subscription — exercises the closure that calls sub.close()
+    await sub.close();
+
+    const entry = sdk.subscriptions.get('s-close-2');
+    expect(entry!.closed).toBe(true);
   });
 
   it('creates subscription on topic object', async () => {

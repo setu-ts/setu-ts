@@ -123,6 +123,100 @@ describe('SqsQueue', () => {
         availableAtMs: 1000000 + 1_000_000,
       })).rejects.toThrow(SqsDelayTooLongError);
     });
+
+    it('sends with delaySeconds when availableAtMs > now', async () => {
+      let sentDelay: number | undefined;
+      const transport: ISqsTransport = {
+        send: (_q, _b, delaySeconds) => {
+          sentDelay = delaySeconds;
+          return Promise.resolve();
+        },
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      // availableAtMs = 1000000 + 30s, now = 1000000 → delaySeconds = 30
+      await queue.enqueue({
+        id: 'job-1',
+        name: 'jobs',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: 1000000 + 30_000,
+      });
+
+      expect(sentDelay).toBe(30);
+    });
+
+    it('sends without delaySeconds when availableAtMs is 0', async () => {
+      let sentDelay: number | undefined;
+      const transport: ISqsTransport = {
+        send: (_q, _b, delaySeconds) => {
+          sentDelay = delaySeconds;
+          return Promise.resolve();
+        },
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      // availableAtMs = 0 → delaySeconds stays undefined
+      await queue.enqueue({
+        id: 'job-1',
+        name: 'jobs',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: 0,
+      });
+
+      expect(sentDelay).toBeUndefined();
+    });
+
+    it('sends without delaySeconds when availableAtMs is in the past', async () => {
+      let sentDelay: number | undefined;
+      const transport: ISqsTransport = {
+        send: (_q, _b, delaySeconds) => {
+          sentDelay = delaySeconds;
+          return Promise.resolve();
+        },
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      // availableAtMs < now → delayMs = 0 → delaySeconds = 0 → still passed
+      await queue.enqueue({
+        id: 'job-1',
+        name: 'jobs',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: 999999,
+      });
+
+      // delaySeconds = ceil(0/1000) = 0
+      expect(sentDelay).toBe(0);
+    });
   });
 
   describe('reserve()', () => {
@@ -501,6 +595,235 @@ describe('SqsQueue', () => {
       });
 
       await expect(queue.reserve('jobs', 1, 1000000)).rejects.toThrow('not connected');
+    });
+  });
+
+  describe('logger branches', () => {
+    it('logs ack for unknown receipt handle', async () => {
+      let logged = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      await queue.ack('jobs', 'nonexistent');
+      expect(logged).toContain('unknown or expired');
+    });
+
+    it('logs requeue for unknown receipt handle', async () => {
+      let logged = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      await queue.requeue('jobs', 'nonexistent', 2000000, 1);
+      expect(logged).toContain('unknown or expired');
+    });
+
+    it('logs deadLetter for unknown receipt handle', async () => {
+      let logged = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      await queue.deadLetter('jobs', 'nonexistent', 1000000);
+      expect(logged).toContain('unknown or expired');
+    });
+
+    it('logs no DLQ configured when deleting', async () => {
+      let logged = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '3',
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        // No deadLetterQueues
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+      expect(logged).toContain('no DLQ configured');
+    });
+
+    it('logs DLQ send failure and leaves source undeleted', async () => {
+      let logged = '';
+      let deletedReceipt = '';
+      const transport: ISqsTransport = {
+        send: (q) => {
+          if (q.includes('dlq')) return Promise.reject(new Error('DLQ network error'));
+          return Promise.resolve();
+        },
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '3',
+          }]),
+        delete: (_q, receipt) => {
+          deletedReceipt = receipt;
+          return Promise.resolve();
+        },
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+
+      expect(logged).toContain('DLQ send failed');
+      // Source message should NOT be deleted when DLQ send fails
+      expect(deletedReceipt).toBe('');
+    });
+  });
+
+  describe('reserve() with logger', () => {
+    it('logs when message has no receiptHandle', async () => {
+      let logged = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: '',
+            approximateReceiveCount: '1',
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      expect(jobs).toHaveLength(0);
+      expect(logged).toContain('no ReceiptHandle');
+    });
+  });
+
+  describe('findReceiptEntry expired', () => {
+    it('removes and returns undefined for expired receipt', async () => {
+      let deletedReceipt = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '1',
+          }]),
+        delete: (_q, receipt) => {
+          deletedReceipt = receipt;
+          return Promise.resolve();
+        },
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      // Runtime with a now() that makes the receipt expired immediately
+      const runtime: IRuntimeServices = {
+        platform: () => 'node' as ReturnType<IRuntimeServices['platform']>,
+        uuid: () => 'uuid-1',
+        now: () => 1000000,
+        setTimeout: (_fn: () => void) => (1 as unknown as ReturnType<typeof setTimeout>),
+        clearTimeout: () => {},
+        setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+        clearInterval: () => {},
+        randomBytes: () => new Uint8Array(16),
+        subtle: undefined,
+        hostname: 'test',
+        version: '0.1.0',
+        hrtime: () => 0,
+        fs: undefined,
+        env: {},
+        exit: () => {},
+      } as unknown as IRuntimeServices;
+      const queue = new SqsQueue(runtime, {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+
+      // Reserve with a nowMs that is 1s BEFORE the runtime's now()
+      const jobs = await queue.reserve('jobs', 1, 999900);
+      expect(jobs).toHaveLength(1);
+
+      // Now ack with an expired handle — the entry was stored with claimExpiresAtMs
+      // = 999900 + 30*1000 = 1029900, but runtime.now() = 1000000 < 1029900
+      // so the receipt is NOT expired. Let's advance time past expiry.
+      (runtime as unknown as { now: () => number }).now = () => 2000000;
+
+      // The entry should now be expired — ack returns early without deleting
+      await queue.ack('jobs', jobs[0].id);
+      expect(deletedReceipt).toBe(''); // not deleted because entry expired
     });
   });
 });
