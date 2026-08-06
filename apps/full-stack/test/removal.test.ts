@@ -51,39 +51,65 @@ describe('the full-stack example', () => {
   });
 
   it('keeps no module-level cache in its service accessors', async () => {
-    const source = await Deno.readTextFile(new URL('config/services.server.ts', APP_ROOT));
+    const source = await Deno.readTextFile(
+      new URL('config/services.server.ts', APP_ROOT),
+    );
 
-    // Top-level only: an indented `let` inside a function body is ordinary
-    // local state, while one at column zero is process-lifetime state that
+    // Column zero only: an indented `let` inside a function body is ordinary
+    // local state, while one at the top level is process-lifetime state that
     // outlives the request — which is exactly the cache the kernel's service
     // registry replaces.
-    const topLevelStatements = source.split('\n').filter((line) =>
-      /^(?:let|var|const) /.test(line)
-    );
-    const cached = topLevelStatements.filter((line) =>
-      /new (?:Map|Set|WeakMap)\b|^(?:let|var) /.test(line)
+    //
+    // The optional `export` prefix is load-bearing. Matching only the bare
+    // `const …` form let `export const clientCache = new Map()` — the same
+    // defect with a keyword in front — pass this test unnoticed.
+    const TOP_LEVEL = /^(?:export\s+)?(?:let|var|const)\s/;
+    const MUTABLE_BINDING = /^(?:export\s+)?(?:let|var)\s/;
+    const CACHE_CONSTRUCTOR = /new\s+(?:Map|Set|WeakMap|WeakSet)\b/;
+
+    const cached = source.split('\n').filter((line) =>
+      TOP_LEVEL.test(line) &&
+      (MUTABLE_BINDING.test(line) || CACHE_CONSTRUCTOR.test(line))
     );
 
-    expect(cached, `module-level state found: ${cached.join(' | ')}`).toEqual([]);
+    expect(cached, `module-level state found: ${cached.join(' | ')}`).toEqual(
+      [],
+    );
   });
 
   it('reads every context key it sets', async () => {
     // A key set in populateLoadContext but never read is dead surface; a key
     // read but never set silently returns its default and renders an empty
     // page. Both directions are checked, because neither type-checks.
-    const keys = await Deno.readTextFile(new URL('lib/context-keys.server.ts', APP_ROOT));
-    const accessors = await Deno.readTextFile(new URL('config/services.server.ts', APP_ROOT));
-    const config = await Deno.readTextFile(new URL('../honoe.config.ts', import.meta.url));
+    const keys = await Deno.readTextFile(
+      new URL('lib/context-keys.server.ts', APP_ROOT),
+    );
+    const accessors = await Deno.readTextFile(
+      new URL('config/services.server.ts', APP_ROOT),
+    );
+    const config = await Deno.readTextFile(
+      new URL('../honoe.config.ts', import.meta.url),
+    );
 
-    const exported = [...keys.matchAll(/export const (\w+Context)\b/g)].map((match) => match[1]);
+    const exported = [...keys.matchAll(/export const (\w+Context)\b/g)].map((
+      match,
+    ) => match[1]);
     expect(exported.length).toBeGreaterThan(0);
 
     for (const key of exported) {
       // Whitespace-tolerant: `deno fmt` wraps a long `context.set(...)` call
       // across lines, and the test must assert the wiring, not the formatting.
-      const isSet = new RegExp(String.raw`context\.set\(\s*${key}\b`).test(config);
+      const isSet = new RegExp(String.raw`context\.set\(\s*${key}\b`).test(
+        config,
+      );
       expect(isSet, `${key} is never set in honoe.config.ts`).toBe(true);
-      expect(accessors.includes(key), `${key} is never read`).toBe(true);
+      // `accessors.includes(key)` would be satisfied by the import statement
+      // alone, so a key imported and never read would pass while the message
+      // claimed otherwise. Assert the access shape the accessors actually use.
+      const isRead = new RegExp(String.raw`context\.get\(\s*${key}\b`).test(
+        accessors,
+      );
+      expect(isRead, `${key} is never read through context.get()`).toBe(true);
     }
   });
 
@@ -93,7 +119,9 @@ describe('the full-stack example', () => {
     // from source — so a `{ defaultValue }` literal produces two distinct key
     // objects, every read falls back to its default, and the page renders
     // empty with no error anywhere.
-    const source = await Deno.readTextFile(new URL('lib/context-keys.server.ts', APP_ROOT));
+    const source = await Deno.readTextFile(
+      new URL('lib/context-keys.server.ts', APP_ROOT),
+    );
 
     expect(source).toContain('contextKeyFor');
     expect(source).not.toMatch(/=\s*\{\s*defaultValue/);

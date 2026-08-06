@@ -64,6 +64,13 @@ Two consequences worth knowing:
 
 ## What the gate does not cover
 
+The `app/` tree is type-checked by this example's own `check:app` task
+(`deno check app/**/*.ts app/**/*.tsx`), which the `test` task runs and `check:apps` therefore
+executes. That task exists because neither of the obvious candidates covers those files: the gate's
+`deno check` entry points are fixed at `main.ts` and `smoke.ts`, which reach six app modules and
+none of the `.tsx`, and `vite build` does not type-check at all — rolldown strips types without
+checking them, so a pure type error builds green.
+
 `check:apps` runs no browser. Hydration, static-asset delivery and client-side navigation were
 verified manually against Chrome via Playwright when this example was written — 11/11 checks,
 including that all 8 referenced assets are served by the framework's own handler, that a `<Form>`

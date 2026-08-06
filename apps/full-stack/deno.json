@@ -2,9 +2,10 @@
   "tasks": {
     "install": "deno install --allow-scripts",
     "build": "deno task install && deno run -A npm:@react-router/dev build",
+    "check:app": "deno check app/**/*.ts app/**/*.tsx",
     "start": "deno task build && deno run --allow-net --allow-env --allow-read main.ts",
     "smoke": "deno task build && deno run -A smoke.ts",
-    "test": "deno test -A test/"
+    "test": "deno task check:app && deno test -A test/"
   },
   "compilerOptions": {
     "strict": true,
@@ -14,7 +15,14 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
-    "useUnknownInCatchVariables": true
+    "useUnknownInCatchVariables": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": [
+      "deno.window",
+      "dom",
+      "dom.iterable"
+    ]
   },
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",

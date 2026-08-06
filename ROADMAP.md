@@ -3905,10 +3905,23 @@ package ecosystem, not a required Node binary. This does not unblock `apps/cloud
 on Wrangler rather than on Node.
 
 CI therefore proves the whole path — install, Vite build, kernel serving the compiled build, SSR
-HTML carrying capability data. Two costs are stated rather than left to discovery: a cold CI runner
-additionally downloads the frontend toolchain (~100 npm packages, measured at 14 s), and `.tsx`
-modules are type-checked by the frontend build rather than by `deno check`, whose entry points are
-fixed at `main.ts` and `smoke.ts`.
+HTML carrying capability data. One cost is stated rather than left to discovery: a cold CI runner
+additionally downloads the frontend toolchain (~100 npm packages, measured at 14 s) on top of the
+sub-second build.
+
+**Type-checking the `app/` tree needs its own task, and code review found out why.** The gate's
+entry points are fixed at `main.ts` and `smoke.ts` (`scripts/check-apps.ts:104`) and reach only what
+they import — six app modules, not the `.tsx` routes and components, and not
+`app/features/products/products.server.ts` (the services layer does not import the features layer;
+the route does). It is tempting to assume `vite build` covers the rest. **It does not:** rolldown
+strips types without checking them, so a pure type error (`const x: number = 'nope'`) builds green —
+only a missing export fails, and that is module resolution rather than type-checking. This milestone
+first shipped that assumption in prose and had eleven app files under no type-checker at all. The
+example therefore carries a `check:app` task (`deno check app/**/*.ts app/**/*.tsx`, with
+`jsx: 'react-jsx'` in its `compilerOptions`) which its `test` task runs, so `check:apps` executes it
+(`scripts/check-apps.ts:133`). A glob rather than a file list, because `app/routes.ts` resolves
+routes through `flatRoutes()` at build time and statically imports none of them — no entry point
+reaches them, so a hand-listed set would silently stop covering a newly added route.
 
 **What CI does not prove is a browser.** Hydration, static-asset delivery and client-side navigation
 were verified manually against Chrome via Playwright at implementation time — 11/11 checks: the SSR
