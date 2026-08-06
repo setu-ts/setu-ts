@@ -494,4 +494,116 @@ describe('RequestReplyCore', () => {
       await core.close();
     });
   });
+
+  // B1: RPC settlement semantics
+  describe('B1: RPC settlement semantics', () => {
+    it('two concurrent requests receive out-of-order replies to correct request', async () => {
+      // Two requests fire, but the reply for request #2 arrives before request #1.
+      // Each reply must resolve the correct pending request.
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      // Start two requests; uuid sequence: id-0 (inbox), id-1 (corrA), id-2 (corrB)
+      const pendingA = core.request('echo', 'A', { timeoutMs: 10000 });
+      const pendingB = core.request('echo', 'B', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      // Deliver reply for B first (correlationId id-2), then A (id-1)
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-2',
+        ok: true,
+        payload: 'B-reply',
+      });
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: true,
+        payload: 'A-reply',
+      });
+
+      // Each request resolves with its own value
+      const resultB = await pendingB;
+      const resultA = await pendingA;
+      expect(resultB).toBe('B-reply');
+      expect(resultA).toBe('A-reply');
+    });
+
+    it('foreign correlation reply (no matching pending) is silently dropped', async () => {
+      // A reply with a correlationId that matches no pending request must be
+      // silently ignored — it must not resolve/reject any other pending request
+      // or throw.
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      // One pending request; uuid sequence: id-0 (inbox), id-1 (corr)
+      const pending = core.request('echo', 'A', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      // Deliver a foreign reply (correlationId never created)
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'foreign-uuid',
+        ok: true,
+        payload: 'foreign',
+      });
+
+      // Deliver the real reply
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: true,
+        payload: 'A-ok',
+      });
+
+      await expect(pending).resolves.toBe('A-ok');
+    });
+
+    it('malformed reply on shared inbox is silently dropped', async () => {
+      // A reply that is not a valid rr-reply envelope (e.g., missing kind) must
+      // be silently ignored.
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      const pending = core.request('echo', 'A', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      // Deliver malformed message (no kind field)
+      await t.deliver('rr.inbox.id-0', { notAReply: true });
+      // Deliver well-formed reply
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: true,
+        payload: 'A-ok',
+      });
+
+      await expect(pending).resolves.toBe('A-ok');
+    });
+
+    it('ok:false reply with error field rejects with RemoteHandlerError', async () => {
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      const pending = core.request('boom', 'A', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: false,
+        error: 'remote-explosion',
+      });
+
+      await expect(pending).rejects.toBeInstanceOf(RemoteHandlerError);
+    });
+  });
 });

@@ -29,7 +29,6 @@ import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
 import { ReplyInboxUnavailableError } from '../errors.ts';
-import { settlementErrors } from '../settlement-marker.ts';
 
 /** Default reply topic for request-reply. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
@@ -208,27 +207,13 @@ export function adaptServiceBusModule(
           processMessage: async (rawMessage) => {
             const msg = rawMessage as { body?: unknown };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
-            // B2: ack/nack call receiver settlement and propagate errors directly.
-            // Settlement rejections are marked via settlementErrors WeakSet so the
-            // broker's subscribe() can distinguish handler invocation failures from
-            // settlement failures and avoid double-abandon.
             await onMessage({
               payload: body,
               ack: async () => {
-                try {
-                  await receiver.completeMessage(rawMessage);
-                } catch (err) {
-                  if (err instanceof Error) settlementErrors.add(err);
-                  throw err;
-                }
+                await receiver.completeMessage(rawMessage);
               },
               nack: async () => {
-                try {
-                  await receiver.abandonMessage(rawMessage);
-                } catch (err) {
-                  if (err instanceof Error) settlementErrors.add(err);
-                  throw err;
-                }
+                await receiver.abandonMessage(rawMessage);
               },
             });
           },
