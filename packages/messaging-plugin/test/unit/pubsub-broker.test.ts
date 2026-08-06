@@ -890,9 +890,7 @@ describe('loadPubSubModule (exported)', () => {
 describe('C6: createSubscription error discrimination', () => {
   it('swallows ALREADY_EXISTS (grpc code 6)', async () => {
     const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
-    // deno-lint-ignore no-explicit-any
-    const err: any = new Error('ALREADY_EXISTS');
-    err.code = 6;
+    const err = { code: 6, message: 'resource-exists' };
     const subObj = {
       on: () => {},
       close: () => Promise.resolve(),
@@ -926,9 +924,7 @@ describe('C6: createSubscription error discrimination', () => {
 
   it('rethrows NOT_FOUND (grpc code 5)', async () => {
     const { adaptPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
-    // deno-lint-ignore no-explicit-any
-    const err: any = new Error('NOT_FOUND');
-    err.code = 5;
+    const err = { code: 5, message: 'no-such-topic' };
     const mod = {
       PubSub: class {
         constructor() {}
@@ -952,7 +948,7 @@ describe('C6: createSubscription error discrimination', () => {
       mod as any,
       { projectId: 'test' },
     );
-    await expect(transport.open('topic', 'sub', () => {})).rejects.toThrow('NOT_FOUND');
+    await expect(transport.open('topic', 'sub', () => {})).rejects.toBe(err);
   });
 });
 

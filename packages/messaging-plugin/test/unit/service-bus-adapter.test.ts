@@ -195,6 +195,7 @@ describe('adaptServiceBusModule', () => {
           abandon: () => Promise<void>;
         }) => Promise<void>)
         | null = null;
+      let receiveOptions: { autoComplete?: boolean } | undefined;
 
       // deno-lint-ignore no-explicit-any
       const sdk = {} as any;
@@ -218,10 +219,13 @@ describe('adaptServiceBusModule', () => {
         createReceiver(topic: string, subscription: string) {
           sdk.receivers.push({ topic, subscription });
           return {
-            // deno-lint-ignore no-explicit-any
-            subscribe(options: any, receiveOptions: any) {
-              // Capture the subscribe call options for assertions.
-              options._receiveOptions = receiveOptions;
+            subscribe(
+              options: {
+                processMessage: typeof processMessageFn;
+              },
+              capturedReceiveOptions: { autoComplete?: boolean },
+            ) {
+              receiveOptions = capturedReceiveOptions;
               // Expose processMessage for the test to call.
               processMessageFn = options.processMessage;
               return { close: () => Promise.resolve() };
@@ -266,6 +270,7 @@ describe('adaptServiceBusModule', () => {
 
       expect(processMessageFn).not.toBeNull();
       expect(onMessageCalled).toBe(false); // not called yet; we control invocation
+      expect(receiveOptions?.autoComplete).toBe(false);
 
       // Invoke processMessage with the deferred complete.
       const processPromise = processMessageFn!({
@@ -279,7 +284,7 @@ describe('adaptServiceBusModule', () => {
       processPromise.then(() => {
         resolved = true;
       });
-      await Promise.resolve();
+      for (let i = 0; i < 5; i++) await Promise.resolve();
       expect(resolved).toBe(false);
 
       // Release settlement → now processMessage resolves.
@@ -296,6 +301,7 @@ describe('adaptServiceBusModule', () => {
         | null = null;
       let abandonCalled = false;
       let completeCalled = false;
+      let releaseAbandon: (() => void) | null = null;
 
       // deno-lint-ignore no-explicit-any
       const sdk = {} as any;
@@ -340,8 +346,9 @@ describe('adaptServiceBusModule', () => {
         throw new Error('handler boom');
       });
 
-      // Invoke processMessage — handler throws → abandon should be called.
-      await processMessageFn!({
+      // Invoke processMessage — handler throws → abandon should be called, but
+      // processMessage must remain pending until the deferred settlement ends.
+      const processPromise = processMessageFn!({
         body: 'boom',
         complete: () => {
           completeCalled = true;
@@ -349,12 +356,25 @@ describe('adaptServiceBusModule', () => {
         },
         abandon: () => {
           abandonCalled = true;
-          return Promise.resolve();
+          return new Promise<void>((resolve) => {
+            releaseAbandon = resolve;
+          });
         },
       });
 
+      let resolved = false;
+      processPromise.then(() => {
+        resolved = true;
+      });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+
       expect(abandonCalled).toBe(true);
       expect(completeCalled).toBe(false);
+      expect(resolved).toBe(false);
+
+      releaseAbandon!();
+      await processPromise;
+      expect(resolved).toBe(true);
     });
   });
 });

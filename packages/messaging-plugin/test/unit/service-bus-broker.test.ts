@@ -742,6 +742,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
         processMessage: (
           msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
         ) => Promise<void>;
+        processError: (err: unknown) => void | Promise<void>;
       }>;
     } {
     type FakeMod =
@@ -754,6 +755,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
           processMessage: (
             msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
           ) => Promise<void>;
+          processError: (err: unknown) => void | Promise<void>;
         }>;
       };
     const mod = {} as FakeMod;
@@ -802,6 +804,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
               topic: _topicName,
               subscription: _subscriptionName,
               processMessage: options.processMessage,
+              processError: options.processError,
             });
             return { close: () => Promise.resolve() };
           },
@@ -859,6 +862,81 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     // The nack in the adapter closure is a no-op (no abandon), but the closure itself is exercised
     await Promise.resolve();
 
+    await broker.disconnect();
+  });
+
+  it('awaits broker nack settlement through the adapted SDK processMessage callback', async () => {
+    const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const transport = adaptServiceBusModule(sdk, {
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
+    });
+    const broker = new ServiceBusBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+
+    await broker.connect();
+    await broker.subscribe('fail-topic', () => {
+      throw new Error('boom');
+    });
+
+    const processMessage =
+      sdk.processMessageCbs.find((entry) => entry.subscription === 'messaging-consumers')!
+        .processMessage;
+    let releaseAbandon: (() => void) | null = null;
+    const processing = processMessage({
+      body: JSON.stringify({ fail: true }),
+      complete: () => Promise.reject(new Error('complete should not run')),
+      abandon: () =>
+        new Promise<void>((resolve) => {
+          releaseAbandon = resolve;
+        }),
+    });
+    let resolved = false;
+    processing.then(() => {
+      resolved = true;
+    });
+
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(releaseAbandon).not.toBeNull();
+    expect(resolved).toBe(false);
+
+    releaseAbandon!();
+    await processing;
+    expect(resolved).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('routes an adapted SDK processError callback to the broker logger', async () => {
+    const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+    const sdk = createFakeSdkModuleWithRouting();
+    const logged: string[] = [];
+    const transport = adaptServiceBusModule(sdk, {
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
+      logger: { error: (message) => logged.push(message) },
+    });
+    const broker = new ServiceBusBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, {
+      client: transport,
+      logger: { error: (message) => logged.push(message) },
+    });
+
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const processError =
+      sdk.processMessageCbs.find((entry) => entry.subscription === 'messaging-consumers')!
+        .processError;
+
+    await processError(new Error('receiver-link-failed'));
+
+    expect(logged).toEqual([
+      'Service Bus receiver error: Error: receiver-link-failed',
+    ]);
     await broker.disconnect();
   });
 

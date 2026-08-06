@@ -94,7 +94,9 @@ export interface IServiceBusTransport {
   open(
     topic: string,
     subscription: string,
-    onMessage: (msg: { payload: string; ack: () => void; nack: () => void }) => void,
+    onMessage: (
+      msg: { payload: string; ack: () => void; nack: () => void },
+    ) => void | Promise<void>,
   ): Promise<IServiceBusSubscription>;
   /** Create a subscription (for RPC inbox). */
   createSubscription(topic: string, subscription: string): Promise<void>;
@@ -148,7 +150,11 @@ export async function loadServiceBusModule(): Promise<ServiceBusSdkModule> {
  */
 export function adaptServiceBusModule(
   mod: ServiceBusSdkModule,
-  options: { connectionString: string; adminConnectionString: string },
+  options: {
+    connectionString: string;
+    adminConnectionString: string;
+    logger?: { error: (msg: string) => void } | undefined;
+  },
 ): IServiceBusTransport {
   const client = new mod.ServiceBusClient(options.connectionString);
   const admin = new mod.ServiceBusAdministrationClient(options.adminConnectionString);
@@ -168,7 +174,9 @@ export function adaptServiceBusModule(
     open: async (
       topic: string,
       subscription: string,
-      onMessage: (msg: { payload: string; ack: () => void; nack: () => void }) => void,
+      onMessage: (
+        msg: { payload: string; ack: () => void; nack: () => void },
+      ) => void | Promise<void>,
     ): Promise<IServiceBusSubscription> => {
       // createReceiver(topicName, subscriptionName) — two positional strings.
       const receiver = client.createReceiver(topic, subscription) as {
@@ -207,9 +215,7 @@ export function adaptServiceBusModule(
               await msg.abandon();
             }
           },
-          processError: () => {
-            // Errors handled by broker's logger
-          },
+          processError: (err) => options.logger?.error(`Service Bus receiver error: ${err}`),
         },
         { autoComplete: false },
       );
@@ -339,6 +345,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       this.#transport = adaptServiceBusModule(mod, {
         connectionString: this.#connectionString,
         adminConnectionString: this.#adminConnectionString,
+        logger: this.#logger,
       });
     }
 

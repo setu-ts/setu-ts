@@ -152,7 +152,7 @@ export function adaptPubSubModule(
         // including NOT_FOUND (gRPC code 5). Match on the documented error-code
         // discriminator rather than String(err) which is representation-dependent.
         const grpcCode = (err as { code?: number }).code;
-        if (grpcCode !== 6 && !String(err).includes('ALREADY_EXISTS')) {
+        if (grpcCode !== 6) {
           throw err;
         }
       }
