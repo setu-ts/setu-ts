@@ -34,9 +34,9 @@ const DEFAULT_VISIBILITY_TIMEOUT = 30;
  */
 export interface SqsSdkModule {
   SQSClient: new (config: {
-    region?: string;
+    region?: string | undefined;
     credentials?: unknown;
-    endpoint?: string;
+    endpoint?: string | undefined;
   }) => {
     send(command: unknown): Promise<unknown>;
     destroy(): Promise<void>;
@@ -114,7 +114,7 @@ export async function loadSqsModule(): Promise<SqsSdkModule> {
  */
 export function adaptSqsModule(
   mod: SqsSdkModule,
-  options: { region?: string; credentials?: unknown; endpoint?: string },
+  options: { region?: string | undefined; credentials?: unknown; endpoint?: string | undefined },
 ): ISqsTransport {
   const clientConfig: Record<string, unknown> = {};
   if (options.region !== undefined) clientConfig.region = options.region;
@@ -196,6 +196,8 @@ export function adaptSqsModule(
 interface ReceiptEntry {
   readonly receiptHandle: string;
   readonly claimExpiresAtMs: number;
+  /** Original message body (for DLQ forwarding). */
+  readonly body?: string;
 }
 
 /**
@@ -208,6 +210,9 @@ export class SqsQueue implements QueueAdapter {
   #queues: Record<string, string>;
   #deadLetterQueues: Record<string, string>;
   #visibilityTimeoutSeconds: number;
+  #region: string | undefined;
+  #credentials: unknown;
+  #endpoint: string | undefined;
   #injectedClient: ISqsTransport | undefined;
   #transport: ISqsTransport | null = null;
   #ready = false;
@@ -224,6 +229,9 @@ export class SqsQueue implements QueueAdapter {
     this.#queues = options.queues;
     this.#deadLetterQueues = options.deadLetterQueues ?? {};
     this.#visibilityTimeoutSeconds = options.visibilityTimeoutSeconds ?? DEFAULT_VISIBILITY_TIMEOUT;
+    this.#region = options.region;
+    this.#credentials = options.credentials;
+    this.#endpoint = options.endpoint;
     this.#injectedClient = options.client;
     this.#receipts = new Map();
     this.#recurring = new Map();
@@ -251,8 +259,10 @@ export class SqsQueue implements QueueAdapter {
     } else {
       const mod = await loadSqsModule();
       this.#transport = adaptSqsModule(mod, {
-        region: this.#injectedClient as undefined,
-      } as unknown as { region?: string; credentials?: unknown; endpoint?: string });
+        region: this.#region,
+        credentials: this.#credentials,
+        endpoint: this.#endpoint,
+      });
     }
 
     this.#ready = true;
@@ -325,16 +335,16 @@ export class SqsQueue implements QueueAdapter {
         continue;
       }
 
-      let data: T;
+      // Parse envelope — skip malformed messages.
+      let envelope: {
+        v: number;
+        id: string;
+        name: string;
+        data: T;
+        maxAttempts: number;
+      };
       try {
-        const envelope = JSON.parse(msg.body) as {
-          v: number;
-          id: string;
-          name: string;
-          data: T;
-          maxAttempts: number;
-        };
-        data = envelope.data;
+        envelope = JSON.parse(msg.body) as typeof envelope;
       } catch {
         // Malformed message — skip.
         continue;
@@ -343,18 +353,20 @@ export class SqsQueue implements QueueAdapter {
       // Attempts come from the platform's ApproximateReceiveCount.
       const attempts = msg.approximateReceiveCount ? Number(msg.approximateReceiveCount) : 1;
 
-      // Record the receipt handle, keyed by job id.
+      // Record the receipt handle, keyed by receipt handle.
+      const maxAttempts = envelope.maxAttempts ?? 3;
       this.#receipts.set(msg.receiptHandle, {
         receiptHandle: msg.receiptHandle,
         claimExpiresAtMs: nowMs + this.#visibilityTimeoutSeconds * 1000,
+        body: msg.body,
       });
 
       jobs.push({
         id: msg.receiptHandle,
         name,
-        data,
+        data: envelope.data,
         attempts,
-        maxAttempts: 3,
+        maxAttempts,
         availableAtMs: nowMs,
       });
     }
@@ -425,7 +437,7 @@ export class SqsQueue implements QueueAdapter {
     if (dlqUrl) {
       try {
         // Send to DLQ first, then delete from source (that order).
-        await this.#transport.send(dlqUrl, '');
+        await this.#transport.send(dlqUrl, entry.body ?? '');
         await this.#transport.delete(queueUrl, entry.receiptHandle);
       } catch (err) {
         // DLQ send failed — leave the source undeleted so it remains claimable.

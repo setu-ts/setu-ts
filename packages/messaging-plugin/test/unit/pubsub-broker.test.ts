@@ -715,10 +715,10 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
           },
         };
       }
-      subscription(_topicName: string, subName: string) {
+      subscription(subName: string) {
         let entry = mod.subscriptions.get(subName);
         if (!entry) {
-          entry = { topic: _topicName, name: subName, closed: false, deleted: false };
+          entry = { topic: '', name: subName, closed: false, deleted: false };
           mod.subscriptions.set(subName, entry);
         }
         return {
@@ -729,9 +729,11 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
             ) => void,
           ) {
             if (event === 'message') {
-              const td = mod.topics.get(_topicName);
-              if (td?.subscriptions.has(subName)) {
-                td.subscriptions.get(subName)!.onMessage = handler as never;
+              // Find the topic that has this subscription
+              for (const [, td] of mod.topics) {
+                if (td.subscriptions.has(subName)) {
+                  td.subscriptions.get(subName)!.onMessage = handler as never;
+                }
               }
             }
           },

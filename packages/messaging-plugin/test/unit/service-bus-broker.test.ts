@@ -535,8 +535,9 @@ describe('adaptServiceBusModule', () => {
   it('creates transport from SDK module', async () => {
     const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
 
-    let processMessageFn: (msg: { body: unknown; complete: () => Promise<void> }) => Promise<void> =
-      async () => {};
+    let processMessageFn: (
+      msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+    ) => Promise<void> = async () => {};
     let processErrorFn: () => void = () => {};
 
     const fakeClient = {
@@ -587,7 +588,11 @@ describe('adaptServiceBusModule', () => {
 
     // Trigger processMessage to cover that closure
     if (processMessageFn) {
-      await processMessageFn({ body: 'test-body', complete: async () => {} });
+      await processMessageFn({
+        body: 'test-body',
+        complete: async () => {},
+        abandon: async () => {},
+      });
     }
 
     // Trigger processError to cover that closure
@@ -735,7 +740,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
         topic: string;
         subscription: string;
         processMessage: (
-          msg: { body: unknown; complete: () => Promise<void> },
+          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
         ) => Promise<void>;
       }>;
     } {
@@ -747,7 +752,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
           topic: string;
           subscription: string;
           processMessage: (
-            msg: { body: unknown; complete: () => Promise<void> },
+            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
           ) => Promise<void>;
         }>;
       };
@@ -770,6 +775,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
                 void cb.processMessage({
                   body: messages.body,
                   complete: () => Promise.resolve(),
+                  abandon: () => Promise.resolve(),
                 });
               }
             }
@@ -847,6 +853,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     await cb({
       body: JSON.stringify({ fail: true }),
       complete: () => Promise.resolve(),
+      abandon: () => Promise.resolve(),
     });
 
     // The nack in the adapter closure is a no-op (no abandon), but the closure itself is exercised

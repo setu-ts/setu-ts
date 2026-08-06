@@ -47,7 +47,9 @@ export interface ServiceBusSdkModule {
     };
     createReceiver(queueName: string, options?: unknown): {
       subscribe(options: {
-        processMessage: (msg: { body: unknown; complete: () => Promise<void> }) => Promise<void>;
+        processMessage: (
+          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+        ) => Promise<void>;
         processError: (err: unknown) => void | Promise<void>;
       }): { close: () => Promise<void> };
       close(): Promise<void>;
@@ -58,7 +60,9 @@ export interface ServiceBusSdkModule {
       options?: unknown,
     ): {
       subscribe(options: {
-        processMessage: (msg: { body: unknown; complete: () => Promise<void> }) => Promise<void>;
+        processMessage: (
+          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+        ) => Promise<void>;
         processError: (err: unknown) => void | Promise<void>;
       }): { close: () => Promise<void> };
       close(): Promise<void>;
@@ -163,7 +167,9 @@ export function adaptServiceBusModule(
       // createReceiver(topicName, subscriptionName) — two positional strings.
       const receiver = client.createReceiver(topic, subscription) as {
         subscribe(options: {
-          processMessage: (msg: { body: unknown; complete: () => Promise<void> }) => Promise<void>;
+          processMessage: (
+            msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+          ) => Promise<void>;
           processError: (err: unknown) => void | Promise<void>;
         }): { close: () => Promise<void> };
         close(): Promise<void>;
@@ -172,16 +178,22 @@ export function adaptServiceBusModule(
       const subHandle = receiver.subscribe({
         processMessage: async (msg) => {
           const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
-          onMessage({
-            payload: body,
-            ack: async () => await msg.complete(),
-            nack: () => {
-              // Abandon the message so it becomes available again.
-              // No explicit abandon in our simplified port; complete is used.
-            },
+          await new Promise<void>((resolve) => {
+            onMessage({
+              payload: body,
+              ack: async () => {
+                await msg.complete();
+                resolve();
+              },
+              nack: async () => {
+                await msg.abandon();
+                resolve();
+              },
+            });
+            // If the handler never calls ack or nack, resolve after a microtask
+            // so the promise doesn't hang indefinitely.
+            Promise.resolve().then(resolve);
           });
-          // Await required by SDK type contract — processMessage returns Promise<void>.
-          await Promise.resolve();
         },
         processError: () => {
           // Errors handled by broker's logger

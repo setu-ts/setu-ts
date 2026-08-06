@@ -46,7 +46,7 @@ export interface PubSubSdkModule {
       publishMessage(message: { data: Uint8Array }): Promise<string>;
       createSubscription(subscriptionName: string): Promise<unknown[]>;
     };
-    subscription(topicName: string, subscriptionName: string): {
+    subscription(subscriptionName: string): {
       on(
         event: 'message',
         handler: (msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string }) => void,
@@ -114,7 +114,7 @@ export interface PubSubOptions {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadPubSubModule(): Promise<PubSubSdkModule> {
-  const mod = await import('npm:@google-cloud/pubsub@5.x');
+  const mod = await import('npm:@google-cloud/pubsub@^6');
   return mod as unknown as PubSubSdkModule;
 }
 
@@ -127,7 +127,11 @@ export async function loadPubSubModule(): Promise<PubSubSdkModule> {
  */
 export function adaptPubSubModule(
   mod: PubSubSdkModule,
-  options: { projectId: string; credentials?: unknown },
+  options: {
+    projectId: string;
+    credentials?: unknown;
+    logger?: { error: (msg: string) => void } | undefined;
+  },
 ): IPubSubTransport {
   const pubsub = new mod.PubSub({ projectId: options.projectId, credentials: options.credentials });
 
@@ -143,11 +147,21 @@ export function adaptPubSubModule(
       // Create subscription on the topic if absent.
       try {
         await pubsub.topic(topic).createSubscription(subscription);
-      } catch {
-        // Subscription already exists — ignore.
+      } catch (err) {
+        // Narrow catch to ALREADY_EXISTS only; rethrow everything else.
+        const message = String(err);
+        if (!message.includes('ALREADY_EXISTS') && !message.includes('Already exists')) {
+          throw err;
+        }
       }
 
-      const sub = pubsub.subscription(topic, subscription);
+      const sub = pubsub.subscription(subscription);
+
+      sub.on('error', (err) => {
+        if (options.logger) {
+          options.logger.error(`Pub/Sub subscription error: ${err}`);
+        }
+      });
 
       sub.on('message', (raw) => {
         const text = new TextDecoder().decode(raw.data);
@@ -168,8 +182,7 @@ export function adaptPubSubModule(
       await pubsub.topic(topic).createSubscription(subscription);
     },
     deleteSubscription: async (subscription: string): Promise<void> => {
-      // Delete uses the subscription name; the client resolves the topic.
-      const sub = pubsub.subscription('', subscription);
+      const sub = pubsub.subscription(subscription);
       await sub.delete();
     },
     close: async () => {
@@ -267,6 +280,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       this.#transport = adaptPubSubModule(mod, {
         projectId: this.#projectId,
         credentials: this.#credentials,
+        logger: this.#logger,
       });
     }
 

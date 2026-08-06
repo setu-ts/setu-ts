@@ -13,9 +13,9 @@
  */
 export interface SnsSdkModule {
   SNSClient: new (config: {
-    region?: string;
+    region?: string | undefined;
     credentials?: unknown;
-    endpoint?: string;
+    endpoint?: string | undefined;
   }) => {
     send(command: unknown): Promise<unknown>;
     destroy(): Promise<void>;
@@ -66,7 +66,7 @@ export async function loadSnsModule(): Promise<SnsSdkModule> {
  */
 export function adaptSnsModule(
   mod: SnsSdkModule,
-  options: { region?: string; credentials?: unknown; endpoint?: string },
+  options: { region?: string | undefined; credentials?: unknown; endpoint?: string | undefined },
 ): ISnsTransport {
   const clientConfig: Record<string, unknown> = {};
   if (options.region !== undefined) clientConfig.region = options.region;
@@ -100,12 +100,18 @@ export function adaptSnsModule(
  */
 export class SnsPublisher {
   #topicArn: string;
+  #region: string | undefined;
+  #credentials: unknown;
+  #endpoint: string | undefined;
   #injectedClient: ISnsTransport | undefined;
   #transport: ISnsTransport | null = null;
   #ready = false;
 
   constructor(options: SnsPublisherOptions) {
     this.#topicArn = options.topicArn;
+    this.#region = options.region;
+    this.#credentials = options.credentials;
+    this.#endpoint = options.endpoint;
     this.#injectedClient = options.client;
   }
 
@@ -116,7 +122,11 @@ export class SnsPublisher {
       this.#transport = this.#injectedClient;
     } else {
       const mod = await loadSnsModule();
-      this.#transport = adaptSnsModule(mod, {});
+      this.#transport = adaptSnsModule(mod, {
+        region: this.#region,
+        credentials: this.#credentials,
+        endpoint: this.#endpoint,
+      });
     }
 
     this.#ready = true;

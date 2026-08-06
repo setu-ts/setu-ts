@@ -77,6 +77,7 @@ export type {
   MessagingPluginOptions,
   NatsMessagingOptions,
   NatsOptions,
+  PubSubMessagingOptions,
   RabbitMqMessagingOptions,
   RabbitMqOptions,
   RedisStreamsMessagingOptions,
@@ -85,10 +86,15 @@ export type {
 } from './interfaces/index.ts';
 
 // Port types
-export type { IPubSubSubscription, IPubSubTransport } from './brokers/pubsub-broker.ts';
+export type {
+  IPubSubSubscription,
+  IPubSubTransport,
+  PubSubOptions,
+} from './brokers/pubsub-broker.ts';
 export type {
   IServiceBusSubscription,
   IServiceBusTransport,
+  ServiceBusOptions,
 } from './brokers/service-bus-broker.ts';
 
 // Re-export common messaging types (owned by @hono-enterprise/common)

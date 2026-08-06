@@ -64,10 +64,10 @@ describe('adaptPubSubModule', () => {
           },
         };
       }
-      subscription(_topicName: string, subName: string) {
+      subscription(subName: string) {
         let entry = mod.subscriptions.get(subName);
         if (!entry) {
-          entry = { topic: _topicName, name: subName, closed: false, deleted: false };
+          entry = { topic: '', name: subName, closed: false, deleted: false };
           mod.subscriptions.set(subName, entry);
         }
         return {
@@ -78,9 +78,11 @@ describe('adaptPubSubModule', () => {
             ) => void,
           ) {
             if (event === 'message') {
-              const topicData = mod.topics.get(_topicName);
-              if (topicData?.subscriptions.has(subName)) {
-                topicData.subscriptions.get(subName)!.onMessage = handler as never;
+              // Find the topic that has this subscription
+              for (const [, topicData] of mod.topics) {
+                if (topicData.subscriptions.has(subName)) {
+                  topicData.subscriptions.get(subName)!.onMessage = handler as never;
+                }
               }
             }
           },
