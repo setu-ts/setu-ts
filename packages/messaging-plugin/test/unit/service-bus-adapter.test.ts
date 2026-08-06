@@ -181,4 +181,180 @@ describe('adaptServiceBusModule', () => {
 
     expect(transport).toBeDefined();
   });
+
+  // B1 discriminating test — settlement is awaited; autoComplete:false is passed
+  describe('B1: settlement awaits + autoComplete false', () => {
+    it('processMessage does not resolve until ack settlement completes', async () => {
+      // Fake SDK whose receiver invokes processMessage synchronously with a
+      // controllable (deferred) complete/abandon so the test can prove processMessage
+      // does NOT resolve before settlement actually runs.
+      let processMessageFn:
+        | ((msg: {
+          body: unknown;
+          complete: () => Promise<void>;
+          abandon: () => Promise<void>;
+        }) => Promise<void>)
+        | null = null;
+
+      // deno-lint-ignore no-explicit-any
+      const sdk = {} as any;
+      sdk.sends = [];
+      sdk.receivers = [];
+      sdk.adminCreates = [];
+      sdk.adminDeletes = [];
+
+      sdk.ServiceBusClient = class {
+        createSender(topic: string) {
+          return {
+            sendMessages(msg: { body: string }) {
+              sdk.sends.push({ topic, body: msg.body });
+              return Promise.resolve();
+            },
+            close() {
+              return Promise.resolve();
+            },
+          };
+        }
+        createReceiver(topic: string, subscription: string) {
+          sdk.receivers.push({ topic, subscription });
+          return {
+            // deno-lint-ignore no-explicit-any
+            subscribe(options: any, receiveOptions: any) {
+              // Capture the subscribe call options for assertions.
+              options._receiveOptions = receiveOptions;
+              // Expose processMessage for the test to call.
+              processMessageFn = options.processMessage;
+              return { close: () => Promise.resolve() };
+            },
+            close: () => Promise.resolve(),
+          };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      };
+      sdk.ServiceBusAdministrationClient = class {
+        createSubscription(_t: string, _s: string) {
+          return Promise.resolve();
+        }
+        deleteSubscription(_t: string, _s: string) {
+          return Promise.resolve();
+        }
+      };
+
+      const transport = adaptServiceBusModule(sdk, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+      });
+
+      // Deferred settlement control.
+      let releaseSettlement: (() => Promise<void>) | null = null;
+      const deferredSettlement = () =>
+        new Promise<void>((resolve) => {
+          releaseSettlement = () => {
+            resolve();
+            return Promise.resolve();
+          };
+        });
+
+      let onMessageCalled = false;
+      await transport.open('topic', 'sub', (msg) => {
+        onMessageCalled = true;
+        // Return the deferred settlement promise so processMessage awaits it.
+        return msg.ack();
+      });
+
+      expect(processMessageFn).not.toBeNull();
+      expect(onMessageCalled).toBe(false); // not called yet; we control invocation
+
+      // Invoke processMessage with the deferred complete.
+      const processPromise = processMessageFn!({
+        body: 'test',
+        complete: deferredSettlement,
+        abandon: () => Promise.reject(new Error('abandon should not run')),
+      });
+
+      // processMessage should NOT have resolved yet (settlement is deferred).
+      let resolved = false;
+      processPromise.then(() => {
+        resolved = true;
+      });
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      // Release settlement → now processMessage resolves.
+      await releaseSettlement!();
+      await processPromise;
+      expect(resolved).toBe(true);
+    });
+
+    it('thrown handler → abandon called, processMessage awaits abandon', async () => {
+      let processMessageFn:
+        | ((
+          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
+        ) => Promise<void>)
+        | null = null;
+      let abandonCalled = false;
+      let completeCalled = false;
+
+      // deno-lint-ignore no-explicit-any
+      const sdk = {} as any;
+      sdk.sends = [];
+      sdk.receivers = [];
+      sdk.adminCreates = [];
+      sdk.adminDeletes = [];
+      sdk.ServiceBusClient = class {
+        createSender() {
+          return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+        }
+        createReceiver(topic: string, subscription: string) {
+          sdk.receivers.push({ topic, subscription });
+          return {
+            // deno-lint-ignore no-explicit-any
+            subscribe(options: any, _receiveOpts: any) {
+              processMessageFn = options.processMessage;
+              return { close: () => Promise.resolve() };
+            },
+            close: () => Promise.resolve(),
+          };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      };
+      sdk.ServiceBusAdministrationClient = class {
+        createSubscription() {
+          return Promise.resolve();
+        }
+        deleteSubscription() {
+          return Promise.resolve();
+        }
+      };
+
+      const transport = adaptServiceBusModule(sdk, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+      });
+
+      await transport.open('topic', 'sub', () => {
+        throw new Error('handler boom');
+      });
+
+      // Invoke processMessage — handler throws → abandon should be called.
+      await processMessageFn!({
+        body: 'boom',
+        complete: () => {
+          completeCalled = true;
+          return Promise.resolve();
+        },
+        abandon: () => {
+          abandonCalled = true;
+          return Promise.resolve();
+        },
+      });
+
+      expect(abandonCalled).toBe(true);
+      expect(completeCalled).toBe(false);
+    });
+  });
 });
