@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows
   kernel's service registry into a React Router loader, rather than that a server started. It then
   signs in through a `<Form>`, so the session and its synchronizer CSRF token round-trip too.
 
+  Its routes are `/` (a landing page that reports session state), `/products` and `/login`.
+
   The example also makes the framework's distinguishing claim executable: `test/removal.test.ts`
   asserts that none of `lib/{session,csrf,sse,kv,service-logger}.server.ts` exists, and that
   `app/config/services.server.ts` holds no module-level cache — because the kernel's service

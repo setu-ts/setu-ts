@@ -1409,7 +1409,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   holes in the removal test itself: it matched only a bare `const …`, so
   `export const clientCache = new Map()` passed unnoticed, and it proved a context key was
   _mentioned_ rather than _read_ (the import statement satisfied it). Both now fail without their
-  fix. The example is composed through `createFullStackAppFromConfig`, whose final statement is
+  fix. **Then the maintainer opened the app and found what none of it caught: `/` was a blank
+  page.** `app/routes.ts` wraps two `flatRoutes` groups in `layout()` calls and neither group had an
+  `_index` file, so the root path matched a layout with no child — `<Outlet />` rendered nothing and
+  the server answered **200 with an empty `<body>`**. Not a 404, not an error; a blank document,
+  black in dark mode. Every gate passed because the smoke and the 11-check browser run both
+  requested `/products` and `/login` EXPLICITLY and nothing ever requested `/`, and because a status
+  assertion would have passed anyway — the page was blank, not failing. Fixed with
+  `app/routes/_app/_index.tsx` (which also reads the session, so the landing page demonstrates a
+  capability rather than being decoration) and a smoke assertion requiring visible CONTENT at `/` —
+  an `<h1>` plus a link — verified to fail when the route is deleted. The lesson is the milestone's
+  own: a gate that only requests the paths its author already believed worked is not coverage. The
+  example is composed through `createFullStackAppFromConfig`, whose final statement is
   `return createFullStackApp(...)`, so one application exercises both starter entry points; the
   `reactRouter`, `session` and `database` arms are all GATED, so a default-options full-stack app
   registers none of them and an example omitting them would prove nothing. The smoke's bar is the

@@ -55,7 +55,9 @@ try {
   // 2 — read it back through server-side rendering.
   const rendered = await app.fetch(new Request(`${ORIGIN}/products`));
   if (rendered.status !== 200) {
-    fail(`Expected the SSR products route to answer 200, received ${rendered.status}.`);
+    fail(
+      `Expected the SSR products route to answer 200, received ${rendered.status}.`,
+    );
   }
   const html = await rendered.text();
   // Every seeded row, name and formatted price. Asserting the whole set rather
@@ -63,7 +65,10 @@ try {
   // markers (`Products (<!-- -->2<!-- -->)`), so a rendered number is not a
   // literal substring — and the set is the stronger claim anyway.
   for (const seededProduct of seeded) {
-    if (!html.includes(seededProduct.name) || !html.includes(formatPrice(seededProduct))) {
+    if (
+      !html.includes(seededProduct.name) ||
+      !html.includes(formatPrice(seededProduct))
+    ) {
       fail(
         `The SSR page did not render the seeded product "${seededProduct.name}" at ` +
           `${formatPrice(seededProduct)} — the load-context bridge is not delivering the ` +
@@ -75,10 +80,32 @@ try {
     fail('The SSR page did not render the products view.');
   }
 
+  // 2b — the ROOT path. Requested explicitly because it is the one URL a human
+  // opens first and the only one no other check covered: `/` matched a
+  // `layout()` with no child, so `<Outlet />` rendered nothing and the server
+  // answered 200 with an EMPTY document. A status assertion alone would have
+  // passed — the page was blank, not broken — so this asserts visible content.
+  const landing = await app.fetch(new Request(`${ORIGIN}/`));
+  if (landing.status !== 200) {
+    fail(`Expected the index route to answer 200, received ${landing.status}.`);
+  }
+  const landingHtml = await landing.text();
+  if (!landingHtml.includes('<h1>')) {
+    fail(
+      'The index route rendered no heading. A 200 with an empty <body> is what a missing index ' +
+        'route looks like: the layout matches, its Outlet has no child, and the page is blank.',
+    );
+  }
+  if (!landingHtml.includes('href="/products"')) {
+    fail('The index route did not link to /products.');
+  }
+
   // 3 — the session and its form CSRF token, through the same SSR path.
   const loginPage = await app.fetch(new Request(`${ORIGIN}/login`));
   if (loginPage.status !== 200) {
-    fail(`Expected the login route to answer 200, received ${loginPage.status}.`);
+    fail(
+      `Expected the login route to answer 200, received ${loginPage.status}.`,
+    );
   }
   const csrfToken = readCsrfToken(await loginPage.text());
   const cookies = readCookies(loginPage);
@@ -86,8 +113,15 @@ try {
   const submitted = await app.fetch(
     new Request(`${ORIGIN}/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: cookies },
-      body: new URLSearchParams({ _csrf: csrfToken, email: 'reader@example.test', password: 'x' }),
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: cookies,
+      },
+      body: new URLSearchParams({
+        _csrf: csrfToken,
+        email: 'reader@example.test',
+        password: 'x',
+      }),
     }),
   );
   if (submitted.status !== 302) {
@@ -97,7 +131,9 @@ try {
     );
   }
   if (submitted.headers.get('location') !== '/products') {
-    fail(`Expected a redirect to /products, received ${submitted.headers.get('location')}.`);
+    fail(
+      `Expected a redirect to /products, received ${submitted.headers.get('location')}.`,
+    );
   }
 } finally {
   await app.stop();

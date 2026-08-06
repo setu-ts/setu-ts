@@ -10,6 +10,7 @@ export interface NavItem {
 
 /** The signed-in application navigation. */
 export const APP_NAV: readonly NavItem[] = [
+  { to: '/', label: 'Home' },
   { to: '/products', label: 'Products' },
 ];
 
