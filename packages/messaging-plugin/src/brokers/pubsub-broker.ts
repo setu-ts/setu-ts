@@ -365,18 +365,26 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
 
     const sub = await this.#transport.open(topic, queue, (msg) => {
       (async () => {
+        // B2: Separate handler invocation from settlement so a settlement rejection
+        // is not confused with a handler failure and does not trigger double-settle.
+        let handlerError: Error | null = null;
         try {
           const deserialized = this.#serializer.deserialize<T>(msg.payload);
           const metadata: MessageMetadata = {
             topic,
           };
           await handler(deserialized, metadata);
-          msg.ack();
         } catch (err) {
-          msg.nack();
+          handlerError = err as Error;
+        }
+
+        if (handlerError !== null) {
           if (this.#logger) {
-            this.#logger.error(`Pub/Sub handler error: ${err}`);
+            this.#logger.error(`Pub/Sub handler error: ${handlerError}`);
           }
+          msg.nack();
+        } else {
+          msg.ack();
         }
       })();
     });

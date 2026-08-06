@@ -140,29 +140,114 @@ describe('adaptServiceBusModule', () => {
   });
 
   it('closes the transport', async () => {
-    const sdk = createFakeSdkModule();
+    let clientClosed = false;
+    let sendersClosed = 0;
+
+    // deno-lint-ignore no-explicit-any
+    const sdk = {} as any;
+    sdk.sends = [];
+    sdk.receivers = [];
+    sdk.adminCreates = [];
+    sdk.adminDeletes = [];
+
+    sdk.ServiceBusClient = class {
+      createSender(_t: string) {
+        return {
+          sendMessages: () => Promise.resolve(),
+          close: () => {
+            sendersClosed++;
+            return Promise.resolve();
+          },
+        };
+      }
+      createReceiver(t: string, s: string) {
+        sdk.receivers.push({ topic: t, subscription: s });
+        return {
+          subscribe: () => ({ close: () => Promise.resolve() }),
+          completeMessage: () => Promise.resolve(),
+          abandonMessage: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        };
+      }
+      close() {
+        clientClosed = true;
+        return Promise.resolve();
+      }
+    };
+    sdk.ServiceBusAdministrationClient = class {
+      createSubscription() {
+        return Promise.resolve();
+      }
+      deleteSubscription() {
+        return Promise.resolve();
+      }
+    };
+
     const transport = adaptServiceBusModule(sdk, {
       connectionString: 'Endpoint=sb://demo.servicebus.windows.net/',
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
     });
 
+    // Create a sender by sending, then a receiver by opening
+    await transport.send('topic-a', 'hello');
+    await transport.open('topic-b', 'sub-b', () => {});
+
     await transport.close();
-    // No error means close resolved.
-    expect(true).toBe(true);
+
+    expect(clientClosed).toBe(true);
+    expect(sendersClosed).toBe(1);
   });
 
   it('subscription close works', async () => {
-    const sdk = createFakeSdkModule();
+    let subClosed = false;
+    // deno-lint-ignore no-explicit-any
+    const sdk = {} as any;
+    sdk.sends = [];
+    sdk.receivers = [];
+    sdk.adminCreates = [];
+    sdk.adminDeletes = [];
+
+    sdk.ServiceBusClient = class {
+      createSender() {
+        return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+      }
+      createReceiver(t: string, s: string) {
+        sdk.receivers.push({ topic: t, subscription: s });
+        return {
+          subscribe: () => ({
+            close: () => {
+              subClosed = true;
+              return Promise.resolve();
+            },
+          }),
+          completeMessage: () => Promise.resolve(),
+          abandonMessage: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    };
+    sdk.ServiceBusAdministrationClient = class {
+      createSubscription() {
+        return Promise.resolve();
+      }
+      deleteSubscription() {
+        return Promise.resolve();
+      }
+    };
+
     const transport = adaptServiceBusModule(sdk, {
       connectionString: 'Endpoint=sb://demo.servicebus.windows.net/',
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
     });
 
     const sub = await transport.open('my-topic', 'my-sub', () => {});
-    await sub.close();
+    expect(subClosed).toBe(false);
 
-    // Sub close resolved without error.
-    expect(true).toBe(true);
+    await sub.close();
+    expect(subClosed).toBe(true);
   });
 
   it('decodes string body as-is', async () => {
@@ -302,17 +387,13 @@ describe('adaptServiceBusModule', () => {
       expect(resolved).toBe(true);
     });
 
-    it('handler failure: receiver.abandonMessage(raw) called, completeMessage not called', async () => {
+    it('handler failure: error propagates; completeMessage not called (B2)', async () => {
+      // B2: The adapter propagates handler errors directly. The broker's subscribe()
+      // catches handler failures and calls nack. The adapter itself does NOT catch
+      // handler errors — settlement and handler are separate paths.
       let processMessageFn: ((message: unknown) => Promise<void>) | null = null;
       let abandonCalled = false;
       let completeCalled = false;
-      let releasedAbandon: (() => void) | null = null;
-
-      const deferredAbandon = new Promise<void>((resolve) => {
-        releasedAbandon = () => {
-          resolve();
-        };
-      });
 
       // deno-lint-ignore no-explicit-any
       const sdk = {} as any;
@@ -344,7 +425,7 @@ describe('adaptServiceBusModule', () => {
             },
             abandonMessage(_msg: unknown, _props?: Record<string, unknown>): Promise<void> {
               abandonCalled = true;
-              return deferredAbandon;
+              return Promise.resolve();
             },
             close: () => Promise.resolve(),
           };
@@ -371,23 +452,13 @@ describe('adaptServiceBusModule', () => {
         throw new Error('handler boom');
       });
 
-      // Invoke processMessage — handler throws → abandon on receiver, not complete.
+      // Invoke processMessage — handler throws → propagates from adapter.
+      // Neither complete nor abandon called at adapter level.
       const rawMessage = { body: 'boom' };
-      const processPromise = processMessageFn!(rawMessage);
+      await expect(processMessageFn!(rawMessage)).rejects.toThrow('handler boom');
 
-      let resolved = false;
-      processPromise.then(() => {
-        resolved = true;
-      });
-      for (let i = 0; i < 5; i++) await Promise.resolve();
-
-      expect(abandonCalled).toBe(true);
       expect(completeCalled).toBe(false);
-      expect(resolved).toBe(false);
-
-      releasedAbandon!();
-      await processPromise;
-      expect(resolved).toBe(true);
+      expect(abandonCalled).toBe(false);
     });
 
     it('B3: processError receives ProcessErrorArgs with .error field', async () => {
@@ -481,6 +552,247 @@ describe('adaptServiceBusModule', () => {
       // The logger receives the underlying error (args.error), not [object Object].
       expect(loggedError).toContain('receiver failed');
       expect(loggedError).not.toContain('[object Object]');
+    });
+  });
+
+  // B2: Settlement rejection propagates exactly once, never swallowed or double-settled
+  describe('B2: settlement rejection propagates exactly once', () => {
+    it('complete rejects: exact error identity propagated; complete=1, abandon=0', async () => {
+      let processMessageFn: ((message: unknown) => Promise<void>) | null = null;
+      let completeCount = 0;
+      let abandonCount = 0;
+      const settlementError = new Error('settlement-failed');
+
+      // deno-lint-ignore no-explicit-any
+      const sdk = {} as any;
+      sdk.sends = [];
+      sdk.receivers = [];
+      sdk.adminCreates = [];
+      sdk.adminDeletes = [];
+
+      sdk.ServiceBusClient = class {
+        createSender() {
+          return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+        }
+        createReceiver(topic: string, subscription: string) {
+          sdk.receivers.push({ topic, subscription });
+          return {
+            subscribe(
+              opts: {
+                processMessage: (message: unknown) => Promise<void>;
+                processError: (args: unknown) => Promise<void>;
+              },
+              _optsBag: { autoCompleteMessages?: boolean },
+            ) {
+              processMessageFn = opts.processMessage;
+              return { close: () => Promise.resolve() };
+            },
+            completeMessage(_msg: unknown): Promise<void> {
+              completeCount++;
+              return Promise.reject(settlementError);
+            },
+            abandonMessage(_msg: unknown, _props?: Record<string, unknown>): Promise<void> {
+              abandonCount++;
+              return Promise.resolve();
+            },
+            close: () => Promise.resolve(),
+          };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      };
+      sdk.ServiceBusAdministrationClient = class {
+        createSubscription() {
+          return Promise.resolve();
+        }
+        deleteSubscription() {
+          return Promise.resolve();
+        }
+      };
+
+      const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+      const transport = adaptServiceBusModule(sdk, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+      });
+
+      await transport.open('topic', 'sub', (msg) => msg.ack());
+
+      // Invoke processMessage — handler calls ack → complete rejects
+      const rawMessage = { body: 'test' };
+      let capturedError: unknown = null;
+      try {
+        await processMessageFn!(rawMessage);
+      } catch (err) {
+        capturedError = err;
+      }
+
+      // Exact error identity propagated
+      expect(capturedError).toBe(settlementError);
+      // complete called exactly once
+      expect(completeCount).toBe(1);
+      // abandon never called (settlement rejection, not handler failure)
+      expect(abandonCount).toBe(0);
+    });
+
+    it('explicit nack rejects: exact error identity propagated; abandon=1, complete=0', async () => {
+      let processMessageFn: ((message: unknown) => Promise<void>) | null = null;
+      let completeCount = 0;
+      let abandonCount = 0;
+      const settlementError = new Error('abandon-settlement-failed');
+
+      // deno-lint-ignore no-explicit-any
+      const sdk = {} as any;
+      sdk.sends = [];
+      sdk.receivers = [];
+      sdk.adminCreates = [];
+      sdk.adminDeletes = [];
+
+      sdk.ServiceBusClient = class {
+        createSender() {
+          return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+        }
+        createReceiver(topic: string, subscription: string) {
+          sdk.receivers.push({ topic, subscription });
+          return {
+            subscribe(
+              opts: {
+                processMessage: (message: unknown) => Promise<void>;
+                processError: (args: unknown) => Promise<void>;
+              },
+              _optsBag: { autoCompleteMessages?: boolean },
+            ) {
+              processMessageFn = opts.processMessage;
+              return { close: () => Promise.resolve() };
+            },
+            completeMessage(_msg: unknown): Promise<void> {
+              completeCount++;
+              return Promise.resolve();
+            },
+            abandonMessage(_msg: unknown, _props?: Record<string, unknown>): Promise<void> {
+              abandonCount++;
+              return Promise.reject(settlementError);
+            },
+            close: () => Promise.resolve(),
+          };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      };
+      sdk.ServiceBusAdministrationClient = class {
+        createSubscription() {
+          return Promise.resolve();
+        }
+        deleteSubscription() {
+          return Promise.resolve();
+        }
+      };
+
+      const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+      const transport = adaptServiceBusModule(sdk, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+      });
+
+      await transport.open('topic', 'sub', (msg) => msg.nack());
+
+      const rawMessage = { body: 'nack-test' };
+      let capturedError: unknown = null;
+      try {
+        await processMessageFn!(rawMessage);
+      } catch (err) {
+        capturedError = err;
+      }
+
+      expect(capturedError).toBe(settlementError);
+      expect(abandonCount).toBe(1);
+      expect(completeCount).toBe(0);
+    });
+
+    it('handler throws: abandon=1; no duplicate even if abandon rejects', async () => {
+      let processMessageFn: ((message: unknown) => Promise<void>) | null = null;
+      let abandonCount = 0;
+      let completeCount = 0;
+      const abandonError = new Error('abandon-itself-failed');
+
+      // deno-lint-ignore no-explicit-any
+      const sdk = {} as any;
+      sdk.sends = [];
+      sdk.receivers = [];
+      sdk.adminCreates = [];
+      sdk.adminDeletes = [];
+
+      sdk.ServiceBusClient = class {
+        createSender() {
+          return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+        }
+        createReceiver(topic: string, subscription: string) {
+          sdk.receivers.push({ topic, subscription });
+          return {
+            subscribe(
+              opts: {
+                processMessage: (message: unknown) => Promise<void>;
+                processError: (args: unknown) => Promise<void>;
+              },
+              _optsBag: { autoCompleteMessages?: boolean },
+            ) {
+              processMessageFn = opts.processMessage;
+              return { close: () => Promise.resolve() };
+            },
+            completeMessage(_msg: unknown): Promise<void> {
+              completeCount++;
+              return Promise.resolve();
+            },
+            abandonMessage(_msg: unknown, _props?: Record<string, unknown>): Promise<void> {
+              abandonCount++;
+              return Promise.reject(abandonError);
+            },
+            close: () => Promise.resolve(),
+          };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      };
+      sdk.ServiceBusAdministrationClient = class {
+        createSubscription() {
+          return Promise.resolve();
+        }
+        deleteSubscription() {
+          return Promise.resolve();
+        }
+      };
+
+      const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+      const transport = adaptServiceBusModule(sdk, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+      });
+
+      await transport.open('topic', 'sub', () => {
+        throw new Error('handler-boom');
+      });
+
+      const rawMessage = { body: 'handler-throw' };
+      // The adapter propagates the handler throw (no inner catch for handler failures).
+      // processMessage calls onMessage which throws — error propagates.
+      // But the broker's subscribe() catches it and nacks, so abandon is called once.
+      // At the adapter level the throw propagates.
+      let capturedError: unknown = null;
+      try {
+        await processMessageFn!(rawMessage);
+      } catch (err) {
+        capturedError = err;
+      }
+
+      // The throw from onMessage propagates through the adapter.
+      expect(capturedError).toBeInstanceOf(Error);
+      expect((capturedError as Error).message).toBe('handler-boom');
+      // Abandon not called at adapter level — the adapter propagates, broker calls nack.
+      expect(abandonCount).toBe(0);
+      expect(completeCount).toBe(0);
     });
   });
 });

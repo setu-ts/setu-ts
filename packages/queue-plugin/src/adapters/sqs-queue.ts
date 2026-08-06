@@ -468,14 +468,28 @@ export class SqsQueue implements QueueAdapter {
     const dlqUrl = this.#deadLetterQueues[name];
 
     if (dlqUrl) {
+      let dlqSendFailed = false;
       try {
-        // Send to DLQ first, then delete from source (that order).
+        // Send to DLQ first with original body, then delete from source.
         await this.#transport.send(dlqUrl, entry.body ?? '');
-        await this.#transport.delete(queueUrl, entry.receiptHandle);
       } catch (err) {
-        // DLQ send failed — leave the source undeleted so it remains claimable.
+        // DLQ send failed — source remains undeleted so it can be re-claimed.
+        dlqSendFailed = true;
         if (this.#logger) {
-          this.#logger.error(`SQS deadLetter: DLQ send failed: ${err}`);
+          this.#logger.error(`SQS deadLetter: DLQ send to "${dlqUrl}" failed: ${err}`);
+        }
+      }
+
+      if (!dlqSendFailed) {
+        try {
+          await this.#transport.delete(queueUrl, entry.receiptHandle);
+        } catch (err) {
+          // Source delete failed after successful DLQ send — risk of duplicate.
+          if (this.#logger) {
+            this.#logger.error(
+              `SQS deadLetter: source delete for "${name}" failed (possible duplicate on re-claim): ${err}`,
+            );
+          }
         }
       }
     } else {

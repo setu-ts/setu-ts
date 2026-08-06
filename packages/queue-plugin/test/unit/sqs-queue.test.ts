@@ -733,9 +733,49 @@ describe('SqsQueue', () => {
       const jobs = await queue.reserve('jobs', 1, 1000000);
       await queue.deadLetter('jobs', jobs[0].id, 1000000);
 
-      expect(logged).toContain('DLQ send failed');
+      expect(logged).toContain('DLQ send to');
       // Source message should NOT be deleted when DLQ send fails
       expect(deletedReceipt).toBe('');
+    });
+
+    it('source delete failure logs duplicate-risk message (DLQ send succeeds)', async () => {
+      let logged = '';
+      let deletedReceipt = '';
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(), // DLQ send succeeds
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '3',
+          }]),
+        delete: (_q, receipt) => {
+          deletedReceipt = receipt;
+          return Promise.reject(new Error('source delete network error'));
+        },
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
+        client: transport,
+      }, {
+        error: (msg: string) => {
+          logged = msg;
+        },
+      });
+      await queue.connect();
+
+      const jobs = await queue.reserve('jobs', 1, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+
+      // Source-delete failure logs duplicate-risk message
+      expect(logged).toContain('possible duplicate on re-claim');
+      // DLQ send DID succeed (no DLQ send failure log)
+      expect(logged).not.toContain('DLQ send');
+      // Delete was attempted
+      expect(deletedReceipt).toBe('handle-j1');
     });
   });
 

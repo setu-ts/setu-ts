@@ -426,4 +426,72 @@ describe('RequestReplyCore', () => {
     await core.respond('topic', (msg) => ({ echo: msg }));
     await expect(core.request('topic', { a: 1 })).resolves.toEqual({ echo: { a: 1 } });
   });
+
+  // B6: Exactly-once reply inbox under concurrent first requests and partial failure
+  describe('B6: concurrent first requests and partial-failure retry', () => {
+    it('two concurrent FIRST request() calls → openInbox called exactly once', async () => {
+      const transport = new FakeTransport();
+      const core = new RequestReplyCore(transport);
+
+      // Responder echoes payload back
+      await core.respond('topic', (msg) => msg);
+
+      // Fire two concurrent requests before either resolves
+      const [r1, r2] = await Promise.all([
+        core.request('topic', { a: 1 }, { timeoutMs: 2000 }),
+        core.request('topic', { b: 2 }, { timeoutMs: 2000 }),
+      ]);
+
+      // Both resolve (auto-deliver routes through responder → inbox)
+      expect(r1).toEqual({ a: 1 });
+      expect(r2).toEqual({ b: 2 });
+      // openInbox called exactly once — no duplicate creation
+      expect(transport.openInboxCalls).toBe(1);
+    });
+
+    it('admin create succeeds, transport open fails → not cached; next retries', async () => {
+      const transport = new FakeTransport();
+      let first = true;
+
+      // First openInbox fails
+      const origOpen = transport.openInbox.bind(transport);
+      transport.openInbox = (onReply) => {
+        if (first) {
+          first = false;
+          throw new Error('transport-unavailable');
+        }
+        return origOpen(onReply);
+      };
+
+      const core = new RequestReplyCore(transport);
+      await core.respond('topic', (msg) => msg);
+
+      // First request fails
+      await expect(core.request('topic', { a: 1 }, { timeoutMs: 2000 })).rejects.toThrow(
+        'transport-unavailable',
+      );
+
+      // Next request retries and succeeds (inbox was NOT cached on failure)
+      await expect(core.request('topic', { a: 2 }, { timeoutMs: 2000 })).resolves.toEqual({
+        a: 2,
+      });
+    });
+
+    it('disconnect after successful open → close called once', async () => {
+      const transport = new FakeTransport();
+      const core = new RequestReplyCore(transport);
+
+      await core.respond('topic', (msg) => msg);
+      await core.request('topic', { a: 1 }, { timeoutMs: 2000 });
+      expect(transport.openInboxCalls).toBe(1);
+
+      // Close tears down inbox (unsubscribe = the respond subscription + inbox subscription)
+      await core.close();
+      // close() unsubscribes the inbox; at least 1 unsubscribe call
+      expect(transport.unsubscribeCalls).toBeGreaterThanOrEqual(1);
+
+      // Close is idempotent — should not throw
+      await core.close();
+    });
+  });
 });

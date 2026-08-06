@@ -29,6 +29,7 @@ import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
 import { ReplyInboxUnavailableError } from '../errors.ts';
+import { settlementErrors } from '../settlement-marker.ts';
 
 /** Default reply topic for request-reply. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
@@ -207,37 +208,29 @@ export function adaptServiceBusModule(
           processMessage: async (rawMessage) => {
             const msg = rawMessage as { body?: unknown };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
-            // B2: Separate handler invocation failures from settlement failures.
-            // ack/nack wrap the receiver calls so settlement rejections do NOT
-            // propagate to the outer catch — that catch is for handler errors only
-            // and must abandon exactly once.
-            try {
-              const handlerResult = onMessage({
-                payload: body,
-                ack: async () => {
-                  try {
-                    await receiver.completeMessage(rawMessage);
-                  } catch {
-                    // Settlement failure — do NOT then abandon.
-                  }
-                },
-                nack: async () => {
-                  try {
-                    await receiver.abandonMessage(rawMessage);
-                  } catch {
-                    // Settlement failure — do NOT abandon again.
-                  }
-                },
-              });
-              await handlerResult;
-            } catch {
-              // Handler (synchronous or async) failed — abandon exactly once.
-              try {
-                await receiver.abandonMessage(rawMessage);
-              } catch {
-                // abandon itself rejected — propagate
-              }
-            }
+            // B2: ack/nack call receiver settlement and propagate errors directly.
+            // Settlement rejections are marked via settlementErrors WeakSet so the
+            // broker's subscribe() can distinguish handler invocation failures from
+            // settlement failures and avoid double-abandon.
+            await onMessage({
+              payload: body,
+              ack: async () => {
+                try {
+                  await receiver.completeMessage(rawMessage);
+                } catch (err) {
+                  if (err instanceof Error) settlementErrors.add(err);
+                  throw err;
+                }
+              },
+              nack: async () => {
+                try {
+                  await receiver.abandonMessage(rawMessage);
+                } catch (err) {
+                  if (err instanceof Error) settlementErrors.add(err);
+                  throw err;
+                }
+              },
+            });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
             Promise.resolve(options.logger?.error(`Service Bus receiver error: ${args.error}`)),
@@ -444,19 +437,27 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const queue = options?.queue ?? this.#defaultQueue;
 
     const sub = await this.#transport.open(topic, queue, async (msg) => {
+      // B2: Separate handler invocation from settlement so a settlement rejection
+      // is not confused with a handler failure and does not trigger double-settle.
+      let handlerError: Error | null = null;
       try {
         const deserialized = this.#serializer.deserialize<T>(msg.payload);
         const metadata: MessageMetadata = {
           topic,
         };
         await handler(deserialized, metadata);
-        return msg.ack();
       } catch (err) {
+        handlerError = err as Error;
+      }
+
+      if (handlerError !== null) {
         if (this.#logger) {
-          this.#logger.error(`Service Bus handler error: ${err}`);
+          this.#logger.error(`Service Bus handler error: ${handlerError}`);
         }
         return msg.nack();
       }
+
+      return msg.ack();
     });
 
     this.#subscriptions.set(subscriptionId, sub);

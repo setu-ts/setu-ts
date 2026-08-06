@@ -1,6 +1,6 @@
 # Queue Plugin
 
-Background job queue plugin for Hono Enterprise with Memory and Redis adapters.
+Background job queue plugin for Hono Enterprise with Memory, Redis, RabbitMQ, and SQS adapters.
 
 ## Installation
 
@@ -26,6 +26,30 @@ import { QueuePlugin } from '@hono-enterprise/queue-plugin';
 app.register(QueuePlugin({
   adapter: 'redis',
   url: 'redis://localhost:6379',
+}));
+```
+
+### RabbitMQ Adapter
+
+```typescript
+import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+
+app.register(QueuePlugin({
+  adapter: 'rabbitmq',
+  url: 'amqp://localhost:5672',
+  queues: { default: 'tasks' },
+}));
+```
+
+### SQS Adapter
+
+```typescript
+import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+
+app.register(QueuePlugin({
+  adapter: 'sqs',
+  region: 'us-east-1',
+  queues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks' },
 }));
 ```
 
@@ -76,13 +100,15 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 
 ## Options
 
-| Option               | Type                  | Default                    | Description                              |
-| -------------------- | --------------------- | -------------------------- | ---------------------------------------- |
-| `adapter`            | `'memory' \| 'redis'` | `'memory'`                 | Queue adapter type                       |
-| `name`               | `string`              | -                          | Instance name for multi-instance support |
-| `url`                | `string`              | `'redis://localhost:6379'` | Redis connection URL                     |
-| `defaultMaxAttempts` | `number`              | `3`                        | Default retry attempts                   |
-| `pollIntervalMs`     | `number`              | `1000`                     | Worker poll interval                     |
+| Option               | Type                                         | Default                    | Description                              |
+| -------------------- | -------------------------------------------- | -------------------------- | ---------------------------------------- |
+| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'` | `'memory'`                 | Queue adapter type                       |
+| `name`               | `string`                                     | -                          | Instance name for multi-instance support |
+| `url`                | `string`                                     | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL          |
+| `region`             | `string`                                     | -                          | AWS region (SQS)                         |
+| `queues`             | `Record<string, string>`                     | -                          | Queue name→URL mapping (RabbitMQ / SQS)  |
+| `defaultMaxAttempts` | `number`                                     | `3`                        | Default retry attempts                   |
+| `pollIntervalMs`     | `number`                                     | `1000`                     | Worker poll interval                     |
 
 ## Adapters
 
@@ -94,6 +120,32 @@ In-memory queue for testing and local development. Jobs are lost on restart.
 
 Redis-backed queue using sorted sets for delayed job storage. Supports persistence and distributed
 processing.
+
+### RabbitMqQueue
+
+RabbitMQ-backed queue using native channels, exchanges, and queues. Supports delayed retries through
+a per-queue delay exchange with TTL-based message routing. Requires the `amqplib` package at runtime
+(or an injected `RabbitMqClient`).
+
+### SqsQueue
+
+AWS SQS-backed queue using the AWS SDK `@aws-sdk/client-sqs`. Supports visibility timeouts, delayed
+jobs (up to 15 minutes via `DelaySeconds`), and dead-letter queues through the AWS managed DLQ
+feature. The `maxAttempts` field in the job envelope drives the DLQ promotion logic. Requires the
+`@aws-sdk/client-sqs` package at runtime (or an injected transport).
+
+#### SQS Retry and DLQ
+
+When a job reaches `maxAttempts`, `SqsQueue.deadLetter()` forwards the original message body to the
+configured DLQ queue URL, then deletes the source message. If DLQ send fails, the source message is
+**not** deleted (preventing silent data loss). If the source delete fails after a successful DLQ
+send, a duplicate-risk warning is logged.
+
+#### ElasticMQ E2E
+
+The SQS adapter includes guarded E2E tests against ElasticMQ (`SQS_ENDPOINT_URL` environment
+variable). These tests verify enqueue→reserve→ack round-trips, queue isolation, visibility retry
+progression, and DLQ promotion.
 
 ## License
 

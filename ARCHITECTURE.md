@@ -1251,25 +1251,25 @@ graph TB
 
 #### @hono-enterprise/messaging-plugin
 
-| Aspect               | Detail                                                                                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Message broker abstraction for cross-service integration events                                                                                                           |
-| **Responsibilities** | Provide `IMessageBroker`; in-memory and Redis Streams adapters; serializer interface (`ISerializer`); `EventsMessagingBridge` for events-to-messaging bridge              |
-| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                             |
-| **Public API**       | `MessagingPlugin()`; `EventsMessagingBridge()`; `InMemoryBroker`; `RedisStreamsBroker`; `JsonSerializer`; `IMessageBroker` (re-exported from `common`)                    |
-| **Extension Points** | Custom broker adapter; custom serializers; custom Redis client injection                                                                                                  |
-| **Rules**            | ioredis is optional (injected or lazy-loaded via `npm:` specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option |
+| Aspect               | Detail                                                                                                                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | Message broker abstraction for cross-service integration events                                                                                                                                                                      |
+| **Responsibilities** | Provide `IMessageBroker`; in-memory, Redis Streams, GCP Pub/Sub, and Azure Service Bus adapters; serializer interface (`ISerializer`); `EventsMessagingBridge`; request-reply via `RequestReplyCore`                                 |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                        |
+| **Public API**       | `MessagingPlugin()`; `EventsMessagingBridge()`; `InMemoryBroker`; `RedisStreamsBroker`; `GcpPubSubBroker`; `ServiceBusBroker`; `JsonSerializer`; `IMessageBroker` (re-exported from `common`)                                        |
+| **Extension Points** | Custom broker adapter; custom serializers; custom SDK client injection; custom transport adapters                                                                                                                                    |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option; cloud brokers require provider credentials at runtime |
 
 #### @hono-enterprise/queue-plugin
 
-| Aspect               | Detail                                                                                                                                                                             |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Background job queue                                                                                                                                                               |
-| **Responsibilities** | Add/process jobs; retry strategies; recurring jobs; concurrency control                                                                                                            |
-| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                      |
-| **Public API**       | `QueuePlugin()`; `IQueue` (re-exported from `common`)                                                                                                                              |
-| **Extension Points** | Custom queue adapter via internal `QueueAdapter` seam; custom retry strategies                                                                                                     |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory queue for testing; RabbitMQ adapter implemented in M15b (polling via basicGet, TTL+DLX for delays) |
+| Aspect               | Detail                                                                                                                                                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Background job queue                                                                                                                                                                                                                                                                    |
+| **Responsibilities** | Add/process jobs; retry strategies; recurring jobs; concurrency control; cloud DLQ promotion                                                                                                                                                                                            |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                                                           |
+| **Public API**       | `QueuePlugin()`; `IQueue` (re-exported from `common`)                                                                                                                                                                                                                                   |
+| **Extension Points** | Custom queue adapter via internal `QueueAdapter` seam; custom retry strategies; custom SQS transport injection                                                                                                                                                                          |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory queue for testing; RabbitMQ adapter (polling via basicGet, TTL+DLX for delays); SQS adapter via AWS SDK `@aws-sdk/client-sqs` (injected or lazy-loaded); DLQ forwards original body then deletes source |
 
 **Architecture Notes:** The `QueuePlugin` factory registers a `QueueService` implementing the
 `IQueue` contract under the `queue` capability token (or `queue.<name>` for named instances). The
@@ -1277,7 +1277,10 @@ service owns the backend-agnostic machinery (worker poll loop, retry with expone
 cron-driven recurring scheduling) and delegates storage to an internal `QueueAdapter` transport
 seam. `MemoryQueue` and `RedisQueue` (ioredis-based delayed queue using Redis sorted sets) implement
 this seam in M15. `RabbitMqQueue` (implemented in M15b) uses polling via `basicGet` over a ready
-queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue.
+queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue. `SqsQueue` (M54) uses
+AWS SQS with visibility timeouts, envelope-based retry tracking, and DLQ promotion when
+`maxAttempts` is reached — the DLQ adapter forwards the original message body to the DLQ queue URL
+then deletes the source message, with separate diagnostics for send vs delete failures.
 
 #### @hono-enterprise/auth-plugin
 

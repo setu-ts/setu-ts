@@ -327,13 +327,16 @@ describe('adaptPubSubModule', () => {
   });
 
   it('closes the client', async () => {
+    let pubsubClosed = false;
     const sdk = createFakeSdkModule();
+    sdk.PubSub.prototype.close = function () {
+      pubsubClosed = true;
+      return Promise.resolve();
+    };
     const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
 
     await transport.close();
-
-    // PubSub close() was called - the fake resolves without error
-    expect(true).toBe(true);
+    expect(pubsubClosed).toBe(true);
   });
 
   it('subscription close works', async () => {
