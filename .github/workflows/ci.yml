@@ -45,9 +45,10 @@ jobs:
         env:
           ALLOW_SKIP: cloudflare
 
-      - name: Test
-        run: deno task test
-
+      # One suite run, not two. `test:coverage` runs the same `packages test`
+      # paths as `deno task test` (the root `test` directory included, so
+      # `test/apps-gate.test.ts` executes on a runner) and adds instrumentation
+      # on top, so a separate `Test` step only re-ran everything.
       - name: Test with coverage
         run: deno task test:coverage
 

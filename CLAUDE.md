@@ -1330,9 +1330,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   because the seam test alone cannot prove it. Also closed the three M37 gate holes: `check:apps`
   now runs an app's `test` task when one is declared (proven by breaking `apps/plugin-development`'s
   test and watching the gate exit 1), CI gained a `deno task test` step so `test/apps-gate.test.ts`
-  runs there, and `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the
-  tree ahead of `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to
-  `unusedPort()`) — complete (PR pending)
+  runs there (that step was later removed — `test:coverage` now covers the root `test` directory
+  itself, so the file still runs on a runner without the suite executing twice), and
+  `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the tree ahead of
+  `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to `unusedPort()`) —
+  complete (PR pending)
 - **Milestone 53** (`.github/workflows/ci.yml` + `scripts/check-apps.ts` + guarded Redis tests —
   real-backend CI: making the proofs that matter actually run on every pull request. `apps/realtime`
   and `apps/microservices` both exited **77** unless `REDIS_URL` was set and no CI job set it, so
