@@ -609,7 +609,6 @@ describe('GcpPubSubBroker', () => {
       expect(logged).toContain('handler-error');
     });
   });
-
 });
 
 // Guarded real-import: exercises the lazy-load path through loadPubSubModule.

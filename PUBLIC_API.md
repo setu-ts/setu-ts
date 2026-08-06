@@ -1885,7 +1885,7 @@ Discriminated on `transport`.
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                          |
 | ------------- | ----------------- | ------------------------------ | -------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default, and a real single-process bus rather than a no-op |
-| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses all five existing brokers; adds no dependency           |
+| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses any registered messaging broker; adds no dependency     |
 | `'redis'`     | Yes               | `npm:ioredis@5.x` (lazy)       | Redis pub/sub, over two connections                            |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane`                                       |
 
@@ -2699,55 +2699,172 @@ app.register(MessagingPlugin({
 
 ### Plugin Options
 
+`MessagingPluginOptions` is a **discriminated union keyed on `broker`** — exactly
+mirroring `packages/messaging-plugin/src/interfaces/index.ts`, which is the source of
+truth. Each arm carries the fields the source defines; the cloud brokers split into an
+*injected-transport* arm (no production credentials) and a *production* arm (credentials
+required, `client` typed `never`). The shared `MessagingBrokerType` has eight literals.
+
 ```typescript
-interface MessagingPluginOptions {
-  /** Broker type. Defaults to 'memory' when omitted. */
-  broker?: 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka' | 'pubsub' | 'service-bus' | 'custom';
+type MessagingBrokerType =
+  | 'memory'
+  | 'redis-streams'
+  | 'rabbitmq'
+  | 'nats'
+  | 'kafka'
+  | 'pubsub'
+  | 'service-bus'
+  | 'custom';
+
+/** Present on every arm. */
+interface MessagingCommonOptions {
   /** Instance name for multi-instance support (registers under messaging.<name>). */
   name?: string;
   /** Serializer for message payloads. @defaultValue new JsonSerializer() */
   serializer?: ISerializer;
+}
 
-  // Redis Streams / RabbitMQ / NATS — shared optional fields
-  /** Connection URL (redis-streams / rabbitmq / nats). */
+// ── Default (in-memory). `broker` is optional so MessagingPlugin() and {} are valid. ──
+interface MemoryMessagingOptions extends MessagingCommonOptions {
+  broker?: 'memory';
+}
+
+// ── Redis Streams ────────────────────────────────────────────────────────────────────
+interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
+  broker: 'redis-streams';
+  /** Connection URL. */
   url?: string;
-  /** Injected client — bypasses the lazy npm import. Type depends on broker. */
-  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory | IPubSubTransport | IServiceBusTransport;
-  /** Default consumer group / queue name. @defaultValue 'messaging-consumers' */
+  /** Injected client — bypasses the lazy npm import. */
+  client?: IRedisStreamsClient;
+  /** Default consumer group / queue name. */
   defaultQueue?: string;
-  /** Redis Streams poll interval in ms. @defaultValue 100 */
+  /** XREADGROUP poll interval in ms. */
   pollIntervalMs?: number;
-  /** Redis Streams XREADGROUP block timeout in ms. @defaultValue 100 */
+  /** XREADGROUP block timeout in ms. */
   blockSizeMs?: number;
-  /** RabbitMQ exchange name. @defaultValue 'messaging' */
-  exchangeName?: string;
-  /** NATS JetStream stream name. @defaultValue 'MESSAGING' */
-  streamName?: string;
+}
 
-  // Kafka
-  /** Kafka bootstrap brokers. @defaultValue ['localhost:9092'] */
+// ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
+interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  broker: 'rabbitmq';
+  /** AMQP connection URL. */
+  url?: string;
+  /** Injected AMQP connection. */
+  client?: IAmqpConnection;
+  /** Topic exchange name. @defaultValue 'messaging' */
+  exchangeName?: string;
+  /** Default consumer group / queue name. */
+  defaultQueue?: string;
+}
+
+// ── NATS (JetStream) ─────────────────────────────────────────────────────────────────
+interface NatsMessagingOptions extends MessagingCommonOptions {
+  broker: 'nats';
+  /** NATS connection URL. */
+  url?: string;
+  /** Injected NATS connection. */
+  client?: INatsConnection;
+  /** JetStream stream name. @defaultValue 'MESSAGING' */
+  streamName?: string;
+  /** Default consumer group / queue name. */
+  defaultQueue?: string;
+}
+
+// ── Kafka ────────────────────────────────────────────────────────────────────────────
+interface KafkaMessagingOptions extends MessagingCommonOptions {
+  broker: 'kafka';
+  /** Kafka bootstrap brokers. */
   brokers?: readonly string[];
+  /** Injected Kafka client factory. */
+  client?: IKafkaFactory;
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
+  /** Default consumer group name. */
+  defaultQueue?: string;
   /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
-
-  // GCP Pub/Sub (production arm)
-  /** GCP project ID. Required when broker is 'pubsub' and no client is injected. */
-  projectId?: string;
-  /** GCP service-account credentials. SDK ADC is used when omitted. */
-  credentials?: unknown;
-
-  // Azure Service Bus (production arm)
-  /** Service Bus connection string. Required when broker is 'service-bus' and no client is injected. */
-  connectionString?: string;
-  /** Service Bus administration connection string. Defaults to connectionString. */
-  adminConnectionString?: string;
-
-  // Custom broker
-  /** Pre-built IMessageBroker instance. Required when broker is 'custom'. */
-  instance?: IMessageBroker;
 }
+
+// ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
+interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
+  client: IPubSubTransport;
+  /** GCP project ID. Optional when client is injected. */
+  projectId?: string;
+  /** Service-account credentials. Optional when client is injected. */
+  credentials?: unknown;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+// ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
+interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** GCP project ID. Required for production. */
+  projectId: string;
+  /** Service-account credentials. SDK ADC is used when omitted. */
+  credentials?: unknown;
+  /** Mutually exclusive with the injected arm — client?: never. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/** GCP Pub/Sub options — exclusive union of injected and production arms. */
+type PubSubMessagingOptions =
+  | PubSubMessagingOptionsInjected
+  | PubSubMessagingOptionsProduction;
+
+// ── Azure Service Bus — injected transport (client required; credentials optional) ───
+interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
+  client: IServiceBusTransport;
+  /** Connection string. Optional when client is injected. */
+  connectionString?: string;
+  /** Administration connection string. Optional when client is injected. */
+  adminConnectionString?: string;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+// ── Azure Service Bus — production (connectionString required; client must be omitted) ─
+interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Connection string for the Service Bus namespace. Required for production. */
+  connectionString: string;
+  /** Connection string for the administration client. Defaults to connectionString. */
+  adminConnectionString?: string;
+  /** Mutually exclusive with the injected arm — client?: never. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/** Azure Service Bus options — exclusive union of injected and production arms. */
+type ServiceBusMessagingOptions =
+  | ServiceBusMessagingOptionsInjected
+  | ServiceBusMessagingOptionsProduction;
+
+// ── Custom — inject any IMessageBroker implementation ────────────────────────────────
+interface CustomMessagingOptions extends MessagingCommonOptions {
+  broker: 'custom';
+  /** Pre-built IMessageBroker instance. Required for this arm. */
+  instance: IMessageBroker;
+}
+
+/** The factory's single options parameter. */
+type MessagingPluginOptions =
+  | MemoryMessagingOptions
+  | RedisStreamsMessagingOptions
+  | RabbitMqMessagingOptions
+  | NatsMessagingOptions
+  | KafkaMessagingOptions
+  | PubSubMessagingOptions
+  | ServiceBusMessagingOptions
+  | CustomMessagingOptions;
+```
 
 **Cloud brokers require production credentials OR an injected transport:**
 
@@ -2775,7 +2892,7 @@ app.register(MessagingPlugin({
   broker: 'service-bus',
   client: myServiceBusTransport,
 }));
-````
+```
 
 ### Publishing Messages
 
@@ -2870,8 +2987,9 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 | `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
 | `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-> **Broker support.** Request-reply is available on **all five** brokers — in-memory, Redis Streams,
-> RabbitMQ, NATS, and Kafka.
+> **Broker support.** Request-reply is available on **all supported broker types** — in-memory, Redis
+> Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which delegates to the
+> injected `IMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
@@ -7796,3 +7914,4 @@ The Hono Enterprise public API is designed for developer experience:
 6. **Runtime independent** — Runs on Node.js, Deno, Bun, and Cloudflare Workers (future)
 7. **Testable** — Built-in test utilities, mock plugins, request injection
 8. **Enterprise-ready** — Auth, secrets, audit, resilience, multi-tenancy, feature flags
+````

@@ -119,14 +119,14 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Messaging and background work
 
-| Feature     | Status | Package              | Description                                                    |
-| ----------- | ------ | -------------------- | -------------------------------------------------------------- |
-| Events      | ✅     | `events-plugin`      | In-process domain event bus                                    |
-| CQRS        | ✅     | `cqrs-plugin`        | Command and query buses with pipeline behaviors                |
-| Messaging   | ✅     | `messaging-plugin`   | In-memory, Redis Streams, RabbitMQ, NATS, Kafka; request-reply |
-| Queue       | ✅     | `queue-plugin`       | Background jobs over memory, Redis, RabbitMQ; retries, cron    |
-| Scheduler   | ✅     | `scheduler-plugin`   | Cron, interval, delayed jobs with distributed locking          |
-| Worker pool | ✅     | `worker-pool-plugin` | CPU-bound work on real worker threads, off the event loop      |
+| Feature     | Status | Package              | Description                                                                                         |
+| ----------- | ------ | -------------------- | --------------------------------------------------------------------------------------------------- |
+| Events      | ✅     | `events-plugin`      | In-process domain event bus                                                                         |
+| CQRS        | ✅     | `cqrs-plugin`        | Command and query buses with pipeline behaviors                                                     |
+| Messaging   | ✅     | `messaging-plugin`   | Memory, Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, custom; request-reply |
+| Queue       | ✅     | `queue-plugin`       | Background jobs over memory, Redis, RabbitMQ, SQS; SNS fan-out; retries, cron                       |
+| Scheduler   | ✅     | `scheduler-plugin`   | Cron, interval, delayed jobs with distributed locking                                               |
+| Worker pool | ✅     | `worker-pool-plugin` | CPU-bound work on real worker threads, off the event loop                                           |
 
 ### Service-to-service
 
