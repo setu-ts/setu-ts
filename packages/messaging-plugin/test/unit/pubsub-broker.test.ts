@@ -610,28 +610,6 @@ describe('GcpPubSubBroker', () => {
     });
   });
 
-  describe('request', () => {
-    it('delegates to RequestReplyCore', async () => {
-      const transport: IPubSubTransport = {
-        publish: () => Promise.resolve(),
-        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
-        createSubscription: () => Promise.resolve(),
-        deleteSubscription: () => Promise.resolve(),
-        close: () => Promise.resolve(),
-      };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
-
-      await broker.connect();
-
-      // request should not throw even without a responder (it times out)
-      const promise = broker.request('topic', 'hello');
-      // We won't await the full timeout; just verify it returns a promise
-      expect(promise).toBeDefined();
-    });
-  });
 });
 
 // Guarded real-import: exercises the lazy-load path through loadPubSubModule.

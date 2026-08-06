@@ -5771,7 +5771,8 @@ fetch-based providers elsewhere in the repo.
 - ✅ A `'custom'` arm on `MessagingPluginOptions`, with the option type a discriminated union
 - ✅ `MessagingPluginOptions` documented in `PUBLIC_API.md` as a public-surface change
 - ✅ GCP Pub/Sub and Azure Service Bus brokers implementing `IMessageBroker`
-- [ ] An SQS adapter implementing `IQueue`, and an SNS→SQS pairing for fan-out
+- ✅ An SQS adapter implementing `IQueue` (`SqsQueue`), and an SNS→SQS pairing for fan-out
+  (`SnsPublisher`)
 - ✅ A per-backend `openInbox` decision for request-reply, or an explicit documented refusal
 - ✅ Guarded real-import tests plus an injectable client facade per backend
 - ✅ Runtime gating and a documented no-op or throw on Cloudflare Workers
