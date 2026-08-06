@@ -242,9 +242,6 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   /**
    * Opens the reply inbox on the shared reply topic with a per-instance
    * subscription.
-  /**
-   * Opens the reply inbox on the shared reply topic with a per-instance
-   * subscription.
    *
    * On failure after admin creation, compensates by deleting the subscription
    * so a later retry can succeed (B6).
