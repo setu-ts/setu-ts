@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`apps/full-stack` — a runnable React Router 8 SSR example** (M37c). The framework's full-stack
+  story shipped in three places — the SSR plugin, the full-stack starter, and
+  `honoe new --template full-stack` — and none of them had an application a reader could run. This
+  one is served by the kernel through `react-router-plugin`, composed through
+  `createFullStackAppFromConfig`, and its `smoke` task asserts that an SSR-rendered page contains
+  rows **written through the database capability** — evidence that `populateLoadContext` bridges the
+  kernel's service registry into a React Router loader, rather than that a server started. It then
+  signs in through a `<Form>`, so the session and its synchronizer CSRF token round-trip too.
+
+  Its routes are `/` (a landing page that reports session state), `/products` and `/login`.
+
+  The example also makes the framework's distinguishing claim executable: `test/removal.test.ts`
+  asserts that none of `lib/{session,csrf,sse,kv,service-logger}.server.ts` exists, and that
+  `app/config/services.server.ts` holds no module-level cache — because the kernel's service
+  registry is that cache.
+
+  **The frontend build runs for real in CI, with no Node toolchain.** `deno install` plus the
+  `@react-router/dev` CLI run the identical Vite build under Deno's own npm support (measured: ~4 s
+  install, <1 s build), so no `ServerBuild` fixture is committed and `full-stack` is deliberately
+  not in `ALLOW_SKIP`. No published package changed; the frontend build remains an app-level,
+  build-time concern outside every published dependency graph (AI_GUIDELINES §12.2).
+
 ### Fixed
 
 - Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.

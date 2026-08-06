@@ -1374,14 +1374,89 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   pins the service, the port mapping, the variable, and the scoped grant, with both assertions
   verified to fail when the wiring is broken. Suite green under BOTH conditions (Redis live and
   Redis stopped), which is the real bar — 1058 passed each way) — complete (PR #123)
-- **Next milestone** — **M38** (documentation), then M39–M40. Two milestones are queued behind
-  those: **M37c** (full-stack example — `react-router-plugin`, `full-stack-starter` and
-  `honoe new --template full-stack` all ship with NOTHING a reader can run; 13 apps, none using
-  React Router. Its first task is a toolchain decision, because a React Router app needs an npm/Vite
-  build — the sole documented exception to the Deno-only toolchain — while `check:apps` runs pure
-  Deno and, since M53, an unlisted skip is a failure) and **M54** (cloud message brokers —
-  `MessagingBrokerType` is a closed switch with no `'custom'` arm, so SQS/SNS, GCP Pub/Sub and Azure
-  Service Bus are not merely absent but inexpressible).
+- **Milestone 37c** (`apps/full-stack` — the runnable React Router example the framework's largest
+  capability had none of. `react-router-plugin` (M44), `full-stack-starter` (M36/M36c) and
+  `honoe new --template full-stack` (M36c) all shipped with nothing a reader could run: 13 apps,
+  none referencing React Router. **The toolchain question the milestone was opened on was answered
+  by measurement, and the answer was neither of the two options the ROADMAP framed.** Both assumed
+  the real Vite build needs a Node toolchain — so the choice was "commit a `ServerBuild` fixture" or
+  "add Node/npm to CI". Deno's own npm support runs the identical build:
+  `deno install
+  --allow-scripts` took **4 s** and the build **0.6 s** against a project scaffolded
+  by the CLI and repointed at the workspace, after which the app served SSR HTML and completed a
+  CSRF-protected login. So the smoke performs the **real** build, CI gains no `setup-node` step, no
+  fixture is committed, and `full-stack` is deliberately **not** in `ALLOW_SKIP` — with
+  `test/apps-gate.test.ts` asserting it never becomes so, because the exemption would be a one-word
+  edit that leaves CI green. AI_GUIDELINES §12.2 is untouched: "npm toolchain" describes the package
+  ecosystem, not a required Node binary. **What CI does NOT prove is a browser** — hydration,
+  static-asset delivery and client-side navigation were verified manually against Chrome via
+  Playwright (11/11, shown to discriminate by aborting the client entry bundle: the hydration and
+  client-side-transition checks flip to failing while SSR content still renders, which also
+  demonstrates the login form degrading to a real POST without JavaScript). That suite is
+  deliberately NOT committed, because it needs a browser CI does not install — the M51b
+  `apps/graphql-demo` interop precedent. It found one real wart, now fixed: the example shipped no
+  favicon, so every browser load logged a 404 from the SSR catch-all, and `root.tsx` now carries an
+  inline `data:` icon. **Code review then found the milestone's own worst assumption.** It had
+  claimed the `.tsx` modules were type-checked by `vite build`; they were not, and neither was
+  `app/features/products/products.server.ts` — rolldown strips types without checking them, so a
+  pure type error builds green, and `deno info --json smoke.ts` shows the gate's fixed entry points
+  reach only six app modules. **Eleven app files were under no type-checker at all**, and the
+  negative control that "proved" otherwise was mis-designed: it renamed an import to a MISSING
+  EXPORT, which is module resolution and any bundler catches it. The example now carries a
+  `check:app` task (`deno check app/**/*.ts app/**/*.tsx`, `jsx: 'react-jsx'`) run from `test`, so
+  `check:apps` executes it — a glob, not a file list, because `app/routes.ts` resolves routes
+  through `flatRoutes()` at build time and statically imports none of them. Review also closed two
+  holes in the removal test itself: it matched only a bare `const …`, so
+  `export const clientCache = new Map()` passed unnoticed, and it proved a context key was
+  _mentioned_ rather than _read_ (the import statement satisfied it). Both now fail without their
+  fix. **Then the maintainer opened the app and found what none of it caught: `/` was a blank
+  page.** `app/routes.ts` wraps two `flatRoutes` groups in `layout()` calls and neither group had an
+  `_index` file, so the root path matched a layout with no child — `<Outlet />` rendered nothing and
+  the server answered **200 with an empty `<body>`**. Not a 404, not an error; a blank document,
+  black in dark mode. Every gate passed because the smoke and the 11-check browser run both
+  requested `/products` and `/login` EXPLICITLY and nothing ever requested `/`, and because a status
+  assertion would have passed anyway — the page was blank, not failing. Fixed with
+  `app/routes/_app/_index.tsx` (which also reads the session, so the landing page demonstrates a
+  capability rather than being decoration) and a smoke assertion requiring visible CONTENT at `/` —
+  an `<h1>` plus a link — verified to fail when the route is deleted. The lesson is the milestone's
+  own: a gate that only requests the paths its author already believed worked is not coverage. **CI
+  then caught a fourth defect no local run could.** `apps/full-stack` carries a `package.json`, so
+  Deno resolves npm specifiers from `node_modules` rather than its global cache — and `check:apps`
+  type-checks an app BEFORE running the smoke that creates `node_modules`. On a cold checkout
+  `deno check main.ts smoke.ts` failed with
+  `Could not find a matching package for 'npm:ws@^8.18.0'`, because the app's import graph reaches
+  plugins that lazily import npm drivers. Every local run passed because `node_modules` persisted
+  from an earlier build — the warm-state trap this repo keeps hitting. Fixed with
+  `"nodeModulesDir": "auto"`, reproduced first by deleting `node_modules`, `build/` and `deno.lock`
+  and re-running the gate's exact order. The example is composed through
+  `createFullStackAppFromConfig`, whose final statement is `return createFullStackApp(...)`, so one
+  application exercises both starter entry points; the `reactRouter`, `session` and `database` arms
+  are all GATED, so a default-options full-stack app registers none of them and an example omitting
+  them would prove nothing. The smoke's bar is the ROADMAP's: an SSR page rendering rows **written
+  through the database capability** — carried by a fifth context key (`databaseContext`) the M36c
+  skeleton does not ship — then a `<Form>` login whose **302 rather than 403** proves the
+  synchronizer token round-tripped through the session plugin's middleware. It is driven with
+  `app.fetch`, never `inject()`, since the SSR body is a stream and step 3 reads `Set-Cookie`.
+  **Four negative controls were each observed failing and then reverted**, and the second is the one
+  worth keeping: replacing `contextKeyFor('app.database', …)` with a `{ defaultValue }` literal
+  **type-checks cleanly (exit 0) while the smoke fails** — the module exists twice at runtime (Vite
+  inlines a copy into the server build; the kernel loads the other from source), so two hand-written
+  key objects match nothing and every context read silently returns its default. Two facts the
+  implementation established that no gate would have: `apps/full-stack` needs the **workspace's
+  `compilerOptions`** in its own manifest, because its import graph reaches `telemetry-plugin`,
+  which only compiles under `exactOptionalPropertyTypes` — the same trap the CLI e2e documents for
+  scaffolded projects; and `smoke.ts` ends in an explicit `Deno.exit(0)`, because importing
+  `react-dom/server` under Deno keeps the process alive after `app.stop()` resolves, while
+  `deno test`'s op and resource sanitizers report nothing leaked (measured by importing it alone,
+  and by the same script with the `reactRouter` arm removed exiting cleanly). A ROADMAP deliverable
+  was **corrected rather than implemented as written** (C1): it required `config/services.server.ts`
+  to be ABSENT, but the M36c skeleton emits it deliberately and its own JSDoc says what a capability
+  replaces is the module-level CACHE, not the accessor file — so the test pins the five
+  `lib/*.server.ts` modules absent AND that the accessor holds no module-level state. No `packages/`
+  source changed) — complete (PR #126)
+- **Next milestone** — **M38** (documentation), then M39–M40. One milestone is queued behind those:
+  **M54** (cloud message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm,
+  so SQS/SNS, GCP Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
 
 ## Verification (run before declaring any work done)
 

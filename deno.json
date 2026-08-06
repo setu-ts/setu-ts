@@ -74,6 +74,7 @@
     "exactOptionalPropertyTypes": true,
     "useUnknownInCatchVariables": true
   },
+  "exclude": ["apps/full-stack/build"],
   "lint": {
     "rules": {
       "tags": ["recommended"],
