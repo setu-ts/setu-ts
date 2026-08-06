@@ -1137,3 +1137,206 @@ describe('C10: DLQ receives original body', () => {
     expect(dlqSend!.body).not.toBe('');
   });
 });
+
+describe('SqsQueue stable identity and current receipt', () => {
+  it('exposes stable envelope id on first reserve and keeps it on redelivery', async () => {
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: { important: true },
+      maxAttempts: 3,
+    });
+
+    let callCount = 0;
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () => {
+        callCount++;
+        const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
+        return Promise.resolve([{
+          body: originalBody,
+          receiptHandle,
+          approximateReceiveCount: String(callCount),
+        }]);
+      },
+      delete: () => Promise.resolve(),
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    // First reserve — uses receipt A
+    const jobs1 = await queue.reserve<{ important: boolean }>('jobs', 10, 1000000);
+    expect(jobs1).toHaveLength(1);
+    expect(jobs1[0].id).toBe('job-stable-1');
+
+    // Second reserve (redelivery) — uses receipt B, but ID remains stable
+    const jobs2 = await queue.reserve<{ important: boolean }>('jobs', 10, 1000000);
+    expect(jobs2).toHaveLength(1);
+    expect(jobs2[0].id).toBe('job-stable-1');
+  });
+
+  it('ack uses current receipt handle after redelivery, never the original', async () => {
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: {},
+      maxAttempts: 3,
+    });
+
+    let callCount = 0;
+    const deletedReceipts: string[] = [];
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () => {
+        callCount++;
+        const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
+        return Promise.resolve([{
+          body: originalBody,
+          receiptHandle,
+          approximateReceiveCount: String(callCount),
+        }]);
+      },
+      delete: (_q, receiptHandle) => {
+        deletedReceipts.push(receiptHandle);
+        return Promise.resolve();
+      },
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    // First reserve (receipt A)
+    const jobs1 = await queue.reserve('jobs', 10, 1000000);
+    expect(jobs1[0].id).toBe('job-stable-1');
+
+    // Redelivery (receipt B) — overwrites the stored receipt
+    await queue.reserve('jobs', 10, 1000000);
+
+    // Ack uses receipt B (current), NOT receipt A
+    await queue.ack('jobs', 'job-stable-1');
+
+    expect(deletedReceipts).toContain('receipt-B');
+    expect(deletedReceipts).not.toContain('receipt-A');
+  });
+
+  it('requeue uses current receipt handle after redelivery', async () => {
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: {},
+      maxAttempts: 3,
+    });
+
+    let callCount = 0;
+    const visibilityReceipts: string[] = [];
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () => {
+        callCount++;
+        const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
+        return Promise.resolve([{
+          body: originalBody,
+          receiptHandle,
+          approximateReceiveCount: String(callCount),
+        }]);
+      },
+      delete: () => Promise.resolve(),
+      changeVisibility: (_q, receiptHandle) => {
+        visibilityReceipts.push(receiptHandle);
+        return Promise.resolve();
+      },
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    // First reserve (receipt A)
+    await queue.reserve('jobs', 10, 1000000);
+
+    // Redelivery (receipt B)
+    await queue.reserve('jobs', 10, 1000000);
+
+    // Requeue uses receipt B
+    await queue.requeue('jobs', 'job-stable-1', 2000000, 2);
+
+    expect(visibilityReceipts).toContain('receipt-B');
+    expect(visibilityReceipts).not.toContain('receipt-A');
+  });
+
+  it('deadLetter uses current receipt and original body after redelivery', async () => {
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: { important: true },
+      maxAttempts: 3,
+    });
+
+    let callCount = 0;
+    const sentAll: Array<{ queueUrl: string; body: string }> = [];
+    const deletedReceipts: string[] = [];
+    const transport: ISqsTransport = {
+      send: (q, b) => {
+        sentAll.push({ queueUrl: q, body: b });
+        return Promise.resolve();
+      },
+      receive: () => {
+        callCount++;
+        const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
+        return Promise.resolve([{
+          body: originalBody,
+          receiptHandle,
+          approximateReceiveCount: String(callCount),
+        }]);
+      },
+      delete: (_q, receiptHandle) => {
+        deletedReceipts.push(receiptHandle);
+        return Promise.resolve();
+      },
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'http://localhost:9324/jobs-dlq' },
+      client: transport,
+    });
+    await queue.connect();
+
+    // First reserve (receipt A)
+    await queue.reserve('jobs', 10, 1000000);
+
+    // Redelivery (receipt B)
+    const jobs = await queue.reserve<{ important: boolean }>('jobs', 10, 1000000);
+
+    // DeadLetter uses receipt B and forwards original body
+    await queue.deadLetter('jobs', jobs[0].id, 1000000);
+
+    const dlqSend = sentAll.find((s) => s.queueUrl === 'http://localhost:9324/jobs-dlq');
+    expect(dlqSend).not.toBeUndefined();
+    expect(dlqSend!.body).toBe(originalBody);
+
+    // Delete uses current receipt B, never A
+    expect(deletedReceipts).toContain('receipt-B');
+    expect(deletedReceipts).not.toContain('receipt-A');
+  });
+});

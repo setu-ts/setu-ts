@@ -2969,7 +2969,8 @@ Provides background job queue with Memory and Redis adapters.
 
 - **`QueuePlugin`** — Plugin factory for registering the queue service
 - **`QueueAdapterType`** — `'memory' | 'redis' | 'rabbitmq' | 'sqs'`
-- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`, `sqs?`)
+- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`,
+  `sqs?`)
 - **`MemoryQueue`** — In-memory queue adapter for development/testing
 - **`RedisQueue`** — Redis-backed queue adapter for production
 - **`RedisQueueOptions`** — Redis adapter configuration
@@ -2981,14 +2982,15 @@ Provides background job queue with Memory and Redis adapters.
 - **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
   `credentials?`, `endpoint?`, `client?`)
 - **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`)
-- **`SqsReceivedMessage`** — SQS received message shape (body, receiptHandle, approximateReceiveCount)
+- **`SqsReceivedMessage`** — SQS received message shape (body, receiptHandle,
+  approximateReceiveCount)
 - **`SnsPublisher`** — SNS publisher for fan-out (SNS→SQS pairing)
 - **`SnsPublisherOptions`** — SNS publisher configuration
 - **`ISnsTransport`** — Structural SNS transport port
 - **`adaptSqsModule`** / **`loadSqsModule`** — SQS SDK adapter and lazy loader
 - **`adaptSnsModule`** / **`loadSnsModule`** — SNS SDK adapter and lazy loader
-- **`QueueBackendUnavailableError`** — Thrown when a cloud queue backend is unavailable (e.g., SQS on
-  Cloudflare Workers)
+- **`QueueBackendUnavailableError`** — Thrown when a cloud queue backend is unavailable (e.g., SQS
+  on Cloudflare Workers)
 - **`SqsDelayTooLongError`** — Thrown when SQS delay exceeds 900 s
 - **`SqsQueueNotConfiguredError`** — Thrown when a job name has no queue URL mapping
 - **`IQueue`** — Queue service interface (re-exported from `@hono-enterprise/common`)
