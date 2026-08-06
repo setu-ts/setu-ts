@@ -1388,32 +1388,40 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   fixture is committed, and `full-stack` is deliberately **not** in `ALLOW_SKIP` — with
   `test/apps-gate.test.ts` asserting it never becomes so, because the exemption would be a one-word
   edit that leaves CI green. AI_GUIDELINES §12.2 is untouched: "npm toolchain" describes the package
-  ecosystem, not a required Node binary. The example is composed through
-  `createFullStackAppFromConfig`, whose final statement is `return createFullStackApp(...)`, so one
-  application exercises both starter entry points; the `reactRouter`, `session` and `database` arms
-  are all GATED, so a default-options full-stack app registers none of them and an example omitting
-  them would prove nothing. The smoke's bar is the ROADMAP's: an SSR page rendering rows **written
-  through the database capability** — carried by a fifth context key (`databaseContext`) the M36c
-  skeleton does not ship — then a `<Form>` login whose **302 rather than 403** proves the
-  synchronizer token round-tripped through the session plugin's middleware. It is driven with
-  `app.fetch`, never `inject()`, since the SSR body is a stream and step 3 reads `Set-Cookie`.
-  **Four negative controls were each observed failing and then reverted**, and the second is the one
-  worth keeping: replacing `contextKeyFor('app.database', …)` with a `{ defaultValue }` literal
-  **type-checks cleanly (exit 0) while the smoke fails** — the module exists twice at runtime (Vite
-  inlines a copy into the server build; the kernel loads the other from source), so two hand-written
-  key objects match nothing and every context read silently returns its default. Two facts the
-  implementation established that no gate would have: `apps/full-stack` needs the **workspace's
-  `compilerOptions`** in its own manifest, because its import graph reaches `telemetry-plugin`,
-  which only compiles under `exactOptionalPropertyTypes` — the same trap the CLI e2e documents for
-  scaffolded projects; and `smoke.ts` ends in an explicit `Deno.exit(0)`, because importing
-  `react-dom/server` under Deno keeps the process alive after `app.stop()` resolves, while
-  `deno test`'s op and resource sanitizers report nothing leaked (measured by importing it alone,
-  and by the same script with the `reactRouter` arm removed exiting cleanly). A ROADMAP deliverable
-  was **corrected rather than implemented as written** (C1): it required `config/services.server.ts`
-  to be ABSENT, but the M36c skeleton emits it deliberately and its own JSDoc says what a capability
-  replaces is the module-level CACHE, not the accessor file — so the test pins the five
-  `lib/*.server.ts` modules absent AND that the accessor holds no module-level state. No `packages/`
-  source changed) — complete (PR pending)
+  ecosystem, not a required Node binary. **What CI does NOT prove is a browser** — hydration,
+  static-asset delivery and client-side navigation were verified manually against Chrome via
+  Playwright (11/11, shown to discriminate by aborting the client entry bundle: the hydration and
+  client-side-transition checks flip to failing while SSR content still renders, which also
+  demonstrates the login form degrading to a real POST without JavaScript). That suite is
+  deliberately NOT committed, because it needs a browser CI does not install — the M51b
+  `apps/graphql-demo` interop precedent. It found one real wart, now fixed: the example shipped no
+  favicon, so every browser load logged a 404 from the SSR catch-all, and `root.tsx` now carries an
+  inline `data:` icon. The example is composed through `createFullStackAppFromConfig`, whose final
+  statement is `return createFullStackApp(...)`, so one application exercises both starter entry
+  points; the `reactRouter`, `session` and `database` arms are all GATED, so a default-options
+  full-stack app registers none of them and an example omitting them would prove nothing. The
+  smoke's bar is the ROADMAP's: an SSR page rendering rows **written through the database
+  capability** — carried by a fifth context key (`databaseContext`) the M36c skeleton does not ship
+  — then a `<Form>` login whose **302 rather than 403** proves the synchronizer token round-tripped
+  through the session plugin's middleware. It is driven with `app.fetch`, never `inject()`, since
+  the SSR body is a stream and step 3 reads `Set-Cookie`. **Four negative controls were each
+  observed failing and then reverted**, and the second is the one worth keeping: replacing
+  `contextKeyFor('app.database', …)` with a `{ defaultValue }` literal **type-checks cleanly
+  (exit 0) while the smoke fails** — the module exists twice at runtime (Vite inlines a copy into
+  the server build; the kernel loads the other from source), so two hand-written key objects match
+  nothing and every context read silently returns its default. Two facts the implementation
+  established that no gate would have: `apps/full-stack` needs the **workspace's `compilerOptions`**
+  in its own manifest, because its import graph reaches `telemetry-plugin`, which only compiles
+  under `exactOptionalPropertyTypes` — the same trap the CLI e2e documents for scaffolded projects;
+  and `smoke.ts` ends in an explicit `Deno.exit(0)`, because importing `react-dom/server` under Deno
+  keeps the process alive after `app.stop()` resolves, while `deno test`'s op and resource
+  sanitizers report nothing leaked (measured by importing it alone, and by the same script with the
+  `reactRouter` arm removed exiting cleanly). A ROADMAP deliverable was **corrected rather than
+  implemented as written** (C1): it required `config/services.server.ts` to be ABSENT, but the M36c
+  skeleton emits it deliberately and its own JSDoc says what a capability replaces is the
+  module-level CACHE, not the accessor file — so the test pins the five `lib/*.server.ts` modules
+  absent AND that the accessor holds no module-level state. No `packages/` source changed) —
+  complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40. One milestone is queued behind those:
   **M54** (cloud message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm,
   so SQS/SNS, GCP Pub/Sub and Azure Service Bus are not merely absent but inexpressible).

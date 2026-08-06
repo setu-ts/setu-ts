@@ -62,6 +62,19 @@ Two consequences worth knowing:
   it is not a handle this example or the framework owns. A failed assertion still throws and exits
   non-zero before reaching that line.
 
+## What the gate does not cover
+
+`check:apps` runs no browser. Hydration, static-asset delivery and client-side navigation were
+verified manually against Chrome via Playwright when this example was written — 11/11 checks,
+including that all 8 referenced assets are served by the framework's own handler, that a `<Form>`
+submit is a client-side transition rather than a document reload, and that the session cookie is
+`HttpOnly`. Aborting the client entry bundle flips the hydration and transition checks to failing
+while the SSR content still renders, which is how that suite was shown to discriminate — and which
+also demonstrates that the login form degrades to a real POST with JavaScript disabled.
+
+That suite is not committed, for the same reason M51b's npm-client interop suite for
+`apps/graphql-demo` is manual: it needs a browser CI does not install.
+
 ## Cloudflare Workers
 
 On Workers the `assetsDir` option is omitted: there is no filesystem, so the framework registers no

@@ -3905,9 +3905,20 @@ package ecosystem, not a required Node binary. This does not unblock `apps/cloud
 on Wrangler rather than on Node.
 
 CI therefore proves the whole path — install, Vite build, kernel serving the compiled build, SSR
-HTML carrying capability data. What it does not prove is a browser: hydration and client-side
-navigation are unexercised, and `.tsx` modules are type-checked by the frontend build rather than by
-`deno check`, whose entry points are fixed at `main.ts` and `smoke.ts`.
+HTML carrying capability data. Two costs are stated rather than left to discovery: a cold CI runner
+additionally downloads the frontend toolchain (~100 npm packages, measured at 14 s), and `.tsx`
+modules are type-checked by the frontend build rather than by `deno check`, whose entry points are
+fixed at `main.ts` and `smoke.ts`.
+
+**What CI does not prove is a browser.** Hydration, static-asset delivery and client-side navigation
+were verified manually against Chrome via Playwright at implementation time — 11/11 checks: the SSR
+document carries the seeded rows before any JavaScript runs, all 8 referenced assets are served by
+the framework's own handler, React hydrates, a `<Form>` submit is a client-side transition rather
+than a document reload, and the session cookie is `HttpOnly`. The suite was shown to discriminate by
+aborting the client entry bundle, which flips the hydration and transition checks to failing while
+SSR content still renders — and incidentally proves the form degrades to a real POST without
+JavaScript. It is **not** gated, because it needs a browser CI does not install: the same reason
+M51b's npm-client interop suite for `apps/graphql-demo` is manual.
 
 ### Deliverables
 
