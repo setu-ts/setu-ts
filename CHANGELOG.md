@@ -30,6 +30,16 @@ All notable changes to this project are documented here. The format follows
   not in `ALLOW_SKIP`. No published package changed; the frontend build remains an app-level,
   build-time concern outside every published dependency graph (AI_GUIDELINES §12.2).
 
+### Changed
+
+- Node and Bun compatibility is now verified on every pull request, retiring the known limitation
+  recorded in `0.1.0-alpha.1`. The `Node compatibility` and `Bun compatibility` CI jobs were
+  placeholders blocked on the first JSR publish; they now install the published packages through
+  JSR's npm compatibility layer and run `compat/compat.test.mjs`, which boots a kernel application,
+  resolves a capability, and serves a request over a real socket on each runtime. The suite tracks
+  the latest published release rather than `HEAD`, because Node and Bun cannot resolve this repo's
+  `jsr:` and `npm:` specifiers from source.
+
 ### Fixed
 
 - Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.

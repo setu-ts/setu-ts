@@ -249,8 +249,12 @@ All runtime-specific operations must be abstracted:
 
 ### 4.5 Cross-Runtime Testing
 
-- All tests must pass on Node.js, Deno, and Bun.
-- CI must run the full test suite on all three runtimes.
+- CI must run the full test suite under Deno, against the working tree.
+- Node and Bun are verified by the separate compat suite in `compat/` (§6.4), which consumes the
+  PUBLISHED packages through JSR's npm compatibility layer. It cannot run the full suite: Node and
+  Bun resolve neither `jsr:@hono-enterprise/*` nor `npm:*` specifiers from source, so the compat
+  suite covers what only a live Node or Bun process can settle — module loading, runtime detection,
+  and the per-runtime HTTP adapters.
 - Runtime-specific tests must be guarded with `runtime.platform()` checks.
 
 ---

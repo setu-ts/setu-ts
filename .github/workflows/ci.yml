@@ -46,7 +46,7 @@ jobs:
           ALLOW_SKIP: cloudflare
 
       # One suite run, not two. `test:coverage` runs the same `packages test`
-      # paths as `deno task test` (the root `test` directory included, so
+      # paths as `deno task test` (the root `test/` directory included, so
       # `test/apps-gate.test.ts` executes on a runner) and adds instrumentation
       # on top, so a separate `Test` step only re-ran everything.
       - name: Test with coverage
@@ -73,33 +73,57 @@ jobs:
       - name: Publish dry-run
         run: deno task publish:check
 
+  # These two jobs consume the packages through JSR's npm compatibility layer
+  # and run `compat/compat.test.mjs` (AI_GUIDELINES.md §4.5). They cannot run
+  # against the working tree: cross-package specifiers are
+  # `jsr:@hono-enterprise/*` and optional heavy deps are `npm:*`, neither of
+  # which Node or Bun resolves. JSR rewrites both at publish time, so the
+  # published artifact is the unit under test.
+  #
+  # `compat/package.json` therefore depends on `latest` rather than on the
+  # workspace's own version: during a release the workspace is bumped BEFORE
+  # the publish, so pinning to it would deadlock the release PR against the
+  # publish that would fix it (the M34b drift-gate lesson). The consequence is
+  # deliberate and worth stating — these jobs gate the last release, not HEAD.
   node-compat:
-    name: Node compatibility (stub)
+    name: Node compatibility
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: compat
     steps:
       - uses: actions/checkout@v4
-      # BLOCKED ON FIRST PUBLISH. This job installs the packages via JSR's npm
-      # compatibility layer and runs the compat suite under Node
-      # (AI_GUIDELINES.md §4.5). It cannot run against the working tree:
-      # cross-package specifiers are `jsr:@hono-enterprise/*` and the optional
-      # heavy deps are imported as `npm:*`, neither of which Node resolves.
-      # JSR rewrites both at publish time, so the published artifact is the
-      # only thing that can be tested.
-      #
-      # Unblocks at the first (pre-)release publish to JSR. That must happen no
-      # later than Milestone 34, whose CLI generates `--runtime node|bun`
-      # projects that consume these packages from npm. See ROADMAP.md M34/M40.
-      - name: Placeholder
-        run: echo "Node compat suite is blocked on the first JSR publish (see comment)."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No lockfile is committed (see .gitignore): resolving `latest` on every
+      # run is the point.
+      - name: Install published packages
+        run: npm install
+
+      - name: Compat suite
+        run: npm run test:node
 
   bun-compat:
-    name: Bun compatibility (stub)
+    name: Bun compatibility
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: compat
     steps:
       - uses: actions/checkout@v4
-      # Same as node-compat, but running the compat suite under Bun.
-      - name: Placeholder
-        run: echo "Bun compat suite is blocked on the first JSR publish (see node-compat)."
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install published packages
+        run: bun install
+
+      - name: Compat suite
+        run: bun run test:bun
 
   audit:
     name: Dependency vulnerability scan

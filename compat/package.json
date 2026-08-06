@@ -1,0 +1,17 @@
+{
+  "name": "@hono-enterprise/compat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node/Bun compatibility suite: consumes the published packages through JSR's npm compatibility layer.",
+  "scripts": {
+    "test:node": "node compat.test.mjs",
+    "test:bun": "bun compat.test.mjs"
+  },
+  "dependencies": {
+    "@jsr/hono-enterprise__common": "latest",
+    "@jsr/hono-enterprise__kernel": "latest",
+    "@jsr/hono-enterprise__logger-plugin": "latest",
+    "@jsr/hono-enterprise__runtime": "latest"
+  }
+}
