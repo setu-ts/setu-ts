@@ -26,6 +26,7 @@
 15. [Git and Commit Rules](#15-git-and-commit-rules)
 16. [Review and Approval Rules](#16-review-and-approval-rules)
 17. [Violation Handling](#17-violation-handling)
+18. [Appendix: Quick Reference](#appendix-quick-reference)
 
 ---
 

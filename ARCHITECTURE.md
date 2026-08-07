@@ -33,6 +33,7 @@
 16. [Testing Strategy](#16-testing-strategy)
 17. [Extending the Framework](#17-extending-the-framework)
 18. [Future Evolution](#18-future-evolution)
+19. [Conclusion](#conclusion)
 
 ---
 
