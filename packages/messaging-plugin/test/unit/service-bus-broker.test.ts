@@ -762,15 +762,21 @@ describe('ServiceBusBroker', () => {
 describe('ServiceBusBroker — lazy SDK load', () => {
   it('connect without an injected client exercises the loadServiceBusModule() path', async () => {
     const runtime = createRuntime();
+    // A WELL-FORMED dummy connection string: the real ServiceBusClient parses it
+    // at construction, so the lazy-load AND adapt paths both run to completion.
+    // An empty string only proved that some throw happened.
     const broker = new ServiceBusBroker(runtime, {
       serialize: (v) => JSON.stringify(v),
       deserialize: (s) => JSON.parse(s),
+    }, {
+      connectionString:
+        'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=probe;SharedAccessKey=Cm9wZQ==',
     });
 
-    // The SDK module is cached in deno.lock, so loadServiceBusModule resolves.
-    // The real ServiceBusClient validates the (empty) connection string and
-    // throws — but the lazy-load + adapt paths are still covered.
-    await expect(broker.connect()).rejects.toThrow();
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
+    await broker.disconnect();
+    expect(broker.isReady()).toBe(false);
   });
 });
 
@@ -781,15 +787,26 @@ describe('loadServiceBusModule (exported)', () => {
     expect(typeof mod.loadServiceBusModule).toBe('function');
   });
 
-  it('calling loadServiceBusModule enters the real import path', async () => {
-    const { loadServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
-    // This actually calls `await import('npm:@azure/service-bus@^7')`.
-    // It either resolves (module cached in deno.lock) or rejects (module absent).
-    // Both outcomes cover the line.
-    try {
-      await loadServiceBusModule();
-    } catch {
-      // Module absent — the import line was still reached.
+  it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
+    const { loadServiceBusModule, adaptServiceBusModule } = await import(
+      '../../src/brokers/service-bus-broker.ts'
+    );
+
+    // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
+    // adapted PORT rather than just reaching the import line is what catches SDK
+    // drift: a renamed constructor throws here, and a member the adapter forgot
+    // to build is caught by name. A bare `try { await load() } catch {}` covered
+    // the line while asserting nothing and could not fail.
+    const mod = await loadServiceBusModule();
+    const port = adaptServiceBusModule(mod, {
+      connectionString:
+        'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=probe;SharedAccessKey=Cm9wZQ==',
+      adminConnectionString:
+        'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=probe;SharedAccessKey=Cm9wZQ==',
+    }) as unknown as Record<string, unknown>;
+
+    for (const member of ['send', 'open', 'createSubscription', 'deleteSubscription', 'close']) {
+      expect(typeof port[member]).toBe('function');
     }
   });
 });
@@ -1296,5 +1313,18 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
 
     await broker.disconnect();
     // disconnect() exercises: clearTimeout (cancels pending timers), close (inbox closure)
+  });
+});
+
+// A credential-less standalone construction must name the missing option.
+describe('ServiceBusBroker — missing credentials', () => {
+  it('connect() without connectionString or client names the missing option', async () => {
+    const runtime = createRuntime();
+    const broker = new ServiceBusBroker(runtime, {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    });
+
+    await expect(broker.connect()).rejects.toThrow(/requires a connectionString/);
   });
 });

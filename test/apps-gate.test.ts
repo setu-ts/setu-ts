@@ -85,7 +85,7 @@ describe('real-backend CI wiring', () => {
   it('pins ElasticMQ image and declares SQS local-region/credentials', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     // Pin the ElasticMQ image to avoid drift from `latest`
-    expect(workflow).toContain('image: softwaremill/elasticmq-native:1.0.6');
+    expect(workflow).toContain('image: softwaremill/elasticmq-native:1.7.1');
     // SQS_ENDPOINT_URL must be present for the e2e test guard
     expect(workflow).toContain('SQS_ENDPOINT_URL: http://localhost:9324');
     // AWS SDK requires region and dummy credentials for local emulator

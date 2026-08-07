@@ -152,6 +152,32 @@ export interface ServiceBusOptions {
 }
 
 /**
+ * One open receiver: the subscriber handle that stops delivery, plus the
+ * receiver whose AMQP link has to be released. Both need closing — closing only
+ * the subscriber leaves the link open until the whole client shuts down.
+ */
+interface OpenReceiver {
+  subHandle: { close(): Promise<void> };
+  receiver: IServiceBusReceiver;
+}
+
+/**
+ * Stops delivery, then releases the receiver's link.
+ *
+ * The link is released even when stopping delivery rejects: skipping it there
+ * would leak exactly the resource this function exists to reclaim.
+ *
+ * @param entry - The open receiver to close
+ */
+async function closeReceiver(entry: OpenReceiver): Promise<void> {
+  try {
+    await entry.subHandle.close();
+  } finally {
+    await entry.receiver.close();
+  }
+}
+
+/**
  * Lazily load the Azure Service Bus SDK.
  *
  * @returns The SDK module
@@ -182,7 +208,7 @@ export function adaptServiceBusModule(
 
   const senders = new Map<string, ReturnType<typeof client['createSender']>>();
   // Track multiple receiver handles per key to support duplicate opens
-  const receivers = new Map<string, { close: () => Promise<void> }[]>();
+  const receivers = new Map<string, OpenReceiver[]>();
 
   return {
     send: async (topic: string, body: string): Promise<void> => {
@@ -232,28 +258,31 @@ export function adaptServiceBusModule(
       );
 
       const key = `${topic}/${subscription}`;
-      // Track multiple handles for duplicate opens
+      // Track this call's OWN pair. Both halves matter: `subHandle.close()`
+      // stops delivery, while `receiver.close()` releases the AMQP link — the
+      // receiver used to be dropped on the floor, so every unsubscribe leaked a
+      // link until the whole client closed. Identity matters too: popping the
+      // last handle closed a SIBLING open's receiver rather than this one's.
+      const entry: OpenReceiver = { subHandle, receiver };
       const existing = receivers.get(key) ?? [];
-      existing.push(subHandle);
+      existing.push(entry);
       receivers.set(key, existing);
 
       // Await required — the SDK requires async `open` for its type contract.
       await Promise.resolve();
 
+      let closed = false;
       return {
         close: async () => {
+          if (closed) return;
+          closed = true;
           const handles = receivers.get(key);
           if (handles) {
-            // Close only this specific handle (last one in array)
-            const handle = handles.pop();
-            if (handle) {
-              await handle.close();
-            }
-            // Clean up empty array
-            if (handles.length === 0) {
-              receivers.delete(key);
-            }
+            const index = handles.indexOf(entry);
+            if (index >= 0) handles.splice(index, 1);
+            if (handles.length === 0) receivers.delete(key);
           }
+          await closeReceiver(entry);
         },
       };
     },
@@ -268,10 +297,10 @@ export function adaptServiceBusModule(
         await sender.close();
       }
       senders.clear();
-      // Close all receiver handles for each key
+      // Close every open receiver — subscriber handle AND the AMQP link.
       for (const handles of receivers.values()) {
-        for (const handle of handles) {
-          await handle.close();
+        for (const entry of handles) {
+          await closeReceiver(entry);
         }
       }
       receivers.clear();
@@ -393,6 +422,12 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (this.#injectedClient !== undefined) {
       this.#transport = this.#injectedClient;
     } else {
+      if (this.#connectionString === '') {
+        throw new Error(
+          'ServiceBusBroker requires a connectionString when no client is injected. ' +
+            'Pass `connectionString` (or an `IServiceBusTransport` as `client`).',
+        );
+      }
       const mod = await loadServiceBusModule();
       this.#transport = adaptServiceBusModule(mod, {
         connectionString: this.#connectionString,

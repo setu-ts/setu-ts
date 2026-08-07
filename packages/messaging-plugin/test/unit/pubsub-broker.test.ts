@@ -622,10 +622,11 @@ describe('GcpPubSubBroker — lazy SDK load', () => {
     const broker = new GcpPubSubBroker(runtime, {
       serialize: (v) => JSON.stringify(v),
       deserialize: (s) => JSON.parse(s),
-    });
+    }, { projectId: 'test-project' });
 
     // The SDK module is cached in deno.lock, so connect() resolves (loadPubSubModule
-    // is exercised) and the broker becomes ready. Disconnect to clean up.
+    // is exercised, and adaptPubSubModule constructs a REAL PubSub client) and the
+    // broker becomes ready. Disconnect to clean up.
     await broker.connect();
     expect(broker.isReady()).toBe(true);
     await broker.disconnect();
@@ -964,15 +965,24 @@ describe('loadPubSubModule (exported)', () => {
     expect(typeof mod.loadPubSubModule).toBe('function');
   });
 
-  it('calling loadPubSubModule enters the real import path', async () => {
-    const { loadPubSubModule } = await import('../../src/brokers/pubsub-broker.ts');
-    // This actually calls `await import('npm:@google-cloud/pubsub@^6')`.
-    // It either resolves (module cached in deno.lock) or rejects (module absent).
-    // Both outcomes cover the line.
-    try {
-      await loadPubSubModule();
-    } catch {
-      // Module absent — the import line was still reached.
+  it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
+    const { loadPubSubModule, adaptPubSubModule } = await import(
+      '../../src/brokers/pubsub-broker.ts'
+    );
+
+    // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
+    // adapted PORT rather than just reaching the import line is what catches SDK
+    // drift: a renamed constructor throws here, and a member the adapter forgot
+    // to build is caught by name. A bare `try { await load() } catch {}` covered
+    // the line while asserting nothing and could not fail.
+    const mod = await loadPubSubModule();
+    const port = adaptPubSubModule(mod, { projectId: 'test-project' }) as unknown as Record<
+      string,
+      unknown
+    >;
+
+    for (const member of ['publish', 'open', 'createSubscription', 'deleteSubscription', 'close']) {
+      expect(typeof port[member]).toBe('function');
     }
   });
 });
@@ -1084,5 +1094,20 @@ describe('C7: on(error) wires to logger', () => {
     expect(errorLoggerCalled).toBe(false);
     errorEmitter!(new Error('boom'));
     expect(errorLoggerCalled).toBe(true);
+  });
+});
+
+// A credential-less standalone construction must name the missing option rather
+// than failing later inside the SDK. The plugin's option union makes this a
+// compile error; the exported class has no such guard.
+describe('GcpPubSubBroker — missing credentials', () => {
+  it('connect() without projectId or client names the missing option', async () => {
+    const runtime = createRuntime();
+    const broker = new GcpPubSubBroker(runtime, {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    });
+
+    await expect(broker.connect()).rejects.toThrow(/requires a projectId/);
   });
 });

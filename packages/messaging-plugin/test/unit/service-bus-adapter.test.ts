@@ -795,4 +795,143 @@ describe('adaptServiceBusModule', () => {
       expect(completeCount).toBe(0);
     });
   });
+
+  describe('receiver lifecycle', () => {
+    /**
+     * Builds a module whose receivers record both close paths, so a leaked
+     * AMQP link is observable. Closing only the subscriber handle used to be
+     * the whole teardown, which left one receiver open per unsubscribe.
+     */
+    function createCountingModule() {
+      const subscriberCloses: string[] = [];
+      const receiverCloses: string[] = [];
+      const mod = {
+        ServiceBusClient: class {
+          createSender() {
+            return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+          }
+          createReceiver(topic: string, subscription: string) {
+            const id = `${topic}/${subscription}`;
+            return {
+              subscribe: () => ({
+                close: () => {
+                  subscriberCloses.push(id);
+                  return Promise.resolve();
+                },
+              }),
+              completeMessage: () => Promise.resolve(),
+              abandonMessage: () => Promise.resolve(),
+              close: () => {
+                receiverCloses.push(id);
+                return Promise.resolve();
+              },
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+        ServiceBusAdministrationClient: class {
+          createSubscription() {
+            return Promise.resolve({});
+          }
+          deleteSubscription() {
+            return Promise.resolve({});
+          }
+        },
+      } as unknown as ServiceBusSdkModule;
+      return { mod, subscriberCloses, receiverCloses };
+    }
+
+    it('closing a subscription releases the AMQP receiver, not just the subscriber', async () => {
+      const { mod, subscriberCloses, receiverCloses } = createCountingModule();
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'cs',
+        adminConnectionString: 'cs',
+      });
+
+      const sub = await transport.open('orders', 'group', () => {});
+      await sub.close();
+
+      expect(subscriberCloses).toEqual(['orders/group']);
+      // Without releasing the link, an unsubscribe leaks a receiver per call.
+      expect(receiverCloses).toEqual(['orders/group']);
+    });
+
+    it('closing one of two opens on the same subscription releases only its own receiver', async () => {
+      const { mod, receiverCloses } = createCountingModule();
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'cs',
+        adminConnectionString: 'cs',
+      });
+
+      const first = await transport.open('orders', 'group', () => {});
+      await transport.open('orders', 'group', () => {});
+      await first.close();
+
+      expect(receiverCloses.length).toBe(1);
+
+      // The sibling is still tracked, so the transport close reclaims it.
+      await transport.close();
+      expect(receiverCloses.length).toBe(2);
+    });
+
+    it('is idempotent — a second close does not re-release the receiver', async () => {
+      const { mod, receiverCloses } = createCountingModule();
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'cs',
+        adminConnectionString: 'cs',
+      });
+
+      const sub = await transport.open('orders', 'group', () => {});
+      await sub.close();
+      await sub.close();
+
+      expect(receiverCloses.length).toBe(1);
+    });
+
+    it('releases the link even when stopping delivery rejects', async () => {
+      const receiverCloses: string[] = [];
+      const mod = {
+        ServiceBusClient: class {
+          createSender() {
+            return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+          }
+          createReceiver(topic: string, subscription: string) {
+            return {
+              subscribe: () => ({
+                close: () => Promise.reject(new Error('drain failed')),
+              }),
+              completeMessage: () => Promise.resolve(),
+              abandonMessage: () => Promise.resolve(),
+              close: () => {
+                receiverCloses.push(`${topic}/${subscription}`);
+                return Promise.resolve();
+              },
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+        ServiceBusAdministrationClient: class {
+          createSubscription() {
+            return Promise.resolve({});
+          }
+          deleteSubscription() {
+            return Promise.resolve({});
+          }
+        },
+      } as unknown as ServiceBusSdkModule;
+
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'cs',
+        adminConnectionString: 'cs',
+      });
+      const sub = await transport.open('orders', 'group', () => {});
+
+      await expect(sub.close()).rejects.toThrow('drain failed');
+      expect(receiverCloses).toEqual(['orders/group']);
+    });
+  });
 });

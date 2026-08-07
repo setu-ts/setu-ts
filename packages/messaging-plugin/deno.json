@@ -13,7 +13,8 @@
         "localhost:6379"
       ],
       "sys": [
-        "hostname"
+        "hostname",
+        "osRelease"
       ]
     }
   },

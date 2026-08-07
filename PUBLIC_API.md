@@ -3059,9 +3059,11 @@ export { KafkaBroker } from '@hono-enterprise/messaging-plugin';
 export { GcpPubSubBroker } from '@hono-enterprise/messaging-plugin';
 export { ServiceBusBroker } from '@hono-enterprise/messaging-plugin';
 
-// Adapter / load helpers
+// Adapter / load helpers. The `*SdkModule` types describe the SDK shape each
+// `adapt*` consumes, so a consumer can type a substitute module.
 export { adaptPubSubModule, loadPubSubModule } from '@hono-enterprise/messaging-plugin';
 export { adaptServiceBusModule, loadServiceBusModule } from '@hono-enterprise/messaging-plugin';
+export type { PubSubSdkModule, ServiceBusSdkModule } from '@hono-enterprise/messaging-plugin';
 
 // Serializer
 export { JsonSerializer } from '@hono-enterprise/messaging-plugin';
@@ -3153,7 +3155,10 @@ Provides background job queue with Memory and Redis adapters.
 - **`SnsPublisherOptions`** — SNS publisher configuration
 - **`ISnsTransport`** — Structural SNS transport port
 - **`adaptSqsModule`** / **`loadSqsModule`** — SQS SDK adapter and lazy loader
+- **`SqsSdkModule`** — Shape of the SQS SDK module `adaptSqsModule` consumes; exported so a consumer
+  can type a substitute module
 - **`adaptSnsModule`** / **`loadSnsModule`** — SNS SDK adapter and lazy loader
+- **`SnsSdkModule`** — Shape of the SNS SDK module `adaptSnsModule` consumes
 - **`QueueBackendUnavailableError`** — Thrown when a cloud queue backend is unavailable (e.g., SQS
   on Cloudflare Workers)
 - **`SqsDelayTooLongError`** — Thrown when SQS delay exceeds 900 s

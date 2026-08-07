@@ -40,10 +40,10 @@ export type { SnsPublisherOptions } from './sns/sns-publisher.ts';
 
 // SQS adapter types
 export type { SqsQueueOptions } from './adapters/sqs-queue.ts';
-export type { ISqsTransport, SqsReceivedMessage } from './adapters/sqs-queue.ts';
+export type { ISqsTransport, SqsReceivedMessage, SqsSdkModule } from './adapters/sqs-queue.ts';
 
 // SNS transport types
-export type { ISnsTransport } from './sns/sns-publisher.ts';
+export type { ISnsTransport, SnsSdkModule } from './sns/sns-publisher.ts';
 
 // Adapter / load helpers
 export { adaptSqsModule, loadSqsModule } from './adapters/sqs-queue.ts';

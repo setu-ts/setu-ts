@@ -106,10 +106,13 @@ export interface StoredJob<T = unknown> {
   /** Timestamp when the job becomes available (ms since epoch). */
   availableAtMs: number;
   /**
-   * Opaque claim token for settlement operations.
-   * Adapters may populate this with transport-specific claim identifiers
-   * (e.g., SQS receipt handle) to prevent stale settlement.
-   * The QueueService passes this through to the adapter on settle calls.
+   * Opaque token identifying THIS delivery, set by `reserve` on adapters whose
+   * transport hands out a per-delivery claim (SQS populates it from the receipt
+   * handle). `runJob` passes it back on `ack`/`requeue`/`deadLetter` so the
+   * adapter can reject a settle belonging to a superseded delivery.
+   *
+   * Adapters with no transport-level claim (memory, redis, rabbitmq) leave it
+   * unset and ignore the argument; `runJob` then falls back to {@link id}.
    */
   claimToken?: string;
 }

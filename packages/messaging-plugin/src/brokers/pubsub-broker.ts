@@ -219,9 +219,11 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   ) {
     this.#runtime = runtime;
     this.#serializer = serializer;
-    // B3: Do not silently default projectId to empty string — the type system
-    // should prevent credential-less production usage. When client is injected,
-    // projectId is not used.
+    // Empty is a sentinel for "not supplied", checked in connect(). The plugin's
+    // option union already makes a credential-less `'pubsub'` arm a compile
+    // error, but this class is exported for standalone construction, where the
+    // type system is not in the way — and `new PubSub({ projectId: '' })` fails
+    // later with an SDK message that names neither the option nor this broker.
     this.#projectId = options?.projectId ?? '';
     this.#credentials = options?.credentials;
     this.#injectedClient = options?.client;
@@ -309,6 +311,12 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     if (this.#injectedClient !== undefined) {
       this.#transport = this.#injectedClient;
     } else {
+      if (this.#projectId === '') {
+        throw new Error(
+          'GcpPubSubBroker requires a projectId when no client is injected. ' +
+            'Pass `projectId` (or an `IPubSubTransport` as `client`).',
+        );
+      }
       const mod = await loadPubSubModule();
       this.#transport = adaptPubSubModule(mod, {
         projectId: this.#projectId,

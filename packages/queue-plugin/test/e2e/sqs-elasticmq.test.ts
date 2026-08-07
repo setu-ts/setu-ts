@@ -1,14 +1,22 @@
 /**
- * E2E test: SqsQueue against ElasticMQ (SQS-compatible backend).
+ * `SqsQueue` against a REAL SQS-compatible server (ElasticMQ).
  *
- * Guarded by SQS_ENDPOINT_URL — when the environment variable is set, the test
- * connects to the live ElasticMQ CI service (default localhost:9324) and runs
- * a real enqueue→reserve→ack round trip. When absent, the test is skipped.
+ * Guarded by `SQS_ENDPOINT_URL`; skipped when absent. CI supplies it alongside
+ * an `elasticmq-native` service container.
  *
- * Mirrors the real-backend CI pattern from M53 (redis-real-import.test.ts).
+ * This suite drives the ADAPTER directly — the `QueuePlugin` → `QueueService`
+ * wiring is covered by `test/integration/sqs-arm-integration.test.ts`. The split
+ * is deliberate and load-bearing: an adapter-level e2e stays green over a broken
+ * settle path, which is exactly what happened before that integration file
+ * existed.
+ *
+ * Queues are CREATED here rather than assumed. ElasticMQ starts empty, and its
+ * queue URLs are `<endpoint>/000000000000/<name>` — a format worth taking from
+ * `CreateQueue`'s own response rather than hand-assembling.
+ *
+ * @module
  */
-
-import { describe, it } from '@std/testing/bdd';
+import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IRuntimeServices } from '@hono-enterprise/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
@@ -33,26 +41,86 @@ function createRuntime(): IRuntimeServices {
   } as unknown as IRuntimeServices;
 }
 
-/**
- * The SQS_ENDPOINT_URL points to the ElasticMQ instance (localhost:9324).
- * When absent, all tests in this suite are skipped.
- */
 const endpoint = Deno.env.get('SQS_ENDPOINT_URL');
+/**
+ * The AWS SDK requires a region even against a local emulator, and it reads
+ * `AWS_REGION` — not `SQS_REGION`. Passing it explicitly keeps the suite
+ * independent of which name the environment happens to set.
+ */
+const region = Deno.env.get('SQS_REGION') ?? Deno.env.get('AWS_REGION') ?? 'us-east-1';
+/** ElasticMQ ignores credential values but the SDK refuses to sign without them. */
+const credentials = { accessKeyId: 'test', secretAccessKey: 'test' };
+
+/** Queue names this run owns, suffixed so repeated runs never share state. */
+const runId = crypto.randomUUID().slice(0, 8);
+const NAMES = {
+  round: `e2e-round-${runId}`,
+  alpha: `e2e-alpha-${runId}`,
+  beta: `e2e-beta-${runId}`,
+  retry: `e2e-retry-${runId}`,
+  dlqSource: `e2e-dlq-source-${runId}`,
+  dlqTarget: `e2e-dlq-target-${runId}`,
+} as const;
+
+/** Live queue URLs, filled by {@linkcode beforeAll} from `CreateQueue`. */
+const urls: Record<string, string> = {};
+
+/** Options every adapter in this suite shares. */
+function baseOptions(): { region: string; credentials: unknown; endpoint: string } {
+  return { region, credentials, endpoint: endpoint! };
+}
 
 describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
-  it('enqueue → reserve → ack round trip against live ElasticMQ', async () => {
-    const queueUrl = `${endpoint}/queue/test-e2e`;
-    const runtime = createRuntime();
+  let sqsClient: { send(command: unknown): Promise<unknown>; destroy(): void } | undefined;
+  // Command constructors are captured as `unknown`-returning factories: the
+  // suite only needs to build and send them, and the SDK's own input types
+  // demand required fields the generic form cannot express.
+  let createQueue: (name: string) => unknown;
+  let deleteQueue: (url: string) => unknown;
+  let receiveFromDlq: (url: string) => unknown;
 
-    const queue = new SqsQueue(runtime, {
-      queues: { test: queueUrl },
+  beforeAll(async () => {
+    const mod = await import('npm:@aws-sdk/client-sqs@^3');
+    createQueue = (name: string) => new mod.CreateQueueCommand({ QueueName: name });
+    deleteQueue = (url: string) => new mod.DeleteQueueCommand({ QueueUrl: url });
+    receiveFromDlq = (url: string) =>
+      new mod.ReceiveMessageCommand({
+        QueueUrl: url,
+        MaxNumberOfMessages: 1,
+        WaitTimeSeconds: 2,
+      });
+
+    sqsClient = new mod.SQSClient({
+      region,
+      credentials,
       endpoint: endpoint!,
+    }) as unknown as typeof sqsClient;
+
+    for (const name of Object.values(NAMES)) {
+      const result = await sqsClient!.send(createQueue(name)) as { QueueUrl?: string };
+      expect(result.QueueUrl).toBeDefined();
+      urls[name] = result.QueueUrl!;
+    }
+  });
+
+  afterAll(async () => {
+    if (!sqsClient) return;
+    for (const url of Object.values(urls)) {
+      await sqsClient.send(deleteQueue(url));
+    }
+    sqsClient.destroy();
+  });
+
+  it('enqueue → reserve → ack round trip against live ElasticMQ', async () => {
+    const runtime = createRuntime();
+    const queue = new SqsQueue(runtime, {
+      queues: { test: urls[NAMES.round]! },
+      ...baseOptions(),
     });
 
     await queue.connect();
     expect(queue.isReady()).toBe(true);
 
-    // Enqueue a message
     await queue.enqueue({
       id: 'job-1',
       name: 'test',
@@ -62,15 +130,15 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
       availableAtMs: 0,
     });
 
-    // Reserve it back
     const jobs = await queue.reserve<{ hello: string }>('test', 1, runtime.now());
     expect(jobs.length).toBe(1);
-    expect(jobs[0].data).toEqual({ hello: 'world' });
+    expect(jobs[0]!.id).toBe('job-1');
+    expect(jobs[0]!.data).toEqual({ hello: 'world' });
+    // First delivery, straight from the platform's ApproximateReceiveCount.
+    expect(jobs[0]!.attempts).toBe(1);
 
-    // Ack (delete) it
-    await queue.ack('test', jobs[0].id, jobs[0].claimToken ?? jobs[0].id);
+    await queue.ack('test', jobs[0]!.id, jobs[0]!.claimToken ?? jobs[0]!.id);
 
-    // Verify queue is empty now
     const remaining = await queue.reserve('test', 1, runtime.now());
     expect(remaining.length).toBe(0);
 
@@ -78,19 +146,15 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
     expect(queue.isReady()).toBe(false);
   });
 
-  it('two queues remain isolated', async () => {
+  it('two job names remain isolated on their own queues', async () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
-      queues: {
-        alpha: `${endpoint}/queue/test-e2e-alpha`,
-        beta: `${endpoint}/queue/test-e2e-beta`,
-      },
-      endpoint: endpoint!,
+      queues: { alpha: urls[NAMES.alpha]!, beta: urls[NAMES.beta]! },
+      ...baseOptions(),
     });
 
     await queue.connect();
 
-    // Enqueue in alpha only
     await queue.enqueue({
       id: 'alpha-1',
       name: 'alpha',
@@ -100,30 +164,30 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
       availableAtMs: 0,
     });
 
-    // Beta should be empty
     const betaJobs = await queue.reserve('beta', 1, runtime.now());
     expect(betaJobs.length).toBe(0);
 
-    // Alpha should have the message
     const alphaJobs = await queue.reserve('alpha', 1, runtime.now());
     expect(alphaJobs.length).toBe(1);
-    expect(alphaJobs[0].data).toEqual({ from: 'alpha' });
+    expect(alphaJobs[0]!.data).toEqual({ from: 'alpha' });
 
-    await queue.ack('alpha', alphaJobs[0].id, alphaJobs[0].claimToken ?? alphaJobs[0].id);
+    await queue.ack('alpha', alphaJobs[0]!.id, alphaJobs[0]!.claimToken ?? alphaJobs[0]!.id);
     await queue.disconnect();
   });
 
-  it('visibility retry: attempts progress 1→2', async () => {
+  it('requeue shortens the claim so the job returns with a higher attempt count', async () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
-      queues: { retry: `${endpoint}/queue/test-e2e-retry` },
-      endpoint: endpoint!,
-      visibilityTimeoutSeconds: 2, // Short visibility so we can expire quickly
+      queues: { retry: urls[NAMES.retry]! },
+      ...baseOptions(),
+      // Long claim, so only the explicit requeue can make the job visible again
+      // — otherwise a lapsing visibility window would produce the same result
+      // and the test would not be measuring `requeue` at all.
+      visibilityTimeoutSeconds: 60,
     });
 
     await queue.connect();
 
-    // Enqueue
     await queue.enqueue({
       id: 'retry-1',
       name: 'retry',
@@ -133,66 +197,80 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
       availableAtMs: 0,
     });
 
-    // First reserve — attempts ≈ 1
-    const jobs1 = await queue.reserve('retry', 1, runtime.now());
-    expect(jobs1.length).toBe(1);
-    // Do NOT ack — let visibility expire
+    const first = await queue.reserve('retry', 1, runtime.now());
+    expect(first.length).toBe(1);
+    expect(first[0]!.attempts).toBe(1);
 
-    // Wait for visibility to expire
-    await new Promise((r) => setTimeout(r, 3000));
+    // Release the claim now rather than in 60 s.
+    await queue.requeue(
+      'retry',
+      first[0]!.id,
+      runtime.now(),
+      2,
+      first[0]!.claimToken ?? first[0]!.id,
+    );
 
-    // Second reserve — same job reappears with attempts ≈ 2
-    const jobs2 = await queue.reserve('retry', 1, runtime.now());
-    expect(jobs2.length).toBe(1);
-    // ElasticMQ reports ApproximateReceiveCount on reserve
-    expect(jobs2[0].attempts).toBeGreaterThanOrEqual(2);
+    const second = await queue.reserve('retry', 1, runtime.now());
+    expect(second.length).toBe(1);
+    expect(second[0]!.id).toBe('retry-1');
+    // The count is the platform's, and it advanced on redelivery.
+    expect(second[0]!.attempts).toBe(2);
 
-    // Clean up
-    await queue.ack('retry', jobs2[0].id, jobs2[0].claimToken ?? jobs2[0].id);
+    await queue.ack('retry', second[0]!.id, second[0]!.claimToken ?? second[0]!.id);
     await queue.disconnect();
   });
 
-  it('exhaust maxAttempts → DLQ receives original body', async () => {
+  it('deadLetter moves the body to the DLQ and clears the source', async () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
-      queues: { 'dlq-test': `${endpoint}/queue/test-e2e-dlq-source` },
-      deadLetterQueues: { 'dlq-test': `${endpoint}/queue/test-e2e-dlq-target` },
-      endpoint: endpoint!,
-      visibilityTimeoutSeconds: 2,
+      queues: { 'dlq-test': urls[NAMES.dlqSource]! },
+      deadLetterQueues: { 'dlq-test': urls[NAMES.dlqTarget]! },
+      ...baseOptions(),
+      visibilityTimeoutSeconds: 5,
     });
 
     await queue.connect();
 
-    const originalBody = { original: 'body-data' };
     await queue.enqueue({
       id: 'dlq-1',
       name: 'dlq-test',
-      data: originalBody,
+      data: { original: 'body-data' },
       attempts: 0,
-      maxAttempts: 1, // Max 1 attempt → DLQ on failure
+      maxAttempts: 1,
       availableAtMs: 0,
     });
 
-    // Reserve (attempt 1) — do NOT ack
     const jobs = await queue.reserve('dlq-test', 1, runtime.now());
     expect(jobs.length).toBe(1);
 
-    // Manually dead-letter the job (simulates processor failure after max attempts)
-    await queue.deadLetter('dlq-test', jobs[0].id, runtime.now(), jobs[0].claimToken ?? jobs[0].id);
+    await queue.deadLetter(
+      'dlq-test',
+      jobs[0]!.id,
+      runtime.now(),
+      jobs[0]!.claimToken ?? jobs[0]!.id,
+    );
 
-    // Wait a tick for DLQ delivery
-    await new Promise((r) => setTimeout(r, 500));
+    // The body must actually arrive on the DLQ — the previous version of this
+    // test only checked that `deadLetter` did not throw.
+    const received = await sqsClient!.send(
+      receiveFromDlq(urls[NAMES.dlqTarget]!),
+    ) as { Messages?: { Body?: string }[] };
 
-    // DLQ should contain the original body
-    await queue.reserve('dlq-test-dlq', 1, runtime.now());
-    // DLQ messages may not be immediately available depending on timing
-    // but the deadLetter call succeeded without error
+    expect(received.Messages?.length).toBe(1);
+    const envelope = JSON.parse(received.Messages![0]!.Body!) as {
+      id: string;
+      name: string;
+      data: { original: string };
+    };
+    expect(envelope.id).toBe('dlq-1');
+    expect(envelope.name).toBe('dlq-test');
+    expect(envelope.data).toEqual({ original: 'body-data' });
 
-    // Clean up best-effort
-    try {
-      await queue.disconnect();
-    } catch {
-      // Ignore disconnect errors in E2E
-    }
+    // And the source claim is settled: nothing comes back after the window.
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    const sourceAfter = await queue.reserve('dlq-test', 1, runtime.now());
+    expect(sourceAfter.length).toBe(0);
+
+    await queue.disconnect();
   });
 });

@@ -900,12 +900,21 @@ describe('loadSqsModule (exported)', () => {
     expect(typeof mod.loadSqsModule).toBe('function');
   });
 
-  it('calling loadSqsModule enters the real import path', async () => {
-    const { loadSqsModule } = await import('../../src/adapters/sqs-queue.ts');
-    try {
-      await loadSqsModule();
-    } catch {
-      // Module absent — the import line was still reached.
+  it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
+    const { loadSqsModule, adaptSqsModule } = await import(
+      '../../src/adapters/sqs-queue.ts'
+    );
+
+    // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
+    // adapted PORT rather than just reaching the import line is what catches SDK
+    // drift: a renamed constructor throws here, and a member the adapter forgot
+    // to build is caught by name. A bare `try { await load() } catch {}` covered
+    // the line while asserting nothing and could not fail.
+    const mod = await loadSqsModule();
+    const port = adaptSqsModule(mod, { region: 'us-east-1' }) as unknown as Record<string, unknown>;
+
+    for (const member of ['send', 'receive', 'delete', 'changeVisibility', 'close']) {
+      expect(typeof port[member]).toBe('function');
     }
   });
 });

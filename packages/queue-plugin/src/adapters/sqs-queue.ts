@@ -447,7 +447,11 @@ export class SqsQueue implements QueueAdapter {
     name: string,
     id: string,
     availableAtMs: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- attempts is unused by SQS; the count comes from ApproximateReceiveCount.
+    // Unused by this adapter, and it cannot be otherwise: an SQS message body
+    // is immutable, so `ChangeMessageVisibility` has nowhere to carry a new
+    // attempt count. `reserve` reads the authoritative count from the
+    // platform's `ApproximateReceiveCount` instead. The parameter stays to
+    // satisfy the shared `QueueAdapter` seam.
     _attempts: number,
     claimToken: string,
   ): Promise<void> {

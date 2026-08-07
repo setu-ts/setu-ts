@@ -57,6 +57,15 @@ export async function runJob<T>(
     attempts: storedJob.attempts,
   };
 
+  // The claim token identifies THIS delivery, so an adapter can reject a settle
+  // that belongs to a superseded one. Adapters with no transport-level claim
+  // (memory, redis, rabbitmq) leave `claimToken` unset and ignore the argument,
+  // so the job id is a serviceable stand-in; SQS sets it in `reserve` and
+  // validates it on every settle. Passing the id unconditionally made every SQS
+  // settle fail its own claim check, so nothing was ever deleted, requeued, or
+  // dead-lettered.
+  const claimToken = storedJob.claimToken ?? storedJob.id;
+
   // Execute the processor - if it fails, requeue or dead-letter
   try {
     await processor(job);
@@ -79,7 +88,7 @@ export async function runJob<T>(
         storedJob.id,
         availableAtMs,
         nextAttempts,
-        storedJob.id,
+        claimToken,
       );
       return;
     } else {
@@ -90,11 +99,11 @@ export async function runJob<T>(
         attempts: storedJob.attempts,
         maxAttempts: storedJob.maxAttempts,
       });
-      await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now(), storedJob.id);
+      await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now(), claimToken);
       return;
     }
   }
 
   // Success: acknowledge (outside the try/catch so ack errors don't trigger requeue)
-  await adapter.ack(storedJob.name, storedJob.id, storedJob.id);
+  await adapter.ack(storedJob.name, storedJob.id, claimToken);
 }

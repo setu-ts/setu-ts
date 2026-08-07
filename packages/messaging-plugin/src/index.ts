@@ -50,7 +50,9 @@ export { ServiceBusBroker } from './brokers/service-bus-broker.ts';
 
 // Adapter / load helpers
 export { adaptPubSubModule, loadPubSubModule } from './brokers/pubsub-broker.ts';
+export type { PubSubSdkModule } from './brokers/pubsub-broker.ts';
 export { adaptServiceBusModule, loadServiceBusModule } from './brokers/service-bus-broker.ts';
+export type { ServiceBusSdkModule } from './brokers/service-bus-broker.ts';
 
 // Serializer
 export { JsonSerializer } from './serializers/json-serializer.ts';

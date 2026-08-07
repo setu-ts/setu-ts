@@ -29,11 +29,14 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       elasticmq:
-        image: softwaremill/elasticmq-native:1.0.6
+        image: softwaremill/elasticmq-native:1.7.1
         ports:
           - 9324:9324
+        # The image ships neither curl nor a 2xx-answering root path — ElasticMQ
+        # returns 400 to a bare GET / — so an HTTP probe can never pass. `nc` is
+        # present and a port check is what readiness actually means here.
         options: >-
-          --health-cmd "curl -sf http://localhost:9324/ || exit 1"
+          --health-cmd "nc -z localhost 9324 || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
