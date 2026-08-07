@@ -17,8 +17,7 @@ export function generateHealthIndicator(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents =
-    `import type { HealthCheckResult, IHealthIndicator } from '@hono-enterprise/common';
+  const contents = `import type { HealthCheckResult, IHealthIndicator } from '@setu-ts/common';
 
 /**
  * Reports the health of the ${names.kebab} dependency.

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { MetricConfig } from '@hono-enterprise/common';
+import type { MetricConfig } from '@setu-ts/common';
 
 /**
  * A metric instance in the registry.

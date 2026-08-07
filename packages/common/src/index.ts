@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Shared types, interfaces, and capability tokens for the Hono Enterprise
+ * Shared types, interfaces, and capability tokens for the Setu-TS
  * framework. This package has zero dependencies and no runtime behavior
  * beyond constants and pure type utilities.
  *

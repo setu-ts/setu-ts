@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { IWorkerHandle, IWorkerHost } from '@hono-enterprise/common';
+import type { IWorkerHandle, IWorkerHost } from '@setu-ts/common';
 import { Worker as NodeThreadWorker } from 'node:worker_threads';
 import { availableParallelism as osAvailableParallelism } from 'node:os';
 

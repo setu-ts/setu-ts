@@ -11,7 +11,7 @@ import type {
   ISubscription,
   RealtimeFrame,
   RealtimeFrameHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { dispatchFrame } from './dispatch.ts';
 
 /**

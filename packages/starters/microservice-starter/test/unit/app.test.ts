@@ -5,11 +5,11 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { buildMicroservicePlugins, createMicroserviceApp } from '../../src/index.ts';
 import type { MicroserviceStarterOptions } from '../../src/options.ts';
-import { CAPABILITIES, type IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES, type IPlugin } from '@setu-ts/common';
 // Imported via the bare specifier, the same way `src/app.ts` imports it,
 // so this test also exercises the cross-starter specifier the published package
 // depends on — a relative path into the sibling package would not.
-import { buildRestPlugins } from '@hono-enterprise/rest-starter';
+import { buildRestPlugins } from '@setu-ts/rest-starter';
 
 describe('microservice-starter / buildMicroservicePlugins', () => {
   it('is a superset of REST set', () => {

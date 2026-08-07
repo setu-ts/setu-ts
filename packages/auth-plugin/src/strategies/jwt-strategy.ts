@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IAuthStrategy, IJwtService, IPrincipal, IRequest } from '@hono-enterprise/common';
+import type { IAuthStrategy, IJwtService, IPrincipal, IRequest } from '@setu-ts/common';
 
 /**
  * JWT strategy options.

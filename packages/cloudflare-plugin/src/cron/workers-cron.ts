@@ -23,7 +23,7 @@
  * @module
  */
 
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 import type { IScheduledController } from '../bindings/facades.ts';
 
 /**

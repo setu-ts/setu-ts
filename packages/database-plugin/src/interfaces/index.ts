@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
 
 // Re-export query option types so consumers don't need internal paths.
@@ -237,7 +237,7 @@ export interface BuiltInDatabaseOptions extends DatabaseConnectionOptions {
  *
  * @example
  * ```typescript
- * import { D1Adapter } from '@hono-enterprise/cloudflare-plugin';
+ * import { D1Adapter } from '@setu-ts/cloudflare-plugin';
  *
  * app.register(DatabasePlugin({
  *   type: 'custom',

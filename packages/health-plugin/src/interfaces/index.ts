@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IHealthIndicator } from '@hono-enterprise/common';
+import type { IHealthIndicator } from '@setu-ts/common';
 
 /**
  * Options for configuring the health plugin endpoints.

@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { ILifecycleApi, IRequestContext } from '@hono-enterprise/common';
+import type { ILifecycleApi, IRequestContext } from '@setu-ts/common';
 
 /** A recorded lifecycle hook keyed by phase. */
 export type LifecycleHook =

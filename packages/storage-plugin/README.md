@@ -1,4 +1,4 @@
-# @hono-enterprise/storage-plugin
+# @setu-ts/storage-plugin
 
 File and object storage. Registers an `IStorage` under `CAPABILITIES.STORAGE` (`'storage'`).
 
@@ -9,18 +9,14 @@ Five providers ship: `MemoryProvider` (zero-dependency default), `LocalStoragePr
 ## Installation
 
 ```typescript
-import { StoragePlugin } from '@hono-enterprise/storage-plugin';
+import { StoragePlugin } from '@setu-ts/storage-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import {
-  createUploadMiddleware,
-  getUploadedFile,
-  StoragePlugin,
-} from '@hono-enterprise/storage-plugin';
-import { CAPABILITIES, type IStorage } from '@hono-enterprise/common';
+import { createUploadMiddleware, getUploadedFile, StoragePlugin } from '@setu-ts/storage-plugin';
+import { CAPABILITIES, type IStorage } from '@setu-ts/common';
 
 app.register(StoragePlugin({
   provider: 's3',
@@ -75,4 +71,4 @@ The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wir
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

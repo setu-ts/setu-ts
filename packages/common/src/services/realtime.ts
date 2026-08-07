@@ -10,7 +10,7 @@
  *
  * The port lives in `common` because two plugins consume it and no plugin may
  * import another. The transports that implement it live in
- * `@hono-enterprise/realtime-backplane-plugin`, which registers one under
+ * `@setu-ts/realtime-backplane-plugin`, which registers one under
  * `CAPABILITIES.REALTIME_BACKPLANE`; a consumer resolves that token optionally
  * and falls back to purely in-process behavior when it is absent.
  *

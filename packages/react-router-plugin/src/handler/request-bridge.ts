@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { HandlerResult } from '@hono-enterprise/common';
+import type { HandlerResult } from '@setu-ts/common';
 import type {
   IRequestContext,
   PopulateLoadContext,

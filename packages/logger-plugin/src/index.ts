@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Structured logging plugin for the Hono Enterprise framework.
+ * Structured logging plugin for the Setu-TS framework.
  *
  * Provides three logger implementations — `ConsoleLogger`, `PinoLogger`,
  * and `NoopLogger` — and automatic request/response logging middleware,

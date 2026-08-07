@@ -11,7 +11,7 @@ import type {
   RuntimePlatform,
   StatResult,
   TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /** Normalizes a path to a leading-slash, no-trailing-slash form. */
 function normalizePath(path: string): string {

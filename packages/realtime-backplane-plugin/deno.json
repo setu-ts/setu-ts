@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/realtime-backplane-plugin",
+  "name": "@setu-ts/realtime-backplane-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",

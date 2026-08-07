@@ -72,8 +72,8 @@ describe('documentation gate — swallowed headings', () => {
 
 describe('documentation gate — anchors', () => {
   it('derives a renderer anchor from heading text', () => {
-    expect(anchorFor('API Reference: @hono-enterprise/common')).toBe(
-      'api-reference-hono-enterprisecommon',
+    expect(anchorFor('API Reference: @setu-ts/common')).toBe(
+      'api-reference-setu-tscommon',
     );
     expect(anchorFor('createApplication()')).toBe('createapplication');
     expect(anchorFor('Feature Flags')).toBe('feature-flags');

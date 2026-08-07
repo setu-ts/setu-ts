@@ -14,8 +14,8 @@
 
 import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import {
@@ -23,7 +23,7 @@ import {
   type GrpcServiceDefinition,
   type IGrpcService,
   type IHealthService,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
 
 const REFLECTION_PATH = '/grpc/grpc.reflection.v1.ServerReflection/ServerReflectionInfo';

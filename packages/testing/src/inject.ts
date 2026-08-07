@@ -1,4 +1,4 @@
-import type { IKernelApplication, InjectRequest, InjectResponse } from '@hono-enterprise/kernel';
+import type { IKernelApplication, InjectRequest, InjectResponse } from '@setu-ts/kernel';
 
 /**
  * Parsed body returned by {@linkcode collectStream}.
@@ -134,7 +134,7 @@ async function normalizeWebRequest(request: Request): Promise<InjectRequest> {
  *
  * @example
  * ```typescript
- * import { inject } from '@hono-enterprise/testing';
+ * import { inject } from '@setu-ts/testing';
  *
  * // String shorthand (GET only)
  * const res = await inject(app, '/users');

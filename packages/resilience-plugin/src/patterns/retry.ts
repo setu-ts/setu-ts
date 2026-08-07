@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { ResilientCall, RetryPolicy } from '@hono-enterprise/common';
+import type { ResilientCall, RetryPolicy } from '@setu-ts/common';
 import type { ITimers } from '../interfaces/index.ts';
 import { abortReasonOf, throwIfAborted } from './abort.ts';
 

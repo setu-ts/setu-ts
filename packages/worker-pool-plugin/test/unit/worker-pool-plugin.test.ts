@@ -6,8 +6,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IWorkerPool } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IWorkerPool } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { WorkerPoolPlugin } from '../../src/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';

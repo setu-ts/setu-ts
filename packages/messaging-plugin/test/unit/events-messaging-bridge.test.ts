@@ -1,8 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { EventsMessagingBridge } from '../../src/bridge/events-messaging-bridge.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IPluginContext, IRuntimeServices } from '@setu-ts/common';
 
 /**
  * Fake implementations for testing EventsMessagingBridge.

@@ -2,13 +2,13 @@
  * In-memory database adapter — zero external dependencies, used for
  * testing and lightweight scenarios.
  *
- * Implements {@linkcode IDatabaseAdapter} from `@hono-enterprise/common` and
+ * Implements {@linkcode IDatabaseAdapter} from `@setu-ts/common` and
  * provides a simple key-value store per entity type with per-transaction
  * overlay semantics (buffered creates, update shadows, delete tombstones).
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,

@@ -14,8 +14,8 @@ import type {
   JobProcessor,
   ProcessOptions,
   RecurringOptions,
-} from '@hono-enterprise/common';
-import type { HealthIndicatorFn, IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { HealthIndicatorFn, IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { QueueAdapter } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { runJob } from '../processors/job-processor.ts';

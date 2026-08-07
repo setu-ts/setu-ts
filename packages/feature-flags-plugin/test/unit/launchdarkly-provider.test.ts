@@ -11,7 +11,7 @@ import {
   toLaunchDarklyContext,
 } from '../../src/providers/launchdarkly-provider.ts';
 import { LaunchDarklyModuleError } from '../../src/providers/launchdarkly-module.ts';
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 import { FakeLaunchDarklyClient, FakeLaunchDarklyModule } from '../fixtures/fake-launchdarkly.ts';
 
 /** Lets pending background refills settle before asserting on the cache. */

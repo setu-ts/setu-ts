@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createMicroserviceApp } from '../../src/index.ts';
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 describe('microservice-starter / integration', () => {
   it('route handler returns expected body via inject()', async () => {
@@ -29,8 +29,8 @@ describe('microservice-starter / integration', () => {
     const response = await app.inject({ method: 'GET', url: '/throw-route' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://hono-enterprise.dev/errors/500"
-    expect(response.body).toContain('"type":"https://hono-enterprise.dev/errors/500"');
+    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
+    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"route error"');
     expect(response.body).not.toContain('"message":');
@@ -51,8 +51,8 @@ describe('microservice-starter / integration', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://hono-enterprise.dev/errors/500"
-    expect(response.body).toContain('"type":"https://hono-enterprise.dev/errors/500"');
+    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
+    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"middleware error"');
     expect(response.body).not.toContain('"message":');

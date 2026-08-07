@@ -252,7 +252,7 @@ describe('buildBunHost — the default host', () => {
     // through injected modules below, which also assert argument translation.
     const bytes = host.readFile('packages/runtime/deno.json');
     expect(bytes).not.toBeNull();
-    expect(new TextDecoder().decode(bytes!)).toContain('@hono-enterprise/runtime');
+    expect(new TextDecoder().decode(bytes!)).toContain('@setu-ts/runtime');
 
     const info = host.stat('packages/runtime/deno.json')!;
     expect(info.isFile).toBe(true);

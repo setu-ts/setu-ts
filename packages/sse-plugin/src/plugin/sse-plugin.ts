@@ -11,9 +11,9 @@ import type {
   IPluginContext,
   IRealtimeBackplane,
   ISseService,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 // IRuntimeServices type used via ctx.runtime (non-optional property)
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseService } from '../services/sse-service.ts';
 
@@ -28,7 +28,7 @@ const PLUGIN_NAME = 'sse-plugin';
  *
  * @example
  * ```typescript
- * import { SsePlugin } from '@hono-enterprise/sse-plugin';
+ * import { SsePlugin } from '@setu-ts/sse-plugin';
  *
  * app.register(SsePlugin({ heartbeatMs: 15000 }));
  * ```
@@ -64,7 +64,7 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         // line without fanning anything out.
         ctx.logger?.info(
           'sse: channels broadcast in-process only. Register RealtimeBackplanePlugin ' +
-            "from @hono-enterprise/realtime-backplane-plugin with a 'redis' or " +
+            "from @setu-ts/realtime-backplane-plugin with a 'redis' or " +
             "'messaging' transport to fan out across replicas.",
         );
       }

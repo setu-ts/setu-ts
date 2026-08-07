@@ -1,9 +1,9 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import type { IDatabaseService, IRepository } from '@hono-enterprise/database-plugin';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IDatabaseService, IRepository } from '@setu-ts/database-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 export interface Note {
   readonly id: string;

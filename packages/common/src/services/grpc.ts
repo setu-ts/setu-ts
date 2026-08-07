@@ -84,8 +84,8 @@ export interface ServiceImpl<TMethod = unknown> {
  *
  * @example
  * ```typescript
- * import { CAPABILITIES } from '@hono-enterprise/common';
- * import { GrpcService } from '@hono-enterprise/grpc-plugin';
+ * import { CAPABILITIES } from '@setu-ts/common';
+ * import { GrpcService } from '@setu-ts/grpc-plugin';
  *
  * const grpc = ctx.services.get<IGrpcService>(CAPABILITIES.GRPC);
  * grpc.addService(MyService, impl);

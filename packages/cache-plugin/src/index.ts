@@ -69,9 +69,9 @@ export type { CacheMiddlewareOptions } from './interfaces/index.ts';
 /** Serializable cached response payload stored in the cache backend. */
 export type { CachedResponsePayload } from './interfaces/index.ts';
 
-// ── Re-exported from @hono-enterprise/common ────────────────────────────────
+// ── Re-exported from @setu-ts/common ────────────────────────────────
 
 /**
  * The committed cache store interface (5 methods: get, set, delete, has, clear).
  */
-export type { ICacheStore } from '@hono-enterprise/common';
+export type { ICacheStore } from '@setu-ts/common';

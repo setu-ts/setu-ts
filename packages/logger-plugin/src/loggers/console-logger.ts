@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ILogger, IRuntimeServices, LogLevel, LogMetadata } from '@hono-enterprise/common';
+import type { ILogger, IRuntimeServices, LogLevel, LogMetadata } from '@setu-ts/common';
 
 /**
  * Numeric severity ranking. Lower numbers are more severe (so a configured

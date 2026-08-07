@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 // deno-lint-ignore no-explicit-any
 type Any = any;
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { SsrRuntime } from '../../src/interfaces/index.ts';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';

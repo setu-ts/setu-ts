@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { IPlugin, IPluginContext, IValidationService } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext, IValidationService } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { ValidationService } from '../services/validation-service.ts';
 import type { ErrorFormat, ValidationErrorFormatter } from '../formatters/error-formatter.ts';
@@ -66,7 +66,7 @@ const PLUGIN_NAME = 'validation-plugin';
  *
  * @example
  * ```typescript
- * import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
+ * import { ValidationPlugin } from '@setu-ts/validation-plugin';
  *
  * app.register(ValidationPlugin({
  *   errorFormat: 'rfc7807',

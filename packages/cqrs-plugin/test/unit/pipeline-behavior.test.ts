@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { composePipeline } from '../../src/behaviors/pipeline-behavior.ts';
-import type { IPipelineBehavior } from '@hono-enterprise/common';
+import type { IPipelineBehavior } from '@setu-ts/common';
 
 describe('composePipeline', () => {
   it('should call the terminal handler when no behaviors are provided', async () => {

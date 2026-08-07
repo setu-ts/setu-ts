@@ -38,10 +38,10 @@ describe('controller schematic', () => {
 
   it('imports the decorators it uses as values and the types as types', () => {
     expect(file.contents).toContain(
-      "import { Controller, Get, Post } from '@hono-enterprise/decorator-plugin';",
+      "import { Controller, Get, Post } from '@setu-ts/decorator-plugin';",
     );
     expect(file.contents).toContain(
-      "import type { HandlerResult, IRequestContext } from '@hono-enterprise/common';",
+      "import type { HandlerResult, IRequestContext } from '@setu-ts/common';",
     );
   });
 });

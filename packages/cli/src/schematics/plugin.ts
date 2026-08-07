@@ -18,8 +18,8 @@ export function generatePlugin(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import { createCapabilityToken } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+  const contents = `import { createCapabilityToken } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 /** Capability token this plugin provides. */
 export const ${names.screaming} = createCapabilityToken('${names.kebab}');

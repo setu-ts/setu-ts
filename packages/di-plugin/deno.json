@@ -1,9 +1,9 @@
 {
-  "name": "@hono-enterprise/di-plugin",
+  "name": "@setu-ts/di-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.4"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.4"
   }
 }

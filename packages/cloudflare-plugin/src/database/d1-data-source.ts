@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { IDataSource, NormalizedQuery } from '@hono-enterprise/common';
+import type { IDataSource, NormalizedQuery } from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import type { D1Statement, D1Target } from './d1-sql.ts';

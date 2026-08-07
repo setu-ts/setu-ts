@@ -1,7 +1,7 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IDatabaseService } from '@hono-enterprise/database-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
 
-import { createApp } from './honoe.config.ts';
+import { createApp } from './setu.config.ts';
 import { seedProducts } from '~/services/products.server.ts';
 
 const app = await createApp();

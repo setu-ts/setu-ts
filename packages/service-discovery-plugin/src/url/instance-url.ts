@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ServiceInstance } from '@hono-enterprise/common';
+import type { ServiceInstance } from '@setu-ts/common';
 
 /**
  * Formats an instance as an absolute URL.

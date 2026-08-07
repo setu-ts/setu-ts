@@ -1,7 +1,7 @@
 /**
  * The schematic contract and the built-in schematic registry.
  *
- * This module is the single source `honoe generate` and the help text read —
+ * This module is the single source `setu generate` and the help text read —
  * schematic names, their factories, and their plugin gates are declared here
  * and nowhere else.
  *
@@ -35,7 +35,7 @@ export type { DerivedNames } from '../utils/names.ts';
 export interface SchematicOptions {
   /** The project's runtime target, so a schematic can shape platform-specific output. */
   readonly runtime: TargetRuntime;
-  /** The `@hono-enterprise` packages detected in the target project. */
+  /** The `@setu-ts` packages detected in the target project. */
   readonly plugins: ReadonlySet<string>;
   /**
    * Wall-clock milliseconds, injected so timestamped output (the migration
@@ -63,12 +63,12 @@ export type Schematic = (
 export interface SchematicMetadata {
   /** The schematic's implementation. */
   readonly factory: Schematic;
-  /** The `@hono-enterprise` package that must be installed, when gated. */
+  /** The `@setu-ts` package that must be installed, when gated. */
   readonly requiresPlugin?: string;
 }
 
 /**
- * The built-in schematics, keyed by the name `honoe generate` accepts.
+ * The built-in schematics, keyed by the name `setu generate` accepts.
  *
  * A `Map` rather than an object literal so that a lookup of an inherited
  * property name (`constructor`, `__proto__`, `toString`) misses cleanly

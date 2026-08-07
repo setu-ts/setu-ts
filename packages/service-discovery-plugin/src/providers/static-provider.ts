@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@hono-enterprise/common';
+import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, StaticServiceDefinition } from '../interfaces/index.ts';
 
 /**

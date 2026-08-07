@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/decorator-plugin",
+  "name": "@setu-ts/decorator-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",
@@ -7,6 +7,6 @@
     "experimentalDecorators": true
   },
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.4"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.4"
   }
 }

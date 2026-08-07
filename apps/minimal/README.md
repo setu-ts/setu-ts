@@ -1,6 +1,6 @@
 # Minimal example
 
-The smallest Hono Enterprise application: the kernel, the runtime plugin, and one route.
+The smallest Setu-TS application: the kernel, the runtime plugin, and one route.
 
 ```bash
 cd apps/minimal

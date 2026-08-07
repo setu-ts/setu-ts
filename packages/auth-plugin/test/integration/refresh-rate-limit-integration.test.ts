@@ -16,7 +16,7 @@ import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { rateLimitMiddleware } from '../../src/middleware/rate-limit-middleware.ts';
 import { RefreshTokenService } from '../../src/services/refresh-token-service.ts';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
   IJwtService,
@@ -26,7 +26,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 type FakeRuntime = ReturnType<typeof createFakeRuntime>;

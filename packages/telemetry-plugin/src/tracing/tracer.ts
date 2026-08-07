@@ -6,7 +6,7 @@
  */
 
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
-import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@hono-enterprise/common';
+import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@setu-ts/common';
 import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 import { createSpanProcessor } from '../services/span-processor-factory.ts';

@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { MiddlewareFunction } from '@hono-enterprise/common';
+import type { MiddlewareFunction } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
 import { parseMultipart } from '../multipart/multipart-parser.ts';
 

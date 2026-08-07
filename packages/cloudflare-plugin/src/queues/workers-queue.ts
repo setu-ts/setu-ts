@@ -18,7 +18,7 @@ import type {
   JobProcessor,
   ProcessOptions,
   RecurringOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { LoggerSource } from '../background/wait-until.ts';
 import type { IQueueMessage, IQueueMessageBatch, IQueueProducer } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';

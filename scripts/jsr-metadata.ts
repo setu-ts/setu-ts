@@ -76,7 +76,7 @@ const NO_EDGE: RuntimeCompat = {
 /**
  * The settings applied to every published package.
  *
- * Keys are JSR package names within the `@hono-enterprise` scope, and
+ * Keys are JSR package names within the `@setu-ts` scope, and
  * `set-jsr-metadata.ts` fails when this map and `PUBLISHED_PACKAGES` disagree,
  * so a new package cannot be published with an empty page by omission.
  */
@@ -84,7 +84,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
   // ── Core ──────────────────────────────────────────────────────────────────
   'common': {
     description:
-      'Shared contracts, capability tokens, and pure codecs every Hono Enterprise package builds on',
+      'Shared contracts, capability tokens, and pure codecs every Setu-TS package builds on',
     runtimeCompat: UNIVERSAL,
   },
   'kernel': {
@@ -101,7 +101,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: PORTABLE,
   },
   'testing': {
-    description: 'Test app factory, mock plugins, and request injection for Hono Enterprise',
+    description: 'Test app factory, mock plugins, and request injection for Setu-TS',
     runtimeCompat: PORTABLE,
   },
 
@@ -279,7 +279,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
 
   // ── Tooling ───────────────────────────────────────────────────────────────
   'cli': {
-    description: 'honoe — project scaffolding and plugin-aware code generation',
+    description: 'setu — project scaffolding and plugin-aware code generation',
     runtimeCompat: SERVER_ONLY,
   },
   'sdk': {

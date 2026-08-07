@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@setu-ts/common';
 
 /**
  * Options for {@linkcode createFakeRuntime}.

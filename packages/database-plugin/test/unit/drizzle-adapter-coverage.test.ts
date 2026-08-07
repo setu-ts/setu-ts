@@ -13,7 +13,7 @@ import {
   type DrizzleOperators,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
-import type { IAdapterTransaction } from '@hono-enterprise/common';
+import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { normalizeQuery } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { MetricConfig } from '@hono-enterprise/common';
+import type { MetricConfig } from '@setu-ts/common';
 import { MetricBase } from './base-metric.ts';
 
 /**

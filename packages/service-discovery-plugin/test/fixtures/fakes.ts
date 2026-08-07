@@ -15,7 +15,7 @@ import type {
   SrvRecord,
   TimerHandle,
   Unsubscribe,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type {
   DiscoveryHttpResponse,
   DiscoveryHttpStream,

@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { INotifier, NotificationMessage } from '@hono-enterprise/common';
+import type { INotifier, NotificationMessage } from '@setu-ts/common';
 import type { NotificationChannel } from '../interfaces/index.ts';
 
 /**

@@ -10,7 +10,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { instanceToken } from '../../src/instance-token.ts';
 

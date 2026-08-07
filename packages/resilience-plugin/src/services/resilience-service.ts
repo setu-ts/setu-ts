@@ -13,7 +13,7 @@ import type {
   ResilientCall,
   RetryPolicy,
   WrapOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { ITimers, ResiliencePluginOptions } from '../interfaces/index.ts';
 import { throwIfAborted } from '../patterns/abort.ts';
 import { CircuitBreaker } from '../patterns/circuit-breaker.ts';

@@ -2,7 +2,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

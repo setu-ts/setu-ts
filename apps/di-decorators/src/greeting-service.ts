@@ -1,4 +1,4 @@
-import { Injectable } from '@hono-enterprise/decorator-plugin';
+import { Injectable } from '@setu-ts/decorator-plugin';
 
 /** Greets the caller named by the decorated controller. */
 @Injectable({ token: 'greeting-service' })

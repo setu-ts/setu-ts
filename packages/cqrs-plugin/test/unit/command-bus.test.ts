@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CommandBus } from '../../src/bus/command-bus.ts';
-import type { CqrsCommand, ICommandHandler } from '@hono-enterprise/common';
+import type { CqrsCommand, ICommandHandler } from '@setu-ts/common';
 import { HandlerNotFoundError } from '../../src/errors/handler-not-found.ts';
 
 // Test command

@@ -4,13 +4,13 @@
  *
  * @module
  */
-import type { NormalizedQuery, OrderDirection } from '@hono-enterprise/common';
+import type { NormalizedQuery, OrderDirection } from '@setu-ts/common';
 import type { CountOptions, FindOptions } from './find-options.ts';
 
 /**
  * Normalized query representation that adapters can evaluate.
  *
- * Re-exported from `@hono-enterprise/common`, where it was promoted in M52c
+ * Re-exported from `@setu-ts/common`, where it was promoted in M52c
  * so a backend in another package can name the type its `findAll` receives.
  * Before the promotion this type was reachable only through an internal path
  * while the exported `DataSource` interface referenced it — so a consumer

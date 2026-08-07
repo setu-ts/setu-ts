@@ -1,8 +1,8 @@
-import { CAPABILITIES, type ILogger } from '@hono-enterprise/common';
-import type { IDatabaseService } from '@hono-enterprise/database-plugin';
-import { getCsrfToken, getSession } from '@hono-enterprise/session-plugin';
-import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
+import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
+import type { IKernelApplication } from '@setu-ts/kernel';
 
 import {
   csrfContext,
@@ -15,7 +15,7 @@ import {
  * Development session secret.
  *
  * A real deployment uses `config.getOrThrow<string>('SESSION_SECRET')` and
- * fails to boot without one — which is what `honoe new --template full-stack`
+ * fails to boot without one — which is what `setu new --template full-stack`
  * emits. This example falls back so that `deno task smoke` runs with no
  * environment at all; the value is public, in a public repository, and is
  * therefore worth exactly nothing.
@@ -25,7 +25,7 @@ const DEV_SESSION_SECRET = 'example-only-session-secret-do-not-deploy';
 /**
  * Builds the application.
  *
- * `honoe` imports this factory to discover plugin-contributed CLI commands, so
+ * `setu` imports this factory to discover plugin-contributed CLI commands, so
  * it must NOT start the server — `main.ts` and `smoke.ts` own that.
  *
  * @returns The configured, unstarted application

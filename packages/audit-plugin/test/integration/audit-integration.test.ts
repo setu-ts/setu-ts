@@ -5,11 +5,11 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuditPlugin } from '../../src/index.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IAuditLogger } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuditLogger } from '@setu-ts/common';
 
 describe('AuditPlugin integration (real kernel)', () => {
   it('register -> resolve IAuditLogger -> log', async () => {

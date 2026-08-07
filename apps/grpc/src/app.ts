@@ -3,11 +3,11 @@ import * as wkt from '@bufbuild/protobuf/wkt';
 import * as connect from '@connectrpc/connect';
 import * as protocol from '@connectrpc/connect/protocol';
 import { createConnectTransport } from '@connectrpc/connect-web';
-import { adaptConnectModule, GrpcPlugin } from '@hono-enterprise/grpc-plugin';
-import type { ConnectModuleLike, GrpcServiceDefinition } from '@hono-enterprise/grpc-plugin';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { adaptConnectModule, GrpcPlugin } from '@setu-ts/grpc-plugin';
+import type { ConnectModuleLike, GrpcServiceDefinition } from '@setu-ts/grpc-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { ECHO_DESCRIPTOR_BASE64 } from './descriptor.ts';
 
 const runtime = adaptConnectModule({

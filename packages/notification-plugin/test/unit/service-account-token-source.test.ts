@@ -7,7 +7,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { ServiceAccountTokenSource } from '../../src/providers/token-source.ts';
 import { createFakeFcmHttp } from '../fixtures/fake-fcm-http.ts';
 

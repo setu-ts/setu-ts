@@ -2,7 +2,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { HandlerResult, IRequestContext } from '@hono-enterprise/common';
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
 
 import { defaultCacheKey } from '../../src/utils/cache-key.ts';
 
@@ -55,7 +55,7 @@ function fakeContext(opts: { method: string; url: string }): IRequestContext {
         status: 200,
         headers: new Headers(),
         body: null,
-      }) as import('@hono-enterprise/common').ResponseSnapshot,
+      }) as import('@setu-ts/common').ResponseSnapshot,
   };
 
   const _abort = new AbortController();

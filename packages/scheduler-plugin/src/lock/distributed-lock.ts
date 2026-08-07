@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { IDistributedLock, SchedulerPluginOptions } from '../interfaces/index.ts';
 
 // Re-export the interface as the public-facing name

@@ -11,7 +11,7 @@ import type {
   GraphqlOperationContext,
   IRequestContext,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 const mockServiceRegistry: IServiceRegistry = {
   register: () => {},

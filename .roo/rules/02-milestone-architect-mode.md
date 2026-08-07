@@ -15,8 +15,8 @@ In Architect mode, for a milestone start, do exactly this and nothing more:
 1. Complete Step 0 from `CLAUDE.md` — be on the milestone's `feat/[milestone]-[description]` branch
    (`git branch --show-current`), never `main`.
 2. Read the mandatory docs in the order `CLAUDE.md` lists (AI_GUIDELINES.md, the ROADMAP milestone
-   section, ARCHITECTURE.md, PUBLIC_API.md, the `@hono-enterprise/common` source you implement, and
-   the source of any package you extend).
+   section, ARCHITECTURE.md, PUBLIC_API.md, the `@setu-ts/common` source you implement, and the
+   source of any package you extend).
 3. Copy `plans/TEMPLATE.md` to `plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run
    `deno task check:plan` until it lints clean. Apply the prose judgment in the CLAUDE.md "Writing a
    milestone plan" section (contracts verified from SOURCE, a test file for every `src/` file, real

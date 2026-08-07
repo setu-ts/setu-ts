@@ -11,8 +11,8 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { nextIndex, watchConsulService } from '../../src/providers/consul-watch.ts';
-import type { ServiceInstance } from '@hono-enterprise/common';
-import type { Unsubscribe } from '@hono-enterprise/common';
+import type { ServiceInstance } from '@setu-ts/common';
+import type { Unsubscribe } from '@setu-ts/common';
 import {
   createFakeHttp,
   createFakeRuntime,

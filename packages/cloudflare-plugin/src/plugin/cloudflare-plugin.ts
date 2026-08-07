@@ -14,8 +14,8 @@ import type {
   IQueue,
   IRealtimeBackplane,
   IStorage,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@setu-ts/common';
 
 import { resolveWaitUntil } from '../background/wait-until.ts';
 import { instanceToken } from '../instance-token.ts';
@@ -47,7 +47,7 @@ const DEFAULT_REALTIME_TOPIC = 'realtime';
  * @example
  * ```typescript
  * import { env, waitUntil } from 'cloudflare:workers';
- * import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
+ * import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
  *
  * const app = createApplication({
  *   plugins: [

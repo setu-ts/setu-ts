@@ -33,7 +33,7 @@ describe('multi tenancy integration', () => {
       json: () => Promise.resolve({}) as Promise<unknown>,
       text: () => Promise.resolve(''),
       bytes: () => Promise.resolve(new Uint8Array()),
-    } as unknown as import('@hono-enterprise/common').IRequest;
+    } as unknown as import('@setu-ts/common').IRequest;
 
     const ctx = {
       id: 'integ-1',
@@ -52,7 +52,7 @@ describe('multi tenancy integration', () => {
       state,
       startTime: performance.now(),
       signal: new AbortController().signal,
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
 
     await mw(ctx, () => {
       middlewareNextCalled = true;
@@ -85,7 +85,7 @@ describe('multi tenancy integration', () => {
       json: () => Promise.resolve({}) as Promise<unknown>,
       text: () => Promise.resolve(''),
       bytes: () => Promise.resolve(new Uint8Array()),
-    } as unknown as import('@hono-enterprise/common').IRequest;
+    } as unknown as import('@setu-ts/common').IRequest;
     requestA.tenant = { id: 'tenant-a' };
 
     const requestB = {
@@ -96,7 +96,7 @@ describe('multi tenancy integration', () => {
       json: () => Promise.resolve({}) as Promise<unknown>,
       text: () => Promise.resolve(''),
       bytes: () => Promise.resolve(new Uint8Array()),
-    } as unknown as import('@hono-enterprise/common').IRequest;
+    } as unknown as import('@setu-ts/common').IRequest;
     requestB.tenant = { id: 'tenant-b' };
 
     const ctxA = {
@@ -106,7 +106,7 @@ describe('multi tenancy integration', () => {
       state: new Map(),
       startTime: performance.now(),
       signal: new AbortController().signal,
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
 
     const ctxB = {
       id: 'b',
@@ -115,7 +115,7 @@ describe('multi tenancy integration', () => {
       state: new Map(),
       startTime: performance.now(),
       signal: new AbortController().signal,
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
 
     // Tenant A creates a record
     const repoA = serviceA.getRepository<unknown, string>(ctxA, 'Item');
@@ -139,7 +139,7 @@ describe('multi tenancy integration', () => {
       resolve() {
         return Promise.resolve({ present: false } as const);
       },
-    } as import('@hono-enterprise/common').ITenantResolver;
+    } as import('@setu-ts/common').ITenantResolver;
 
     const state = new Map();
     const request = {
@@ -150,7 +150,7 @@ describe('multi tenancy integration', () => {
       json: () => Promise.resolve({}) as Promise<unknown>,
       text: () => Promise.resolve(''),
       bytes: () => Promise.resolve(new Uint8Array()),
-    } as unknown as import('@hono-enterprise/common').IRequest;
+    } as unknown as import('@setu-ts/common').IRequest;
 
     let shortCircuitStatus = 0;
     const ctx = {
@@ -170,7 +170,7 @@ describe('multi tenancy integration', () => {
       state,
       startTime: performance.now(),
       signal: new AbortController().signal,
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
 
     let handlerNextCalled = false;
     const mw = tenantMiddleware({

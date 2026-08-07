@@ -7,7 +7,7 @@
  * @module
  */
 
-import type { ITenantResolver } from '@hono-enterprise/common';
+import type { ITenantResolver } from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Options types

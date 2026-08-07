@@ -1,4 +1,4 @@
-# @hono-enterprise/logger-plugin
+# @setu-ts/logger-plugin
 
 Structured logging. Registers an `ILogger` under `CAPABILITIES.LOGGER` (`'logger'`) and, optionally,
 request/response logging middleware.
@@ -9,16 +9,16 @@ Three implementations ship: `ConsoleLogger` (zero-dependency default), `PinoLogg
 ## Installation
 
 ```typescript
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
-import { CAPABILITIES, type ILogger } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), LoggerPlugin({ transport: 'console', level: 'info' })],
@@ -43,4 +43,4 @@ from the monotonic clock (`runtime.hrtime()`), never from a wall-clock epoch.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

@@ -2,18 +2,18 @@
  * Loading the target project's application factory.
  *
  * This is the one place the CLI imports user code. It resolves
- * `honoe.config.ts` (or `--config <path>`), imports it with a REAL dynamic
+ * `setu.config.ts` (or `--config <path>`), imports it with a REAL dynamic
  * `import()`, and validates that it exports the factory the contract requires
  * — each failure naming the resolved path and what was expected.
  *
  * @module
  */
 
-import type { IApplication } from '@hono-enterprise/common';
+import type { IApplication } from '@setu-ts/common';
 import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 
 /**
  * Loads the project's config module by URL.
@@ -39,7 +39,7 @@ export function configModulePath(dir: string, config?: string): string {
 /**
  * Reports whether the project has a config module at all.
  *
- * Checked separately from loading so "this project has no `honoe.config.ts`"
+ * Checked separately from loading so "this project has no `setu.config.ts`"
  * can be a distinct, actionable message rather than an import failure.
  *
  * @param fs - The filesystem to probe

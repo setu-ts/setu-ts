@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 /**
  * Default cache key: `${request.method}:${request.url}`.

@@ -8,7 +8,7 @@
  * @since 0.1.0
  */
 
-import type { ISseConnection, SseChannel, SseMessage } from '@hono-enterprise/common';
+import type { ISseConnection, SseChannel, SseMessage } from '@setu-ts/common';
 
 /**
  * Forwards a local publish to peers on other replicas.

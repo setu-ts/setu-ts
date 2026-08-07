@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/auth-plugin",
+  "name": "@setu-ts/auth-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",

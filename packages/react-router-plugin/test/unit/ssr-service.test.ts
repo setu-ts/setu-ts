@@ -5,10 +5,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult, ISsrService } from '@hono-enterprise/common';
+import type { HandlerResult, ISsrService } from '@setu-ts/common';
 import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { servicesContext } from '../../src/handler/context-keys.ts';
 import {
   createFakeLoadContextFactory,

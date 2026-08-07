@@ -88,7 +88,7 @@ describe('the full-stack example', () => {
       new URL('config/services.server.ts', APP_ROOT),
     );
     const config = await Deno.readTextFile(
-      new URL('../honoe.config.ts', import.meta.url),
+      new URL('../setu.config.ts', import.meta.url),
     );
 
     const exported = [...keys.matchAll(/export const (\w+Context)\b/g)].map((
@@ -102,7 +102,7 @@ describe('the full-stack example', () => {
       const isSet = new RegExp(String.raw`context\.set\(\s*${key}\b`).test(
         config,
       );
-      expect(isSet, `${key} is never set in honoe.config.ts`).toBe(true);
+      expect(isSet, `${key} is never set in setu.config.ts`).toBe(true);
       // `accessors.includes(key)` would be satisfied by the import statement
       // alone, so a key imported and never read would pass while the message
       // claimed otherwise. Assert the access shape the accessors actually use.

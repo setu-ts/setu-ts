@@ -11,10 +11,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { cacheMiddleware, CachePlugin } from '@hono-enterprise/cache-plugin';
-import type { IPlugin, IPluginContext, IRequestContext } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
+import type { IPlugin, IPluginContext, IRequestContext } from '@setu-ts/common';
 
 /** Bind a port, release it, return the port number. */
 function findFreePort(): number {

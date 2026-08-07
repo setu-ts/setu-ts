@@ -10,7 +10,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { DurableObjectLock } from '../../../src/lock/durable-object-lock.ts';
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { FakeDurableObjectNamespace } from '../../do-fakes.ts';

@@ -7,7 +7,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { NormalizedQuery } from '@hono-enterprise/common';
+import type { NormalizedQuery } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/index.ts';
 import {

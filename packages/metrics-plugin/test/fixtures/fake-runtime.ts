@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@setu-ts/common';
 
 /**
  * A fake runtime that lets tests control the clock.

@@ -71,7 +71,7 @@ describe('header resolver', () => {
     const resolver = new HeaderResolver();
     const fakeHeaders = { get: (_name: string) => '   ' };
     const request = { method: 'GET', url: 'https://example.com/', path: '/', headers: fakeHeaders };
-    const result = await resolver.resolve(request as import('@hono-enterprise/common').IRequest);
+    const result = await resolver.resolve(request as import('@setu-ts/common').IRequest);
     expect(!result.present).toBeTruthy();
   });
 });

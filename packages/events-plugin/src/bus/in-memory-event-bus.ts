@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { EventHandler, IDomainEvent, IEventBus } from '@hono-enterprise/common';
+import type { EventHandler, IDomainEvent, IEventBus } from '@setu-ts/common';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
 
 /**

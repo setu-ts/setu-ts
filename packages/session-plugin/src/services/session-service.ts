@@ -8,13 +8,8 @@
  *
  * @module
  */
-import type {
-  IRequestContext,
-  ISession,
-  ISessionService,
-  ISessionStore,
-} from '@hono-enterprise/common';
-import { parseCookie, serializeCookie } from '@hono-enterprise/common';
+import type { IRequestContext, ISession, ISessionService, ISessionStore } from '@setu-ts/common';
+import { parseCookie, serializeCookie } from '@setu-ts/common';
 
 import type { KeyRing } from '../codec/crypto.ts';
 import { open, seal } from '../codec/crypto.ts';
@@ -33,7 +28,7 @@ import { createSession, parseSnapshot, restoreSession } from './session.ts';
  * every hand-rolled double — to construct one, and would type it as present on
  * requests the middleware never touched.
  */
-export const SESSION_STATE_KEY = 'hono-enterprise:session';
+export const SESSION_STATE_KEY = 'setu-ts:session';
 
 /** Runtime capabilities the service needs, injected for testability. */
 export interface SessionServiceDeps {

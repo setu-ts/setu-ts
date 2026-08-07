@@ -11,7 +11,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
-import type { GrpcServiceDefinition } from '@hono-enterprise/common';
+import type { GrpcServiceDefinition } from '@setu-ts/common';
 
 /** Whether all four specifiers can actually be imported here. */
 async function connectAvailable(): Promise<boolean> {

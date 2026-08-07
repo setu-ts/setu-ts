@@ -10,7 +10,7 @@ import {
   type IPluginContext,
   type ITenantResolver,
   PLUGIN_PRIORITY,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type {
   ITenantDataStore,
   ITenantIsolationStrategy,

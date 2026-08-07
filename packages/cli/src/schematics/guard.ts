@@ -17,7 +17,7 @@ export function generateGuard(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import type { MiddlewareFunction } from '@hono-enterprise/common';
+  const contents = `import type { MiddlewareFunction } from '@setu-ts/common';
 
 /**
  * Guards a route behind the ${names.kebab} check.

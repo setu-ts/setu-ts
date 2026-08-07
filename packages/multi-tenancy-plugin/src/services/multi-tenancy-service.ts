@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { IRequestContext, ITenant, ITenantRepository } from '@hono-enterprise/common';
-import type { IMultiTenancyService } from '@hono-enterprise/common';
+import type { IRequestContext, ITenant, ITenantRepository } from '@setu-ts/common';
+import type { IMultiTenancyService } from '@setu-ts/common';
 import type { ITenantDataStore } from '../interfaces/index.ts';
 import { TenantNotResolvedError } from '../errors.ts';
 import { TenantRepository } from '../repositories/tenant-repository.ts';

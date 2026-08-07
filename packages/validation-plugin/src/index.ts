@@ -6,7 +6,7 @@
  *
  * @example
  * ```typescript
- * import { ValidationPlugin, validateBody, validateQuery } from '@hono-enterprise/validation-plugin';
+ * import { ValidationPlugin, validateBody, validateQuery } from '@setu-ts/validation-plugin';
  *
  * app.register(ValidationPlugin({ errorFormat: 'rfc7807' }));
  *

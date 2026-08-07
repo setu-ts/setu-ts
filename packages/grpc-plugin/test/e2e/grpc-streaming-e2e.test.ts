@@ -9,15 +9,11 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
-import {
-  CAPABILITIES,
-  type GrpcServiceDefinition,
-  type IGrpcService,
-} from '@hono-enterprise/common';
+import { CAPABILITIES, type GrpcServiceDefinition, type IGrpcService } from '@setu-ts/common';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
 
 /**

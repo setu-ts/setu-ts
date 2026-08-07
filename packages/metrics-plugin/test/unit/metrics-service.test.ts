@@ -6,7 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MetricsService } from '../../src/services/metrics-service.ts';
-import type { ICounter, IGauge, IHistogram, ISummary } from '@hono-enterprise/common';
+import type { ICounter, IGauge, IHistogram, ISummary } from '@setu-ts/common';
 
 describe('MetricsService', () => {
   it('counter() is get-or-create', () => {

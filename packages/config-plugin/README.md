@@ -1,22 +1,22 @@
-# @hono-enterprise/config-plugin
+# @setu-ts/config-plugin
 
-Configuration management plugin for Hono Enterprise with strict `.env` parsing, variable expansion,
-and structurally compatible schema validation.
+Configuration management plugin for Setu-TS with strict `.env` parsing, variable expansion, and
+structurally compatible schema validation.
 
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/config-plugin
+deno add jsr:@setu-ts/config-plugin
 ```
 
 ## Quick Start
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IConfig } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig } from '@setu-ts/common';
 
 const app = createApplication();
 
@@ -134,7 +134,7 @@ interface ConfigPluginOptions {
 
 Minimal schema interface compatible with Zod's `parse(unknown)` API.
 
-### `IConfig` (from `@hono-enterprise/common`)
+### `IConfig` (from `@setu-ts/common`)
 
 ```typescript
 interface IConfig {
@@ -152,5 +152,5 @@ When `validationSchema` is not provided, all values remain as strings from the e
 
 ## Dependencies
 
-- `@hono-enterprise/common` (workspace)
+- `@setu-ts/common` (workspace)
 - Consumer-supplied structural schema such as Zod (optional; not a package dependency)

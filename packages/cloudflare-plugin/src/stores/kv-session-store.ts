@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { ISessionStore, SessionData } from '@hono-enterprise/common';
+import type { ISessionStore, SessionData } from '@setu-ts/common';
 import type { IKvNamespace } from '../bindings/facades.ts';
 import type { CacheClock } from './kv-cache-store.ts';
 import type { EnvelopeRead } from './kv-envelope.ts';
@@ -43,8 +43,8 @@ const DEFAULT_PREFIX = 'session:';
  * @example
  * ```typescript
  * import { env } from 'cloudflare:workers';
- * import { createRuntimeServices } from '@hono-enterprise/runtime';
- * import { KvSessionStore } from '@hono-enterprise/cloudflare-plugin';
+ * import { createRuntimeServices } from '@setu-ts/runtime';
+ * import { KvSessionStore } from '@setu-ts/cloudflare-plugin';
  *
  * const runtime = createRuntimeServices({ env });
  *

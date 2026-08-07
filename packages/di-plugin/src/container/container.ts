@@ -15,7 +15,7 @@ import type {
   Provider,
   ProviderOptions,
   ServiceScope,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { CircularDetector } from './circular-detector.ts';
 import type { ProviderEntry } from './provider-registry.ts';

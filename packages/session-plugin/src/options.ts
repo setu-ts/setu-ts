@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ISessionStore } from '@hono-enterprise/common';
+import type { ISessionStore } from '@setu-ts/common';
 
 import type { SessionMode } from './codec/crypto.ts';
 

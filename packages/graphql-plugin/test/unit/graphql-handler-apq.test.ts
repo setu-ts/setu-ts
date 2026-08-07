@@ -17,7 +17,7 @@ import type {
   ApqResolver as ApqResolverType,
   ApqResolveResult,
 } from '../../src/apq/apq-resolver.ts';
-import type { IRequest, IRequestContext, IResponse } from '@hono-enterprise/common';
+import type { IRequest, IRequestContext, IResponse } from '@setu-ts/common';
 
 const subtle = globalThis.crypto.subtle;
 

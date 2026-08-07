@@ -135,7 +135,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
 
       for (
         const match of file.contents.matchAll(
-          /^import\s+(?!type\b)[^;]*?from\s+'(@hono-enterprise\/[^']+)'/gm,
+          /^import\s+(?!type\b)[^;]*?from\s+'(@setu-ts\/[^']+)'/gm,
         )
       ) {
         throw new Error(
@@ -170,7 +170,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     const keys = contentsOf('app/lib/context-keys.server.ts');
 
     // A `{ defaultValue }` literal is the defect: Vite inlines this module into
-    // the server build while the runtime loads honoe.config.ts from source, so
+    // the server build while the runtime loads setu.config.ts from source, so
     // two literals would look identical and match nothing.
     expect(keys).toContain('contextKeyFor');
     expect(keys).not.toContain('defaultValue:');
@@ -266,7 +266,7 @@ describe('full-stack template | manifest contributions', () => {
   it('declares the packages its emitted files import', () => {
     const packages = (FULL_STACK_TEMPLATE.packageImports ?? []).map((entry) => entry.pkg);
 
-    // Named by honoe.config.ts's bridge, and by app/lib/context-keys.ts.
+    // Named by setu.config.ts's bridge, and by app/lib/context-keys.ts.
     expect(packages).toContain('session-plugin');
     expect(packages).toContain('react-router-plugin');
   });
@@ -279,13 +279,13 @@ describe('full-stack template | manifest contributions', () => {
   it('externalises every framework package the app imports, and pins each one', () => {
     // The two must agree. Bundled instead of externalised, a package gets a
     // second copy in the server build and its context keys stop matching the
-    // ones honoe.config.ts holds — which fails silently, as a context value
+    // ones setu.config.ts holds — which fails silently, as a context value
     // that is always its default.
     const vite = contentsOf('vite.config.ts');
     const pinned = (FULL_STACK_TEMPLATE.packageImports ?? []).map((entry) => entry.pkg);
 
     for (const pkg of FULL_STACK_APP_FRAMEWORK_PACKAGES) {
-      expect(vite).toContain(`'@hono-enterprise/${pkg}'`);
+      expect(vite).toContain(`'@setu-ts/${pkg}'`);
       expect(pinned).toContain(pkg);
     }
   });
@@ -305,7 +305,7 @@ describe('full-stack template | manifest contributions', () => {
 describe('full-stack app files | module-level shape', () => {
   it('marks every server-only module with the .server convention', () => {
     const serverModules = FULL_STACK_APP_FILES
-      .filter((file) => file.contents.includes('@hono-enterprise/common'))
+      .filter((file) => file.contents.includes('@setu-ts/common'))
       .map((file) => file.path);
 
     // context-keys.ts is the one exception: it is a type-only import of a key
@@ -320,7 +320,7 @@ describe('full-stack app files | module-level shape', () => {
 
     // Shared by loaders and components, so a server import would break the
     // client bundle.
-    expect(model).not.toContain('@hono-enterprise/');
+    expect(model).not.toContain('@setu-ts/');
     expect(model).not.toContain('.server.ts');
   });
 });

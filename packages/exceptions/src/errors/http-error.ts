@@ -17,7 +17,7 @@
 /**
  * A single validation failure carried by a `422` error.
  *
- * Mirrors the shape used by `@hono-enterprise/validation-plugin` so error
+ * Mirrors the shape used by `@setu-ts/validation-plugin` so error
  * payloads are consistent across the validation and exceptions packages.
  *
  * @since 0.1.0
@@ -58,7 +58,7 @@ export interface HttpErrorInit {
  *
  * @example
  * ```typescript
- * import { notFound } from '@hono-enterprise/exceptions';
+ * import { notFound } from '@setu-ts/exceptions';
  *
  * throw notFound(`User ${id} not found`);
  * ```

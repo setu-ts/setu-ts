@@ -149,7 +149,7 @@ describe('runCli', () => {
 
     /** A harness whose project has a config module registering `commands`. */
     function withApp(commands: readonly { name: string; handler: () => void }[]) {
-      const fs = createFakeFs({ '/work/honoe.config.ts': 'export function createApp() {}' });
+      const fs = createFakeFs({ '/work/setu.config.ts': 'export function createApp() {}' });
       const out = createRecorder();
       const err = createRecorder();
       let booted = false;
@@ -223,7 +223,7 @@ describe('runCli', () => {
       });
 
       it('does not boot the application for a built-in verb', async () => {
-        // The common path must stay fast: `honoe g service x` never imports
+        // The common path must stay fast: `setu g service x` never imports
         // the user's project.
         const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
         await h.run(['g', 'service', 'billing']);
@@ -245,11 +245,11 @@ describe('runCli', () => {
       });
     });
 
-    it('exits 2 naming honoe.config.ts when an unknown command is typed in a bare dir', async () => {
+    it('exits 2 naming setu.config.ts when an unknown command is typed in a bare dir', async () => {
       const h = harness();
       expect(await h.run(['frobnicate'])).toBe(2);
       expect(h.err.text()).toContain('Unknown command: frobnicate');
-      expect(h.err.text()).toContain('honoe.config.ts');
+      expect(h.err.text()).toContain('setu.config.ts');
     });
   });
 

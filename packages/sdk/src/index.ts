@@ -1,8 +1,8 @@
 /**
  * @module
  *
- * `@hono-enterprise/sdk` — Portable, zero-npm-dependency client SDK for
- * consuming Hono Enterprise APIs.
+ * `@setu-ts/sdk` — Portable, zero-npm-dependency client SDK for
+ * consuming Setu-TS APIs.
  *
  * Exports the runtime client surface: interfaces, factories, error classes,
  * re-exported common policy types, and `createDefaultClientTiming`.

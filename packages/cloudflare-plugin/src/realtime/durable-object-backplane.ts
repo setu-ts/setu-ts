@@ -10,7 +10,7 @@ import type {
   IRealtimeBackplane,
   RealtimeFrame,
   RealtimeFrameHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import type { IDurableObjectNamespace } from '../bindings/facades.ts';
 import type {

@@ -17,7 +17,7 @@ import type {
   LogMetadata,
   TimerHandle,
   WebSocketReadyState,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /** A fake runtime with a controllable monotonic clock and captured intervals. */
 export interface FakeRuntime extends IRuntimeServices {

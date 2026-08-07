@@ -11,8 +11,8 @@ import type {
   RealtimeFrame,
   ServerHandle,
   WebSocketUpgradeRouter,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { WebSocketPlugin } from '../../src/plugin/websocket-plugin.ts';
 import { WebSocketService } from '../../src/services/websocket-service.ts';
 import { WebSocketUnavailableError } from '../../src/errors/websocket-errors.ts';
@@ -220,7 +220,7 @@ describe('WebSocketPlugin scaling notice', () => {
     // notice must name both the limitation and the plugin that lifts it.
     expect(harness.infoLogs.length).toBe(1);
     expect(harness.infoLogs[0]).toContain('rooms broadcast in-process only');
-    expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+    expect(harness.infoLogs[0]).toContain('@setu-ts/realtime-backplane-plugin');
     // The transport must be named: the backplane plugin defaults to a
     // single-process 'memory' bus, so registering it bare silences this notice
     // without fanning anything out.

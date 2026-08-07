@@ -12,8 +12,8 @@ import type {
   IHttpAdapter,
   IPlugin,
   IPluginContext,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { loadConnectModule } from '../transports/connect-loader.ts';

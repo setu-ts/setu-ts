@@ -6,14 +6,14 @@
  * `order-item` and still shipped `(class) => {` and `class 2faService`, both
  * unparseable.
  *
- * The check resolves `@hono-enterprise/*` to THIS workspace, not to JSR. That
+ * The check resolves `@setu-ts/*` to THIS workspace, not to JSR. That
  * is both more correct and necessary:
  *
  * - More correct: drift means "the template disagrees with the framework as it
  *   is now". Checking against a published snapshot would pass a template that
  *   is stale relative to HEAD, and fail one correctly updated for an unreleased
  *   API change.
- * - Necessary: `honoe new` pins generated projects to the CLI's OWN version, so
+ * - Necessary: `setu new` pins generated projects to the CLI's OWN version, so
  *   during a version bump the pinned version is not published yet. Checking
  *   against JSR would deadlock — the release workflow runs the test suite
  *   BEFORE publishing, so the gate would block the publish that would fix it.
@@ -23,8 +23,8 @@
 
 import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@hono-enterprise/runtime';
-import type { IFileSystem } from '@hono-enterprise/common';
+import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 
@@ -58,7 +58,7 @@ const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
 const REPO_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/, '');
 
 /**
- * Repoints a scaffolded project's `@hono-enterprise/*` imports at this
+ * Repoints a scaffolded project's `@setu-ts/*` imports at this
  * workspace, so the check measures drift against HEAD rather than against a
  * published snapshot.
  *
@@ -75,11 +75,11 @@ async function useWorkspacePackages(root: string): Promise<void> {
     // Only framework specifiers are repointed. A template may also declare a
     // project-local alias (`~/` → `./app/`), and rewriting that to a package
     // path would break every module that imports through it.
-    if (!specifier.startsWith('@hono-enterprise/')) {
+    if (!specifier.startsWith('@setu-ts/')) {
       imports[specifier] = target;
       continue;
     }
-    imports[specifier] = workspaceEntrypoint(specifier.slice('@hono-enterprise/'.length));
+    imports[specifier] = workspaceEntrypoint(specifier.slice('@setu-ts/'.length));
   }
   manifest.imports = imports;
   manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
@@ -161,7 +161,7 @@ describe('template scaffolding — end to end', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'honoe-tpl-' });
+    root = await Deno.makeTempDir({ prefix: 'setu-tpl-' });
     out = [];
     err = [];
   });
@@ -173,16 +173,16 @@ describe('template scaffolding — end to end', () => {
   for (const template of listTemplates()) {
     it(`scaffolds a ${template.name} project whose files exist on disk`, async () => {
       expect(await run(['new', 'svc', '--template', template.name])).toBe(0);
-      for (const name of ['deno.json', 'main.ts', 'honoe.config.ts', 'README.md']) {
+      for (const name of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md']) {
         expect((await Deno.stat(`${root}/svc/${name}`)).isFile).toBe(true);
       }
     });
 
     it(`emits a ${template.name} config declaring every plugin in the manifest`, async () => {
       await run(['new', 'svc', '--template', template.name]);
-      const config = await Deno.readTextFile(`${root}/svc/honoe.config.ts`);
+      const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
       const manifest = JSON.parse(await Deno.readTextFile(`${root}/svc/deno.json`));
-      for (const match of config.matchAll(/from '(@hono-enterprise\/[a-z-]+)'/g)) {
+      for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
         expect(Object.keys(manifest.imports)).toContain(match[1]);
       }
     });
@@ -193,7 +193,7 @@ describe('template scaffolding — end to end', () => {
     // generate produced source whose own import could not resolve.
     await run(['new', 'bare']);
     expect(await run(['g', 'controller', 'user', '--dir', `${root}/bare`])).toBe(1);
-    expect(err.join('\n')).toContain('@hono-enterprise/decorator-plugin');
+    expect(err.join('\n')).toContain('@setu-ts/decorator-plugin');
   });
 
   it('allows a controller once the rest template installs the decorator plugin', async () => {
@@ -233,7 +233,7 @@ describe('template scaffolding — end to end', () => {
 
     const sources = [
       `${project}/main.ts`,
-      `${project}/honoe.config.ts`,
+      `${project}/setu.config.ts`,
       `${project}/src/greeting-service.ts`,
       `${project}/src/greeting-controller.ts`,
     ];
@@ -258,12 +258,12 @@ describe('template scaffolding — end to end', () => {
     expect(await run(['new', 'msvc', '--template', 'microservice'])).toBe(0);
     const project = `${root}/msvc`;
 
-    const config = await Deno.readTextFile(`${project}/honoe.config.ts`);
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
     expect(config).toContain(
       "ServiceDiscoveryPlugin({ provider: 'static', services: {} })",
     );
 
-    const sources = [`${project}/main.ts`, `${project}/honoe.config.ts`];
+    const sources = [`${project}/main.ts`, `${project}/setu.config.ts`];
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
@@ -285,7 +285,7 @@ describe('template scaffolding — end to end', () => {
     // framework coupling is plain TypeScript and IS checked.
     const sources = [
       `${project}/main.ts`,
-      `${project}/honoe.config.ts`,
+      `${project}/setu.config.ts`,
       `${project}/app/lib/context-keys.server.ts`,
       `${project}/app/lib/load-context.ts`,
       `${project}/app/config/services.server.ts`,
@@ -312,8 +312,8 @@ describe('template scaffolding — end to end', () => {
       await run(['new', 'edge', '--template', 'full-stack', '--runtime', 'cloudflare-workers']),
     ).toBe(0);
 
-    const deno = await Deno.readTextFile(`${root}/shop/honoe.config.ts`);
-    const workers = await Deno.readTextFile(`${root}/edge/honoe.config.ts`);
+    const deno = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
+    const workers = await Deno.readTextFile(`${root}/edge/setu.config.ts`);
 
     expect(deno).toContain("assetsDir: './build/client/assets'");
     expect(workers).not.toContain('assetsDir');
@@ -331,8 +331,8 @@ describe('template scaffolding — end to end', () => {
     expect(manifest.devDependencies['@react-router/dev']).toBeDefined();
     expect(manifest.devDependencies['vite']).toBeDefined();
     // Framework packages resolve through the Deno import map, never here.
-    expect(Object.keys(manifest.devDependencies)).not.toContain('@hono-enterprise/kernel');
-    expect(Object.keys(manifest.dependencies ?? {})).not.toContain('@hono-enterprise/kernel');
+    expect(Object.keys(manifest.devDependencies)).not.toContain('@setu-ts/kernel');
+    expect(Object.keys(manifest.dependencies ?? {})).not.toContain('@setu-ts/kernel');
   });
 
   it('merges the npm toolchain into the fixed manifest on a Node target', async () => {
@@ -341,7 +341,7 @@ describe('template scaffolding — end to end', () => {
 
     // One package.json carrying both: a second file would collide with the
     // fixed set and silently overwrite the framework dependencies.
-    expect(manifest.dependencies['@hono-enterprise/full-stack-starter']).toBeDefined();
+    expect(manifest.dependencies['@setu-ts/full-stack-starter']).toBeDefined();
     expect(manifest.devDependencies['@react-router/dev']).toBeDefined();
 
     const tsconfig = JSON.parse(await Deno.readTextFile(`${root}/shop/tsconfig.json`));
@@ -362,7 +362,7 @@ describe('template scaffolding — end to end', () => {
 
   it('emits no hello-world route, which would shadow the SSR index', async () => {
     expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
-    const config = await Deno.readTextFile(`${root}/shop/honoe.config.ts`);
+    const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
 
     // An exact '/' handler beats the catch-all the SSR plugin mounts, so the
     // app's own index route would never render.
@@ -372,7 +372,7 @@ describe('template scaffolding — end to end', () => {
 
   it('wires the nest config with DI and the emitted classes', async () => {
     expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
-    const config = await Deno.readTextFile(`${root}/svc/honoe.config.ts`);
+    const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
 
     // The args string, rendered into the plugin call.
     expect(config).toContain(
@@ -415,7 +415,7 @@ describe('template scaffolding — end to end', () => {
       }
     }
 
-    const sources: string[] = [`${project}/main.ts`, `${project}/honoe.config.ts`];
+    const sources: string[] = [`${project}/main.ts`, `${project}/setu.config.ts`];
     for await (const entry of Deno.readDir(`${project}/src`)) {
       for await (const file of Deno.readDir(`${project}/src/${entry.name}`)) {
         sources.push(`${project}/src/${entry.name}/${file.name}`);

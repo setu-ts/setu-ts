@@ -6,7 +6,7 @@ import { expect } from '@std/expect';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
-import type { ITenantResolver } from '@hono-enterprise/common';
+import type { ITenantResolver } from '@setu-ts/common';
 
 // Fake ITenantResolver for tests that need a custom one.
 type FakeResolverResult = { present: boolean; value?: { id: string } };
@@ -167,7 +167,7 @@ describe('tenant middleware', () => {
       state: new Map(),
       startTime: performance.now(),
       signal: new AbortController().signal,
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
     const noneResolver: FakeResolver = {
       resolve(_request) {
         return Promise.resolve({ present: false });

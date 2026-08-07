@@ -11,9 +11,9 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HealthCheckResult,
   IApplication,
@@ -21,7 +21,7 @@ import type {
   ILogger,
   IPlugin,
   IStorage,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import type { ICloudflareBindings } from '../../src/index.ts';
 import { CloudflareBindingMissingError, CloudflarePlugin } from '../../src/index.ts';

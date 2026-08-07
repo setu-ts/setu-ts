@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { IMailer, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IMailer, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { MailProvider, MailProviderOptions, MailProviderType } from '../interfaces/index.ts';
 import { MailService } from '../services/mail-service.ts';
 import { TemplateEngine } from '../templates/template-engine.ts';
@@ -72,7 +72,7 @@ export function createProvider(
  *
  * @example
  * ```typescript
- * import { MailPlugin } from '@hono-enterprise/mail-plugin';
+ * import { MailPlugin } from '@setu-ts/mail-plugin';
  *
  * app.register(MailPlugin({
  *   provider: 'sendgrid',

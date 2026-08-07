@@ -4,9 +4,9 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IAuthStrategy, IPrincipal } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IAuthStrategy, IPrincipal } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
 import { JwtService } from '../services/jwt-service.ts';
 import { AuthService, LocalStrategy } from '../services/auth-service.ts';

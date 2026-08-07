@@ -8,7 +8,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
 import type {
@@ -22,13 +22,8 @@ import type {
   IOpenApiApi,
   IPluginContext,
   IRouterApi,
-} from '@hono-enterprise/common';
-import type {
-  IConfig,
-  IRuntimeServices,
-  IServiceRegistry,
-  TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { IConfig, IRuntimeServices, IServiceRegistry, TimerHandle } from '@setu-ts/common';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
 

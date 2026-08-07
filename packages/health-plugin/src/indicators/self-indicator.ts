@@ -3,11 +3,7 @@
  *
  * @module
  */
-import type {
-  HealthCheckResult,
-  IHealthIndicator,
-  IRuntimeServices,
-} from '@hono-enterprise/common';
+import type { HealthCheckResult, IHealthIndicator, IRuntimeServices } from '@setu-ts/common';
 
 /**
  * Creates a self liveness indicator.

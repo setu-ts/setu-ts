@@ -4,14 +4,14 @@
  * @module
  */
 import type { TracerHost } from '../../src/interfaces/index.ts';
-import type { SpanContext } from '@hono-enterprise/common';
+import type { SpanContext } from '@setu-ts/common';
 import {
   type ISpan,
   type SpanAttributeValue,
   type SpanStatus,
   TELEMETRY_CONTEXT_OPAQUE,
   type TelemetryContext,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /**
  * Records span operations for test assertions.

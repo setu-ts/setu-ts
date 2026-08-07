@@ -1,4 +1,4 @@
-# Hono Enterprise — Public API Contract
+# Setu-TS — Public API Contract
 
 > **This document describes how developers use the framework.** Implementation details are
 > intentionally omitted.
@@ -53,16 +53,16 @@
 44. [Service Discovery](#service-discovery)
 45. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
 46. [Developer Ergonomics](#developer-ergonomics)
-47. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
-48. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
-49. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
-50. [API Reference: @hono-enterprise/exceptions](#api-reference-hono-enterpriseexceptions)
-51. [API Reference: @hono-enterprise/di-plugin](#api-reference-hono-enterprisedi-plugin)
-52. [API Reference: @hono-enterprise/decorator-plugin](#api-reference-hono-enterprisedecorator-plugin)
-53. [Testing Package (@hono-enterprise/testing)](#testing-package-hono-enterprisetesting)
-54. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdk-hono-enterprisesdk)
-55. [API Reference: @hono-enterprise/grpc-plugin](#api-reference-hono-enterprisegrpc-plugin)
-56. [API Reference: @hono-enterprise/cloudflare-plugin](#api-reference-hono-enterprisecloudflare-plugin)
+47. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
+48. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
+49. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
+50. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
+51. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
+52. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
+53. [Testing Package (@setu-ts/testing)](#testing-package-setu-tstesting)
+54. [SDK — Client SDK (@setu-ts/sdk)](#sdk--client-sdk-setu-tssdk)
+55. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
+56. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
 57. [GraphQL](#graphql)
 58. [Summary](#summary)
 
@@ -70,33 +70,33 @@
 
 ## Installation
 
-Packages are published to [JSR](https://jsr.io) under the `@hono-enterprise` scope and are
-consumable from every runtime:
+Packages are published to [JSR](https://jsr.io) under the `@setu-ts` scope and are consumable from
+every runtime:
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/kernel jsr:@hono-enterprise/runtime
+deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime
 
 # npm / pnpm / yarn (via JSR's npm compatibility layer)
-npx jsr add @hono-enterprise/kernel @hono-enterprise/runtime
-pnpm dlx jsr add @hono-enterprise/kernel @hono-enterprise/runtime
+npx jsr add @setu-ts/kernel @setu-ts/runtime
+pnpm dlx jsr add @setu-ts/kernel @setu-ts/runtime
 
 # bun
-bunx jsr add @hono-enterprise/kernel @hono-enterprise/runtime
+bunx jsr add @setu-ts/kernel @setu-ts/runtime
 ```
 
 Add plugins as needed:
 
 ```bash
-deno add jsr:@hono-enterprise/logger-plugin jsr:@hono-enterprise/config-plugin \
-         jsr:@hono-enterprise/validation-plugin jsr:@hono-enterprise/database-plugin \
-         jsr:@hono-enterprise/auth-plugin jsr:@hono-enterprise/openapi-plugin
+deno add jsr:@setu-ts/logger-plugin jsr:@setu-ts/config-plugin \
+         jsr:@setu-ts/validation-plugin jsr:@setu-ts/database-plugin \
+         jsr:@setu-ts/auth-plugin jsr:@setu-ts/openapi-plugin
 ```
 
 Or use a starter bundle:
 
 ```bash
-deno add jsr:@hono-enterprise/rest-starter
+deno add jsr:@setu-ts/rest-starter
 ```
 
 ---
@@ -106,7 +106,7 @@ deno add jsr:@hono-enterprise/rest-starter
 A full-featured service with caching, events, scheduling, and more:
 
 ```typescript
-import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
+import { createFullStackApp } from '@setu-ts/full-stack-starter';
 
 const app = createFullStackApp({
   cache: { store: 'memory' },
@@ -129,8 +129,8 @@ await app.start({ port: 3002 });
 The smallest possible application — just the kernel and runtime:
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication({
   plugins: [RuntimePlugin()],
@@ -218,7 +218,7 @@ console.log(response.json()); // [{ id: 1 }]
 
 For testing, prefer `createTestApp()` — it calls `start()` automatically (without binding a socket),
 so you can call `inject()` or `fetch()` directly. See
-[Testing Package](#testing-package-hono-enterprisetesting) for the full API.
+[Testing Package](#testing-package-setu-tstesting) for the full API.
 
 ---
 
@@ -229,7 +229,7 @@ Provides runtime-agnostic services (UUID, timers, crypto, env, HTTP server).
 ### Registration
 
 ```typescript
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 app.register(RuntimePlugin({
   httpAdapter: 'auto', // 'node' | 'deno' | 'bun' | 'auto'
@@ -340,8 +340,8 @@ record at all. The runtime package exports both resolver factories: `createNodeD
 
 The runtime package also exports the worker host factories `createWebWorkerHost(globals?)`
 (Deno/Bun, over the web `Worker` API) and `createNodeWorkerHost(mods?)` (Node, over
-`node:worker_threads`), each behind an injectable seam, plus a `@hono-enterprise/runtime/worker`
-subpath whose sole export is `defineWorkerTask` (see the WorkerPoolPlugin section).
+`node:worker_threads`), each behind an injectable seam, plus a `@setu-ts/runtime/worker` subpath
+whose sole export is `defineWorkerTask` (see the WorkerPoolPlugin section).
 
 ---
 
@@ -354,7 +354,7 @@ available before most other plugins register.
 ### Registration
 
 ```typescript
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
 app.register(LoggerPlugin({
   level: 'info', // minimum level to emit (default 'info')
@@ -378,7 +378,7 @@ app.register(LoggerPlugin({
 ### Usage in Routes
 
 ```typescript
-import { CAPABILITIES, ILogger } from '@hono-enterprise/common';
+import { CAPABILITIES, ILogger } from '@setu-ts/common';
 
 app.router.get('/users/:id', async (ctx) => {
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
@@ -431,7 +431,7 @@ type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
 The logger implementations can be used directly without the plugin, e.g. in tests or scripts:
 
 ```typescript
-import { ConsoleLogger, NoopLogger, PinoLogger } from '@hono-enterprise/logger-plugin';
+import { ConsoleLogger, NoopLogger, PinoLogger } from '@setu-ts/logger-plugin';
 
 const consoleLogger = new ConsoleLogger(runtime, { level: 'debug', pretty: true });
 const noopLogger = new NoopLogger();
@@ -442,7 +442,7 @@ const pinoLogger = await PinoLogger.create({ level: 'info', redact: ['password']
 ### Request Logging Middleware
 
 ```typescript
-import { createRequestLoggerMiddleware } from '@hono-enterprise/logger-plugin';
+import { createRequestLoggerMiddleware } from '@setu-ts/logger-plugin';
 
 app.middleware.add(createRequestLoggerMiddleware({
   slowRequestThreshold: 1000,
@@ -469,8 +469,8 @@ never mutated. Hot reload is deferred (the runtime contract has no file-watching
 ### Registration
 
 ```typescript
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 import { z } from 'zod';
 
 const AppConfigSchema = z.object({
@@ -542,8 +542,8 @@ interface ConfigPluginOptions {
 ### loadConfig()
 
 ```typescript
-import { loadConfig } from '@hono-enterprise/config-plugin';
-import { createRuntimeServices } from '@hono-enterprise/runtime';
+import { loadConfig } from '@setu-ts/config-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
 
 const config = await loadConfig(createRuntimeServices(), {
   envFilePath: ['.env.local', '.env'],
@@ -615,7 +615,7 @@ via a structural `safeParse()` interface — no hard Zod dependency in the plugi
 ### Registration
 
 ```typescript
-import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
+import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
 app.register(ValidationPlugin({
   errorFormat: 'rfc7807', // 'default' | 'rfc7807' | 'nestjs' | custom function
@@ -650,7 +650,7 @@ interface ValidationPluginOptions {
 
 ```typescript
 import { z } from 'zod';
-import { CAPABILITIES, IValidationService } from '@hono-enterprise/common';
+import { CAPABILITIES, IValidationService } from '@setu-ts/common';
 
 const CreateUserSchema = z.object({
   name: z.string().min(2).max(100),
@@ -696,7 +696,7 @@ import {
   validateHeaders,
   validateParams,
   validateQuery,
-} from '@hono-enterprise/validation-plugin';
+} from '@setu-ts/validation-plugin';
 
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
@@ -725,7 +725,7 @@ The `IValidationService.middleware()` method builds middleware with the formatte
 construction time:
 
 ```typescript
-import { CAPABILITIES, IValidationService } from '@hono-enterprise/common';
+import { CAPABILITIES, IValidationService } from '@setu-ts/common';
 
 app.router.post('/users', (ctx, next) => {
   const validation = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
@@ -738,7 +738,7 @@ app.router.post('/users', (ctx, next) => {
 Sanitization is a standalone export (not a method on `IValidationService`):
 
 ```typescript
-import { SanitizationRules, sanitize } from '@hono-enterprise/validation-plugin';
+import { SanitizationRules, sanitize } from '@setu-ts/validation-plugin';
 
 const rules: SanitizationRules = {
   htmlEncode: true,
@@ -753,7 +753,7 @@ const clean = sanitize(userInput, rules);
 You can also create a reusable sanitizer function:
 
 ```typescript
-import { createSanitizer } from '@hono-enterprise/validation-plugin';
+import { createSanitizer } from '@setu-ts/validation-plugin';
 
 const sanitizer = createSanitizer({ htmlEncode: true, maxLength: 500 });
 const clean1 = sanitizer(inputA);
@@ -777,7 +777,7 @@ const clean2 = sanitizer(inputB);
 
 ```json
 {
-  "type": "https://hono-enterprise.dev/errors/validation",
+  "type": "https://setu-ts.dev/errors/validation",
   "title": "Validation Error",
   "status": 400,
   "detail": "The request contains 1 validation error(s).",
@@ -804,7 +804,7 @@ const clean2 = sanitizer(inputB);
 ### Custom Error Formatter
 
 ```typescript
-import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
+import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
 app.register(ValidationPlugin({
   errorFormat: (issues) => ({
@@ -823,7 +823,7 @@ Provides database access with repository pattern and unit of work.
 ### Registration
 
 ```typescript
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
 
 app.register(DatabasePlugin({
   type: 'prisma',
@@ -936,12 +936,12 @@ interface IRepository<Entity> {
 ### Custom Adapters (external backends)
 
 `DatabasePluginOptions` is a union discriminated on `type`. The `'custom'` arm accepts any
-`IDatabaseAdapter` from `@hono-enterprise/common`, which is how a backend implemented outside this
-package is registered — no plugin imports another plugin.
+`IDatabaseAdapter` from `@setu-ts/common`, which is how a backend implemented outside this package
+is registered — no plugin imports another plugin.
 
 ```typescript
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { D1Adapter, type ID1Database } from '@setu-ts/cloudflare-plugin';
 
 app.register(DatabasePlugin({
   type: 'custom',
@@ -1078,19 +1078,19 @@ Registers three services under existing capability tokens:
 | `RateLimitResult`         | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                        |
 | `MemoryRateLimitStore`    | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                  |
 | `RedisRateLimitStore`     | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                 |
-| `IAuthService`            | re-export                                 | From `@hono-enterprise/common`                                        |
-| `IJwtService`             | re-export                                 | From `@hono-enterprise/common`                                        |
-| `IAuthorizationService`   | re-export                                 | From `@hono-enterprise/common`                                        |
-| `IAuthStrategy`           | re-export                                 | From `@hono-enterprise/common`                                        |
-| `IPrincipal`              | re-export                                 | From `@hono-enterprise/common`                                        |
-| `JwtSignOptions`          | re-export                                 | From `@hono-enterprise/common`                                        |
-| `RbacConfig`              | re-export                                 | From `@hono-enterprise/common`                                        |
-| `RoleDefinition`          | re-export                                 | From `@hono-enterprise/common`                                        |
+| `IAuthService`            | re-export                                 | From `@setu-ts/common`                                                |
+| `IJwtService`             | re-export                                 | From `@setu-ts/common`                                                |
+| `IAuthorizationService`   | re-export                                 | From `@setu-ts/common`                                                |
+| `IAuthStrategy`           | re-export                                 | From `@setu-ts/common`                                                |
+| `IPrincipal`              | re-export                                 | From `@setu-ts/common`                                                |
+| `JwtSignOptions`          | re-export                                 | From `@setu-ts/common`                                                |
+| `RbacConfig`              | re-export                                 | From `@setu-ts/common`                                                |
+| `RoleDefinition`          | re-export                                 | From `@setu-ts/common`                                                |
 
 ### Registration
 
 ```typescript
-import { authMiddleware, AuthPlugin } from '@hono-enterprise/auth-plugin';
+import { authMiddleware, AuthPlugin } from '@setu-ts/auth-plugin';
 
 app.register(AuthPlugin({
   jwt: {
@@ -1126,7 +1126,7 @@ JWT with the separate `IJwtService` resolved from `'jwt'` (or issue an access + 
 `RefreshTokenService` — see Refresh Tokens below).
 
 ```typescript
-import type { IAuthService, IJwtService } from '@hono-enterprise/common';
+import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 app.router.post('/auth/login', async (ctx) => {
   const auth = ctx.services.get<IAuthService>('authentication');
@@ -1160,8 +1160,8 @@ default backend (single-process; lazy expiry on `get`); a Redis-backed `RefreshT
 deferred — the async interface makes it a later drop-in.
 
 ```typescript
-import { MemoryRefreshTokenStore, RefreshTokenService } from '@hono-enterprise/auth-plugin';
-import type { IJwtService, IRuntimeServices } from '@hono-enterprise/common';
+import { MemoryRefreshTokenStore, RefreshTokenService } from '@setu-ts/auth-plugin';
+import type { IJwtService, IRuntimeServices } from '@setu-ts/common';
 
 const jwt = app.services.get<IJwtService>('jwt');
 const runtime = app.services.get<IRuntimeServices>('runtime');
@@ -1212,7 +1212,7 @@ multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, 
 `npm:ioredis@5.x` is lazily imported on first use).
 
 ```typescript
-import { rateLimitMiddleware, RedisRateLimitStore } from '@hono-enterprise/auth-plugin';
+import { rateLimitMiddleware, RedisRateLimitStore } from '@setu-ts/auth-plugin';
 
 // Global: 100 requests per minute per client IP (in-memory store)
 app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 }));
@@ -1250,7 +1250,7 @@ import {
   requireAuth,
   requirePermission,
   requireRole,
-} from '@hono-enterprise/auth-plugin';
+} from '@setu-ts/auth-plugin';
 
 // Require authentication
 app.router.get('/profile', {
@@ -1310,7 +1310,7 @@ app.router.get('/me', {
 000 iterations) via `runtime.subtle` / `runtime.randomBytes`.
 
 ```typescript
-import { PasswordHasher } from '@hono-enterprise/auth-plugin';
+import { PasswordHasher } from '@setu-ts/auth-plugin';
 
 const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from the 'runtime' token
 const stored = await hasher.hash('correct horse battery staple');
@@ -1332,7 +1332,7 @@ opt-in via their option blocks. Each concern is secure-by-default when enabled.
 ### Registration
 
 ```typescript
-import { HttpSecurityPlugin } from '@hono-enterprise/http-security-plugin';
+import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 
 app.register(HttpSecurityPlugin({
   cors: { origin: 'https://example.com', credentials: true },
@@ -1432,26 +1432,26 @@ Registers `ICacheStore` under `CAPABILITIES.CACHE`.
 
 ### Exports
 
-| Export                   | File                                 | Description                              |
-| ------------------------ | ------------------------------------ | ---------------------------------------- |
-| `CachePlugin`            | `src/plugin/cache-plugin.ts`         | Plugin factory                           |
-| `CacheService`           | `src/services/cache-service.ts`      | Wrapper applying prefix + defaultTTL     |
-| `MemoryStore`            | `src/stores/memory-store.ts`         | In-memory LRU + TTL store                |
-| `RedisStore`             | `src/stores/redis-store.ts`          | Redis store via ioredis                  |
-| `NoopStore`              | `src/stores/noop-store.ts`           | No-op store (dev/test)                   |
-| `cacheMiddleware`        | `src/middleware/cache-middleware.ts` | Transparent response-caching middleware  |
-| `CacheStoreType`         | `src/interfaces/index.ts`            | `'memory' \| 'redis' \| 'noop'`          |
-| `CacheStoreOptions`      | `src/interfaces/index.ts`            | Store-specific options                   |
-| `CachePluginOptions`     | `src/interfaces/index.ts`            | Plugin factory options                   |
-| `IRedisClient`           | `src/interfaces/index.ts`            | Structural ioredis shape                 |
-| `CacheMiddlewareOptions` | `src/interfaces/index.ts`            | Middleware options                       |
-| `CachedResponsePayload`  | `src/interfaces/index.ts`            | Cached response shape                    |
-| `ICacheStore`            | `src/interfaces/index.ts`            | Re-export from `@hono-enterprise/common` |
+| Export                   | File                                 | Description                             |
+| ------------------------ | ------------------------------------ | --------------------------------------- |
+| `CachePlugin`            | `src/plugin/cache-plugin.ts`         | Plugin factory                          |
+| `CacheService`           | `src/services/cache-service.ts`      | Wrapper applying prefix + defaultTTL    |
+| `MemoryStore`            | `src/stores/memory-store.ts`         | In-memory LRU + TTL store               |
+| `RedisStore`             | `src/stores/redis-store.ts`          | Redis store via ioredis                 |
+| `NoopStore`              | `src/stores/noop-store.ts`           | No-op store (dev/test)                  |
+| `cacheMiddleware`        | `src/middleware/cache-middleware.ts` | Transparent response-caching middleware |
+| `CacheStoreType`         | `src/interfaces/index.ts`            | `'memory' \| 'redis' \| 'noop'`         |
+| `CacheStoreOptions`      | `src/interfaces/index.ts`            | Store-specific options                  |
+| `CachePluginOptions`     | `src/interfaces/index.ts`            | Plugin factory options                  |
+| `IRedisClient`           | `src/interfaces/index.ts`            | Structural ioredis shape                |
+| `CacheMiddlewareOptions` | `src/interfaces/index.ts`            | Middleware options                      |
+| `CachedResponsePayload`  | `src/interfaces/index.ts`            | Cached response shape                   |
+| `ICacheStore`            | `src/interfaces/index.ts`            | Re-export from `@setu-ts/common`        |
 
 ### Registration
 
 ```typescript
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
+import { CachePlugin } from '@setu-ts/cache-plugin';
 
 // Memory store (default)
 app.register(CachePlugin());
@@ -1469,7 +1469,7 @@ app.register(CachePlugin({ name: 'session', options: { maxSize: 500 } }));
 ### Programmatic API
 
 ```typescript
-import type { ICacheStore } from '@hono-enterprise/common';
+import type { ICacheStore } from '@setu-ts/common';
 
 app.router.get('/users/:id', async (ctx) => {
   const cache = ctx.services.get<ICacheStore>('cache');
@@ -1497,7 +1497,7 @@ Transparent response-caching middleware that stores full HTTP responses (status,
 replays them on cache HIT without invoking the handler.
 
 ```typescript
-import { cacheMiddleware } from '@hono-enterprise/cache-plugin';
+import { cacheMiddleware } from '@setu-ts/cache-plugin';
 
 app.router.get('/users/:id', {
   middleware: [
@@ -1535,7 +1535,7 @@ Provides in-memory event bus for domain events.
 ### Registration
 
 ```typescript
-import { EventsPlugin } from '@hono-enterprise/events-plugin';
+import { EventsPlugin } from '@setu-ts/events-plugin';
 
 app.register(EventsPlugin({
   async: true,
@@ -1549,7 +1549,7 @@ app.register(EventsPlugin({
 ### Defining Events
 
 ```typescript
-import { DomainEvent } from '@hono-enterprise/events-plugin';
+import { DomainEvent } from '@setu-ts/events-plugin';
 
 class UserCreatedEvent extends DomainEvent<{ userId: string; email: string }> {
   readonly type = 'UserCreated';
@@ -1625,8 +1625,7 @@ interface IEventBus {
 - **`subscribeHandler`** — Function that adapts an `IEventHandler` instance to the `EventHandler`
   signature and subscribes it to the bus; returns an `Unsubscribe` function.
 
-**Re-exports from `@hono-enterprise/common`:** `IEventBus`, `IDomainEvent`, `EventHandler`,
-`Unsubscribe`.
+**Re-exports from `@setu-ts/common`:** `IEventBus`, `IDomainEvent`, `EventHandler`, `Unsubscribe`.
 
 ---
 
@@ -1639,7 +1638,7 @@ Provides Server-Sent Events (SSE) for real-time, one-way server-to-client messag
 ### Registration
 
 ```typescript
-import { SsePlugin } from '@hono-enterprise/sse-plugin';
+import { SsePlugin } from '@setu-ts/sse-plugin';
 
 app.register(SsePlugin({
   heartbeatMs: 15000,
@@ -1650,8 +1649,8 @@ app.register(SsePlugin({
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ISseService } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ISseService } from '@setu-ts/common';
 
 app.router.get('/events', async (ctx) => {
   const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
@@ -1703,8 +1702,8 @@ Omitting an option disables that behaviour (no timer created).
 | `SseConnection`                                             | class             | A live SSE connection over a `ReadableStream`                       |
 | `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`, `scalingNotice`                           |
 | `ChannelPublisher`                                          | type              | Forwards a local publish to other replicas; supplied by a backplane |
-| `ISseConnection`, `ISseService`, `SseChannel`, `SseMessage` | type (re-export)  | From `@hono-enterprise/common`                                      |
-| `CAPABILITIES`                                              | const (re-export) | From `@hono-enterprise/common`                                      |
+| `ISseConnection`, `ISseService`, `SseChannel`, `SseMessage` | type (re-export)  | From `@setu-ts/common`                                              |
+| `CAPABILITIES`                                              | const (re-export) | From `@setu-ts/common`                                              |
 
 ### Notes
 
@@ -1734,7 +1733,7 @@ Cloudflare Workers. The plugin never creates a server and never touches a runtim
 ### Registration
 
 ```typescript
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 
 app.register(WebSocketPlugin({
   maxConnections: 10_000,
@@ -1759,7 +1758,7 @@ app.register(WebSocketPlugin({
 ### Usage
 
 ```typescript
-import { CAPABILITIES, type IWebSocketService } from '@hono-enterprise/common';
+import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
 const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 
@@ -1817,8 +1816,8 @@ ws.route('/ws/chat', {
 
 - **Routes match on exact path.** Variable data travels in the query string and reaches `onOpen` via
   `WebSocketConnectionContext.query`. Pattern parameters (`:id`) are deliberately not supported: the
-  kernel's matcher is internal to `@hono-enterprise/kernel` and hand-rolling a second one would
-  duplicate logic.
+  kernel's matcher is internal to `@setu-ts/kernel` and hand-rolling a second one would duplicate
+  logic.
 - **The heartbeat is an application-level frame, not an RFC 6455 ping.** The web `WebSocket` API on
   Deno and Cloudflare Workers exposes no `ping()`, so a protocol ping would silently no-op on half
   the supported runtimes.
@@ -1845,8 +1844,8 @@ ws.route('/ws/chat', {
   creates; a standalone `new Room(name)` takes no listener and is not tracked.
 - **A failing upgrade router is logged, then refused with `500`.** The service catches its own
   routing errors and reports them through the logger capability when one is registered — the HTTP
-  adapter's `UpgradeRouterStore` backstop runs inside `@hono-enterprise/runtime`, which has no
-  logger, so the cause would otherwise be lost. Register the LoggerPlugin to see it.
+  adapter's `UpgradeRouterStore` backstop runs inside `@setu-ts/runtime`, which has no logger, so
+  the cause would otherwise be lost. Register the LoggerPlugin to see it.
 - **`app.inject()` cannot exercise a WebSocket**; tests must bind a real socket
   (`app.start({ port })` + `new WebSocket(...)`).
 - A `websocket` health indicator reports `{ available, connections, rooms, routes }`. `onClose`
@@ -1868,7 +1867,7 @@ in-process behavior with no application code touched.
 ### Registration
 
 ```typescript
-import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 
 const app = createApplication({
   plugins: [
@@ -1887,16 +1886,16 @@ registers and subscribes.
 
 Discriminated on `transport`.
 
-| Option                  | Applies to       | Default                      | Description                                                         |
-| ----------------------- | ---------------- | ---------------------------- | ------------------------------------------------------------------- |
-| `transport`             | all              | `'memory'`                   | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                    |
-| `topic`                 | all but `memory` | `'hono-enterprise.realtime'` | Broker topic / Redis channel. Every replica must agree on it        |
-| `origin`                | all              | a fresh `runtime.uuid()`     | This replica's identity. Override only to make a test deterministic |
-| `bus`                   | `'memory'`       | `'default'`                  | Named in-process bus; separate names stay isolated                  |
-| `url`                   | `'redis'`        | —                            | Connection URL, read only on the lazy `npm:ioredis@5.x` path        |
-| `client` / `subscriber` | `'redis'`        | —                            | Injected client pair. **Required together** — see Notes             |
-| `module`                | `'redis'`        | —                            | An `ioredis`-shaped module, for testing without the real driver     |
-| `instance`              | `'custom'`       | —                            | The `IRealtimeBackplane` to register, used as-is                    |
+| Option                  | Applies to       | Default                  | Description                                                         |
+| ----------------------- | ---------------- | ------------------------ | ------------------------------------------------------------------- |
+| `transport`             | all              | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                    |
+| `topic`                 | all but `memory` | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it        |
+| `origin`                | all              | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic |
+| `bus`                   | `'memory'`       | `'default'`              | Named in-process bus; separate names stay isolated                  |
+| `url`                   | `'redis'`        | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path        |
+| `client` / `subscriber` | `'redis'`        | —                        | Injected client pair. **Required together** — see Notes             |
+| `module`                | `'redis'`        | —                        | An `ioredis`-shaped module, for testing without the real driver     |
+| `instance`              | `'custom'`       | —                        | The `IRealtimeBackplane` to register, used as-is                    |
 
 ### Transports
 
@@ -1920,7 +1919,7 @@ Discriminated on `transport`.
 | `adaptRedisModule`                                                                                   | function          | Narrows an `ioredis` module to `IRedisModule`                 |
 | `loadRedisModule`                                                                                    | function          | Real lazy `import('npm:ioredis@5.x')`                         |
 | `RedisModuleError`                                                                                   | class             | Thrown when `ioredis` cannot be loaded or recognized          |
-| `DEFAULT_TOPIC`                                                                                      | const             | `'hono-enterprise.realtime'`                                  |
+| `DEFAULT_TOPIC`                                                                                      | const             | `'setu-ts.realtime'`                                          |
 | `IRedisBackplaneClient`                                                                              | interface         | Structural facade for an injected Redis client                |
 | `IRedisModule`                                                                                       | interface         | Structural facade for the `ioredis` module                    |
 | `RealtimeBackplanePluginOptions`                                                                     | type              | Discriminated union of the four transport arms                |
@@ -1929,8 +1928,8 @@ Discriminated on `transport`.
 | `MessagingBackplaneOptions`                                                                          | interface         | The `'messaging'` arm                                         |
 | `RedisBackplaneOptions`                                                                              | interface         | The `'redis'` arm                                             |
 | `CustomBackplaneOptions`                                                                             | interface         | The `'custom'` arm                                            |
-| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload` | type (re-export)  | From `@hono-enterprise/common`                                |
-| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                 | value (re-export) | From `@hono-enterprise/common`                                |
+| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload` | type (re-export)  | From `@setu-ts/common`                                        |
+| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                 | value (re-export) | From `@setu-ts/common`                                        |
 
 ### Notes
 
@@ -1949,8 +1948,8 @@ Discriminated on `transport`.
 - **A remote frame never creates a room or channel.** It is delivered only to one that already
   exists locally, so a cluster-wide namespace cannot grow a replica's maps without bound.
 - **Binary WebSocket frames are base64-encoded** for the wire (`encodeFrameData` /
-  `decodeFrameData`, in `@hono-enterprise/common` because three packages need the identical shape).
-  An `SseMessage` is already JSON-serializable and travels as its JSON encoding.
+  `decodeFrameData`, in `@setu-ts/common` because three packages need the identical shape). An
+  `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
   replayed; a replica partitioned from the transport misses frames sent during the partition.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
@@ -1975,7 +1974,7 @@ payload server-side and leaves only an opaque id in the cookie, which is what ma
 revocation possible.
 
 ```typescript
-import { getSession, SessionPlugin } from '@hono-enterprise/session-plugin';
+import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), SessionPlugin({ secret: mySecret, csrf: {} })],
@@ -2099,15 +2098,15 @@ app.router.post('/login', (ctx) => {
 
 ## ReactRouterPlugin()
 
-Embeds **React Router v7 framework mode** as a first-party plugin so a Hono Enterprise application
-can serve a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
+Embeds **React Router v7 framework mode** as a first-party plugin so a Setu-TS application can serve
+a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
 
 ### Registration
 
 ```typescript
-import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 
 app.register(ReactRouterPlugin({
   serverBuildPath: './build/server/index.js',
@@ -2124,7 +2123,7 @@ The plugin registers its own catch-all route internally — the consumer does **
 register SSR routes. The plugin owns all HTTP verbs at the configured `basename` pattern:
 
 ```typescript
-import { CAPABILITIES, ISsrService } from '@hono-enterprise/common';
+import { CAPABILITIES, ISsrService } from '@setu-ts/common';
 
 // The plugin handles SSR automatically at the catch-all.
 // Custom routes take precedence based on static segment count:
@@ -2205,8 +2204,8 @@ app.router.get('/api/health', (ctx) => {
 ### Reading the load context in a route module
 
 ```typescript
-import { servicesContext, userContext } from '@hono-enterprise/react-router-plugin';
-import { CAPABILITIES, type ILogger } from '@hono-enterprise/common';
+import { servicesContext, userContext } from '@setu-ts/react-router-plugin';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
 
 export async function loader({ context }: Route.LoaderArgs) {
   const services = context.get(servicesContext);
@@ -2224,21 +2223,21 @@ literal:
 
 ```typescript
 // app/lib/context-keys.server.ts
-import { contextKeyFor } from '@hono-enterprise/react-router-plugin';
-import type { ISession } from '@hono-enterprise/common';
+import { contextKeyFor } from '@setu-ts/react-router-plugin';
+import type { ISession } from '@setu-ts/common';
 
 export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
 ```
 
 Keys are matched by **identity**, and in a framework-mode application the declaring module reliably
 exists twice: Vite inlines application modules into the server build, while the runtime loads
-`honoe.config.ts` from source. Two hand-written key objects then look identical and match nothing —
+`setu.config.ts` from source. Two hand-written key objects then look identical and match nothing —
 `context.get()` returns the default, so a session reads as `null` and a CSRF token as an empty
 string, with no error anywhere. Resolving by name through this package gives both copies the same
 object.
 
 That guarantee needs this package to be a **single module instance**, which means the server build
-must treat `@hono-enterprise/*` as external:
+must treat `@setu-ts/*` as external:
 
 ```typescript
 // vite.config.ts
@@ -2246,7 +2245,7 @@ export default defineConfig({
   environments: {
     ssr: {
       build: {
-        rollupOptions: { external: ['@hono-enterprise/react-router-plugin'] },
+        rollupOptions: { external: ['@setu-ts/react-router-plugin'] },
       },
     },
   },
@@ -2255,7 +2254,7 @@ export default defineConfig({
 
 Declared under `environments.ssr.build`, deliberately: React Router builds through Vite's
 Environment API, and neither a top-level `ssr.external` nor `environments.ssr.resolve.external`
-reaches that build. `honoe new --template full-stack` emits all of this already.
+reaches that build. `setu new --template full-stack` emits all of this already.
 
 The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
 package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
@@ -2318,7 +2317,7 @@ closures cannot cross a thread boundary. Inputs and outputs travel by structured
 ### Registration
 
 ```typescript
-import { WorkerPoolPlugin } from '@hono-enterprise/worker-pool-plugin';
+import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
 
 app.register(WorkerPoolPlugin({
   defaultPoolSize: 4, // default: runtime.workers.availableParallelism()
@@ -2338,7 +2337,7 @@ level with `defineWorkerTask` from the runtime package's `./worker` subpath:
 
 ```typescript
 // tasks/resize-image.ts — runs on a worker thread
-import { defineWorkerTask } from '@hono-enterprise/runtime/worker';
+import { defineWorkerTask } from '@setu-ts/runtime/worker';
 
 defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
   return await resize(imageBytes);
@@ -2348,8 +2347,8 @@ defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IWorkerPool } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IWorkerPool } from '@setu-ts/common';
 
 app.router.post('/thumbnail', async (ctx) => {
   const pool = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
@@ -2421,7 +2420,7 @@ logged.
 ### Registration
 
 ```typescript
-import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
+import { SecretsPlugin } from '@setu-ts/secrets-plugin';
 
 // Environment variables (default provider)
 app.register(SecretsPlugin());
@@ -2443,8 +2442,8 @@ app.register(SecretsPlugin({ provider: 'aws-kms', options: { region: 'us-east-1'
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ISecretManager } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ISecretManager } from '@setu-ts/common';
 
 const secrets = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
 const dbPassword = await secrets.get('database/password'); // env: DATABASE_PASSWORD
@@ -2477,7 +2476,7 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   `HashiCorpVaultProviderOptions` — option types.
 - `IAwsSecretsClient`, `IGcpSecretsClient`, `IAzureSecretsClient`, `IVaultHttp` — structural
   injection types.
-- `ISecretManager` — re-exported from `@hono-enterprise/common` (`get` / `has` / `rotate`).
+- `ISecretManager` — re-exported from `@setu-ts/common` (`get` / `has` / `rotate`).
 
 ### Notes
 
@@ -2502,7 +2501,7 @@ backend takes an injected client facade (`IAuditDbClient`), never the `database`
 ### Registration
 
 ```typescript
-import { AuditPlugin } from '@hono-enterprise/audit-plugin';
+import { AuditPlugin } from '@setu-ts/audit-plugin';
 
 // In-memory (default — non-durable)
 app.register(AuditPlugin());
@@ -2522,8 +2521,8 @@ app.register(AuditPlugin({ storage: 'file', options: { path: './audit.log' } }))
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IAuditLogger } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuditLogger } from '@setu-ts/common';
 
 const audit = ctx.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
 await audit.log({
@@ -2562,7 +2561,7 @@ not part of the public capability this milestone.
 - `AuditPluginOptions`, `AuditStorageType`, `AuditStorageOptions` — option types.
 - `IAuditDbClient` — structural database client facade for the `'database'` backend
   (`insert(table, row)` / `select(table, criteria?)`).
-- `IAuditLogger`, `AuditEntry` — re-exported from `@hono-enterprise/common`.
+- `IAuditLogger`, `AuditEntry` — re-exported from `@setu-ts/common`.
 
 ### Notes
 
@@ -2588,8 +2587,8 @@ Provides command/query separation with buses.
 ### Registration
 
 ```typescript
-import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
-import type { CqrsRequest, IPipelineBehavior } from '@hono-enterprise/common';
+import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import type { CqrsRequest, IPipelineBehavior } from '@setu-ts/common';
 
 // Example behavior implementations
 const loggingBehavior: IPipelineBehavior = {
@@ -2618,7 +2617,7 @@ app.register(CqrsPlugin({
 ### Defining Commands and Queries
 
 ```typescript
-import type { CqrsCommand, CqrsQuery } from '@hono-enterprise/cqrs-plugin';
+import type { CqrsCommand, CqrsQuery } from '@setu-ts/cqrs-plugin';
 
 // A request is routed by its string `type`; `data` carries the payload.
 // Both a class instance (below) and a plain `{ type, data }` object satisfy the contract.
@@ -2636,7 +2635,7 @@ class GetUserQuery implements CqrsQuery<{ id: string }> {
 ### Implementing Handlers
 
 ```typescript
-import type { ICommandHandler, IQueryHandler } from '@hono-enterprise/cqrs-plugin';
+import type { ICommandHandler, IQueryHandler } from '@setu-ts/cqrs-plugin';
 
 class CreateUserHandler implements ICommandHandler<CreateUserCommand, string> {
   constructor(private db: IDatabaseService) {}
@@ -2701,7 +2700,7 @@ Provides message broker abstraction for cross-service integration events.
 ### Registration
 
 ```typescript
-import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 
 // In-memory broker (for development/testing)
 app.register(MessagingPlugin({
@@ -2916,7 +2915,7 @@ app.register(MessagingPlugin({
 ### Publishing Messages
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 app.router.post('/orders', async (ctx) => {
   const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
@@ -2974,7 +2973,7 @@ const reply = await broker.request<{ userId: string }, { name: string }>(
 );
 ```
 
-Signatures (on `IMessageBroker`, from `@hono-enterprise/common`):
+Signatures (on `IMessageBroker`, from `@setu-ts/common`):
 
 ```typescript
 interface RequestOptions {
@@ -2997,8 +2996,8 @@ respond<TReq, TRes>(
 
 Pass `options.queue` to `respond` to load-balance requests across competing responders.
 
-`request` rejects with one of three exported error classes (import from
-`@hono-enterprise/messaging-plugin` for `instanceof` handling):
+`request` rejects with one of three exported error classes (import from `@setu-ts/messaging-plugin`
+for `instanceof` handling):
 
 | Error                        | Thrown when                                                                      |
 | ---------------------------- | -------------------------------------------------------------------------------- |
@@ -3024,7 +3023,7 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 ### Multiple Broker Instances
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 app.register(MessagingPlugin({
   broker: 'redis-streams',
@@ -3050,7 +3049,7 @@ const auditBroker = ctx.services.get<IMessageBroker>('messaging.audit');
 The `EventsMessagingBridge` forwards domain events from `EventsPlugin` to a messaging broker:
 
 ```typescript
-import { EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
+import { EventsMessagingBridge } from '@setu-ts/messaging-plugin';
 
 app.register(EventsMessagingBridge({
   eventTypes: ['user.created', 'user.updated'],
@@ -3066,27 +3065,27 @@ app.register(EventsMessagingBridge({
 
 ```typescript
 // Plugin factories
-export { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
-export { EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
+export { MessagingPlugin } from '@setu-ts/messaging-plugin';
+export { EventsMessagingBridge } from '@setu-ts/messaging-plugin';
 
 // Broker implementations
-export { InMemoryBroker } from '@hono-enterprise/messaging-plugin';
-export { RedisStreamsBroker } from '@hono-enterprise/messaging-plugin';
-export { RabbitMqBroker } from '@hono-enterprise/messaging-plugin';
-export { NatsBroker } from '@hono-enterprise/messaging-plugin';
-export { KafkaBroker } from '@hono-enterprise/messaging-plugin';
-export { GcpPubSubBroker } from '@hono-enterprise/messaging-plugin';
-export { ServiceBusBroker } from '@hono-enterprise/messaging-plugin';
+export { InMemoryBroker } from '@setu-ts/messaging-plugin';
+export { RedisStreamsBroker } from '@setu-ts/messaging-plugin';
+export { RabbitMqBroker } from '@setu-ts/messaging-plugin';
+export { NatsBroker } from '@setu-ts/messaging-plugin';
+export { KafkaBroker } from '@setu-ts/messaging-plugin';
+export { GcpPubSubBroker } from '@setu-ts/messaging-plugin';
+export { ServiceBusBroker } from '@setu-ts/messaging-plugin';
 
 // Adapter / load helpers. The `*SdkModule` types describe the SDK shape each
 // `adapt*` consumes, so a consumer can type a substitute module.
-export { adaptPubSubModule, loadPubSubModule } from '@hono-enterprise/messaging-plugin';
-export { adaptServiceBusModule, loadServiceBusModule } from '@hono-enterprise/messaging-plugin';
-export type { PubSubSdkModule, ServiceBusSdkModule } from '@hono-enterprise/messaging-plugin';
+export { adaptPubSubModule, loadPubSubModule } from '@setu-ts/messaging-plugin';
+export { adaptServiceBusModule, loadServiceBusModule } from '@setu-ts/messaging-plugin';
+export type { PubSubSdkModule, ServiceBusSdkModule } from '@setu-ts/messaging-plugin';
 
 // Serializer
-export { JsonSerializer } from '@hono-enterprise/messaging-plugin';
-export type { ISerializer } from '@hono-enterprise/messaging-plugin';
+export { JsonSerializer } from '@setu-ts/messaging-plugin';
+export type { ISerializer } from '@setu-ts/messaging-plugin';
 
 // Request-reply error classes
 export {
@@ -3095,7 +3094,7 @@ export {
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
-} from '@hono-enterprise/messaging-plugin';
+} from '@setu-ts/messaging-plugin';
 
 // Option types
 export type {
@@ -3115,14 +3114,14 @@ export type {
   RedisStreamsMessagingOptions,
   RedisStreamsOptions,
   ServiceBusMessagingOptions,
-} from '@hono-enterprise/messaging-plugin';
+} from '@setu-ts/messaging-plugin';
 
 // Port types (structural)
 export type {
   IPubSubSubscription,
   IPubSubTransport,
   PubSubOptions,
-} from '@hono-enterprise/messaging-plugin';
+} from '@setu-ts/messaging-plugin';
 export type {
   IServiceBusProcessErrorArgs,
   IServiceBusReceiver,
@@ -3130,16 +3129,16 @@ export type {
   IServiceBusSubscription,
   IServiceBusTransport,
   ServiceBusOptions,
-} from '@hono-enterprise/messaging-plugin';
+} from '@setu-ts/messaging-plugin';
 
-// Re-exported types from @hono-enterprise/common
+// Re-exported types from @setu-ts/common
 export type {
   IMessageBroker,
   ISubscription,
   MessageHandler,
   MessageMetadata,
   SubscribeOptions,
-} from '@hono-enterprise/messaging-plugin';
+} from '@setu-ts/messaging-plugin';
 ```
 
 > **Kafka Commit Model:** Kafka uses the producer/consumer commit model — handler success
@@ -3182,7 +3181,7 @@ Provides background job queue with Memory and Redis adapters.
   on Cloudflare Workers)
 - **`SqsDelayTooLongError`** — Thrown when SQS delay exceeds 900 s
 - **`SqsQueueNotConfiguredError`** — Thrown when a job name has no queue URL mapping
-- **`IQueue`** — Queue service interface (re-exported from `@hono-enterprise/common`)
+- **`IQueue`** — Queue service interface (re-exported from `@setu-ts/common`)
 - **`IJob<T>`** — Job interface (re-exported)
 - **`JobProcessor<T>`** — Job processor type (re-exported)
 - **`AddJobOptions`** — Options for `queue.add()` (re-exported)
@@ -3194,7 +3193,7 @@ Provides background job queue with Memory and Redis adapters.
 ### Registration
 
 ```typescript
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 // Memory adapter (development/testing)
 app.register(QueuePlugin({
@@ -3248,7 +3247,7 @@ app.register(QueuePlugin({
 ### Adding Jobs
 
 ```typescript
-import type { AddJobOptions, IQueue } from '@hono-enterprise/queue-plugin';
+import type { AddJobOptions, IQueue } from '@setu-ts/queue-plugin';
 
 app.router.post('/users', async (ctx) => {
   const queue = ctx.services.get<IQueue>('queue');
@@ -3276,7 +3275,7 @@ app.router.post('/users', async (ctx) => {
 ### Processing Jobs
 
 ```typescript
-import type { IJob, IQueue } from '@hono-enterprise/queue-plugin';
+import type { IJob, IQueue } from '@setu-ts/queue-plugin';
 
 app.register({
   name: 'job-processors',
@@ -3303,7 +3302,7 @@ app.register({
 ### Recurring Jobs
 
 ```typescript
-import type { IQueue, RecurringOptions } from '@hono-enterprise/queue-plugin';
+import type { IQueue, RecurringOptions } from '@setu-ts/queue-plugin';
 
 const queue = ctx.services.get<IQueue>('queue');
 
@@ -3330,7 +3329,7 @@ exposes its dead set for assertions in tests; the Redis transport keeps its dead
 the RabbitMQ transport keeps its dead set in a per-name dead queue (`he.queue.<name>.dead`).
 
 ```typescript
-import { MemoryQueue } from '@hono-enterprise/queue-plugin';
+import { MemoryQueue } from '@setu-ts/queue-plugin';
 
 const adapter = new MemoryQueue();
 // ... jobs fail through all their attempts ...
@@ -3396,7 +3395,7 @@ schedule until the registering plugin re-creates it. For durable background work
   `lock?`, `ttlMs?`)
 - **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation
 - **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`
-- **`IScheduler`** — Scheduler service interface (re-exported from `@hono-enterprise/common`)
+- **`IScheduler`** — Scheduler service interface (re-exported from `@setu-ts/common`)
 - **`ScheduledJob<T>`** — Job instance handed to the handler (re-exported)
 - **`SchedulerJobHandler<T>`** — Handler callback type (re-exported)
 - **`ScheduleOptions<T>`** — Options for `cron()`/`every()`/`delay()` (re-exported)
@@ -3406,7 +3405,7 @@ schedule until the registering plugin re-creates it. For durable background work
 ### Registration
 
 ```typescript
-import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
 // Process-local locking (default)
 app.register(SchedulerPlugin());
@@ -3435,7 +3434,7 @@ if the lock expires mid-run, another instance may start the same job.
 ### Scheduling Jobs
 
 ```typescript
-import type { IScheduler } from '@hono-enterprise/common';
+import type { IScheduler } from '@setu-ts/common';
 
 app.register({
   name: 'scheduled-jobs',
@@ -3577,8 +3576,7 @@ breaker state across instances.
 - **`TimeoutError`** — Thrown when a call exceeds its per-attempt timeout deadline
 - **`BulkheadFullError`** — Thrown when a bulkhead sheds a call (concurrency saturated, queue full)
 - **`CircuitOpenError`** — Thrown when an open circuit breaker fails fast without invoking the call
-- **`IResilienceService`** — Resilience service interface (re-exported from
-  `@hono-enterprise/common`)
+- **`IResilienceService`** — Resilience service interface (re-exported from `@setu-ts/common`)
 - **`WrapOptions`** — Pattern-selection options for `wrap` (re-exported)
 - **`CircuitBreakerPolicy`** — `threshold`, `timeout` (rolling failure window ms), `resetTimeout`
   (re-exported)
@@ -3589,7 +3587,7 @@ breaker state across instances.
 ### Registration
 
 ```typescript
-import { ResiliencePlugin } from '@hono-enterprise/resilience-plugin';
+import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
 
 app.register(ResiliencePlugin({
   defaultCircuitBreaker: { threshold: 5, timeout: 10_000, resetTimeout: 30_000 },
@@ -3601,8 +3599,8 @@ app.register(ResiliencePlugin({
 ### Programmatic API
 
 ```typescript
-import type { IResilienceService } from '@hono-enterprise/common';
-import { CircuitOpenError, TimeoutError } from '@hono-enterprise/resilience-plugin';
+import type { IResilienceService } from '@setu-ts/common';
+import { CircuitOpenError, TimeoutError } from '@setu-ts/resilience-plugin';
 
 const resilience = ctx.services.get<IResilienceService>('resilience');
 
@@ -3682,7 +3680,7 @@ Provides an HTTP client for external API calls.
 ### Registration
 
 ```typescript
-import { HttpClientPlugin } from '@hono-enterprise/http-client-plugin';
+import { HttpClientPlugin } from '@setu-ts/http-client-plugin';
 
 app.register(HttpClientPlugin({
   baseURL: 'https://api.external.com',
@@ -3731,13 +3729,9 @@ Provides file storage abstraction.
 ### Registration
 
 ```typescript
-import {
-  createUploadMiddleware,
-  getUploadedFile,
-  StoragePlugin,
-} from '@hono-enterprise/storage-plugin';
-import type { IStorage } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { createUploadMiddleware, getUploadedFile, StoragePlugin } from '@setu-ts/storage-plugin';
+import type { IStorage } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 app.register(StoragePlugin({
   provider: 's3',
@@ -3852,7 +3846,7 @@ for `sendTemplate`.
 ### Registration
 
 ```typescript
-import { MailPlugin } from '@hono-enterprise/mail-plugin';
+import { MailPlugin } from '@setu-ts/mail-plugin';
 
 // Log provider (default) — records mail instead of sending; for tests/local dev
 app.register(MailPlugin({ defaults: { from: 'noreply@myapp.com' } }));
@@ -3880,8 +3874,8 @@ app.register(MailPlugin({
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IMailer } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMailer } from '@setu-ts/common';
 
 app.router.post('/users', async (ctx) => {
   const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
@@ -3935,7 +3929,7 @@ app.router.post('/users', async (ctx) => {
   `MailTemplate`, `OutgoingMail`, `RenderedTemplate`, `LogProviderOptions`, `SmtpProviderOptions`,
   `NodemailerModule`, `SesProviderOptions`, `SesSdkModule`, `SendGridProviderOptions` — types.
 - `ISmtpTransport`, `ISesClient`, `IMailHttp` — structural injection types.
-- `IMailer`, `MailMessage` — re-exported from `@hono-enterprise/common`.
+- `IMailer`, `MailMessage` — re-exported from `@setu-ts/common`.
 
 ### Notes
 
@@ -3957,7 +3951,7 @@ Provides multi-channel notifications.
 ### Registration
 
 ```typescript
-import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
+import { NotificationPlugin } from '@setu-ts/notification-plugin';
 
 app.register(NotificationPlugin({
   channels: {
@@ -4046,7 +4040,7 @@ through `CAPABILITIES.MAIL`.
   configuration types.
 - `INotificationHttp`, `NotificationHttpResponse`, `SmsTransport`, `SmsMessage`, `PushTransport`,
   `PushMessage`, `SlackTransport`, `SlackMessage` — injection/transport types.
-- `INotifier`, `NotificationMessage` — re-exported from `@hono-enterprise/common`.
+- `INotifier`, `NotificationMessage` — re-exported from `@setu-ts/common`.
 
 ### Notes
 
@@ -4084,7 +4078,7 @@ Provides feature flag capability.
 ### Registration
 
 ```typescript
-import { FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
+import { FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 
 app.register(FeatureFlagsPlugin({
   provider: 'config',
@@ -4113,7 +4107,7 @@ app.router.get('/dashboard', async (ctx) => {
 });
 
 // Middleware (free-function guard — IFeatureFlags has no middleware method)
-import { createFlagGuard } from '@hono-enterprise/feature-flags-plugin';
+import { createFlagGuard } from '@setu-ts/feature-flags-plugin';
 
 app.router.get('/beta', {
   middleware: [createFlagGuard('beta-features', { fallback: '/not-found' })],
@@ -4170,7 +4164,7 @@ app.router.get('/beta', {
 | `LaunchDarklyProviderConfig`   | interface        | That arm's configuration shape                                                |
 | `CustomProviderOptions`        | interface        | The `'custom'` arm — requires `options.instance`                              |
 | `FlagGuardOptions`             | interface        | `createFlagGuard` options (`fallback`, `statusCode`, `context`)               |
-| `IFeatureFlags`, `FlagContext` | type (re-export) | From `@hono-enterprise/common`                                                |
+| `IFeatureFlags`, `FlagContext` | type (re-export) | From `@setu-ts/common`                                                        |
 
 ### Notes
 
@@ -4205,7 +4199,7 @@ cache-key isolation, and pluggable database-isolation strategies.
 ### Registration
 
 ```typescript
-import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
 
 app.register(MultiTenancyPlugin({
   resolver: 'header',
@@ -4282,7 +4276,7 @@ app.router.get('/users', async (ctx) => {
 | `MemoryTenantDataStoreOptions`                                                                                     | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                 |
 | `ITenantDataStore`                                                                                                 | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                  |
 | `ITenantIsolationStrategy`                                                                                         | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`       |
-| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@hono-enterprise/common`           |
+| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@setu-ts/common`                   |
 
 ### Notes
 
@@ -4344,7 +4338,7 @@ type HealthStatus = 'up' | 'down' | 'degraded';
 ### Registration
 
 ```typescript
-import { createHttpIndicator, HealthPlugin } from '@hono-enterprise/health-plugin';
+import { createHttpIndicator, HealthPlugin } from '@setu-ts/health-plugin';
 
 app.register(HealthPlugin({
   endpoints: {
@@ -4470,7 +4464,7 @@ scrape endpoint responds with `Content-Type: text/plain; version=0.0.4; charset=
 ### Registration
 
 ```typescript
-import { MetricsPlugin } from '@hono-enterprise/metrics-plugin';
+import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 
 app.register(MetricsPlugin({
   endpoint: '/metrics',
@@ -4586,7 +4580,7 @@ are exported from the pinned `@opentelemetry/sdk-trace-base@^2.9.0`.
 ### Registration
 
 ```typescript
-import { TelemetryPlugin } from '@hono-enterprise/telemetry-plugin';
+import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 
 // Noop mode (zero dependencies)
 app.register(TelemetryPlugin({ serviceName: 'my-service' }));
@@ -4610,8 +4604,8 @@ app.register(TelemetryPlugin({
 ### Manual Spans
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ITelemetryService } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ITelemetryService } from '@setu-ts/common';
 
 app.router.post('/orders', async (ctx) => {
   const telemetry = ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY);
@@ -4645,17 +4639,17 @@ The plugin registers `telemetryMiddleware` at priority 30 by default. It:
 Downstream handlers can read the active span via:
 
 ```typescript
-import { TELEMETRY_SPAN_KEY } from '@hono-enterprise/telemetry-plugin';
-import type { ISpan } from '@hono-enterprise/common';
+import { TELEMETRY_SPAN_KEY } from '@setu-ts/telemetry-plugin';
+import type { ISpan } from '@setu-ts/common';
 
 const activeSpan = ctx.state.get(TELEMETRY_SPAN_KEY) as ISpan | undefined;
 ```
 
 ### Contract Types
 
-The telemetry contract is framework-owned and exported from `@hono-enterprise/common` (zero
-dependencies — importable without the OTel SDK installed). The telemetry-plugin translates these to
-OTel types at its implementation seam.
+The telemetry contract is framework-owned and exported from `@setu-ts/common` (zero dependencies —
+importable without the OTel SDK installed). The telemetry-plugin translates these to OTel types at
+its implementation seam.
 
 | Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                             |
 | -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -4684,13 +4678,13 @@ Provides automatic OpenAPI documentation.
 ### Registration
 
 ```typescript
-import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
+import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
 app.register(OpenApiPlugin({
   // OpenAPI spec metadata
   title: 'My API',
   version: '1.0.0',
-  description: 'A sample API built with Hono Enterprise',
+  description: 'A sample API built with Setu-TS',
   servers: [
     { url: 'https://api.myapp.com', description: 'Production' },
     { url: 'http://localhost:3000', description: 'Local' },
@@ -4768,55 +4762,55 @@ const spec = openapi.getSpec();
 
 ## CLI
 
-`@hono-enterprise/cli` ships the `honoe` executable: project scaffolding and plugin-aware code
-generation. Install it with an explicit binary name, because Deno's default inference would name it
-after the package (`cli`):
+`@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation.
+Install it with an explicit binary name, because Deno's default inference would name it after the
+package (`cli`):
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.3/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.3/main
 ```
 
 ### Commands
 
 ```bash
 # Scaffold a project (creates ./my-app)
-honoe new my-app
-honoe new my-app --runtime node                 # deno | node | bun | cloudflare-workers
-honoe new my-app --template rest                # rest | microservice | nest | full-stack
-honoe new my-app --template microservice --runtime bun
+setu new my-app
+setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers
+setu new my-app --template rest                # rest | microservice | nest | full-stack
+setu new my-app --template microservice --runtime bun
 
 # Commands this application's plugins provide
-honoe commands
-honoe db:migrate up 3                           # runs a plugin-registered command
+setu commands
+setu db:migrate up 3                           # runs a plugin-registered command
 
 # Generate code
-honoe generate plugin my-plugin
-honoe generate controller user-profile
-honoe generate service user-profile
-honoe generate route users
-honoe generate middleware rate-limit
-honoe generate guard admin-only                 # requires @hono-enterprise/auth-plugin
-honoe generate health-indicator external-api    # requires @hono-enterprise/health-plugin
-honoe generate metric orders-placed             # requires @hono-enterprise/metrics-plugin
-honoe generate command-handler create-user      # requires @hono-enterprise/cqrs-plugin
-honoe generate query-handler get-user           # requires @hono-enterprise/cqrs-plugin
-honoe generate event-handler user-created       # requires @hono-enterprise/events-plugin
-honoe generate job send-welcome-email
-honoe generate migration add-users-table        # requires @hono-enterprise/database-plugin
+setu generate plugin my-plugin
+setu generate controller user-profile
+setu generate service user-profile
+setu generate route users
+setu generate middleware rate-limit
+setu generate guard admin-only                 # requires @setu-ts/auth-plugin
+setu generate health-indicator external-api    # requires @setu-ts/health-plugin
+setu generate metric orders-placed             # requires @setu-ts/metrics-plugin
+setu generate command-handler create-user      # requires @setu-ts/cqrs-plugin
+setu generate query-handler get-user           # requires @setu-ts/cqrs-plugin
+setu generate event-handler user-created       # requires @setu-ts/events-plugin
+setu generate job send-welcome-email
+setu generate migration add-users-table        # requires @setu-ts/database-plugin
 
-# Custom schematics, loaded from .hono-enterprise/schematics/<schematic>.ts
-honoe generate custom my-schematic order-item
+# Custom schematics, loaded from .setu-ts/schematics/<schematic>.ts
+setu generate custom my-schematic order-item
 
 # Aliases
-honoe n my-app
-honoe g service user-profile
+setu n my-app
+setu g service user-profile
 
 # Print the plan, write nothing
-honoe g controller user-profile --dry-run
+setu g controller user-profile --dry-run
 ```
 
-Any casing of the name produces identical output: `honoe g controller user-profile` and
-`honoe g controller UserProfile` emit the same file.
+Any casing of the name produces identical output: `setu g controller user-profile` and
+`setu g controller UserProfile` emit the same file.
 
 ### Options
 
@@ -4825,7 +4819,7 @@ Any casing of the name produces identical output: `honoe g controller user-profi
 | `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both. |
 | `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                 |
 | `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                           |
-| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `honoe generate --help` lists only the schematics available here.                                                                                                                          |
+| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                           |
 | `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                              |
 
 ### Exit codes
@@ -4838,10 +4832,10 @@ Any casing of the name produces identical output: `honoe g controller user-profi
 
 ### Plugin gating
 
-`honoe generate` reads the target project's `deno.json` `imports` (falling back to `package.json`
-`dependencies` + `devDependencies`) to learn which `@hono-enterprise` packages are installed. It
-never imports or boots the project. A schematic whose backing plugin is absent is refused with exit
-code `1`, naming the package to install, and `honoe generate --help` marks it unavailable.
+`setu generate` reads the target project's `deno.json` `imports` (falling back to `package.json`
+`dependencies` + `devDependencies`) to learn which `@setu-ts` packages are installed. It never
+imports or boots the project. A schematic whose backing plugin is absent is refused with exit code
+`1`, naming the package to install, and `setu generate --help` marks it unavailable.
 
 ### Overwrite protection
 
@@ -4850,19 +4844,18 @@ checked before the first write, so a multi-file schematic can never leave a half
 
 ### Project templates
 
-`honoe new` always emits a `honoe.config.ts` exporting `createApp()` — one place the project's
-plugin list lives. `main.ts` imports it to start the server, and `honoe` imports it to discover
-plugin commands, so the two can never disagree. The factory deliberately does NOT start the
-application.
+`setu new` always emits a `setu.config.ts` exporting `createApp()` — one place the project's plugin
+list lives. `main.ts` imports it to start the server, and `setu` imports it to discover plugin
+commands, so the two can never disagree. The factory deliberately does NOT start the application.
 
 ```typescript
-// honoe.config.ts (--template rest)
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IApplication } from '@hono-enterprise/common';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
+// setu.config.ts (--template rest)
+import { createApplication } from '@setu-ts/kernel';
+import type { IApplication } from '@setu-ts/common';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
 // … logging, validation, security, health, metrics, OpenAPI, decorators
-import { errorHandler } from '@hono-enterprise/exceptions';
+import { errorHandler } from '@setu-ts/exceptions';
 
 export function createApp(): IApplication {
   const app = createApplication({ plugins: [RuntimePlugin(), ConfigPlugin()] });
@@ -4880,7 +4873,7 @@ export function createApp(): IApplication {
 | `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
 | `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
 
-Three of the four templates emit **inline wiring**, not imports of the `@hono-enterprise/*-starter`
+Three of the four templates emit **inline wiring**, not imports of the `@setu-ts/*-starter`
 packages, so a scaffolded project owns an explicit, editable plugin list. `full-stack` is the
 exception, with cause: its composition is twenty-two plugins, and a generated file a human is meant
 to open and edit should not begin with twenty-two imports they did not choose. A general `--starter`
@@ -4889,10 +4882,10 @@ flag for the other three is still deferred (see "Not in this release").
 ### `--template full-stack`
 
 ```typescript
-// honoe.config.ts (--template full-stack)
-import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
-import type { IApplication } from '@hono-enterprise/common';
-import { getCsrfToken, getSession } from '@hono-enterprise/session-plugin';
+// setu.config.ts (--template full-stack)
+import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
+import type { IApplication } from '@setu-ts/common';
+import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
 import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
 
 export async function createApp(): Promise<IApplication> {
@@ -4924,7 +4917,7 @@ keys without importing `react-router` on the server.
 
 Notes:
 
-- **The generated factory is `async`.** `honoe` awaits it during command discovery, and `main.ts`
+- **The generated factory is `async`.** `setu` awaits it during command discovery, and `main.ts`
   awaits it too, so nothing else changes.
 - **No hello-world route.** An exact `/` handler would take precedence over the SSR catch-all and
   shadow the application's own index route.
@@ -4939,7 +4932,7 @@ Notes:
 - **React Router is pinned to v8**, matching the `npm:react-router@8` the SSR plugin imports.
 
 The `nest` template additionally emits `src/greeting-service.ts` and `src/greeting-controller.ts`,
-and its `honoe.config.ts` imports both to pass them to `DecoratorPlugin({ controllers, services })`.
+and its `setu.config.ts` imports both to pass them to `DecoratorPlugin({ controllers, services })`.
 It refuses no runtime target. `--template microservice --runtime
 cloudflare-workers` is refused
 (`2`): the messaging and queue plugins need raw sockets, which Workers does not provide.
@@ -4947,20 +4940,20 @@ cloudflare-workers` is refused
 ### Plugin-contributed commands
 
 A plugin publishes commands with `ctx.cli.register(name, handler)`; the CLI discovers them by
-loading `honoe.config.ts` and starting the application with **no port**, so registration happens
+loading `setu.config.ts` and starting the application with **no port**, so registration happens
 without binding a socket. The application is always stopped afterwards, including when a handler
 throws.
 
 ```bash
-honoe commands          # list what this application's plugins provide
-honoe db:migrate up 3   # positionals after the name reach the handler
+setu commands          # list what this application's plugins provide
+setu db:migrate up 3   # positionals after the name reach the handler
 ```
 
-Handlers receive positionals only. `honoe` consumes its own flags, so pass a plugin command's flags
+Handlers receive positionals only. `setu` consumes its own flags, so pass a plugin command's flags
 after `--`:
 
 ```bash
-honoe db:migrate -- --verbose --dry
+setu db:migrate -- --verbose --dry
 ```
 
 Built-in verbs (`new`, `n`, `generate`, `g`, `commands`, `help`) are matched **first** and always
@@ -4973,14 +4966,14 @@ registration wins would otherwise depend on plugin load order.
 ### Generated plugin example
 
 ```bash
-honoe g plugin my-plugin
+setu g plugin my-plugin
 ```
 
 Generates `src/plugins/my-plugin.ts`:
 
 ```typescript
-import { createCapabilityToken } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { createCapabilityToken } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 /** Capability token this plugin provides. */
 export const MY_PLUGIN = createCapabilityToken('my-plugin');
@@ -5013,13 +5006,13 @@ export function MyPluginPlugin(): IPlugin {
 
 ### Custom schematics
 
-`honoe generate custom <schematic> <name>` resolves `.hono-enterprise/schematics/<schematic>.ts` and
-loads it with a real dynamic `import()`. The module must export a `schematic` function (or a default
-export that is a function):
+`setu generate custom <schematic> <name>` resolves `.setu-ts/schematics/<schematic>.ts` and loads it
+with a real dynamic `import()`. The module must export a `schematic` function (or a default export
+that is a function):
 
 ```typescript
-// .hono-enterprise/schematics/readme.ts
-import type { DerivedNames, GeneratedFile, SchematicOptions } from '@hono-enterprise/cli';
+// .setu-ts/schematics/readme.ts
+import type { DerivedNames, GeneratedFile, SchematicOptions } from '@setu-ts/cli';
 
 export function schematic(
   names: DerivedNames,
@@ -5036,20 +5029,20 @@ they return, which is what makes `--dry-run` exact.
 
 ### Programmatic API
 
-| Export             | Kind     | Purpose                                                                      |
-| ------------------ | -------- | ---------------------------------------------------------------------------- |
-| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.              |
-| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.         |
-| `deriveNames`      | function | Produces the five naming forms every schematic uses.                         |
-| `DerivedNames`     | type     | The result of `deriveNames`.                                                 |
-| `GeneratedFile`    | type     | `{ path, contents }` — one file a schematic asks to create.                  |
-| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                              |
-| `SchematicOptions` | type     | The second parameter of every schematic.                                     |
-| `PROGRAM_NAME`     | const    | `'honoe'` — interpolated into every usage string.                            |
-| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically.    |
-| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                        |
-| `AppLoader`        | type     | The seam `honoe.config.ts` is loaded through (`CliDependencies.loadApp`).    |
-| `detectPlugins`    | function | Reads a project manifest and returns the installed `@hono-enterprise` names. |
+| Export             | Kind     | Purpose                                                                   |
+| ------------------ | -------- | ------------------------------------------------------------------------- |
+| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.           |
+| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.      |
+| `deriveNames`      | function | Produces the five naming forms every schematic uses.                      |
+| `DerivedNames`     | type     | The result of `deriveNames`.                                              |
+| `GeneratedFile`    | type     | `{ path, contents }` — one file a schematic asks to create.               |
+| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                           |
+| `SchematicOptions` | type     | The second parameter of every schematic.                                  |
+| `PROGRAM_NAME`     | const    | `'setu'` — interpolated into every usage string.                          |
+| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically. |
+| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                     |
+| `AppLoader`        | type     | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).  |
+| `detectPlugins`    | function | Reads a project manifest and returns the installed `@setu-ts` names.      |
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is
@@ -5057,12 +5050,12 @@ testable without terminating the runner.
 
 ### Not in this release
 
-- **Starter-backed scaffolding.** `--template` emits inline wiring. A `honoe new --starter` path
-  that scaffolds a project importing `createRestApp` and friends is deferred — the starters
-  themselves shipped in Milestone 36 and can be depended on directly.
+- **Starter-backed scaffolding.** `--template` emits inline wiring. A `setu new --starter` path that
+  scaffolds a project importing `createRestApp` and friends is deferred — the starters themselves
+  shipped in Milestone 36 and can be depended on directly.
 - **Flags for plugin commands.** `CliCommandHandler` receives positionals only; giving handlers a
   parsed flag record would widen a committed `common` contract. Forward flags with `--` instead.
-- **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
+- **Plugin installation.** `setu` generates and dispatches; it does not edit your manifest.
 
 ---
 
@@ -5124,7 +5117,7 @@ Notes:
 ### Composing from configuration
 
 ```typescript
-import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
   database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
@@ -5154,7 +5147,7 @@ there — the composition would see no configuration at all, and a resolver call
 fail on the first request and every request after it, because the boot promise is memoised. Pass the
 handler's `env` straight through; non-string values (KV, D1, R2 bindings) are ignored. Omit it on
 Node, Deno, and Bun, where the detected runtime reads the environment itself.
-`honoe new --template full-stack` wires this for you on all four targets.
+`setu new --template full-stack` wires this for you on all four targets.
 
 This is why **no plugin option carries a config-key shorthand** (`urlFromConfig`,
 `endpointFromConfig`): such a field would need its value at the same impossible moment.
@@ -5165,7 +5158,7 @@ lazily at use time.
 A complete REST API using the REST starter:
 
 ```typescript
-import { createRestApp } from '@hono-enterprise/rest-starter';
+import { createRestApp } from '@setu-ts/rest-starter';
 import { z } from 'zod';
 
 const app = createRestApp({
@@ -5261,7 +5254,7 @@ console.log('Docs at http://localhost:3000/docs');
 A microservice with messaging, queue, and telemetry:
 
 ```typescript
-import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
+import { createMicroserviceApp } from '@setu-ts/microservice-starter';
 
 const app = createMicroserviceApp({
   database: {
@@ -5347,14 +5340,14 @@ await app.start({ port: 3001 });
 A CQRS application with event sourcing:
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { EventsPlugin } from '@hono-enterprise/events-plugin';
-import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
-import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { EventsPlugin } from '@setu-ts/events-plugin';
+import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
 const app = createApplication({
   plugins: [
@@ -5427,7 +5420,7 @@ await app.start({ port: 3000 });
 ### Basic Plugin
 
 ```typescript
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -5658,8 +5651,8 @@ app.middleware.add(new AuthMiddleware(auth));
 ### Using Built-in Decorators
 
 ```typescript
-import { Body, Controller, Get, Params, Post } from '@hono-enterprise/decorator-plugin';
-import { CurrentUser, UseGuards } from '@hono-enterprise/auth-plugin';
+import { Body, Controller, Get, Params, Post } from '@setu-ts/decorator-plugin';
+import { CurrentUser, UseGuards } from '@setu-ts/auth-plugin';
 
 @Controller('/users')
 class UserController {
@@ -5688,7 +5681,7 @@ class UserController {
 ### Defining Custom Decorators
 
 ```typescript
-import { createDecorator } from '@hono-enterprise/decorator-plugin';
+import { createDecorator } from '@setu-ts/decorator-plugin';
 
 // Method decorator
 export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
@@ -5744,7 +5737,7 @@ run on web-standard `fetch` and the DNS provider on the optional `IRuntimeServic
 ### Registration
 
 ```typescript
-import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
+import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 
 app.register(ServiceDiscoveryPlugin({
   provider: 'consul',
@@ -5756,7 +5749,7 @@ app.register(ServiceDiscoveryPlugin({
 ### Usage
 
 ```typescript
-import { CAPABILITIES, type IServiceDiscovery } from '@hono-enterprise/common';
+import { CAPABILITIES, type IServiceDiscovery } from '@setu-ts/common';
 
 const discovery = ctx.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
 
@@ -6056,7 +6049,7 @@ Standardized error responses across the framework:
 
 ```json
 {
-  "type": "https://hono-enterprise.dev/errors/not-found",
+  "type": "https://setu-ts.dev/errors/not-found",
   "title": "Not Found",
   "status": 404,
   "detail": "User with id 123 not found",
@@ -6075,7 +6068,7 @@ Standardized error responses across the framework:
 
 ```bash
 # Development with hot reload
-hono-enterprise dev
+setu-ts dev
 
 # Or with file watching
 deno task dev  # runs `deno run --watch` under the hood
@@ -6099,7 +6092,7 @@ app.register(LoggerPlugin({
 ### Testing
 
 ```typescript
-import { createTestApp } from '@hono-enterprise/testing';
+import { createTestApp } from '@setu-ts/testing';
 
 const app = await createTestApp({
   plugins: [
@@ -6123,7 +6116,7 @@ expect(response.json().name).toBe('John');
 ### Mocking Plugins
 
 ```typescript
-import { createMockPlugin, createTestApp } from '@hono-enterprise/testing';
+import { createMockPlugin, createTestApp } from '@setu-ts/testing';
 
 const mockDb = createMockPlugin({
   name: 'database',
@@ -6208,7 +6201,7 @@ app.register({
 
 ---
 
-## API Reference: @hono-enterprise/common
+## API Reference: @setu-ts/common
 
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
@@ -6356,7 +6349,7 @@ Contract notes:
 
 ---
 
-## API Reference: @hono-enterprise/kernel
+## API Reference: @setu-ts/kernel
 
 The plugin kernel: resolves plugin dependencies, builds the middleware pipeline and router,
 validates environment variables, and dispatches requests. Implemented in **Milestone 2**; route
@@ -6408,7 +6401,7 @@ Contract notes:
 
 ---
 
-## API Reference: @hono-enterprise/runtime
+## API Reference: @setu-ts/runtime
 
 RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, Bun, and
 Cloudflare Workers.
@@ -6435,7 +6428,7 @@ Cloudflare Workers.
 | `CloudflareWorkersHttpAdapter`    | class    | Cloudflare Workers HTTP adapter implementing `IHttpAdapter` (fetch-only, no listen)        |
 | `createWebWorkerHost`             | function | Creates an `IWorkerHost` over the web `Worker` API (Deno/Bun); throws if `Worker` absent   |
 | `createNodeWorkerHost`            | function | Creates an `IWorkerHost` over `node:worker_threads`                                        |
-| `defineWorkerTask`                | function | **`@hono-enterprise/runtime/worker` subpath.** Registers a worker module's task handler    |
+| `defineWorkerTask`                | function | **`@setu-ts/runtime/worker` subpath.** Registers a worker module's task handler            |
 | `isDenoHttpServerHandle`          | function | Type guard for `DenoHttpServerHandle`                                                      |
 | `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                      |
 | `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                       |
@@ -6580,8 +6573,8 @@ Contract notes:
   `No runtime adapter factory for platform: <p>` error exist once rather than twice.
 
   ```typescript
-  import { createRuntimeServices } from '@hono-enterprise/runtime';
-  import { loadConfig } from '@hono-enterprise/config-plugin';
+  import { createRuntimeServices } from '@setu-ts/runtime';
+  import { loadConfig } from '@setu-ts/config-plugin';
 
   const config = await loadConfig(createRuntimeServices());
   ```
@@ -6611,34 +6604,34 @@ Contract notes:
 
 ---
 
-## API Reference: @hono-enterprise/exceptions
+## API Reference: @setu-ts/exceptions
 
 Exception factory functions, `HttpError`, error formatters, and the global error handler middleware.
-This is a **plain package** (not a plugin) — it depends on `@hono-enterprise/common` only. Register
-the middleware via the application's pipeline.
+This is a **plain package** (not a plugin) — it depends on `@setu-ts/common` only. Register the
+middleware via the application's pipeline.
 
 ### Values (exceptions exports)
 
-| Export                | Kind     | Purpose                                                                    |
-| --------------------- | -------- | -------------------------------------------------------------------------- |
-| `HttpError`           | class    | The single HTTP error type (`extends Error`, carries `statusCode`)         |
-| `badRequest`          | function | Factory → `400` `HttpError`                                                |
-| `unauthorized`        | function | Factory → `401` `HttpError`                                                |
-| `forbidden`           | function | Factory → `403` `HttpError`                                                |
-| `notFound`            | function | Factory → `404` `HttpError`                                                |
-| `conflict`            | function | Factory → `409` `HttpError`                                                |
-| `validationError`     | function | Factory → `422` `HttpError` wrapping `ValidationError[]`                   |
-| `tooManyRequests`     | function | Factory → `429` `HttpError`                                                |
-| `internalServerError` | function | Factory → `500` `HttpError` (accepts `cause` for error chaining)           |
-| `notImplemented`      | function | Factory → `501` `HttpError`                                                |
-| `serviceUnavailable`  | function | Factory → `503` `HttpError`                                                |
-| `statusTitle`         | function | Resolves a status code to a human-readable title                           |
-| `STATUS_TITLES`       | const    | Readonly record of well-known status-code → title mappings                 |
-| `errorHandler`        | function | Creates the global error-handler `MiddlewareFunction`                      |
-| `defaultFormatter`    | const    | Framework-standard error body formatter (`{ statusCode, message }`)        |
-| `rfc7807Formatter`    | const    | RFC 7807 Problem Details formatter                                         |
-| `selectFormatter`     | function | Resolves `'default' \| 'rfc7807' \| custom` to a formatter function        |
-| `ERROR_TYPE_BASE`     | const    | Base URI for RFC 7807 `type` fields (`https://hono-enterprise.dev/errors`) |
+| Export                | Kind     | Purpose                                                             |
+| --------------------- | -------- | ------------------------------------------------------------------- |
+| `HttpError`           | class    | The single HTTP error type (`extends Error`, carries `statusCode`)  |
+| `badRequest`          | function | Factory → `400` `HttpError`                                         |
+| `unauthorized`        | function | Factory → `401` `HttpError`                                         |
+| `forbidden`           | function | Factory → `403` `HttpError`                                         |
+| `notFound`            | function | Factory → `404` `HttpError`                                         |
+| `conflict`            | function | Factory → `409` `HttpError`                                         |
+| `validationError`     | function | Factory → `422` `HttpError` wrapping `ValidationError[]`            |
+| `tooManyRequests`     | function | Factory → `429` `HttpError`                                         |
+| `internalServerError` | function | Factory → `500` `HttpError` (accepts `cause` for error chaining)    |
+| `notImplemented`      | function | Factory → `501` `HttpError`                                         |
+| `serviceUnavailable`  | function | Factory → `503` `HttpError`                                         |
+| `statusTitle`         | function | Resolves a status code to a human-readable title                    |
+| `STATUS_TITLES`       | const    | Readonly record of well-known status-code → title mappings          |
+| `errorHandler`        | function | Creates the global error-handler `MiddlewareFunction`               |
+| `defaultFormatter`    | const    | Framework-standard error body formatter (`{ statusCode, message }`) |
+| `rfc7807Formatter`    | const    | RFC 7807 Problem Details formatter                                  |
+| `selectFormatter`     | function | Resolves `'default' \| 'rfc7807' \| custom` to a formatter function |
+| `ERROR_TYPE_BASE`     | const    | Base URI for RFC 7807 `type` fields (`https://setu-ts.dev/errors`)  |
 
 ### Types
 
@@ -6676,7 +6669,7 @@ Contract notes:
 
 ---
 
-## API Reference: @hono-enterprise/di-plugin
+## API Reference: @setu-ts/di-plugin
 
 Optional dependency injection container plugin. Registers an `IContainer` under
 `CAPABILITIES.DI_CONTAINER`. The service registry remains the primary resolution mechanism; this
@@ -6711,7 +6704,7 @@ Contract notes:
   `ctx.container` is `undefined` and services resolve directly from the `ServiceRegistry`.
 - **Three provider forms**: `ClassProvider` (constructor injection via `inject` tokens),
   `FactoryProvider` (factory function), `ValueProvider` (pre-built value) — all defined in
-  `@hono-enterprise/common`.
+  `@setu-ts/common`.
 - **Three lifecycle scopes**: `singleton` (one instance, shared across child scopes), `scoped` (one
   instance per scope), `transient` (new instance every resolve). Default is `singleton`.
 - **Circular dependency detection**: an instance-level resolution stack catches cycles that cross
@@ -6729,7 +6722,7 @@ Contract notes:
 
 ---
 
-## API Reference: @hono-enterprise/decorator-plugin
+## API Reference: @setu-ts/decorator-plugin
 
 Optional decorator and metadata system plugin. Provides NestJS-style decorators as syntactic sugar
 over the kernel's programmatic API. Decorators capture metadata in a plain `MetadataStore` (no
@@ -6889,38 +6882,38 @@ Contract notes:
 
 ---
 
-## Testing Package (`@hono-enterprise/testing`)
+## Testing Package (`@setu-ts/testing`)
 
-First-party testing utilities for the Hono Enterprise framework: a test application factory, mock
-plugin builder, request injector, mock request context, service registry double, fixture manager,
-and streaming-response reader.
+First-party testing utilities for the Setu-TS framework: a test application factory, mock plugin
+builder, request injector, mock request context, service registry double, fixture manager, and
+streaming-response reader.
 
 ### Exports
 
-| Export                | File                                       | Description                        |
-| --------------------- | ------------------------------------------ | ---------------------------------- |
-| `createTestApp`       | `src/test-app.ts`                          | Test application factory           |
-| `TestAppOptions`      | `src/test-app.ts`                          | Factory options                    |
-| `createMockPlugin`    | `src/mock-plugin.ts`                       | Mock plugin builder                |
-| `MockPluginOptions`   | `src/mock-plugin.ts`                       | Builder options                    |
-| `collectStream`       | `src/inject.ts`                            | Collect streaming response body    |
-| `inject`              | `src/inject.ts`                            | Inject HTTP requests into test app |
-| `StreamingBody`       | `src/inject.ts`                            | Stream collector result shape      |
-| `createTestContext`   | `src/mock-context.ts`                      | Create a mock `IRequestContext`    |
-| `TestContextOptions`  | `src/mock-context.ts`                      | Context builder options            |
-| `MockResponse`        | `src/mock-context.ts`                      | Fake `IResponse` double            |
-| `MockServiceRegistry` | `src/mock-registry.ts`                     | Fake `IServiceRegistry` double     |
-| `FixtureManager`      | `src/fixtures/fixture-manager.ts`          | Assemble mock plugins per-test     |
-| `IKernelApplication`  | (re-export from `@hono-enterprise/kernel`) | Kernel application interface       |
-| `InjectRequest`       | (re-export from `@hono-enterprise/kernel`) | Shape for `inject()` request       |
-| `InjectResponse`      | (re-export from `@hono-enterprise/kernel`) | Shape for `inject()` response      |
+| Export                | File                               | Description                        |
+| --------------------- | ---------------------------------- | ---------------------------------- |
+| `createTestApp`       | `src/test-app.ts`                  | Test application factory           |
+| `TestAppOptions`      | `src/test-app.ts`                  | Factory options                    |
+| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                |
+| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                    |
+| `collectStream`       | `src/inject.ts`                    | Collect streaming response body    |
+| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app |
+| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape      |
+| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`    |
+| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options            |
+| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double            |
+| `MockServiceRegistry` | `src/mock-registry.ts`             | Fake `IServiceRegistry` double     |
+| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test     |
+| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface       |
+| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request       |
+| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response      |
 
 ### Registration
 
 ```typescript
-import { createTestApp } from '@hono-enterprise/testing';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { createTestApp } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
 
 const app = await createTestApp({
   plugins: [
@@ -6967,13 +6960,8 @@ const app = await createTestApp({
 ### Programmatic Testing
 
 ```typescript
-import {
-  collectStream,
-  createMockPlugin,
-  createTestContext,
-  inject,
-} from '@hono-enterprise/testing';
-import { FixtureManager, MockServiceRegistry } from '@hono-enterprise/testing';
+import { collectStream, createMockPlugin, createTestContext, inject } from '@setu-ts/testing';
+import { FixtureManager, MockServiceRegistry } from '@setu-ts/testing';
 
 // Mock a plugin service
 const mockDb = createMockPlugin({
@@ -7050,16 +7038,15 @@ console.log(stream.text); // → "hello world"
 
 ---
 
-## SDK — Client SDK (`@hono-enterprise/sdk`)
+## SDK — Client SDK (`@setu-ts/sdk`)
 
-Portable, zero-npm-dependency client SDK for consuming Hono Enterprise APIs from browsers and
-servers. Does not register a plugin or resolve capability tokens — it is an external-consumer
-library.
+Portable, zero-npm-dependency client SDK for consuming Setu-TS APIs from browsers and servers. Does
+not register a plugin or resolve capability tokens — it is an external-consumer library.
 
 ### Installation
 
 ```bash
-deno add jsr:@hono-enterprise/sdk@^0.1.0-alpha.3
+deno add jsr:@setu-ts/sdk@^0.1.0-alpha.3
 ```
 
 ### createClient()
@@ -7068,7 +7055,7 @@ Factory that returns an `IHttpClient`. Requires a base URL; accepts default head
 `fetch` seam, a timing seam, resilience policies, rate-limit policy, and interceptor arrays.
 
 ```typescript
-import { createClient } from '@hono-enterprise/sdk';
+import { createClient } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
@@ -7188,9 +7175,8 @@ retained timestamp expires.
 
 ### Re-exported policy types
 
-`RetryPolicy`, `CircuitBreakerPolicy`, and `BackoffStrategy` are re-exported from
-`@hono-enterprise/common` so consumers can name their types without adding `common` to their own
-manifest.
+`RetryPolicy`, `CircuitBreakerPolicy`, and `BackoffStrategy` are re-exported from `@setu-ts/common`
+so consumers can name their types without adding `common` to their own manifest.
 
 ### Authentication interceptors
 
@@ -7225,10 +7211,10 @@ avoid a barrel collision.
 Pure function that turns an M21-compatible OpenAPI 3.1 document into TypeScript source.
 
 ```typescript
-import { generateOpenApiClient } from '@hono-enterprise/sdk';
+import { generateOpenApiClient } from '@setu-ts/sdk';
 
 const source = generateOpenApiClient(document, {
-  sdkImport: '@hono-enterprise/sdk',
+  sdkImport: '@setu-ts/sdk',
   factoryName: 'createApi',
 });
 ```
@@ -7242,10 +7228,10 @@ interface OpenApiCodegenOptions {
 }
 ```
 
-| Option        | Default                  | Description                     |
-| ------------- | ------------------------ | ------------------------------- |
-| `sdkImport`   | `'@hono-enterprise/sdk'` | Generated type-import specifier |
-| `factoryName` | `'createApi'`            | Exported generated factory name |
+| Option        | Default          | Description                     |
+| ------------- | ---------------- | ------------------------------- |
+| `sdkImport`   | `'@setu-ts/sdk'` | Generated type-import specifier |
+| `factoryName` | `'createApi'`    | Exported generated factory name |
 
 #### Generated naming contract
 
@@ -7285,7 +7271,7 @@ subset accepted by the generator. They are intentionally different from the open
 
 ---
 
-## API Reference: @hono-enterprise/grpc-plugin
+## API Reference: @setu-ts/grpc-plugin
 
 gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered under
 `CAPABILITIES.GRPC`. Added in Milestone 49.
@@ -7293,7 +7279,7 @@ gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered und
 ### Registration
 
 ```typescript
-import { GrpcPlugin } from '@hono-enterprise/grpc-plugin';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 
 app.register(GrpcPlugin({
   basePath: '/grpc', // default
@@ -7307,8 +7293,8 @@ app.register(GrpcPlugin({
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IGrpcService } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IGrpcService } from '@setu-ts/common';
 
 const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
 grpc.addService(MyServiceDefinition, myServiceImpl);
@@ -7384,7 +7370,7 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 
 ---
 
-## API Reference: @hono-enterprise/cloudflare-plugin
+## API Reference: @setu-ts/cloudflare-plugin
 
 Cloudflare Workers platform bindings, published under `CAPABILITIES.CLOUDFLARE`, plus optional
 KV-backed cache, R2-backed storage, and a Queues-backed `IQueue`. Zero npm dependencies. Added in
@@ -7394,7 +7380,7 @@ Milestone 52; Queues, Cron Triggers, and the Cache API response cache added in M
 
 ```typescript
 import { env, waitUntil } from 'cloudflare:workers';
-import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
+import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 
 app.register(CloudflarePlugin({
   env, // required — the Worker's bindings and variables
@@ -7414,7 +7400,7 @@ import {
   createQueueHandler,
   createScheduledHandler,
   WorkersCron,
-} from '@hono-enterprise/cloudflare-plugin';
+} from '@setu-ts/cloudflare-plugin';
 
 await app.start();
 
@@ -7484,7 +7470,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 
 ### `D1Adapter` — D1 as a first-class database
 
-Implements the committed `IDatabaseAdapter` (from `@hono-enterprise/common`), so a Worker serves
+Implements the committed `IDatabaseAdapter` (from `@setu-ts/common`), so a Worker serves
 `CAPABILITIES.DATABASE` through the ordinary repository and Unit-of-Work surface. Constructed by the
 application and handed to `DatabasePlugin`, matching `KvSessionStore`: those plugin options are read
 when the plugin is **constructed**, before any application exists, so an adapter published in the
@@ -7492,8 +7478,8 @@ service registry could never reach it.
 
 ```typescript
 import { env } from 'cloudflare:workers';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { D1Adapter, type ID1Database } from '@setu-ts/cloudflare-plugin';
 
 app.register(DatabasePlugin({
   type: 'custom',
@@ -7549,7 +7535,7 @@ and it also keeps `cloudflare:workers` (unresolvable off a Worker toolchain) out
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
-import { RealtimeBackplaneObjectCore } from '@hono-enterprise/cloudflare-plugin';
+import { RealtimeBackplaneObjectCore } from '@setu-ts/cloudflare-plugin';
 
 export class RealtimeBackplaneObject extends DurableObject {
   #core = new RealtimeBackplaneObjectCore(this.ctx);
@@ -7669,7 +7655,7 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   injected, so background work never fails silently. With no host the promise still runs: no runtime
   off Workers cuts work off at the response.
 - **Compatibility date.** `import { waitUntil } from 'cloudflare:workers'` shipped 2025-08-08;
-  `honoe new --runtime cloudflare-workers` scaffolds a later date.
+  `setu new --runtime cloudflare-workers` scaffolds a later date.
 - **Unverified against a live Worker.** Every binding is exercised against a fake built from the
   documented signatures — including KV's 60-second floor and R2's void `delete` — but CI holds no
   Cloudflare account.
@@ -7759,8 +7745,8 @@ schema definition with resolver maps and pre-built schemas. Includes media-type 
 ### Usage
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IGraphqlService } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IGraphqlService } from '@setu-ts/common';
 
 // Schema-first
 app.use(
@@ -7975,7 +7961,7 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ## Summary
 
-The Hono Enterprise public API is designed for developer experience:
+The Setu-TS public API is designed for developer experience:
 
 1. **Start minimal** — Just kernel + runtime, add plugins as needed
 2. **Everything is replaceable** — Any plugin can be swapped via capability tokens

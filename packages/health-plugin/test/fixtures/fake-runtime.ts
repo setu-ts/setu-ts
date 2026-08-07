@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
 
 /**
  * Options for configuring the fake runtime.

@@ -1,4 +1,4 @@
-# @hono-enterprise/react-router-plugin
+# @setu-ts/react-router-plugin
 
 React SSR and file-based routing, by embedding **React Router v7 framework mode** as a plugin over a
 kernel catch-all handler. Registers an `SsrService` under `CAPABILITIES.SSR` (`'ssr'`).
@@ -9,7 +9,7 @@ services.
 ## Installation
 
 ```typescript
-import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 ```
 
 `react-router` is an **optional** dependency, lazily imported alongside your compiled `ServerBuild`.
@@ -17,9 +17,9 @@ import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 
 const app = createApplication({
   plugins: [
@@ -75,4 +75,4 @@ stateless.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

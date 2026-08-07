@@ -7,12 +7,7 @@ import { expect } from '@std/expect';
 import { createGraphqlHandler } from '../../src/http/graphql-handler.ts';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
-import type {
-  HandlerResult,
-  IRequestContext,
-  IResponse,
-  IServiceRegistry,
-} from '@hono-enterprise/common';
+import type { HandlerResult, IRequestContext, IResponse, IServiceRegistry } from '@setu-ts/common';
 
 const mockServiceRegistry: IServiceRegistry = {
   register: () => {},

@@ -14,7 +14,7 @@ import { KubernetesProvider } from '../../src/providers/kubernetes-provider.ts';
 import { DnsProvider } from '../../src/providers/dns-provider.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
 import type { DiscoveryProvider } from '../../src/interfaces/index.ts';
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import { createFakeDns, createFakeHttp, createFakeRuntime } from '../fixtures/fakes.ts';
 
 const noopFs = {

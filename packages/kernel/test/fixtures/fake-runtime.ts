@@ -10,9 +10,9 @@ import type {
   RuntimePlatform,
   ServerHandle,
   TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
-import type { IRequest } from '@hono-enterprise/common';
+import type { IRequest } from '@setu-ts/common';
 
 /**
  * Wall-clock origin for the fake `now()`. Any fixed epoch works; the point is

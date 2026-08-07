@@ -1,11 +1,11 @@
 /**
  * Worker-side task helper — the ONLY framework code that runs inside a worker
- * thread, published as the `@hono-enterprise/runtime/worker` subpath so task
+ * thread, published as the `@setu-ts/runtime/worker` subpath so task
  * modules can import it without pulling in the runtime plugin barrel.
  *
  * Application task modules call {@linkcode defineWorkerTask} at module top
  * level; the WorkerPoolPlugin's pool spawns workers of that module and speaks
- * the shared protocol from `@hono-enterprise/common` to them.
+ * the shared protocol from `@setu-ts/common` to them.
  *
  * @module
  */
@@ -19,7 +19,7 @@ import { resolveTaskPort, wireWorkerTask } from './task-port.ts';
  * @example
  * ```typescript
  * // tasks/resize-image.ts — runs on a worker thread
- * import { defineWorkerTask } from '@hono-enterprise/runtime/worker';
+ * import { defineWorkerTask } from '@setu-ts/runtime/worker';
  *
  * defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
  *   return await resize(imageBytes);

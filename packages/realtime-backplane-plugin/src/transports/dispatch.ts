@@ -15,7 +15,7 @@
  * @since 0.2.0
  */
 
-import type { RealtimeFrame, RealtimeFrameHandler } from '@hono-enterprise/common';
+import type { RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 
 /**
  * Invoked when a subscriber throws, so a transport can report the failure

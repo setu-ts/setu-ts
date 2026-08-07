@@ -5,7 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { RbacService } from '../../src/services/rbac-service.ts';
-import type { IPrincipal, RbacConfig } from '@hono-enterprise/common';
+import type { IPrincipal, RbacConfig } from '@setu-ts/common';
 
 describe('RbacService', () => {
   describe('hasRole', () => {

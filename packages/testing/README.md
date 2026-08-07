@@ -1,11 +1,11 @@
-# @hono-enterprise/testing
+# @setu-ts/testing
 
-First-party testing utilities for the Hono Enterprise framework.
+First-party testing utilities for the Setu-TS framework.
 
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/testing
+deno add jsr:@setu-ts/testing
 ```
 
 ## Usage
@@ -16,8 +16,8 @@ Creates a started test application that can be exercised via `inject()` and `fet
 binding a socket.
 
 ```typescript
-import { createMockPlugin, createTestApp } from '@hono-enterprise/testing';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createMockPlugin, createTestApp } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = await createTestApp({
   plugins: [
@@ -46,7 +46,7 @@ Free-function HTTP request injector with string, `InjectRequest`, and web-standa
 shorthand.
 
 ```typescript
-import { inject } from '@hono-enterprise/testing';
+import { inject } from '@setu-ts/testing';
 
 // String shorthand (GET only)
 const res = await inject(app, '/users');
@@ -75,7 +75,7 @@ const res3 = await inject(app, req);
 Creates an `IPlugin` that registers a mock service under a capability token.
 
 ```typescript
-import { createMockPlugin } from '@hono-enterprise/testing';
+import { createMockPlugin } from '@setu-ts/testing';
 
 const mockDb = createMockPlugin({
   name: 'database',
@@ -88,7 +88,7 @@ const mockDb = createMockPlugin({
 Builds a contract-faithful `IRequestContext` for unit-testing middleware and handlers in isolation.
 
 ```typescript
-import { createTestContext } from '@hono-enterprise/testing';
+import { createTestContext } from '@setu-ts/testing';
 
 const ctx = createTestContext();
 expect(ctx.id).toBe('test-ctx');
@@ -100,8 +100,8 @@ expect(ctx.startTime).toBe(0); // monotonic, never Date.now()
 Collects mocks and plugins, produces `IPlugin[]`, resets between tests.
 
 ```typescript
-import { createTestApp, FixtureManager } from '@hono-enterprise/testing';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createTestApp, FixtureManager } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const fixtures = new FixtureManager();
 
@@ -143,22 +143,22 @@ afterEach(() => fixtures.reset());
 `request.signal` > `signal` > a live never-aborting signal, matching the kernel.
 
 See
-[Testing Package](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+[Testing Package](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
 in PUBLIC_API.md for the full option tables and notes.
 
 ## API Reference
 
-- [`createTestApp`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`createTestApp`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Test application factory
-- [`createMockPlugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`createMockPlugin`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Mock plugin builder
-- [`inject`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`inject`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Free-function request injector
-- [`createTestContext`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`createTestContext`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Mock request context builder
-- [`MockServiceRegistry` / `MockResponse`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`MockServiceRegistry` / `MockResponse`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Kernel-faithful doubles
-- [`FixtureManager`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`FixtureManager`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Multi-mock fixture manager
-- [`collectStream`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md#testing-package-hono-enterprisetesting)
+- [`collectStream`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Streaming response reader

@@ -22,7 +22,7 @@
  *
  * @example
  * ```typescript
- * import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
+ * import { NotificationPlugin } from '@setu-ts/notification-plugin';
  *
  * app.register(NotificationPlugin({
  *   channels: {
@@ -174,7 +174,7 @@ export type { SlackTransport } from './interfaces/index.ts';
 /** Outgoing Slack message shaped by {@linkcode SlackTransport}. */
 export type { SlackMessage } from './interfaces/index.ts';
 
-// ── Re-exported from @hono-enterprise/common ────────────────────────────────
+// ── Re-exported from @setu-ts/common ────────────────────────────────
 
 /** The committed notification contract (`send`) and message shape. */
-export type { INotifier, NotificationMessage } from '@hono-enterprise/common';
+export type { INotifier, NotificationMessage } from '@setu-ts/common';

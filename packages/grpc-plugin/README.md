@@ -1,8 +1,8 @@
-# @hono-enterprise/grpc-plugin
+# @setu-ts/grpc-plugin
 
-gRPC plugin for Hono Enterprise — enables co-serving of gRPC, Connect, and gRPC-Web protocols on the
-same port as ordinary Hono routes. The plugin registers an `IGrpcService` under `CAPABILITIES.GRPC`
-and installs a fetch handler into the HTTP adapter's RPC interceptor seam.
+gRPC plugin for Setu-TS — enables co-serving of gRPC, Connect, and gRPC-Web protocols on the same
+port as ordinary Hono routes. The plugin registers an `IGrpcService` under `CAPABILITIES.GRPC` and
+installs a fetch handler into the HTTP adapter's RPC interceptor seam.
 
 ## Features
 
@@ -18,10 +18,10 @@ and installs a fetch handler into the HTTP adapter's RPC interceptor seam.
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { GrpcPlugin } from '@hono-enterprise/grpc-plugin';
-import { CAPABILITIES, type IGrpcService } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+import { CAPABILITIES, type IGrpcService } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), GrpcPlugin()],
@@ -132,8 +132,8 @@ base64 -w0 < reflection.binpb  # 2332 chars
 
 ## See Also
 
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) — the
-  `grpc-plugin` Options / Exports / Notes section
-- [ARCHITECTURE.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) — §7 the
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md) — the `grpc-plugin`
+  Options / Exports / Notes section
+- [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) — §7 the
   `IHttpAdapter` seam, §18 why the plugin does not hang off the kernel
-- [ROADMAP.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ROADMAP.md) — Milestone 49
+- [ROADMAP.md](https://github.com/setu-ts/setu-ts/blob/main/ROADMAP.md) — Milestone 49

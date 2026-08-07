@@ -15,7 +15,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
-import type { IAdapterTransaction } from '@hono-enterprise/common';
+import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 

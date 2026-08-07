@@ -11,7 +11,7 @@
  * @since 0.2.0
  */
 
-import type { WebSocketEventSink } from '@hono-enterprise/common';
+import type { WebSocketEventSink } from '@setu-ts/common';
 import type { WebSocketLike } from '../shared/web-socket-transport.ts';
 import {
   createWebSocketTransport,

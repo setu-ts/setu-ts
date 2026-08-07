@@ -17,7 +17,7 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
-import type { IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Internal generic repository (was `MemoryRepository` — renamed because it

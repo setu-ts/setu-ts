@@ -4,8 +4,8 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { EventsPlugin } from '../../src/plugin/events-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ILogger, IPluginContext, TimerHandle } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IPluginContext, TimerHandle } from '@setu-ts/common';
 
 describe('EventsPlugin', () => {
   let ctx: IPluginContext;

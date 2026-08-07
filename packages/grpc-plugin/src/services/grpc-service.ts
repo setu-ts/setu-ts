@@ -15,7 +15,7 @@ import type {
   IHttpAdapter,
   RpcFetchHandler,
   ServiceImpl,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';

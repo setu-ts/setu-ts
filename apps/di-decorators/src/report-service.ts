@@ -1,4 +1,4 @@
-import { Injectable } from '@hono-enterprise/decorator-plugin';
+import { Injectable } from '@setu-ts/decorator-plugin';
 
 /** One application-wide reporting service. */
 @Injectable({ scope: 'singleton', token: 'singleton-report' })

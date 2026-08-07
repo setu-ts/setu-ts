@@ -15,7 +15,7 @@ import type {
   MiddlewareFunction,
   NextFunction,
   TelemetryContext,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { TracerHost } from '../interfaces/index.ts';
 import { TELEMETRY_SPAN_KEY } from '../interfaces/index.ts';
 import { contextToTraceparent } from '../tracing/tracer.ts';

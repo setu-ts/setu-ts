@@ -10,7 +10,7 @@ import type {
   HealthStatus,
   IHealthService,
   IRuntimeServices,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /**
  * Internal representation of a registered indicator.

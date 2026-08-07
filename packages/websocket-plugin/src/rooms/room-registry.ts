@@ -6,11 +6,7 @@
  * @since 0.1.0
  */
 
-import type {
-  IWebSocketConnection,
-  RoomBroadcastOptions,
-  WebSocketRoom,
-} from '@hono-enterprise/common';
+import type { IWebSocketConnection, RoomBroadcastOptions, WebSocketRoom } from '@setu-ts/common';
 
 /**
  * Notified whenever a connection joins or leaves a {@linkcode Room}.

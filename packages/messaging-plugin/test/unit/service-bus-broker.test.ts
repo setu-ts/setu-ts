@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import type {
   IServiceBusSubscription,

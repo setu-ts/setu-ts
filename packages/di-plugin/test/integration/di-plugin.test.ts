@@ -1,8 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IContainer } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IContainer } from '@setu-ts/common';
 
 import { DiPlugin } from '../../src/plugin/di-plugin.ts';
 import type { DiPluginOptions } from '../../src/plugin/di-plugin.ts';

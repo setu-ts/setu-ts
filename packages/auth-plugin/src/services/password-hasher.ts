@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { toBuffer } from '../utils/buffer.ts';
 
 const PBKDF2_ITERATIONS = 100000;

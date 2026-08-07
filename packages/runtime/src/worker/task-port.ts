@@ -11,8 +11,8 @@
  * @module
  */
 
-import type { WorkerErrorShape, WorkerReadySignal, WorkerTaskReply } from '@hono-enterprise/common';
-import { isWorkerTaskRequest } from '@hono-enterprise/common';
+import type { WorkerErrorShape, WorkerReadySignal, WorkerTaskReply } from '@setu-ts/common';
+import { isWorkerTaskRequest } from '@setu-ts/common';
 import { parentPort } from 'node:worker_threads';
 
 /**

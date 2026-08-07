@@ -15,8 +15,8 @@ import type {
   IPluginContext,
   IRequestContext,
   RouteHandler,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthPluginOptions } from '../interfaces/index.ts';
 import { HealthService } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';

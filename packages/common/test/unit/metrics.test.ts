@@ -1,5 +1,5 @@
 /**
- * Unit tests for the metrics contracts in @hono-enterprise/common.
+ * Unit tests for the metrics contracts in @setu-ts/common.
  *
  * @module
  */

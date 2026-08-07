@@ -12,10 +12,10 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { HealthReport, HealthStatus, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import type { HealthReport, HealthStatus, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { HealthPlugin } from '../../src/index.ts';
 

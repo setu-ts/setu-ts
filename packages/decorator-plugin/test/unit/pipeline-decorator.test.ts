@@ -6,7 +6,7 @@ import type {
   IRequestContext,
   MiddlewareFunction,
   NextFunction,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { Controller } from '../../src/decorators/controller.ts';
 import { Get, Post } from '../../src/decorators/http.ts';

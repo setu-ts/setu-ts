@@ -6,11 +6,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { z } from 'npm:zod@^3.24.0';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import {
   ApiOperation,
   ApiResponse,
@@ -20,7 +20,7 @@ import {
   Get,
   Post,
   ValidateBody,
-} from '@hono-enterprise/decorator-plugin';
+} from '@setu-ts/decorator-plugin';
 
 describe('OpenAPI Integration', () => {
   it('should generate OpenAPI spec for programmatic routes', async () => {

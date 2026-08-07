@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IResponse, WebSocketEventSink } from '@hono-enterprise/common';
+import type { IResponse, WebSocketEventSink } from '@setu-ts/common';
 import {
   adaptWsModule,
   asUpgradeEmitter,

@@ -1,8 +1,8 @@
 # Releasing to JSR
 
-Packages are published to [JSR](https://jsr.io) under the `@hono-enterprise` scope. **JSR versions
-are immutable** — a published version can be yanked, but never deleted or replaced. Every step below
-is designed so that mistakes are caught before that point.
+Packages are published to [JSR](https://jsr.io) under the `@setu-ts` scope. **JSR versions are
+immutable** — a published version can be yanked, but never deleted or replaced. Every step below is
+designed so that mistakes are caught before that point.
 
 ## One-time setup
 
@@ -10,8 +10,8 @@ These run once for the whole project, not once per release.
 
 ### 1. The scope
 
-`@hono-enterprise` must exist. Create it at [jsr.io/new](https://jsr.io/new) — fill in the **Scope**
-box only (`hono-enterprise`, without the `@`).
+`@setu-ts` must exist. Create it at [jsr.io/new](https://jsr.io/new) — fill in the **Scope** box
+only (`setu-ts`, without the `@`).
 
 ### 2. The packages
 
@@ -22,7 +22,7 @@ This is the step that is easy to miss, because nothing warns you until a publish
 
 ```
 error: Following packages don't exist, follow the links and create them:
-- https://jsr.io/new?scope=hono-enterprise&package=common&from=cli
+- https://jsr.io/new?scope=setu-ts&package=common&from=cli
 ```
 
 `deno publish` will not create them for you. It can only print one creation link per package, and it
@@ -45,7 +45,7 @@ re-run after a partial failure. Pass `--dry-run` to see what it would create wit
 35, so the first run stops two-thirds of the way through:
 
 ```
-[21/35] FAILED @hono-enterprise/metrics-plugin — HTTP 400: {
+[21/35] FAILED @setu-ts/metrics-plugin — HTTP 400: {
   "code": "weeklyPackageLimitExceeded",
   "message": "Exceeded weekly limit of 20 new packages for scope."
 }
@@ -53,9 +53,9 @@ re-run after a partial failure. Pass `--dry-run` to see what it would create wit
 
 No dry run can predict this — the quota is only evaluated on a real write.
 
-Request an increase at `https://jsr.io/@hono-enterprise/~/settings` → **Quotas** → _Request scope
-quota increase_. Choose **New packages per week** (not _Total packages_, which is a different quota)
-and give a concrete reason: what the scope is, why it is many small packages, and the exact package
+Request an increase at `https://jsr.io/@setu-ts/~/settings` → **Quotas** → _Request scope quota
+increase_. Choose **New packages per week** (not _Total packages_, which is a different quota) and
+give a concrete reason: what the scope is, why it is many small packages, and the exact package
 names still needed. Requests are reviewed by a human, so vague ones stall.
 
 The scope's three quotas and what they mean for a 35-package release:
@@ -71,8 +71,8 @@ waiting a week lets the remaining batch be created in one go.
 
 ### 3. Link the GitHub repository
 
-For each package, or via scope settings, link `dkpaul91/hono-enterprise` in JSR. This is what lets
-the tag-triggered workflow publish using the runner's OIDC identity instead of a long-lived token.
+For each package, or via scope settings, link `dkpaul91/setu-ts` in JSR. This is what lets the
+tag-triggered workflow publish using the runner's OIDC identity instead of a long-lived token.
 
 Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
@@ -82,9 +82,9 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
 - Bump `version` in every workspace member's `deno.json`.
 - **Bump the cross-package specifiers to match.** 15 packages pin
-  `jsr:@hono-enterprise/{common,kernel,runtime}@^<version>` explicitly. Under semver a `^0.1.0`
-  range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these
-  publishes packages whose dependencies cannot resolve — and `deno publish` does not warn.
+  `jsr:@setu-ts/{common,kernel,runtime}@^<version>` explicitly. Under semver a `^0.1.0` range does
+  **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these publishes packages
+  whose dependencies cannot resolve — and `deno publish` does not warn.
 - **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
   four `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping
@@ -108,17 +108,16 @@ module JSDoc opens with `@module` so the package's README is what renders on jsr
 > **A green `--dry-run` is not proof the publish will succeed.** The dry run resolves modules from
 > the workspace; a real publish builds the graph from the package tarball, where a sibling package
 > is not on disk. A cross-package import written as a relative path —
-> `"@hono-enterprise/common": "../common/src/index.ts"` — therefore passes `deno check`, the full
-> test suite, and `deno publish --dry-run`, then fails on the real publish with:
+> `"@setu-ts/common": "../common/src/index.ts"` — therefore passes `deno check`, the full test
+> suite, and `deno publish --dry-run`, then fails on the real publish with:
 >
 > ```
 > failed to build module graph: Module not found "file:///common/src/index.ts".
 > ```
 >
 > `metrics-plugin` and `telemetry-plugin` both shipped this way and were caught only when the
-> release reached package 21 of 35. `release:verify` now rejects any `@hono-enterprise/*` import
-> that is not a `jsr:` specifier, so this class cannot reach a publish again — but only if you
-> actually run it.
+> release reached package 21 of 35. `release:verify` now rejects any `@setu-ts/*` import that is not
+> a `jsr:` specifier, so this class cannot reach a publish again — but only if you actually run it.
 
 ### 3. Merge, then publish
 
@@ -164,7 +163,7 @@ JSR accepts a GitHub Actions OIDC identity only for a package it knows belongs t
 Without the link, `deno publish` gets as far as uploading and then fails with
 
 ```
-error: Failed to publish @hono-enterprise/common@0.1.0-alpha.2
+error: Failed to publish @setu-ts/common@0.1.0-alpha.2
 Caused by:
     The actor that this request was authenticated for is not authorized to
     access this resource. (actorNotAuthorized)
@@ -225,8 +224,8 @@ JSR does not point a package's `latest` at a prerelease. `meta.json` shows `"lat
 though the version is live, and consumers get:
 
 ```
-error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.3
+error: jsr:@setu-ts/kernel has only pre-release versions available.
+Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.3
 ```
 
 Every install instruction for a prerelease must carry an explicit version. Check the README and
@@ -253,12 +252,12 @@ published dependency — and serve one request:
 
 ```fish
 mkdir /tmp/relcheck; and cd /tmp/relcheck; and echo '{}' > deno.json
-deno add --min-dep-age 0 jsr:@hono-enterprise/kernel@^0.1.0-alpha.3 jsr:@hono-enterprise/runtime@^0.1.0-alpha.3
+deno add --min-dep-age 0 jsr:@setu-ts/kernel@^0.1.0-alpha.3 jsr:@setu-ts/runtime@^0.1.0-alpha.3
 ```
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication({ plugins: [RuntimePlugin()] });
 app.router.get('/hello', (ctx) => ctx.response.json({ ok: true }));

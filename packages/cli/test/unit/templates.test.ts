@@ -69,7 +69,7 @@ describe('rest template', () => {
   });
 
   it('adds errorHandler as MIDDLEWARE, never as a plugin', () => {
-    // `@hono-enterprise/exceptions` ships a MiddlewareFunction, not an IPlugin.
+    // `@setu-ts/exceptions` ships a MiddlewareFunction, not an IPlugin.
     expect(symbols(REST_TEMPLATE.middleware)).toEqual(['errorHandler']);
     expect(symbols(REST_TEMPLATE.plugins)).not.toContain('errorHandler');
     expect(REST_TEMPLATE.plugins.every((w) => w.pkg !== 'exceptions')).toBe(true);
@@ -165,7 +165,7 @@ describe('microservice template', () => {
 });
 
 describe('every template', () => {
-  it('names only @hono-enterprise packages', () => {
+  it('names only @setu-ts packages', () => {
     for (const template of listTemplates()) {
       for (const wiring of [...template.plugins, ...template.middleware]) {
         expect(wiring.pkg).not.toContain('@');

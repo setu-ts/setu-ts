@@ -31,7 +31,7 @@ export class HttpClientError extends Error {
  * Thrown when the circuit breaker for the target origin is open.
  *
  * Named `ClientCircuitOpenError` (not `CircuitOpenError`) to avoid a barrel
- * collision with `@hono-enterprise/resilience-plugin`.
+ * collision with `@setu-ts/resilience-plugin`.
  *
  * @since 0.1.0
  */

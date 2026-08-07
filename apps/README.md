@@ -1,4 +1,4 @@
-# Hono Enterprise examples
+# Setu-TS examples
 
 Each directory is a standalone Deno application kept outside the workspace so its application-only
 dependencies cannot enter a published package graph. Run its `smoke` task to verify the claim below.

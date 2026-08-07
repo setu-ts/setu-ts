@@ -14,7 +14,7 @@ import {
 } from '../../src/middleware/rate-limit-middleware.ts';
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
   IPrincipal,
@@ -22,7 +22,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 interface CapturedResponse {
   status: number;

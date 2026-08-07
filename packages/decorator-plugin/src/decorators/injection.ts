@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { Constructor, ServiceScope } from '@hono-enterprise/common';
+import type { Constructor, ServiceScope } from '@setu-ts/common';
 
 import { metadataStore } from '../metadata/metadata-store.ts';
 

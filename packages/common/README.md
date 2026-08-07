@@ -1,6 +1,6 @@
-# @hono-enterprise/common
+# @setu-ts/common
 
-Shared types, interfaces, and capability tokens for the Hono Enterprise framework.
+Shared types, interfaces, and capability tokens for the Setu-TS framework.
 
 This package is the framework's contract layer: every other package depends on it, and it depends on
 nothing. It contains only interfaces, type aliases, constants, and pure zero-dependency type
@@ -10,10 +10,10 @@ utilities — no runtime behavior beyond those.
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/common
+deno add jsr:@setu-ts/common
 
 # npm / pnpm / yarn / bun (via JSR's npm compatibility layer)
-npx jsr add @hono-enterprise/common
+npx jsr add @setu-ts/common
 ```
 
 ## What's Inside
@@ -35,7 +35,7 @@ npx jsr add @hono-enterprise/common
 Resolve capabilities by token, typed by the interfaces defined here:
 
 ```typescript
-import { CAPABILITIES, type ILogger, type IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES, type ILogger, type IPlugin } from '@setu-ts/common';
 
 export function MyPlugin(): IPlugin {
   return {
@@ -53,7 +53,7 @@ export function MyPlugin(): IPlugin {
 Handle fallible operations without throwing:
 
 ```typescript
-import { err, ok, type Result } from '@hono-enterprise/common';
+import { err, ok, type Result } from '@setu-ts/common';
 
 function parsePort(raw: string): Result<number, RangeError> {
   const port = Number(raw);
@@ -70,8 +70,7 @@ function parsePort(raw: string): Result<number, RangeError> {
 - Every export is public API: documented in the repository's `PUBLIC_API.md`, JSDoc'd, and covered
   by the backward-compatibility policy.
 
-See the repository's
-[`PUBLIC_API.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) for the full
-API contract and
-[`ARCHITECTURE.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) for how
-this package fits the plugin architecture.
+See the repository's [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+for the full API contract and
+[`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
+package fits the plugin architecture.

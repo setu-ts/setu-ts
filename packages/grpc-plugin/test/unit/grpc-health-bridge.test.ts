@@ -11,7 +11,7 @@ import {
   mapHealthStatus,
   resolveServingStatus,
 } from '../../src/health/grpc-health-bridge.ts';
-import type { HealthReport, HealthStatus, IHealthService } from '@hono-enterprise/common';
+import type { HealthReport, HealthStatus, IHealthService } from '@setu-ts/common';
 
 /** The enum values from grpc/health/v1/health.proto. */
 const SERVING = 1;

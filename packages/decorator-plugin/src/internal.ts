@@ -5,12 +5,7 @@
  *
  * @module
  */
-import type {
-  Constructor,
-  HandlerResult,
-  IMiddleware,
-  MiddlewareFunction,
-} from '@hono-enterprise/common';
+import type { Constructor, HandlerResult, IMiddleware, MiddlewareFunction } from '@setu-ts/common';
 
 /**
  * A middleware value accepted by pipeline decorators: either a bare

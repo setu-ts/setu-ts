@@ -16,10 +16,10 @@
  * body is a `ReadableStream` and step 3 needs the response's `Set-Cookie`,
  * neither of which `inject` exposes.
  */
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IDatabaseService } from '@hono-enterprise/database-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
 
-import { createApp } from './honoe.config.ts';
+import { createApp } from './setu.config.ts';
 import { formatPrice } from '~/models/product.ts';
 import { seedProducts } from '~/services/products.server.ts';
 

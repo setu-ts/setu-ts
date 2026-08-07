@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { FlagContext, ILogger, IRuntimeServices } from '@hono-enterprise/common';
+import type { FlagContext, ILogger, IRuntimeServices } from '@setu-ts/common';
 import type {
   FlagDefinition,
   FlagProvider,

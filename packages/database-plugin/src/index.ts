@@ -35,7 +35,7 @@ export type {
   IDatabaseAdapter,
   IDataSource,
   NormalizedQuery,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 // Services
 export { DatabaseService } from './services/database-service.ts';

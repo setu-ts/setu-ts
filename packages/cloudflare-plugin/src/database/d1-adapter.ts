@@ -2,7 +2,7 @@
  * `D1Adapter` — Cloudflare D1 as a first-class database backend.
  *
  * Implements the {@linkcode IDatabaseAdapter} port that M52c promoted into
- * `@hono-enterprise/common`. Before that promotion the seam a backend has to
+ * `@setu-ts/common`. Before that promotion the seam a backend has to
  * satisfy lived inside `database-plugin` and was never exported, so a D1
  * backend could not be written anywhere except inside that package —
  * AI_GUIDELINES §2.2 forbids one plugin importing another.
@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@hono-enterprise/common';
+import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 import type { ID1Database } from '../bindings/facades.ts';
 import { isD1Database } from '../bindings/facades.ts';
 import { CloudflareBindingMissingError, CloudflareUnsupportedError } from '../errors.ts';
@@ -116,8 +116,8 @@ export interface D1AdapterOptions {
  * @example
  * ```typescript
  * import { env } from 'cloudflare:workers';
- * import { DatabasePlugin } from '@hono-enterprise/database-plugin';
- * import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+ * import { DatabasePlugin } from '@setu-ts/database-plugin';
+ * import { D1Adapter, type ID1Database } from '@setu-ts/cloudflare-plugin';
  *
  * app.register(DatabasePlugin({
  *   type: 'custom',

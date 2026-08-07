@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Individual cross-runtime implementations (exported for unit testing)

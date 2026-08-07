@@ -8,12 +8,12 @@
  */
 
 // Re-export resilience policy types from common so consumers don't need a
-// separate @hono-enterprise/common dependency.
+// separate @setu-ts/common dependency.
 import type {
   BackoffStrategy,
   CircuitBreakerPolicy,
   RetryPolicy,
-} from 'jsr:@hono-enterprise/common@^0.1.0-alpha.4';
+} from 'jsr:@setu-ts/common@^0.1.0-alpha.4';
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };
 

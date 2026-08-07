@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * @hono-enterprise/graphql-plugin — GraphQL plugin for Hono Enterprise.
+ * @setu-ts/graphql-plugin — GraphQL plugin for Setu-TS.
  *
  * This plugin provides schema-first and code-first GraphQL support
  * over the kernel router, with subscription transports (WebSocket, SSE),
@@ -41,7 +41,7 @@ export type {
   GraphqlRequestParams,
   GraphqlSubscriptionOutcome,
   IGraphqlService,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 // Runtime types
 export type {

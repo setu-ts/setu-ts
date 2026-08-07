@@ -4,9 +4,9 @@
     "smoke": "deno run -A smoke.ts"
   },
   "imports": {
-    "@hono-enterprise/common": "../../packages/common/src/index.ts",
-    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
-    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
-    "@hono-enterprise/cqrs-plugin": "../../packages/cqrs-plugin/src/index.ts"
+    "@setu-ts/common": "../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
+    "@setu-ts/cqrs-plugin": "../../packages/cqrs-plugin/src/index.ts"
   }
 }

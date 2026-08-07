@@ -10,8 +10,8 @@ import type {
   IPluginContext,
   IRuntimeServices,
   ISecretManager,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   IAwsSecretsClient,
   IAzureSecretsClient,
@@ -88,7 +88,7 @@ export function createProvider(
  *
  * @example
  * ```typescript
- * import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
+ * import { SecretsPlugin } from '@setu-ts/secrets-plugin';
  *
  * // Environment variables (default)
  * app.register(SecretsPlugin());

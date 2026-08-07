@@ -5,7 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { AuthService, LocalStrategy } from '../../src/services/auth-service.ts';
-import type { IAuthStrategy, IPrincipal, IRequest } from '@hono-enterprise/common';
+import type { IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
 
 function createRequest(): IRequest {
   return {

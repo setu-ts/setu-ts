@@ -7,8 +7,8 @@
  *
  * @example
  * ```typescript
- * import { ResiliencePlugin } from '@hono-enterprise/resilience-plugin';
- * import type { IResilienceService } from '@hono-enterprise/common';
+ * import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
+ * import type { IResilienceService } from '@setu-ts/common';
  *
  * app.register(ResiliencePlugin({
  *   defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },

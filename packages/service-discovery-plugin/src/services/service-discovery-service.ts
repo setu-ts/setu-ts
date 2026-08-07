@@ -14,7 +14,7 @@ import type {
   ServiceInstance,
   ServiceOutcome,
   Unsubscribe,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
 import type { ResolvedDiscoveryOptions } from '../options.ts';
 import { createLoadBalancer, type LoadBalancer } from '../balancer/load-balancer.ts';

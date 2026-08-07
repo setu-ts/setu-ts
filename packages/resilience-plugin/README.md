@@ -1,4 +1,4 @@
-# @hono-enterprise/resilience-plugin
+# @setu-ts/resilience-plugin
 
 Circuit breaker, retry, timeout, and bulkhead. Registers an `IResilienceService` under
 `CAPABILITIES.RESILIENCE` (`'resilience'`).
@@ -10,14 +10,14 @@ a state-preserving closure, so the breaker and bulkhead accumulate state across 
 ## Installation
 
 ```typescript
-import { ResiliencePlugin } from '@hono-enterprise/resilience-plugin';
+import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { ResiliencePlugin } from '@hono-enterprise/resilience-plugin';
-import { CAPABILITIES, type IResilienceService } from '@hono-enterprise/common';
+import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
+import { CAPABILITIES, type IResilienceService } from '@setu-ts/common';
 
 app.register(ResiliencePlugin({
   defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },
@@ -57,4 +57,4 @@ mistake, not a silent no-op.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

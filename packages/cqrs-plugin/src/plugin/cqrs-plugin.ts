@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { ICqrsFacade, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { ICqrsFacade, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { CqrsPluginOptions } from '../interfaces/index.ts';
 import { CommandBus } from '../bus/command-bus.ts';
 import { QueryBus } from '../bus/query-bus.ts';
@@ -30,7 +30,7 @@ const DEFAULT_OPTIONS: Required<CqrsPluginOptions> = {
  *
  * @example
  * ```typescript
- * import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
+ * import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
  *
  * app.register(CqrsPlugin({ behaviors: [timingBehavior] }));
  * ```

@@ -1,4 +1,4 @@
-# @hono-enterprise/cqrs-plugin
+# @setu-ts/cqrs-plugin
 
 Command Query Responsibility Segregation. Registers an `ICqrsFacade` under `CAPABILITIES.CQRS`
 (`'cqrs'`), exposing a `commandBus` and a `queryBus`.
@@ -9,14 +9,14 @@ alike.
 ## Installation
 
 ```typescript
-import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
+import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
-import { CAPABILITIES, type ICqrsFacade, type IPipelineBehavior } from '@hono-enterprise/common';
+import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import { CAPABILITIES, type ICqrsFacade, type IPipelineBehavior } from '@setu-ts/common';
 
 const timing: IPipelineBehavior = {
   async handle(request, next) {
@@ -55,4 +55,4 @@ bus with no registered handler.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

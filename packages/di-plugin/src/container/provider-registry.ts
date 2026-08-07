@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { Provider, ServiceScope } from '@hono-enterprise/common';
+import type { Provider, ServiceScope } from '@setu-ts/common';
 
 /**
  * A provider paired with its resolved lifecycle scope.

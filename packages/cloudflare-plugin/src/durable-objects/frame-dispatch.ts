@@ -15,7 +15,7 @@
  * @since 0.2.0
  */
 
-import type { RealtimeFrame, RealtimeFrameHandler } from '@hono-enterprise/common';
+import type { RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 
 /** The two frame kinds the committed contract defines. */
 const FRAME_KINDS = new Set(['ws-room', 'sse-channel']);

@@ -13,7 +13,7 @@ import type {
   IGraphqlService,
   IRequestContext,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { GraphqlLogger } from '../interfaces/options.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../interfaces/graphql-runtime.ts';
 import type { DefaultGraphqlContext, GraphqlContextInput } from '../interfaces/options.ts';

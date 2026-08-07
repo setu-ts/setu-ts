@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult, ISseConnection, SseMessage } from '@hono-enterprise/common';
+import type { HandlerResult, ISseConnection, SseMessage } from '@setu-ts/common';
 import { ChannelRegistry } from '../../src/channels/channel-registry.ts';
 import { SseChannelImpl } from '../../src/channels/channel-registry.ts';
 

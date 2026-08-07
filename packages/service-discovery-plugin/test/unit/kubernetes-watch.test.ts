@@ -11,7 +11,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { watchKubernetesService } from '../../src/providers/kubernetes-watch.ts';
-import type { ServiceInstance, Unsubscribe } from '@hono-enterprise/common';
+import type { ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import {
   createFakeHttp,
   createFakeRuntime,

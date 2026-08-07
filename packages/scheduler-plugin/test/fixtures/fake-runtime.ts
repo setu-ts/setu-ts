@@ -6,8 +6,8 @@
  *
  * @module
  */
-import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
-import type { RuntimePlatform } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
+import type { RuntimePlatform } from '@setu-ts/common';
 
 /** Pending timer. */
 export interface PendingTimer {

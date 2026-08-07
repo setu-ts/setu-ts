@@ -1,8 +1,7 @@
-# @hono-enterprise/service-discovery-plugin
+# @setu-ts/service-discovery-plugin
 
-Service discovery for Hono Enterprise — turns a logical service name into a reachable address,
-balances across the instances behind it, and takes them out of rotation when callers report
-failures.
+Service discovery for Setu-TS — turns a logical service name into a reachable address, balances
+across the instances behind it, and takes them out of rotation when callers report failures.
 
 Registers an `IServiceDiscovery` under `CAPABILITIES.SERVICE_DISCOVERY`. **Zero npm dependencies**:
 the HTTP providers run on web-standard `fetch` and the DNS provider on the optional
@@ -11,16 +10,16 @@ the HTTP providers run on web-standard `fetch` and the DNS provider on the optio
 ## Install
 
 ```bash
-deno add jsr:@hono-enterprise/service-discovery-plugin
+deno add jsr:@setu-ts/service-discovery-plugin
 ```
 
 ## Quick start
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
-import { CAPABILITIES, type IServiceDiscovery } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
+import { CAPABILITIES, type IServiceDiscovery } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -221,8 +220,8 @@ refresh failed and a stale snapshot is being served.
 
 ## Related documentation
 
-- [Public API reference](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [Architecture](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md)
+- [Public API reference](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [Architecture](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 

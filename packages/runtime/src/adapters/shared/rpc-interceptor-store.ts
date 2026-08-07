@@ -11,7 +11,7 @@
  * @since 0.3.0
  */
 
-import type { RpcFetchHandler } from '@hono-enterprise/common';
+import type { RpcFetchHandler } from '@setu-ts/common';
 
 /**
  * Stores an adapter's RPC interceptor and consults it safely.

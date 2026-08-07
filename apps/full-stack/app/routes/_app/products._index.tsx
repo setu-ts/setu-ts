@@ -7,7 +7,7 @@ import { formatPrice } from '~/models/product.ts';
 /**
  * Loads the view on the server.
  *
- * The request context carries the framework services `honoe.config.ts` put
+ * The request context carries the framework services `setu.config.ts` put
  * there, so the logger and database are reachable without a module-level
  * singleton or a second DI container — and without importing a framework
  * package into a module that also ships to the browser.

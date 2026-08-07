@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 
 /**
  * A stored audit record extends {@linkcode AuditEntry} with an internally

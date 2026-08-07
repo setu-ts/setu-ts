@@ -1,14 +1,14 @@
 /**
  * @module
  *
- * Authentication and authorization plugin for Hono Enterprise.
+ * Authentication and authorization plugin for Setu-TS.
  *
  * Provides JWT and API key authentication, local credentials verification,
  * and RBAC authorization with role hierarchy.
  *
  * @example
  * ```typescript
- * import { AuthPlugin, authMiddleware, requireAuth, requireRole } from '@hono-enterprise/auth-plugin';
+ * import { AuthPlugin, authMiddleware, requireAuth, requireRole } from '@setu-ts/auth-plugin';
  *
  * app.register(AuthPlugin({
  *   jwt: { secret: process.env.JWT_SECRET! },
@@ -72,4 +72,4 @@ export type {
   JwtSignOptions,
   RbacConfig,
   RoleDefinition,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

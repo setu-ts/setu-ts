@@ -11,7 +11,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { ILogger, RealtimeFrame } from '@hono-enterprise/common';
+import type { ILogger, RealtimeFrame } from '@setu-ts/common';
 import type { IServiceBinding } from '../../../src/bindings/facades.ts';
 import type { IDurableObjectNamespace } from '../../../src/bindings/facades.ts';
 import { DurableObjectBackplane } from '../../../src/realtime/durable-object-backplane.ts';

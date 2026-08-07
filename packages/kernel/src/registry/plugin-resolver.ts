@@ -5,8 +5,8 @@
  *
  * @module
  */
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { CapabilityToken, IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { CapabilityToken, IPlugin } from '@setu-ts/common';
 
 /**
  * Resolves plugin registration order.
@@ -24,7 +24,7 @@ export function resolvePluginOrder(plugins: readonly IPlugin[]): readonly IPlugi
   if (runtimeProvider === undefined) {
     throw new Error(
       `No plugin provides the mandatory '${CAPABILITIES.RUNTIME}' capability. ` +
-        `Register a runtime plugin (e.g. RuntimePlugin from @hono-enterprise/runtime).`,
+        `Register a runtime plugin (e.g. RuntimePlugin from @setu-ts/runtime).`,
     );
   }
 

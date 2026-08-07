@@ -18,7 +18,7 @@ import type { HandlerResult, IRequestContext } from '../http.ts';
  *
  * @example
  * ```typescript
- * import { CAPABILITIES } from '@hono-enterprise/common';
+ * import { CAPABILITIES } from '@setu-ts/common';
  *
  * const ssr = ctx.services.get<ISsrService>(CAPABILITIES.SSR);
  * const result = await ssr.render(ctx);

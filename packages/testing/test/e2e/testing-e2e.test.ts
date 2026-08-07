@@ -4,8 +4,8 @@ import { createTestApp } from '../../src/test-app.ts';
 import { collectStream, inject } from '../../src/inject.ts';
 import { createTestContext } from '../../src/mock-context.ts';
 import { FixtureManager } from '../../src/fixtures/fixture-manager.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 describe('testing package — e2e', () => {
   it('full flow: inject non-streaming, fetch streaming via collectStream, context, and fixture manager', async () => {

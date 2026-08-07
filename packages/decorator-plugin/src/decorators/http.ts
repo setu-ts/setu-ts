@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { HttpMethod } from '@hono-enterprise/common';
+import type { HttpMethod } from '@setu-ts/common';
 
 import { metadataStore } from '../metadata/metadata-store.ts';
 import { protoToCtor } from '../internal.ts';

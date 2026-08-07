@@ -1,19 +1,19 @@
 /**
  * @module
  */
-import type { MicroserviceStarterOptions } from '@hono-enterprise/microservice-starter';
-import type { CachePluginOptions } from '@hono-enterprise/cache-plugin';
-import type { EventsPluginOptions } from '@hono-enterprise/events-plugin';
-import type { CqrsPluginOptions } from '@hono-enterprise/cqrs-plugin';
-import type { SchedulerPluginOptions } from '@hono-enterprise/scheduler-plugin';
-import type { AuditPluginOptions } from '@hono-enterprise/audit-plugin';
-import type { SecretsPluginOptions } from '@hono-enterprise/secrets-plugin';
-import type { StoragePluginOptions } from '@hono-enterprise/storage-plugin';
-import type { MailPluginOptions } from '@hono-enterprise/mail-plugin';
-import type { FeatureFlagsPluginOptions } from '@hono-enterprise/feature-flags-plugin';
-import type { NotificationPluginOptions } from '@hono-enterprise/notification-plugin';
-import type { MultiTenancyPluginOptions } from '@hono-enterprise/multi-tenancy-plugin';
-import type { ReactRouterPluginOptions } from '@hono-enterprise/react-router-plugin';
+import type { MicroserviceStarterOptions } from '@setu-ts/microservice-starter';
+import type { CachePluginOptions } from '@setu-ts/cache-plugin';
+import type { EventsPluginOptions } from '@setu-ts/events-plugin';
+import type { CqrsPluginOptions } from '@setu-ts/cqrs-plugin';
+import type { SchedulerPluginOptions } from '@setu-ts/scheduler-plugin';
+import type { AuditPluginOptions } from '@setu-ts/audit-plugin';
+import type { SecretsPluginOptions } from '@setu-ts/secrets-plugin';
+import type { StoragePluginOptions } from '@setu-ts/storage-plugin';
+import type { MailPluginOptions } from '@setu-ts/mail-plugin';
+import type { FeatureFlagsPluginOptions } from '@setu-ts/feature-flags-plugin';
+import type { NotificationPluginOptions } from '@setu-ts/notification-plugin';
+import type { MultiTenancyPluginOptions } from '@setu-ts/multi-tenancy-plugin';
+import type { ReactRouterPluginOptions } from '@setu-ts/react-router-plugin';
 
 /**
  * Options for {@linkcode createFullStackApp}. Extends {@linkcode MicroserviceStarterOptions}

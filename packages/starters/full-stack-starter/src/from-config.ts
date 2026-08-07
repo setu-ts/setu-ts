@@ -5,11 +5,11 @@
  * @module
  */
 
-import type { IConfig } from '@hono-enterprise/common';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { createRuntimeServices } from '@hono-enterprise/runtime';
-import type { ConfigPluginOptions } from '@hono-enterprise/config-plugin';
-import { loadConfig } from '@hono-enterprise/config-plugin';
+import type { IConfig } from '@setu-ts/common';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import type { ConfigPluginOptions } from '@setu-ts/config-plugin';
+import { loadConfig } from '@setu-ts/config-plugin';
 
 import type { FullStackStarterOptions } from './options.ts';
 import { createFullStackApp } from './app.ts';
@@ -110,7 +110,7 @@ function toStringEnv(
  *
  * @example Choosing a database and a mail provider from the environment
  * ```typescript
- * import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+ * import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
  *
  * const app = await createFullStackAppFromConfig((config) => ({
  *   database: { adapter: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },

@@ -15,7 +15,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import type { IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
 

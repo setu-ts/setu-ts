@@ -1,10 +1,9 @@
-# React Router development mode (HMR) with `@hono-enterprise/react-router-plugin`
+# React Router development mode (HMR) with `@setu-ts/react-router-plugin`
 
 The plugin's production path imports a compiled `ServerBuild` once, at `register()` time, so a
 rebuild needs a process restart. This guide sets up a development loop where editing a route file
 changes the rendered output with **no restart**, and the browser gets Vite's Hot Module Replacement
-and React Fast Refresh — while the hono-enterprise app still serves the SSR document and your API
-routes.
+and React Fast Refresh — while the setu-ts app still serves the SSR document and your API routes.
 
 No plugin code is required. The `loadRequestHandler` option is the seam; everything here is
 app-level configuration.
@@ -87,8 +86,8 @@ export default defineConfig({
 
 `base` is what makes a single proxy route sufficient. Without it, the SSR document references
 `/app/root.tsx`, `/@react-router/critical.css`, and `/node_modules/...` at the root — all of which
-would hit the hono-enterprise app and collide with real application routes. With `base: '/__vite/'`,
-those become `/__vite/app/root.tsx`, `/__vite/@react-router/critical.css`, and so on.
+would hit the setu-ts app and collide with real application routes. With `base: '/__vite/'`, those
+become `/__vite/app/root.tsx`, `/__vite/@react-router/critical.css`, and so on.
 
 > **`server.origin` does not do this.** It affects asset URLs produced by Vite's asset pipeline, not
 > the module script paths React Router emits into the document — those stayed root-relative in
@@ -102,9 +101,9 @@ The React Router Vite plugin also **requires a real config file**: passing `conf
 ```typescript
 import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider } from 'react-router';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 
 const VITE_PORT = 5199;
 const BASE = '/__vite/';

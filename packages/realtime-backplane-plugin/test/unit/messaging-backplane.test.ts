@@ -6,12 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type {
-  IMessageBroker,
-  ISubscription,
-  MessageHandler,
-  RealtimeFrame,
-} from '@hono-enterprise/common';
+import type { IMessageBroker, ISubscription, MessageHandler, RealtimeFrame } from '@setu-ts/common';
 import { isRealtimeFrame, MessagingBackplane } from '../../src/transports/messaging-backplane.ts';
 
 /**

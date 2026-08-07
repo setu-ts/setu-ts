@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { FcmTokenSource, INotificationHttp } from '../interfaces/index.ts';
 import { pemToDer } from './pem.ts';
 

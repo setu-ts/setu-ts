@@ -13,13 +13,13 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IPluginContext,
   IRuntimeServices,
   IServiceRegistry,
   RuntimePlatform,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import {
   createRuntimeServices,
@@ -189,7 +189,7 @@ describe('createRuntimeServices | one implementation, two entry points', () => {
   it('the two instances read the same environment', () => {
     // The documented consequence of building services outside the app: two
     // instances exist, and both must see the environment they were built over.
-    Deno.env.set('HONOE_M36C_PROBE', 'shared');
+    Deno.env.set('SETU_M36C_PROBE', 'shared');
     try {
       const { ctx, registry } = createRegistryContext();
       RuntimePlugin().register(ctx);
@@ -197,10 +197,10 @@ describe('createRuntimeServices | one implementation, two entry points', () => {
       const fromPlugin = registry.get(CAPABILITIES.RUNTIME) as IRuntimeServices;
       const standalone = createRuntimeServices();
 
-      expect(standalone.env['HONOE_M36C_PROBE']).toBe('shared');
-      expect(fromPlugin.env['HONOE_M36C_PROBE']).toBe('shared');
+      expect(standalone.env['SETU_M36C_PROBE']).toBe('shared');
+      expect(fromPlugin.env['SETU_M36C_PROBE']).toBe('shared');
     } finally {
-      Deno.env.delete('HONOE_M36C_PROBE');
+      Deno.env.delete('SETU_M36C_PROBE');
     }
   });
 
@@ -208,14 +208,14 @@ describe('createRuntimeServices | one implementation, two entry points', () => {
     // Pins the caveat the factory's JSDoc states, so the doc claim is verified
     // rather than asserted: a variable set after construction is not visible.
     const before = createRuntimeServices();
-    Deno.env.set('HONOE_M36C_LATE', 'late');
+    Deno.env.set('SETU_M36C_LATE', 'late');
     try {
       const after = createRuntimeServices();
 
-      expect(before.env['HONOE_M36C_LATE']).toBeUndefined();
-      expect(after.env['HONOE_M36C_LATE']).toBe('late');
+      expect(before.env['SETU_M36C_LATE']).toBeUndefined();
+      expect(after.env['SETU_M36C_LATE']).toBe('late');
     } finally {
-      Deno.env.delete('HONOE_M36C_LATE');
+      Deno.env.delete('SETU_M36C_LATE');
     }
   });
 });
@@ -252,11 +252,11 @@ describe('createRuntimeServices | Cloudflare Workers env passthrough', () => {
     // and must not be handed to a factory whose first parameter is a host.
     const services = createRuntimeServices({
       platform: 'deno',
-      env: { HONOE_M52_NEVER: 'should not appear' },
+      env: { SETU_M52_NEVER: 'should not appear' },
     });
 
     expect(services.platform()).toBe('deno');
-    expect(services.env['HONOE_M52_NEVER']).toBeUndefined();
+    expect(services.env['SETU_M52_NEVER']).toBeUndefined();
   });
 });
 

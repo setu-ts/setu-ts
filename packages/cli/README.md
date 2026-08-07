@@ -1,28 +1,28 @@
-# @hono-enterprise/cli
+# @setu-ts/cli
 
-The `honoe` command-line tool: project scaffolding and plugin-aware code generation for the Hono
+The `setu` command-line tool: project scaffolding and plugin-aware code generation for the Hono
 Enterprise framework.
 
 ## Installation
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.4/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.4/main
 ```
 
-The `-n honoe` is required, not decorative: Deno derives the binary name from the package, which for
-a package called `cli` would install a binary named `cli`. All help text shows `honoe`.
+The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for
+a package called `cli` would install a binary named `cli`. All help text shows `setu`.
 
 ## Scaffolding a project
 
 ```bash
-honoe new my-app                                  # Deno, minimal (runtime plugin only)
-honoe new my-app --runtime node                   # deno | node | bun | cloudflare-workers
-honoe new my-app --template rest                  # rest | microservice | nest | full-stack
+setu new my-app                                  # Deno, minimal (runtime plugin only)
+setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers
+setu new my-app --template rest                  # rest | microservice | nest | full-stack
 ```
 
-Every project gets a `honoe.config.ts` exporting `createApp()` — the one place its plugin list
-lives. `main.ts` imports it to start the server, and `honoe` imports it to find plugin commands, so
-the two cannot disagree. The factory does **not** start the application.
+Every project gets a `setu.config.ts` exporting `createApp()` — the one place its plugin list lives.
+`main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
+cannot disagree. The factory does **not** start the application.
 
 | Template       | Plugin set                                                                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -64,8 +64,8 @@ Every target also gets a `README.md` and a `.gitignore`.
 ## Generating code
 
 ```bash
-honoe generate service user-profile
-honoe g service user-profile        # `g` is an alias, `n` aliases `new`
+setu generate service user-profile
+setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
 | Schematic          | Emits                                  | Requires           |
@@ -90,9 +90,9 @@ all produce identical output.
 ### Plugin awareness
 
 `generate` reads the target project's `deno.json` `imports` (falling back to `package.json`
-`dependencies` + `devDependencies`) to learn which `@hono-enterprise` packages are installed. It
-never imports or boots your project. A schematic whose plugin is missing is refused, naming the
-package to install, and `honoe generate --help` lists only what is available here.
+`dependencies` + `devDependencies`) to learn which `@setu-ts` packages are installed. It never
+imports or boots your project. A schematic whose plugin is missing is refused, naming the package to
+install, and `setu generate --help` lists only what is available here.
 
 ## Options
 
@@ -102,7 +102,7 @@ package to install, and `honoe generate --help` lists only what is available her
 | `--dir <path>`       | Operate on this directory instead of the working directory.                                     |
 | `--runtime <target>` | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`. |
 | `--template <name>`  | `new` only: `rest` or `microservice`. Omitted yields the minimal plugin set.                    |
-| `--config <path>`    | Load the app from this module instead of `./honoe.config.ts`.                                   |
+| `--config <path>`    | Load the app from this module instead of `./setu.config.ts`.                                    |
 | `--help`, `-h`       | Prints usage.                                                                                   |
 | `--version`, `-v`    | Prints the version.                                                                             |
 
@@ -118,13 +118,13 @@ half-written tree.
 
 ## Plugin commands
 
-A plugin publishes commands with `ctx.cli.register(name, handler)`. `honoe` finds them by loading
-your `honoe.config.ts` and starting the application with **no port**, so nothing binds a socket. It
+A plugin publishes commands with `ctx.cli.register(name, handler)`. `setu` finds them by loading
+your `setu.config.ts` and starting the application with **no port**, so nothing binds a socket. It
 always stops the application afterwards, including when a handler throws.
 
 ```bash
-honoe commands          # list what this application's plugins provide
-honoe db:migrate up 3   # positionals after the name reach the handler
+setu commands          # list what this application's plugins provide
+setu db:migrate up 3   # positionals after the name reach the handler
 ```
 
 ```typescript
@@ -135,11 +135,11 @@ register(ctx: IPluginContext): void {
 }
 ```
 
-Handlers receive positionals only. `honoe` consumes its own flags, so pass a plugin command's flags
+Handlers receive positionals only. `setu` consumes its own flags, so pass a plugin command's flags
 after `--`:
 
 ```bash
-honoe db:migrate -- --verbose --dry
+setu db:migrate -- --verbose --dry
 ```
 
 Built-in verbs (`new`, `generate`, `commands`, `help`) match **first**, so a plugin cannot shadow
@@ -153,12 +153,11 @@ Two plugins registering the same name is refused rather than resolved by load or
 
 ## Custom schematics
 
-Drop a module in `.hono-enterprise/schematics/` and the CLI will load it with a real dynamic
-`import()`:
+Drop a module in `.setu-ts/schematics/` and the CLI will load it with a real dynamic `import()`:
 
 ```typescript
-// .hono-enterprise/schematics/readme.ts
-import type { DerivedNames, GeneratedFile, SchematicOptions } from '@hono-enterprise/cli';
+// .setu-ts/schematics/readme.ts
+import type { DerivedNames, GeneratedFile, SchematicOptions } from '@setu-ts/cli';
 
 export function schematic(
   names: DerivedNames,
@@ -169,7 +168,7 @@ export function schematic(
 ```
 
 ```bash
-honoe g custom readme order-item   # writes docs/order-item.md
+setu g custom readme order-item   # writes docs/order-item.md
 ```
 
 `DerivedNames` carries `raw`, `kebab`, `camel`, `pascal`, and `screaming`. `SchematicOptions`
@@ -180,8 +179,8 @@ is what makes `--dry-run` exact.
 ## Programmatic use
 
 ```typescript
-import { runCli } from '@hono-enterprise/cli';
-import { createDenoRuntimeServices } from '@hono-enterprise/runtime';
+import { runCli } from '@setu-ts/cli';
+import { createDenoRuntimeServices } from '@setu-ts/runtime';
 
 const runtime = createDenoRuntimeServices();
 const code = await runCli(['generate', 'service', 'billing'], {
@@ -199,9 +198,9 @@ purpose: `src/main.ts` owns the process boundary, so every other path stays test
 ## Not yet supported
 
 - **Starter-backed templates.** `--template` emits inline wiring; templates that resolve to
-  `@hono-enterprise/*-starter` wait on Milestone 36, which owns those packages.
+  `@setu-ts/*-starter` wait on Milestone 36, which owns those packages.
 - **Flags for plugin commands.** Handlers receive positionals only; use `--` to forward flags.
-- **Plugin installation.** `honoe` generates and dispatches; it does not edit your manifest.
+- **Plugin installation.** `setu` generates and dispatches; it does not edit your manifest.
 
 ## License
 

@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 
 /**
  * One file a schematic asks the command layer to create.

@@ -3,7 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ILogger, ScheduledJob } from '@hono-enterprise/common';
+import type { ILogger, ScheduledJob } from '@setu-ts/common';
 import { SchedulerService } from '../../src/services/scheduler-service.ts';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';

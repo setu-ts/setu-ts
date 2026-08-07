@@ -6,7 +6,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
 import type {
@@ -20,13 +20,8 @@ import type {
   IOpenApiApi,
   IPluginContext,
   IRouterApi,
-} from '@hono-enterprise/common';
-import type {
-  IConfig,
-  IRuntimeServices,
-  IServiceRegistry,
-  TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { IConfig, IRuntimeServices, IServiceRegistry, TimerHandle } from '@setu-ts/common';
 
 /** Minimal fake config. */
 function createFakeConfig(): IConfig {
@@ -364,7 +359,7 @@ describe('DatabasePlugin integration', () => {
   it('resolves logger when available', async () => {
     const healthChecks: Map<string, () => Promise<unknown>> = new Map();
     const closeFns: Array<() => Promise<void>> = [];
-    const fakeLogger: import('@hono-enterprise/common').ILogger = {
+    const fakeLogger: import('@setu-ts/common').ILogger = {
       level: 'info',
       info: () => {},
       warn: () => {},

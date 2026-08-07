@@ -1,7 +1,7 @@
-# @hono-enterprise/secrets-plugin
+# @setu-ts/secrets-plugin
 
-Secret management for Hono Enterprise. Registers an `ISecretManager` under `CAPABILITIES.SECRETS`,
-backed by a pluggable provider with a read-through cache.
+Secret management for Setu-TS. Registers an `ISecretManager` under `CAPABILITIES.SECRETS`, backed by
+a pluggable provider with a read-through cache.
 
 Providers:
 
@@ -20,7 +20,7 @@ logged.
 ## Installation
 
 ```typescript
-import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
+import { SecretsPlugin } from '@setu-ts/secrets-plugin';
 ```
 
 Install the SDK only for the provider you choose (e.g.
@@ -29,10 +29,10 @@ Install the SDK only for the provider you choose (e.g.
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
-import type { ISecretManager } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SecretsPlugin } from '@setu-ts/secrets-plugin';
+import type { ISecretManager } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [

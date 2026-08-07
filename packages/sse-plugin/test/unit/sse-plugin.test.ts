@@ -16,8 +16,8 @@ import type {
   RealtimeFrame,
   SseMessage,
   TimerHandle,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 describe('SsePlugin', () => {
   it('should have correct name and version', () => {
@@ -544,7 +544,7 @@ describe('SsePlugin scaling notice', () => {
     // notice must name both the limitation and the plugin that lifts it.
     expect(harness.infoLogs.length).toBe(1);
     expect(harness.infoLogs[0]).toContain('channels broadcast in-process only');
-    expect(harness.infoLogs[0]).toContain('@hono-enterprise/realtime-backplane-plugin');
+    expect(harness.infoLogs[0]).toContain('@setu-ts/realtime-backplane-plugin');
     // The transport must be named: the backplane plugin defaults to a
     // single-process 'memory' bus, so registering it bare silences this notice
     // without fanning anything out.

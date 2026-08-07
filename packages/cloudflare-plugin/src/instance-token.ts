@@ -15,8 +15,8 @@
  * @module
  */
 
-import type { CapabilityToken } from '@hono-enterprise/common';
-import { createCapabilityToken } from '@hono-enterprise/common';
+import type { CapabilityToken } from '@setu-ts/common';
+import { createCapabilityToken } from '@setu-ts/common';
 
 /** The instance name that claims a bare capability token. */
 const DEFAULT_INSTANCE = 'default';

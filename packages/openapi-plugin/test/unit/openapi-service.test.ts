@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IApplication } from '@hono-enterprise/common';
+import type { IApplication } from '@setu-ts/common';
 import { OpenApiService } from '../../src/services/openapi-service.ts';
 import { z } from 'npm:zod@^3.24.0';
 

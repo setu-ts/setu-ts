@@ -4,14 +4,8 @@
  *
  * @module
  */
-import type {
-  ILogger,
-  IPlugin,
-  IPluginContext,
-  IRuntimeServices,
-  LogLevel,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { ILogger, IPlugin, IPluginContext, IRuntimeServices, LogLevel } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { ConsoleLogger } from '../loggers/console-logger.ts';
 import { NoopLogger } from '../loggers/noop-logger.ts';
@@ -76,7 +70,7 @@ const PLUGIN_NAME = 'logger-plugin';
  *
  * @example
  * ```typescript
- * import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
+ * import { LoggerPlugin } from '@setu-ts/logger-plugin';
  *
  * app.register(LoggerPlugin({
  *   level: 'debug',

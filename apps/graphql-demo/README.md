@@ -1,7 +1,7 @@
 # graphql-demo
 
-A runnable application exercising `@hono-enterprise/graphql-plugin` end to end, and an interop suite
-that drives it with **real third-party GraphQL clients**.
+A runnable application exercising `@setu-ts/graphql-plugin` end to end, and an interop suite that
+drives it with **real third-party GraphQL clients**.
 
 > **Scope.** This is an example app, not a published package. It is deliberately **outside the Deno
 > workspace** — it resolves the framework through relative paths in its own `deno.json`, and it

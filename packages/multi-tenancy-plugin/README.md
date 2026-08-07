@@ -1,4 +1,4 @@
-# @hono-enterprise/multi-tenancy-plugin
+# @setu-ts/multi-tenancy-plugin
 
 Multi-tenancy: tenant resolution, data isolation, and cache-key scoping. Registers an
 `IMultiTenancyService` under `CAPABILITIES.MULTI_TENANCY` (`'multi-tenancy'`) and a tenant
@@ -7,14 +7,14 @@ middleware at priority 40.
 ## Installation
 
 ```typescript
-import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
-import { CAPABILITIES, type IMultiTenancyService } from '@hono-enterprise/common';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+import { CAPABILITIES, type IMultiTenancyService } from '@setu-ts/common';
 
 app.register(MultiTenancyPlugin({
   resolver: 'subdomain',
@@ -74,4 +74,4 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

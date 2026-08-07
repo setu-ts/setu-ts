@@ -80,9 +80,9 @@ export type { IAzureSecretsClient } from './interfaces/index.ts';
 /** A `fetch`-shaped function for the HashiCorp Vault provider. */
 export type { IVaultHttp } from './interfaces/index.ts';
 
-// ── Re-exported from @hono-enterprise/common ────────────────────────────────
+// ── Re-exported from @setu-ts/common ────────────────────────────────
 
 /**
  * The committed secret manager contract (get, has, rotate).
  */
-export type { ISecretManager } from '@hono-enterprise/common';
+export type { ISecretManager } from '@setu-ts/common';

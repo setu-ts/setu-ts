@@ -4,10 +4,10 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createRestApp } from '../../src/index.ts';
-import type { IRequestContext } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { Controller, Get, Inject, Injectable } from '@hono-enterprise/decorator-plugin';
+import type { IRequestContext } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import { CachePlugin } from '@setu-ts/cache-plugin';
+import { Controller, Get, Inject, Injectable } from '@setu-ts/decorator-plugin';
 
 describe('rest-starter / integration', () => {
   it('route handler returns expected body via inject()', async () => {
@@ -36,7 +36,7 @@ describe('rest-starter / integration', () => {
     // Parse the JSON body to check fields
     const body = JSON.parse(response.body!);
     // RFC 7807 format: type includes ERROR_TYPE_BASE/statusCode
-    expect(body.type).toContain('hono-enterprise.dev/errors/500');
+    expect(body.type).toContain('setu-ts.dev/errors/500');
     expect(body.detail).toBe('test route error');
     // RFC 7807 Problem Details MUST NOT have a "message" field
     expect(Object.keys(body).includes('message')).toBe(false);

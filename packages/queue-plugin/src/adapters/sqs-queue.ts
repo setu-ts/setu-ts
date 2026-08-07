@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { QueueAdapter } from './queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import {

@@ -1,16 +1,16 @@
-import { contextKeyFor } from '@hono-enterprise/react-router-plugin';
-import type { ILogger, ISession } from '@hono-enterprise/common';
-import type { IDatabaseService } from '@hono-enterprise/database-plugin';
+import { contextKeyFor } from '@setu-ts/react-router-plugin';
+import type { ILogger, ISession } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
 
 /**
  * Context keys this application adds to every SSR request.
  *
- * `honoe.config.ts` sets them; loaders and actions read them. Two things make
+ * `setu.config.ts` sets them; loaders and actions read them. Two things make
  * that work, and both are easy to break:
  *
  * 1. **Keys come from `contextKeyFor`, never from a `{ defaultValue }`
  *    literal.** Vite INLINES application modules into the server build, while
- *    the runtime loads `honoe.config.ts` from source — so this module exists
+ *    the runtime loads `setu.config.ts` from source — so this module exists
  *    twice, and two hand-written key objects would look identical and match
  *    nothing. Resolving each key by NAME through the plugin gives both copies
  *    the same object. Nothing type-checks this: with a literal, every read

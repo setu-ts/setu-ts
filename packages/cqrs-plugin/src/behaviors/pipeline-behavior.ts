@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { CqrsRequest, IPipelineBehavior } from '@hono-enterprise/common';
+import type { CqrsRequest, IPipelineBehavior } from '@setu-ts/common';
 
 /**
  * Composes a pipeline of behaviors wrapping a terminal handler.

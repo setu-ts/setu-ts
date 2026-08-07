@@ -17,8 +17,8 @@ import type {
   TimerHandle,
   WorkerErrorShape,
   WorkerTaskRequest,
-} from '@hono-enterprise/common';
-import { isWorkerReadySignal, isWorkerTaskReply } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { isWorkerReadySignal, isWorkerTaskReply } from '@setu-ts/common';
 import {
   WorkerPoolUnavailableError,
   WorkerQueueFullError,

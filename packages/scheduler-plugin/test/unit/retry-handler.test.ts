@@ -3,7 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { RetryOptions } from '@hono-enterprise/common';
+import type { RetryOptions } from '@setu-ts/common';
 import { computeBackoffMs } from '../../src/retry/retry-handler.ts';
 
 describe('computeBackoffMs', () => {

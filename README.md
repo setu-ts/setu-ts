@@ -1,4 +1,4 @@
-# Hono Enterprise
+# Setu-TS
 
 <div align="center">
 
@@ -24,10 +24,10 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 > `graphql-plugin`, `cloudflare-plugin`, and the three starters — publish for the first time here.
 >
 > The kernel, the runtime layer, 36 plugins, the three starters, the test utilities, the client SDK,
-> and the `honoe` CLI are implemented, tested, and documented.
+> and the `setu` CLI are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
-> `deno add jsr:@hono-enterprise/kernel` fails with _"has only pre-release versions available"_.
+> `deno add jsr:@setu-ts/kernel` fails with _"has only pre-release versions available"_.
 >
 > This is an alpha: the public API is not frozen and may break in any prerelease. See
 > [CHANGELOG.md](CHANGELOG.md) for known limitations.
@@ -48,7 +48,7 @@ Building enterprise backends today forces a difficult choice:
 Every existing solution forces a compromise: **power vs. portability, features vs. simplicity,
 opinion vs. flexibility.**
 
-**Hono Enterprise resolves this compromise.** It combines:
+**Setu-TS resolves this compromise.** It combines:
 
 - ⚡ **Hono's performance** — One of the fastest TypeScript routers available.
 - 🌍 **Runtime independence** — Write once, run on Node.js, Deno, Bun, and Cloudflare Workers.
@@ -171,7 +171,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 | Feature         | Status | Package                                                      | Description                                                                                                        |
 | --------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| CLI             | ✅     | `cli`                                                        | `honoe` — project scaffolding and plugin-aware code generation                                                     |
+| CLI             | ✅     | `cli`                                                        | `setu` — project scaffolding and plugin-aware code generation                                                      |
 | Client SDK      | ✅     | `sdk`                                                        | HTTP client with retry, circuit breaker, OpenAPI codegen                                                           |
 | Test utilities  | ✅     | `testing`                                                    | `createTestApp`, mock plugins/registry, fixtures, stream reads                                                     |
 | Starter bundles | ✅     | `rest-starter`, `microservice-starter`, `full-stack-starter` | `createRestApp`, `createMicroserviceApp`, `createFullStackApp` — pre-wired plugin sets with per-plugin option arms |
@@ -182,21 +182,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.4 jsr:@hono-enterprise/runtime@^0.1.0-alpha.4
+deno add jsr:@setu-ts/kernel@^0.1.0-alpha.4 jsr:@setu-ts/runtime@^0.1.0-alpha.4
 
 # Node
-npx jsr add @hono-enterprise/kernel@^0.1.0-alpha.4 @hono-enterprise/runtime@^0.1.0-alpha.4
+npx jsr add @setu-ts/kernel@^0.1.0-alpha.4 @setu-ts/runtime@^0.1.0-alpha.4
 
 # Bun
-bunx jsr add @hono-enterprise/kernel@^0.1.0-alpha.4 @hono-enterprise/runtime@^0.1.0-alpha.4
+bunx jsr add @setu-ts/kernel@^0.1.0-alpha.4 @setu-ts/runtime@^0.1.0-alpha.4
 ```
 
 **The `@^0.1.0-alpha.4` is required, not decorative.** JSR does not point `latest` at a prerelease,
 so omitting the version fails outright:
 
 ```
-error: jsr:@hono-enterprise/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@hono-enterprise/kernel@^0.1.0-alpha.4
+error: jsr:@setu-ts/kernel has only pre-release versions available.
+Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.4
 ```
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
@@ -205,13 +205,13 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A -n honoe jsr:@hono-enterprise/cli@^0.1.0-alpha.4/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.4/main
 
-honoe new my-app
-cd my-app && honoe generate service billing
+setu new my-app
+cd my-app && setu generate service billing
 ```
 
-The `-n honoe` is required: Deno would otherwise name the binary after the package (`cli`).
+The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
 All 46 workspace members are published on JSR, in `v0.1.0-alpha.4`: the core (`common`, `kernel`,
 `runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the
@@ -228,9 +228,9 @@ options or imported lazily, so an application pays only for the capabilities it 
 The smallest possible application — just the kernel and a runtime:
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
 const app = createApplication({
   plugins: [
@@ -251,11 +251,11 @@ No decorators. No DI. No modules. Just a router, a runtime, and a logger.
 Add capabilities as you need them:
 
 ```typescript
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
-import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { AuthPlugin } from '@hono-enterprise/auth-plugin';
-import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { ValidationPlugin } from '@setu-ts/validation-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
 app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 app.register(ValidationPlugin());
@@ -315,7 +315,7 @@ graph TB
 A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
-hono-enterprise/
+setu-ts/
 ├── packages/              # 46 workspace members, all published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
@@ -323,7 +323,7 @@ hono-enterprise/
 │   ├── exceptions/        # Exception factories and error-handler middleware
 │   ├── testing/           # Test utilities
 │   ├── *-plugin/          # 33 capability plugins
-│   ├── cli/               # CLI tool — `honoe`, project scaffolding and code generation
+│   ├── cli/               # CLI tool — `setu`, project scaffolding and code generation
 │   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
 │   └── starters/          # Plugin bundles — REST, microservice, full-stack starters (M36)
 ├── scripts/               # Coverage, plan linting, JSR release tooling
@@ -428,8 +428,7 @@ on the capability model.
 ### Process
 
 The monorepo is built with the **Deno toolchain** (Deno 2 workspaces). Packages are published to
-**JSR** under `@hono-enterprise` and are consumable from Node and Bun via JSR's npm compatibility
-layer.
+**JSR** under `@setu-ts` and are consumable from Node and Bun via JSR's npm compatibility layer.
 
 1. Open an issue to discuss the change.
 2. Fork the repository and create a feature branch.
@@ -466,7 +465,7 @@ production.
 
 ## License
 
-[MIT](LICENSE) © Hono Enterprise Contributors
+[MIT](LICENSE) © Setu-TS Contributors
 
 ---
 

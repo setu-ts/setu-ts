@@ -13,12 +13,12 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { HealthCheckResult, IApplication } from '@hono-enterprise/common';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import type { IDatabaseService } from '@hono-enterprise/database-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { HealthCheckResult, IApplication } from '@setu-ts/common';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
 
 import { D1Adapter } from '../../src/index.ts';
 import { SqliteD1 } from '../d1-fakes.ts';

@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { ITransaction } from '@hono-enterprise/common';
+import type { ITransaction } from '@setu-ts/common';
 import type { IRepository, IUnitOfWork } from '../interfaces/index.ts';
 
 /**

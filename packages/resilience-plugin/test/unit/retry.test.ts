@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { RetryPolicy } from '@hono-enterprise/common';
+import type { RetryPolicy } from '@setu-ts/common';
 import { computeBackoffMs, runWithRetry } from '../../src/patterns/retry.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 

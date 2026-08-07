@@ -5,8 +5,8 @@
  * @since 0.1.0
  */
 
-import type { IRequestContext } from '@hono-enterprise/common';
-export type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
+export type { IRequestContext } from '@setu-ts/common';
 
 /**
  * React Router request handler — the callable returned by

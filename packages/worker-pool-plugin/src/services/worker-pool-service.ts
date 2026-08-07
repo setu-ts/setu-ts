@@ -11,7 +11,7 @@ import type {
   IWorkerPool,
   TaskPoolStats,
   WorkerRunOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolUnavailableError } from '../errors.ts';
 import { TaskPool } from '../pool/task-pool.ts';

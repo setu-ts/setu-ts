@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { ICacheStore } from '@hono-enterprise/common';
+import type { ICacheStore } from '@setu-ts/common';
 import type { IKvNamespace } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import type { EnvelopeRead } from './kv-envelope.ts';

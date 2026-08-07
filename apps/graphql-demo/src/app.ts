@@ -9,12 +9,12 @@
  * @module
  */
 
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { CachePlugin } from '@setu-ts/cache-plugin';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 import { createResolvers, typeDefs } from './schema.ts';
 
 /**

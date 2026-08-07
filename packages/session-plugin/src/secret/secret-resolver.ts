@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { ISecretManager, IServiceRegistry } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ISecretManager, IServiceRegistry } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { SessionSecretMissingError } from '../errors.ts';
 import type { SessionPluginOptions } from '../options.ts';

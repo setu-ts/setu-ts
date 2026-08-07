@@ -1,7 +1,7 @@
-# @hono-enterprise/graphql-plugin
+# @setu-ts/graphql-plugin
 
-GraphQL plugin for the Hono Enterprise framework. Provides schema-first and code-first GraphQL
-support over the kernel router.
+GraphQL plugin for the Setu-TS framework. Provides schema-first and code-first GraphQL support over
+the kernel router.
 
 ## Features
 
@@ -16,7 +16,7 @@ support over the kernel router.
 ## Installation
 
 ```bash
-deno add npm:graphql@^16 @hono-enterprise/graphql-plugin
+deno add npm:graphql@^16 @setu-ts/graphql-plugin
 ```
 
 ## Usage
@@ -24,8 +24,8 @@ deno add npm:graphql@^16 @hono-enterprise/graphql-plugin
 ### Schema-First
 
 ```typescript
-import { GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
-import { Application } from '@hono-enterprise/kernel';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
+import { Application } from '@setu-ts/kernel';
 
 const app = new Application();
 
@@ -50,7 +50,7 @@ await app.start({ port: 3000 });
 ### Code-First
 
 ```typescript
-import { GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 import { buildSchema } from 'npm:graphql@^16';
 
 const schema = buildSchema(`
@@ -75,7 +75,7 @@ await app.start({ port: 3000 });
 If your application uses its own copy of `graphql`, inject it to avoid cross-copy issues:
 
 ```typescript
-import { adaptGraphqlModule, GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
+import { adaptGraphqlModule, GraphqlPlugin } from '@setu-ts/graphql-plugin';
 import * as graphql from 'npm:graphql@^16';
 
 app.use(

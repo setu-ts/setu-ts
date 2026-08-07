@@ -11,8 +11,8 @@ import type {
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { RealtimeBackplanePluginOptions } from '../interfaces/index.ts';
 import { createBackplane } from '../transports/backplane-factory.ts';
 
@@ -32,7 +32,7 @@ const PLUGIN_NAME = 'realtime-backplane-plugin';
  *
  * @example
  * ```typescript
- * import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+ * import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
  *
  * app.register(RealtimeBackplanePlugin({
  *   transport: 'redis',

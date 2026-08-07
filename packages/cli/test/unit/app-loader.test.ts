@@ -5,12 +5,12 @@ import { createFakeApp } from '../fixtures/fake-app.ts';
 import { configModuleExists, configModulePath, loadApp } from '../../src/app-loader.ts';
 
 describe('configModulePath', () => {
-  it('defaults to honoe.config.ts at the project root', () => {
-    expect(configModulePath('/app')).toBe('/app/honoe.config.ts');
+  it('defaults to setu.config.ts at the project root', () => {
+    expect(configModulePath('/app')).toBe('/app/setu.config.ts');
   });
 
   it('treats an empty --config as absent', () => {
-    expect(configModulePath('/app', '')).toBe('/app/honoe.config.ts');
+    expect(configModulePath('/app', '')).toBe('/app/setu.config.ts');
   });
 
   it('passes an absolute --config through', () => {
@@ -24,7 +24,7 @@ describe('configModulePath', () => {
 
 describe('configModuleExists', () => {
   it('is true when the module is present', async () => {
-    const fs = createFakeFs({ '/app/honoe.config.ts': 'export function createApp() {}' });
+    const fs = createFakeFs({ '/app/setu.config.ts': 'export function createApp() {}' });
     expect(await configModuleExists(fs, '/app')).toBe(true);
   });
 
@@ -72,7 +72,7 @@ describe('loadApp', () => {
       seen = url;
       return Promise.resolve({ createApp: () => app });
     });
-    expect(seen).toBe('file:///app/honoe.config.ts');
+    expect(seen).toBe('file:///app/setu.config.ts');
   });
 
   it('imports the --config override', async () => {
@@ -86,7 +86,7 @@ describe('loadApp', () => {
 
   it('throws naming the path when the module cannot be imported', async () => {
     await expect(loadApp('/app', undefined, () => Promise.reject(new Error('not found'))))
-      .rejects.toThrow('Cannot load file:///app/honoe.config.ts');
+      .rejects.toThrow('Cannot load file:///app/setu.config.ts');
   });
 
   it('preserves the import failure as the cause', async () => {
@@ -118,7 +118,7 @@ describe('loadApp', () => {
           throw new Error('missing DATABASE_URL');
         },
       }))).rejects.toThrow(
-        'createApp() in file:///app/honoe.config.ts threw: missing DATABASE_URL',
+        'createApp() in file:///app/setu.config.ts threw: missing DATABASE_URL',
       );
   });
 

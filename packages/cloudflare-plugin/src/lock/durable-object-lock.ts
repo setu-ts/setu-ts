@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 import type { IDurableObjectNamespace } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
@@ -62,8 +62,8 @@ export interface DurableObjectLockOptions {
  * @example
  * ```typescript
  * import { env } from 'cloudflare:workers';
- * import { DurableObjectLock } from '@hono-enterprise/cloudflare-plugin';
- * import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
+ * import { DurableObjectLock } from '@setu-ts/cloudflare-plugin';
+ * import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
  *
  * const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, {
  *   runtime,

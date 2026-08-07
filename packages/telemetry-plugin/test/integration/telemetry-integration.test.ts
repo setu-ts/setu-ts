@@ -11,7 +11,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { TelemetryPlugin } from '../../src/plugin/telemetry-plugin.ts';
 import { TELEMETRY_SPAN_KEY } from '../../src/interfaces/index.ts';
-import type { ISpan, ITelemetryService } from '@hono-enterprise/common';
+import type { ISpan, ITelemetryService } from '@setu-ts/common';
 import type { TracerHost } from '../../src/interfaces/index.ts';
 
 describe('telemetry integration (fake TracerHost)', () => {

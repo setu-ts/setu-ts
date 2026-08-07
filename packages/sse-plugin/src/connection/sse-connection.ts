@@ -16,7 +16,7 @@ import type {
   ISseConnection as IConn,
   SseMessage,
   TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { encodeSseComment, encodeSseMessage } from '../utils/sse-frame.ts';
 import { SSE_HWM_BYTES, SSE_MAX_BACKLOG_BYTES } from '../channels/channel-registry.ts';
 

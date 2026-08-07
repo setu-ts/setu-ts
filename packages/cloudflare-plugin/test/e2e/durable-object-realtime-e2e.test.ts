@@ -14,15 +14,11 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type {
-  IApplication,
-  IWebSocketConnection,
-  IWebSocketService,
-} from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IApplication, IWebSocketConnection, IWebSocketService } from '@setu-ts/common';
 
 import { CloudflarePlugin } from '../../src/index.ts';
 import { FakeDurableObjectNamespace } from '../do-fakes.ts';

@@ -1,4 +1,4 @@
-# Hono Enterprise — Agent Rules (pointer)
+# Setu-TS — Agent Rules (pointer)
 
 The canonical, always-current project rules for **all** assistants live in **`CLAUDE.md`** at the
 repo root. This file is intentionally a thin pointer, for the same reason `.roo/rules/01-project.md`
@@ -21,7 +21,7 @@ delta for agents that are not Claude Code.
 3. **`ROADMAP.md`** — the section for the milestone you are starting, and the Progress Tracking
    table.
 4. **`ARCHITECTURE.md`** — the sections for the package you are touching. It explains why.
-5. **`PUBLIC_API.md`** — for `@hono-enterprise/common` and any package you depend on, so you consume
+5. **`PUBLIC_API.md`** — for `@setu-ts/common` and any package you depend on, so you consume
    existing interfaces instead of inventing new ones.
 6. **The milestone's plan** under `plans/milestone-<N>-<desc>.md`. If none exists, write one from
    `plans/TEMPLATE.md` and run `deno task check:plan` before implementing.

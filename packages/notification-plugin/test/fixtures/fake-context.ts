@@ -11,8 +11,8 @@
  *
  * @module
  */
-import type { HealthCheckResult, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { HealthCheckResult, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 /** The fake context and its capture buffers. */
 export interface FakeContext {

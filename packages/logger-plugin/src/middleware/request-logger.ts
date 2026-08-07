@@ -9,8 +9,8 @@ import type {
   IRequestContext,
   IRuntimeServices,
   MiddlewareFunction,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { NoopLogger } from '../loggers/noop-logger.ts';
 

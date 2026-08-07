@@ -28,7 +28,7 @@ import type {
   ServiceDescriptorLike,
 } from '../interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
-import type { IHealthService } from '@hono-enterprise/common';
+import type { IHealthService } from '@setu-ts/common';
 
 /** Fully-qualified name of the built-in health service. */
 const HEALTH_SERVICE_NAME = 'grpc.health.v1.Health';

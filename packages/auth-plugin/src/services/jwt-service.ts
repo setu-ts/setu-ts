@@ -4,8 +4,8 @@
  * @module
  */
 
-import type { IJwtService, JwtSignOptions } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IJwtService, JwtSignOptions } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { decodeBase64Url, encodeBase64Url } from '../utils/base64url.ts';
 import { toBuffer } from '../utils/buffer.ts';
 import { pemToDer } from '../utils/pem.ts';

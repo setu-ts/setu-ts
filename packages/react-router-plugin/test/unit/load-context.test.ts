@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IPrincipal, IServiceRegistry } from '@hono-enterprise/common';
+import type { IPrincipal, IServiceRegistry } from '@setu-ts/common';
 import type { IRequestContext } from '../../src/interfaces/index.ts';
 import { applyDefaultLoadContext } from '../../src/handler/load-context.ts';
 import { servicesContext, userContext } from '../../src/handler/context-keys.ts';

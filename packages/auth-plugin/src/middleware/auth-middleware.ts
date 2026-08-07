@@ -4,8 +4,8 @@
  * @module
  */
 
-import type { IAuthService, IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IAuthService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 /**
  * Authentication middleware that runs passive strategies and populates ctx.request.user.

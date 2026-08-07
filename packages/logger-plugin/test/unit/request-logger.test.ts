@@ -12,8 +12,8 @@ import type {
   IServiceRegistry,
   LogLevel,
   LogMetadata,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { createRequestLoggerMiddleware } from '../../src/middleware/request-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

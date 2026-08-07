@@ -5,7 +5,7 @@ import { createFakeApp, type FakeApp, type FakeCommand } from '../fixtures/fake-
 import { parseArgs } from '../../src/args.ts';
 import { dispatchPluginCommand, runCommandsListing } from '../../src/commands/plugin-commands.ts';
 
-const CONFIG = '/app/honoe.config.ts';
+const CONFIG = '/app/setu.config.ts';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -57,8 +57,8 @@ describe('runCommandsListing', () => {
       { name: 'cache:clear', handler: noop },
     ]));
     expect(await h.list()).toBe(0);
-    expect(h.out.text()).toContain('honoe cache:clear');
-    expect(h.out.text()).toContain('honoe db:migrate');
+    expect(h.out.text()).toContain('setu cache:clear');
+    expect(h.out.text()).toContain('setu db:migrate');
   });
 
   it('sorts the listing so output is stable', async () => {
@@ -77,11 +77,11 @@ describe('runCommandsListing', () => {
     expect(h.out.text()).toContain('ctx.cli.register');
   });
 
-  it('exits 2 naming honoe.config.ts when the project has none', async () => {
+  it('exits 2 naming setu.config.ts when the project has none', async () => {
     const h = harness(createFakeApp(), { withConfig: false });
     expect(await h.list()).toBe(2);
-    expect(h.err.text()).toContain('No honoe.config.ts found at /app/honoe.config.ts');
-    expect(h.err.text()).toContain('honoe new');
+    expect(h.err.text()).toContain('No setu.config.ts found at /app/setu.config.ts');
+    expect(h.err.text()).toContain('setu new');
   });
 
   it('exits 1 when the application fails to load', async () => {
@@ -296,11 +296,11 @@ describe('dispatchPluginCommand', () => {
     expect(h.err.text()).toContain('registers no plugin commands');
   });
 
-  it('exits 2 naming honoe.config.ts when the project has none', async () => {
+  it('exits 2 naming setu.config.ts when the project has none', async () => {
     const h = harness(createFakeApp(), { withConfig: false });
     expect(await h.dispatch('db:migrate')).toBe(2);
     expect(h.err.text()).toContain('Unknown command: db:migrate');
-    expect(h.err.text()).toContain('No honoe.config.ts found');
+    expect(h.err.text()).toContain('No setu.config.ts found');
   });
 
   it('never boots when the project has no config module', async () => {
@@ -375,7 +375,7 @@ describe('--config and --dir', () => {
   });
 
   it('anchors a relative --dir to the working directory', async () => {
-    const fs = createFakeFs({ '/work/proj/honoe.config.ts': 'x' });
+    const fs = createFakeFs({ '/work/proj/setu.config.ts': 'x' });
     let seen: string | undefined;
     const code = await runCommandsListing(parseArgs(['--dir', 'proj']), {
       fs,
@@ -388,6 +388,6 @@ describe('--config and --dir', () => {
       },
     });
     expect(code).toBe(0);
-    expect(seen).toBe('file:///work/proj/honoe.config.ts');
+    expect(seen).toBe('file:///work/proj/setu.config.ts');
   });
 });

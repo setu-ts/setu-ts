@@ -5,7 +5,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ILogger, LogMetadata } from '@hono-enterprise/common';
+import type { ILogger, LogMetadata } from '@setu-ts/common';
 
 import { resolveWaitUntil } from '../../../src/background/wait-until.ts';
 

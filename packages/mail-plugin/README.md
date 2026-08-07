@@ -1,4 +1,4 @@
-# @hono-enterprise/mail-plugin
+# @setu-ts/mail-plugin
 
 Transactional email. Registers an `IMailer` under `CAPABILITIES.MAIL` (`'mail'`).
 
@@ -9,14 +9,14 @@ Four providers ship: `LogProvider` (zero-dependency default), `SmtpProvider` (ov
 ## Installation
 
 ```typescript
-import { MailPlugin } from '@hono-enterprise/mail-plugin';
+import { MailPlugin } from '@setu-ts/mail-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { MailPlugin } from '@hono-enterprise/mail-plugin';
-import { CAPABILITIES, type IMailer } from '@hono-enterprise/common';
+import { MailPlugin } from '@setu-ts/mail-plugin';
+import { CAPABILITIES, type IMailer } from '@setu-ts/common';
 
 app.register(MailPlugin({
   provider: 'sendgrid',
@@ -60,4 +60,4 @@ empty string.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

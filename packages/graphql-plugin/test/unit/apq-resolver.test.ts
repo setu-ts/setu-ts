@@ -6,7 +6,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { ApqResolver } from '../../src/apq/apq-resolver.ts';
 import { persistedQueryHash } from '../../src/apq/persisted-query.ts';
-import type { ICacheStore } from '@hono-enterprise/common';
+import type { ICacheStore } from '@setu-ts/common';
 
 const subtle = globalThis.crypto.subtle;
 

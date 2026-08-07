@@ -10,8 +10,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IRequestContext } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import { CSRF_SESSION_KEY, getCsrfToken, readCsrfToken } from '../../../src/csrf/token.ts';

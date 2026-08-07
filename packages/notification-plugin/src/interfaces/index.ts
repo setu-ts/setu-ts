@@ -2,13 +2,13 @@
  * Internal ports and option types for the notification plugin.
  *
  * Transport ports (implemented by providers), the injectable HTTP seam,
- * and plugin configuration shapes. These are NOT exported from `@hono-enterprise/common`
+ * and plugin configuration shapes. These are NOT exported from `@setu-ts/common`
  * — they live inside the package so the channel/provider split remains encapsulated.
  *
  * @module
  */
 
-import type { IMailer, IRuntimeServices, NotificationMessage } from '@hono-enterprise/common';
+import type { IMailer, IRuntimeServices, NotificationMessage } from '@setu-ts/common';
 
 /**
  * Supplies OAuth2 access tokens for FCM HTTP v1.

@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import type { FlagContext, ILogger } from '@hono-enterprise/common';
+import type { FlagContext, ILogger } from '@setu-ts/common';
 import type {
   FlagProvider,
   FlagProviderStatus,

@@ -14,8 +14,8 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IConfig, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 
 import { loadConfig } from '../../src/services/load-config.ts';
 import { ConfigPlugin } from '../../src/plugin/config-plugin.ts';

@@ -1,10 +1,10 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IPluginContext, IRequestContext } from '@hono-enterprise/common';
+import type { IPluginContext, IRequestContext } from '@setu-ts/common';
 
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { cacheMiddleware, CachePlugin } from '../../src/index.ts';
 
@@ -107,7 +107,7 @@ describe('Cache integration (through real kernel app.inject)', () => {
               // Set content-type AFTER text() since text() overwrites to text/plain.
               _c.response.text(html);
               _c.response.header('content-type', 'text/html; charset=utf-8');
-              return { __handlerResult: true } as import('@hono-enterprise/common').HandlerResult;
+              return { __handlerResult: true } as import('@setu-ts/common').HandlerResult;
             });
           },
         },

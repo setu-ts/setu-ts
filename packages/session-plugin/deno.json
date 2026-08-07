@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/session-plugin",
+  "name": "@setu-ts/session-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts"

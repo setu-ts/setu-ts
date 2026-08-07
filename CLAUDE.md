@@ -1,7 +1,7 @@
-# Hono Enterprise — Session Instructions
+# Setu-TS — Session Instructions
 
 Plugin-first enterprise backend framework. **Deno-first toolchain** (Deno 2 workspaces), published
-to **JSR** under `@hono-enterprise`, consumable from Node/Bun via JSR npm compatibility.
+to **JSR** under `@setu-ts`, consumable from Node/Bun via JSR npm compatibility.
 
 The backend toolchain is Deno-only. The **sole exception** is an application's _frontend build_ —
 the React Router SSR plugin (M44) is built with Vite on the Node/npm toolchain, outside the Deno
@@ -41,10 +41,10 @@ Do NOT write, edit, or scaffold any code until you have read, in this order:
    start the next until the current one is complete (compiles, tested 90%+, documented).
 3. **ARCHITECTURE.md** — the sections relevant to the package you are building (e.g. §6 service
    registry, §10 middleware pipeline). It explains WHY, not just what.
-4. **PUBLIC_API.md** — the sections for `@hono-enterprise/common` and any package you depend on, so
-   you consume existing interfaces instead of inventing new ones.
-5. **The `@hono-enterprise/common` source** for the interfaces you will implement — implement the
-   committed contracts exactly; do not redefine, widen, or re-declare them.
+4. **PUBLIC_API.md** — the sections for `@setu-ts/common` and any package you depend on, so you
+   consume existing interfaces instead of inventing new ones.
+5. **The `@setu-ts/common` source** for the interfaces you will implement — implement the committed
+   contracts exactly; do not redefine, widen, or re-declare them.
 6. **The milestone's plan under `plans/`** (write one if it does not exist) — and verify it against
    the "Writing a milestone plan" checklist below BEFORE implementing. A plan that fails a checklist
    item gets fixed as a plan first; do not "fix it during implementation".
@@ -371,13 +371,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   alongside the M44 `fs?` precedent — implemented by `createNodeWorkerHost` (`node:worker_threads`)
   and `createWebWorkerHost` (web `Worker`, Deno/Bun), and OMITTED on Cloudflare Workers (no edge
   threads → `run()` throws `WorkerPoolUnavailableError`, plugin still registers). Worker-side helper
-  `defineWorkerTask` ships as a new `@hono-enterprise/runtime/worker` subpath (its sole export);
-  host↔worker envelope protocol (`WorkerReadySignal`/`WorkerTaskRequest`/`WorkerTaskReply` + three
-  guards) lives in `common` so both runtime (worker side) and plugin (host side) read it without a
-  plugin importing another plugin. Internal `TaskPool` (one per specifier, lazy; spawn-on-demand to
-  size, idle reuse, bounded FIFO queue): handler-error → `WorkerTaskError` + worker retained; worker
-  crash → drop + re-dispatch queued work; timeout → `WorkerTaskTimeoutError` + terminate & replace;
-  queue overflow → `WorkerQueueFullError`. `worker-pool` health indicator (`{ available, pools }`) +
+  `defineWorkerTask` ships as a new `@setu-ts/runtime/worker` subpath (its sole export); host↔worker
+  envelope protocol (`WorkerReadySignal`/`WorkerTaskRequest`/`WorkerTaskReply` + three guards) lives
+  in `common` so both runtime (worker side) and plugin (host side) read it without a plugin
+  importing another plugin. Internal `TaskPool` (one per specifier, lazy; spawn-on-demand to size,
+  idle reuse, bounded FIFO queue): handler-error → `WorkerTaskError` + worker retained; worker crash
+  → drop + re-dispatch queued work; timeout → `WorkerTaskTimeoutError` + terminate & replace; queue
+  overflow → `WorkerQueueFullError`. `worker-pool` health indicator (`{ available, pools }`) +
   `onClose` terminates all. Real-thread e2e on Deno spawning fixture task modules; developed in an
   isolated worktree off `main`) — complete (PR #64)
 - **Milestone 30** (`packages/notification-plugin` — NotificationPlugin registering an `INotifier`
@@ -513,8 +513,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   returned an object body while `text()`/`bytes()` silently dropped it — complete (PR #78)
 - **Alpha release `v0.1.0-alpha.1`** — taken out of band before M34, on `release/v0.1.0-alpha.1`
   (not a milestone, so not a `feat/…` branch). All 40 workspace members bumped to `0.1.0-alpha.1`;
-  the 11 explicit `jsr:@hono-enterprise/{common,kernel}@^0.1.0` specifiers bumped alongside, because
-  a `^0.1.0` range does NOT match a prerelease and `deno publish` does not warn. **35 implemented
+  the 11 explicit `jsr:@setu-ts/{common,kernel}@^0.1.0` specifiers bumped alongside, because a
+  `^0.1.0` range does NOT match a prerelease and `deno publish` does not warn. **35 implemented
   packages publish; the 5 stubs (`cli`, `sdk`, three starters) do not** — `deno publish` from the
   workspace root would push all 40, so releases go through `scripts/publish-packages.ts`, which
   walks an explicit dependency-ordered allow-list in `scripts/release-packages.ts` one package at a
@@ -524,20 +524,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   READMEs. **JSR versions are immutable** — yankable, never deletable or replaceable.
 - **Alpha release `v0.1.0-alpha.2`** — on `release/v0.1.0-alpha.2`, published 2026-07-28. **36
   packages** (adds `cli`); only `sdk` and the three starters remain unpublished. The whole scope
-  moves as ONE version because the CLI forces it: `honoe new` stamps generated projects with the
+  moves as ONE version because the CLI forces it: `setu new` stamps generated projects with the
   CLI's OWN version as the range for `kernel`/`runtime`/`common`/every template plugin, so a CLI at
   `alpha.2` beside a framework at `alpha.1` would scaffold projects pinning versions that do not
   exist. Also fixed 44 relative links across 28 package READMEs — JSR resolves a README's relative
-  links against `jsr.io/@hono-enterprise/`, so `../../PUBLIC_API.md` returned a 400
-  `malformedRequest` on every package page; package READMEs must use absolute GitHub URLs. **This
-  was the first release CI published.** `alpha.1` went out by hand because the workflow failed every
-  time, in three distinct ways, none reproducible locally: (1) the publish step lacked
-  `--allow-env`, because the workflow inlined its own `deno run` instead of calling the
-  `release:publish` task and the copy drifted — it now calls the task; (2) it also lacked
-  `--allow-net`, needed by the already-published check, which `--dry-run` SKIPS, so a green dry run
-  proves nothing about a real run; (3) no package was linked to the GitHub repo, which tokenless
-  OIDC requires and token publishing does not — hence `alpha.1` never hit it.
-  `deno task
+  links against `jsr.io/@setu-ts/`, so `../../PUBLIC_API.md` returned a 400 `malformedRequest` on
+  every package page; package READMEs must use absolute GitHub URLs. **This was the first release CI
+  published.** `alpha.1` went out by hand because the workflow failed every time, in three distinct
+  ways, none reproducible locally: (1) the publish step lacked `--allow-env`, because the workflow
+  inlined its own `deno run` instead of calling the `release:publish` task and the copy drifted — it
+  now calls the task; (2) it also lacked `--allow-net`, needed by the already-published check, which
+  `--dry-run` SKIPS, so a green dry run proves nothing about a real run; (3) no package was linked
+  to the GitHub repo, which tokenless OIDC requires and token publishing does not — hence `alpha.1`
+  never hit it. `deno task
   release:link-repos` links all 36 through the API. Do NOT read
   `githubRepository: null` on already-published packages as evidence the link is optional; those
   were published with a token. **Six packages went live with no visible README** (`cli`,
@@ -556,7 +555,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   page, PATCH `readmeSource: 'readme'` on the package via the API — but that setting also suppresses
   the module JSDoc's `@example` "Examples" section, which is why the source fix, not the setting, is
   the durable one.
-- **Milestone 34** (`packages/cli` — the `honoe` CLI: `new` project scaffolding and plugin-aware
+- **Milestone 34** (`packages/cli` — the `setu` CLI: `new` project scaffolding and plugin-aware
   `generate` code generation. `runCli(argv, deps)` returns an exit code and never calls `Deno.exit`;
   `src/main.ts` is the sole process boundary (`Deno.args`, `Deno.cwd()`, `console`, the Deno
   filesystem, the one `Deno.exit`) and `CliDependencies` deliberately has NO default — a defaulted
@@ -565,7 +564,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   value flags (`--dir`, `--runtime`); one `deriveNames` producing five casings that all 13
   schematics share; schematics are PURE `(names, options) => GeneratedFile[]` so `--dry-run` is
   exact and the overwrite check ("check every planned path, then write") lives in one place.
-  Registry is a `Map`, not an object literal, so `honoe g constructor x` misses cleanly instead of
+  Registry is a `Map`, not an object literal, so `setu g constructor x` misses cleanly instead of
   resolving `Object.prototype`. `--runtime deno|node|bun|cloudflare-workers`: Deno gets
   `deno.json` + `main.ts` binding via `app.start({port})`; node/bun get `package.json` (npm-compat
   `@jsr/…` deps) + `.npmrc`
@@ -577,7 +576,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     file). **The generated code is verified, not assumed**: a drift gate scaffolds a project,
     generates all 13 schematics into it, and runs `deno check` against the real published JSR
     packages — it caught `ctx.request.params` (params live on `IRequestContext`) and missing
-    `experimentalDecorators`. Doc deliverables C1–C6 shipped: `honoe` everywhere, ARCHITECTURE deps
+    `experimentalDecorators`. Doc deliverables C1–C6 shipped: `setu` everywhere, ARCHITECTURE deps
     corrected to `common` + `runtime` (not `kernel`), the `ICliApi` JSDoc no longer claims a
     consumer that does not exist, `metric`/`migration` added to the ROADMAP file list, `--template`
     dropped to M36. Post-implementation code review found and fixed six correctness bugs the gates
@@ -589,10 +588,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     name, since `/class` is a legal route path; a digit-leading name emitted `class 2faService`; and
     `new --help` exited 2. The last two slipped through because the drift gate only ever used the
     name `order-item` — M34b's e2e gate takes a hostile-name set) — complete (PR #88)
-- **Milestone 34b** (`packages/cli` — `honoe new --template rest|microservice`, a `honoe.config.ts`
+- **Milestone 34b** (`packages/cli` — `setu new --template rest|microservice`, a `setu.config.ts`
   application seam, and discovery/dispatch of plugin-contributed CLI commands via
   `ICliApi`/`CAPABILITIES.CLI_COMMAND`, committed since M1 with no reader until now. Every
-  scaffolded project — templated or not — exports `createApp()` from `honoe.config.ts`; `main.ts`
+  scaffolded project — templated or not — exports `createApp()` from `setu.config.ts`; `main.ts`
   imports it to start the server and the CLI imports it to find commands, so the plugin list has ONE
   home. The factory must NOT start the app: M34's `main.ts` called `start({port})` at module scope,
   so importing that would bind a socket. Templates emit INLINE wiring, never `*-starter` imports —
@@ -608,7 +607,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   hand-patched to make it pass. Now gated, and `rest` installs `DecoratorPlugin`. That gate spawns
   `deno check` in a subprocess (so `packages/cli/deno.json` grants `run`) and repoints the generated
   project's imports at THIS workspace rather than JSR — which is both more correct (drift means
-  disagreement with HEAD, not with a published snapshot) and necessary: `honoe new` pins generated
+  disagreement with HEAD, not with a published snapshot) and necessary: `setu new` pins generated
   projects to the CLI's own version, so during a version bump the pinned version is not published
   yet, and checking against JSR would deadlock the release workflow's own test step against the
   publish that would fix it) — complete (PR #89)
@@ -774,7 +773,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `instantiate()` required service metadata before consulting the container, so a `@Controller`
   (which carries no `@Injectable`) took the registry path even in a DI app where its dependencies
   live in the container, and construction failed outright; the guard contradicted the function's own
-  JSDoc. **(C)** `honoe new --template nest`, the showcase: REST set + `DiPlugin` + an `@Injectable`
+  JSDoc. **(C)** `setu new --template nest`, the showcase: REST set + `DiPlugin` + an `@Injectable`
   service + a `@Controller` using the parameter form, wiring INLINE like the other templates (not
   the deferred `--starter` path). That needed a template-contract widening the original plan had
   assumed away — `Wiring` was `{ pkg, symbol }` and the renderer hardcoded `Symbol()`, so neither a
@@ -789,13 +788,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (PR #107)
 - **Milestone 36c** (`packages/cli` + `packages/starters/*` + `packages/config-plugin` +
   `packages/runtime` — React Router app skeleton and config-driven composition. Two deliverables.
-  **(A)** `honoe new --template full-stack` emits a React Router **8** framework-mode skeleton: the
+  **(A)** `setu new --template full-stack` emits a React Router **8** framework-mode skeleton: the
   `routes → features → services → models` layering, `flatRoutes` `_app`/`_auth` groups each wrapped
   in their own `layout()`, the `~/*` alias, the `.server.ts` convention, one worked feature, and the
   Vite/npm build files. ROADMAP said the app structure was owned by the full-stack STARTER; that is
   impossible and was corrected — a starter is a JSR **library** and cannot write `app/routes.ts`
   into a user's project, so the CLI owns the file layout and the starter owns the plugin composition
-  the generated `honoe.config.ts` calls. The deliverable that distinguishes this from
+  the generated `setu.config.ts` calls. The deliverable that distinguishes this from
   `create-react-router` is the REMOVAL: a conventional RR app's
   `lib/{session,csrf,sse,kv,
   service-logger}.server.ts` and its `config/services.server.ts`
@@ -1070,7 +1069,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   identical partition and no plugin may import another (the M47 frame-codec precedent) — keeping it
   in `runtime` would have forced the duplicated copy §11.1 forbids; and the CLI threads the
   platform's own `fetch(request, env)` argument through a new `Wiring.workersArgs` field instead of
-  emitting `import { env } from 'cloudflare:workers'` into `honoe.config.ts`, because `honoe` itself
+  emitting `import { env } from 'cloudflare:workers'` into `setu.config.ts`, because `setu` itself
   imports that module to discover plugin commands and the specifier is unresolvable off a Worker
   toolchain. Verified beyond the gates by scaffolding a real Workers project, repointing it at this
   workspace, `deno check`ing it, and driving its own `fetch(request, env)` export with a KV-shaped
@@ -1255,7 +1254,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Cloudflare account) — complete (PR #115)
 - **Milestone 50b** (`packages/cli` — wiring service discovery into the microservice template. M50
   shipped the plugin and nothing consumed it: a project scaffolded with
-  `honoe new --template microservice` got messaging, queues, resilience and telemetry — the four
+  `setu new --template microservice` got messaging, queues, resilience and telemetry — the four
   plugins a service needs to talk to others — and then hard-coded the URLs of the services it
   called. Adds one `Wiring` to `MICROSERVICE_TEMPLATE`. The CLI emits inline wiring and never
   imports a starter (M36b's rule), so only newly scaffolded projects change and no published
@@ -1279,7 +1278,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   nothing a reader could run; the ROADMAP's example list predated 22 milestones and named no
   capability added after M34, so it was corrected rather than implemented as written. Ten examples
   are new and `apps/graphql-demo` (M51b) is **adopted** rather than rebuilt. Examples stay OUT of
-  the Deno workspace and each carries its own `deno.json` mapping `@hono-enterprise/*` at
+  the Deno workspace and each carries its own `deno.json` mapping `@setu-ts/*` at
   `../../packages/<name>/src/index.ts` — load-bearing, not stylistic, because an example pulling
   `npm:@connectrpc/connect` into the workspace would put it in a published package's resolution
   graph; pointing at `src/` rather than JSR is also the correct target for a gate, since drift means
@@ -1378,10 +1377,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Redis stopped), which is the real bar — 1058 passed each way) — complete (PR #123)
 - **Milestone 37c** (`apps/full-stack` — the runnable React Router example the framework's largest
   capability had none of. `react-router-plugin` (M44), `full-stack-starter` (M36/M36c) and
-  `honoe new --template full-stack` (M36c) all shipped with nothing a reader could run: 13 apps,
-  none referencing React Router. **The toolchain question the milestone was opened on was answered
-  by measurement, and the answer was neither of the two options the ROADMAP framed.** Both assumed
-  the real Vite build needs a Node toolchain — so the choice was "commit a `ServerBuild` fixture" or
+  `setu new --template full-stack` (M36c) all shipped with nothing a reader could run: 13 apps, none
+  referencing React Router. **The toolchain question the milestone was opened on was answered by
+  measurement, and the answer was neither of the two options the ROADMAP framed.** Both assumed the
+  real Vite build needs a Node toolchain — so the choice was "commit a `ServerBuild` fixture" or
   "add Node/npm to CI". Deno's own npm support runs the identical build:
   `deno install
   --allow-scripts` took **4 s** and the build **0.6 s** against a project scaffolded

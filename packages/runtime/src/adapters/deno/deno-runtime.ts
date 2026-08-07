@@ -9,12 +9,7 @@
  * @module
  */
 
-import type {
-  IDnsResolver,
-  IFileSystem,
-  IRuntimeServices,
-  IWorkerHost,
-} from '@hono-enterprise/common';
+import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 import { createWebWorkerHost } from '../shared/web-worker-host.ts';
 import { createDenoDnsResolver } from './deno-dns-resolver.ts';

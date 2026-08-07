@@ -1,8 +1,8 @@
-# Hono Enterprise — AI Engineering Guidelines
+# Setu-TS — AI Engineering Guidelines
 
-> **This document is the permanent engineering handbook for the Hono Enterprise framework.** Every
-> rule in this document is mandatory and applies to all future coding sessions. These rules exist to
-> ensure the framework remains production-quality, maintainable, and trustworthy for thousands of
+> **This document is the permanent engineering handbook for the Setu-TS framework.** Every rule in
+> this document is mandatory and applies to all future coding sessions. These rules exist to ensure
+> the framework remains production-quality, maintainable, and trustworthy for thousands of
 > developers.
 
 ---
@@ -42,7 +42,7 @@ Every package, plugin, module, and class must adhere to SOLID principles:
 - **Open/Closed** — Extend behavior through composition and plugins, not modification.
 - **Liskov Substitution** — Any implementation of an interface must be substitutable.
 - **Interface Segregation** — No consumer depends on methods it does not use.
-- **Dependency Inversion** — Depend on interfaces from `@hono-enterprise/common`, never on concrete
+- **Dependency Inversion** — Depend on interfaces from `@setu-ts/common`, never on concrete
   implementations.
 
 ### 1.2 Clean Architecture
@@ -65,7 +65,7 @@ Framework Code → Application Code → Domain Code
 
 The framework follows hexagonal (ports and adapters) architecture:
 
-- **Ports** — Interfaces defined in `@hono-enterprise/common`.
+- **Ports** — Interfaces defined in `@setu-ts/common`.
 - **Adapters** — Implementations provided by plugins (e.g., `PrismaAdapter`, `RedisStore`).
 - **Application Core** — Business logic depends only on ports, never on adapters.
 
@@ -100,9 +100,9 @@ The framework follows hexagonal (ports and adapters) architecture:
 - Packages communicate via their public API (`src/index.ts`) only.
 - No package imports from another package's internal modules.
 - Circular dependencies between packages are forbidden.
-- The `@hono-enterprise/common` package contains only types, interfaces, constants (e.g.,
-  `CAPABILITIES`), and pure zero-dependency type utilities (e.g., `ok()`, `some()`) — no runtime
-  behavior beyond those, and zero dependencies.
+- The `@setu-ts/common` package contains only types, interfaces, constants (e.g., `CAPABILITIES`),
+  and pure zero-dependency type utilities (e.g., `ok()`, `some()`) — no runtime behavior beyond
+  those, and zero dependencies.
 
 ### 2.2 Dependency Direction
 
@@ -155,7 +155,7 @@ plugin-package/
 
 ### 3.2 Plugin Contract
 
-Every plugin must implement the `IPlugin` interface from `@hono-enterprise/common`:
+Every plugin must implement the `IPlugin` interface from `@setu-ts/common`:
 
 ```typescript
 interface IPlugin {
@@ -203,7 +203,7 @@ Every plugin must expose extension points:
 ### 3.6 Plugin Naming
 
 - Plugin names must be lowercase kebab-case: `my-plugin`.
-- Package names must be `@hono-enterprise/[name]-plugin` for capability plugins.
+- Package names must be `@setu-ts/[name]-plugin` for capability plugins.
 - The `name` field in the `Plugin` interface must match the package name without the scope.
 
 ### 3.7 Plugin Versioning
@@ -253,9 +253,9 @@ All runtime-specific operations must be abstracted:
 - CI must run the full test suite under Deno, against the working tree.
 - Node and Bun are verified by the separate compat suite in `compat/` (§6.4), which consumes the
   PUBLISHED packages through JSR's npm compatibility layer. It cannot run the full suite: Node and
-  Bun resolve neither `jsr:@hono-enterprise/*` nor `npm:*` specifiers from source, so the compat
-  suite covers what only a live Node or Bun process can settle — module loading, runtime detection,
-  and the per-runtime HTTP adapters.
+  Bun resolve neither `jsr:@setu-ts/*` nor `npm:*` specifiers from source, so the compat suite
+  covers what only a live Node or Bun process can settle — module loading, runtime detection, and
+  the per-runtime HTTP adapters.
 - Runtime-specific tests must be guarded with `runtime.platform()` checks.
 
 ---
@@ -369,7 +369,7 @@ Every package must include:
 
 - Use `deno test` as the test runner, with `@std/testing/bdd` (`describe`/`it`) and `@std/expect`
   for assertions.
-- Use `@hono-enterprise/testing` for test utilities.
+- Use `@setu-ts/testing` for test utilities.
 - Use `app.inject()` for HTTP testing without a server.
 - Use `createMockPlugin()` for mocking plugin services.
 - Node/Bun compatibility is verified by a separate compat suite in CI that consumes the packages
@@ -612,12 +612,12 @@ A public API is any export from a package's `src/index.ts` file.
 
 - DRY (Don't Repeat Yourself) is enforced.
 - If logic appears in two places, extract it to a shared utility.
-- Shared utilities live in `@hono-enterprise/common` or the owning package.
+- Shared utilities live in `@setu-ts/common` or the owning package.
 
 ### 11.2 No Magic Strings
 
 - Use constants for all string literals that appear more than once.
-- Capability tokens must use the `CAPABILITIES` constant from `@hono-enterprise/common`.
+- Capability tokens must use the `CAPABILITIES` constant from `@setu-ts/common`.
 - HTTP header names, error codes, and event names must be constants.
 
 ### 11.3 No Circular Dependencies
@@ -949,7 +949,7 @@ These rules may be updated through:
 
 ## Appendix: Quick Reference
 
-### The 10 Commandments of Hono Enterprise
+### The 10 Commandments of Setu-TS
 
 1. **Thou shalt not break backward compatibility.**
 2. **Thou shalt not ship a milestone that does not compile.**

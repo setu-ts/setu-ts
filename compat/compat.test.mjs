@@ -4,7 +4,7 @@
  *
  * Consumes the PUBLISHED packages through JSR's npm compatibility layer, which
  * is the only way these runtimes can consume this repo: cross-package
- * specifiers are `jsr:@hono-enterprise/*` and optional heavy deps are `npm:*`,
+ * specifiers are `jsr:@setu-ts/*` and optional heavy deps are `npm:*`,
  * neither of which Node or Bun resolves from the working tree. JSR rewrites
  * both at publish time, so the published artifact is the unit under test
  * (AI_GUIDELINES §4.5, §6.4).
@@ -15,10 +15,10 @@
 import { createServer } from 'node:net';
 import { readFileSync } from 'node:fs';
 
-import { CAPABILITIES } from '@jsr/hono-enterprise__common';
-import { createApplication } from '@jsr/hono-enterprise__kernel';
-import { detectRuntime, RuntimePlugin } from '@jsr/hono-enterprise__runtime';
-import { LoggerPlugin } from '@jsr/hono-enterprise__logger-plugin';
+import { CAPABILITIES } from '@jsr/setu-ts__common';
+import { createApplication } from '@jsr/setu-ts__kernel';
+import { detectRuntime, RuntimePlugin } from '@jsr/setu-ts__runtime';
+import { LoggerPlugin } from '@jsr/setu-ts__logger-plugin';
 
 /** The runtime this process is executing on, as the framework should see it. */
 const host = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
@@ -97,13 +97,13 @@ function rebind(target) {
  * `package.json` — otherwise a new package could be added to the repo and
  * silently never checked on Node or Bun.
  *
- * @returns {string[]} Sorted `@jsr/hono-enterprise__*` names.
+ * @returns {string[]} Sorted `@jsr/setu-ts__*` names.
  */
 function workspacePackageNames() {
   const root = JSON.parse(readFileSync('../deno.json', 'utf8'));
   return root.workspace
     .map((entry) => JSON.parse(readFileSync(`../${entry.replace(/^\.\//, '')}/deno.json`, 'utf8')))
-    .map((cfg) => cfg.name.replace('@hono-enterprise/', '@jsr/hono-enterprise__'))
+    .map((cfg) => cfg.name.replace('@setu-ts/', '@jsr/setu-ts__'))
     .sort();
 }
 
@@ -114,7 +114,7 @@ function createCompatApp() {
   return app;
 }
 
-console.log(`Hono Enterprise compat suite — ${host}`);
+console.log(`Setu-TS compat suite — ${host}`);
 
 // 1. Every workspace member is actually under test. Without this, adding a
 //    package to the repo covers it on Deno and nowhere else, and the suite

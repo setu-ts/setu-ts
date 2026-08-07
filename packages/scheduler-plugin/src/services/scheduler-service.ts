@@ -21,7 +21,7 @@ import type {
   ScheduleOptions,
   SchedulerJobHandler,
   TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type {
   CronRegistryEntry,
   DelayRegistryEntry,

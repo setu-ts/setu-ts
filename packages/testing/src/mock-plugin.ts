@@ -1,4 +1,4 @@
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 /**
  * Options for {@linkcode createMockPlugin}.
@@ -38,8 +38,8 @@ export interface MockPluginOptions {
  *
  * @example
  * ```typescript
- * import { createMockPlugin } from '@hono-enterprise/testing';
- * import { CAPABILITIES } from '@hono-enterprise/common';
+ * import { createMockPlugin } from '@setu-ts/testing';
+ * import { CAPABILITIES } from '@setu-ts/common';
  *
  * const mockDb = createMockPlugin({
  *   name: 'database',

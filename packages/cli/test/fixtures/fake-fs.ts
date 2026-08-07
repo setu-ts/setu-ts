@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { IFileSystem, StatResult } from '@hono-enterprise/common';
+import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 /**
  * An in-memory filesystem that also records the mutating calls made against it.

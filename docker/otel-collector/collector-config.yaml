@@ -1,6 +1,6 @@
-# OpenTelemetry Collector — trace fan-out reference config (Hono Enterprise, M24c)
+# OpenTelemetry Collector — trace fan-out reference config (Setu-TS, M24c)
 #
-# Receives ONE OTLP/HTTP trace stream from a Hono Enterprise app
+# Receives ONE OTLP/HTTP trace stream from a Setu-TS app
 # (TelemetryPlugin({ exporter: 'otlp', endpoint: 'http://<this-collector>:4318/v1/traces' }))
 # and fans it out to Datadog + New Relic + Azure Application Insights simultaneously.
 #

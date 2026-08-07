@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 /** Supported cache store backends. */
 export type CacheStoreType = 'memory' | 'redis' | 'noop';
@@ -32,7 +32,7 @@ export interface CacheStoreOptions {
  *
  * @example
  * ```typescript
- * import { CachePlugin } from '@hono-enterprise/cache-plugin';
+ * import { CachePlugin } from '@setu-ts/cache-plugin';
  *
  * // Memory store (default)
  * app.register(CachePlugin());
@@ -85,7 +85,7 @@ export interface IRedisClient {
  *
  * @example
  * ```typescript
- * import { cacheMiddleware } from '@hono-enterprise/cache-plugin';
+ * import { cacheMiddleware } from '@setu-ts/cache-plugin';
  *
  * app.router.use('/api/data', cacheMiddleware({ ttlSeconds: 300 }));
  * ```

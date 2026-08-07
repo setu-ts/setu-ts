@@ -10,7 +10,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequest } from '@hono-enterprise/common';
+import type { IRequest } from '@setu-ts/common';
 
 import { createRequestContext } from '../../src/context/request-context.ts';
 import { ServiceRegistry } from '../../src/registry/service-registry.ts';

@@ -24,7 +24,7 @@ import type {
   RequestOptions,
   SubscribeOptions,
   TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { OpenInbox, ReplyInbox } from './inbox.ts';
 import { RemoteHandlerError, RequestTimeoutError } from '../errors.ts';
 

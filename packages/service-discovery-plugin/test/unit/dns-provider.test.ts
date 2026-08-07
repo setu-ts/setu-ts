@@ -11,7 +11,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { DnsProvider, lowestPriorityTier } from '../../src/providers/dns-provider.ts';
-import type { IDnsResolver, SrvRecord } from '@hono-enterprise/common';
+import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
 import { createFakeDns, createFakeRuntime, type FakeRuntime } from '../fixtures/fakes.ts';
 
 function srv(host: string, port: number, priority: number, weight: number): SrvRecord {

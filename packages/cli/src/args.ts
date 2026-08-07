@@ -1,5 +1,5 @@
 /**
- * Zero-dependency argument parser for the honoe CLI.
+ * Zero-dependency argument parser for the setu CLI.
  *
  * Handles positionals, boolean flags, `--key=value`, `--key value` for the
  * declared value-taking flags, and the `--` terminator.

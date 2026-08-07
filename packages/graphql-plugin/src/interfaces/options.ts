@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { GraphqlConnectionInfo } from '@hono-enterprise/common';
+import type { GraphqlConnectionInfo } from '@setu-ts/common';
 import type { GraphqlModuleLike, GraphqlSchemaLike } from './graphql-runtime.ts';
 
 /**

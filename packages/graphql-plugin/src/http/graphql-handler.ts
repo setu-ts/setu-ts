@@ -11,7 +11,7 @@ import type {
   IRequestContext,
   IResponse,
   RouteHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { ApqResolver, ApqResolveResult } from '../apq/apq-resolver.ts';
 import type { GraphqlService } from '../services/graphql-service.ts';
 import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON, negotiateMediaType } from './media-type.ts';

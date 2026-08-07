@@ -1,9 +1,9 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ICloudflareBindings, IKvNamespace } from '@hono-enterprise/cloudflare-plugin';
-import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
-import type { CloudflareWorkerEnv } from '@hono-enterprise/cloudflare-plugin';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICloudflareBindings, IKvNamespace } from '@setu-ts/cloudflare-plugin';
+import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
+import type { CloudflareWorkerEnv } from '@setu-ts/cloudflare-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
 import { CloudflareRuntimePlugin } from './cloudflare-runtime-plugin.ts';
 
 /** Creates a Worker-compatible application with an injected KV binding. */

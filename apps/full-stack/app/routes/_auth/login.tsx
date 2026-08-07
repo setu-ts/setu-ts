@@ -7,7 +7,7 @@ import { getCsrfToken, getSession } from '~/config/services.server.ts';
  * Hands the form its CSRF token.
  *
  * The token comes from the session, placed on the request context by
- * `honoe.config.ts`. A progressive-enhancement `<Form>` cannot set a custom
+ * `setu.config.ts`. A progressive-enhancement `<Form>` cannot set a custom
  * header, which is why the synchronizer-token strategy — not the stateless
  * Origin check — is what guards this action.
  */

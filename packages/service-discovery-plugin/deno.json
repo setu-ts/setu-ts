@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/service-discovery-plugin",
+  "name": "@setu-ts/service-discovery-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",

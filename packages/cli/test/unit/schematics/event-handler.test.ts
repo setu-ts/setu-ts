@@ -32,7 +32,7 @@ describe('event-handler schematic', () => {
 
   it('implements IEventHandler from the events plugin', () => {
     expect(file.contents).toContain(
-      "import type { IEventHandler } from '@hono-enterprise/events-plugin';",
+      "import type { IEventHandler } from '@setu-ts/events-plugin';",
     );
     expect(file.contents).toContain('implements IEventHandler<OrderItemPayload>');
   });

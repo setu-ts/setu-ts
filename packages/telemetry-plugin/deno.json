@@ -1,10 +1,10 @@
 {
-  "name": "@hono-enterprise/telemetry-plugin",
+  "name": "@setu-ts/telemetry-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.4"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.4"
   },
   "tests": {
     "permissions": {

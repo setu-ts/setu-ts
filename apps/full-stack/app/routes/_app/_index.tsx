@@ -25,7 +25,7 @@ export default function IndexRoute() {
 
   return (
     <section>
-      <h1>Hono Enterprise — full-stack example</h1>
+      <h1>Setu-TS — full-stack example</h1>
       <p>
         A React Router 8 application server-rendered by the kernel through{' '}
         <code>react-router-plugin</code>, composed with <code>createFullStackAppFromConfig</code>.

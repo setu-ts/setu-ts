@@ -18,7 +18,7 @@ import type {
   RealtimeFrame,
   SseChannel,
   SseMessage,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseConnection } from '../connection/sse-connection.ts';
 import { ChannelRegistry } from '../channels/channel-registry.ts';

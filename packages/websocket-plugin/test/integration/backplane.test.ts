@@ -11,11 +11,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type {
-  IRealtimeBackplane,
-  IWebSocketConnection,
-  RealtimeFrame,
-} from '@hono-enterprise/common';
+import type { IRealtimeBackplane, IWebSocketConnection, RealtimeFrame } from '@setu-ts/common';
 import { resolveOptions, WebSocketService } from '../../src/services/websocket-service.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 

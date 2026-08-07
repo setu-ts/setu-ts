@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { LogProvider } from '../../src/providers/log-provider.ts';
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 import type { OutgoingMail } from '../../src/interfaces/index.ts';
 
 const MESSAGE: OutgoingMail = {

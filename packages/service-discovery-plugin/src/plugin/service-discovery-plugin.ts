@@ -9,8 +9,8 @@ import type {
   IPlugin,
   IPluginContext,
   IServiceDiscovery,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { DiscoveryProvider, SelfRegistration } from '../interfaces/index.ts';
 import type { ServiceDiscoveryPluginOptions } from '../options.ts';
 import { resolveOptions } from '../options.ts';

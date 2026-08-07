@@ -8,15 +8,15 @@
 
 import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@hono-enterprise/runtime';
-import type { IFileSystem } from '@hono-enterprise/common';
+import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { CUSTOM_SCHEMATIC_DIR } from '../../src/schematics/custom.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
-describe('honoe end-to-end on a real filesystem', () => {
+describe('setu end-to-end on a real filesystem', () => {
   let root: string;
   let out: string[];
   let err: string[];
@@ -31,7 +31,7 @@ describe('honoe end-to-end on a real filesystem', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'honoe-e2e-' });
+    root = await Deno.makeTempDir({ prefix: 'setu-e2e-' });
     out = [];
     err = [];
   });
@@ -51,7 +51,7 @@ describe('honoe end-to-end on a real filesystem', () => {
   it('scaffolds a deno.json that parses and pins the framework', async () => {
     await run(['new', 'shop-api']);
     const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop-api/deno.json`));
-    expect(manifest.imports['@hono-enterprise/kernel']).toContain('jsr:@hono-enterprise/kernel@');
+    expect(manifest.imports['@setu-ts/kernel']).toContain('jsr:@setu-ts/kernel@');
     expect(manifest.compilerOptions.experimentalDecorators).toBe(true);
   });
 
@@ -84,7 +84,7 @@ describe('honoe end-to-end on a real filesystem', () => {
     await expect(Deno.stat(`${project}/src/guards/admin.guard.ts`)).rejects.toThrow();
 
     const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`));
-    manifest.imports['@hono-enterprise/auth-plugin'] = 'jsr:@hono-enterprise/auth-plugin@^0.1.0';
+    manifest.imports['@setu-ts/auth-plugin'] = 'jsr:@setu-ts/auth-plugin@^0.1.0';
     await Deno.writeTextFile(`${project}/deno.json`, JSON.stringify(manifest, null, 2));
 
     expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(0);

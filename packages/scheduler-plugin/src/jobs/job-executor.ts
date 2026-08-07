@@ -13,7 +13,7 @@ import type {
   RetryOptions,
   ScheduledJob,
   SchedulerJobHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { computeBackoffMs } from '../retry/retry-handler.ts';
 
 /**

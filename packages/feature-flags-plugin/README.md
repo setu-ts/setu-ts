@@ -1,4 +1,4 @@
-# @hono-enterprise/feature-flags-plugin
+# @setu-ts/feature-flags-plugin
 
 Feature flags with pluggable backends. Registers the **synchronous** `IFeatureFlags` under
 `CAPABILITIES.FEATURE_FLAGS` (`'feature-flags'`).
@@ -9,14 +9,14 @@ plugin drives, which is what lets `isEnabled` stay synchronous at the call site.
 ## Installation
 
 ```typescript
-import { createFlagGuard, FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
+import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createFlagGuard, FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
-import { CAPABILITIES, type IFeatureFlags } from '@hono-enterprise/common';
+import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
+import { CAPABILITIES, type IFeatureFlags } from '@setu-ts/common';
 
 app.register(FeatureFlagsPlugin({
   provider: 'config',
@@ -74,4 +74,4 @@ arm as a bridge.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

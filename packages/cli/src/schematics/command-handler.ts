@@ -17,7 +17,7 @@ export function generateCommandHandler(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import type { CqrsCommand, ICommandHandler } from '@hono-enterprise/common';
+  const contents = `import type { CqrsCommand, ICommandHandler } from '@setu-ts/common';
 
 /** Type name the command bus routes on. */
 export const ${names.screaming}_COMMAND = '${names.pascal}';

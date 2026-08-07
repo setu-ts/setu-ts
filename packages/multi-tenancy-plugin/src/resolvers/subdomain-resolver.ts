@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { IRequest, ITenant, ITenantResolver } from '@hono-enterprise/common';
-import { none, type Option, some } from '@hono-enterprise/common';
+import type { IRequest, ITenant, ITenantResolver } from '@setu-ts/common';
+import { none, type Option, some } from '@setu-ts/common';
 import type { SubdomainResolverOptions } from '../interfaces/index.ts';
 
 /**

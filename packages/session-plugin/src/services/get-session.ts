@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { IRequestContext, ISession, ISessionService } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IRequestContext, ISession, ISessionService } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 /**
  * Returns the session the middleware loaded for this request.

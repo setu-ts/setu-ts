@@ -22,7 +22,7 @@ import type {
 export interface OpenApiCodegenOptions {
   /** Name of the exported factory function. Defaults to `'createApi'`. */
   readonly factoryName?: string;
-  /** Import specifier for SDK types. Defaults to `'@hono-enterprise/sdk'`. */
+  /** Import specifier for SDK types. Defaults to `'@setu-ts/sdk'`. */
   readonly sdkImport?: string;
 }
 
@@ -34,7 +34,7 @@ interface ResolvedOptions {
 function resolveOptions(options?: OpenApiCodegenOptions): ResolvedOptions {
   return {
     factoryName: options?.factoryName ?? 'createApi',
-    sdkImport: options?.sdkImport ?? '@hono-enterprise/sdk',
+    sdkImport: options?.sdkImport ?? '@setu-ts/sdk',
   };
 }
 

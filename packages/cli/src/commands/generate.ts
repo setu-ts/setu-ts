@@ -1,10 +1,10 @@
 /**
- * The `honoe generate` command — plugin-aware code generation.
+ * The `setu generate` command — plugin-aware code generation.
  *
  * @module
  */
 
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import {
@@ -58,7 +58,7 @@ export interface GenerateDependencies {
  * Gated schematics whose plugin is absent are listed as unavailable, naming the
  * package to install.
  *
- * @param installed - The `@hono-enterprise` packages detected in the project
+ * @param installed - The `@setu-ts` packages detected in the project
  * @param log - Output sink
  */
 function printSchematics(installed: ReadonlySet<string>, log: (message: string) => void): void {
@@ -71,10 +71,10 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
     } else if (installed.has(requiresPlugin)) {
       log(`  ${name}`);
     } else {
-      log(`  ${name}  (unavailable — install @hono-enterprise/${requiresPlugin})`);
+      log(`  ${name}  (unavailable — install @setu-ts/${requiresPlugin})`);
     }
   }
-  log(`  ${CUSTOM_SCHEMATIC} <schematic-name>  (from .hono-enterprise/schematics/)`);
+  log(`  ${CUSTOM_SCHEMATIC} <schematic-name>  (from .setu-ts/schematics/)`);
   log('');
   log('Options:');
   log('  --dry-run          Print what would be created, write nothing');
@@ -82,7 +82,7 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
 }
 
 /**
- * Runs `honoe generate`.
+ * Runs `setu generate`.
  *
  * Resolves the schematic (built-in or custom), refuses a gated schematic whose
  * plugin is not installed, checks every planned path for an existing file
@@ -155,7 +155,7 @@ export async function runGenerateCommand(
 
     if (metadata.requiresPlugin !== undefined && !installed.has(metadata.requiresPlugin)) {
       deps.error(
-        `The "${schematicName}" schematic requires @hono-enterprise/${metadata.requiresPlugin}, ` +
+        `The "${schematicName}" schematic requires @setu-ts/${metadata.requiresPlugin}, ` +
           `which is not installed in ${dir}.`,
       );
       deps.error(`Install it, then run this command again.`);

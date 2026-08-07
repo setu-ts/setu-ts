@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type { IFileSystem, IRuntimeServices } from '@setu-ts/common';
 
 import { parseEnv } from '../parsers/env-parser.ts';
 

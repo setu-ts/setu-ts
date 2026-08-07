@@ -9,12 +9,12 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { HealthCheckResult, IApplication, IQueue } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { HealthCheckResult, IApplication, IQueue } from '@setu-ts/common';
 
-import type { ILogger, IPlugin } from '@hono-enterprise/common';
+import type { ILogger, IPlugin } from '@setu-ts/common';
 import { CloudflareBindingMissingError, CloudflarePlugin } from '../../src/index.ts';
 import { createQueueHandler } from '../../src/index.ts';
 import { FakeQueueBatch, FakeQueueMessage, FakeQueueProducer, RecordingLogger } from '../fakes.ts';

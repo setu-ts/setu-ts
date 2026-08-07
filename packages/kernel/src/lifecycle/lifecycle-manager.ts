@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { IRequestContext } from '@hono-enterprise/common';
-import type { ILifecycleApi } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
+import type { ILifecycleApi } from '@setu-ts/common';
 
 type VoidHook = () => void | Promise<void>;
 type RequestHook = (ctx: IRequestContext) => void | Promise<void>;

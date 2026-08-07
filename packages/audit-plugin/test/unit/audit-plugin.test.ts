@@ -8,9 +8,9 @@ import { MemoryAuditStorage } from '../../src/storage/memory-audit.ts';
 import { LogAuditStorage } from '../../src/storage/log-audit.ts';
 import { DatabaseAuditStorage } from '../../src/storage/database-audit.ts';
 import { FileAuditStorage } from '../../src/storage/file-audit.ts';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IPluginContext } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IPluginContext } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { IAuditDbClient } from '../../src/interfaces/index.ts';
 
 describe('createStorage', () => {

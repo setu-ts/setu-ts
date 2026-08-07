@@ -17,7 +17,7 @@ export function generateQueryHandler(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import type { CqrsQuery, IQueryHandler } from '@hono-enterprise/common';
+  const contents = `import type { CqrsQuery, IQueryHandler } from '@setu-ts/common';
 
 /** Type name the query bus routes on. */
 export const ${names.screaming}_QUERY = '${names.pascal}';

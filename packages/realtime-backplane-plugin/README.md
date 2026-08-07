@@ -1,13 +1,13 @@
-# @hono-enterprise/realtime-backplane-plugin
+# @setu-ts/realtime-backplane-plugin
 
 Cross-replica fan-out for WebSocket rooms and SSE channels.
 
 ## Why
 
-`@hono-enterprise/websocket-plugin` rooms and `@hono-enterprise/sse-plugin` channels hold their
-membership in ordinary in-process sets. That is correct and fast on a single instance, and invisible
-to every other instance — behind a load balancer, `ws.room('lobby').broadcast(...)` reaches only the
-clients that happen to be connected to the replica that ran it.
+`@setu-ts/websocket-plugin` rooms and `@setu-ts/sse-plugin` channels hold their membership in
+ordinary in-process sets. That is correct and fast on a single instance, and invisible to every
+other instance — behind a load balancer, `ws.room('lobby').broadcast(...)` reaches only the clients
+that happen to be connected to the replica that ran it.
 
 This plugin registers an `IRealtimeBackplane` under `CAPABILITIES.REALTIME_BACKPLANE`. Both of those
 plugins resolve that token **optionally**, so registering this plugin is the whole change: rooms and
@@ -17,7 +17,7 @@ application code touched.
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/realtime-backplane-plugin
+deno add jsr:@setu-ts/realtime-backplane-plugin
 ```
 
 ## Usage
@@ -26,11 +26,11 @@ Register it **before** the WebSocket or SSE plugin — its `HIGH` priority alrea
 transport is connected before either subscribes.
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import { SsePlugin } from '@hono-enterprise/sse-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { SsePlugin } from '@setu-ts/sse-plugin';
 
 const app = createApplication({
   plugins: [
@@ -81,15 +81,15 @@ without a `subscriber` throws at construction rather than failing at the first p
 
 ## Options
 
-| Option                  | Applies to     | Default                      | Description                                                         |
-| ----------------------- | -------------- | ---------------------------- | ------------------------------------------------------------------- |
-| `topic`                 | all but memory | `'hono-enterprise.realtime'` | Broker topic / Redis channel. Every replica must agree on it        |
-| `origin`                | all            | a fresh `runtime.uuid()`     | This replica's identity. Override only to make a test deterministic |
-| `bus`                   | `'memory'`     | `'default'`                  | Named in-process bus; separate names stay isolated                  |
-| `url`                   | `'redis'`      | —                            | Connection URL, used only on the lazy-load path                     |
-| `client` / `subscriber` | `'redis'`      | —                            | Injected client pair; required together                             |
-| `module`                | `'redis'`      | —                            | An `ioredis`-shaped module, for testing without the real driver     |
-| `instance`              | `'custom'`     | —                            | The transport to register, used as-is                               |
+| Option                  | Applies to     | Default                  | Description                                                         |
+| ----------------------- | -------------- | ------------------------ | ------------------------------------------------------------------- |
+| `topic`                 | all but memory | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it        |
+| `origin`                | all            | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic |
+| `bus`                   | `'memory'`     | `'default'`              | Named in-process bus; separate names stay isolated                  |
+| `url`                   | `'redis'`      | —                        | Connection URL, used only on the lazy-load path                     |
+| `client` / `subscriber` | `'redis'`      | —                        | Injected client pair; required together                             |
+| `module`                | `'redis'`      | —                        | An `ioredis`-shaped module, for testing without the real driver     |
+| `instance`              | `'custom'`     | —                        | The transport to register, used as-is                               |
 
 ## Limitations
 
@@ -106,8 +106,8 @@ Redis or the broker misses frames sent during the partition. Frames are not pers
 
 ## Documentation
 
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [ARCHITECTURE.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 

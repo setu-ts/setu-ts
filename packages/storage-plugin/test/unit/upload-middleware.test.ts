@@ -6,7 +6,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 import { createUploadMiddleware, getUploadedFile } from '../../src/middleware/upload-middleware.ts';
 /** Creates a minimal fake context for middleware testing. */
 function makeCtx(partial?: Partial<IRequestContext>): IRequestContext {
@@ -19,10 +19,10 @@ function makeCtx(partial?: Partial<IRequestContext>): IRequestContext {
     _lastStatus: 200,
     json(body: unknown) {
       calls.push({ status: this._lastStatus, body });
-      return {} as import('@hono-enterprise/common').HandlerResult;
+      return {} as import('@setu-ts/common').HandlerResult;
     },
     send() {
-      return {} as import('@hono-enterprise/common').HandlerResult;
+      return {} as import('@setu-ts/common').HandlerResult;
     },
     header() {
       return this;

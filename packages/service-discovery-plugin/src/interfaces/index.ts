@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ServiceInstance, Unsubscribe } from '@hono-enterprise/common';
+import type { ServiceInstance, Unsubscribe } from '@setu-ts/common';
 
 /**
  * A discovery backend.

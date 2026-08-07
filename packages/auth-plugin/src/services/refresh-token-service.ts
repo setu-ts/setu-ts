@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IJwtService, IPrincipal, IRuntimeServices } from '@hono-enterprise/common';
+import type { IJwtService, IPrincipal, IRuntimeServices } from '@setu-ts/common';
 import { encodeBase64Url } from '../utils/base64url.ts';
 import { parseDuration } from '../utils/duration.ts';
 import type { RefreshTokenStore } from '../stores/refresh-token-store.ts';

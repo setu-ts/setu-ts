@@ -6,13 +6,8 @@
  * @since 0.1.0
  */
 
-import type {
-  HealthCheckResult,
-  IPlugin,
-  IPluginContext,
-  IWorkerPool,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { HealthCheckResult, IPlugin, IPluginContext, IWorkerPool } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolService } from '../services/worker-pool-service.ts';
 
@@ -29,7 +24,7 @@ const PLUGIN_NAME = 'worker-pool-plugin';
  *
  * @example
  * ```typescript
- * import { WorkerPoolPlugin } from '@hono-enterprise/worker-pool-plugin';
+ * import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
  *
  * app.register(WorkerPoolPlugin({ taskTimeoutMs: 10_000 }));
  * ```

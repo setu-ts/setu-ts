@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { WorkerErrorShape } from '@hono-enterprise/common';
+import type { WorkerErrorShape } from '@setu-ts/common';
 
 /**
  * Thrown by `run()` when the runtime provides no worker support (no

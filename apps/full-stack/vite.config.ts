@@ -18,12 +18,12 @@ import { defineConfig } from 'vite';
 //    toolchain cannot resolve those paths at all.
 // 2. Bundling would inline a second copy of each package, and the context keys
 //    in app/lib/context-keys.server.ts are matched by identity: the copy
-//    honoe.config.ts holds would stop matching the copy a loader reads, so
+//    setu.config.ts holds would stop matching the copy a loader reads, so
 //    every context value would silently fall back to its default.
 const frameworkPackages = [
-  '@hono-enterprise/common',
-  '@hono-enterprise/database-plugin',
-  '@hono-enterprise/react-router-plugin',
+  '@setu-ts/common',
+  '@setu-ts/database-plugin',
+  '@setu-ts/react-router-plugin',
 ];
 
 export default defineConfig({

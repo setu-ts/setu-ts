@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { HttpMethod, IRequest, ResponseSnapshot } from '@hono-enterprise/common';
+import type { HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
 
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();

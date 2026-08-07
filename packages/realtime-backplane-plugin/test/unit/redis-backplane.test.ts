@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { RealtimeFrame } from '@hono-enterprise/common';
+import type { RealtimeFrame } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
 

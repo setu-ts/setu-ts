@@ -1,10 +1,7 @@
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
-import type { CloudflareWorkerEnv } from '@hono-enterprise/cloudflare-plugin';
-import {
-  CloudflareWorkersHttpAdapter,
-  createCloudflareRuntimeServices,
-} from '@hono-enterprise/runtime';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import type { CloudflareWorkerEnv } from '@setu-ts/cloudflare-plugin';
+import { CloudflareWorkersHttpAdapter, createCloudflareRuntimeServices } from '@setu-ts/runtime';
 
 /**
  * Registers only the Workers runtime adapters so the Worker bundle never evaluates Node, Deno, or

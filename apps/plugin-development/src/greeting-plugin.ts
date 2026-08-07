@@ -1,5 +1,5 @@
-import { createCapabilityToken } from '@hono-enterprise/common';
-import type { IPlugin } from '@hono-enterprise/common';
+import { createCapabilityToken } from '@setu-ts/common';
+import type { IPlugin } from '@setu-ts/common';
 
 export const GREETING = createCapabilityToken('example.greeting');
 

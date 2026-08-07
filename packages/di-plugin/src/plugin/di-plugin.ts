@@ -8,8 +8,8 @@
  *
  * @module
  */
-import type { IContainer, IPlugin, IPluginContext, ServiceScope } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IContainer, IPlugin, IPluginContext, ServiceScope } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { ContainerBuilder } from '../container/container-builder.ts';
 import type { ExternalResolver } from '../container/container.ts';
@@ -51,7 +51,7 @@ const PLUGIN_NAME = 'di-plugin';
  *
  * @example
  * ```typescript
- * import { DiPlugin } from '@hono-enterprise/di-plugin';
+ * import { DiPlugin } from '@setu-ts/di-plugin';
  *
  * app.register(DiPlugin({
  *   defaultScope: 'singleton',

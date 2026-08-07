@@ -7,7 +7,7 @@
  * @since 0.2.0
  */
 
-import type { WebSocketUpgradeDecision, WebSocketUpgradeRouter } from '@hono-enterprise/common';
+import type { WebSocketUpgradeDecision, WebSocketUpgradeRouter } from '@setu-ts/common';
 import { isWebSocketUpgradeRequest } from './upgrade-detection.ts';
 
 /**

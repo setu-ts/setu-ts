@@ -12,8 +12,8 @@
  * @module
  */
 
-import type { IApplication, IQueue } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IApplication, IQueue } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { instanceToken } from '../instance-token.ts';
 import type { IQueueMessageBatch } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';

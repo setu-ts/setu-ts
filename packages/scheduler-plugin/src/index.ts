@@ -13,7 +13,7 @@ export type {
   SchedulerPluginOptions,
 } from './interfaces/index.ts';
 
-// ── Re-exported from @hono-enterprise/common ────────────────────────────────
+// ── Re-exported from @setu-ts/common ────────────────────────────────
 
 export type {
   IScheduler,
@@ -22,4 +22,4 @@ export type {
   ScheduleOptions,
   SchedulerBackoff,
   SchedulerJobHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

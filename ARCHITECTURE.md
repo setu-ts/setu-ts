@@ -1,4 +1,4 @@
-# Hono Enterprise — Architecture Guide
+# Setu-TS — Architecture Guide
 
 > **This document is the definitive technical architecture guide for framework contributors.** It
 > explains how the framework works internally and why it was designed this way.
@@ -50,7 +50,7 @@ plugin-oriented but lacks the enterprise abstractions (repository pattern, CQRS,
 audit logging) that large organizations need. Hono delivers exceptional performance and runtime
 portability but is intentionally minimal — it provides routing, not architecture.
 
-**Hono Enterprise exists to bridge this gap.** It combines:
+**Setu-TS exists to bridge this gap.** It combines:
 
 | Source       | What We Take                                                         |
 | ------------ | -------------------------------------------------------------------- |
@@ -61,23 +61,22 @@ portability but is intentionally minimal — it provides routing, not architectu
 
 ### Problems It Solves
 
-1. **Runtime lock-in** — NestJS, Express, and Fastify are Node.js-first. Hono Enterprise runs on
-   Node.js, Deno, and Bun with zero code changes, and is designed for Cloudflare Workers
-   extensibility.
+1. **Runtime lock-in** — NestJS, Express, and Fastify are Node.js-first. Setu-TS runs on Node.js,
+   Deno, and Bun with zero code changes, and is designed for Cloudflare Workers extensibility.
 
-2. **Opinionated heaviness** — NestJS requires DI, decorators, and reflection. Hono Enterprise makes
-   all of these optional. Start with just a router and add capabilities as needed.
+2. **Opinionated heaviness** — NestJS requires DI, decorators, and reflection. Setu-TS makes all of
+   these optional. Start with just a router and add capabilities as needed.
 
-3. **Monolithic frameworks** — Most frameworks bundle all features. Hono Enterprise is plugin-first:
-   every capability (logging, database, auth, validation) is a plugin that can be added, removed, or
+3. **Monolithic frameworks** — Most frameworks bundle all features. Setu-TS is plugin-first: every
+   capability (logging, database, auth, validation) is a plugin that can be added, removed, or
    replaced.
 
 4. **Poor replaceability** — In most frameworks, swapping the database layer or logger requires
-   touching application code. Hono Enterprise uses capability tokens, so any plugin can be replaced
-   without modifying business logic.
+   touching application code. Setu-TS uses capability tokens, so any plugin can be replaced without
+   modifying business logic.
 
 5. **Enterprise feature gaps** — Lightweight frameworks lack secrets management, audit logging,
-   circuit breakers, feature flags, and multi-tenancy. Hono Enterprise provides these as plugins.
+   circuit breakers, feature flags, and multi-tenancy. Setu-TS provides these as plugins.
 
 ### Why It Is Not a NestJS Clone
 
@@ -85,9 +84,9 @@ NestJS is built around three mandatory pillars: **modules, dependency injection,
 Every NestJS application must use all three. This creates a steep learning curve and tight coupling
 to the framework's opinions.
 
-Hono Enterprise inverts this:
+Setu-TS inverts this:
 
-| Aspect           | NestJS       | Hono Enterprise             |
+| Aspect           | NestJS       | Setu-TS                     |
 | ---------------- | ------------ | --------------------------- |
 | DI               | Required     | Optional plugin             |
 | Decorators       | Required     | Optional plugin             |
@@ -105,7 +104,7 @@ Hono Enterprise inverts this:
 > React Router framework mode specifically carries additional constraints and is not implied by this
 > row.
 
-A Hono Enterprise application can be as minimal as:
+A Setu-TS application can be as minimal as:
 
 ```typescript
 const app = createApplication({ plugins: [RuntimePlugin()] });
@@ -134,9 +133,9 @@ Hono is chosen for several reasons:
    build on top.
 4. **Standards-based** — Hono uses the standard `Request`/`Response` Web APIs.
 
-Hono Enterprise does not expose Hono directly to application developers. Instead, it wraps Hono in
-the kernel router; the runtime adapter (M41 today, M23 next) handles only socket serving. This
-allows the framework to swap Hono for another router in the future without breaking applications.
+Setu-TS does not expose Hono directly to application developers. Instead, it wraps Hono in the
+kernel router; the runtime adapter (M41 today, M23 next) handles only socket serving. This allows
+the framework to swap Hono for another router in the future without breaking applications.
 
 ### Why It Is Plugin-First
 
@@ -162,8 +161,8 @@ The JavaScript ecosystem is fragmenting across runtimes:
 - **Cloudflare Workers** — Edge computing, V8 isolates, no Node.js APIs.
 
 Applications written today on Node.js may need to run on Bun tomorrow for performance, or on
-Cloudflare Workers for edge deployment. Hono Enterprise ensures that **business logic never depends
-on runtime-specific APIs**. All runtime-specific operations (UUID generation, timers, crypto, file
+Cloudflare Workers for edge deployment. Setu-TS ensures that **business logic never depends on
+runtime-specific APIs**. All runtime-specific operations (UUID generation, timers, crypto, file
 system, environment variables) are abstracted behind `IRuntimeServices` and provided by the
 `RuntimePlugin`.
 
@@ -194,15 +193,14 @@ The framework avoids deep inheritance hierarchies. Instead:
 
 All dependencies point toward abstractions:
 
-- Plugins depend on interfaces from `@hono-enterprise/common`.
+- Plugins depend on interfaces from `@setu-ts/common`.
 - Services are resolved by capability token, not by class reference.
 - Adapters implement interfaces defined in `common`.
 - No package depends on a concrete implementation from another package.
 
 ### Runtime Abstraction
 
-No package except `@hono-enterprise/runtime` may use runtime-specific APIs. This rule is enforced
-by:
+No package except `@setu-ts/runtime` may use runtime-specific APIs. This rule is enforced by:
 
 - Lint rules (custom `deno lint` plugin rule / CI gate) that forbid `node:` and `bun:` imports and
   `Deno.*` globals outside the runtime package.
@@ -283,7 +281,7 @@ Plugins (Infrastructure) → Application Code → Domain Code
 
 ### Hexagonal Architecture
 
-- **Ports** — Interfaces in `@hono-enterprise/common` (e.g., `IDatabaseService`, `ICacheStore`,
+- **Ports** — Interfaces in `@setu-ts/common` (e.g., `IDatabaseService`, `ICacheStore`,
   `IMessageBroker`).
 - **Adapters** — Implementations in plugins (e.g., `PrismaAdapter`, `RedisStore`, `RabbitMqBroker`).
 - **Application Core** — Business logic depends only on ports.
@@ -555,7 +553,7 @@ The plugin registry:
 Capability tokens are strings that identify a capability, not a concrete type:
 
 ```typescript
-// Standard tokens defined in @hono-enterprise/common
+// Standard tokens defined in @setu-ts/common
 const CAPABILITIES = {
   LOGGER: 'logger',
   DATABASE: 'database',
@@ -973,9 +971,9 @@ modification.
 ### Toolchain and Distribution
 
 The monorepo is developed with the **Deno toolchain** (Deno 2 workspaces;
-`deno check`/`test`/`lint`/`fmt`). Packages are published to **JSR** under the `@hono-enterprise`
-scope with no build step — TypeScript sources are published directly. Node and Bun consumers install
-through JSR's npm compatibility layer, which transforms packages to standard ESM npm artifacts.
+`deno check`/`test`/`lint`/`fmt`). Packages are published to **JSR** under the `@setu-ts` scope with
+no build step — TypeScript sources are published directly. Node and Bun consumers install through
+JSR's npm compatibility layer, which transforms packages to standard ESM npm artifacts.
 Cross-runtime support is therefore a _distribution_ property (JSR) plus a _code_ property (runtime
 abstraction, §7) — CI verifies both by running the test suite under Deno and a compat suite under
 Node and Bun.
@@ -1107,7 +1105,7 @@ graph TB
 
 ### Package Details
 
-#### @hono-enterprise/common
+#### @setu-ts/common
 
 | Aspect               | Detail                                                                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1118,7 +1116,7 @@ graph TB
 | **Extension Points** | N/A (types only)                                                                                                                     |
 | **Rules**            | Zero dependencies; no runtime behavior beyond constants and pure type utilities                                                      |
 
-#### @hono-enterprise/kernel
+#### @setu-ts/kernel
 
 | Aspect               | Detail                                                                                                                                    |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1129,7 +1127,7 @@ graph TB
 | **Extension Points** | Custom plugins; custom middleware; custom routes; service override                                                                        |
 | **Rules**            | No runtime-specific APIs; no decorator support; no DI; zero features beyond orchestration                                                 |
 
-#### @hono-enterprise/runtime
+#### @setu-ts/runtime
 
 | Aspect               | Detail                                                                                               |
 | -------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -1140,7 +1138,7 @@ graph TB
 | **Extension Points** | Custom runtime adapter (for new runtimes); custom HTTP adapter                                       |
 | **Rules**            | The only package allowed to use runtime-specific APIs                                                |
 
-#### @hono-enterprise/di-plugin
+#### @setu-ts/di-plugin
 
 | Aspect               | Detail                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -1151,7 +1149,7 @@ graph TB
 | **Extension Points** | Custom provider types; custom scopes                                                                        |
 | **Rules**            | Optional; no other plugin depends on it; services resolve from ServiceRegistry, not container               |
 
-#### @hono-enterprise/decorator-plugin
+#### @setu-ts/decorator-plugin
 
 | Aspect               | Detail                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1162,7 +1160,7 @@ graph TB
 | **Extension Points** | Custom decorators via `createDecorator()`; custom parameter decorators                                                                |
 | **Rules**            | Optional; no reflection required; metadata stored in plain objects; decorators are syntactic sugar over programmatic API              |
 
-#### @hono-enterprise/logger-plugin
+#### @setu-ts/logger-plugin
 
 | Aspect               | Detail                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -1173,7 +1171,7 @@ graph TB
 | **Extension Points** | Custom logger implementation (override `logger` token); custom log formatters                               |
 | **Rules**            | Pino is optional (injected or lazy-loaded via `npm:` specifier); ConsoleLogger works on all runtimes        |
 
-#### @hono-enterprise/config-plugin
+#### @setu-ts/config-plugin
 
 | Aspect               | Detail                                                                                             |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
@@ -1184,7 +1182,7 @@ graph TB
 | **Extension Points** | Custom config sources (override `config` token); custom env file parsers                           |
 | **Rules**            | Environment access via `runtime.env`, not `process.env`                                            |
 
-#### @hono-enterprise/validation-plugin
+#### @setu-ts/validation-plugin
 
 | Aspect               | Detail                                                                                                               |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -1195,7 +1193,7 @@ graph TB
 | **Extension Points** | Custom error formatters; custom sanitization rules                                                                   |
 | **Rules**            | Zod is the source of truth for validation; schemas are shared with OpenAPI plugin                                    |
 
-#### @hono-enterprise/exceptions
+#### @setu-ts/exceptions
 
 | Aspect               | Detail                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -1206,7 +1204,7 @@ graph TB
 | **Extension Points** | Custom error formatters                                                                                                 |
 | **Rules**            | Plain package, not a plugin; composition (factories) over inheritance; registered by the application, not the kernel    |
 
-#### @hono-enterprise/database-plugin
+#### @setu-ts/database-plugin
 
 | Aspect               | Detail                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1217,7 +1215,7 @@ graph TB
 | **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy                                                                    |
 | **Rules**            | Prisma and Drizzle are optional (injected or lazy-loaded via `npm:` specifiers); Memory adapter for testing; no raw SQL in public API |
 
-#### @hono-enterprise/cache-plugin
+#### @setu-ts/cache-plugin
 
 | Aspect               | Detail                                                                                                                        |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -1228,7 +1226,7 @@ graph TB
 | **Extension Points** | Custom cache store (override `cache` token); custom key generators; named multi-cache instances                               |
 | **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store default; `ICacheStore` has 5 methods    |
 
-#### @hono-enterprise/events-plugin
+#### @setu-ts/events-plugin
 
 | Aspect               | Detail                                                                                                                     |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -1239,7 +1237,7 @@ graph TB
 | **Extension Points** | Custom event bus (override `events` token); custom event handlers                                                          |
 | **Rules**            | In-memory only; for distributed events, use messaging plugin                                                               |
 
-#### @hono-enterprise/cqrs-plugin
+#### @setu-ts/cqrs-plugin
 
 | Aspect               | Detail                                                                                                                                                                                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1250,7 +1248,7 @@ graph TB
 | **Extension Points** | Custom pipeline behaviors; custom bus implementations                                                                                                                                                                                                                    |
 | **Rules**            | Optional; consumes the `events` capability via token for event sourcing (optional)                                                                                                                                                                                       |
 
-#### @hono-enterprise/messaging-plugin
+#### @setu-ts/messaging-plugin
 
 | Aspect               | Detail                                                                                                                                                                                                                                              |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1261,7 +1259,7 @@ graph TB
 | **Extension Points** | Custom broker adapter; custom serializers; custom SDK client injection; custom transport adapters                                                                                                                                                   |
 | **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option; cloud brokers require provider credentials at runtime                |
 
-#### @hono-enterprise/queue-plugin
+#### @setu-ts/queue-plugin
 
 | Aspect               | Detail                                                                                                                                                                                                                                                                                                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1285,7 +1283,7 @@ then deletes the source message, with separate diagnostics for send vs delete fa
 `SnsPublisher` export is a separate AWS SNS fan-out helper (not a `QueueAdapter`): it publishes to a
 single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam as `SqsQueue`.
 
-#### @hono-enterprise/auth-plugin
+#### @setu-ts/auth-plugin
 
 | Aspect               | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1296,7 +1294,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom `IAuthStrategy` strategies; RBAC role/permission models; app-supplied `apiKey.validate` / `local.verify`                                                                                                                                                                                                                                                                                                                                                     |
 | **Rules**            | Zero npm deps — JWT (HS256/RS256) and PBKDF2-SHA256 via Web Crypto (`runtime.subtle`/`runtime.randomBytes`); no JWT library. Three service tokens `jwt`/`authentication`/`authorization`; `ctx.request.user` is the writable principal field; guards short-circuit (no `next()`) on 401/403. Refresh tokens (`RefreshTokenService`) + rate limiting (`rateLimitMiddleware`) shipped in M16b as standalone additions — no new tokens, `AuthPlugin` options unchanged |
 
-#### @hono-enterprise/http-security-plugin
+#### @setu-ts/http-security-plugin
 
 | Aspect               | Detail                                                                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1307,7 +1305,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom security headers; custom CORS policies; custom CSRF trusted origins                                                                                  |
 | **Rules**            | Secure defaults: security headers on by default; CORS/CSRF/request-size/IP-security are opt-in via their option blocks, each secure-by-default when enabled |
 
-#### @hono-enterprise/scheduler-plugin
+#### @setu-ts/scheduler-plugin
 
 | Aspect               | Detail                                                                                                         |
 | -------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -1318,7 +1316,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom distributed lock implementation; custom cron parser                                                     |
 | **Rules**            | Distributed locking for multi-instance deployments; Redis for lock storage (optional, injected or lazy-loaded) |
 
-#### @hono-enterprise/metrics-plugin
+#### @setu-ts/metrics-plugin
 
 | Aspect               | Detail                                                                                          |
 | -------------------- | ----------------------------------------------------------------------------------------------- |
@@ -1329,7 +1327,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom metric collectors; custom renderers                                                      |
 | **Rules**            | Prometheus format only; OpenMetrics support in future                                           |
 
-#### @hono-enterprise/health-plugin
+#### @setu-ts/health-plugin
 
 | Aspect               | Detail                                                                                     |
 | -------------------- | ------------------------------------------------------------------------------------------ |
@@ -1340,7 +1338,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom health indicators                                                                   |
 | **Rules**            | Health indicators depend on capability tokens, not concrete packages                       |
 
-#### @hono-enterprise/openapi-plugin
+#### @setu-ts/openapi-plugin
 
 | Aspect               | Detail                                                                          |
 | -------------------- | ------------------------------------------------------------------------------- |
@@ -1351,7 +1349,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom schema transformers; custom UI                                           |
 | **Rules**            | Zod is the source of truth; no duplicated schemas; spec deduplication           |
 
-#### @hono-enterprise/telemetry-plugin
+#### @setu-ts/telemetry-plugin
 
 | Aspect               | Detail                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1362,7 +1360,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom exporters; injectable `tracerProviderFactory`; injectable per-instrumentation instances (`InstrumentationConfig.instrumentation`)                                                                                                                                                                                                                                                          |
 | **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier); noop default when no exporter; middleware priority 30; `TracerProviderFactory` injection seam for tests; auto-instrumentation (M24b) is runtime-gated (Node-only kinds `http`/`fetch`/`ioredis`/`amqplib`/`kafkajs`) and degrades to a documented no-op elsewhere; `spanProcessor: 'simple'` (default) or `'batch'` |
 
-#### @hono-enterprise/secrets-plugin
+#### @setu-ts/secrets-plugin
 
 | Aspect               | Detail                                                                                                |
 | -------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -1373,7 +1371,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom secret provider                                                                                |
 | **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); env provider for development |
 
-#### @hono-enterprise/audit-plugin
+#### @setu-ts/audit-plugin
 
 | Aspect               | Detail                                                                   |
 | -------------------- | ------------------------------------------------------------------------ |
@@ -1384,7 +1382,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom audit storage                                                     |
 | **Rules**            | Audit logs are immutable; storage is pluggable                           |
 
-#### @hono-enterprise/resilience-plugin
+#### @setu-ts/resilience-plugin
 
 | Aspect               | Detail                                                        |
 | -------------------- | ------------------------------------------------------------- |
@@ -1395,7 +1393,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom resilience patterns; custom circuit breaker strategies |
 | **Rules**            | Patterns are composable; no external dependencies             |
 
-#### @hono-enterprise/storage-plugin
+#### @setu-ts/storage-plugin
 
 | Aspect               | Detail                                                                                                          |
 | -------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -1406,7 +1404,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom storage provider                                                                                         |
 | **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); local and memory providers for testing |
 
-#### @hono-enterprise/mail-plugin
+#### @setu-ts/mail-plugin
 
 | Aspect               | Detail                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------- |
@@ -1417,7 +1415,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom mail provider; custom template engine                                                      |
 | **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
 
-#### @hono-enterprise/notification-plugin
+#### @setu-ts/notification-plugin
 
 | Aspect               | Detail                                                                         |
 | -------------------- | ------------------------------------------------------------------------------ |
@@ -1428,7 +1426,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom notification channels                                                   |
 | **Rules**            | Channel providers are optional (injected or lazy-loaded via `npm:` specifiers) |
 
-#### @hono-enterprise/feature-flags-plugin
+#### @setu-ts/feature-flags-plugin
 
 | Aspect               | Detail                                                                                    |
 | -------------------- | ----------------------------------------------------------------------------------------- |
@@ -1439,7 +1437,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Extension Points** | Custom flag provider                                                                      |
 | **Rules**            | Config provider for simple cases; DatabaseProvider or LaunchDarklyProvider for production |
 
-#### @hono-enterprise/realtime-backplane-plugin
+#### @setu-ts/realtime-backplane-plugin
 
 | Aspect               | Detail                                                                                   |
 | -------------------- | ---------------------------------------------------------------------------------------- |
@@ -1454,7 +1452,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 Durable Object). An application registers exactly one of the two: the kernel rejects two providers
 of a single capability token at startup.
 
-#### @hono-enterprise/multi-tenancy-plugin
+#### @setu-ts/multi-tenancy-plugin
 
 | Aspect               | Detail                                                                            |
 | -------------------- | --------------------------------------------------------------------------------- |
@@ -1465,7 +1463,7 @@ of a single capability token at startup.
 | **Extension Points** | Custom tenant resolver; custom database strategy                                  |
 | **Rules**            | Tenant resolution via middleware; tenant context via request context              |
 
-#### @hono-enterprise/testing
+#### @setu-ts/testing
 
 | Aspect               | Detail                                                                                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1476,22 +1474,22 @@ of a single capability token at startup.
 | **Extension Points** | N/A (testing utility)                                                                                                                                  |
 | **Rules**            | No real external dependencies; in-memory adapters only                                                                                                 |
 
-#### @hono-enterprise/cli
+#### @setu-ts/cli
 
-| Aspect               | Detail                                                                                                                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Purpose**          | CLI tool with generators                                                                                                                                                                                                                                                       |
-| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                                                                                                                                                  |
-| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text and loads the user's app through `IApplication`, never constructing one itself)                                                                                                                                  |
-| **Public API**       | The `honoe` command (`new`, `generate`, `commands`); `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                                                                                                                  |
-| **Extension Points** | Custom schematics from `.hono-enterprise/schematics/`; plugin commands via `ICliApi`, read by loading the project's `honoe.config.ts`                                                                                                                                          |
-| **Rules**            | Generation reads the target project's manifest and never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing. Plugin-command discovery is the one path that DOES boot the app — via `honoe.config.ts`, with no port and guaranteed teardown |
+| Aspect               | Detail                                                                                                                                                                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | CLI tool with generators                                                                                                                                                                                                                                                      |
+| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                                                                                                                                                 |
+| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text and loads the user's app through `IApplication`, never constructing one itself)                                                                                                                                 |
+| **Public API**       | The `setu` command (`new`, `generate`, `commands`); `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                                                                                                                  |
+| **Extension Points** | Custom schematics from `.setu-ts/schematics/`; plugin commands via `ICliApi`, read by loading the project's `setu.config.ts`                                                                                                                                                  |
+| **Rules**            | Generation reads the target project's manifest and never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing. Plugin-command discovery is the one path that DOES boot the app — via `setu.config.ts`, with no port and guaranteed teardown |
 
-#### @hono-enterprise/sdk
+#### @setu-ts/sdk
 
 | Aspect               | Detail                                                                                                                                                                                                                                                                                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Portable, zero-npm-dependency client SDK for consuming Hono Enterprise APIs from browsers and servers                                                                                                                                                                                                                                       |
+| **Purpose**          | Portable, zero-npm-dependency client SDK for consuming Setu-TS APIs from browsers and servers                                                                                                                                                                                                                                               |
 | **Responsibilities** | Injectable HTTP client (`IHttpClient`); bearer/API-key auth interceptors; per-origin retry with backoff, circuit breaker, sliding-window rate limiting; pure OpenAPI 3.1 → TypeScript codegen                                                                                                                                               |
 | **Dependencies**     | `common` only (type-level imports of `RetryPolicy`, `CircuitBreakerPolicy`, `BackoffStrategy`; no kernel, no runtime, no plugins, no npm dependencies)                                                                                                                                                                                      |
 | **Public API**       | Interfaces + factory functions + error classes (`IHttpClient`, `createClient()`, interceptor types, `IClientTiming`, `createDefaultClientTiming()`, `ClientRateLimitPolicy`, re-exported policy types, auth factories, errors, `generateOpenApiClient`, `SdkOpenApi*` types, `OpenApiCodegenOptions`) — NOT the concrete `HttpClient` class |
@@ -1565,10 +1563,10 @@ With capability tokens:
 
 ### Build-Time vs Runtime Dependencies
 
-| Type           | Direction                                  | Example                                                           |
-| -------------- | ------------------------------------------ | ----------------------------------------------------------------- |
-| **Build-time** | Package imports types from another package | `import type { IDatabaseService } from '@hono-enterprise/common'` |
-| **Runtime**    | Plugin resolves service by token           | `ctx.services.get('database')`                                    |
+| Type           | Direction                                  | Example                                                   |
+| -------------- | ------------------------------------------ | --------------------------------------------------------- |
+| **Build-time** | Package imports types from another package | `import type { IDatabaseService } from '@setu-ts/common'` |
+| **Runtime**    | Plugin resolves service by token           | `ctx.services.get('database')`                            |
 
 Build-time dependencies are for type definitions only. Runtime dependencies are resolved through the
 service registry. This separation ensures packages can be type-checked independently and bundled
@@ -1734,8 +1732,8 @@ Request-scoped data is stored on the context, not on global state. This ensures:
 
 ### Why DI Is Optional
 
-DI is a pattern for managing service dependencies. In Hono Enterprise, the **Service Registry** is
-the primary service resolution mechanism. DI is an optional layer that provides:
+DI is a pattern for managing service dependencies. In Setu-TS, the **Service Registry** is the
+primary service resolution mechanism. DI is an optional layer that provides:
 
 - Constructor injection.
 - Lifecycle management (singleton, scoped, transient).
@@ -1836,7 +1834,7 @@ Decorators are a TypeScript feature that requires compiler support (`experimenta
 new TC39 decorators proposal). Some environments and bundlers do not support decorators.
 Additionally, some developers prefer functional style over OOP decorators.
 
-Hono Enterprise makes decorators optional by:
+Setu-TS makes decorators optional by:
 
 1. Providing a complete programmatic API for every feature.
 2. Implementing decorators as a thin layer over the programmatic API.
@@ -1961,7 +1959,7 @@ The default error format follows [RFC 7807](https://datatracker.ietf.org/doc/htm
 
 ```json
 {
-  "type": "https://hono-enterprise.dev/errors/not-found",
+  "type": "https://setu-ts.dev/errors/not-found",
   "title": "Not Found",
   "status": 404,
   "detail": "User with id 123 not found",
@@ -1971,12 +1969,11 @@ The default error format follows [RFC 7807](https://datatracker.ietf.org/doc/htm
 
 ### Global Error Handler
 
-The error handler middleware comes from the `@hono-enterprise/exceptions` package and is registered
-by the application (or by a starter bundle) — the kernel ships zero features, including error
-formatting:
+The error handler middleware comes from the `@setu-ts/exceptions` package and is registered by the
+application (or by a starter bundle) — the kernel ships zero features, including error formatting:
 
 ```typescript
-import { errorHandler } from '@hono-enterprise/exceptions';
+import { errorHandler } from '@setu-ts/exceptions';
 
 app.middleware.add(errorHandler({
   format: 'rfc7807',
@@ -2257,7 +2254,7 @@ Each plugin must test:
 
 ### Test Utilities
 
-The `@hono-enterprise/testing` package provides:
+The `@setu-ts/testing` package provides:
 
 - `createTestApp()` — Create a test application with specified plugins.
 - `createMockPlugin()` — Mock a plugin's service.
@@ -2275,7 +2272,7 @@ The `@hono-enterprise/testing` package provides:
 ### Creating a Plugin
 
 ```typescript
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 export function MyPlugin(options: MyPluginOptions): IPlugin {
   return {
@@ -2327,7 +2324,7 @@ export function MyPlugin(options: MyPluginOptions): IPlugin {
 ### Creating a Runtime Adapter
 
 ```typescript
-import { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
+import { IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
 
 export class MyRuntimeServices implements IRuntimeServices {
   platform(): RuntimePlatform {
@@ -2366,7 +2363,7 @@ function myMiddleware(options?: MyOptions): MiddlewareFunction {
 ### Creating a Custom Decorator
 
 ```typescript
-import { createDecorator } from '@hono-enterprise/decorator-plugin';
+import { createDecorator } from '@setu-ts/decorator-plugin';
 
 export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
 
@@ -2392,7 +2389,7 @@ There is no `migrate()` on the contract: programmatic migration is not honestly 
 the supported backends, and each one owns migrations through its own CLI.
 
 ```typescript
-import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@hono-enterprise/common';
+import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 
 export class MyAdapter implements IDatabaseAdapter {
   async connect(): Promise<void> {/* ... */}
@@ -2412,12 +2409,12 @@ export class MyAdapter implements IDatabaseAdapter {
 app.register(DatabasePlugin({ type: 'custom', adapter: new MyAdapter() }));
 ```
 
-`@hono-enterprise/cloudflare-plugin`'s `D1Adapter` is the worked example.
+`@setu-ts/cloudflare-plugin`'s `D1Adapter` is the worked example.
 
 ### Creating a Cache Adapter
 
 ```typescript
-import { ICacheStore } from '@hono-enterprise/common';
+import { ICacheStore } from '@setu-ts/common';
 
 export class MyCacheStore implements ICacheStore {
   async get<T>(key: string): Promise<T | null> {/* ... */}
@@ -2432,7 +2429,7 @@ export class MyCacheStore implements ICacheStore {
 Transport adapters (message brokers, queue systems) follow the same pattern:
 
 ```typescript
-import { IMessageBroker } from '@hono-enterprise/common';
+import { IMessageBroker } from '@setu-ts/common';
 
 export class MyMessageBroker implements IMessageBroker {
   async connect(): Promise<void> {/* ... */}
@@ -2488,7 +2485,7 @@ graph TB
 > through the optional `IHttpAdapter.setRpcHandler` seam, consulted after the WebSocket upgrade
 > short-circuit and before body mapping; returning `null` falls through to Hono untouched. Only the
 > **server** shipped: gRPC/Connect clients are generated by the consuming application's own
-> toolchain, and the browser client story belongs to `@hono-enterprise/sdk` (Milestone 35).
+> toolchain, and the browser client story belongs to `@setu-ts/sdk` (Milestone 35).
 
 > The **GraphQL Plugin** shipped in Milestone 51 and is no longer a future extension point. Unlike
 > its two neighbours above it needs **no adapter seam at all**, and that negative result is the
@@ -2589,9 +2586,9 @@ When breaking changes are necessary:
 
 ## Conclusion
 
-The Hono Enterprise architecture is designed for **longevity, replaceability, and runtime
-portability**. By making everything a plugin, using capability tokens for communication, and
-abstracting runtime-specific APIs, the framework can evolve without breaking existing applications.
+The Setu-TS architecture is designed for **longevity, replaceability, and runtime portability**. By
+making everything a plugin, using capability tokens for communication, and abstracting
+runtime-specific APIs, the framework can evolve without breaking existing applications.
 
 Contributors should internalize these principles:
 

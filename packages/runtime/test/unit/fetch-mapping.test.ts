@@ -10,7 +10,7 @@ import {
 } from '../../src/adapters/shared/fetch-mapping.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ResponseSnapshot } from '@hono-enterprise/common';
+import type { ResponseSnapshot } from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // mapWebRequestToFrameworkRequest — field mapping

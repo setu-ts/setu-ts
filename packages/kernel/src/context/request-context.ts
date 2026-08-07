@@ -5,8 +5,8 @@
  *
  * @module
  */
-import type { IRequest, IRequestContext } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRequest, IRequestContext } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';

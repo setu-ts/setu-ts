@@ -11,9 +11,9 @@ import type {
   IPluginContext,
   ISsrService,
   RouteHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 // IRuntimeServices type used via ctx.runtime (non-optional property)
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
 import { createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
@@ -64,7 +64,7 @@ function joinWildcard(prefix: string): string {
  *
  * @example
  * ```typescript
- * import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+ * import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
  *
  * app.register(ReactRouterPlugin({
  *   serverBuildPath: './build/server/index.js',

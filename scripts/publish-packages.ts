@@ -60,7 +60,7 @@ async function declaredVersion(dir: string): Promise<string> {
  */
 async function alreadyPublished(dir: string, version: string): Promise<boolean> {
   try {
-    const response = await fetch(`https://jsr.io/@hono-enterprise/${packageName(dir)}/meta.json`);
+    const response = await fetch(`https://jsr.io/@setu-ts/${packageName(dir)}/meta.json`);
     if (!response.ok) return false;
     const meta = (await response.json()) as { versions?: Record<string, unknown> };
     return Object.hasOwn(meta.versions ?? {}, version);

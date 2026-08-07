@@ -1,4 +1,4 @@
-import type { IPlugin } from '@hono-enterprise/common';
+import type { IPlugin } from '@setu-ts/common';
 import { createMockPlugin } from '../mock-plugin.ts';
 
 /**
@@ -12,8 +12,8 @@ import { createMockPlugin } from '../mock-plugin.ts';
  *
  * @example
  * ```typescript
- * import { FixtureManager, createTestApp } from '@hono-enterprise/testing';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
+ * import { FixtureManager, createTestApp } from '@setu-ts/testing';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
  *
  * const fixtures = new FixtureManager();
  *

@@ -172,8 +172,7 @@ body {
 }
 `;
 
-const loadContextModule =
-  `import type { RouterContextKey } from '@hono-enterprise/react-router-plugin';
+const loadContextModule = `import type { RouterContextKey } from '@setu-ts/react-router-plugin';
 
 /**
  * The part of React Router's request context this application reads.
@@ -191,18 +190,18 @@ export interface AppLoadContext {
 }
 `;
 
-const contextKeysModule = `import { contextKeyFor } from '@hono-enterprise/react-router-plugin';
-import type { ILogger, ISecretManager, ISession } from '@hono-enterprise/common';
+const contextKeysModule = `import { contextKeyFor } from '@setu-ts/react-router-plugin';
+import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
 
 /**
  * Context keys this application adds to every SSR request.
  *
- * \`honoe.config.ts\` sets them; loaders and actions read them. Two things make
+ * \`setu.config.ts\` sets them; loaders and actions read them. Two things make
  * that work, and both are easy to break:
  *
  * 1. **Keys come from \`contextKeyFor\`, never from a \`{ defaultValue }\`
  *    literal.** Vite INLINES application modules into the server build, while
- *    the runtime loads \`honoe.config.ts\` from source — so this module exists
+ *    the runtime loads \`setu.config.ts\` from source — so this module exists
  *    twice, and two hand-written key objects would look identical and match
  *    nothing. Resolving each key by NAME through the plugin gives both copies
  *    the same object.
@@ -235,14 +234,14 @@ export const loggerContext = contextKeyFor<ILogger | null>('app.logger', null);
  * The secret manager.
  *
  * Replaces a hand-rolled key-vault module: the provider (env, AWS, GCP, Azure,
- * Vault) is chosen once in \`honoe.config.ts\`, and reads are cached by the
+ * Vault) is chosen once in \`setu.config.ts\`, and reads are cached by the
  * plugin rather than by a module-level map here.
  */
 export const secretsContext = contextKeyFor<ISecretManager | null>('app.secrets', null);
 `;
 
 const servicesAccessModule =
-  `import type { ILogger, ISecretManager, ISession } from '@hono-enterprise/common';
+  `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import {
   csrfContext,
@@ -258,7 +257,7 @@ import {
  * HTTP client and one secret lookup per service for the life of the process.
  * That cache is exactly what the kernel's service registry already is, so this
  * module holds NO state: every value comes from the request context that
- * \`honoe.config.ts\` populated, and nothing is memoised here.
+ * \`setu.config.ts\` populated, and nothing is memoised here.
  *
  * @param value - The value read from the request context
  * @param name - The service name, for the error message
@@ -270,7 +269,7 @@ import {
 function requireValue<T>(value: T | null, name: string): T {
   if (value === null) {
     throw new Error(
-      \`No \${name} on this request. Register its plugin in honoe.config.ts and set its \` +
+      \`No \${name} on this request. Register its plugin in setu.config.ts and set its \` +
         'context key in populateLoadContext, and call this only from a loader or action.',
     );
   }
@@ -462,7 +461,7 @@ import { formatPrice } from '~/models/product.ts';
 /**
  * Loads the view on the server.
  *
- * The request context carries the framework services \`honoe.config.ts\` put
+ * The request context carries the framework services \`setu.config.ts\` put
  * there, so the logger, database, cache and secrets are all reachable without a
  * module-level singleton or a second DI container — and without importing a
  * framework package into a module that also ships to the browser.
@@ -498,7 +497,7 @@ import { getCsrfToken, getSession } from '~/config/services.server.ts';
  * Hands the form its CSRF token.
  *
  * The token comes from the session, placed on the request context by
- * \`honoe.config.ts\`. A progressive-enhancement \`<Form>\` cannot set a custom
+ * \`setu.config.ts\`. A progressive-enhancement \`<Form>\` cannot set a custom
  * header, which is why the synchronizer-token strategy — not the stateless
  * Origin check — is what guards this action.
  */

@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { GraphqlRequestParams } from '@hono-enterprise/common';
+import type { GraphqlRequestParams } from '@setu-ts/common';
 
 /**
  * Error codes for request parsing failures.

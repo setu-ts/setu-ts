@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
 
 export class FakeRuntimeServices implements IRuntimeServices {
   setIntervalFn: ((fn: () => void, ms: number) => unknown) | null = null;

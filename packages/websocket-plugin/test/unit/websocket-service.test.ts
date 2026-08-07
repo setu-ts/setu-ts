@@ -4,7 +4,7 @@ import type {
   IWebSocketConnection,
   WebSocketCloseEvent,
   WebSocketEventSink,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import {
   buildContext,
   frameByteLength,

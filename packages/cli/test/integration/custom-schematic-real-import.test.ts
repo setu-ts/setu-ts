@@ -33,7 +33,7 @@ describe('custom schematic — real import()', () => {
   let root: string;
 
   beforeAll(async () => {
-    root = await Deno.makeTempDir({ prefix: 'honoe-custom-' });
+    root = await Deno.makeTempDir({ prefix: 'setu-custom-' });
     await Deno.mkdir(`${root}/${CUSTOM_SCHEMATIC_DIR}`, { recursive: true });
     await Deno.writeTextFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/real.ts`, MODULE_SOURCE);
     await Deno.writeTextFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/defaulted.ts`, DEFAULT_EXPORT_SOURCE);
@@ -84,6 +84,6 @@ describe('custom schematic — real import()', () => {
   it('importModule really resolves a module, not a stub', async () => {
     const url = new URL('../../src/constants.ts', import.meta.url).href;
     const module = await importModule(url);
-    expect(module['PROGRAM_NAME']).toBe('honoe');
+    expect(module['PROGRAM_NAME']).toBe('setu');
   });
 });

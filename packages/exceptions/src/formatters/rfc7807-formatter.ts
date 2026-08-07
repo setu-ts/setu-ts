@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 import type { ErrorHandlerFormatter } from './error-formatter.ts';
 import { statusTitle } from '../errors/exceptions.ts';
@@ -19,7 +19,7 @@ import { HttpError } from '../errors/http-error.ts';
  *
  * @since 0.1.0
  */
-export const ERROR_TYPE_BASE = 'https://hono-enterprise.dev/errors';
+export const ERROR_TYPE_BASE = 'https://setu-ts.dev/errors';
 
 /**
  * A RFC 7807 Problem Details object.

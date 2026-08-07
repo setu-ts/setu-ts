@@ -1,9 +1,9 @@
 /**
  * Fake IRequestContext for testing.
  */
-import type { IMultiTenancyService, IRequestContext, IResponse } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ITenant } from '@hono-enterprise/common';
+import type { IMultiTenancyService, IRequestContext, IResponse } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ITenant } from '@setu-ts/common';
 import { createFakeRequest } from './fake-request.ts';
 
 export interface FakeContextOptions {

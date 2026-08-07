@@ -7,13 +7,8 @@
  *
  * @module
  */
-import type {
-  ICacheStore,
-  IPlugin,
-  IPluginContext,
-  IRuntimeServices,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { ICacheStore, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { CachePluginOptions, CacheStoreOptions } from '../interfaces/index.ts';
 import type { CacheStore } from '../stores/cache-store.ts';
 import { MemoryStore } from '../stores/memory-store.ts';
@@ -38,7 +33,7 @@ const DEFAULT_PREFIX = '';
  *
  * @example
  * ```typescript
- * import { CachePlugin } from '@hono-enterprise/cache-plugin';
+ * import { CachePlugin } from '@setu-ts/cache-plugin';
  *
  * // Memory store (default)
  * app.register(CachePlugin());

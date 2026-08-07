@@ -50,7 +50,7 @@ export interface RealtimeBackplaneObjectCoreOptions {
  * @example
  * ```typescript
  * import { DurableObject } from 'cloudflare:workers';
- * import { RealtimeBackplaneObjectCore } from '@hono-enterprise/cloudflare-plugin';
+ * import { RealtimeBackplaneObjectCore } from '@setu-ts/cloudflare-plugin';
  *
  * export class RealtimeBackplaneObject extends DurableObject {
  *   #core = new RealtimeBackplaneObjectCore(this.ctx);
@@ -92,7 +92,7 @@ export class RealtimeBackplaneObjectCore {
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return Promise.resolve(
         new Response(
-          'This Durable Object serves the Hono Enterprise realtime backplane and accepts ' +
+          'This Durable Object serves the Setu-TS realtime backplane and accepts ' +
             'only WebSocket upgrades.',
           { status: 426 },
         ),

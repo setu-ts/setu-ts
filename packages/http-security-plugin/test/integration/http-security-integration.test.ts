@@ -14,7 +14,7 @@ import type {
   IPluginContext,
   IRequestContext,
   IRuntimeServices,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { HttpSecurityPlugin } from '../../src/plugin/http-security-plugin.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';

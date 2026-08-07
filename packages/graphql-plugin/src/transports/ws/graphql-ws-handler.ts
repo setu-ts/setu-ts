@@ -18,7 +18,7 @@ import type {
   TimerHandle,
   WebSocketConnectionContext,
   WebSocketHandlers,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { IApqResolver } from '../../apq/apq-resolver.ts';
 import type { GraphqlWsTransportOptions } from '../../interfaces/options.ts';
 import {

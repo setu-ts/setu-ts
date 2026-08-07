@@ -1,11 +1,11 @@
 /**
  * @module
  */
-import type { RestStarterOptions } from '@hono-enterprise/rest-starter';
-import type { MessagingPluginOptions } from '@hono-enterprise/messaging-plugin';
-import type { QueuePluginOptions } from '@hono-enterprise/queue-plugin';
-import type { ResiliencePluginOptions } from '@hono-enterprise/resilience-plugin';
-import type { TelemetryPluginOptions } from '@hono-enterprise/telemetry-plugin';
+import type { RestStarterOptions } from '@setu-ts/rest-starter';
+import type { MessagingPluginOptions } from '@setu-ts/messaging-plugin';
+import type { QueuePluginOptions } from '@setu-ts/queue-plugin';
+import type { ResiliencePluginOptions } from '@setu-ts/resilience-plugin';
+import type { TelemetryPluginOptions } from '@setu-ts/telemetry-plugin';
 
 /**
  * Options for {@linkcode createMicroserviceApp}. Extends {@linkcode RestStarterOptions}

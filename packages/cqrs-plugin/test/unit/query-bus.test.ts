@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { QueryBus } from '../../src/bus/query-bus.ts';
-import type { CqrsQuery, IQueryHandler } from '@hono-enterprise/common';
+import type { CqrsQuery, IQueryHandler } from '@setu-ts/common';
 import { HandlerNotFoundError } from '../../src/errors/handler-not-found.ts';
 
 // Test query

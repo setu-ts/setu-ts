@@ -12,7 +12,7 @@
  * @module
  */
 
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 
 /**
  * A sink that keeps a Worker alive until the promise settles.

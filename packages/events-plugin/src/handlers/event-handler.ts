@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IDomainEvent, IEventBus, Unsubscribe } from '@hono-enterprise/common';
+import type { IDomainEvent, IEventBus, Unsubscribe } from '@setu-ts/common';
 
 /**
  * Class-based event handler interface.

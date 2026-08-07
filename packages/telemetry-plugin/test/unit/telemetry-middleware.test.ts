@@ -7,8 +7,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { telemetryMiddleware } from '../../src/middleware/telemetry-middleware.ts';
-import type { ISpan, ITelemetryService, NextFunction } from '@hono-enterprise/common';
-import { TELEMETRY_CONTEXT_OPAQUE } from '@hono-enterprise/common';
+import type { ISpan, ITelemetryService, NextFunction } from '@setu-ts/common';
+import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 import { TELEMETRY_SPAN_KEY } from '../../src/interfaces/index.ts';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
 import { TelemetryService } from '../../src/services/telemetry-service.ts';

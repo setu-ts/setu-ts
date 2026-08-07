@@ -6,8 +6,8 @@
  *
  * @module
  */
-import type { ILogger, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ILogger, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 /** A captured logger call. */
 export interface LogCall {

@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { HandlerResult, IResponse, ResponseSnapshot } from '@hono-enterprise/common';
+import type { HandlerResult, IResponse, ResponseSnapshot } from '@setu-ts/common';
 
 /** Opaque brand — only the kernel constructs values of this type. */
 const HANDLER_RESULT: HandlerResult = { __handlerResult: true };

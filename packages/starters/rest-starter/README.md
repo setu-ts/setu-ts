@@ -1,6 +1,6 @@
-# @hono-enterprise/rest-starter
+# @setu-ts/rest-starter
 
-Opinionated plugin composition for building REST APIs with Hono Enterprise.
+Opinionated plugin composition for building REST APIs with Setu-TS.
 
 Provides a pre-configured set of plugins for building production-ready REST applications, including
 configuration, logging, validation, security, health checks, metrics, OpenAPI documentation,
@@ -9,13 +9,13 @@ decorators, database support, and authentication.
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/rest-starter
+deno add jsr:@setu-ts/rest-starter
 ```
 
 Or via npm/yarn/pnpm when using the Node-compatible runtime:
 
 ```bash
-npm install @hono-enterprise/rest-starter
+npm install @setu-ts/rest-starter
 ```
 
 ## Usage
@@ -24,7 +24,7 @@ The starter exports a single factory function `createRestApp` that returns a ful
 with error handling already configured:
 
 ```typescript
-import { createRestApp } from '@hono-enterprise/rest-starter';
+import { createRestApp } from '@setu-ts/rest-starter';
 
 const app = createRestApp();
 
@@ -38,8 +38,8 @@ await app.start({ port: 3000 });
 You can customize plugin configuration through the optional `options` parameter:
 
 ```typescript
-import { createRestApp } from '@hono-enterprise/rest-starter';
-import type { RestStarterOptions } from '@hono-enterprise/rest-starter';
+import { createRestApp } from '@setu-ts/rest-starter';
+import type { RestStarterOptions } from '@setu-ts/rest-starter';
 
 const options: RestStarterOptions = {
   config: {/* config plugin options */},
@@ -70,8 +70,8 @@ For scenarios requiring custom plugin ordering or selective inclusion, use the `
 builder function together with `createApplication` from the kernel:
 
 ```typescript
-import { buildRestPlugins } from '@hono-enterprise/rest-starter';
-import { createApplication } from '@hono-enterprise/kernel';
+import { buildRestPlugins } from '@setu-ts/rest-starter';
+import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication({
   plugins: buildRestPlugins({
@@ -165,7 +165,7 @@ exactly as it did before the option existed.
 
 ## Coming from NestJS
 
-| NestJS                        | Hono Enterprise                                                 |
+| NestJS                        | Setu-TS                                                         |
 | ----------------------------- | --------------------------------------------------------------- |
 | `@Module({ … })`              | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
 | `providers: [UserService]`    | `decorators: { services: [UserService] }`, or `app.register(…)` |
@@ -226,8 +226,8 @@ instance (e.g., a session cache distinct from the default), register it manually
 returns:
 
 ```typescript
-import { createRestApp } from '@hono-enterprise/rest-starter';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
+import { createRestApp } from '@setu-ts/rest-starter';
+import { CachePlugin } from '@setu-ts/cache-plugin';
 
 const app = createRestApp();
 app.register(CachePlugin({ name: 'session' }));
@@ -238,5 +238,5 @@ accepts additional registrations.
 
 ## See Also
 
-- [JSR Registry](https://jsr.io/@hono-enterprise/rest-starter)
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
+- [JSR Registry](https://jsr.io/@setu-ts/rest-starter)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)

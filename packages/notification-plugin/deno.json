@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/notification-plugin",
+  "name": "@setu-ts/notification-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts"

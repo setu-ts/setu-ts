@@ -14,14 +14,14 @@ import {
   fakeFile,
   fakeService,
 } from '../fixtures/fake-connect-runtime.ts';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   HealthIndicatorFn,
   IGrpcService,
   IHealthService,
   IPluginContext,
   RpcFetchHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 const HEALTH = 'grpc.health.v1.Health';
 const REFLECTION = 'grpc.reflection.v1.ServerReflection';

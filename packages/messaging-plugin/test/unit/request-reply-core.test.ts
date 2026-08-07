@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISubscription, MessageMetadata, SubscribeOptions } from '@hono-enterprise/common';
+import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 import { RequestReplyCore } from '../../src/brokers/request-reply-core.ts';
 import type { RequestReplyDeps } from '../../src/brokers/request-reply-core.ts';
 import { createTopicInbox } from '../../src/brokers/inbox.ts';

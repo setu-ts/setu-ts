@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import type { ConfigPluginOptions } from '../options.ts';
 import { loadConfig } from '../services/load-config.ts';
@@ -29,7 +29,7 @@ const PLUGIN_NAME = 'config-plugin';
  *
  * @example
  * ```typescript
- * import { ConfigPlugin } from '@hono-enterprise/config-plugin';
+ * import { ConfigPlugin } from '@setu-ts/config-plugin';
  * import { z } from 'npm:zod';
  *
  * const AppConfigSchema = z.object({

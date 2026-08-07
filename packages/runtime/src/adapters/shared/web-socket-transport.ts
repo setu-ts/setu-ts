@@ -11,7 +11,7 @@
  * @since 0.2.0
  */
 
-import type { IWebSocketTransport, WebSocketReadyState } from '@hono-enterprise/common';
+import type { IWebSocketTransport, WebSocketReadyState } from '@setu-ts/common';
 
 /**
  * The subset of the web `WebSocket` API the runtime adapters drive. Declared

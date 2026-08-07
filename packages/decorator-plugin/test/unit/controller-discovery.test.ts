@@ -1,6 +1,6 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type { IFileSystem, IRuntimeServices } from '@setu-ts/common';
 
 import {
   discoverControllers,

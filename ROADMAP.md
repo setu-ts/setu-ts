@@ -1,4 +1,4 @@
-# Hono Enterprise Framework — Plugin-First Architecture Roadmap
+# Setu-TS Framework — Plugin-First Architecture Roadmap
 
 ## Design Philosophy
 
@@ -109,8 +109,8 @@ graph TB
 ## Plugin Contract
 
 Every plugin implements this contract. `IPlugin` and `IPluginContext` are defined in
-`@hono-enterprise/common` (following the `IXxx` interface naming rule) — the kernel consumes them,
-it does not define them.
+`@setu-ts/common` (following the `IXxx` interface naming rule) — the kernel consumes them, it does
+not define them.
 
 ```typescript
 interface IPlugin {
@@ -287,7 +287,7 @@ interface LifecycleApi {
 ## Monorepo Structure
 
 ```
-hono-enterprise/
+setu-ts/
 ├── apps/
 │   ├── minimal/                 # Minimal app (no plugins)
 │   ├── rest-api/                # REST API with common plugins
@@ -347,9 +347,9 @@ hono-enterprise/
 ```
 
 > **Toolchain:** The monorepo is built with the **Deno toolchain** (Deno 2 workspaces,
-> `deno test`/`lint`/`fmt`/`check`). Packages are published to **JSR** under the `@hono-enterprise`
-> scope and are consumable from Node/Bun via JSR's npm compatibility layer. There is no build step —
-> JSR publishes TypeScript sources directly. Applications built on the framework can be shipped as
+> `deno test`/`lint`/`fmt`/`check`). Packages are published to **JSR** under the `@setu-ts` scope
+> and are consumable from Node/Bun via JSR's npm compatibility layer. There is no build step — JSR
+> publishes TypeScript sources directly. Applications built on the framework can be shipped as
 > standalone binaries with `deno compile`.
 
 ---
@@ -392,9 +392,9 @@ sdk ─► common
 ```
 
 **Key rule:** No plugin depends on another plugin — not even at build time. All shared interfaces
-(`ILogger`, `IEventBus`, etc.) live in `@hono-enterprise/common`, so a plugin never needs another
-plugin's package for type definitions. Plugins communicate exclusively via capability tokens
-resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
+(`ILogger`, `IEventBus`, etc.) live in `@setu-ts/common`, so a plugin never needs another plugin's
+package for type definitions. Plugins communicate exclusively via capability tokens resolved through
+the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 
 ---
 
@@ -419,8 +419,8 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 
 2. **Create Directory Structure**
    - Create `apps/`, `packages/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
-   - Create stub `deno.json` for each package with `@hono-enterprise/[name]` JSR naming, version,
-     and exports
+   - Create stub `deno.json` for each package with `@setu-ts/[name]` JSR naming, version, and
+     exports
 
 3. **Configure Tooling**
    - Workspace-wide task orchestration via root `deno task`
@@ -450,7 +450,7 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 
 **Objective:** Define all shared types, interfaces, and capability tokens.
 
-### Package: `@hono-enterprise/common`
+### Package: `@setu-ts/common`
 
 **Contents:**
 
@@ -515,7 +515,7 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 
 **Objective:** Build the plugin kernel that orchestrates plugin registration and execution.
 
-### Package: `@hono-enterprise/kernel`
+### Package: `@setu-ts/kernel`
 
 **Core Components:**
 
@@ -563,7 +563,7 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 **Programmatic API (no decorators required):**
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication({
   plugins: [
@@ -672,7 +672,7 @@ await app.start();
 > reaching into kernel internals. The framework already ran via `app.inject()` with no server, so
 > nothing was blocked.
 
-### Package: `@hono-enterprise/runtime`
+### Package: `@setu-ts/runtime`
 
 **Runtime Services Interface:**
 
@@ -795,7 +795,7 @@ const app = createApplication({
 
 **Objective:** Provide logging capability via plugin.
 
-### Package: `@hono-enterprise/logger-plugin`
+### Package: `@setu-ts/logger-plugin`
 
 **Plugin Registration:**
 
@@ -866,7 +866,7 @@ childLogger.debug('Processing request');
 
 **Objective:** Provide configuration capability with env validation.
 
-### Package: `@hono-enterprise/config-plugin`
+### Package: `@setu-ts/config-plugin`
 
 **Plugin Registration:**
 
@@ -950,7 +950,7 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 
 **Objective:** Provide validation capability with standardized errors.
 
-### Package: `@hono-enterprise/validation-plugin`
+### Package: `@setu-ts/validation-plugin`
 
 **Plugin Registration:**
 
@@ -1053,7 +1053,7 @@ const sanitizers = validation.createSanitizer({
 
 **Objective:** Provide exception types and global error handling.
 
-### Package: `@hono-enterprise/exceptions`
+### Package: `@setu-ts/exceptions`
 
 This is a **plain package** (not a plugin) containing exception types and an error handling
 middleware factory.
@@ -1085,7 +1085,7 @@ function internalServerError(message: string, cause?: Error): HttpError;
 **Error Handling Middleware:**
 
 ```typescript
-import { errorHandler } from '@hono-enterprise/exceptions';
+import { errorHandler } from '@setu-ts/exceptions';
 
 app.middleware.add(errorHandler({
   format: 'rfc7807', // or 'default', custom
@@ -1124,7 +1124,7 @@ app.middleware.add(errorHandler({
 
 **Objective:** Provide optional DI container for those who want it.
 
-### Package: `@hono-enterprise/di-plugin`
+### Package: `@setu-ts/di-plugin`
 
 **Plugin Registration:**
 
@@ -1191,7 +1191,7 @@ const userService = container.resolve<UserService>('UserService');
 
 **Objective:** Provide optional decorator system for those who prefer NestJS-style DX.
 
-### Package: `@hono-enterprise/decorator-plugin`
+### Package: `@setu-ts/decorator-plugin`
 
 **Plugin Registration:**
 
@@ -1303,7 +1303,7 @@ interface RouteMetadata {
 
 **Objective:** Provide database capability with ORM adapters.
 
-### Package: `@hono-enterprise/database-plugin`
+### Package: `@setu-ts/database-plugin`
 
 **Plugin Registration:**
 
@@ -1395,7 +1395,7 @@ interface IRepository<Entity, Id = string> {
 
 **Objective:** Provide cache capability with multiple stores.
 
-### Package: `@hono-enterprise/cache-plugin`
+### Package: `@setu-ts/cache-plugin`
 
 **Plugin Registration:**
 
@@ -1413,8 +1413,8 @@ app.register(CachePlugin({
 **Programmatic API:**
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ICacheStore } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICacheStore } from '@setu-ts/common';
 
 const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
 await cache.set('user:123', userData, 3600);
@@ -1425,7 +1425,7 @@ await cache.delete('user:123');
 **Cache Middleware:**
 
 ```typescript
-import { cacheMiddleware } from '@hono-enterprise/cache-plugin';
+import { cacheMiddleware } from '@setu-ts/cache-plugin';
 
 app.router.get('/users/:id', {
   middleware: [cacheMiddleware({ ttlSeconds: 3600, key: (ctx) => `user:${ctx.params.id}` })],
@@ -1470,7 +1470,7 @@ app.router.get('/users/:id', {
 
 **Objective:** Provide event bus capability.
 
-### Package: `@hono-enterprise/events-plugin`
+### Package: `@setu-ts/events-plugin`
 
 **Plugin Registration:**
 
@@ -1542,7 +1542,7 @@ abstract class DomainEvent<T = unknown> {
 
 **Objective:** Provide CQRS capability.
 
-### Package: `@hono-enterprise/cqrs-plugin`
+### Package: `@setu-ts/cqrs-plugin`
 
 **Plugin Registration:**
 
@@ -1617,9 +1617,8 @@ Behaviors are consumer-supplied and composable; no built-in behaviors ship in M1
 
 > Note: the ROADMAP file list included `src/handlers/command-handler.ts` and
 > `src/handlers/query-handler.ts`; these were intentionally omitted (the handler interfaces
-> `ICommandHandler`/`IQueryHandler` are contracts owned by `@hono-enterprise/common`, so plugin
-> handler files would be empty re-export shells). See `plans/archive/milestone-13-cqrs-plugin.md`
-> §C4.
+> `ICommandHandler`/`IQueryHandler` are contracts owned by `@setu-ts/common`, so plugin handler
+> files would be empty re-export shells). See `plans/archive/milestone-13-cqrs-plugin.md` §C4.
 
 ---
 
@@ -1629,7 +1628,7 @@ Behaviors are consumer-supplied and composable; no built-in behaviors ship in M1
 
 > **Status:** Complete. RabbitMQ, NATS, and Kafka brokers deferred to Milestone 14b.
 
-### Package: `@hono-enterprise/messaging-plugin`
+### Package: `@setu-ts/messaging-plugin`
 
 **Plugin Registration:**
 
@@ -1651,7 +1650,7 @@ app.register(MessagingPlugin({
 **Programmatic API:**
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
@@ -1729,7 +1728,7 @@ app.register(EventsMessagingBridge({
 ## Milestone 14b: Messaging Plugin — RabbitMQ, NATS, Kafka Brokers ✅ COMPLETE
 
 **Objective:** Complete the messaging capability by adding the three remaining production brokers to
-the existing `@hono-enterprise/messaging-plugin` package.
+the existing `@setu-ts/messaging-plugin` package.
 
 > **Why this is a separate milestone.** Milestone 14 was deliberately phased ("Redis-first",
 > user-approved) so that every broker it shipped could be exercised against a real transport —
@@ -1739,7 +1738,7 @@ the existing `@hono-enterprise/messaging-plugin` package.
 > backend). Each broker below lands only with the full inject-or-lazy client seam and a guarded
 > real-import test — no stubs.
 
-### Package: `@hono-enterprise/messaging-plugin` (extends the M14 package)
+### Package: `@setu-ts/messaging-plugin` (extends the M14 package)
 
 These brokers implement the same committed `IMessageBroker` contract
 (`packages/common/src/services/messaging.ts`) and the internal `MessageBrokerAdapter` seam
@@ -1789,8 +1788,8 @@ app.register(MessagingPlugin({ broker: 'kafka', brokers: config.get('KAFKA_BROKE
 
 ## Milestone 14c: Messaging Plugin — Brokered Request-Reply ✅ COMPLETE
 
-**Objective:** Add brokered request-reply (RPC) to the existing `@hono-enterprise/messaging-plugin`,
-closing the one NestJS-microservice pattern (`client.send`) that pub/sub alone cannot serve.
+**Objective:** Add brokered request-reply (RPC) to the existing `@setu-ts/messaging-plugin`, closing
+the one NestJS-microservice pattern (`client.send`) that pub/sub alone cannot serve.
 
 > **Why this is a separate milestone.** Mirrors the M14 → M14b and M15 → M15b splits: a pure
 > addition to the existing plugin via the internal broker seam, with a small, flagged widening of
@@ -1801,7 +1800,7 @@ closing the one NestJS-microservice pattern (`client.send`) that pub/sub alone c
 > request body before the pipeline runs, so gRPC is intercepted at the HTTP-adapter seam
 > (`IHttpAdapter.setRpcHandler?`) instead.
 
-### Package: `@hono-enterprise/messaging-plugin` (extends the M14/M14b package)
+### Package: `@setu-ts/messaging-plugin` (extends the M14/M14b package)
 
 `IMessageBroker` gains `request<TReq, TRes>()` and `respond<TReq, TRes>()`. Correlation rides inside
 a message envelope over each broker's existing `publish`/`subscribe` path (not transport headers,
@@ -1840,7 +1839,7 @@ to make Kafka reply-capable, and fix the two defects the generic path caused.
 > those four treat a topic as cheap and per-instance-addressable — which is the actual reason Kafka
 > shipped a throw. No `common` contract change; `IMessageBroker` signatures are untouched.
 
-### Package: `@hono-enterprise/messaging-plugin` (extends M14/M14b/M14c)
+### Package: `@setu-ts/messaging-plugin` (extends M14/M14b/M14c)
 
 `RequestReplyDeps` gains `openInbox`, returning a `ReplyInbox` (`address` + `close`). The four
 existing brokers pass the shared `createTopicInbox` helper and are behaviour-identical.
@@ -1874,7 +1873,7 @@ were never affected).
 
 **Objective:** Provide background job queue capability.
 
-### Package: `@hono-enterprise/queue-plugin`
+### Package: `@setu-ts/queue-plugin`
 
 **Plugin Registration:**
 
@@ -1945,7 +1944,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
 **Objective:** Add RabbitMQ queue adapter with polling via `basicGet` and per-message TTL + DLX for
 delayed re-delivery.
 
-### Package: `@hono-enterprise/queue-plugin`
+### Package: `@setu-ts/queue-plugin`
 
 The `RabbitMqQueue` adapter implements the same
 [`QueueAdapter`](packages/queue-plugin/src/adapters/queue-adapter.ts) transport seam as
@@ -1982,7 +1981,7 @@ ships with **zero npm dependencies**.
 > sub-section below), mirroring the M14 → M14b and M15 → M15b splits, and have since shipped there.
 > Status: complete (PR #35).
 
-### Package: `@hono-enterprise/auth-plugin`
+### Package: `@setu-ts/auth-plugin`
 
 Registers `IJwtService` under `'jwt'`, `IAuthService` under `'authentication'`, and
 `IAuthorizationService` under `'authorization'`.
@@ -1990,7 +1989,7 @@ Registers `IJwtService` under `'jwt'`, `IAuthService` under `'authentication'`, 
 **Plugin Registration:**
 
 ```typescript
-import { authMiddleware, AuthPlugin } from '@hono-enterprise/auth-plugin';
+import { authMiddleware, AuthPlugin } from '@setu-ts/auth-plugin';
 
 app.register(AuthPlugin({
   jwt: { secret: config.get('JWT_SECRET') }, // HS256; use privateKey/publicKey PEMs for RS256
@@ -2004,7 +2003,7 @@ app.middleware.add(authMiddleware());
 **Programmatic API:**
 
 ```typescript
-import type { IAuthService, IJwtService } from '@hono-enterprise/common';
+import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 const auth = ctx.services.get<IAuthService>('authentication');
 const jwt = ctx.services.get<IJwtService>('jwt');
@@ -2079,9 +2078,8 @@ All guards short-circuit (no `next()`) on 401/403; `authMiddleware` always calls
 
 ## Milestone 16b: Auth Plugin — Refresh Tokens & Rate Limiting ✅ COMPLETE
 
-Follow-up to M16, mirroring the M14 → M14b / M15 → M15b splits. No `@hono-enterprise/common`
-contract change was required — refresh tokens are minted with the existing
-`IJwtService.sign({ expiresIn })`.
+Follow-up to M16, mirroring the M14 → M14b / M15 → M15b splits. No `@setu-ts/common` contract change
+was required — refresh tokens are minted with the existing `IJwtService.sign({ expiresIn })`.
 
 - [x] `RefreshTokenService` — a thin layer over `sign({ expiresIn })` plus a pluggable server-side
       token store (`RefreshTokenStore` + `MemoryRefreshTokenStore`); `issue` / `refresh` (rotation)
@@ -2100,7 +2098,7 @@ contract change was required — refresh tokens are minted with the existing
 
 **Objective:** Provide HTTP transport security.
 
-### Package: `@hono-enterprise/http-security-plugin`
+### Package: `@setu-ts/http-security-plugin`
 
 **Plugin Registration:**
 
@@ -2156,7 +2154,7 @@ app.register(HttpSecurityPlugin({
 
 **Objective:** Provide scheduling capability.
 
-### Package: `@hono-enterprise/scheduler-plugin`
+### Package: `@setu-ts/scheduler-plugin`
 
 **Plugin Registration:**
 
@@ -2235,7 +2233,7 @@ ensure only one instance executes a job.
 
 **Objective:** Provide metrics collection and Prometheus endpoint.
 
-### Package: `@hono-enterprise/metrics-plugin`
+### Package: `@setu-ts/metrics-plugin`
 
 **Plugin Registration:**
 
@@ -2313,7 +2311,7 @@ gauge.set(42);
 
 **Objective:** Provide health check endpoints.
 
-### Package: `@hono-enterprise/health-plugin`
+### Package: `@setu-ts/health-plugin`
 
 **Plugin Registration:**
 
@@ -2391,7 +2389,7 @@ health.registerIndicator('external-api', async () => {
 
 **Objective:** Generate OpenAPI docs from route definitions.
 
-### Package: `@hono-enterprise/openapi-plugin`
+### Package: `@setu-ts/openapi-plugin`
 
 **Plugin Registration:**
 
@@ -2470,14 +2468,14 @@ matcher and imports no Hono at all.
 
 > **Why this is a ~2-package change, not a rewrite (coupling audit, branch
 > `docs/roadmap-streaming-ssr`).** The abstraction boundary is clean: **0 of ~20 plugins import
-> `@hono-enterprise/kernel`** — all depend only on `common`; **no plugin touches kernel internals**
+> `@setu-ts/kernel`** — all depend only on `common`; **no plugin touches kernel internals**
 > (`ResponseBuilder`/`route-matcher`/`createRequestContext`) or `IHttpAdapter`. The only coupling
 > past `json`/`text` is `IResponse.snapshot()`, used by exactly two plugins (cache, metrics) — and
 > it is a `common` contract method, so preserving it keeps them unchanged. Requests funnel through a
 > single seam, `#handleRequest(IRequest) → router.match + pipeline`, which is the choke point to
 > redirect through Hono.
 
-### Package: `@hono-enterprise/kernel` (+ `jsr:@hono/hono`)
+### Package: `@setu-ts/kernel` (+ `jsr:@hono/hono`)
 
 **De-risking constraint — preserve every `common` contract exactly.** `IRequestContext`, `IResponse`
 (incl. `snapshot()`), `IRouterApi`, `MiddlewareFunction`/`IMiddleware`, and the
@@ -2540,7 +2538,7 @@ socket-based adapters (M41, formerly M39) structurally cannot. **Depends on M22.
 > `createServer((IRequest) => IResponse)` to a web-standard `fetch` entry — safe because **no plugin
 > references `IHttpAdapter`/`HTTP_ADAPTER`** (only kernel + runtime do).
 
-### Packages: `@hono-enterprise/common`, `@hono-enterprise/runtime`
+### Packages: `@setu-ts/common`, `@setu-ts/runtime`
 
 **Tasks:**
 
@@ -2580,7 +2578,7 @@ socket-based adapters (M41, formerly M39) structurally cannot. **Depends on M22.
 (`withSpan`) plus a request-span middleware that wraps every inbound HTTP request in a server span
 with W3C `traceparent`/`tracestate` propagation.
 
-### Package: `@hono-enterprise/telemetry-plugin`
+### Package: `@setu-ts/telemetry-plugin`
 
 **Plugin Registration:**
 
@@ -2642,8 +2640,7 @@ await telemetry.withSpan('process-order', async (span) => {
 
 ## Milestone 24b: Telemetry Plugin — Auto-Instrumentation
 
-**Objective:** Add runtime-gated auto-instrumentation packages to
-`@hono-enterprise/telemetry-plugin`.
+**Objective:** Add runtime-gated auto-instrumentation packages to `@setu-ts/telemetry-plugin`.
 
 This milestone extends M24 with automatic instrumentation of HTTP clients, database drivers, and
 message brokers behind the same inject-or-lazy `TracerHost` seam that M24 established.
@@ -2676,7 +2673,7 @@ message brokers behind the same inject-or-lazy `TracerHost` seam that M24 establ
 whatever option shape M24b lands becomes what the M35 SDK / M36 microservice-starter `telemetry:`
 config block maps onto — so M24b must treat the shape as a stable public contract, not a draft.
 
-### Package: `@hono-enterprise/telemetry-plugin` (extends M24)
+### Package: `@setu-ts/telemetry-plugin` (extends M24)
 
 **Implementation files (added to the M24 package):**
 
@@ -2770,7 +2767,7 @@ telemetry plugin, mirroring the sub-milestone convention (16b, 24b).
 > `EnvProvider` reads env through `IRuntimeServices`, not `process.env`, so it resolves Workers/Deno
 > env bindings too.
 
-### Package: `@hono-enterprise/secrets-plugin`
+### Package: `@setu-ts/secrets-plugin`
 
 **Plugin Registration:**
 
@@ -2837,7 +2834,7 @@ await secrets.rotate('database/password', newPassword);
 > FS) is unavailable there and must be documented as a Node/Deno/Bun-only constraint;
 > `DatabaseAuditStorage` and `LogAuditStorage` are the runtime-portable defaults.
 
-### Package: `@hono-enterprise/audit-plugin`
+### Package: `@setu-ts/audit-plugin`
 
 **Plugin Registration:**
 
@@ -2899,7 +2896,7 @@ await audit.log({
 
 **Objective:** Provide resilience patterns.
 
-### Package: `@hono-enterprise/resilience-plugin`
+### Package: `@setu-ts/resilience-plugin`
 
 **Plugin Registration:**
 
@@ -2980,7 +2977,7 @@ an inline policy object; a `true` with no configured default throws at `wrap` ti
 > and the upload middleware must account for the fetch model's buffered request body
 > (`shared/fetch-mapping.ts` pre-reads the body into an `ArrayBuffer`).
 
-### Package: `@hono-enterprise/storage-plugin`
+### Package: `@setu-ts/storage-plugin`
 
 **Plugin Registration:**
 
@@ -3061,7 +3058,7 @@ app.router.post('/upload', {
 > Mailgun) are the Workers-portable path. Clients are injected or lazily imported per AI_GUIDELINES
 > §12.2 (no Node-only mail SDK as a hard dep).
 
-### Package: `@hono-enterprise/mail-plugin`
+### Package: `@setu-ts/mail-plugin`
 
 **Plugin Registration:**
 
@@ -3134,7 +3131,7 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 > portable to CF Workers; the one exception is the email channel when it delegates to M29's
 > `SmtpProvider` (SMTP is not available on Workers — see M29).
 
-### Package: `@hono-enterprise/notification-plugin`
+### Package: `@setu-ts/notification-plugin`
 
 **Plugin Registration:**
 
@@ -3215,7 +3212,7 @@ FCM HTTP v1 and service-account OAuth2.
 > could never succeed against a live project — the `POST /fcm/send` endpoint it targets was switched
 > off in 2024 — so this is a defect repair, not a feature.
 
-### Package: `@hono-enterprise/notification-plugin` (extends M30)
+### Package: `@setu-ts/notification-plugin` (extends M30)
 
 `FcmProvider` posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted
 from a service account: an RS256 JWT assertion signed with `runtime.subtle` and exchanged at
@@ -3247,7 +3244,7 @@ covers sourcing tokens from a GCP metadata server or an external key holder inst
 
 **Objective:** Provide feature flag capability.
 
-### Package: `@hono-enterprise/feature-flags-plugin`
+### Package: `@setu-ts/feature-flags-plugin`
 
 **Plugin Registration:**
 
@@ -3273,7 +3270,7 @@ if (flags.isEnabled('new-dashboard', { userId: '123' })) {
 }
 
 // Middleware (free-function guard — IFeatureFlags has no middleware method)
-import { createFlagGuard } from '@hono-enterprise/feature-flags-plugin';
+import { createFlagGuard } from '@setu-ts/feature-flags-plugin';
 
 app.router.get('/dashboard', {
   middleware: [createFlagGuard('new-dashboard', { fallback: '/old-dashboard' })],
@@ -3326,7 +3323,7 @@ app.router.get('/dashboard', {
 
 **Objective:** Provide multi-tenancy support.
 
-### Package: `@hono-enterprise/multi-tenancy-plugin`
+### Package: `@setu-ts/multi-tenancy-plugin`
 
 **Plugin Registration:**
 
@@ -3409,12 +3406,12 @@ const users = await userRepo.findAll(); // Scoped to current tenant
 > utilities exist to catch. Add a helper to assert streaming responses (read the `Response` body
 > incrementally).
 
-### Package: `@hono-enterprise/testing`
+### Package: `@setu-ts/testing`
 
 **Test Application Factory:**
 
 ```typescript
-import { createTestApp } from '@hono-enterprise/testing';
+import { createTestApp } from '@setu-ts/testing';
 
 const testApp = await createTestApp({
   plugins: [
@@ -3492,38 +3489,38 @@ const testApp = await createTestApp({
 > `wrangler.toml`, since M23 made Workers a real target. Generated Node/Deno/Bun apps use the M23
 > Hono serve entry; the `new`/scaffold templates must not emit the deleted socket-adapter model.
 
-### Package: `@hono-enterprise/cli`
+### Package: `@setu-ts/cli`
 
 **Commands:**
 
-The installed binary is **`honoe`** (`deno install -g -n honoe`), not `hono-enterprise`.
+The installed binary is **`setu`** (`deno install -g -n setu`), not `setu-ts`.
 
 ```
-honoe new <project-name> [--runtime deno|node|bun|cloudflare-workers]
-honoe generate plugin <name>
-honoe generate controller <name>
-honoe generate service <name>
-honoe generate route <name>
-honoe generate middleware <name>
-honoe generate guard <name>              # requires auth-plugin
-honoe generate health-indicator <name>   # requires health-plugin
-honoe generate metric <name>             # requires metrics-plugin
-honoe generate command-handler <name>    # requires cqrs-plugin
-honoe generate query-handler <name>      # requires cqrs-plugin
-honoe generate event-handler <name>      # requires events-plugin
-honoe generate job <name>
-honoe generate migration <name>          # requires database-plugin
-honoe generate custom <schematic> <name> # from .hono-enterprise/schematics/
+setu new <project-name> [--runtime deno|node|bun|cloudflare-workers]
+setu generate plugin <name>
+setu generate controller <name>
+setu generate service <name>
+setu generate route <name>
+setu generate middleware <name>
+setu generate guard <name>              # requires auth-plugin
+setu generate health-indicator <name>   # requires health-plugin
+setu generate metric <name>             # requires metrics-plugin
+setu generate command-handler <name>    # requires cqrs-plugin
+setu generate query-handler <name>      # requires cqrs-plugin
+setu generate event-handler <name>      # requires events-plugin
+setu generate job <name>
+setu generate migration <name>          # requires database-plugin
+setu generate custom <schematic> <name> # from .setu-ts/schematics/
 ```
 
 Aliases: `n` for `new`, `g` for `generate`. Global flags: `--dry-run` (print the plan, write
 nothing), `--dir <path>` (operate on that directory instead of the CWD), `--help`/`-h`,
 `--version`/`-v`.
 
-**Milestone 34b adds** `honoe new --template rest|microservice`, a `honoe commands` verb, and
-dispatch of plugin-registered commands (`honoe db:migrate …`) — see the M34b section below.
+**Milestone 34b adds** `setu new --template rest|microservice`, a `setu commands` verb, and dispatch
+of plugin-registered commands (`setu db:migrate …`) — see the M34b section below.
 
-**Scaffolding Is Deno-First:** `honoe new` generates a Deno project (`deno.json` with tasks, JSR
+**Scaffolding Is Deno-First:** `setu new` generates a Deno project (`deno.json` with tasks, JSR
 imports). A `--runtime node|bun` flag generates an npm-based variant that consumes the packages via
 JSR's npm compatibility layer (`package.json` + `.npmrc` mapping the `@jsr` scope +
 `tsconfig.json`); `--runtime cloudflare-workers` generates the `fetch` entry plus a `wrangler.toml`
@@ -3536,7 +3533,7 @@ and no `listen`.
 - If `cqrs-plugin` installed → offer command/query handler generators
 - If `events-plugin` installed → offer event handler generator
 
-**Custom Schematics:** Projects can define custom schematics in `.hono-enterprise/schematics/`.
+**Custom Schematics:** Projects can define custom schematics in `.setu-ts/schematics/`.
 
 **Implementation Files:**
 
@@ -3584,26 +3581,26 @@ and no `listen`.
 
 ## Milestone 34b: CLI — Templates and Plugin Commands ✅ COMPLETE
 
-**Objective:** Ship the two capabilities M34 deferred, as pure additions to the `honoe` binary.
+**Objective:** Ship the two capabilities M34 deferred, as pure additions to the `setu` binary.
 
-### Package: `@hono-enterprise/cli`
+### Package: `@setu-ts/cli`
 
 **Commands:**
 
 ```
-honoe new <project-name> --template rest|microservice
-honoe commands                      # list what this application's plugins provide
-honoe <plugin>:<command> [args...]  # run a plugin-registered command
+setu new <project-name> --template rest|microservice
+setu commands                      # list what this application's plugins provide
+setu <plugin>:<command> [args...]  # run a plugin-registered command
 ```
 
-**The `honoe.config.ts` seam.** Every scaffolded project — templated or not — exports `createApp()`
-from `honoe.config.ts`. `main.ts` imports it to start the server; the CLI imports it to discover
+**The `setu.config.ts` seam.** Every scaffolded project — templated or not — exports `createApp()`
+from `setu.config.ts`. `main.ts` imports it to start the server; the CLI imports it to discover
 plugin commands. The factory does NOT start the application, because M34's `main.ts` called
 `app.start({ port })` at module scope and importing that would bind a socket.
 
-**Templates emit inline wiring**, not `@hono-enterprise/*-starter` imports: those packages export
-nothing today (Milestone 36 owns them), so a generated starter import would not compile. The two
-approaches are complementary — M36 ships `createRestApp()` as a library, this ships editable source.
+**Templates emit inline wiring**, not `@setu-ts/*-starter` imports: those packages export nothing
+today (Milestone 36 owns them), so a generated starter import would not compile. The two approaches
+are complementary — M36 ships `createRestApp()` as a library, this ships editable source.
 
 | Template       | Plugin set                                                                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -3615,7 +3612,7 @@ approaches are complementary — M36 ships `createRestApp()` as a library, this 
 sockets. `database-plugin` and `auth-plugin` are excluded from `rest` despite M36's list — both need
 credentials before they do anything.
 
-**Plugin commands** are read by loading `honoe.config.ts` and calling `start()` with **no port** —
+**Plugin commands** are read by loading `setu.config.ts` and calling `start()` with **no port** —
 the kernel skips `listen` without one, so registration happens with no socket bound. Startup hooks
 DO run (a database plugin will connect), so teardown is guaranteed in a `finally`. Built-in verbs
 match first and never boot the project; two plugins registering one name is refused rather than
@@ -3641,9 +3638,9 @@ resolved by load order.
 ### Deliverables
 
 - [x] `--template rest|microservice`
-- [x] `honoe.config.ts` application seam
+- [x] `setu.config.ts` application seam
 - [x] Plugin command discovery and dispatch
-- [x] `honoe commands` listing
+- [x] `setu commands` listing
 - [x] Full test coverage
 
 ---
@@ -3652,7 +3649,7 @@ resolved by load order.
 
 **Objective:** Provide client SDK for external consumers.
 
-### Package: `@hono-enterprise/sdk`
+### Package: `@setu-ts/sdk`
 
 **Features:**
 
@@ -3747,13 +3744,13 @@ resolved by load order.
 > bundled plugins are Workers-portable — the full-stack starter pulls in Node-oriented pieces (local
 > Storage, SMTP Mail, timer-based Scheduler) that degrade or are unavailable on Workers.
 
-### Packages: `@hono-enterprise/starter-*`
+### Packages: `@setu-ts/starter-*`
 
 **Starters:**
 
 1. **REST Starter**
    ```typescript
-   import { createRestApp } from '@hono-enterprise/rest-starter';
+   import { createRestApp } from '@setu-ts/rest-starter';
    const app = await createRestApp({ port: 3000 });
    ```
    Includes: Runtime, Logger, Config, Validation, Database, Auth, OpenApi, Health, Metrics,
@@ -3761,7 +3758,7 @@ resolved by load order.
 
 2. **Microservice Starter**
    ```typescript
-   import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
+   import { createMicroserviceApp } from '@setu-ts/microservice-starter';
    const app = await createMicroserviceApp({ port: 3000 });
    ```
    Includes: REST Starter + Messaging, Queue, Telemetry, Resilience
@@ -3779,8 +3776,8 @@ sensible defaults.
 > alias, per-feature Zod schemas, `.server.ts` convention — belongs to the full-stack story, not to
 > the plugin. **Delivered in M36c, and by the CLI rather than by the starter package**: a starter is
 > a JSR library and cannot write `app/routes.ts` into a user's project, so ownership is split —
-> `honoe new --template full-stack` owns the FILE LAYOUT, and `full-stack-starter` owns the PLUGIN
-> COMPOSITION that the generated `honoe.config.ts` calls. Adapt the reference skeleton from the
+> `setu new --template full-stack` owns the FILE LAYOUT, and `full-stack-starter` owns the PLUGIN
+> COMPOSITION that the generated `setu.config.ts` calls. Adapt the reference skeleton from the
 > user's `B2BAdmin` project (`/home/dkpaul91/Projects/B2BAdmin`, a standalone RR7 framework-mode
 > app). **Critical rule when adapting:** B2BAdmin re-implements cross-cutting concerns in-frontend
 > (SSE, session/auth, CSRF, telemetry, secrets/config, HTTP client) that this framework already
@@ -3863,7 +3860,7 @@ defect that blocked a real cross-service messaging proof.
 **Objective:** the framework's full-stack story ships in three places and has **no runnable
 example**. `packages/react-router-plugin` (M44) embeds React Router 8 in framework mode over a
 kernel catch-all; `packages/starters/full-stack-starter` (M36) composes it as `createFullStackApp`;
-and `honoe new --template full-stack` (M36c) scaffolds the `routes → features → services → models`
+and `setu new --template full-stack` (M36c) scaffolds the `routes → features → services → models`
 skeleton. A reader can run none of it. Verified at the time of writing: 13 directories under
 `apps/`, none referencing `react-router` in source.
 
@@ -3894,7 +3891,7 @@ framed when this milestone was opened:
 
 **Decided: a third option, measured.** Both framings assume the real build needs the Node toolchain.
 It does not — Deno's own npm support runs the identical Vite build. Measured against a project
-scaffolded by `honoe new --template full-stack` and repointed at the workspace:
+scaffolded by `setu new --template full-stack` and repointed at the workspace:
 `deno install
 --allow-scripts` took 4 s and the build 0.6 s, after which the app served SSR HTML and
 completed a CSRF-protected login. So the smoke performs the **real** build (`deno install` + the
@@ -4077,7 +4074,7 @@ M51b's npm-client interop suite for `apps/graphql-demo` is manual.
 > `RuntimePlugin`, and wires `app.start({ port })` to bind a real socket. Cloudflare Workers is
 > explicitly excluded (no `listen(port)` model).
 
-### Package: `@hono-enterprise/runtime` (continued)
+### Package: `@setu-ts/runtime` (continued)
 
 **Tasks:**
 
@@ -4131,7 +4128,7 @@ it.
 > - **Cloudflare Workers is now a real target** (added in M23) and must be in the streaming test
 >   matrix and deliverables.
 
-### Packages: `@hono-enterprise/common`, `@hono-enterprise/kernel`, `@hono-enterprise/runtime`
+### Packages: `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`
 
 **Contract additions (`common`):**
 
@@ -4206,7 +4203,7 @@ it.
 **Objective:** Provide Server-Sent Events (`text/event-stream`) as a first-class capability, built
 entirely on the M42 streaming primitive. **Depends on M42.**
 
-### Package: `@hono-enterprise/sse-plugin`
+### Package: `@setu-ts/sse-plugin`
 
 Registers an `ISseService` under a new `CAPABILITIES.SSE = 'sse'` token (added to `common`, with the
 interface documented in PUBLIC_API.md — a token resolves to a documented `common` interface).
@@ -4320,7 +4317,7 @@ a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M4
 > app/deploy concern, not an M44 concern, but noted so M44 does not assume multi-destination tracing
 > exists.
 
-### Package: `@hono-enterprise/react-router-plugin`
+### Package: `@setu-ts/react-router-plugin`
 
 Registers an `ISsrService` under a new `CAPABILITIES.SSR = 'ssr'` token (added to `common`,
 documented in PUBLIC_API.md).
@@ -4417,7 +4414,7 @@ a thread boundary — and inputs/outputs travel by structured clone.
 > offload, and it fits the existing capability/adapter model cleanly as an **optional** plugin. The
 > kernel, the service registry, and every other plugin stay single-threaded and untouched.
 
-### Package: `@hono-enterprise/worker-pool-plugin`
+### Package: `@setu-ts/worker-pool-plugin`
 
 Registers a `WorkerPoolService` (`IWorkerPool`) under `CAPABILITIES.WORKER_POOL`. One `TaskPool` per
 task-module specifier, created lazily; workers spawn on demand up to the pool size, idle workers are
@@ -4438,7 +4435,7 @@ precedent), with `IWorkerHandle`. Implemented by the runtime adapters:
 - **Cloudflare Workers** — omitted (no threads on the edge). `run()` then throws
   `WorkerPoolUnavailableError`; the plugin still registers, so one codebase deploys everywhere.
 
-### Worker-side helper: `@hono-enterprise/runtime/worker`
+### Worker-side helper: `@setu-ts/runtime/worker`
 
 A new runtime subpath whose sole export is `defineWorkerTask(fn)` — the only framework code that
 runs inside a worker. Application task modules call it at top level; it detects the worker channel
@@ -4477,7 +4474,7 @@ runtime-specific socket API.
 > the native request and owns the runtime's serve loop (AI_GUIDELINES §4.3). That is a single,
 > flagged widening of `IHttpAdapter`, not a new server.
 
-### Package: `@hono-enterprise/websocket-plugin`
+### Package: `@setu-ts/websocket-plugin`
 
 Registers a `WebSocketService` (`IWebSocketService`) under `CAPABILITIES.WEBSOCKET`. The service
 owns a path→handlers route table compiled once at registration, a connection registry, and named
@@ -4587,10 +4584,10 @@ synchronous `isEnabled`. The bridge is `LDFlagsState.getFlagValue`, the SDK's on
   `CAPABILITIES.REALTIME_BACKPLANE` token, and the pure `encodeFrameData` / `decodeFrameData` codec
   (in `common` because three packages need the identical wire shape and no plugin may import
   another).
-- **New package `@hono-enterprise/realtime-backplane-plugin`** with four transports: `'memory'`
-  (default, a real single-process bus), `'messaging'` (over `CAPABILITIES.MESSAGING`, reusing all
-  five existing brokers with no new dependency), `'redis'` (pub/sub over inject-or-lazy `ioredis`,
-  two connections), and `'custom'`.
+- **New package `@setu-ts/realtime-backplane-plugin`** with four transports: `'memory'` (default, a
+  real single-process bus), `'messaging'` (over `CAPABILITIES.MESSAGING`, reusing all five existing
+  brokers with no new dependency), `'redis'` (pub/sub over inject-or-lazy `ioredis`, two
+  connections), and `'custom'`.
 - `websocket-plugin` and `sse-plugin` resolve the token **optionally**; both `register()` become
   async to await their subscription, and both unsubscribe in `onClose`.
 
@@ -4692,7 +4689,7 @@ consulting the container, so a `@Controller` — which carries no `@Injectable` 
 path even in a DI application, where its dependencies live in the container, and construction failed
 outright. The guard contradicted the function's own documented behavior.
 
-### C. `honoe new --template nest`
+### C. `setu new --template nest`
 
 A third template beside `rest` and `microservice`: the REST set plus `DiPlugin`, an `@Injectable`
 service, and a `@Controller` whose dependency is declared with parameter-level `@Inject`. Wiring
@@ -4733,7 +4730,7 @@ existing wiring renders byte-identically.
 **Not this milestone:** config-key indirection and the full-stack React Router app skeleton adapted
 from B2BAdmin — both **M36c**. The skeleton is deferred on scope alone now: M48 closed the
 session/CSRF capability gap that also blocked it. Example applications under `apps/*` remain M37; a
-`honoe new --starter` path remains deferred. (M36c **rejected** `urlFromConfig` / `secretFromConfig`
+`setu new --starter` path remains deferred. (M36c **rejected** `urlFromConfig` / `secretFromConfig`
 rather than implementing them, and delivered `createFullStackAppFromConfig` instead — see that
 section for the reasoning.)
 
@@ -4750,7 +4747,7 @@ app**, so the full-stack story ended at "a plugin exists". This milestone ships 
 scaffoldable skeleton, with its cross-cutting `lib/` rewired onto the shipped plugins rather than
 reimplemented.
 
-### A. `honoe new --template full-stack`
+### A. `setu new --template full-stack`
 
 A React Router 8 framework-mode skeleton: the `routes → features → services → models` layering,
 `flatRoutes` `_app`/`_auth` layout groups each wrapped in their own layout, the `~/*` alias, the
@@ -4758,7 +4755,7 @@ A React Router 8 framework-mode skeleton: the `routes → features → services 
 
 Ownership is split because it has to be (see the M36 note): a starter is a JSR **library** and
 cannot write files into a user's project, so the **CLI owns the file layout** and the **starter owns
-the plugin composition** the generated `honoe.config.ts` calls.
+the plugin composition** the generated `setu.config.ts` calls.
 
 **The cross-cutting rewiring** — the deliverable that distinguishes this from
 `npx create-react-router`:
@@ -4770,7 +4767,7 @@ the plugin composition** the generated `honoe.config.ts` calls.
 | `lib/csrf.server.ts`                  | M48 `csrfFormMiddleware` + `getCsrfToken`                 |
 | `lib/sse.server.ts`                   | `CAPABILITIES.SSE` (M43), via the M36b `realtime.sse` arm |
 | `lib/kv.server.ts`                    | `CAPABILITIES.SECRETS` (M25)                              |
-| `lib/http/xior.server.ts`             | `@hono-enterprise/sdk` (M35)                              |
+| `lib/http/xior.server.ts`             | `@setu-ts/sdk` (M35)                                      |
 | `lib/appinsights-bootstrap.server.ts` | `CAPABILITIES.TELEMETRY` (M24)                            |
 | `lib/service-logger.server.ts`        | `CAPABILITIES.LOGGER`                                     |
 | `lib/route-guards.server.ts`          | `auth-plugin` guard factories + `userContext`             |
@@ -4824,7 +4821,7 @@ configuration a second time.
 
 **Not this milestone:** migrating B2BAdmin itself off `@react-router/serve` (a manual validation
 exercise — it edits a repository CI cannot gate); example applications under `apps/*` — M37; a
-general `honoe new --starter` flag for the other three templates; secrets resolved before startup
+general `setu new --starter` flag for the other three templates; secrets resolved before startup
 (**rejected**, see above).
 
 ---
@@ -5033,11 +5030,11 @@ auto-`unimplemented` surface.
 - **Deno does not expose HTTP/2 response trailers**, so native `application/grpc` status signaling
   is limited there. Connect-JSON and gRPC-Web work on every runtime.
 
-**Out of scope:** a `honoe generate grpc-service` schematic; codegen of the application's own
+**Out of scope:** a `setu generate grpc-service` schematic; codegen of the application's own
 `.proto` files (owned by `buf` in the app's toolchain); auth / telemetry / metrics / multi-tenancy
 bridging into the RPC call path (the interceptor runs before the kernel pipeline);
 `grpc.health.v1.Health/List` and `/Watch`; `grpc.reflection.v1alpha`; exposing the negotiated HTTP
-version through `IHttpAdapter`; and the browser client, which belongs to `@hono-enterprise/sdk`.
+version through `IHttpAdapter`; and the browser client, which belongs to `@setu-ts/sdk`.
 
 ---
 
@@ -5133,7 +5130,7 @@ server side — has no way to turn a logical service name into an address.
 **Package:** `packages/cli`
 
 **Objective:** M50 shipped the plugin; nothing wired it. A project scaffolded with
-`honoe new --template microservice` got the four plugins a service needs to talk to others —
+`setu new --template microservice` got the four plugins a service needs to talk to others —
 messaging, queues, resilience, telemetry — and then hard-coded the URLs of the services it called.
 This adds `ServiceDiscoveryPlugin` to that one template.
 
@@ -5169,7 +5166,7 @@ was verified to discriminate by breaking the string and watching it fail.
 
 - A `serviceDiscovery` arm on `MicroserviceStarterOptions` — non-breaking, deferred.
 - An example application resolving against a live Consul or Kubernetes — M37.
-- A `honoe generate` schematic for a discovery-backed client — unowned.
+- A `setu generate` schematic for a discovery-backed client — unowned.
 
 ---
 
@@ -5572,7 +5569,7 @@ isolate loses both together. The socket therefore opens lazily and reopens after
 
 ## Plugin-First vs NestJS Comparison
 
-| Aspect           | NestJS          | Hono Enterprise (Plugin-First)       |
+| Aspect           | NestJS          | Setu-TS (Plugin-First)               |
 | ---------------- | --------------- | ------------------------------------ |
 | Architecture     | Module-based    | Plugin-based                         |
 | DI               | Required        | Optional (DiPlugin)                  |
@@ -5608,8 +5605,8 @@ stateless Origin/Referer check in `http-security-plugin` structurally cannot sat
 ### Minimal (Just Kernel)
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication({
   plugins: [RuntimePlugin()],
@@ -5623,10 +5620,10 @@ await app.start({ port: 3000 });
 ### With Logging and Config
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
 
 const app = createApplication({
   plugins: [
@@ -5648,9 +5645,9 @@ await app.start({ port: 3000 });
 ### With REST Starter
 
 ```typescript
-import { createRestApp } from '@hono-enterprise/rest-starter';
-import { CAPABILITIES, type IDatabase } from '@hono-enterprise/common';
-import { requireAuth } from '@hono-enterprise/auth-plugin';
+import { createRestApp } from '@setu-ts/rest-starter';
+import { CAPABILITIES, type IDatabase } from '@setu-ts/common';
+import { requireAuth } from '@setu-ts/auth-plugin';
 
 const app = createRestApp({
   database: { type: 'prisma', url: Deno.env.get('DATABASE_URL')! },
@@ -5672,7 +5669,7 @@ has registered anything. That is why no plugin option carries a config-key short
 closes the ordering gap once, for every option:
 
 ```typescript
-import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
   database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },

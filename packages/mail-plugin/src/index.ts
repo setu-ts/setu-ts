@@ -97,7 +97,7 @@ export type { ISesClient } from './interfaces/index.ts';
 /** A `fetch`-shaped function for the SendGrid provider. */
 export type { IMailHttp } from './interfaces/index.ts';
 
-// ── Re-exported from @hono-enterprise/common ────────────────────────────────
+// ── Re-exported from @setu-ts/common ────────────────────────────────
 
 /** The committed mail contract (`send`, `sendTemplate`) and message shape. */
-export type { IMailer, MailMessage } from '@hono-enterprise/common';
+export type { IMailer, MailMessage } from '@setu-ts/common';

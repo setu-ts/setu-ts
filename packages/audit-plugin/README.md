@@ -1,9 +1,9 @@
-# @hono-enterprise/audit-plugin
+# @setu-ts/audit-plugin
 
-Immutable audit-trail logging for Hono Enterprise. Registers an `IAuditLogger` under
-`CAPABILITIES.AUDIT`, backed by a pluggable storage backend. Each entry is stamped with an
-internally assigned `id` (`runtime.uuid()`) and wall-clock `timestamp` (`runtime.now()`),
-deep-frozen for immutability, then appended to the selected storage.
+Immutable audit-trail logging for Setu-TS. Registers an `IAuditLogger` under `CAPABILITIES.AUDIT`,
+backed by a pluggable storage backend. Each entry is stamped with an internally assigned `id`
+(`runtime.uuid()`) and wall-clock `timestamp` (`runtime.now()`), deep-frozen for immutability, then
+appended to the selected storage.
 
 Storage backends:
 
@@ -22,7 +22,7 @@ capability token.
 ## Installation
 
 ```typescript
-import { AuditPlugin } from '@hono-enterprise/audit-plugin';
+import { AuditPlugin } from '@setu-ts/audit-plugin';
 ```
 
 The `memory`, `log`, and `file` backends need nothing beyond the framework. The `database` backend
@@ -32,11 +32,11 @@ needs an injected client that adapts your driver to the `IAuditDbClient` shape (
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { AuditPlugin } from '@hono-enterprise/audit-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IAuditLogger } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuditPlugin } from '@setu-ts/audit-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuditLogger } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [

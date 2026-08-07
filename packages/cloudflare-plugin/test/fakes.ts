@@ -21,7 +21,7 @@ import type {
   KvPutOptions,
   QueueSendOptions,
 } from '../src/index.ts';
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 
 /** A recorded `put` call, so a test can assert what reached the platform. */
 export interface RecordedPut {

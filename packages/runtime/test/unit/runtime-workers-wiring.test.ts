@@ -5,7 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IWorkerHandle, IWorkerHost } from '@hono-enterprise/common';
+import type { IWorkerHandle, IWorkerHost } from '@setu-ts/common';
 import { createDenoRuntimeServices } from '../../src/adapters/deno/deno-runtime.ts';
 import type { DenoHost } from '../../src/adapters/deno/deno-runtime.ts';
 import { createBunRuntimeServices } from '../../src/adapters/bun/bun-runtime.ts';

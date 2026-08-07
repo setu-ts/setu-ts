@@ -5,14 +5,14 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   IAuthService,
   IJwtService,
   IPluginContext,
   IPrincipal,
   IRequest,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /**

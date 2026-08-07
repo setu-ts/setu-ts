@@ -11,7 +11,7 @@ import type {
   ITenantResolver,
   MiddlewareFunction,
   NextFunction,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`

@@ -4,7 +4,7 @@
     "smoke": "deno run -A smoke.ts"
   },
   "imports": {
-    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
-    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts"
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts"
   }
 }

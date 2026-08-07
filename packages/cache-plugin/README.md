@@ -1,4 +1,4 @@
-# @hono-enterprise/cache-plugin
+# @setu-ts/cache-plugin
 
 Caching with pluggable stores. Registers an `ICacheStore` under `CAPABILITIES.CACHE` (`'cache'`).
 
@@ -8,16 +8,16 @@ Three stores ship: `MemoryStore` (LRU with per-entry TTL, zero-dependency defaul
 ## Installation
 
 ```typescript
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
+import { CachePlugin } from '@setu-ts/cache-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { cacheMiddleware, CachePlugin } from '@hono-enterprise/cache-plugin';
-import { CAPABILITIES, type ICacheStore } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -52,4 +52,4 @@ pass straight through.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

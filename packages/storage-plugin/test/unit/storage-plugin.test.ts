@@ -9,8 +9,8 @@ import { expect } from '@std/expect';
 import { createProvider, StoragePlugin } from '../../src/plugin/storage-plugin.ts';
 import { MemoryProvider } from '../../src/providers/memory-provider.ts';
 import type { StorageProvider } from '../../src/interfaces/index.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 
 /** Build a minimal fake runtime for createProvider tests. */

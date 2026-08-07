@@ -1,7 +1,7 @@
 /**
- * @module @hono-enterprise/testing
+ * @module @setu-ts/testing
  *
- * First-party testing utilities for the Hono Enterprise framework:
+ * First-party testing utilities for the Setu-TS framework:
  * a test application factory, mock-plugin builder, request injector,
  * mock request context, service registry double, response builder,
  * fixture manager, and streaming-response reader.
@@ -24,5 +24,5 @@ export { MockServiceRegistry } from './mock-registry.ts';
 
 export { FixtureManager } from './fixtures/fixture-manager.ts';
 
-// Re-exports from @hono-enterprise/kernel for convenience
-export type { IKernelApplication, InjectRequest, InjectResponse } from '@hono-enterprise/kernel';
+// Re-exports from @setu-ts/kernel for convenience
+export type { IKernelApplication, InjectRequest, InjectResponse } from '@setu-ts/kernel';

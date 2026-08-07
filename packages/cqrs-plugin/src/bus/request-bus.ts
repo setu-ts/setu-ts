@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { CqrsRequest, IPipelineBehavior } from '@hono-enterprise/common';
+import type { CqrsRequest, IPipelineBehavior } from '@setu-ts/common';
 import { composePipeline } from '../behaviors/pipeline-behavior.ts';
 import { HandlerNotFoundError } from '../errors/handler-not-found.ts';
 

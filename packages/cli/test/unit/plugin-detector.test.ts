@@ -8,8 +8,8 @@ describe('detectPlugins', () => {
     const fs = createFakeFs({
       '/app/deno.json': JSON.stringify({
         imports: {
-          '@hono-enterprise/kernel': 'jsr:@hono-enterprise/kernel@^0.1.0-alpha.1',
-          '@hono-enterprise/auth-plugin': 'jsr:@hono-enterprise/auth-plugin@^0.1.0-alpha.1',
+          '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^0.1.0-alpha.1',
+          '@setu-ts/auth-plugin': 'jsr:@setu-ts/auth-plugin@^0.1.0-alpha.1',
           '@std/expect': 'jsr:@std/expect@^1',
         },
       }),
@@ -21,8 +21,8 @@ describe('detectPlugins', () => {
   it('reads dependencies and devDependencies of an npm project', async () => {
     const fs = createFakeFs({
       '/app/package.json': JSON.stringify({
-        dependencies: { '@hono-enterprise/kernel': '*', hono: '^4' },
-        devDependencies: { '@hono-enterprise/testing': '*' },
+        dependencies: { '@setu-ts/kernel': '*', hono: '^4' },
+        devDependencies: { '@setu-ts/testing': '*' },
       }),
     });
     const plugins = await detectPlugins(fs, '/app');
@@ -33,7 +33,7 @@ describe('detectPlugins', () => {
     const fs = createFakeFs({
       '/app/deno.json': JSON.stringify({ imports: { '@std/expect': 'jsr:@std/expect@^1' } }),
       '/app/package.json': JSON.stringify({
-        dependencies: { '@hono-enterprise/cqrs-plugin': '*' },
+        dependencies: { '@setu-ts/cqrs-plugin': '*' },
       }),
     });
     expect([...await detectPlugins(fs, '/app')]).toEqual(['cqrs-plugin']);
@@ -70,9 +70,9 @@ describe('detectPlugins', () => {
     const fs = createFakeFs({
       '/app/deno.json': JSON.stringify({
         imports: {
-          '@hono-enterprise/runtime/worker': 'jsr:@hono-enterprise/runtime@^0.1.0-alpha.1/worker',
-          '@hono-enterprise/': 'jsr:@hono-enterprise/',
-          '@hono-enterprise/cache-plugin': 'jsr:@hono-enterprise/cache-plugin@^0.1.0-alpha.1',
+          '@setu-ts/runtime/worker': 'jsr:@setu-ts/runtime@^0.1.0-alpha.1/worker',
+          '@setu-ts/': 'jsr:@setu-ts/',
+          '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.1.0-alpha.1',
         },
       }),
     });

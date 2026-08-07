@@ -7,8 +7,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { NoopTelemetryService, TelemetryService } from '../../src/services/telemetry-service.ts';
-import type { ISpan, ITelemetryService, SpanOptions } from '@hono-enterprise/common';
-import { TELEMETRY_CONTEXT_OPAQUE } from '@hono-enterprise/common';
+import type { ISpan, ITelemetryService, SpanOptions } from '@setu-ts/common';
+import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
 
 describe('NoopTelemetryService', () => {

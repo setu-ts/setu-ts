@@ -1,22 +1,22 @@
 /**
  * @module
  */
-import type { ConfigPluginOptions } from '@hono-enterprise/config-plugin';
-import type { LoggerPluginOptions } from '@hono-enterprise/logger-plugin';
-import type { ValidationPluginOptions } from '@hono-enterprise/validation-plugin';
-import type { HttpSecurityPluginOptions } from '@hono-enterprise/http-security-plugin';
-import type { HealthPluginOptions } from '@hono-enterprise/health-plugin';
-import type { MetricsPluginOptions } from '@hono-enterprise/metrics-plugin';
-import type { OpenApiPluginOptions } from '@hono-enterprise/openapi-plugin';
-import type { DecoratorPluginOptions } from '@hono-enterprise/decorator-plugin';
-import type { DatabasePluginOptions } from '@hono-enterprise/database-plugin';
-import type { AuthPluginOptions } from '@hono-enterprise/auth-plugin';
-import type { DiPluginOptions } from '@hono-enterprise/di-plugin';
-import type { WebSocketPluginOptions } from '@hono-enterprise/websocket-plugin';
-import type { SsePluginOptions } from '@hono-enterprise/sse-plugin';
-import type { RealtimeBackplanePluginOptions } from '@hono-enterprise/realtime-backplane-plugin';
-import type { SessionPluginOptions } from '@hono-enterprise/session-plugin';
-import type { GraphqlPluginOptions } from '@hono-enterprise/graphql-plugin';
+import type { ConfigPluginOptions } from '@setu-ts/config-plugin';
+import type { LoggerPluginOptions } from '@setu-ts/logger-plugin';
+import type { ValidationPluginOptions } from '@setu-ts/validation-plugin';
+import type { HttpSecurityPluginOptions } from '@setu-ts/http-security-plugin';
+import type { HealthPluginOptions } from '@setu-ts/health-plugin';
+import type { MetricsPluginOptions } from '@setu-ts/metrics-plugin';
+import type { OpenApiPluginOptions } from '@setu-ts/openapi-plugin';
+import type { DecoratorPluginOptions } from '@setu-ts/decorator-plugin';
+import type { DatabasePluginOptions } from '@setu-ts/database-plugin';
+import type { AuthPluginOptions } from '@setu-ts/auth-plugin';
+import type { DiPluginOptions } from '@setu-ts/di-plugin';
+import type { WebSocketPluginOptions } from '@setu-ts/websocket-plugin';
+import type { SsePluginOptions } from '@setu-ts/sse-plugin';
+import type { RealtimeBackplanePluginOptions } from '@setu-ts/realtime-backplane-plugin';
+import type { SessionPluginOptions } from '@setu-ts/session-plugin';
+import type { GraphqlPluginOptions } from '@setu-ts/graphql-plugin';
 
 /**
  * The real-time arm: one option grouping the three plugins that together make a

@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IPrincipal, IRuntimeServices } from '@hono-enterprise/common';
+import type { IPrincipal, IRuntimeServices } from '@setu-ts/common';
 
 /**
  * A refresh token record stored on the server.

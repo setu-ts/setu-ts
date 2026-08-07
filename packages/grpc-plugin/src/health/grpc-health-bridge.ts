@@ -12,7 +12,7 @@
  * @module
  */
 
-import type { GrpcServingStatus, IHealthService } from '@hono-enterprise/common';
+import type { GrpcServingStatus, IHealthService } from '@setu-ts/common';
 
 /** `grpc.health.v1.HealthCheckRequest`. */
 interface HealthCheckRequest {

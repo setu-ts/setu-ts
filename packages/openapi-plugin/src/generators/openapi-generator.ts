@@ -1,4 +1,4 @@
-import type { RouteInfo } from '@hono-enterprise/common';
+import type { RouteInfo } from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';

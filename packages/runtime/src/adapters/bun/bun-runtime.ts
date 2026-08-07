@@ -16,12 +16,7 @@
  * @module
  */
 
-import type {
-  IDnsResolver,
-  IFileSystem,
-  IRuntimeServices,
-  IWorkerHost,
-} from '@hono-enterprise/common';
+import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
 import {
   mkdirSync,
   readdirSync,

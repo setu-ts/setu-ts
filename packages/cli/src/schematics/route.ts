@@ -22,7 +22,7 @@ export function generateRoute(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import type { IRouterApi } from '@hono-enterprise/common';
+  const contents = `import type { IRouterApi } from '@setu-ts/common';
 
 /**
  * Registers the ${names.kebab} routes.

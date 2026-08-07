@@ -11,8 +11,8 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IConfig } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig } from '@setu-ts/common';
 
 import { createFullStackAppFromConfig } from '../../src/from-config.ts';
 
@@ -31,9 +31,9 @@ async function withEnv(
 
 describe('createFullStackAppFromConfig | configuration drives composition', () => {
   it('a value from the environment reaches a gated plugin arm', async () => {
-    await withEnv({ HONOE_M36C_REALTIME: 'on' }, async () => {
+    await withEnv({ SETU_M36C_REALTIME: 'on' }, async () => {
       const app = await createFullStackAppFromConfig((config) =>
-        config.get<string>('HONOE_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {}
+        config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {}
       );
       await app.start();
 
@@ -45,7 +45,7 @@ describe('createFullStackAppFromConfig | configuration drives composition', () =
     // The negative half: without it the assertion above would pass even if the
     // arm were registered unconditionally.
     const app = await createFullStackAppFromConfig((config) =>
-      config.get<string>('HONOE_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {}
+      config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {}
     );
     await app.start();
 
@@ -54,28 +54,28 @@ describe('createFullStackAppFromConfig | configuration drives composition', () =
 
   it('forwards its loading options to the loader', async () => {
     await withEnv(
-      { HONOE_M36C_HOST: 'db.internal', HONOE_M36C_URL: 'pg://${HONOE_M36C_HOST}/x' },
+      { SETU_M36C_HOST: 'db.internal', SETU_M36C_URL: 'pg://${SETU_M36C_HOST}/x' },
       async () => {
         let seen: string | undefined;
         const app = await createFullStackAppFromConfig((config) => {
-          seen = config.get<string>('HONOE_M36C_URL');
+          seen = config.get<string>('SETU_M36C_URL');
           return {};
         }, { config: { expandVariables: false } });
         await app.start();
 
         // Non-default option honoured: the reference is left literal.
-        expect(seen).toBe('pg://${HONOE_M36C_HOST}/x');
+        expect(seen).toBe('pg://${SETU_M36C_HOST}/x');
       },
     );
   });
 
   it('expands references by default, so the option above is what changed it', async () => {
     await withEnv(
-      { HONOE_M36C_HOST: 'db.internal', HONOE_M36C_URL: 'pg://${HONOE_M36C_HOST}/x' },
+      { SETU_M36C_HOST: 'db.internal', SETU_M36C_URL: 'pg://${SETU_M36C_HOST}/x' },
       async () => {
         let seen: string | undefined;
         const app = await createFullStackAppFromConfig((config) => {
-          seen = config.get<string>('HONOE_M36C_URL');
+          seen = config.get<string>('SETU_M36C_URL');
           return {};
         });
         await app.start();
@@ -97,9 +97,9 @@ describe('createFullStackAppFromConfig | the env override', () => {
     let seen: string | undefined;
 
     const app = await createFullStackAppFromConfig((config) => {
-      seen = config.get<string>('HONOE_M36C_BINDING');
+      seen = config.get<string>('SETU_M36C_BINDING');
       return {};
-    }, { env: { HONOE_M36C_BINDING: 'from-the-binding' } });
+    }, { env: { SETU_M36C_BINDING: 'from-the-binding' } });
     await app.start();
 
     expect(seen).toBe('from-the-binding');
@@ -110,8 +110,8 @@ describe('createFullStackAppFromConfig | the env override', () => {
     // binding. This value is NOT in Deno.env, so it can only come from `env`.
     const app = await createFullStackAppFromConfig(
       (config) =>
-        config.get<string>('HONOE_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {},
-      { env: { HONOE_M36C_REALTIME: 'on' } },
+        config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {},
+      { env: { SETU_M36C_REALTIME: 'on' } },
     );
     await app.start();
 
@@ -124,10 +124,10 @@ describe('createFullStackAppFromConfig | the env override', () => {
     let hasBinding = false;
 
     const app = await createFullStackAppFromConfig((config) => {
-      value = config.get('HONOE_M36C_TEXT');
-      hasBinding = config.has('HONOE_M36C_KV');
+      value = config.get('SETU_M36C_TEXT');
+      hasBinding = config.has('SETU_M36C_KV');
       return {};
-    }, { env: { HONOE_M36C_TEXT: 'kept', HONOE_M36C_KV: { get: () => undefined } } });
+    }, { env: { SETU_M36C_TEXT: 'kept', SETU_M36C_KV: { get: () => undefined } } });
     await app.start();
 
     expect(value).toBe('kept');
@@ -135,11 +135,11 @@ describe('createFullStackAppFromConfig | the env override', () => {
   });
 
   it('falls back to the platform environment when no env is supplied', async () => {
-    await withEnv({ HONOE_M36C_PLATFORM: 'from-platform' }, async () => {
+    await withEnv({ SETU_M36C_PLATFORM: 'from-platform' }, async () => {
       let seen: string | undefined;
 
       const app = await createFullStackAppFromConfig((config) => {
-        seen = config.get<string>('HONOE_M36C_PLATFORM');
+        seen = config.get<string>('SETU_M36C_PLATFORM');
         return {};
       });
       await app.start();
@@ -151,11 +151,11 @@ describe('createFullStackAppFromConfig | the env override', () => {
   it('the supplied env replaces the platform environment rather than merging', async () => {
     // Workers has no process environment to merge with, and merging would let
     // a developer machine's variables mask a missing binding in production.
-    await withEnv({ HONOE_M36C_PLATFORM: 'from-platform' }, async () => {
+    await withEnv({ SETU_M36C_PLATFORM: 'from-platform' }, async () => {
       let seen: string | undefined;
 
       const app = await createFullStackAppFromConfig((config) => {
-        seen = config.get<string>('HONOE_M36C_PLATFORM');
+        seen = config.get<string>('SETU_M36C_PLATFORM');
         return {};
       }, { env: { SOMETHING_ELSE: 'x' } });
       await app.start();
@@ -182,14 +182,14 @@ describe('createFullStackAppFromConfig | one snapshot', () => {
   });
 
   it('serves the composed value from the same snapshot at request time', async () => {
-    await withEnv({ HONOE_M36C_GREETING: 'from-config' }, async () => {
+    await withEnv({ SETU_M36C_GREETING: 'from-config' }, async () => {
       const app = await createFullStackAppFromConfig((config) => {
-        expect(config.get<string>('HONOE_M36C_GREETING')).toBe('from-config');
+        expect(config.get<string>('SETU_M36C_GREETING')).toBe('from-config');
         return {};
       });
       app.router.get('/greeting', (ctx) => {
         const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
-        return ctx.response.text(config.get<string>('HONOE_M36C_GREETING') ?? 'missing');
+        return ctx.response.text(config.get<string>('SETU_M36C_GREETING') ?? 'missing');
       });
       await app.start();
 

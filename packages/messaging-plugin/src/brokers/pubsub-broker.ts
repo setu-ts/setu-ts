@@ -20,8 +20,8 @@ import type {
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
-} from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import type { ReplyInbox } from './inbox.ts';

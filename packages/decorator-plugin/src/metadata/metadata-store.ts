@@ -12,8 +12,8 @@
  *
  * @module
  */
-import type { Constructor, IMetadataStore, MiddlewareFunction } from '@hono-enterprise/common';
-import type { HttpMethod } from '@hono-enterprise/common';
+import type { Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
+import type { HttpMethod } from '@setu-ts/common';
 
 import { className } from '../internal.ts';
 

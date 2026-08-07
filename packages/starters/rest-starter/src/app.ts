@@ -1,27 +1,27 @@
 /**
  * @module
  */
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import type { IPlugin } from '@hono-enterprise/common';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { ConfigPlugin } from '@hono-enterprise/config-plugin';
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
-import { ValidationPlugin } from '@hono-enterprise/validation-plugin';
-import { HttpSecurityPlugin } from '@hono-enterprise/http-security-plugin';
-import { HealthPlugin } from '@hono-enterprise/health-plugin';
-import { MetricsPlugin } from '@hono-enterprise/metrics-plugin';
-import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
-import { DecoratorPlugin } from '@hono-enterprise/decorator-plugin';
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { AuthPlugin } from '@hono-enterprise/auth-plugin';
-import { DiPlugin } from '@hono-enterprise/di-plugin';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import { SsePlugin } from '@hono-enterprise/sse-plugin';
-import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
-import { SessionPlugin } from '@hono-enterprise/session-plugin';
-import { GraphqlPlugin } from '@hono-enterprise/graphql-plugin';
-import { errorHandler } from '@hono-enterprise/exceptions';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import type { IPlugin } from '@setu-ts/common';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+import { ValidationPlugin } from '@setu-ts/validation-plugin';
+import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
+import { HealthPlugin } from '@setu-ts/health-plugin';
+import { MetricsPlugin } from '@setu-ts/metrics-plugin';
+import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
+import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { DiPlugin } from '@setu-ts/di-plugin';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { SsePlugin } from '@setu-ts/sse-plugin';
+import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
+import { errorHandler } from '@setu-ts/exceptions';
 import type { RestStarterOptions } from './options.ts';
 
 /**
@@ -77,7 +77,7 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
  * @returns An {@linkcode IKernelApplication} ready for route registration.
  * @example
  * ```typescript
- * import { createRestApp } from '@hono-enterprise/rest-starter';
+ * import { createRestApp } from '@setu-ts/rest-starter';
  *
  * const app = createRestApp();
  * app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));

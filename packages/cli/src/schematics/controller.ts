@@ -17,8 +17,8 @@ export function generateController(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import { Controller, Get, Post } from '@hono-enterprise/decorator-plugin';
-import type { HandlerResult, IRequestContext } from '@hono-enterprise/common';
+  const contents = `import { Controller, Get, Post } from '@setu-ts/decorator-plugin';
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
 
 /**
  * HTTP controller for the ${names.kebab} resource.

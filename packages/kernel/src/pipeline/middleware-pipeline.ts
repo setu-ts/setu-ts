@@ -9,7 +9,7 @@ import type {
   IRequestContext,
   MiddlewareFunction,
   MiddlewareOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { executeChain } from './execute-chain.ts';
 

@@ -9,7 +9,7 @@ import type {
   CircuitState,
   ICircuitBreaker,
   ResilientCall,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { CircuitOpenError } from '../errors.ts';
 import { throwIfAborted } from './abort.ts';
 

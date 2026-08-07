@@ -1,4 +1,4 @@
-# Milestone <N> — <Package> (`@hono-enterprise/<pkg>`)
+# Milestone <N> — <Package> (`@setu-ts/<pkg>`)
 
 <!--
   PLAN TEMPLATE. Copy to plans/milestone-<N>-<desc>.md and replace every <FILL: ...>.

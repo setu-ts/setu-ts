@@ -6,7 +6,7 @@ import type {
   IPluginContext,
   IRuntimeServices,
   MiddlewareFunction,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { HttpSecurityPlugin } from '../../src/plugin/http-security-plugin.ts';
 import type { CorsOptions } from '../../src/middleware/cors-middleware.ts';
 import { corsMiddleware } from '../../src/middleware/cors-middleware.ts';

@@ -1,8 +1,8 @@
 # Full-stack example — React Router 8 SSR served by the kernel
 
-A React Router 8 framework-mode application served by a Hono Enterprise application, composed
-through `createFullStackAppFromConfig` from `@hono-enterprise/full-stack-starter`. It is the
-runnable counterpart to `honoe new --template full-stack`.
+A React Router 8 framework-mode application served by a Setu-TS application, composed through
+`createFullStackAppFromConfig` from `@setu-ts/full-stack-starter`. It is the runnable counterpart to
+`setu new --template full-stack`.
 
 ```bash
 deno task start   # builds the frontend, then serves on http://localhost:3000
@@ -100,6 +100,6 @@ end-to-end test pins it. This example targets Deno, which is what `check:apps` r
 
 ## Session secret
 
-`honoe.config.ts` falls back to a development secret so the example runs with no environment at all.
+`setu.config.ts` falls back to a development secret so the example runs with no environment at all.
 A real deployment uses `config.getOrThrow<string>('SESSION_SECRET')` and refuses to boot without one
 — which is what the CLI scaffolds.

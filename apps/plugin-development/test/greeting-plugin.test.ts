@@ -1,7 +1,7 @@
 import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { createTestApp } from '@hono-enterprise/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createTestApp } from '@setu-ts/testing';
 import { GreetingPlugin } from '../src/greeting-plugin.ts';
 
 describe('GreetingPlugin', () => {

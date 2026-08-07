@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ILogger, LogMetadata } from '@hono-enterprise/common';
+import type { ILogger, LogMetadata } from '@setu-ts/common';
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
 
 type LogLevel = 'info' | 'warn' | 'error';

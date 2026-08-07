@@ -16,7 +16,7 @@ import type {
   ISseConnection,
   RealtimeFrame,
   SseMessage,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { SseService } from '../../src/services/sse-service.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
