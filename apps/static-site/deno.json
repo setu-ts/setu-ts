@@ -1,0 +1,12 @@
+{
+  "imports": {
+    "@setu-ts/common": "../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
+    "@setu-ts/static-plugin": "../../packages/static-plugin/src/index.ts"
+  },
+  "tasks": {
+    "start": "deno run --allow-net --allow-read main.ts",
+    "smoke": "deno run --allow-net --allow-read smoke.ts"
+  }
+}

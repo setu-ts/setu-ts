@@ -168,6 +168,15 @@ export function createNodeRuntimeServices(
     readdir: host.readdir,
     mkdir: host.mkdir,
     rm: host.rm,
+    readStream: async (
+      path: string,
+      options?: { readonly start?: number; readonly end?: number },
+    ): Promise<ReadableStream<Uint8Array>> => {
+      const { createReadStream } = mods.fs;
+      const { Readable } = await import('node:stream');
+      const stream = createReadStream(path, options);
+      return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+    },
   };
 
   return mergeRuntimeServices({

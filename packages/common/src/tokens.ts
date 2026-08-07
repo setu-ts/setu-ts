@@ -136,6 +136,8 @@ export const CAPABILITIES = {
   CLOUDFLARE: 'cloudflare',
   /** GraphQL plugin — schema-first and code-first GraphQL-over-HTTP. */
   GRAPHQL: 'graphql',
+  /** Static file serving plugin. */
+  STATIC_FILES: 'static-files',
 } as const;
 
 /**

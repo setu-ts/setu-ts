@@ -9,6 +9,10 @@
  * (AI_GUIDELINES §10).
  */
 
+// Static file serving utilities
+export { contentTypeFor } from './static/content-types.ts';
+export { assertRealPathContained, isLexicallyContained } from './static/path-containment.ts';
+
 // Capability tokens
 export { CAPABILITIES, createCapabilityToken } from './tokens.ts';
 export type { CapabilityToken, StandardCapability } from './tokens.ts';

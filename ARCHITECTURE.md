@@ -2562,15 +2562,16 @@ The public API (defined in `PUBLIC_API.md`) is stable:
 
 The architecture supports future additions without breaking existing applications:
 
-| Future Addition          | How It Fits                                                      |
-| ------------------------ | ---------------------------------------------------------------- |
-| **Edge Runtime**         | New runtime adapter for Cloudflare Workers                       |
-| **SSE Plugin**           | New plugin that provides Server-Sent Events                      |
-| **New Database Adapter** | New plugin that provides the `database` token with a new ORM     |
-| **New Message Broker**   | New plugin that provides the `messaging` token with a new broker |
-| **New Auth Strategy**    | New plugin that extends the `auth-plugin` with a new strategy    |
-| **New Health Indicator** | New plugin that registers a health check                         |
-| **New Metric Collector** | New plugin that registers a metric collector                     |
+| Future Addition          | How It Fits                                                       |
+| ------------------------ | ----------------------------------------------------------------- |
+| **Edge Runtime**         | New runtime adapter for Cloudflare Workers                        |
+| **SSE Plugin**           | New plugin that provides Server-Sent Events                       |
+| **New Database Adapter** | New plugin that provides the `database` token with a new ORM      |
+| **New Message Broker**   | New plugin that provides the `messaging` token with a new broker  |
+| **New Auth Strategy**    | New plugin that extends the `auth-plugin` with a new strategy     |
+| **New Health Indicator** | New plugin that registers a health check                          |
+| **New Metric Collector** | New plugin that registers a metric collector                      |
+| **Static File Plugin**   | New plugin that serves static files with ETag, Range, compression |
 
 ### Migration Paths
 

@@ -59,6 +59,14 @@ export interface BunHost {
   mkdir: (path: string, options?: { recursive?: boolean }) => boolean;
   /** Remove a file or directory. */
   rm: (path: string, options?: { recursive?: boolean }) => boolean;
+  /**
+   * Create a read stream for a file.
+   * Returns null if the file cannot be opened.
+   */
+  createReadStream?: (
+    path: string,
+    options?: { start?: number; end?: number },
+  ) => NodeJS.ReadableStream | null;
 }
 
 /** File info returned by BunHost.stat(). */
@@ -148,6 +156,15 @@ export function createBunRuntimeServices(
       }
       return Promise.resolve();
     },
+    readStream: async (
+      path: string,
+      options?: { readonly start?: number; readonly end?: number },
+    ): Promise<ReadableStream<Uint8Array>> => {
+      const { createReadStream } = await import('node:fs');
+      const { Readable } = await import('node:stream');
+      const stream = createReadStream(path, options);
+      return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+    },
   };
 
   return mergeRuntimeServices({
@@ -182,6 +199,10 @@ export interface BunModules {
     readdirSync(path: string): string[];
     mkdirSync(path: string, options?: { recursive?: boolean }): string | undefined;
     rmSync(path: string, options?: { recursive?: boolean }): void;
+    createReadStream?: (
+      path: string,
+      options?: { start?: number; end?: number },
+    ) => NodeJS.ReadableStream | null;
   };
   /** Process object (version, env, exit). */
   proc: {

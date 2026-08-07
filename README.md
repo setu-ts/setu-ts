@@ -135,6 +135,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection |
 | gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port           |
 | Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, KV sessions, `waitUntil` |
+| Static files      | ✅     | `static-plugin`            | ETag, Range, precompressed sidecars, SPA fallback, streaming    |
 
 ### Real-time and rendering
 
@@ -213,7 +214,7 @@ cd my-app && setu generate service billing
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 46 workspace members are published on JSR, in `v0.1.0-alpha.4`: the core (`common`, `kernel`,
+All 47 workspace members are published on JSR, in `v0.1.0-alpha.4`: the core (`common`, `kernel`,
 `runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the
 `sdk`, and the `cli`.
 

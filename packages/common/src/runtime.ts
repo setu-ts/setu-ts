@@ -103,6 +103,25 @@ export interface IFileSystem {
    * @param options - Set `recursive` to remove directories with contents
    */
   rm(path: string, options?: { readonly recursive?: boolean }): Promise<void>;
+  /**
+   * Reads a file as a stream, optionally with byte range.
+   *
+   * Optional: absent on runtimes/adapters that do not support streaming reads.
+   * Callers MUST degrade gracefully when it is not provided (e.g. fall back to
+   * reading the entire file via {@linkcode readFile}).
+   *
+   * The `end` offset is INCLUSIVE, matching both node:fs createReadStream and
+   * HTTP Range semantics.
+   *
+   * @param path - File path
+   * @param options - Optional byte range (both start and end are inclusive)
+   * @returns A readable stream of bytes
+   * @since 0.1.0
+   */
+  readStream?(
+    path: string,
+    options?: { readonly start?: number; readonly end?: number },
+  ): Promise<ReadableStream<Uint8Array>>;
 }
 
 /**

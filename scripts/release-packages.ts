@@ -62,6 +62,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/service-discovery-plugin',
   'packages/session-plugin',
   'packages/sse-plugin',
+  'packages/static-plugin',
   'packages/storage-plugin',
   'packages/telemetry-plugin',
   'packages/validation-plugin',

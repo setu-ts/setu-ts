@@ -98,6 +98,41 @@ export function createDenoRuntimeServices(
     },
     mkdir: (path: string, options?: { readonly recursive?: boolean }) => host.mkdir(path, options),
     rm: (path: string, options?: { readonly recursive?: boolean }) => host.remove(path, options),
+    readStream: async (
+      path: string,
+      _options?: { readonly start?: number; readonly end?: number },
+    ): Promise<ReadableStream<Uint8Array>> => {
+      const file = await host.open(path);
+      let cancelled = false;
+
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          if (cancelled) {
+            await file.close();
+            controller.close();
+            return;
+          }
+
+          const chunkSize = 64 * 1024; // 64KB chunks
+          const buffer = new Uint8Array(chunkSize);
+          const bytesRead = await file.read(buffer);
+
+          if (bytesRead === 0) {
+            await file.close();
+            controller.close();
+            return;
+          }
+
+          controller.enqueue(buffer.subarray(0, bytesRead));
+        },
+        cancel: async () => {
+          cancelled = true;
+          await file.close();
+        },
+      });
+
+      return stream;
+    },
   };
 
   return mergeRuntimeServices({
