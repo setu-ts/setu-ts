@@ -368,9 +368,11 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
 async function collectMarkdown(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
-    let entries: Deno.DirEntry[];
+    const entries: Deno.DirEntry[] = [];
     try {
-      entries = [...Deno.readDirSync(dir)];
+      for await (const entry of Deno.readDir(dir)) {
+        entries.push(entry);
+      }
     } catch {
       return;
     }
