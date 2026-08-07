@@ -13,9 +13,14 @@ All notable changes to this project are documented here. The format follows
   topic + per-instance subscription. `MessagingPluginOptions` is now a **discriminated union on
   `broker`** with a `'custom'` arm (inject any `IMessageBroker`) and a default memory arm so
   `MessagingPlugin()` / `MessagingPlugin({})` remain valid. `MessagingBrokerType` widened to 8
-  literals. Both cloud brokers throw `CloudBrokerUnavailableError` on Cloudflare Workers. **Not
-  verified against a live backend** (Pub/Sub and Service Bus emulators were declined; fake-driven
-  with guarded real-import tests).
+  literals. Both cloud brokers throw `CloudBrokerUnavailableError` on Cloudflare Workers. **Verified
+  against the vendors' own local emulators** — Google's Pub/Sub emulator and Microsoft's Service Bus
+  emulator — covering publish/subscribe over real gRPC/AMQP, ack/nack settlement producing genuine
+  redelivery, receiver teardown, and on Pub/Sub the RPC reply subscription's create/delete cycle.
+  See `docs/messaging-emulators.md`. **Service Bus RPC is unverified**: that emulator supports no
+  management operations, so the per-instance reply subscription cannot be created there — the suite
+  asserts the refusal surfaces `ReplyInboxUnavailableError` instead. Neither backend has run against
+  a live cloud account.
 - **`@hono-enterprise/queue-plugin`** — SQS `SqsQueue` adapter (`QueueAdapter` seam, wrapped by
   `QueueService`) with per-name queue URLs, receipt-handle bookkeeping, `ApproximateReceiveCount`
   attempt ladder, visibility-timeout backoff, and dead-letter ordering. `SnsPublisher` for SNS

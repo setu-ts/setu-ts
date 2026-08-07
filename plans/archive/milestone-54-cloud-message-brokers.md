@@ -438,6 +438,20 @@ pair, not one object.
   fully-unit-tested adapter. Declining them is recorded here rather than left to §9 so the plan says
   one thing in one place; an earlier draft claimed "fake-driven" in §0 and "emulator/manual only" in
   §9.
+- **AS BUILT — the Pub/Sub and Service Bus emulators WERE run, locally rather than in CI.** The
+  decision above stands for the workflow: ElasticMQ is in CI, the other two are not. But declining
+  them for CI was read as declining them entirely, which left both backends' real-transport
+  behaviour unexercised. Both now have guarded suites —
+  `messaging-plugin/test/e2e/pubsub-emulator.test.ts` (guarded on `PUBSUB_EMULATOR_HOST`) and
+  `messaging-plugin/test/e2e/service-bus-emulator.test.ts` (guarded on
+  `SERVICEBUS_CONNECTION_STRING`) — run against Google's and Microsoft's own emulators and
+  documented in `docs/messaging-emulators.md`. Three facts came out of that which no fake surfaced:
+  a Service Bus subscription accrues every message published to its topic whether or not a receiver
+  is attached, competing receivers on one subscription split the messages between them, and the
+  Service Bus emulator supports NO management operations — so `createSubscription` fails there and
+  RPC cannot be round-tripped, which the suite turns into the one real-broker exercise of the reply
+  inbox's `ReplyInboxUnavailableError` path. Service Bus RPC is still unverified against real Azure.
+
 - **Test home:** `packages/queue-plugin/test/e2e/sqs-elasticmq.test.ts` — guarded on
   `SQS_ENDPOINT_URL`; creates two real queues plus a DLQ; drives the plugin's public `IQueue`
   surface through a real `createApplication`; asserts a job added under one name is processed under
