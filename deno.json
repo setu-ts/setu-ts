@@ -52,7 +52,7 @@
     "check:apps": "deno run --allow-read --allow-run --allow-env=ALLOW_SKIP scripts/check-apps.ts",
     "check:plan": "deno run --allow-read scripts/plan-lint.ts",
     "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages test",
-    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages --coverage=coverage && deno run --allow-run=deno scripts/coverage.ts",
+    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts",
     "audit": "deno audit --level=high",
     "publish:check": "deno publish --dry-run",
     "release:verify": "deno run --allow-read scripts/verify-release.ts",
@@ -74,6 +74,7 @@
     "exactOptionalPropertyTypes": true,
     "useUnknownInCatchVariables": true
   },
+  "exclude": ["apps/full-stack/build"],
   "lint": {
     "rules": {
       "tags": ["recommended"],

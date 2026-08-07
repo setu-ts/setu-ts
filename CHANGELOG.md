@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`apps/full-stack` — a runnable React Router 8 SSR example** (M37c). The framework's full-stack
+  story shipped in three places — the SSR plugin, the full-stack starter, and
+  `honoe new --template full-stack` — and none of them had an application a reader could run. This
+  one is served by the kernel through `react-router-plugin`, composed through
+  `createFullStackAppFromConfig`, and its `smoke` task asserts that an SSR-rendered page contains
+  rows **written through the database capability** — evidence that `populateLoadContext` bridges the
+  kernel's service registry into a React Router loader, rather than that a server started. It then
+  signs in through a `<Form>`, so the session and its synchronizer CSRF token round-trip too.
+
+  Its routes are `/` (a landing page that reports session state), `/products` and `/login`.
+
+  The example also makes the framework's distinguishing claim executable: `test/removal.test.ts`
+  asserts that none of `lib/{session,csrf,sse,kv,service-logger}.server.ts` exists, and that
+  `app/config/services.server.ts` holds no module-level cache — because the kernel's service
+  registry is that cache.
+
+  **The frontend build runs for real in CI, with no Node toolchain.** `deno install` plus the
+  `@react-router/dev` CLI run the identical Vite build under Deno's own npm support (measured: ~4 s
+  install, <1 s build), so no `ServerBuild` fixture is committed and `full-stack` is deliberately
+  not in `ALLOW_SKIP`. No published package changed; the frontend build remains an app-level,
+  build-time concern outside every published dependency graph (AI_GUIDELINES §12.2).
 - **`@hono-enterprise/messaging-plugin`** — GCP Pub/Sub (`GcpPubSubBroker`) and Azure Service Bus
   (`ServiceBusBroker`) backends implementing `IMessageBroker` with request-reply over a shared reply
   topic + per-instance subscription. `MessagingPluginOptions` is now a **discriminated union on
@@ -31,6 +52,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Node and Bun compatibility is now verified on every pull request, retiring the known limitation
+  recorded in `0.1.0-alpha.1`. The `Node compatibility` and `Bun compatibility` CI jobs were
+  placeholders blocked on the first JSR publish; they now install the published packages through
+  JSR's npm compatibility layer and run `compat/compat.test.mjs`. **All 46 published packages are
+  installed and imported** on each runtime — a package whose ESM output or transitive dependency
+  does not resolve there is broken for every consumer and nothing else in CI would see it — and the
+  suite then boots a kernel application, resolves a capability, and serves a request over a real
+  socket. The expected package list is derived from the Deno workspace, so a new package that is
+  never added to the compat suite fails the job rather than quietly shrinking coverage. The suite
+  tracks the latest published release rather than `HEAD`, because Node and Bun cannot resolve this
+  repo's `jsr:` and `npm:` specifiers from source.
 - **⚠️ Breaking 1 of 1: `MessagingPluginOptions` is now a discriminated union.** A caller holding a
   widened variable (e.g. `let opts: MessagingPluginOptions = getOptions()`) must narrow before
   passing to the factory. Single-arm literals, `MessagingPlugin()`, `MessagingPlugin({})`, and the

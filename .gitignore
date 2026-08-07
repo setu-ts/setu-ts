@@ -34,7 +34,23 @@ node_modules/
 # would dirty the tree and make a following `deno task publish:check` abort.
 .wrangler/
 
+# The frontend build and its resolved npm graph, written by apps/full-stack's
+# smoke check (which builds for real rather than committing a ServerBuild
+# fixture). Same reason as .wrangler/ above: untracked output dirties the tree
+# ahead of `publish:check`. The lockfile is ignored deliberately — CI resolves
+# the declared ranges fresh, so a range that stops working fails loudly instead
+# of being pinned around.
+apps/full-stack/build/
+apps/full-stack/.react-router/
+apps/full-stack/deno.lock
+
 # Claude Code local state (worktree checkouts, personal settings). Nothing
 # under .claude/ is meant to be tracked today; if shared project config is
 # added later (e.g. .claude/settings.json), un-ignore it with a negation.
 .claude/
+
+# Compat suite installs the latest PUBLISHED packages on purpose; a committed
+# lockfile would pin them and defeat the check.
+compat/package-lock.json
+compat/bun.lock
+compat/bun.lockb

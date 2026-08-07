@@ -13,7 +13,13 @@ const command = new Deno.Command('deno', {
   // measured — a bare `test` would also exclude the testing package's source.
   // Each element is passed to deno verbatim (no shell), so the flag value must
   // NOT be quoted — quotes would become part of the regex and disable it.
-  args: ['coverage', 'coverage', '--exclude=/test/'],
+  //
+  // `/scripts/` is excluded because the run now also executes the root `test/`
+  // directory, whose `apps-gate.test.ts` imports `scripts/check-apps.ts`. Tooling
+  // scripts are not published package source and were never subject to the 90%
+  // bar (Milestone 37b); leaving them in would put a ~20%-line row in the very
+  // per-file table a human reads to enforce that bar on `packages/*/src`.
+  args: ['coverage', 'coverage', '--exclude=/test/', '--exclude=/scripts/'],
   stdout: 'inherit',
   stderr: 'piped',
 });
