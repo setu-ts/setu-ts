@@ -441,7 +441,8 @@ resolved through the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
 - [x] Root task pipeline (`check`, `test`, `lint`, `fmt`)
 - [x] Strict TypeScript via root `deno.json`
 - [x] All package stubs created with JSR metadata
-- [x] CI passing on Deno, with Node/Bun compat jobs stubbed (verified green on PR #1)
+- [x] CI passing on Deno, with Node/Bun compat jobs stubbed (verified green on PR #1) — the stubs
+      were blocked on the first JSR publish and are now real jobs running `compat/compat.test.mjs`
 
 ---
 
