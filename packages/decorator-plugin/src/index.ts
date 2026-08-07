@@ -29,7 +29,7 @@ export type { HttpMethodDecorator } from './decorators/http.ts';
 export { Body, Cookie, Header, Param, Query } from './decorators/request.ts';
 
 // --- Injection decorators ---
-export { Inject, Injectable } from './decorators/injection.ts';
+export { Inject, Injectable, Optional } from './decorators/injection.ts';
 export type { InjectableOptions } from './decorators/injection.ts';
 
 // --- Security decorators ---
