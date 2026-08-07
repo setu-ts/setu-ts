@@ -1,8 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { ISecretManager } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { ISecretManager } from '@setu-ts/common';
 
 import { createProvider, SecretsPlugin } from '../../src/plugin/secrets-plugin.ts';
 import { EnvProvider } from '../../src/providers/env-provider.ts';

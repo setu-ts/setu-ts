@@ -1,5 +1,5 @@
 /**
- * The `honoe` executable entry point.
+ * The `setu` executable entry point.
  *
  * This is the one module that owns the process boundary: `Deno.args`,
  * `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`.
@@ -9,14 +9,14 @@
  * @module
  */
 
-import { createDenoRuntimeServices } from '@hono-enterprise/runtime';
+import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from './cli.ts';
 import { EXIT_ERROR } from './constants.ts';
 
 const runtime = createDenoRuntimeServices();
 
 if (runtime.fs === undefined) {
-  console.error('honoe requires filesystem access. Re-run with --allow-read --allow-write.');
+  console.error('setu requires filesystem access. Re-run with --allow-read --allow-write.');
   Deno.exit(EXIT_ERROR);
 }
 

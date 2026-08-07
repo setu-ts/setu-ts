@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IFileSystem, RouteHandler } from '@hono-enterprise/common';
+import type { IFileSystem, RouteHandler } from '@setu-ts/common';
 import { createStaticAssetHandler } from '../../src/assets/static-assets.ts';
 
 describe('static-assets — real files', () => {

@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { IConfig } from '@hono-enterprise/common';
+import type { IConfig } from '@setu-ts/common';
 
 import type { StructuralSchema } from './validators/config-validator.ts';
 
@@ -60,8 +60,8 @@ export interface ConfigPluginOptions {
    *
    * @example Composing from configuration, then reusing the same snapshot
    * ```typescript
-   * import { createRuntimeServices } from '@hono-enterprise/runtime';
-   * import { ConfigPlugin, loadConfig } from '@hono-enterprise/config-plugin';
+   * import { createRuntimeServices } from '@setu-ts/runtime';
+   * import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
    *
    * const config = await loadConfig(createRuntimeServices());
    * const plugins = [ConfigPlugin({ instance: config })];

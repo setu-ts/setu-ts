@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, ServiceInstance, ServiceOutcome } from '@hono-enterprise/common';
+import type { IRuntimeServices, ServiceInstance, ServiceOutcome } from '@setu-ts/common';
 import type { EjectionOptions } from '../interfaces/index.ts';
 
 /** Per-instance state: recent failure stamps and the ejection expiry, if any. */

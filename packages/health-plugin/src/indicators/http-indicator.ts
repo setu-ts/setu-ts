@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { HealthCheckResult, IHealthIndicator } from '@hono-enterprise/common';
+import type { HealthCheckResult, IHealthIndicator } from '@setu-ts/common';
 
 /**
  * Options for creating an HTTP probe indicator.

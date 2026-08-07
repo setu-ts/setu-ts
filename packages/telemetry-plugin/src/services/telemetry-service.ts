@@ -14,7 +14,7 @@ import type {
   SpanOptions,
   SpanStatus,
   TelemetryContext,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { TracerHost } from '../interfaces/index.ts';
 
 /**

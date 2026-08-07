@@ -1,9 +1,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { ISecretManager } from '@hono-enterprise/common';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import type { ISecretManager } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { SecretsPlugin } from '../../src/index.ts';
 

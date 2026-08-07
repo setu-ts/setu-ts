@@ -6,7 +6,7 @@
  *
  * @example
  * ```typescript
- * import { HttpSecurityPlugin, corsMiddleware } from '@hono-enterprise/http-security-plugin';
+ * import { HttpSecurityPlugin, corsMiddleware } from '@setu-ts/http-security-plugin';
  *
  * app.register(HttpSecurityPlugin({
  *   cors: { origin: 'https://example.com', credentials: true },

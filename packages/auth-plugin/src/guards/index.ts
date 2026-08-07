@@ -4,12 +4,8 @@
  * @module
  */
 
-import type {
-  IAuthorizationService,
-  IRequestContext,
-  MiddlewareFunction,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IAuthorizationService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 /**
  * Guard that requires authentication. Returns 401 if no principal.

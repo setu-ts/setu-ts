@@ -11,13 +11,8 @@
  * @module
  */
 
-import type {
-  ILogger,
-  IRequestContext,
-  IResponse,
-  MiddlewareFunction,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ILogger, IRequestContext, IResponse, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import type { ICacheApi } from './cache-api.ts';
 import { resolveCacheApi } from './cache-api.ts';

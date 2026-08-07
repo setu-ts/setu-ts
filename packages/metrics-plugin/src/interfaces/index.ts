@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { MetricConfig, MetricType } from '@hono-enterprise/common';
+import type { MetricConfig, MetricType } from '@setu-ts/common';
 
 /**
  * Named metric config for declarative registration.

@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * `@hono-enterprise/multi-tenancy-plugin` — multi-tenancy support for Hono Enterprise.
+ * `@setu-ts/multi-tenancy-plugin` — multi-tenancy support for Setu-TS.
  */
 
 // Re-export types from common for convenience.
@@ -10,8 +10,8 @@ export type {
   ITenant,
   ITenantRepository,
   ITenantResolver,
-} from '@hono-enterprise/common';
-export { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+export { CAPABILITIES } from '@setu-ts/common';
 
 // Plugin factory.
 export { MultiTenancyPlugin } from './plugin/multi-tenancy-plugin.ts';

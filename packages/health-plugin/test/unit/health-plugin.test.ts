@@ -7,7 +7,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { HealthPlugin } from '../../src/plugin/health-plugin.ts';
 import type { HealthService } from '../../src/services/health-service.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IApplication,
   ICliApi,
@@ -25,7 +25,7 @@ import type {
   IRuntimeServices,
   IServiceRegistry,
   RuntimePlatform,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 describe('HealthPlugin', () => {
   function createFakeContext(): IPluginContext {

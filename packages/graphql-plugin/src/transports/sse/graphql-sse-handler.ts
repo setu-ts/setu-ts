@@ -18,7 +18,7 @@ import type {
   IResponse,
   IRuntimeServices,
   RouteHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { ApqResolveResult, IApqResolver } from '../../apq/apq-resolver.ts';
 import { encodeSseComment, encodeSseComplete, encodeSseEvent } from './sse-frame.ts';
 

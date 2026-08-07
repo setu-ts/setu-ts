@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as barrel from '../../src/index.ts';
 
-describe('@hono-enterprise/sdk barrel', () => {
+describe('@setu-ts/sdk barrel', () => {
   it('exports exactly the documented runtime surface', () => {
     const actual = Object.keys(barrel).sort();
     const expected = [

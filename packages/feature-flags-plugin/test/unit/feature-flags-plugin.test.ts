@@ -10,12 +10,12 @@ import { createProvider, FeatureFlagsPlugin } from '../../src/plugin/feature-fla
 import { ConfigProvider } from '../../src/providers/config-provider.ts';
 import { MemoryProvider } from '../../src/providers/memory-provider.ts';
 import { DatabaseProvider } from '../../src/providers/database-provider.ts';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { FeatureFlagsPluginOptions, FlagProvider } from '../../src/interfaces/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { LaunchDarklyProvider } from '../../src/providers/launchdarkly-provider.ts';
 import { FakeLaunchDarklyClient } from '../fixtures/fake-launchdarkly.ts';
-import type { IFeatureFlags } from '@hono-enterprise/common';
+import type { IFeatureFlags } from '@setu-ts/common';
 
 describe('FeatureFlagsPlugin', () => {
   it('has correct name, provides, priority, optionalDependencies', () => {

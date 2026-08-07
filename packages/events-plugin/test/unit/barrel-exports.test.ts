@@ -2,7 +2,7 @@
  * Unit tests for barrel exports.
  *
  * This test ensures that every exported value from the public package
- * specifier `@hono-enterprise/events-plugin` is reachable at runtime.
+ * specifier `@setu-ts/events-plugin` is reachable at runtime.
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
@@ -13,8 +13,8 @@ import {
   InMemoryEventBus,
   IntegrationEvent,
   subscribeHandler,
-} from '@hono-enterprise/events-plugin';
-import type { IEventHandler } from '@hono-enterprise/events-plugin';
+} from '@setu-ts/events-plugin';
+import type { IEventHandler } from '@setu-ts/events-plugin';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('events-plugin barrel exports', () => {

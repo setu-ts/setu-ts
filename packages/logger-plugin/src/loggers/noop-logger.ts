@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { ILogger, LogMetadata } from '@hono-enterprise/common';
-import type { LogLevel } from '@hono-enterprise/common';
+import type { ILogger, LogMetadata } from '@setu-ts/common';
+import type { LogLevel } from '@setu-ts/common';
 
 /**
  * Options for constructing a {@linkcode NoopLogger}. Currently unused but

@@ -10,7 +10,7 @@
  * @since 0.1.0
  */
 
-import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { WebSocketConnection } from '../connection/websocket-connection.ts';
 
 /** Close code sent to a peer that went silent (RFC 6455 "going away"). */

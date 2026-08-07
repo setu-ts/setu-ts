@@ -14,7 +14,7 @@ import type {
   SpanOptions,
   SpanStatus,
   TelemetryContext,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 describe('telemetry contract types', () => {
   it('should compile SpanStatus as the documented union', () => {

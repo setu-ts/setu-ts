@@ -1,4 +1,4 @@
-# @hono-enterprise/sse-plugin
+# @setu-ts/sse-plugin
 
 Server-Sent Events — one-way, server → client streaming over `text/event-stream`. Registers an
 `ISseService` under `CAPABILITIES.SSE` (`'sse'`).
@@ -12,21 +12,21 @@ socket upgrade, and browsers reconnect automatically. Reach for it whenever traf
 server → client — notifications, progress feeds, log tailing, metric ticks.
 
 When the client also needs to **send**, use
-[`@hono-enterprise/websocket-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/websocket-plugin).
+[`@setu-ts/websocket-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/websocket-plugin).
 
 ## Installation
 
 ```typescript
-import { SsePlugin } from '@hono-enterprise/sse-plugin';
+import { SsePlugin } from '@setu-ts/sse-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { SsePlugin } from '@hono-enterprise/sse-plugin';
-import { CAPABILITIES, type ISseService } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SsePlugin } from '@setu-ts/sse-plugin';
+import { CAPABILITIES, type ISseService } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), SsePlugin({ heartbeatMs: 15_000, retryMs: 3_000 })],
@@ -56,12 +56,12 @@ to _that_ process — the other replicas' subscribers hear nothing, and no error
 It is partial delivery, not a failure, which is what makes it easy to ship.
 
 Registering
-[`@hono-enterprise/realtime-backplane-plugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/realtime-backplane-plugin/README.md)
+[`@setu-ts/realtime-backplane-plugin`](https://github.com/setu-ts/setu-ts/blob/main/packages/realtime-backplane-plugin/README.md)
 **with a cross-process transport** is the entire fix. This plugin resolves it _optionally_, so
 nothing else changes:
 
 ```typescript
-import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 
 createApplication({
   plugins: [
@@ -108,4 +108,4 @@ resume from where it dropped.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

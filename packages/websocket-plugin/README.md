@@ -1,7 +1,7 @@
-# @hono-enterprise/websocket-plugin
+# @setu-ts/websocket-plugin
 
-Full-duplex, **bidirectional** real-time messaging behind the Hono Enterprise capability model.
-Registers an `IWebSocketService` under `CAPABILITIES.WEBSOCKET`.
+Full-duplex, **bidirectional** real-time messaging behind the Setu-TS capability model. Registers an
+`IWebSocketService` under `CAPABILITIES.WEBSOCKET`.
 
 Declare routes with lifecycle handlers, address peers individually or through named **rooms**, and
 let the runtime's HTTP adapter perform the RFC 6455 handshake — the same application code runs on
@@ -13,8 +13,7 @@ Reach for WebSockets when the **client also sends**: chat, collaborative editing
 live cursors, interactive dashboards with client-driven subscriptions.
 
 When traffic only flows server → client — notifications, progress feeds, log tailing, metric ticks —
-prefer
-[`@hono-enterprise/sse-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/sse-plugin).
+prefer [`@setu-ts/sse-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/sse-plugin).
 Server-Sent Events run over ordinary HTTP, survive proxies and corporate middleboxes far more
 reliably, and reconnect automatically in the browser. A WebSocket buys you an upstream channel at
 the cost of all of that.
@@ -40,16 +39,16 @@ ordinary HTTP only.
 ## Installation
 
 ```typescript
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import { CAPABILITIES, type IWebSocketService } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -120,7 +119,7 @@ ws.route('/ws/chat', handlers); // matches /ws/chat and /ws/chat?room=general
 ```
 
 Pattern parameters (`:id`) are deliberately unsupported: the kernel's matcher is internal to
-`@hono-enterprise/kernel`, and hand-rolling a second one would duplicate logic that must not drift.
+`@setu-ts/kernel`, and hand-rolling a second one would duplicate logic that must not drift.
 Registering the same path twice throws.
 
 Subprotocols are opt-in per route and echoed from an allow-list — never blindly reflected back:
@@ -163,12 +162,12 @@ process — the other replicas' clients hear nothing, and no error is raised any
 delivery, not a failure, which is what makes it easy to ship.
 
 Registering
-[`@hono-enterprise/realtime-backplane-plugin`](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/realtime-backplane-plugin/README.md)
+[`@setu-ts/realtime-backplane-plugin`](https://github.com/setu-ts/setu-ts/blob/main/packages/realtime-backplane-plugin/README.md)
 **with a cross-process transport** is the entire fix. This plugin resolves it _optionally_, so
 nothing else changes:
 
 ```typescript
-import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
+import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 
 createApplication({
   plugins: [

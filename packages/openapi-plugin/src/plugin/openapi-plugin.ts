@@ -1,5 +1,5 @@
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import type { OpenApiGeneratorOptions } from '../generators/openapi-generator.ts';
 import type { IOpenApiService } from '../interfaces/openapi-service.ts';

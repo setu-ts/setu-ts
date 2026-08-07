@@ -1,4 +1,4 @@
-import type { IMessageBroker } from '@hono-enterprise/common';
+import type { IMessageBroker } from '@setu-ts/common';
 
 /**
  * Internal broker adapter interface extending IMessageBroker with readiness check.

@@ -10,8 +10,8 @@ import type {
   IPluginContext,
   IRuntimeServices,
   IWebSocketService,
-} from '@hono-enterprise/common';
-import { CAPABILITIES as CAP } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES as CAP } from '@setu-ts/common';
 import type { GraphqlPluginOptions } from '../interfaces/options.ts';
 import { adaptGraphqlModule, loadGraphqlModule } from '../runtime/graphql-loader.ts';
 import { buildSchema } from '../schema/build-schema.ts';

@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IMailer, MailMessage, NotificationMessage } from '@hono-enterprise/common';
+import type { IMailer, MailMessage, NotificationMessage } from '@setu-ts/common';
 import { EmailChannel } from '../../src/channels/email-channel.ts';
 
 describe('EmailChannel', () => {

@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Service discovery for Hono Enterprise — turns a logical service name into a
+ * Service discovery for Setu-TS — turns a logical service name into a
  * reachable address, balances across the instances behind it, and takes them
  * out of rotation when callers report failures.
  *
@@ -14,10 +14,10 @@
  *
  * @example
  * ```typescript
- * import { createApplication } from '@hono-enterprise/kernel';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
- * import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
- * import { CAPABILITIES, type IServiceDiscovery } from '@hono-enterprise/common';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
+ * import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
+ * import { CAPABILITIES, type IServiceDiscovery } from '@setu-ts/common';
  *
  * const app = createApplication({
  *   plugins: [

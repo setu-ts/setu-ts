@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ValidationIssue } from '@hono-enterprise/common';
+import type { ValidationIssue } from '@setu-ts/common';
 import type { FormatValidationErrors, ValidationErrorFormatter } from './error-formatter.ts';
 
 /**

@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { LogAuditStorage } from '../../src/storage/log-audit.ts';
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 import type { StoredAuditEntry } from '../../src/interfaces/index.ts';
 
 describe('LogAuditStorage', () => {

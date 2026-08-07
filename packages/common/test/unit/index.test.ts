@@ -31,7 +31,7 @@ import type {
   WrapOptions,
 } from '../../src/index.ts';
 
-describe('@hono-enterprise/common barrel', () => {
+describe('@setu-ts/common barrel', () => {
   it('should export the capability token constants', () => {
     expect(CAPABILITIES.LOGGER).toBe('logger');
     expect(PLUGIN_PRIORITY.NORMAL).toBe(500);

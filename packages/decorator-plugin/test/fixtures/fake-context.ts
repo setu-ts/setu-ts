@@ -21,8 +21,8 @@ import type {
   MiddlewareOptions,
   RouteDefinition,
   RouteHandler,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { createFakeRuntime } from './fake-runtime.ts';
 import { createFakeLifecycle } from './fake-lifecycle.ts';
@@ -132,9 +132,9 @@ export function createFakeContext(options: FakeContextOptions = {}): {
     },
     listRoutes() {
       return routes.map((r) => ({
-        method: r.method as import('@hono-enterprise/common').HttpMethod,
+        method: r.method as import('@setu-ts/common').HttpMethod,
         path: r.path,
-        definition: { handler: r.route as import('@hono-enterprise/common').RouteHandler },
+        definition: { handler: r.route as import('@setu-ts/common').RouteHandler },
       }));
     },
   };

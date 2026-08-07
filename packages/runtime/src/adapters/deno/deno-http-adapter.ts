@@ -17,7 +17,7 @@ import type {
   RpcFetchHandler,
   ServerHandle,
   WebSocketUpgradeRouter,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,

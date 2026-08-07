@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ResilientCall } from '@hono-enterprise/common';
+import type { ResilientCall } from '@setu-ts/common';
 import type { ITimers } from '../interfaces/index.ts';
 import { TimeoutError } from '../errors.ts';
 import { linkAbort, throwIfAborted } from './abort.ts';

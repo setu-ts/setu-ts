@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@hono-enterprise/common';
+import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp, SelfRegistration } from '../interfaces/index.ts';
 import { watchConsulService } from './consul-watch.ts';
 import { instanceUrl } from '../url/instance-url.ts';

@@ -126,9 +126,9 @@ from inside it; e.g. `.verify-<milestone>/driver.ts`, deleted afterwards) and dr
 through its REAL surface — a kernel application, not import-and-call:
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { XxxPlugin } from '@hono-enterprise/xxx-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { XxxPlugin } from '@setu-ts/xxx-plugin';
 const app = createApplication({ plugins: [RuntimePlugin(), XxxPlugin(/* opts */)] });
 app.router.post('/probe', async (ctx) => {/* exercise the service via ctx.services */});
 await app.start();

@@ -3,10 +3,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 import { MessagingPlugin } from '../../src/index.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IMessageBroker, IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMessageBroker, IPlugin } from '@setu-ts/common';
 import type { IKafkaFactory } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeKafkaFactory } from '../fixtures/fake-kafkajs-client.ts';

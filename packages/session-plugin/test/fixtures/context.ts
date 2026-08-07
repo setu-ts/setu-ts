@@ -1,7 +1,7 @@
 /**
  * Test fixtures: a minimal request context and service registry.
  *
- * Written here rather than imported from `@hono-enterprise/testing` so the
+ * Written here rather than imported from `@setu-ts/testing` so the
  * plugin's tests carry no extra workspace dependency, and deliberately faithful
  * to how the real producers behave — a fixture that diverges from the kernel
  * tests the fixture instead of the code. In particular `startTime` is a
@@ -17,7 +17,7 @@ import type {
   IResponse,
   IServiceRegistry,
   ResponseSnapshot,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /** Records everything a response builder was asked to do. */
 export class FakeResponse implements IResponse {

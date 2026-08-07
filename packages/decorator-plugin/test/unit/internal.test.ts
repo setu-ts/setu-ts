@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { Constructor } from '@hono-enterprise/common';
+import type { Constructor } from '@setu-ts/common';
 
 import {
   className,

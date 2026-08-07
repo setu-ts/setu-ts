@@ -11,7 +11,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IDatabaseAdapter, IDataSource } from '@hono-enterprise/common';
+import type { IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 
 import { DrizzleAdapter, MemoryAdapter, PrismaAdapter } from '../../src/index.ts';
 

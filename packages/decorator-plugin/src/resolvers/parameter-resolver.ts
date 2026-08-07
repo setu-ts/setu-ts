@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { IRequestContext } from '@hono-enterprise/common';
-import { parseCookie } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
+import { parseCookie } from '@setu-ts/common';
 
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 
@@ -61,7 +61,7 @@ export function clearParameterResolvers(): void {
 /**
  * Parses cookies from a `Cookie` request header into a name→value record.
  *
- * Delegates to the canonical codec in `@hono-enterprise/common`, so the
+ * Delegates to the canonical codec in `@setu-ts/common`, so the
  * framework has exactly one cookie parser (AI_GUIDELINES §11.1). That codec is
  * stricter than this function's original inline implementation in three ways,
  * each a defect fix rather than a feature: values are percent-decoded (so a

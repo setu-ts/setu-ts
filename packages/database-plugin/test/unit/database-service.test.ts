@@ -16,7 +16,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
-import type { IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 
 describe('DatabaseService', () => {

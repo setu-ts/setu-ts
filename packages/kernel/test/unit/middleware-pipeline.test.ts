@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequestContext, MiddlewareFunction, NextFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 import { MiddlewarePipeline } from '../../src/pipeline/middleware-pipeline.ts';
 
 function emptyCtx(): IRequestContext {

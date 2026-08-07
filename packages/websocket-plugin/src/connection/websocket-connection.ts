@@ -11,7 +11,7 @@ import type {
   IWebSocketConnection,
   IWebSocketTransport,
   WebSocketReadyState,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /**
  * A live WebSocket connection.

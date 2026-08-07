@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { ICacheStore } from '@hono-enterprise/common';
+import type { ICacheStore } from '@setu-ts/common';
 import type { CacheStore } from '../stores/cache-store.ts';
 
 /**

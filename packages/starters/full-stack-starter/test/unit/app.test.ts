@@ -5,9 +5,9 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { buildFullStackPlugins, createFullStackApp } from '../../src/index.ts';
 import type { FullStackStarterOptions } from '../../src/options.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
-import type { IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import { buildMicroservicePlugins } from '@setu-ts/microservice-starter';
+import type { IPlugin } from '@setu-ts/common';
 
 describe('full-stack-starter / buildFullStackPlugins', () => {
   it('is a superset of microservice set', () => {

@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { BulkheadPolicy, CircuitBreakerPolicy, RetryPolicy } from '@hono-enterprise/common';
+import type { BulkheadPolicy, CircuitBreakerPolicy, RetryPolicy } from '@setu-ts/common';
 
 /**
  * The timer subset of `IRuntimeServices` used by the retry and timeout

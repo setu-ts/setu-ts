@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { IPlugin, IResilienceService } from '@hono-enterprise/common';
+import type { IPlugin, IResilienceService } from '@setu-ts/common';
 import type { ResiliencePluginOptions } from '../interfaces/index.ts';
 import { ResilienceService } from '../services/resilience-service.ts';
 

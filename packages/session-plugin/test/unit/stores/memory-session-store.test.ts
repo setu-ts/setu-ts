@@ -8,7 +8,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { TimerHandle } from '@hono-enterprise/common';
+import type { TimerHandle } from '@setu-ts/common';
 
 import { MemorySessionStore } from '../../../src/stores/memory-session-store.ts';
 

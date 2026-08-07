@@ -1,4 +1,4 @@
-# @hono-enterprise/metrics-plugin
+# @setu-ts/metrics-plugin
 
 Prometheus metrics. Registers an `IMetricsService` under `CAPABILITIES.METRICS` (`'metrics'`) and
 serves the scrape endpoint at `/metrics`.
@@ -8,16 +8,16 @@ Zero dependencies — the Prometheus text-format 0.0.4 renderer is implemented i
 ## Installation
 
 ```typescript
-import { MetricsPlugin } from '@hono-enterprise/metrics-plugin';
+import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { MetricsPlugin } from '@hono-enterprise/metrics-plugin';
-import { CAPABILITIES, type IMetricsService } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { MetricsPlugin } from '@setu-ts/metrics-plugin';
+import { CAPABILITIES, type IMetricsService } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), MetricsPlugin({ endpoint: '/metrics', httpMetrics: true })],
@@ -53,4 +53,4 @@ decrements the active-requests gauge rather than leaking it.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

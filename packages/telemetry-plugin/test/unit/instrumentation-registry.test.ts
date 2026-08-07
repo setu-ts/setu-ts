@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { InstrumentationKind } from '../../src/interfaces/index.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import {
   buildInstrumentationRegistry,
   isInstrumentationSupported,

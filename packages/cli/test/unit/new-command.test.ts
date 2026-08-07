@@ -77,23 +77,23 @@ describe('runNewCommand', () => {
   it('creates a deno project under the working directory by default', async () => {
     const h = harness();
     expect(await h.run(['my-app'])).toBe(0);
-    for (const file of ['deno.json', 'main.ts', 'honoe.config.ts', 'README.md', '.gitignore']) {
+    for (const file of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md', '.gitignore']) {
       expect(h.fs.has(`/work/my-app/${file}`)).toBe(true);
     }
   });
 
-  describe('the honoe.config.ts seam', () => {
+  describe('the setu.config.ts seam', () => {
     it('is emitted even without --template', async () => {
       // Plugin-command discovery needs one seam that always exists.
       const h = harness();
       await h.run(['app']);
-      expect(h.fs.read('/work/app/honoe.config.ts')).toContain('export function createApp()');
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain('export function createApp()');
     });
 
     it('carries only the runtime plugin without --template', async () => {
       const h = harness();
       await h.run(['app']);
-      const config = h.fs.read('/work/app/honoe.config.ts');
+      const config = h.fs.read('/work/app/setu.config.ts');
       expect(config).toContain('RuntimePlugin()');
       expect(config).not.toContain('ConfigPlugin');
       expect(config).not.toContain('errorHandler');
@@ -103,14 +103,14 @@ describe('runNewCommand', () => {
       // Importing this module must never bind a socket.
       const h = harness();
       await h.run(['app']);
-      expect(h.fs.read('/work/app/honoe.config.ts')).not.toContain('.start(');
+      expect(h.fs.read('/work/app/setu.config.ts')).not.toContain('.start(');
     });
 
     it('is the only place main.ts gets its plugin list from', async () => {
       const h = harness();
       await h.run(['app']);
       const main = h.fs.read('/work/app/main.ts');
-      expect(main).toContain("import { createApp } from './honoe.config.ts'");
+      expect(main).toContain("import { createApp } from './setu.config.ts'");
       expect(main).toContain('app.start({ port: 3000 })');
       expect(main).not.toContain('RuntimePlugin');
       expect(main).not.toContain('createApplication');
@@ -121,19 +121,19 @@ describe('runNewCommand', () => {
     it('awaits the factory instead of calling createApplication', async () => {
       const h = harness();
       expect(await h.run(['shop', '--template', 'full-stack'])).toBe(0);
-      const config = h.fs.read('/work/shop/honoe.config.ts');
+      const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(config).toContain('await createFullStackAppFromConfig(');
-      expect(config).toContain("from '@hono-enterprise/full-stack-starter'");
+      expect(config).toContain("from '@setu-ts/full-stack-starter'");
       // The kernel is not on this path at all.
       expect(config).not.toContain('createApplication');
-      expect(config).not.toContain('@hono-enterprise/kernel');
+      expect(config).not.toContain('@setu-ts/kernel');
     });
 
     it('exports an async factory, which the loader already awaits', async () => {
       const h = harness();
       await h.run(['shop', '--template', 'full-stack']);
-      const config = h.fs.read('/work/shop/honoe.config.ts');
+      const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(config).toContain('export async function createApp(');
       expect(config).toContain('): Promise<IApplication> {');
@@ -146,22 +146,22 @@ describe('runNewCommand', () => {
       await h.run(['shop', '--template', 'full-stack']);
       const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
 
-      expect(manifest.imports['@hono-enterprise/full-stack-starter']).toContain(
-        'jsr:@hono-enterprise/full-stack-starter@',
+      expect(manifest.imports['@setu-ts/full-stack-starter']).toContain(
+        'jsr:@setu-ts/full-stack-starter@',
       );
       // Declaring the kernel would name a package the project never imports.
-      expect(manifest.imports['@hono-enterprise/kernel']).toBeUndefined();
+      expect(manifest.imports['@setu-ts/kernel']).toBeUndefined();
       // Still needed: the config module imports the IApplication type.
-      expect(manifest.imports['@hono-enterprise/common']).toBeDefined();
+      expect(manifest.imports['@setu-ts/common']).toBeDefined();
     });
 
     it('declares every package the generated config imports', async () => {
       const h = harness();
       await h.run(['shop', '--template', 'full-stack']);
-      const config = h.fs.read('/work/shop/honoe.config.ts');
+      const config = h.fs.read('/work/shop/setu.config.ts');
       const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
 
-      for (const match of config.matchAll(/from '(@hono-enterprise\/[a-z-]+)'/g)) {
+      for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
         expect(Object.keys(manifest.imports)).toContain(match[1]);
       }
     });
@@ -196,7 +196,7 @@ describe('runNewCommand', () => {
       ).toBe(0);
 
       const entry = h.fs.read('/work/shop/src/index.ts');
-      const config = h.fs.read('/work/shop/honoe.config.ts');
+      const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('booted ??= boot(env)');
@@ -213,7 +213,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['api', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/api/src/index.ts');
-      const config = h.fs.read('/work/api/honoe.config.ts');
+      const config = h.fs.read('/work/api/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('booted ??= boot(env);');
@@ -226,7 +226,7 @@ describe('runNewCommand', () => {
       // The field is additive: the rest template must be untouched by it.
       const h = harness();
       await h.run(['api', '--template', 'rest']);
-      const config = h.fs.read('/work/api/honoe.config.ts');
+      const config = h.fs.read('/work/api/setu.config.ts');
 
       expect(config).toContain('export function createApp(): IApplication');
       expect(config).toContain('createApplication({');
@@ -236,10 +236,10 @@ describe('runNewCommand', () => {
   });
 
   describe('--template', () => {
-    it('writes the rest plugin set into honoe.config.ts', async () => {
+    it('writes the rest plugin set into setu.config.ts', async () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'rest'])).toBe(0);
-      const config = h.fs.read('/work/app/honoe.config.ts');
+      const config = h.fs.read('/work/app/setu.config.ts');
       for (
         const symbol of [
           'RuntimePlugin',
@@ -259,15 +259,15 @@ describe('runNewCommand', () => {
     it('adds errorHandler through middleware.add, not the plugin list', async () => {
       const h = harness();
       await h.run(['app', '--template', 'rest']);
-      const config = h.fs.read('/work/app/honoe.config.ts');
-      expect(config).toContain("import { errorHandler } from '@hono-enterprise/exceptions';");
+      const config = h.fs.read('/work/app/setu.config.ts');
+      expect(config).toContain("import { errorHandler } from '@setu-ts/exceptions';");
       expect(config).not.toContain('ExceptionsPlugin');
     });
 
     it('registers errorHandler at priority 0, the outermost position', async () => {
       const h = harness();
       await h.run(['app', '--template', 'rest']);
-      const config = h.fs.read('/work/app/honoe.config.ts');
+      const config = h.fs.read('/work/app/setu.config.ts');
 
       // `errorHandler`'s contract requires the outermost slot. A bare `add()`
       // takes the pipeline default of 500, which sits INSIDE the metrics
@@ -282,7 +282,7 @@ describe('runNewCommand', () => {
     it('registers errorHandler at priority 0 for the microservice template too', async () => {
       const h = harness();
       await h.run(['app', '--template', 'microservice']);
-      const config = h.fs.read('/work/app/honoe.config.ts');
+      const config = h.fs.read('/work/app/setu.config.ts');
 
       // The microservice set adds telemetry middleware at 30, so the same
       // ordering requirement applies — and it composes REST_MIDDLEWARE, so this
@@ -296,12 +296,12 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--template', 'rest']);
       const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
-      const config = h.fs.read('/work/app/honoe.config.ts');
+      const config = h.fs.read('/work/app/setu.config.ts');
       for (const specifier of Object.keys(manifest.imports)) {
         expect(typeof manifest.imports[specifier]).toBe('string');
       }
       // Every import in the generated source must be declared in the manifest.
-      for (const match of config.matchAll(/from '(@hono-enterprise\/[a-z-]+)'/g)) {
+      for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
         expect(Object.keys(manifest.imports)).toContain(match[1]);
       }
     });
@@ -311,7 +311,7 @@ describe('runNewCommand', () => {
       await rest.run(['app', '--template', 'rest']);
       const micro = harness();
       await micro.run(['app', '--template', 'microservice']);
-      const microConfig = micro.fs.read('/work/app/honoe.config.ts');
+      const microConfig = micro.fs.read('/work/app/setu.config.ts');
       for (const symbol of ['ConfigPlugin', 'OpenApiPlugin', 'errorHandler']) {
         expect(microConfig).toContain(symbol);
       }
@@ -319,7 +319,7 @@ describe('runNewCommand', () => {
         const symbol of ['MessagingPlugin', 'QueuePlugin', 'ResiliencePlugin', 'TelemetryPlugin']
       ) {
         expect(microConfig).toContain(`${symbol}()`);
-        expect(rest.fs.read('/work/app/honoe.config.ts')).not.toContain(symbol);
+        expect(rest.fs.read('/work/app/setu.config.ts')).not.toContain(symbol);
       }
     });
 
@@ -386,8 +386,8 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
-      expect(manifest.imports['@hono-enterprise/kernel']).toMatch(
-        /^jsr:@hono-enterprise\/kernel@\^/,
+      expect(manifest.imports['@setu-ts/kernel']).toMatch(
+        /^jsr:@setu-ts\/kernel@\^/,
       );
       expect(manifest.tasks.start).toContain('main.ts');
     });
@@ -397,9 +397,9 @@ describe('runNewCommand', () => {
       await h.run(['app', '--runtime', 'deno']);
       const main = h.fs.read('/work/app/main.ts');
       expect(main).toContain('await app.start({ port: 3000 })');
-      // The plugin list lives in honoe.config.ts, not here.
-      expect(main).toContain("from './honoe.config.ts'");
-      expect(h.fs.read('/work/app/honoe.config.ts')).toContain('RuntimePlugin()');
+      // The plugin list lives in setu.config.ts, not here.
+      expect(main).toContain("from './setu.config.ts'");
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain('RuntimePlugin()');
     });
 
     it('emits no package.json', async () => {
@@ -415,8 +415,8 @@ describe('runNewCommand', () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
         const manifest = JSON.parse(h.fs.read('/work/app/package.json'));
-        expect(manifest.dependencies['@hono-enterprise/kernel'])
-          .toMatch(/^npm:@jsr\/hono-enterprise__kernel@\^/);
+        expect(manifest.dependencies['@setu-ts/kernel'])
+          .toMatch(/^npm:@jsr\/setu-ts__kernel@\^/);
       });
 
       it('emits the .npmrc that makes the @jsr scope resolvable', async () => {
@@ -444,8 +444,8 @@ describe('runNewCommand', () => {
         await h.run(['app', '--runtime', runtime, '--template', 'rest']);
         const manifest = JSON.parse(h.fs.read('/work/app/package.json'));
         for (const pkg of ['kernel', 'common', 'runtime', 'openapi-plugin', 'exceptions']) {
-          expect(manifest.dependencies[`@hono-enterprise/${pkg}`])
-            .toMatch(new RegExp(`^npm:@jsr/hono-enterprise__${pkg}@\\^`));
+          expect(manifest.dependencies[`@setu-ts/${pkg}`])
+            .toMatch(new RegExp(`^npm:@jsr/setu-ts__${pkg}@\\^`));
         }
       });
     });
@@ -498,7 +498,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/app/src/index.ts');
-      expect(entry).toContain("import { createApp } from '../honoe.config.ts'");
+      expect(entry).toContain("import { createApp } from '../setu.config.ts'");
       expect(entry).not.toContain('createApplication');
     });
 

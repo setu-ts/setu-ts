@@ -271,7 +271,7 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
       expect(info.isFile).toBe(true);
       expect(info.size).toBeGreaterThan(0);
       const bytes = await services.fs!.readFile('packages/runtime/deno.json');
-      expect(new TextDecoder().decode(bytes)).toContain('@hono-enterprise/runtime');
+      expect(new TextDecoder().decode(bytes)).toContain('@setu-ts/runtime');
     });
 
     it('reports the real platform, version, and hostname through the real global', () => {

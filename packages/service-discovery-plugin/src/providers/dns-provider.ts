@@ -14,7 +14,7 @@ import type {
   SrvRecord,
   TimerHandle,
   Unsubscribe,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
 
 /** Options shared by both DNS modes. */

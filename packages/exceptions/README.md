@@ -1,20 +1,20 @@
-# @hono-enterprise/exceptions
+# @setu-ts/exceptions
 
 Exception hierarchy, factory functions, error formatters, and the global error-handler middleware.
 
-This is a **plain package, not a plugin** — it depends on `@hono-enterprise/common` only and
-registers no capability. You wire the middleware into the application pipeline yourself.
+This is a **plain package, not a plugin** — it depends on `@setu-ts/common` only and registers no
+capability. You wire the middleware into the application pipeline yourself.
 
 ## Installation
 
 ```typescript
-import { errorHandler, notFound } from '@hono-enterprise/exceptions';
+import { errorHandler, notFound } from '@setu-ts/exceptions';
 ```
 
 ## Usage
 
 ```typescript
-import { badRequest, errorHandler, HttpError, notFound } from '@hono-enterprise/exceptions';
+import { badRequest, errorHandler, HttpError, notFound } from '@setu-ts/exceptions';
 
 app.middleware.add(errorHandler({ format: 'rfc7807' }), {
   priority: 0,
@@ -41,4 +41,4 @@ app.router.get('/users/:id', async (ctx) => {
 ## Full API
 
 Every export, its signature, and the exact response shapes are documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

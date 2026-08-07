@@ -18,7 +18,7 @@ import type {
   IGraphqlService,
   IWebSocketConnection,
   WebSocketConnectionContext,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createWsHandlers } from '../../src/transports/ws/graphql-ws-handler.ts';
 import {

@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
 
 import { detectRuntime } from '../../detector/runtime-detector.ts';
 import { createDenoRuntimeServices } from '../deno/deno-runtime.ts';
@@ -121,8 +121,8 @@ function defaultRuntimeAdapters(
  *
  * @example Resolving configuration before choosing plugins
  * ```typescript
- * import { createRuntimeServices } from '@hono-enterprise/runtime';
- * import { loadConfig } from '@hono-enterprise/config-plugin';
+ * import { createRuntimeServices } from '@setu-ts/runtime';
+ * import { loadConfig } from '@setu-ts/config-plugin';
  *
  * const config = await loadConfig(createRuntimeServices());
  * const url = config.getOrThrow<string>('DATABASE_URL');
@@ -130,7 +130,7 @@ function defaultRuntimeAdapters(
  * @example The same, on Cloudflare Workers
  * ```typescript
  * import { env } from 'cloudflare:workers';
- * import { createRuntimeServices } from '@hono-enterprise/runtime';
+ * import { createRuntimeServices } from '@setu-ts/runtime';
  *
  * const config = await loadConfig(createRuntimeServices({ env }));
  * ```

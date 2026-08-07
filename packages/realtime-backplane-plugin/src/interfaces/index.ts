@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import type { IRealtimeBackplane } from '@hono-enterprise/common';
+import type { IRealtimeBackplane } from '@setu-ts/common';
 
 /**
  * The `ioredis`-shaped client surface the Redis transport uses.
@@ -74,7 +74,7 @@ export interface IRedisModule {
 export interface BackplaneCommonOptions {
   /**
    * The broker topic / Redis channel every instance publishes and subscribes
-   * on. Defaults to `'hono-enterprise.realtime'`. Instances must agree on it
+   * on. Defaults to `'setu-ts.realtime'`. Instances must agree on it
    * to see each other.
    */
   readonly topic?: string;
@@ -167,4 +167,4 @@ export type RealtimeBackplanePluginOptions =
   | CustomBackplaneOptions;
 
 /** The default topic when none is configured. */
-export const DEFAULT_TOPIC = 'hono-enterprise.realtime';
+export const DEFAULT_TOPIC = 'setu-ts.realtime';

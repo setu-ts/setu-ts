@@ -12,8 +12,8 @@ import type {
   IRequestContext,
   IRuntimeServices,
   MiddlewareFunction,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { RateLimitStore } from '../stores/rate-limit-store.ts';
 import { MemoryRateLimitStore } from '../stores/rate-limit-store.ts';
 

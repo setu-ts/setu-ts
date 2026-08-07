@@ -6,9 +6,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+**The project is renamed from Hono Enterprise to Setu-TS, and every package moves to a new JSR
+scope.** The old name asserted an association with the Hono project that does not exist: this
+framework is not built, endorsed, or maintained by the Hono team, and its actual use of Hono is one
+file — the kernel's router delegates matching to `jsr:@hono/hono`. That dependency is unchanged and
+unaffected. The rename removes the false signal, nothing else.
+
+> **⚠️ Breaking 1 of 5: every import specifier changes.** `@hono-enterprise/<pkg>` becomes
+> `@setu-ts/<pkg>`, published under the `@setu-ts` JSR scope. On the npm compatibility path,
+> `@jsr/hono-enterprise__<pkg>` becomes `@jsr/setu-ts__<pkg>`. This is a find-and-replace across
+> your imports and your manifest; no API changes with it. The `@hono-enterprise` packages are yanked
+> and archived on JSR — they remain downloadable by exact version, but they receive no further
+> releases.
+
+> **⚠️ Breaking 2 of 5: existing session cookies are invalidated.** The HKDF `info` parameters
+> behind `@setu-ts/session-plugin` carried the old project name, so the derived encryption, signing,
+> and key-id values all change. Every previously issued cookie fails to open and is treated as
+> absent, signing users out once. No configuration changes and no key rotation is required — this
+> happens on deploy and does not repeat.
+
+> **⚠️ Breaking 3 of 5: the realtime backplane default topic changes.** `DEFAULT_TOPIC` moves from
+> `hono-enterprise.realtime` to `setu-ts.realtime`, so replicas on either side of the upgrade **do
+> not see each other's frames**. Restart all replicas together rather than rolling them, or pin the
+> old value explicitly via the `topic` option to upgrade in stages. This mirrors the alpha.3
+> request-reply wire change; if you do not use the backplane, nothing here applies to you.
+
+> **⚠️ Breaking 4 of 5: RFC 7807 `type` URIs change.** The error-document base moves from
+> `https://hono-enterprise.dev/errors` to `https://setu-ts.dev/errors`, affecting every Problem
+> Details body from `@setu-ts/exceptions` and `@setu-ts/validation-plugin`. Clients matching on the
+> `type` field need updating. Per RFC 7807 these URIs are identifiers and are not required to
+> resolve.
+
+> **⚠️ Breaking 5 of 5: the CLI binary is renamed.** `honoe` becomes `setu` — `setu new`,
+> `setu generate`, and so on. Reinstall the CLI to pick up the new executable name; scaffolded
+> projects are otherwise unchanged apart from the scope in their generated manifests.
+
+Two further identifiers change with the rename and are noted for completeness rather than as
+breaking: the exported `SESSION_STATE_KEY` is now `setu-ts:session`, and the GitHub repository moved
+to `setu-ts/setu-ts`. Released sections below this one deliberately retain the `@hono-enterprise`
+names, because they record what those releases actually shipped.
+
 ### Added
 
-- **`@Optional` constructor-parameter decorator** in `@hono-enterprise/decorator-plugin`. Pairs with
+- **`@Optional` constructor-parameter decorator** in `@setu-ts/decorator-plugin`. Pairs with
   `@Inject` on the same parameter (either order) and injects `undefined` when that token has no
   provider, so a class can depend on a capability the application may not have registered without
   the author hand-writing a container lookup.
@@ -49,7 +89,7 @@ All notable changes to this project are documented here. The format follows
   install, <1 s build), so no `ServerBuild` fixture is committed and `full-stack` is deliberately
   not in `ALLOW_SKIP`. No published package changed; the frontend build remains an app-level,
   build-time concern outside every published dependency graph (AI_GUIDELINES §12.2).
-- **`@hono-enterprise/messaging-plugin`** — GCP Pub/Sub (`GcpPubSubBroker`) and Azure Service Bus
+- **`@setu-ts/messaging-plugin`** — GCP Pub/Sub (`GcpPubSubBroker`) and Azure Service Bus
   (`ServiceBusBroker`) backends implementing `IMessageBroker` with request-reply over a shared reply
   topic + per-instance subscription. `MessagingPluginOptions` is now a **discriminated union on
   `broker`** with a `'custom'` arm (inject any `IMessageBroker`) and a default memory arm so
@@ -62,7 +102,7 @@ All notable changes to this project are documented here. The format follows
   management operations, so the per-instance reply subscription cannot be created there — the suite
   asserts the refusal surfaces `ReplyInboxUnavailableError` instead. Neither backend has run against
   a live cloud account.
-- **`@hono-enterprise/queue-plugin`** — SQS `SqsQueue` adapter (`QueueAdapter` seam, wrapped by
+- **`@setu-ts/queue-plugin`** — SQS `SqsQueue` adapter (`QueueAdapter` seam, wrapped by
   `QueueService`) with per-name queue URLs, receipt-handle bookkeeping, `ApproximateReceiveCount`
   attempt ladder, visibility-timeout backoff, and dead-letter ordering. `SnsPublisher` for SNS
   fan-out. `QueueAdapterType` widened to include `'sqs'`. `QueueBackendUnavailableError` thrown on
@@ -88,39 +128,39 @@ All notable changes to this project are documented here. The format follows
   passing to the factory. Single-arm literals, `MessagingPlugin()`, `MessagingPlugin({})`, and the
   factory's own `= {}` default are unaffected. `MessagingBrokerType` includes `'pubsub'`,
   `'service-bus'`, and `'custom'`.
-- **`@hono-enterprise/queue-plugin`** — the INTERNAL `QueueAdapter` seam gained a `claimToken`
-  argument on `ack`/`requeue`/`deadLetter`, and `StoredJob` an optional `claimToken?`. It identifies
-  one delivery, so an adapter can refuse a settle belonging to a superseded one — SQS needs this
-  because a requeued message returns with a new `ReceiptHandle`. Adapters without a transport-level
-  claim (memory, redis, rabbitmq) accept and ignore it. Neither type is barrel-exported, so **no
-  published surface changes**; listed because it alters a contract shared by every adapter.
+- **`@setu-ts/queue-plugin`** — the INTERNAL `QueueAdapter` seam gained a `claimToken` argument on
+  `ack`/`requeue`/`deadLetter`, and `StoredJob` an optional `claimToken?`. It identifies one
+  delivery, so an adapter can refuse a settle belonging to a superseded one — SQS needs this because
+  a requeued message returns with a new `ReceiptHandle`. Adapters without a transport-level claim
+  (memory, redis, rabbitmq) accept and ignore it. Neither type is barrel-exported, so **no published
+  surface changes**; listed because it alters a contract shared by every adapter.
 
 ### Fixed
 
-- **`@hono-enterprise/queue-plugin`** — the SQS backend settled nothing through `QueuePlugin`. The
-  job runner passed the job id where the adapter expected the `claimToken` minted by `reserve`, so
-  every `ack`/`requeue`/`deadLetter` failed its own claim check and returned without calling SQS: a
+- **`@setu-ts/queue-plugin`** — the SQS backend settled nothing through `QueuePlugin`. The job
+  runner passed the job id where the adapter expected the `claimToken` minted by `reserve`, so every
+  `ack`/`requeue`/`deadLetter` failed its own claim check and returned without calling SQS: a
   processed job was never deleted and redelivered after each visibility timeout, forever. Adapter
   tests and the ElasticMQ e2e passed because both settle the adapter directly, supplying the token
   the real caller did not. Now covered through a real kernel application.
-- **`@hono-enterprise/messaging-plugin`** — `ServiceBusBroker` leaked an AMQP receiver link per
+- **`@setu-ts/messaging-plugin`** — `ServiceBusBroker` leaked an AMQP receiver link per
   `unsubscribe()`. Teardown closed only the subscriber handle returned by `receiver.subscribe(...)`
   and never the receiver itself; it also closed the most recently opened receiver rather than the
   one being unsubscribed, so cancelling one of two subscriptions on the same topic stopped the wrong
   delivery.
-- **`@hono-enterprise/messaging-plugin`** — `GcpPubSubBroker` and `ServiceBusBroker` constructed
-  standalone with neither credentials nor an injected transport now fail at `connect()` naming the
-  missing option, instead of building a client on an empty `projectId` / connection string and
-  failing later inside the SDK.
+- **`@setu-ts/messaging-plugin`** — `GcpPubSubBroker` and `ServiceBusBroker` constructed standalone
+  with neither credentials nor an injected transport now fail at `connect()` naming the missing
+  option, instead of building a client on an empty `projectId` / connection string and failing later
+  inside the SDK.
 
 - Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.
   Their explicit startup `connect()` call no longer fails because ioredis connected eagerly during
   construction.
-- `@hono-enterprise/queue-plugin` — `RedisQueue.reserve()` now sends the mandatory `LIMIT` keyword
-  in the `ZRANGEBYSCORE` command, so reserve works against a real Redis server. Previously the call
-  sent positional offset/count arguments without the keyword, which caused Redis to return
+- `@setu-ts/queue-plugin` — `RedisQueue.reserve()` now sends the mandatory `LIMIT` keyword in the
+  `ZRANGEBYSCORE` command, so reserve works against a real Redis server. Previously the call sent
+  positional offset/count arguments without the keyword, which caused Redis to return
   `ERR syntax error` on every reserve attempt.
-- `@hono-enterprise/messaging-plugin` — `RedisStreamsBroker` now hands a timer handle back to
+- `@setu-ts/messaging-plugin` — `RedisStreamsBroker` now hands a timer handle back to
   `clearInterval` exactly as `setInterval` returned it. It previously stored the handle as a
   `number`, and `TimerHandle` is deliberately opaque (`unknown`), so a runtime returning an
   object-shaped handle had it coerced to `NaN` — making the cancel a silent no-op and leaking a poll
@@ -1051,4 +1091,4 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[0.1.0-alpha.1]: https://github.com/dkpaul91/hono-enterprise/releases/tag/v0.1.0-alpha.1
+[0.1.0-alpha.1]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.1

@@ -12,10 +12,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IServiceDiscovery } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IServiceDiscovery } from '@setu-ts/common';
 
 import { ServiceDiscoveryPlugin } from '../../src/index.ts';
 

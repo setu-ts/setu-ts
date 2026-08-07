@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { ISecretManager } from '@hono-enterprise/common';
+import type { ISecretManager } from '@setu-ts/common';
 import type { SecretProvider } from '../interfaces/index.ts';
 
 /** Default read-cache TTL in seconds. */

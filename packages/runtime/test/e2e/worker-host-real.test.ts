@@ -6,8 +6,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { WorkerTaskReply } from '@hono-enterprise/common';
-import { isWorkerReadySignal, isWorkerTaskReply } from '@hono-enterprise/common';
+import type { WorkerTaskReply } from '@setu-ts/common';
+import { isWorkerReadySignal, isWorkerTaskReply } from '@setu-ts/common';
 import { createWebWorkerHost } from '../../src/adapters/shared/web-worker-host.ts';
 
 const echoTaskUrl = new URL('../fixtures/echo-task.ts', import.meta.url).href;

@@ -8,7 +8,7 @@
  * @since 0.3.0
  */
 
-import type { ICacheStore } from '@hono-enterprise/common';
+import type { ICacheStore } from '@setu-ts/common';
 import { extractPersistedQuery, persistedQueryHash } from './persisted-query.ts';
 
 /** Error code for a missing cached document. */

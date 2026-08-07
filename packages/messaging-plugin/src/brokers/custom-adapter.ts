@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { IMessageBroker } from '@hono-enterprise/common';
+import type { IMessageBroker } from '@setu-ts/common';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 
 /**

@@ -6,8 +6,8 @@
  *
  * @module
  */
-import type { IMetricsService, IPlugin } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IMetricsService, IPlugin } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { MetricsPluginOptions } from '../interfaces/index.ts';
 import { MetricsService } from '../services/metrics-service.ts';
 import { HttpCollector, MIDDLEWARE_PRIORITY } from '../collectors/http-collector.ts';
@@ -95,7 +95,7 @@ export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
         // Get all metric registration contributions
         const registrations = ctx.services.getAll<{
           name: string;
-          config: import('@hono-enterprise/common').MetricConfig;
+          config: import('@setu-ts/common').MetricConfig;
         }>(CAPABILITIES.METRIC_REGISTRATION);
 
         // Materialize each registration

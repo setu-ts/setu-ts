@@ -15,4 +15,4 @@ export { subscribeHandler } from './handlers/event-handler.ts';
 export type { EventsPluginOptions } from './interfaces/index.ts';
 
 // Re-export common types for convenience
-export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from '@hono-enterprise/common';
+export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from '@setu-ts/common';

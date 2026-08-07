@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
 import { freezeAuditRecord, matchAuditQuery, orderAndLimit } from './audit-record.ts';
 

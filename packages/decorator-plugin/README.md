@@ -1,4 +1,4 @@
-# @hono-enterprise/decorator-plugin
+# @setu-ts/decorator-plugin
 
 Optional NestJS-style decorators as syntactic sugar over the kernel's programmatic API.
 
@@ -11,20 +11,13 @@ The store itself is registered under `CAPABILITIES.METADATA_STORE` (`'metadata-s
 ## Installation
 
 ```typescript
-import { Controller, DecoratorPlugin, Get } from '@hono-enterprise/decorator-plugin';
+import { Controller, DecoratorPlugin, Get } from '@setu-ts/decorator-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import {
-  Body,
-  Controller,
-  DecoratorPlugin,
-  Get,
-  Param,
-  Post,
-} from '@hono-enterprise/decorator-plugin';
+import { Body, Controller, DecoratorPlugin, Get, Param, Post } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
 class UsersController {
@@ -69,4 +62,4 @@ Discovery failures are logged as warnings and never crash the application.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

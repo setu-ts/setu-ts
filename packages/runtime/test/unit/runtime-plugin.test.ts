@@ -7,8 +7,8 @@
  */
 
 import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IHttpAdapter, IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IHttpAdapter, IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 

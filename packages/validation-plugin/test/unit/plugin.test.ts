@@ -5,8 +5,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IPluginContext, IValidationService } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IPluginContext, IValidationService } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { ValidationPlugin } from '../../src/plugin/validation-plugin.ts';
 import { ValidationService } from '../../src/services/validation-service.ts';

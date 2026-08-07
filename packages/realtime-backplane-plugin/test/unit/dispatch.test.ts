@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { RealtimeFrame, RealtimeFrameHandler } from '@hono-enterprise/common';
+import type { RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import { dispatchFrame } from '../../src/transports/dispatch.ts';
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-a', name: 'lobby', data: 'hi' };

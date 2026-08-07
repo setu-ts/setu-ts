@@ -6,7 +6,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IValidationService } from '@hono-enterprise/common';
+import type { IValidationService } from '@setu-ts/common';
 
 import { createValidationMiddleware } from '../../src/middleware/validation-middleware.ts';
 import { defaultFormatter } from '../../src/formatters/default-formatter.ts';

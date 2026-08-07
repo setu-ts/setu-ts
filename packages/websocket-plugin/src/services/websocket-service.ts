@@ -26,8 +26,8 @@ import type {
   WebSocketRoom,
   WebSocketRouteOptions,
   WebSocketUpgradeDecision,
-} from '@hono-enterprise/common';
-import { decodeFrameData, encodeFrameData } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { decodeFrameData, encodeFrameData } from '@setu-ts/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
@@ -271,7 +271,7 @@ export class WebSocketService implements IWebSocketService {
    *
    * A failure here is reported through the logger before it is turned into a
    * `500` refusal. The adapter-side `UpgradeRouterStore` also catches, but it
-   * runs inside `@hono-enterprise/runtime`, which has no logger and therefore
+   * runs inside `@setu-ts/runtime`, which has no logger and therefore
    * has nowhere to put the cause — so the only place a routing bug can be made
    * visible is here, at its source.
    *

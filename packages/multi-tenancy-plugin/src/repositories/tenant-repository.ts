@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ITenantRepository } from '@hono-enterprise/common';
+import type { ITenantRepository } from '@setu-ts/common';
 import type { ITenantDataStore } from '../interfaces/index.ts';
 
 /**

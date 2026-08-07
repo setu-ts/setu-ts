@@ -13,7 +13,7 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 /** Options for IP security middleware. */
 export interface IpSecurityOptions {

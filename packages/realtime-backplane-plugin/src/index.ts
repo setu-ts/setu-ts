@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * `@hono-enterprise/realtime-backplane-plugin` — cross-replica fan-out for
+ * `@setu-ts/realtime-backplane-plugin` — cross-replica fan-out for
  * WebSocket rooms and SSE channels.
  *
  * The WebSocket and SSE plugins hold their broadcast membership in ordinary
@@ -25,10 +25,10 @@
  *
  * @example
  * ```typescript
- * import { createApplication } from '@hono-enterprise/kernel';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
- * import { RealtimeBackplanePlugin } from '@hono-enterprise/realtime-backplane-plugin';
- * import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
+ * import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
+ * import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
  *
  * const app = createApplication({
  *   plugins: [
@@ -75,7 +75,7 @@ export type {
   RealtimeFrame,
   RealtimeFrameHandler,
   RealtimeFrameKind,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 // Re-exported so a custom transport can honor the identical wire shape without
 // reaching past this package.
-export { CAPABILITIES, decodeFrameData, encodeFrameData } from '@hono-enterprise/common';
+export { CAPABILITIES, decodeFrameData, encodeFrameData } from '@setu-ts/common';

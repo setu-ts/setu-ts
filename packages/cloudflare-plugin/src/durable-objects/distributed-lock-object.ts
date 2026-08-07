@@ -55,7 +55,7 @@ export interface DistributedLockObjectCoreOptions {
  * @example
  * ```typescript
  * import { DurableObject } from 'cloudflare:workers';
- * import { DistributedLockObjectCore } from '@hono-enterprise/cloudflare-plugin';
+ * import { DistributedLockObjectCore } from '@setu-ts/cloudflare-plugin';
  *
  * export class DistributedLockObject extends DurableObject {
  *   #core = new DistributedLockObjectCore(this.ctx);

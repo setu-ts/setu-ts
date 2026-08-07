@@ -8,7 +8,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { NormalizedQuery } from '@hono-enterprise/common';
+import type { NormalizedQuery } from '@setu-ts/common';
 
 import { createD1DataSource } from '../../../src/database/d1-data-source.ts';
 import { RecordingD1, SqliteD1 } from '../../d1-fakes.ts';

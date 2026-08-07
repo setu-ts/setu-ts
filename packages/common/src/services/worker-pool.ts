@@ -49,7 +49,7 @@ export interface TaskPoolStats {
  * A pool of worker threads executing task modules off the event loop.
  *
  * A task module is an ES module owned by the application that registers its
- * handler via `defineWorkerTask` (from `@hono-enterprise/runtime/worker`).
+ * handler via `defineWorkerTask` (from `@setu-ts/runtime/worker`).
  * Tasks are addressed by module specifier — never by closure, because
  * functions cannot cross a thread boundary. Inputs and outputs travel by
  * structured clone.
@@ -123,7 +123,7 @@ export interface WorkerErrorShape {
  * Posted once by the worker side (`defineWorkerTask`) after its message
  * handler is wired; the pool dispatches tasks only to ready workers.
  *
- * The `__hewp` marker (Hono Enterprise Worker Protocol) distinguishes
+ * The `__hewp` marker (Setu-TS Worker Protocol) distinguishes
  * protocol envelopes from unrelated messages, which both sides ignore.
  *
  * @since 0.1.0

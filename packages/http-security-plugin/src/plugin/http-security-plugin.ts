@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import { PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { CorsOptions } from '../middleware/cors-middleware.ts';
 import { corsMiddleware } from '../middleware/cors-middleware.ts';
 import type { SecurityHeadersOptions } from '../middleware/security-headers-middleware.ts';

@@ -10,8 +10,8 @@
  * @module
  */
 
-import type { CliCommandHandler, IFileSystem } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { CliCommandHandler, IFileSystem } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import {
@@ -170,7 +170,7 @@ function reportMissingConfig(
 }
 
 /**
- * Runs `honoe commands` — boots the project and lists what its plugins provide.
+ * Runs `setu commands` — boots the project and lists what its plugins provide.
  *
  * @param args - Arguments after the `commands` verb, already parsed
  * @param deps - Filesystem, working directory, and output sinks

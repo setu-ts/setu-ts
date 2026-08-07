@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { Option, Some } from '@hono-enterprise/common';
+import type { Option, Some } from '@setu-ts/common';
 
 /**
  * Asserts the option is `Some`, narrowing it for subsequent `.value` access.

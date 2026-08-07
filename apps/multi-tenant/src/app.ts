@@ -1,9 +1,9 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IMultiTenancyService, ITenantRepository } from '@hono-enterprise/common';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMultiTenancyService, ITenantRepository } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 interface TenantNote {
   readonly id: string;

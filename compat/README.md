@@ -12,10 +12,10 @@ bun install && bun run test:bun
 
 ## What it tests, and why it cannot test the working tree
 
-Node and Bun cannot consume this repo's source. Cross-package specifiers are
-`jsr:@hono-enterprise/*` and optional heavy dependencies are `npm:*`; neither resolves outside Deno.
-JSR rewrites both at publish time, so **the published artifact is the unit under test** — installed
-from `https://npm.jsr.io` as `@jsr/hono-enterprise__*` via the scoped registry in `.npmrc`.
+Node and Bun cannot consume this repo's source. Cross-package specifiers are `jsr:@setu-ts/*` and
+optional heavy dependencies are `npm:*`; neither resolves outside Deno. JSR rewrites both at publish
+time, so **the published artifact is the unit under test** — installed from `https://npm.jsr.io` as
+`@jsr/setu-ts__*` via the scoped registry in `.npmrc`.
 
 Two consequences follow, and both are deliberate:
 

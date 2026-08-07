@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IConfig } from '@hono-enterprise/common';
+import type { IConfig } from '@setu-ts/common';
 
 /**
  * Internal configuration service implementing the {@linkcode IConfig} contract.

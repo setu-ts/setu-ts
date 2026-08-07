@@ -11,7 +11,7 @@ import type {
   IRuntimeServices,
   MetricOptions,
   NextFunction,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type { MetricsService } from '../services/metrics-service.ts';
 
 /**

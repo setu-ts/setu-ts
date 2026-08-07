@@ -1,7 +1,7 @@
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IDomainEvent, IEventBus } from '@hono-enterprise/common';
-import type { IMessageBroker } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IDomainEvent, IEventBus } from '@setu-ts/common';
+import type { IMessageBroker } from '@setu-ts/common';
 import type { EventsMessagingBridgeOptions } from '../interfaces/index.ts';
 
 /**

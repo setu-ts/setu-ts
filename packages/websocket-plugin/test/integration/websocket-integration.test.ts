@@ -6,10 +6,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, type IWebSocketService, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, type IWebSocketService, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { WebSocketPlugin } from '../../src/index.ts';
 import { createFakeLogger, requestFailingOnSecondHeaderRead } from '../fixtures/fake-runtime.ts';
 

@@ -10,12 +10,7 @@
  * @module
  */
 
-import type {
-  IDnsResolver,
-  IFileSystem,
-  IRuntimeServices,
-  IWorkerHost,
-} from '@hono-enterprise/common';
+import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
 import { hostname as osHostname } from 'node:os';
 import * as nodeFs from 'node:fs/promises';
 import process from 'node:process';

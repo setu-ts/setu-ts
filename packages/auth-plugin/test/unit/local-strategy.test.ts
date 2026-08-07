@@ -5,7 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { LocalStrategy } from '../../src/services/auth-service.ts';
-import type { IPrincipal } from '@hono-enterprise/common';
+import type { IPrincipal } from '@setu-ts/common';
 
 describe('LocalStrategy', () => {
   it('delegates to the verify callback and returns the principal', async () => {

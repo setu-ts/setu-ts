@@ -13,7 +13,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 function createContext(authService: IAuthService): {
   ctx: IRequestContext;

@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import type { TelemetryContext } from '@hono-enterprise/common';
+import type { TelemetryContext } from '@setu-ts/common';
 
 /**
  * The key used to store the active span on `ctx.state`.

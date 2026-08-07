@@ -4,9 +4,9 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { HealthCheckResult, HealthIndicatorFn } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { HealthCheckResult, HealthIndicatorFn } from '@setu-ts/common';
 import type { FeatureFlagsPluginOptions, FlagProvider } from '../interfaces/index.ts';
 import { ConfigProvider } from '../providers/config-provider.ts';
 import { MemoryProvider } from '../providers/memory-provider.ts';
@@ -73,7 +73,7 @@ export function createProvider(
  *
  * @example
  * ```typescript
- * import { FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
+ * import { FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
  *
  * app.register(FeatureFlagsPlugin({
  *   provider: 'config',

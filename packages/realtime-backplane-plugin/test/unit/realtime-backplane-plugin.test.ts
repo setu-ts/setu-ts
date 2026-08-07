@@ -6,12 +6,8 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type {
-  HealthCheckResult,
-  IPluginContext,
-  IRealtimeBackplane,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { HealthCheckResult, IPluginContext, IRealtimeBackplane } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { RealtimeBackplanePlugin } from '../../src/plugin/realtime-backplane-plugin.ts';
 
 interface Harness {

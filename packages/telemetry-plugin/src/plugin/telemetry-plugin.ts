@@ -13,8 +13,8 @@ import type {
   ITelemetryService,
   MiddlewareFunction,
   TelemetryContext,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';

@@ -6,10 +6,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { MiddlewareFunction } from '@hono-enterprise/common';
+import type { MiddlewareFunction } from '@setu-ts/common';
 import { createNoopTracerHost, TelemetryPlugin } from '../../src/plugin/telemetry-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IPluginContext, ITelemetryService } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IPluginContext, ITelemetryService } from '@setu-ts/common';
 
 /** Whether `npm:` imports are available in this environment. */
 function canImportNpm(): boolean {

@@ -13,7 +13,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IServiceRegistry } from '@hono-enterprise/common';
+import type { IServiceRegistry } from '@setu-ts/common';
 import type { IRequestContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { assembleHandler, createLoadContextFactory } from '../../src/handler/server-build.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';

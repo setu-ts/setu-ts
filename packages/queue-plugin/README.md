@@ -1,11 +1,11 @@
 # Queue Plugin
 
-Background job queue plugin for Hono Enterprise with Memory, Redis, RabbitMQ, and SQS adapters.
+Background job queue plugin for Setu-TS with Memory, Redis, RabbitMQ, and SQS adapters.
 
 ## Installation
 
 ```bash
-deno add @hono-enterprise/queue-plugin
+deno add @setu-ts/queue-plugin
 ```
 
 ## Usage
@@ -13,7 +13,7 @@ deno add @hono-enterprise/queue-plugin
 ### Basic Setup (Memory Adapter)
 
 ```typescript
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 app.register(QueuePlugin({ adapter: 'memory' }));
 ```
@@ -21,7 +21,7 @@ app.register(QueuePlugin({ adapter: 'memory' }));
 ### Redis Adapter
 
 ```typescript
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 app.register(QueuePlugin({
   adapter: 'redis',
@@ -32,7 +32,7 @@ app.register(QueuePlugin({
 ### RabbitMQ Adapter
 
 ```typescript
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 app.register(QueuePlugin({
   adapter: 'rabbitmq',
@@ -44,7 +44,7 @@ app.register(QueuePlugin({
 ### SQS Adapter
 
 ```typescript
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 app.register(QueuePlugin({
   adapter: 'sqs',
@@ -58,7 +58,7 @@ app.register(QueuePlugin({
 ### Named Instances
 
 ```typescript
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 // Foreground queue
 app.register(QueuePlugin({ adapter: 'memory', name: 'foreground' }));
@@ -72,7 +72,7 @@ app.register(QueuePlugin({ adapter: 'memory', name: 'background' }));
 ### Adding Jobs
 
 ```typescript
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
 

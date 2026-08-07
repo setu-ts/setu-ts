@@ -10,7 +10,7 @@ import type {
   InstrumentationKind,
   InstrumentationsConfig,
 } from '../interfaces/index.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { loadFetchInstrumentation, loadHttpInstrumentation } from './http-instrumentation.ts';
 import { loadIORedisInstrumentation } from './database-instrumentation.ts';
 import { loadAmqplibInstrumentation, loadKafkaJsInstrumentation } from './queue-instrumentation.ts';

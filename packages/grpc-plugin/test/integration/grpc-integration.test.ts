@@ -9,10 +9,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
-import { CAPABILITIES, type IGrpcService } from '@hono-enterprise/common';
+import { CAPABILITIES, type IGrpcService } from '@setu-ts/common';
 
 /** Runs `body` against a started application and always stops it. */
 async function withApp(

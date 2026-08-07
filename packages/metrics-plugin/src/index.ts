@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Prometheus metrics plugin for Hono Enterprise.
+ * Prometheus metrics plugin for Setu-TS.
  *
  * This plugin provides:
  * - `MetricsPlugin` - The plugin factory
@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { MetricsPlugin } from '@hono-enterprise/metrics-plugin';
+ * import { MetricsPlugin } from '@setu-ts/metrics-plugin';
  *
  * app.register(MetricsPlugin({
  *   endpoint: '/metrics',
@@ -42,4 +42,4 @@ export type {
   ISummary,
   MetricConfig,
   MetricOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

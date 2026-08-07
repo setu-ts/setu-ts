@@ -11,7 +11,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
-import type { IAdapterTransaction, IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
 // ---------------------------------------------------------------------------

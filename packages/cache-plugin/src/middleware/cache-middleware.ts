@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { CachedResponsePayload, CacheMiddlewareOptions } from '../interfaces/index.ts';
 import { defaultCacheKey } from '../utils/cache-key.ts';
 import { decodePayload, encodePayload } from '../utils/cache-payload.ts';

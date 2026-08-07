@@ -1,7 +1,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { ILogger, LogLevel, LogMetadata } from '@hono-enterprise/common';
+import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
 
 import { normalizePinoFactory, PinoLogger } from '../../src/loggers/pino-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';

@@ -19,7 +19,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /**
  * Create a fake response that records the status and body.

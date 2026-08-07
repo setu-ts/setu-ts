@@ -12,7 +12,7 @@ import type {
   ISummary,
   MetricConfig,
   MetricOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { Counter } from '../metrics/counter.ts';
 import { Gauge } from '../metrics/gauge.ts';
 import { Histogram } from '../metrics/histogram.ts';

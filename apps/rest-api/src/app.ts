@@ -1,8 +1,8 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IJwtService } from '@hono-enterprise/common';
-import { authMiddleware, requireAuth } from '@hono-enterprise/auth-plugin';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { createRestApp } from '@hono-enterprise/rest-starter';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IJwtService } from '@setu-ts/common';
+import { authMiddleware, requireAuth } from '@setu-ts/auth-plugin';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createRestApp } from '@setu-ts/rest-starter';
 
 interface Todo {
   readonly id: string;

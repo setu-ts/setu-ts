@@ -4,11 +4,7 @@
  * @module
  */
 
-import type {
-  HealthCheckResult,
-  HealthIndicatorFn,
-  RuntimePlatform,
-} from '@hono-enterprise/common';
+import type { HealthCheckResult, HealthIndicatorFn, RuntimePlatform } from '@setu-ts/common';
 
 /** What the indicator reports on. */
 export interface CloudflareHealthInput {

@@ -34,6 +34,6 @@ export type {
   AuditStorageType,
 } from './interfaces/index.ts';
 
-// ── Re-exported from @hono-enterprise/common ────────────────────────────────
+// ── Re-exported from @setu-ts/common ────────────────────────────────
 
-export type { AuditEntry, IAuditLogger } from '@hono-enterprise/common';
+export type { AuditEntry, IAuditLogger } from '@setu-ts/common';

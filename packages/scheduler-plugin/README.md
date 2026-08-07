@@ -1,4 +1,4 @@
-# @hono-enterprise/scheduler-plugin
+# @setu-ts/scheduler-plugin
 
 Job scheduling. Registers an `IScheduler` under `CAPABILITIES.SCHEDULER` (`'scheduler'`).
 
@@ -8,16 +8,16 @@ distributed locking. The 5-field UTC cron parser is implemented here — no depe
 ## Installation
 
 ```typescript
-import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
-import { CAPABILITIES, type IScheduler } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import { CAPABILITIES, type IScheduler } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -58,4 +58,4 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

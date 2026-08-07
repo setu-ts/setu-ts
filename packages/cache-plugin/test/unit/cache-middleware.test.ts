@@ -7,7 +7,7 @@ import type {
   ICacheStore,
   IRequestContext,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { cacheMiddleware } from '../../src/middleware/cache-middleware.ts';
 

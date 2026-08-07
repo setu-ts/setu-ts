@@ -1,4 +1,4 @@
-# @hono-enterprise/notification-plugin
+# @setu-ts/notification-plugin
 
 Multi-channel notifications — email, SMS, push, Slack. Registers an `INotifier` under
 `CAPABILITIES.NOTIFICATION` (`'notification'`).
@@ -10,14 +10,14 @@ is no `npm:` import anywhere and all channels are Workers-portable.
 ## Installation
 
 ```typescript
-import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
+import { NotificationPlugin } from '@setu-ts/notification-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
-import { CAPABILITIES, type INotifier } from '@hono-enterprise/common';
+import { NotificationPlugin } from '@setu-ts/notification-plugin';
+import { CAPABILITIES, type INotifier } from '@setu-ts/common';
 
 app.register(NotificationPlugin({
   channels: {
@@ -89,4 +89,4 @@ unused and the runtime requirement does not apply.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IPipelineBehavior } from '@hono-enterprise/common';
+import type { IPipelineBehavior } from '@setu-ts/common';
 
 /**
  * Options for {@linkcode CqrsPlugin}.

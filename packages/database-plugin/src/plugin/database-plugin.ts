@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   CustomDatabaseOptions,
   DatabaseAdapterOptions,
@@ -20,7 +20,7 @@ import { DatabaseService } from '../services/database-service.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
-import type { IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../repositories/base-repository.ts';
 
 /** Default adapter when none is specified. */
@@ -38,7 +38,7 @@ const PLUGIN_NAME = 'database-plugin';
  *
  * @example
  * ```typescript
- * import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+ * import { DatabasePlugin } from '@setu-ts/database-plugin';
  *
  * // Memory adapter (default, zero deps)
  * app.register(DatabasePlugin());

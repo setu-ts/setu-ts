@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { IDnsResolver, SrvRecord } from '@hono-enterprise/common';
+import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
 
 /**
  * One SRV record as `Deno.resolveDns` returns it.

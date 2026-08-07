@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 
 import { NoopLogger } from '../../src/loggers/noop-logger.ts';
 

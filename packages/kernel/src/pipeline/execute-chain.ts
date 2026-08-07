@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 import type { ResponseBuilder } from '../context/response.ts';
 

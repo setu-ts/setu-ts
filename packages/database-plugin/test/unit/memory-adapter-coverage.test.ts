@@ -8,7 +8,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
-import type { IAdapterTransaction } from '@hono-enterprise/common';
+import type { IAdapterTransaction } from '@setu-ts/common';
 import { normalizeQuery } from '../../src/query/query-builder.ts';
 
 describe('MemoryAdapter — overlay and transaction coverage', () => {

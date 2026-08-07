@@ -7,9 +7,9 @@ export function createFakeRequest(overrides?: {
   path?: string;
   headers?: Record<string, string>;
   tenant?: { id: string; name?: string; metadata?: Record<string, unknown> };
-}): import('@hono-enterprise/common').IRequest {
+}): import('@setu-ts/common').IRequest {
   let storedTenant: { id: string; name?: string; metadata?: Record<string, unknown> } | undefined;
-  let storedUser: import('@hono-enterprise/common').IPrincipal | undefined;
+  let storedUser: import('@setu-ts/common').IPrincipal | undefined;
   const baseHeaders = new Headers(overrides?.headers ?? {});
   return {
     method: overrides?.method ?? 'GET',
@@ -32,10 +32,10 @@ export function createFakeRequest(overrides?: {
     // Writable fields — genuinely readable back, as on the real `IRequest`:
     // a no-op setter here would let a middleware bug that never writes the
     // field pass its own test.
-    get user(): import('@hono-enterprise/common').IPrincipal | undefined {
+    get user(): import('@setu-ts/common').IPrincipal | undefined {
       return storedUser;
     },
-    set user(v: import('@hono-enterprise/common').IPrincipal | undefined) {
+    set user(v: import('@setu-ts/common').IPrincipal | undefined) {
       storedUser = v;
     },
     get tenant(): { id: string; name?: string; metadata?: Record<string, unknown> } | undefined {
@@ -44,5 +44,5 @@ export function createFakeRequest(overrides?: {
     set tenant(v: { id: string; name?: string; metadata?: Record<string, unknown> } | undefined) {
       storedTenant = v;
     },
-  } as unknown as import('@hono-enterprise/common').IRequest;
+  } as unknown as import('@setu-ts/common').IRequest;
 }

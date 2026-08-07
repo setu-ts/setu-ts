@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ILogger } from '@hono-enterprise/common';
+import type { ILogger } from '@setu-ts/common';
 import { DatabaseProvider } from '../../src/providers/database-provider.ts';
 import type { FlagDefinition, IFlagStore } from '../../src/interfaces/index.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
@@ -184,14 +184,14 @@ describe('DatabaseProvider', () => {
       let logMsg: string | null = null;
       const fakeLogger: ILogger = {
         level: 'debug' as const,
-        fatal: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        error: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        warn: (msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {
+        fatal: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        error: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        warn: (msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {
           logMsg = msg;
         },
-        info: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        debug: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        trace: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        info: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        debug: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        trace: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
         child: (): ILogger => fakeLogger,
       };
 
@@ -258,12 +258,12 @@ describe('DatabaseProvider', () => {
       let callCount = 0;
       const fakeLogger: ILogger = {
         level: 'debug' as const,
-        fatal: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        error: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        warn: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        info: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        debug: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
-        trace: (_msg: string, _meta?: import('@hono-enterprise/common').LogMetadata): void => {},
+        fatal: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        error: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        warn: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        info: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        debug: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
+        trace: (_msg: string, _meta?: import('@setu-ts/common').LogMetadata): void => {},
         child: (): ILogger => fakeLogger,
       };
 

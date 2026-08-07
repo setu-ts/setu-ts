@@ -16,7 +16,7 @@ import type {
   IServiceRegistry,
   LogLevel,
   ResponseSnapshot,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Fake IRequest

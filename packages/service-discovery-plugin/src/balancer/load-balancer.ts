@@ -8,11 +8,7 @@
  *
  * @module
  */
-import type {
-  IRuntimeServices,
-  LoadBalanceStrategy,
-  ServiceInstance,
-} from '@hono-enterprise/common';
+import type { IRuntimeServices, LoadBalanceStrategy, ServiceInstance } from '@setu-ts/common';
 
 /** Picks one instance from a non-empty candidate list, or `null` from an empty one. */
 export interface LoadBalancer {

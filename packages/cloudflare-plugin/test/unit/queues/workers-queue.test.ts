@@ -9,7 +9,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IJob, IQueue } from '@hono-enterprise/common';
+import type { IJob, IQueue } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { WorkersQueue } from '../../../src/queues/workers-queue.ts';

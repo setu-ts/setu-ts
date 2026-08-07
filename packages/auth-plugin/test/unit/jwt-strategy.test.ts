@@ -7,7 +7,7 @@ import { expect } from '@std/expect';
 import { JwtStrategy } from '../../src/strategies/jwt-strategy.ts';
 import { JwtService } from '../../src/services/jwt-service.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
-import type { IRequest } from '@hono-enterprise/common';
+import type { IRequest } from '@setu-ts/common';
 
 describe('JwtStrategy', () => {
   let jwt: JwtService;

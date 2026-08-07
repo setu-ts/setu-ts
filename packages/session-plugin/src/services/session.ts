@@ -12,7 +12,7 @@
  *
  * @module
  */
-import type { ISession, SessionData } from '@hono-enterprise/common';
+import type { ISession, SessionData } from '@setu-ts/common';
 
 /** The serialized session payload carried in the cookie. */
 export interface SessionSnapshot {

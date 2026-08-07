@@ -1,10 +1,10 @@
-# @hono-enterprise/http-security-plugin
+# @setu-ts/http-security-plugin
 
-HTTP transport security plugin for Hono Enterprise. Provides five independent, composable middleware
+HTTP transport security plugin for Setu-TS. Provides five independent, composable middleware
 concerns: **CORS**, **security response headers**, **CSRF**, **request-size limiting**, and **IP
 security**.
 
-**Zero npm dependencies** — depends only on `@hono-enterprise/common` and `@hono-enterprise/kernel`.
+**Zero npm dependencies** — depends only on `@setu-ts/common` and `@setu-ts/kernel`.
 
 ## Features
 
@@ -22,7 +22,7 @@ security**.
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/http-security-plugin
+deno add jsr:@setu-ts/http-security-plugin
 ```
 
 ## Usage
@@ -30,8 +30,8 @@ deno add jsr:@hono-enterprise/http-security-plugin
 ### Plugin Registration
 
 ```typescript
-import { HttpSecurityPlugin } from '@hono-enterprise/http-security-plugin';
-import { createApplication } from '@hono-enterprise/kernel';
+import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
+import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication();
 
@@ -79,7 +79,7 @@ import {
   ipSecurityMiddleware,
   requestSizeMiddleware,
   securityHeadersMiddleware,
-} from '@hono-enterprise/http-security-plugin';
+} from '@setu-ts/http-security-plugin';
 
 app.router.post('/api/data', {
   middleware: [

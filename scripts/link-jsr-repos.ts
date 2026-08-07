@@ -16,7 +16,7 @@
  *
  * Without the link, `deno publish` gets as far as uploading and then fails with
  *
- *     error: Failed to publish @hono-enterprise/common@…
+ *     error: Failed to publish @setu-ts/common@…
  *     Caused by:
  *         The actor that this request was authenticated for is not authorized
  *         to access this resource. (actorNotAuthorized)
@@ -42,9 +42,9 @@ import { PUBLISHED_PACKAGES } from './release-packages.ts';
 // untested error path is how a release script fails at the worst moment.
 // Defaults to the real API; production runs never set it.
 const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
-const SCOPE = 'hono-enterprise';
-const OWNER = Deno.env.get('JSR_REPO_OWNER') ?? 'dkpaul91';
-const REPO = Deno.env.get('JSR_REPO_NAME') ?? 'hono-enterprise';
+const SCOPE = 'setu-ts';
+const OWNER = Deno.env.get('JSR_REPO_OWNER') ?? 'setu-ts';
+const REPO = Deno.env.get('JSR_REPO_NAME') ?? 'setu-ts';
 
 const dryRun = Deno.args.includes('--dry-run');
 const token = Deno.env.get('JSR_TOKEN');

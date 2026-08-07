@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { ILogger, LogLevel, LogMetadata } from '@hono-enterprise/common';
+import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
 
 /**
  * Minimal structural shape of a Pino logger that this wrapper depends on.

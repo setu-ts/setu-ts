@@ -10,7 +10,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IHealthIndicator,
   IMailer,
@@ -18,9 +18,9 @@ import type {
   IPlugin,
   IPluginContext,
   MailMessage,
-} from '@hono-enterprise/common';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+} from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { NotificationPlugin } from '../../src/index.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
 

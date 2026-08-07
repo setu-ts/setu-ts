@@ -1,7 +1,7 @@
 /**
  * Shared structural-shape validation for injected provider clients.
  *
- * Copied from `@hono-enterprise/secrets-plugin` (M25).
+ * Copied from `@setu-ts/secrets-plugin` (M25).
  *
  * @module
  */

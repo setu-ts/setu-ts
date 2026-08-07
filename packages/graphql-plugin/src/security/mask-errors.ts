@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { GraphqlFormattedError } from '@hono-enterprise/common';
+import type { GraphqlFormattedError } from '@setu-ts/common';
 
 /**
  * Check if an error is exposable to clients.

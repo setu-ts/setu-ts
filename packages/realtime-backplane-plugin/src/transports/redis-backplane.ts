@@ -5,11 +5,7 @@
  * @since 0.2.0
  */
 
-import type {
-  IRealtimeBackplane,
-  RealtimeFrame,
-  RealtimeFrameHandler,
-} from '@hono-enterprise/common';
+import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
 import { dispatchFrame } from './dispatch.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';

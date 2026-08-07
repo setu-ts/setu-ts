@@ -1,7 +1,7 @@
-# @hono-enterprise/session-plugin
+# @setu-ts/session-plugin
 
 Cookie-backed sessions and session-backed form CSRF for
-[Hono Enterprise](https://github.com/dkpaul91/hono-enterprise).
+[Setu-TS](https://github.com/setu-ts/setu-ts).
 
 Registers an `ISessionService` under `CAPABILITIES.SESSION`. The default is a self-contained
 encrypted cookie — AES-256-GCM under a key derived by HKDF-SHA256, entirely through `runtime.subtle`
@@ -10,15 +10,15 @@ encrypted cookie — AES-256-GCM under a key derived by HKDF-SHA256, entirely th
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/session-plugin
+deno add jsr:@setu-ts/session-plugin
 ```
 
 ## Quick start
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { getSession, SessionPlugin } from '@hono-enterprise/session-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 
 const app = createApplication({
   plugins: [
@@ -183,7 +183,7 @@ To validate inside a handler or a React Router action instead of via middleware,
 function the middleware uses:
 
 ```typescript
-import { verifyCsrfToken } from '@hono-enterprise/session-plugin';
+import { verifyCsrfToken } from '@setu-ts/session-plugin';
 
 await verifyCsrfToken(ctx); // throws CsrfTokenMismatchError
 ```
@@ -250,12 +250,12 @@ arriving while every session reads as absent.
 
 The `ISession` / `ISessionService` / `ISessionStore` contracts and the `parseCookie` /
 `serializeCookie` codec live in
-[`@hono-enterprise/common`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[`@setu-ts/common`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
 
 ## Documentation
 
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [ARCHITECTURE.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 

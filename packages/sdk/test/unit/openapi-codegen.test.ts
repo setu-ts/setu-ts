@@ -828,7 +828,7 @@ describe('fixture equality', () => {
  * the `test` task does not grant, so the whole suite errored out — and a
  * subprocess `deno check` would not have caught the emitted source disagreeing
  * with the SDK's own `IHttpClient` contract anyway, because the temp file was
- * checked in isolation against a bare `@hono-enterprise/sdk` specifier.
+ * checked in isolation against a bare `@setu-ts/sdk` specifier.
  */
 describe('compile regression', () => {
   const generated = generateOpenApiClient(paramsDocument, { sdkImport: '../../src/index.ts' });

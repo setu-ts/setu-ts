@@ -108,12 +108,12 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     },
   ],
   packageImports: [
-    // The load-context bridge in the generated honoe.config.ts.
+    // The load-context bridge in the generated setu.config.ts.
     { pkg: 'session-plugin', symbols: ['getCsrfToken', 'getSession'] },
     // The capability tokens and service types the bridge resolves.
     { pkg: 'common', symbols: ['CAPABILITIES', 'type ILogger', 'type ISecretManager'] },
     // Imported by app/lib/context-keys.server.ts for contextKeyFor(), so the
-    // manifest must carry it even though honoe.config.ts names no symbol.
+    // manifest must carry it even though setu.config.ts names no symbol.
     { pkg: 'react-router-plugin' },
   ],
   files: [...FULL_STACK_APP_FILES, ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES)],

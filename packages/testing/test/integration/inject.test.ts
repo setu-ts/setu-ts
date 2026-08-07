@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 import { inject } from '../../src/inject.ts';
 import { createMockPlugin } from '../../src/mock-plugin.ts';
 import { createTestApp } from '../../src/test-app.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 describe('inject — integration through real started app', () => {
   function fakeRuntime(): ReturnType<typeof createMockPlugin> {

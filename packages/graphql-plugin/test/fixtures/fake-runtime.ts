@@ -9,7 +9,7 @@
  * reaching for a runtime API directly is banned outside `packages/runtime`.
  */
 
-import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 
 interface ScheduledTimer {
   readonly fn: () => void;

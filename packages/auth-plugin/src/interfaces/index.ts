@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IPrincipal, RbacConfig } from '@hono-enterprise/common';
+import type { IPrincipal, RbacConfig } from '@setu-ts/common';
 
 /**
  * JWT configuration options.

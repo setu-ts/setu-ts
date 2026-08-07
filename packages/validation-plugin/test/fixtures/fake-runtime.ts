@@ -12,7 +12,7 @@ import type {
   IResponse,
   IServiceRegistry,
   ResponseSnapshot,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Fake IRequest

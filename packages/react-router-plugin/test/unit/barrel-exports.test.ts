@@ -94,8 +94,7 @@ describe('barrel exports', () => {
     const _handler: SsrRequestHandler = async (_r: Request, _c: unknown) => new Response('ok');
     void _handler;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _svc: import('@hono-enterprise/common').ISsrService =
-      {} as import('@hono-enterprise/common').ISsrService;
+    const _svc: import('@setu-ts/common').ISsrService = {} as import('@setu-ts/common').ISsrService;
     void _svc;
 
     expect(_opt.serverBuildPath).toBe('./build/server');

@@ -6,8 +6,8 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IMessageBroker, IRealtimeBackplane, IServiceRegistry } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IMessageBroker, IRealtimeBackplane, IServiceRegistry } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { createBackplane } from '../../src/transports/backplane-factory.ts';
 import { MemoryBackplane } from '../../src/transports/memory-backplane.ts';
 import { MessagingBackplane } from '../../src/transports/messaging-backplane.ts';

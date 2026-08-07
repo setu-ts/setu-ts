@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IContainer, Provider, ProviderOptions, ServiceScope } from '@hono-enterprise/common';
+import type { IContainer, Provider, ProviderOptions, ServiceScope } from '@setu-ts/common';
 
 import type { ExternalResolver } from './container.ts';
 import { DiContainer } from './container.ts';

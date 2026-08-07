@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IAuthStrategy, IPrincipal, IRequest } from '@hono-enterprise/common';
+import type { IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
 
 /**
  * API key strategy options.

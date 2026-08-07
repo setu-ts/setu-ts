@@ -1,6 +1,6 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   ClassProvider,
   Constructor,
@@ -11,7 +11,7 @@ import type {
   ProviderOptions,
   RouteDefinition,
   RouteHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import {
   ApiOperation,

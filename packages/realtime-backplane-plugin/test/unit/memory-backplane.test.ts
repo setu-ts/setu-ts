@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { RealtimeFrame } from '@hono-enterprise/common';
+import type { RealtimeFrame } from '@setu-ts/common';
 import { MemoryBackplane } from '../../src/transports/memory-backplane.ts';
 
 /** Builds a frame with a caller-chosen origin. */

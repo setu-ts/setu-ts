@@ -4,9 +4,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFullStackApp } from '../../src/index.ts';
-import type { IRequestContext } from '@hono-enterprise/common';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
+import { CachePlugin } from '@setu-ts/cache-plugin';
+import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 
 describe('full-stack-starter / integration (load-bearing)', () => {
   it('boots all ~22 plugins in one kernel and inject() returns 200', async () => {
@@ -34,8 +34,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     const response = await app.inject({ method: 'GET', url: '/throw-route' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://hono-enterprise.dev/errors/500"
-    expect(response.body).toContain('"type":"https://hono-enterprise.dev/errors/500"');
+    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
+    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"route error"');
     expect(response.body).not.toContain('"message":');
@@ -56,8 +56,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://hono-enterprise.dev/errors/500"
-    expect(response.body).toContain('"type":"https://hono-enterprise.dev/errors/500"');
+    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
+    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"middleware error"');
     expect(response.body).not.toContain('"message":');

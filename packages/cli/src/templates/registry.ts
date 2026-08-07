@@ -17,10 +17,10 @@ import { NEST_TEMPLATE } from './nest.ts';
 import { REST_TEMPLATE, RUNTIME_WIRING } from './rest.ts';
 
 /**
- * One symbol a generated `honoe.config.ts` imports and calls.
+ * One symbol a generated `setu.config.ts` imports and calls.
  */
 export interface Wiring {
-  /** Bare `@hono-enterprise` package name, e.g. `config-plugin`. */
+  /** Bare `@setu-ts` package name, e.g. `config-plugin`. */
   readonly pkg: string;
   /** The exported symbol, e.g. `ConfigPlugin`. */
   readonly symbol: string;
@@ -57,7 +57,7 @@ export interface Wiring {
 }
 
 /**
- * One import of a project-local module emitted into `honoe.config.ts`.
+ * One import of a project-local module emitted into `setu.config.ts`.
  *
  * Needed because a {@linkcode Wiring.args} string can name a class the template
  * also emits as a source file; without the import, the generated config would
@@ -71,7 +71,7 @@ export interface LocalImport {
 }
 
 /**
- * One middleware a generated `honoe.config.ts` adds to the pipeline.
+ * One middleware a generated `setu.config.ts` adds to the pipeline.
  *
  * `addOptions` is **required**, deliberately. A bare `app.middleware.add(fn())`
  * lands at the pipeline default of `500`, which is silently wrong for anything
@@ -102,7 +102,7 @@ export interface MiddlewareWiring extends Wiring {
  * it.
  */
 export interface AppFactoryWiring {
-  /** Bare `@hono-enterprise` package name, e.g. `full-stack-starter`. */
+  /** Bare `@setu-ts` package name, e.g. `full-stack-starter`. */
   readonly pkg: string;
   /** The exported factory, e.g. `createFullStackAppFromConfig`. */
   readonly symbol: string;
@@ -116,20 +116,20 @@ export interface AppFactoryWiring {
 }
 
 /**
- * One `@hono-enterprise` package a template needs beyond its wirings.
+ * One `@setu-ts` package a template needs beyond its wirings.
  *
  * Two things are declared at once, deliberately: the symbols (if any) the
- * generated `honoe.config.ts` imports, and the fact that the project depends on
+ * generated `setu.config.ts` imports, and the fact that the project depends on
  * the package. A template whose emitted source files import a package that no
  * wiring names — a type from the SSR plugin, say — would otherwise produce a
  * project whose own imports cannot resolve.
  */
 export interface PackageImport {
-  /** Bare `@hono-enterprise` package name. */
+  /** Bare `@setu-ts` package name. */
   readonly pkg: string;
   /**
    * Named exports the config module imports. Omitted → the package is added to
-   * the manifest but nothing is imported into `honoe.config.ts`, which is what
+   * the manifest but nothing is imported into `setu.config.ts`, which is what
    * a package used only by the template's own source files needs.
    */
   readonly symbols?: readonly string[];
@@ -211,7 +211,7 @@ export interface TemplateDefinition {
   /** Middleware added with `app.middleware.add(...)` after construction. */
   readonly middleware: readonly MiddlewareWiring[];
   /**
-   * Project-local imports emitted into `honoe.config.ts`, above the package
+   * Project-local imports emitted into `setu.config.ts`, above the package
    * imports. Present only for templates whose {@linkcode Wiring.args} name a
    * class the template also emits.
    */
@@ -234,7 +234,7 @@ export interface TemplateDefinition {
 /**
  * The plugin set used when no `--template` is given: a runtime provider alone.
  *
- * Still emitted through the same `honoe.config.ts` seam as every template, so
+ * Still emitted through the same `setu.config.ts` seam as every template, so
  * plugin-command discovery has one shape to read.
  */
 export const MINIMAL_PLUGINS: readonly Wiring[] = [RUNTIME_WIRING];
@@ -262,7 +262,7 @@ export function getTemplate(name: string): TemplateDefinition | undefined {
 /**
  * Lists every template in registration order.
  *
- * Consumed by `honoe new --help`, so the documented list cannot drift from the
+ * Consumed by `setu new --help`, so the documented list cannot drift from the
  * templates that actually exist.
  *
  * @returns Each template definition
@@ -272,10 +272,10 @@ export function listTemplates(): readonly TemplateDefinition[] {
 }
 
 /**
- * Collects the distinct `@hono-enterprise` packages a set of wirings imports.
+ * Collects the distinct `@setu-ts` packages a set of wirings imports.
  *
  * Consumed by the manifest writer, so a scaffolded project always declares an
- * import for every package its `honoe.config.ts` references — the two cannot
+ * import for every package its `setu.config.ts` references — the two cannot
  * disagree, because both read this one list.
  *
  * @param wirings - Wiring lists, in any order

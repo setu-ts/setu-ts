@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * `@hono-enterprise/feature-flags-plugin` — feature flag evaluation with
+ * `@setu-ts/feature-flags-plugin` — feature flag evaluation with
  * pluggable backends (config, memory, database) and a free-function route
  * guard.
  *
@@ -61,4 +61,4 @@ export type {
 
 // ── Re-export common contracts ──────────────────────────────────────────────
 
-export type { FlagContext, IFeatureFlags } from '@hono-enterprise/common';
+export type { FlagContext, IFeatureFlags } from '@setu-ts/common';

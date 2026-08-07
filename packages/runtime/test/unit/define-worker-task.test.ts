@@ -9,8 +9,8 @@ import { expect } from '@std/expect';
 import { resolveTaskPort, wireWorkerTask } from '../../src/worker/task-port.ts';
 import type { NodePortLike, TaskPort } from '../../src/worker/task-port.ts';
 import { defineWorkerTask } from '../../src/worker/define-worker-task.ts';
-import type { WorkerTaskReply } from '@hono-enterprise/common';
-import { isWorkerTaskReply } from '@hono-enterprise/common';
+import type { WorkerTaskReply } from '@setu-ts/common';
+import { isWorkerTaskReply } from '@setu-ts/common';
 
 /** In-memory TaskPort for driving wireWorkerTask directly. */
 class FakePort implements TaskPort {

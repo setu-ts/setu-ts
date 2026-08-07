@@ -15,8 +15,8 @@ import type {
   IRuntimeServices,
   IServiceRegistry,
   ResponseSnapshot,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 const HANDLER_RESULT: HandlerResult = { __handlerResult: true };
 

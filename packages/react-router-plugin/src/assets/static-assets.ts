@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { IFileSystem, RouteHandler } from '@hono-enterprise/common';
+import type { IFileSystem, RouteHandler } from '@setu-ts/common';
 
 /**
  * Content-type map for common file extensions.

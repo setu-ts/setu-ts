@@ -14,7 +14,7 @@ import type {
   IRequestContext,
   MiddlewareFunction,
   NextFunction,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { CsrfTokenMismatchError } from '../errors.ts';
 import type { CsrfFormOptions } from '../options.ts';

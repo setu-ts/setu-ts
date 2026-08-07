@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Cloudflare Workers platform bindings for Hono Enterprise.
+ * Cloudflare Workers platform bindings for Setu-TS.
  *
  * The framework has served traffic on Workers since the Hono migration, but had
  * no way to reach the platform's own primitives. `CloudflarePlugin` publishes a
@@ -17,9 +17,9 @@
  * @example
  * ```typescript
  * import { env, waitUntil } from 'cloudflare:workers';
- * import { createApplication } from '@hono-enterprise/kernel';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
- * import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
+ * import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
  *
  * const app = createApplication({
  *   plugins: [

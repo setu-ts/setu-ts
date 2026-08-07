@@ -1,6 +1,6 @@
-# @hono-enterprise/cloudflare-plugin
+# @setu-ts/cloudflare-plugin
 
-Cloudflare Workers platform bindings for Hono Enterprise.
+Cloudflare Workers platform bindings for Setu-TS.
 
 The framework has served traffic on Workers since the Hono migration, but had no way to reach the
 platform's own primitives. This plugin publishes a Worker's bindings under `CAPABILITIES.CLOUDFLARE`
@@ -15,18 +15,18 @@ testable with a plain object.
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/cloudflare-plugin
+deno add jsr:@setu-ts/cloudflare-plugin
 ```
 
 ## Usage
 
 ```typescript
 import { env, waitUntil } from 'cloudflare:workers';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { CloudflarePlugin } from '@hono-enterprise/cloudflare-plugin';
-import { CAPABILITIES, type ICacheStore } from '@hono-enterprise/common';
-import type { ICloudflareBindings } from '@hono-enterprise/cloudflare-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
+import type { ICloudflareBindings } from '@setu-ts/cloudflare-plugin';
 
 const app = createApplication({
   plugins: [
@@ -58,7 +58,7 @@ app.router.get('/settings', async (ctx) => {
 export default { fetch: app.fetch };
 ```
 
-`honoe new --runtime cloudflare-workers` scaffolds the `env` wiring and a `wrangler.toml` with
+`setu new --runtime cloudflare-workers` scaffolds the `env` wiring and a `wrangler.toml` with
 commented binding stanzas.
 
 ## Requirements
@@ -100,8 +100,8 @@ import {
   createQueueHandler,
   createScheduledHandler,
   WorkersCron,
-} from '@hono-enterprise/cloudflare-plugin';
-import { CAPABILITIES, type IQueue } from '@hono-enterprise/common';
+} from '@setu-ts/cloudflare-plugin';
+import { CAPABILITIES, type IQueue } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -154,9 +154,9 @@ crons = ["0 3 * * *"]
 exists, so a store published in the registry could never reach it. Build one yourself:
 
 ```typescript
-import { createRuntimeServices } from '@hono-enterprise/runtime';
-import { SessionPlugin } from '@hono-enterprise/session-plugin';
-import { type IKvNamespace, KvSessionStore } from '@hono-enterprise/cloudflare-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { type IKvNamespace, KvSessionStore } from '@setu-ts/cloudflare-plugin';
 
 const runtime = createRuntimeServices({ env });
 
@@ -174,8 +174,8 @@ through the ordinary repository and Unit-of-Work surface. Like the session store
 hand it over — `DatabasePlugin`'s options are read before any application exists.
 
 ```typescript
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
-import { D1Adapter, type ID1Database } from '@hono-enterprise/cloudflare-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { D1Adapter, type ID1Database } from '@setu-ts/cloudflare-plugin';
 
 DatabasePlugin({
   type: 'custom',
@@ -218,10 +218,7 @@ is unresolvable on every other runtime and would break type-checking everywhere.
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
-import {
-  DistributedLockObjectCore,
-  RealtimeBackplaneObjectCore,
-} from '@hono-enterprise/cloudflare-plugin';
+import { DistributedLockObjectCore, RealtimeBackplaneObjectCore } from '@setu-ts/cloudflare-plugin';
 
 export class RealtimeBackplaneObject extends DurableObject {
   #core = new RealtimeBackplaneObjectCore(this.ctx);
@@ -297,8 +294,8 @@ other's frames.
 ### Distributed lock
 
 ```typescript
-import { DurableObjectLock } from '@hono-enterprise/cloudflare-plugin';
-import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
+import { DurableObjectLock } from '@setu-ts/cloudflare-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
 const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, {
   runtime,
@@ -383,8 +380,8 @@ job.
 
 ## Documentation
 
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [ARCHITECTURE.md](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 

@@ -1,8 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IMailer } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IMailer } from '@setu-ts/common';
 
 import { createProvider, MailPlugin } from '../../src/plugin/mail-plugin.ts';
 import { LogProvider } from '../../src/providers/log-provider.ts';

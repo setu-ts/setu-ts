@@ -1,4 +1,4 @@
-# Hono Enterprise — Project Rules (pointer)
+# Setu-TS — Project Rules (pointer)
 
 The canonical, always-current project rules for ALL assistants live in **`CLAUDE.md`** at the repo
 root. This file is intentionally a thin pointer so the rules exist in exactly one place and cannot
@@ -13,7 +13,7 @@ drift out of sync.
   existing `feat/…` branch if work is in progress. Do NOT open a `fix/…` branch for an unmerged
   milestone — that is only for defects in already-merged `main`. Never work on or commit to `main`.
 - the documentation you MUST read first (AI_GUIDELINES.md, ROADMAP.md, ARCHITECTURE.md,
-  PUBLIC_API.md, and the `@hono-enterprise/common` interfaces you will implement);
+  PUBLIC_API.md, and the `@setu-ts/common` interfaces you will implement);
 - the verification gates (`deno task fmt:check` / `lint` / `check` / `test` / `test:coverage` /
   `audit`);
 - the "Common pitfalls", "Self-review checklist", and "Before reporting a task done (evidence, not

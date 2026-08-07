@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { IConfig, IRuntimeServices } from '@hono-enterprise/common';
+import type { IConfig, IRuntimeServices } from '@setu-ts/common';
 
 import type { ConfigPluginOptions } from '../options.ts';
 import { ConfigService } from './config-service.ts';
@@ -34,8 +34,8 @@ import { validateConfig } from '../validators/config-validator.ts';
  *
  * @example Reading configuration before an application exists
  * ```typescript
- * import { createRuntimeServices } from '@hono-enterprise/runtime';
- * import { loadConfig } from '@hono-enterprise/config-plugin';
+ * import { createRuntimeServices } from '@setu-ts/runtime';
+ * import { loadConfig } from '@setu-ts/config-plugin';
  *
  * const config = await loadConfig(createRuntimeServices(), {
  *   envFilePath: ['.env.local', '.env'],

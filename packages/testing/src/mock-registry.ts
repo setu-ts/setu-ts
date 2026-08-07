@@ -3,7 +3,7 @@ import type {
   IServiceRegistry,
   RegisterOptions,
   ServiceFactory,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 interface Registration {
   instance?: object;

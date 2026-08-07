@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IMailer, MailMessage } from '@hono-enterprise/common';
+import type { IMailer, MailMessage } from '@setu-ts/common';
 import type { MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import type { TemplateEngine } from '../templates/template-engine.ts';
 

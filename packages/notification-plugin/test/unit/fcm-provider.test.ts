@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { FcmProvider } from '../../src/providers/fcm-provider.ts';
 import type { FcmProviderOptions, FcmTokenSource } from '../../src/index.ts';
 import { createFakeFcmHttp } from '../fixtures/fake-fcm-http.ts';

@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IPlugin } from '@setu-ts/common';
 import {
   findUnsatisfiedConsumers,
   resolvePluginOrder,

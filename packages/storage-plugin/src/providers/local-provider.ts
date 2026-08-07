@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import type { StorageProvider } from '../interfaces/index.ts';
 
 /**

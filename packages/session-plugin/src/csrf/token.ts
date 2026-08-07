@@ -12,8 +12,8 @@
  *
  * @module
  */
-import type { IRequestContext, IRuntimeServices, ISession } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IRequestContext, IRuntimeServices, ISession } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { toBase64Url } from '../codec/envelope.ts';
 import { getSession } from '../services/get-session.ts';

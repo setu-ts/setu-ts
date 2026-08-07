@@ -3,12 +3,12 @@
  *
  * @module
  */
-import type { OrderDirection } from '@hono-enterprise/common';
+import type { OrderDirection } from '@setu-ts/common';
 
 /**
  * Sort direction for a single field.
  *
- * Re-exported from `@hono-enterprise/common`, where it was promoted in M52c
+ * Re-exported from `@setu-ts/common`, where it was promoted in M52c
  * alongside `NormalizedQuery` so a backend in another package can name it.
  * Same type, two import paths.
  *

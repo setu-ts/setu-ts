@@ -6,7 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createSelfIndicator } from '../../src/indicators/self-indicator.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 describe('createSelfIndicator', () => {
   function createFakeRuntime(overrides?: Partial<IRuntimeServices>): IRuntimeServices {
@@ -14,7 +14,7 @@ describe('createSelfIndicator', () => {
       now: () => 1_000_000_000_000,
       hrtime: () => 0,
       platform: () =>
-        (overrides?.platform?.() ?? 'node') as import('@hono-enterprise/common').RuntimePlatform,
+        (overrides?.platform?.() ?? 'node') as import('@setu-ts/common').RuntimePlatform,
       version: () => overrides?.version?.() ?? '18.0.0',
       hostname: () => overrides?.hostname?.() ?? 'test-host',
       uuid: () => '00000000-0000-0000-0000-000000000000',
@@ -50,7 +50,7 @@ describe('createSelfIndicator', () => {
 
   it('should include platform in data', async () => {
     const runtime = createFakeRuntime({
-      platform: () => 'linux' as import('@hono-enterprise/common').RuntimePlatform,
+      platform: () => 'linux' as import('@setu-ts/common').RuntimePlatform,
     });
     const indicator = createSelfIndicator(runtime);
 
@@ -95,7 +95,7 @@ describe('createSelfIndicator', () => {
 
   it('should include all platform diagnostics', async () => {
     const runtime = createFakeRuntime({
-      platform: () => 'darwin' as import('@hono-enterprise/common').RuntimePlatform,
+      platform: () => 'darwin' as import('@setu-ts/common').RuntimePlatform,
       version: () => '19.5.0',
       hostname: () => 'localhost',
     });

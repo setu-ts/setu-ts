@@ -4,7 +4,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { GraphqlPlugin } from '../../src/plugin/graphql-plugin.ts';
 import type { ResolverMap } from '../../src/interfaces/options.ts';
 import { createHandlerLogger } from '../../src/plugin/graphql-plugin.ts';

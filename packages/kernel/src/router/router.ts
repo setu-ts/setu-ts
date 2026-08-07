@@ -15,7 +15,7 @@ import type {
   RouteDefinition,
   RouteHandler,
   RouteInfo,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import { parsePattern, staticSegmentCount } from './route-matcher.ts';
 

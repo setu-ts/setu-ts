@@ -28,7 +28,7 @@ describe('LocalStorageProvider', () => {
           if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
           return {
             size: store.get(path)!.length,
-          } as unknown as import('@hono-enterprise/common').StatResult;
+          } as unknown as import('@setu-ts/common').StatResult;
         },
         rm(path: string) {
           if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
@@ -44,7 +44,7 @@ describe('LocalStorageProvider', () => {
         mkdir(_path: string, _options?: { readonly recursive?: boolean }): Promise<void> {
           return Promise.resolve();
         },
-      } as unknown as import('@hono-enterprise/common').IFileSystem,
+      } as unknown as import('@setu-ts/common').IFileSystem,
       store,
     };
   }
@@ -183,7 +183,7 @@ describe('LocalStorageProvider', () => {
         if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
         return {
           size: store.get(path)!.length,
-        } as unknown as import('@hono-enterprise/common').StatResult;
+        } as unknown as import('@setu-ts/common').StatResult;
       },
       rm(path: string) {
         if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
@@ -197,7 +197,7 @@ describe('LocalStorageProvider', () => {
       mkdir(_path: string, _options?: { readonly recursive?: boolean }): Promise<void> {
         return Promise.resolve();
       },
-    } as unknown as import('@hono-enterprise/common').IFileSystem;
+    } as unknown as import('@setu-ts/common').IFileSystem;
     const provider = new LocalStorageProvider(fakeFs, { rootDir: '/safe-root' });
     await provider.connect();
     await provider.put('joined/path.bin', new Uint8Array([55]));
@@ -247,7 +247,7 @@ describe('LocalStorageProvider', () => {
       },
     };
     const provider = new LocalStorageProvider(
-      trackingFs as unknown as import('@hono-enterprise/common').IFileSystem,
+      trackingFs as unknown as import('@setu-ts/common').IFileSystem,
       { rootDir: '/safe-root' },
     );
     await provider.connect();
@@ -271,7 +271,7 @@ describe('LocalStorageProvider', () => {
       },
     };
     const provider = new LocalStorageProvider(
-      mkdirFs as unknown as import('@hono-enterprise/common').IFileSystem,
+      mkdirFs as unknown as import('@setu-ts/common').IFileSystem,
       {
         rootDir: '/root',
       },
@@ -295,7 +295,7 @@ describe('LocalStorageProvider', () => {
       },
     };
     const provider = new LocalStorageProvider(
-      throwFs as unknown as import('@hono-enterprise/common').IFileSystem,
+      throwFs as unknown as import('@setu-ts/common').IFileSystem,
       { rootDir: '/root' },
     );
     await provider.connect();

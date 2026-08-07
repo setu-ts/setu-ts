@@ -14,8 +14,8 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 import { DurableObjectLock } from '../../../src/index.ts';
 import { FakeDurableObjectNamespace } from '../../do-fakes.ts';

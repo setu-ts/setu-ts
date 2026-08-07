@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IRequestContext, ValidationIssue } from '@hono-enterprise/common';
+import type { IRequestContext, ValidationIssue } from '@setu-ts/common';
 import type { FormatValidationErrors, ValidationErrorFormatter } from './error-formatter.ts';
 
 /**
@@ -19,7 +19,7 @@ export const rfc7807Formatter: ValidationErrorFormatter = (
   ctx?: IRequestContext,
 ): FormatValidationErrors => {
   return {
-    type: 'https://hono-enterprise.dev/errors/validation',
+    type: 'https://setu-ts.dev/errors/validation',
     title: 'Validation Error',
     status: 400,
     detail: `The request contains ${issues.length} validation error(s).`,

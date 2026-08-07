@@ -9,7 +9,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@hono-enterprise/common';
+import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { IDiscoveryHttp } from '../interfaces/index.ts';
 
 /** Initial reconnect delay after a failed request. */

@@ -4,7 +4,7 @@
  * Emits a project whose first files are a decorated controller and an injected
  * service, so a developer arriving from NestJS sees the composition immediately
  * rather than reading about it. Wiring stays INLINE, like `rest` and
- * `microservice`: this is not the deferred `honoe new --starter` path.
+ * `microservice`: this is not the deferred `setu new --starter` path.
  *
  * @module
  */
@@ -21,7 +21,7 @@ const CONTROLLER_PATH = './src/greeting-controller.ts';
  * The example service: an `@Injectable` with a capability token, so the
  * controller can name it in `@Inject`.
  */
-const SERVICE_SOURCE = `import { Injectable } from '@hono-enterprise/decorator-plugin';
+const SERVICE_SOURCE = `import { Injectable } from '@setu-ts/decorator-plugin';
 
 /**
  * A plain injectable service.
@@ -42,7 +42,7 @@ export class GreetingService {
  * parameter-level `@Inject`.
  */
 const CONTROLLER_SOURCE =
-  `import { Controller, Get, Inject, Param } from '@hono-enterprise/decorator-plugin';
+  `import { Controller, Get, Inject, Param } from '@setu-ts/decorator-plugin';
 import { GreetingService } from './greeting-service.ts';
 
 /**
@@ -75,7 +75,7 @@ export const NEST_FILES: readonly GeneratedFile[] = [
   { path: 'src/greeting-controller.ts', contents: CONTROLLER_SOURCE },
 ];
 
-/** The classes `honoe.config.ts` must import to pass them to `DecoratorPlugin`. */
+/** The classes `setu.config.ts` must import to pass them to `DecoratorPlugin`. */
 export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
   { symbols: ['GreetingService'], from: SERVICE_PATH },
   { symbols: ['GreetingController'], from: CONTROLLER_PATH },

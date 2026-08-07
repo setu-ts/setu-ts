@@ -12,9 +12,9 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import type { IApplication, IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import type { IApplication, IPlugin, IPluginContext } from '@setu-ts/common';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { dispatchPluginCommand, runCommandsListing } from '../../src/commands/plugin-commands.ts';
@@ -58,7 +58,7 @@ function realAppDeps(plugins: readonly IPlugin[]) {
     err,
     getApp: () => app,
     deps: {
-      fs: createFakeFs({ '/proj/honoe.config.ts': 'export function createApp() {}' }),
+      fs: createFakeFs({ '/proj/setu.config.ts': 'export function createApp() {}' }),
       cwd: '/proj',
       log: out.sink,
       error: err.sink,
@@ -146,7 +146,7 @@ describe('plugin commands against a real kernel application', () => {
     const out = createRecorder();
     const err = createRecorder();
     const code = await runCommandsListing(parseArgs([]), {
-      fs: createFakeFs({ '/proj/honoe.config.ts': 'x' }),
+      fs: createFakeFs({ '/proj/setu.config.ts': 'x' }),
       cwd: '/proj',
       log: out.sink,
       error: err.sink,

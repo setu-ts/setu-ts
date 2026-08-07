@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { HealthIndicatorFn, IPlugin, IScheduler } from '@hono-enterprise/common';
+import type { HealthIndicatorFn, IPlugin, IScheduler } from '@setu-ts/common';
 import type { SchedulerPluginOptions } from '../interfaces/index.ts';
 import { resolveLock } from '../lock/distributed-lock.ts';
 import type { ILifecyclableLock } from '../lock/distributed-lock.ts';

@@ -13,7 +13,7 @@ import {
   fakeFile,
   fakeService,
 } from '../fixtures/fake-connect-runtime.ts';
-import type { GrpcServiceDefinition, IHttpAdapter } from '@hono-enterprise/common';
+import type { GrpcServiceDefinition, IHttpAdapter } from '@setu-ts/common';
 import type { EmbeddedDescriptors as EmbeddedDescriptorsType } from '../../src/descriptors/embedded-descriptors.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 

@@ -11,7 +11,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /** Options for {@linkcode createFakeRequestContext}. */
 export interface FakeRequestOptions {

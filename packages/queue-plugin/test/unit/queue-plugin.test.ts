@@ -1,9 +1,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
-import type { IQueue, IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ILogger } from '@hono-enterprise/common';
+import type { IQueue, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger } from '@setu-ts/common';
 import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 

@@ -18,7 +18,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createSseHandler } from '../../src/transports/sse/graphql-sse-handler.ts';
 import type { ApqResolver, ApqResolveResult } from '../../src/apq/apq-resolver.ts';

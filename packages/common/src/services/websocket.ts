@@ -1,7 +1,7 @@
 /**
  * WebSocket contracts — the capability interface the WebSocketPlugin
  * implements under `CAPABILITIES.WEBSOCKET`, plus the upgrade seam the HTTP
- * adapters in `@hono-enterprise/runtime` implement.
+ * adapters in `@setu-ts/runtime` implement.
  *
  * The plugin provides full-duplex, bidirectional messaging, completing the
  * real-time story that Server-Sent Events (Milestone 43) covers one-way.
@@ -345,7 +345,7 @@ export interface WebSocketRouteOptions {
  *
  * @example
  * ```typescript
- * import { CAPABILITIES } from '@hono-enterprise/common';
+ * import { CAPABILITIES } from '@setu-ts/common';
  *
  * const ws = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
  *

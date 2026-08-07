@@ -16,8 +16,8 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
-import { splitWorkerEnv } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+import { splitWorkerEnv } from '@setu-ts/common';
 
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 

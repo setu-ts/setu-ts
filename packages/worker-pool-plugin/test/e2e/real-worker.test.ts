@@ -6,10 +6,10 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import type { IWorkerPool } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import type { IWorkerPool } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { WorkerPoolPlugin, WorkerTaskError, WorkerTaskTimeoutError } from '../../src/index.ts';
 

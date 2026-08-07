@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { HttpMethod, IRequestContext } from '@hono-enterprise/common';
+import type { HttpMethod, IRequestContext } from '@setu-ts/common';
 
 /**
  * A fake response builder for testing.
@@ -135,10 +135,10 @@ export function createFakeContext(options?: {
 
   return {
     id: 'test-request-id',
-    request: request as unknown as import('@hono-enterprise/common').IRequest,
-    response: response as unknown as import('@hono-enterprise/common').IResponse,
+    request: request as unknown as import('@setu-ts/common').IRequest,
+    response: response as unknown as import('@setu-ts/common').IResponse,
     startTime,
-    services: new Map() as unknown as import('@hono-enterprise/common').IServiceRegistry,
+    services: new Map() as unknown as import('@setu-ts/common').IServiceRegistry,
     params: {},
     query: {},
     state: new Map(),

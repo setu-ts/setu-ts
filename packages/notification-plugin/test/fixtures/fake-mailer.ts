@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IMailer, MailMessage } from '@hono-enterprise/common';
+import type { IMailer, MailMessage } from '@setu-ts/common';
 
 /**
  * Creates a fake `IMailer` that records sent messages.

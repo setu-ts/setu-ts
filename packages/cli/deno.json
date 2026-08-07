@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/cli",
+  "name": "@setu-ts/cli",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": {
@@ -7,8 +7,8 @@
     "./main": "./src/main.ts"
   },
   "imports": {
-    "@hono-enterprise/common": "jsr:@hono-enterprise/common@^0.1.0-alpha.4",
-    "@hono-enterprise/runtime": "jsr:@hono-enterprise/runtime@^0.1.0-alpha.4"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.4",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.4"
   },
   "lint": {
     "rules": {

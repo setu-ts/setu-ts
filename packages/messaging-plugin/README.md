@@ -1,4 +1,4 @@
-# @hono-enterprise/messaging-plugin
+# @setu-ts/messaging-plugin
 
 Cross-service messaging. Registers an `IMessageBroker` under `CAPABILITIES.MESSAGING`
 (`'messaging'`).
@@ -11,14 +11,14 @@ arm. Each cloud client is an **optional** dependency, lazily imported or injecte
 ## Installation
 
 ```typescript
-import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
-import { CAPABILITIES, type IMessageBroker } from '@hono-enterprise/common';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';
 
 app.register(MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' }));
 
@@ -81,8 +81,8 @@ broker's former refusal and no broker throws it now.
 ## Bridging in-process events
 
 `EventsMessagingBridge` forwards selected events from
-[`@hono-enterprise/events-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/events-plugin)
-onto the broker:
+[`@setu-ts/events-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/events-plugin) onto
+the broker:
 
 ```typescript
 app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] }));
@@ -91,4 +91,4 @@ app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

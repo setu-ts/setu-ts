@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { FileAuditStorage } from '../../src/storage/file-audit.ts';
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 
 describe('FileAuditStorage', () => {
   function makeFakeFs(files: Record<string, string>): IFileSystem {

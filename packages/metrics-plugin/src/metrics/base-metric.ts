@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IMetric, MetricConfig, MetricType } from '@hono-enterprise/common';
+import type { IMetric, MetricConfig, MetricType } from '@setu-ts/common';
 
 /**
  * Abstract base class for all metric types.

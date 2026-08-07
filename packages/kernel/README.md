@@ -1,7 +1,7 @@
-# @hono-enterprise/kernel
+# @setu-ts/kernel
 
-Plugin kernel for the Hono Enterprise framework: plugin registry, service registry, middleware
-pipeline, router, and application lifecycle.
+Plugin kernel for the Setu-TS framework: plugin registry, service registry, middleware pipeline,
+router, and application lifecycle.
 
 This package is the framework's orchestration layer. It resolves plugin dependencies, builds the
 middleware pipeline and router, validates environment variables, and dispatches requests through the
@@ -12,10 +12,10 @@ through `IRuntimeServices` provided by the runtime plugin.
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/kernel
+deno add jsr:@setu-ts/kernel
 
 # npm / pnpm / yarn / bun (via JSR's npm compatibility layer)
-npx jsr add @hono-enterprise/kernel
+npx jsr add @setu-ts/kernel
 ```
 
 ## What's Inside
@@ -37,8 +37,8 @@ internal.
 Create an application, register plugins, and start it:
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication({
   plugins: [RuntimePlugin()],
@@ -66,8 +66,7 @@ console.log(res.statusCode, res.json());
 - A runtime provider is mandatory — `start()` fails fast if no plugin provides
   `CAPABILITIES.RUNTIME`.
 
-See the repository's
-[`PUBLIC_API.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) for the full
-API contract and
-[`ARCHITECTURE.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) for how
-this package fits the plugin architecture.
+See the repository's [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+for the full API contract and
+[`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
+package fits the plugin architecture.

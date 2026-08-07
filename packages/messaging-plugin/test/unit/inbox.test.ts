@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISubscription, MessageMetadata, SubscribeOptions } from '@hono-enterprise/common';
+import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 import { createTopicInbox } from '../../src/brokers/inbox.ts';
 
 type Handler = (message: unknown, metadata: MessageMetadata) => void | Promise<void>;

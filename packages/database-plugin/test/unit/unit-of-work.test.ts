@@ -13,7 +13,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { UnitOfWork } from '../../src/unitOfWork/unit-of-work.ts';
-import type { IAdapterTransaction } from '@hono-enterprise/common';
+import type { IAdapterTransaction } from '@setu-ts/common';
 import type { IRepository } from '../../src/interfaces/index.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';

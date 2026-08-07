@@ -17,13 +17,13 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IWebSocketService } from '@hono-enterprise/common';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import type { WebSocketPluginOptions } from '@hono-enterprise/websocket-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IWebSocketService } from '@setu-ts/common';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { CAPABILITIES } from '@setu-ts/common';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import type { WebSocketPluginOptions } from '@setu-ts/websocket-plugin';
 import { GraphqlPlugin } from '../../src/index.ts';
 import type { GraphqlWsTransportOptions, ResolverMap } from '../../src/index.ts';
 import {

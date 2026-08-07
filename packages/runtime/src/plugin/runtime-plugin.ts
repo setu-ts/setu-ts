@@ -7,13 +7,8 @@
  * @module
  */
 
-import type {
-  IHttpAdapter,
-  IPlugin,
-  IPluginContext,
-  RuntimePlatform,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IHttpAdapter, IPlugin, IPluginContext, RuntimePlatform } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { detectRuntime } from '../detector/runtime-detector.ts';
 import type { RuntimeAdapterFactories } from '../adapters/shared/runtime-services-factory.ts';

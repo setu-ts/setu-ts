@@ -1,5 +1,5 @@
-import type { ILogger, ISession } from '@hono-enterprise/common';
-import type { IDatabaseService } from '@hono-enterprise/database-plugin';
+import type { ILogger, ISession } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import {
   csrfContext,
@@ -15,7 +15,7 @@ import {
  * database client, one HTTP client and one secret lookup for the life of the
  * process. That cache is exactly what the kernel's service registry already is,
  * so this module holds NO state: every value comes from the request context
- * that `honoe.config.ts` populated, and nothing is memoised here.
+ * that `setu.config.ts` populated, and nothing is memoised here.
  * `test/removal.test.ts` asserts that, because "holds no state" is a claim, and
  * a claim nothing executes is a comment.
  *
@@ -29,7 +29,7 @@ import {
 function requireValue<T>(value: T | null, name: string): T {
   if (value === null) {
     throw new Error(
-      `No ${name} on this request. Register its plugin in honoe.config.ts and set its ` +
+      `No ${name} on this request. Register its plugin in setu.config.ts and set its ` +
         'context key in populateLoadContext, and call this only from a loader or action.',
     );
   }

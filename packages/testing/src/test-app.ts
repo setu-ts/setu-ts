@@ -1,6 +1,6 @@
-import type { IPlugin } from '@hono-enterprise/common';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { createApplication } from '@hono-enterprise/kernel';
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApplication } from '@setu-ts/kernel';
 
 /**
  * Options for {@linkcode createTestApp}.
@@ -40,8 +40,8 @@ export interface TestAppOptions {
  *
  * @example
  * ```typescript
- * import { createTestApp } from '@hono-enterprise/testing';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
+ * import { createTestApp } from '@setu-ts/testing';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
  *
  * const app = await createTestApp({
  *   plugins: [RuntimePlugin()],

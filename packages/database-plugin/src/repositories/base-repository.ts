@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IDataSource } from '@hono-enterprise/common';
+import type { IDataSource } from '@setu-ts/common';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
 import { normalizeCountOptions, normalizeQuery } from '../query/query-builder.ts';
 import type { IRepository } from '../interfaces/index.ts';
@@ -14,16 +14,16 @@ import type { IRepository } from '../interfaces/index.ts';
  * The data-access seam adapter-specific implementations provide, keeping
  * {@linkcode BaseRepository} decoupled from concrete ORM clients.
  *
- * @deprecated Use {@linkcode IDataSource} from `@hono-enterprise/common`
+ * @deprecated Use {@linkcode IDataSource} from `@setu-ts/common`
  * instead — the port was promoted there in M52c so a backend living in
  * another package can implement it. This alias is the same type and keeps
  * working; it will be removed in the next major version.
  * @example
  * ```typescript
  * // Before
- * import type { DataSource } from '@hono-enterprise/database-plugin';
+ * import type { DataSource } from '@setu-ts/database-plugin';
  * // After
- * import type { IDataSource } from '@hono-enterprise/common';
+ * import type { IDataSource } from '@setu-ts/common';
  * ```
  * @since 0.1.0
  */

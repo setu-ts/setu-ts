@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 import { rfc7807Formatter } from './rfc7807-formatter.ts';
 import { HttpError } from '../errors/http-error.ts';

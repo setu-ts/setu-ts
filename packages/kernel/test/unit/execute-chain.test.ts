@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequestContext, MiddlewareFunction, NextFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 
 import { executeChain } from '../../src/pipeline/execute-chain.ts';
 import { ResponseBuilder } from '../../src/context/response.ts';

@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { FlagContext } from '@hono-enterprise/common';
+import type { FlagContext } from '@setu-ts/common';
 import type { ILaunchDarklyClient } from '../providers/launchdarkly-module.ts';
 
 // ── Flag definition ────────────────────────────────────────────────────────

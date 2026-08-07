@@ -12,8 +12,8 @@ import type {
   TimerHandle,
   WorkerErrorShape,
   WorkerTaskRequest,
-} from '@hono-enterprise/common';
-import { isWorkerTaskRequest } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { isWorkerTaskRequest } from '@setu-ts/common';
 
 /**
  * Scriptable worker handle. Tests trigger protocol traffic explicitly via

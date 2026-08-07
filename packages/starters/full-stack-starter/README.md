@@ -1,6 +1,6 @@
-# @hono-enterprise/full-stack-starter
+# @setu-ts/full-stack-starter
 
-Opinionated plugin composition for building full-stack applications with Hono Enterprise.
+Opinionated plugin composition for building full-stack applications with Setu-TS.
 
 The most comprehensive starter bundle, combining REST capabilities, microservice patterns, and
 full-stack features including caching, event-driven architecture, CQRS, scheduling, auditing,
@@ -10,13 +10,13 @@ SSR support.
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/full-stack-starter
+deno add jsr:@setu-ts/full-stack-starter
 ```
 
 Or via npm/yarn/pnpm:
 
 ```bash
-npm install @hono-enterprise/full-stack-starter
+npm install @setu-ts/full-stack-starter
 ```
 
 ## Usage
@@ -25,7 +25,7 @@ The starter exports `createFullStackApp` — a fully wired application with all 
 plugins pre-configured:
 
 ```typescript
-import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
+import { createFullStackApp } from '@setu-ts/full-stack-starter';
 
 const app = createFullStackApp();
 
@@ -39,8 +39,8 @@ await app.start({ port: 3000 });
 Configure every plugin through the optional options parameter:
 
 ```typescript
-import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
-import type { FullStackStarterOptions } from '@hono-enterprise/full-stack-starter';
+import { createFullStackApp } from '@setu-ts/full-stack-starter';
+import type { FullStackStarterOptions } from '@setu-ts/full-stack-starter';
 
 const options: FullStackStarterOptions = {
   // REST base plugins (see rest-starter)
@@ -77,8 +77,8 @@ Use `buildFullStackPlugins` together with `createApplication` from the kernel to
 plugin array for advanced scenarios requiring selective inclusion or different ordering:
 
 ```typescript
-import { buildFullStackPlugins } from '@hono-enterprise/full-stack-starter';
-import { createApplication } from '@hono-enterprise/kernel';
+import { buildFullStackPlugins } from '@setu-ts/full-stack-starter';
+import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication({
   plugins: buildFullStackPlugins({
@@ -147,9 +147,9 @@ instance (e.g., a session cache distinct from the default, or a separate queue f
 processing), register it manually after the starter returns:
 
 ```typescript
-import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { createFullStackApp } from '@setu-ts/full-stack-starter';
+import { CachePlugin } from '@setu-ts/cache-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 const app = createFullStackApp();
 app.register(CachePlugin({ name: 'session' }));
@@ -182,7 +182,7 @@ The `session` arm is inherited the same way: `session: { secret, csrf: {} }` add
 and the form-CSRF middleware, which a server-rendered `<Form>` post needs.
 
 See
-[rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
+[rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 for the full description of each arm.
 
 ## Composing from configuration
@@ -192,7 +192,7 @@ Plugin options must be decided **before** the plugins are constructed — which 
 yet. `createFullStackAppFromConfig` closes that ordering gap for every option at once:
 
 ```typescript
-import { createFullStackAppFromConfig } from '@hono-enterprise/full-stack-starter';
+import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
   database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
@@ -216,15 +216,15 @@ time.
 
 This package supplies the plugin **composition**; it cannot supply the application's `app/`
 directory, because a JSR library cannot write files into your project. Scaffold that with the CLI,
-which generates a `honoe.config.ts` calling `createFullStackAppFromConfig`:
+which generates a `setu.config.ts` calling `createFullStackAppFromConfig`:
 
 ```bash
-honoe new my-app --template full-stack
+setu new my-app --template full-stack
 ```
 
 ## Coming from NestJS
 
-| NestJS                        | Hono Enterprise                                                 |
+| NestJS                        | Setu-TS                                                         |
 | ----------------------------- | --------------------------------------------------------------- |
 | `@Module({ … })`              | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
 | `providers: [UserService]`    | `decorators: { services: [UserService] }`, or `app.register(…)` |
@@ -262,7 +262,7 @@ Three consequences, each a startup throw rather than a silent misinjection:
 
 ## See Also
 
-- [JSR Registry](https://jsr.io/@hono-enterprise/full-stack-starter)
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
-- [microservice-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/microservice-starter/README.md)
+- [JSR Registry](https://jsr.io/@setu-ts/full-stack-starter)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
+- [microservice-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/microservice-starter/README.md)

@@ -3,16 +3,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 import { CqrsPlugin } from '../../src/plugin/cqrs-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type {
-  ICommandBus,
-  ICqrsFacade,
-  IPlugin,
-  IQueryBus,
-  TimerHandle,
-} from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICommandBus, ICqrsFacade, IPlugin, IQueryBus, TimerHandle } from '@setu-ts/common';
 
 /** Fake runtime plugin for integration tests. */
 function fakeRuntimePlugin(): IPlugin {

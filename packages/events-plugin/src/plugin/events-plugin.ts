@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { IEventBus, ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IEventBus, ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { EventsPluginOptions } from '../interfaces/index.ts';
 import { InMemoryEventBus } from '../bus/in-memory-event-bus.ts';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
@@ -25,7 +25,7 @@ const DEFAULT_OPTIONS: EventsPluginOptions = {
  *
  * @example
  * ```typescript
- * import { EventsPlugin } from '@hono-enterprise/events-plugin';
+ * import { EventsPlugin } from '@setu-ts/events-plugin';
  *
  * app.register(EventsPlugin({ async: true }));
  * ```
@@ -51,7 +51,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // Build default error handler if not provided.
       const defaultErrorHandler: (
         error: unknown,
-        event: import('@hono-enterprise/common').IDomainEvent,
+        event: import('@setu-ts/common').IDomainEvent,
       ) => void = (error, event) => {
         if (logger) {
           logger.error('Event handler failed', { error, eventType: event.type });

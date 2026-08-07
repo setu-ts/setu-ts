@@ -1,25 +1,25 @@
 /**
  * @module
  */
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import type { IPlugin } from '@hono-enterprise/common';
-import { errorHandler } from '@hono-enterprise/exceptions';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import type { IPlugin } from '@setu-ts/common';
+import { errorHandler } from '@setu-ts/exceptions';
 // Import microservice-starter via bare specifier to enable cross-tier composition
-import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
+import { buildMicroservicePlugins } from '@setu-ts/microservice-starter';
 import type { FullStackStarterOptions } from './options.ts';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { EventsPlugin } from '@hono-enterprise/events-plugin';
-import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
-import { SchedulerPlugin } from '@hono-enterprise/scheduler-plugin';
-import { AuditPlugin } from '@hono-enterprise/audit-plugin';
-import { SecretsPlugin } from '@hono-enterprise/secrets-plugin';
-import { StoragePlugin } from '@hono-enterprise/storage-plugin';
-import { MailPlugin } from '@hono-enterprise/mail-plugin';
-import { FeatureFlagsPlugin } from '@hono-enterprise/feature-flags-plugin';
-import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
-import { MultiTenancyPlugin } from '@hono-enterprise/multi-tenancy-plugin';
-import { ReactRouterPlugin } from '@hono-enterprise/react-router-plugin';
+import { CachePlugin } from '@setu-ts/cache-plugin';
+import { EventsPlugin } from '@setu-ts/events-plugin';
+import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import { AuditPlugin } from '@setu-ts/audit-plugin';
+import { SecretsPlugin } from '@setu-ts/secrets-plugin';
+import { StoragePlugin } from '@setu-ts/storage-plugin';
+import { MailPlugin } from '@setu-ts/mail-plugin';
+import { FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
+import { NotificationPlugin } from '@setu-ts/notification-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 
 /**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
@@ -66,7 +66,7 @@ export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IP
  * @returns An {@linkcode IKernelApplication} ready for route registration.
  * @example
  * ```typescript
- * import { createFullStackApp } from '@hono-enterprise/full-stack-starter';
+ * import { createFullStackApp } from '@setu-ts/full-stack-starter';
  *
  * const app = createFullStackApp();
  * app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));

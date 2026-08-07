@@ -33,7 +33,7 @@ export const REST_PLUGINS: readonly Wiring[] = [
   { pkg: 'health-plugin', symbol: 'HealthPlugin' },
   { pkg: 'metrics-plugin', symbol: 'MetricsPlugin' },
   { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin' },
-  // Present so `honoe generate controller` works in a scaffolded REST project:
+  // Present so `setu generate controller` works in a scaffolded REST project:
   // that schematic emits @Controller/@Get/@Post and is gated on this package.
   { pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' },
 ];
@@ -41,7 +41,7 @@ export const REST_PLUGINS: readonly Wiring[] = [
 /**
  * Middleware added with `app.middleware.add(...)`.
  *
- * Kept separate from the plugin list because `@hono-enterprise/exceptions`
+ * Kept separate from the plugin list because `@setu-ts/exceptions`
  * ships a `MiddlewareFunction`, NOT an `IPlugin` — emitting
  * `ExceptionsPlugin()` would name a symbol that does not exist.
  */

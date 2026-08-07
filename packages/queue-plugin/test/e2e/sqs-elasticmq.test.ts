@@ -18,7 +18,7 @@
  */
 import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 
 function createRuntime(): IRuntimeServices {

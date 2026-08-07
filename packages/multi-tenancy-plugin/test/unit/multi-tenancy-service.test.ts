@@ -48,7 +48,7 @@ describe('multi tenancy service', () => {
     const ctx = {
       ...createFakeContext(),
       request: { ...fakeRequest, tenant },
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
     const repo = service.getRepository<unknown, string>(ctx, 'User');
     // Verify it satisfies ITenantRepository surface
     expect(typeof repo.findAll === 'function').toBeTruthy();
@@ -93,14 +93,14 @@ describe('multi tenancy service', () => {
     const ctx = {
       id: 'test-id',
       request: { ...fakeRequest, tenant: { id: 'resolved-tenant' } },
-      response: {} as import('@hono-enterprise/common').IResponse,
+      response: {} as import('@setu-ts/common').IResponse,
       services: new Map(),
       params: {},
       query: {},
       state: new Map(),
       startTime: Date.now(),
       signal: undefined as AbortSignal | undefined,
-    } as unknown as import('@hono-enterprise/common').IRequestContext;
+    } as unknown as import('@setu-ts/common').IRequestContext;
     expect(service.getCurrentTenant(ctx)?.id).toEqual('resolved-tenant');
   });
 });

@@ -1,17 +1,17 @@
 /**
  * @module
  */
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import type { IPlugin } from '@hono-enterprise/common';
-import { errorHandler } from '@hono-enterprise/exceptions';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import type { IPlugin } from '@setu-ts/common';
+import { errorHandler } from '@setu-ts/exceptions';
 // Import rest-starter via bare specifier to enable cross-tier composition
-import { buildRestPlugins } from '@hono-enterprise/rest-starter';
+import { buildRestPlugins } from '@setu-ts/rest-starter';
 import type { MicroserviceStarterOptions } from './options.ts';
-import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
-import { ResiliencePlugin } from '@hono-enterprise/resilience-plugin';
-import { TelemetryPlugin } from '@hono-enterprise/telemetry-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
+import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
+import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 
 /**
  * Builds the canonical microservice plugin set. Composes from {@linkcode buildRestPlugins}
@@ -47,7 +47,7 @@ export function buildMicroservicePlugins(options: MicroserviceStarterOptions = {
  * @returns An {@linkcode IKernelApplication} ready for route registration.
  * @example
  * ```typescript
- * import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
+ * import { createMicroserviceApp } from '@setu-ts/microservice-starter';
  *
  * const app = createMicroserviceApp();
  * app.router.get('/hello', (ctx) => ctx.response.text('Hello world'));

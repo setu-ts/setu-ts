@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { asBrokerAdapter } from '../../src/brokers/custom-adapter.ts';
-import type { IMessageBroker } from '@hono-enterprise/common';
+import type { IMessageBroker } from '@setu-ts/common';
 
 describe('asBrokerAdapter', () => {
   function createMinimalBroker(overrides: Record<string, unknown> = {}): IMessageBroker {

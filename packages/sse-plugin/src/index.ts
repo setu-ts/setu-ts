@@ -7,8 +7,8 @@
  *
  * @example
  * ```typescript
- * import { SsePlugin } from '@hono-enterprise/sse-plugin';
- * import { CAPABILITIES, ISseService } from '@hono-enterprise/common';
+ * import { SsePlugin } from '@setu-ts/sse-plugin';
+ * import { CAPABILITIES, ISseService } from '@setu-ts/common';
  *
  * const app = createApplication();
  * app.register(SsePlugin({ heartbeatMs: 15000, retryMs: 3000 }));
@@ -31,5 +31,5 @@ export type { SsePluginOptions } from './interfaces/index.ts';
 export type { ChannelPublisher } from './channels/channel-registry.ts';
 
 // Re-export common SSE contracts for convenience.
-export type { ISseConnection, ISseService, SseChannel, SseMessage } from '@hono-enterprise/common';
-export { CAPABILITIES } from '@hono-enterprise/common';
+export type { ISseConnection, ISseService, SseChannel, SseMessage } from '@setu-ts/common';
+export { CAPABILITIES } from '@setu-ts/common';

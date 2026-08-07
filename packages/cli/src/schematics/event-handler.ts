@@ -17,8 +17,8 @@ export function generateEventHandler(
   names: DerivedNames,
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import type { IDomainEvent } from '@hono-enterprise/common';
-import type { IEventHandler } from '@hono-enterprise/events-plugin';
+  const contents = `import type { IDomainEvent } from '@setu-ts/common';
+import type { IEventHandler } from '@setu-ts/events-plugin';
 
 /** Event type name the bus routes on. */
 export const ${names.screaming}_EVENT = '${names.kebab}';

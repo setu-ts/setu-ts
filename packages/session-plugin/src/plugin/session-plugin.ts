@@ -11,8 +11,8 @@ import type {
   IRuntimeServices,
   ISessionService,
   ISessionStore,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../codec/crypto.ts';
 import { csrfFormMiddleware } from '../middleware/csrf-form-middleware.ts';

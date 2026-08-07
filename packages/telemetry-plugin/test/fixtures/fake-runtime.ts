@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, RuntimePlatform } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
 
 let uuidCounter = 0;
 

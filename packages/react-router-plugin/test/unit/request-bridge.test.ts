@@ -9,7 +9,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult } from '@hono-enterprise/common';
+import type { HandlerResult } from '@setu-ts/common';
 import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
 import { servicesContext, userContext } from '../../src/handler/context-keys.ts';

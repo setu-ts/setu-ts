@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRealtimeBackplane } from '@hono-enterprise/common';
+import type { IRealtimeBackplane } from '@setu-ts/common';
 import { SseService } from '../../src/services/sse-service.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

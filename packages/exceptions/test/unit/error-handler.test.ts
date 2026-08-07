@@ -8,8 +8,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { NextFunction } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { NextFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { errorHandler } from '../../src/middleware/error-handler.ts';
 import { badRequest, internalServerError, notFound } from '../../src/errors/exceptions.ts';
@@ -196,7 +196,7 @@ describe('errorHandler middleware', () => {
       await mw(ctx, nextThrows(notFound('User 42 not found')));
 
       const body = parseBody(responseSnapshot().body);
-      expect(body.type).toBe('https://hono-enterprise.dev/errors/404');
+      expect(body.type).toBe('https://setu-ts.dev/errors/404');
       expect(body.title).toBe('Not Found');
       expect(body.status).toBe(404);
       expect(body.detail).toBe('User 42 not found');

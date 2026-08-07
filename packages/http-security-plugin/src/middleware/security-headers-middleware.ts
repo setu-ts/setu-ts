@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 /** Options for Content-Security-Policy header. */
 export interface ContentSecurityPolicyOptions {

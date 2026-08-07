@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * OpenTelemetry distributed tracing plugin for Hono Enterprise.
+ * OpenTelemetry distributed tracing plugin for Setu-TS.
  *
  * Provides `ITelemetryService` registration under `CAPABILITIES.TELEMETRY`,
  * a request-span middleware at priority 30, and lazy-loaded OTel SDK support.
@@ -32,4 +32,4 @@ export type {
   SpanOptions,
   SpanStatus,
   TelemetryContext,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

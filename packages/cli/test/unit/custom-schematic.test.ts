@@ -8,7 +8,7 @@ import {
 import type { GeneratedFile } from '../../src/utils/file-writer.ts';
 
 describe('customSchematicUrl', () => {
-  it('resolves under .hono-enterprise/schematics', () => {
+  it('resolves under .setu-ts/schematics', () => {
     expect(customSchematicUrl('/app', 'my-gen'))
       .toBe(`file:///app/${CUSTOM_SCHEMATIC_DIR}/my-gen.ts`);
   });

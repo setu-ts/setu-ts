@@ -22,9 +22,9 @@ describe('help output', () => {
     expect(await helpText(['--help'])).toContain(PROGRAM_NAME);
   });
 
-  it('never spells the old hono-enterprise invocation', async () => {
+  it('never spells the old setu-ts invocation', async () => {
     for (const argv of [['--help'], [], ['help'], ['generate', '--help']]) {
-      expect(await helpText(argv)).not.toContain('hono-enterprise ');
+      expect(await helpText(argv)).not.toContain('setu-ts ');
     }
   });
 

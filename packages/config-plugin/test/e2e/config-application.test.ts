@@ -6,10 +6,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 import { ConfigPlugin } from '../../src/plugin/config-plugin.ts';
 import { createFakeFileSystem, createRuntime } from '../fixtures/fake-runtime.ts';
 

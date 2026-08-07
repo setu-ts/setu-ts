@@ -12,7 +12,7 @@
  *
  * 1. Every publishable package carries exactly the expected version — so the
  *    tag, the CHANGELOG entry, and what lands on JSR all agree.
- * 2. Every cross-package `jsr:@hono-enterprise/*` specifier resolves to the
+ * 2. Every cross-package `jsr:@setu-ts/*` specifier resolves to the
  *    version being published. This is the one that bites on a prerelease: a
  *    `^0.1.0` range does NOT match `0.1.0-alpha.1` under semver, so a bump
  *    that misses a specifier ships packages whose dependencies cannot resolve
@@ -55,8 +55,8 @@ async function readConfig(dir: string): Promise<PackageConfig | null> {
 
 // ── 1 & 2: versions and cross-package specifiers ────────────────────────────
 
-// Matches `jsr:@hono-enterprise/<pkg>@<range>` anywhere in an import value.
-const CROSS_PACKAGE = /^jsr:@hono-enterprise\/([a-z-]+)@(.+)$/;
+// Matches `jsr:@setu-ts/<pkg>@<range>` anywhere in an import value.
+const CROSS_PACKAGE = /^jsr:@setu-ts\/([a-z-]+)@(.+)$/;
 
 for (const dir of PUBLISHED_PACKAGES) {
   const config = await readConfig(dir);
@@ -71,7 +71,7 @@ for (const dir of PUBLISHED_PACKAGES) {
 
   for (const [alias, specifier] of Object.entries(config.imports ?? {})) {
     // Only in-repo packages are checked; a third-party specifier is not ours.
-    if (!alias.startsWith('@hono-enterprise/')) continue;
+    if (!alias.startsWith('@setu-ts/')) continue;
 
     const match = CROSS_PACKAGE.exec(specifier);
     if (!match) {

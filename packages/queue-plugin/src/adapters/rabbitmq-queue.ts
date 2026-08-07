@@ -20,7 +20,7 @@ import type {
   StoredJob,
   StoredRecurring,
 } from '../interfaces/index.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 /**
  * Lazily load amqplib at runtime. Pin to 0.10.x for stability.

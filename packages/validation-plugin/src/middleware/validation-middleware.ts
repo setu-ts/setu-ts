@@ -17,8 +17,8 @@ import type {
   MiddlewareFunction,
   ValidationIssue,
   ValidationTarget,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import type {
   FormatValidationErrors,

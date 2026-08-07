@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { IRuntimeServices } from '@hono-enterprise/common';
-import type { IDomainEvent } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+import type { IDomainEvent } from '@setu-ts/common';
 
 /**
  * Abstract base class for domain events.

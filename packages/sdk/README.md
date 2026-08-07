@@ -1,31 +1,31 @@
-# @hono-enterprise/sdk
+# @setu-ts/sdk
 
-Portable, zero-npm-dependency client SDK for consuming Hono Enterprise APIs from browsers and
-servers. Provides an injectable `fetch` HTTP client, bearer and API-key authentication interceptors,
+Portable, zero-npm-dependency client SDK for consuming Setu-TS APIs from browsers and servers.
+Provides an injectable `fetch` HTTP client, bearer and API-key authentication interceptors,
 per-origin retry with backoff, circuit breaker, and sliding-window rate limiting, plus a pure
 generator that turns OpenAPI 3.1 documents into type-checked TypeScript client source.
 
 This package does **not** register a plugin or resolve capability tokens. It is an external-consumer
 library with no dependency on `kernel`, `runtime`, or any plugin — its only in-repo import is
-type-level from `@hono-enterprise/common`.
+type-level from `@setu-ts/common`.
 
 ## Installation
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/sdk@^0.1.0-alpha.4
+deno add jsr:@setu-ts/sdk@^0.1.0-alpha.4
 
 # npm / pnpm / yarn
-npx jsr add @hono-enterprise/sdk@^0.1.0-alpha.4
+npx jsr add @setu-ts/sdk@^0.1.0-alpha.4
 
 # Bun
-bunx jsr add @hono-enterprise/sdk@^0.1.0-alpha.4
+bunx jsr add @setu-ts/sdk@^0.1.0-alpha.4
 ```
 
 ## Quick Start
 
 ```typescript
-import { createBearerAuthInterceptor, createClient } from '@hono-enterprise/sdk';
+import { createBearerAuthInterceptor, createClient } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
@@ -107,7 +107,7 @@ interface ClientResponse<T> {
 ### Bearer Token
 
 ```typescript
-import { createBearerAuthInterceptor } from '@hono-enterprise/sdk';
+import { createBearerAuthInterceptor } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
@@ -123,7 +123,7 @@ const client = createClient({
 ### API Key
 
 ```typescript
-import { createApiKeyAuthInterceptor } from '@hono-enterprise/sdk';
+import { createApiKeyAuthInterceptor } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
@@ -144,7 +144,7 @@ request has not already supplied that header.
 ### Retry
 
 ```typescript
-import { BackoffStrategy } from '@hono-enterprise/sdk';
+import { BackoffStrategy } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
@@ -213,7 +213,7 @@ retained timestamp expires.
 ### Request Interceptors
 
 ```typescript
-import { ClientRequestContext, ClientRequestInterceptor } from '@hono-enterprise/sdk';
+import { ClientRequestContext, ClientRequestInterceptor } from '@setu-ts/sdk';
 
 const loggingInterceptor: ClientRequestInterceptor = (ctx: ClientRequestContext) => {
   console.log(`${ctx.url.method} ${ctx.url.href}`);
@@ -231,7 +231,7 @@ execute once in registration order before the outbound attempt sequence.
 ### Response Interceptors
 
 ```typescript
-import { ClientResponse, ClientResponseInterceptor } from '@hono-enterprise/sdk';
+import { ClientResponse, ClientResponseInterceptor } from '@setu-ts/sdk';
 
 const timingInterceptor: ClientResponseInterceptor<unknown> = (
   response: ClientResponse<unknown>,
@@ -251,13 +251,13 @@ description. They are skipped entirely when the request throws.
 into TypeScript source.
 
 ```typescript
-import { generateOpenApiClient } from '@hono-enterprise/sdk';
+import { generateOpenApiClient } from '@setu-ts/sdk';
 import { readFileSync } from 'node:fs';
 
 const document = JSON.parse(readFileSync('openapi.json', 'utf-8'));
 
 const source = generateOpenApiClient(document, {
-  sdkImport: '@hono-enterprise/sdk',
+  sdkImport: '@setu-ts/sdk',
   factoryName: 'createApi',
 });
 
@@ -336,9 +336,9 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 | `IClientTiming`               | interface   | Timing seam (`now()`, `sleep()`)         |
 | `createDefaultClientTiming`   | factory     | Default timing over `performance.now()`  |
 | `ClientRateLimitPolicy`       | type        | Sliding-window rate limiter config       |
-| `RetryPolicy`                 | re-export   | From `@hono-enterprise/common`           |
-| `CircuitBreakerPolicy`        | re-export   | From `@hono-enterprise/common`           |
-| `BackoffStrategy`             | re-export   | From `@hono-enterprise/common`           |
+| `RetryPolicy`                 | re-export   | From `@setu-ts/common`                   |
+| `CircuitBreakerPolicy`        | re-export   | From `@setu-ts/common`                   |
+| `BackoffStrategy`             | re-export   | From `@setu-ts/common`                   |
 | `createBearerAuthInterceptor` | factory     | Bearer-token request interceptor         |
 | `createApiKeyAuthInterceptor` | factory     | API-key request interceptor              |
 | `HttpClientError`             | error class | Failed non-2xx response                  |

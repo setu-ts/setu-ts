@@ -10,8 +10,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import { createApplication } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

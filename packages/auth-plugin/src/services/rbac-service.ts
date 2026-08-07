@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IAuthorizationService, IPrincipal, RbacConfig } from '@hono-enterprise/common';
+import type { IAuthorizationService, IPrincipal, RbacConfig } from '@setu-ts/common';
 
 /** Permission that grants every permission. */
 const WILDCARD = '*';

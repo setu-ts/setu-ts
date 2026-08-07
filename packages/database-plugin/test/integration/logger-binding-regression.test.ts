@@ -18,10 +18,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { LoggerPlugin } from '@hono-enterprise/logger-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { DatabasePlugin } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/index.ts';

@@ -5,8 +5,8 @@
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IApplication, IPluginContext } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IApplication, IPluginContext } from '@setu-ts/common';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
 
 /**

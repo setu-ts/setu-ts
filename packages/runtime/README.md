@@ -1,20 +1,20 @@
-# @hono-enterprise/runtime
+# @setu-ts/runtime
 
 RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, and Bun.
 
 This package implements the runtime-independence seam: every runtime-specific operation the
-framework needs is abstracted behind `IRuntimeServices` (defined in `@hono-enterprise/common`) and
-provided here under the `CAPABILITIES.RUNTIME` token by the `RuntimePlugin`. No other package ever
-touches `process`, `Deno`, `Bun`, or `node:`/`deno:`/`bun:` modules directly.
+framework needs is abstracted behind `IRuntimeServices` (defined in `@setu-ts/common`) and provided
+here under the `CAPABILITIES.RUNTIME` token by the `RuntimePlugin`. No other package ever touches
+`process`, `Deno`, `Bun`, or `node:`/`deno:`/`bun:` modules directly.
 
 ## Installation
 
 ```bash
 # Deno
-deno add jsr:@hono-enterprise/runtime
+deno add jsr:@setu-ts/runtime
 
 # npm / pnpm / yarn / bun (via JSR's npm compatibility layer)
-npx jsr add @hono-enterprise/runtime
+npx jsr add @setu-ts/runtime
 ```
 
 ## What's Inside
@@ -33,8 +33,8 @@ npx jsr add @hono-enterprise/runtime
 Register the plugin in every application — it is mandatory:
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication({
   plugins: [RuntimePlugin()],
@@ -73,8 +73,7 @@ unit-testable on Deno by passing a fake host — no real Node/Bun, no OS permiss
 M3 provides runtime services only. HTTP server adapters are deferred to a dedicated milestone — see
 ROADMAP.md.
 
-See the repository's
-[`PUBLIC_API.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md) for the full
-API contract and
-[`ARCHITECTURE.md`](https://github.com/dkpaul91/hono-enterprise/blob/main/ARCHITECTURE.md) for how
-this package fits the plugin architecture.
+See the repository's [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+for the full API contract and
+[`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
+package fits the plugin architecture.

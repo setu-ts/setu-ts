@@ -18,8 +18,8 @@ import type {
   IRuntimeServices,
   IWebSocketService,
   RouteHandler,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import { GraphqlPlugin } from '../../src/plugin/graphql-plugin.ts';
 import { GRAPHQL_TRANSPORT_WS } from '../../src/transports/ws/ws-protocol.ts';
 

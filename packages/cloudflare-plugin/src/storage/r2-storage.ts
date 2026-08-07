@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IStorage, SignedUrlOptions } from '@hono-enterprise/common';
+import type { IStorage, SignedUrlOptions } from '@setu-ts/common';
 import type { IR2Bucket } from '../bindings/facades.ts';
 import { CloudflareObjectNotFoundError, CloudflareUnsupportedError } from '../errors.ts';
 

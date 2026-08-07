@@ -7,7 +7,7 @@
  * @module
  */
 
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';

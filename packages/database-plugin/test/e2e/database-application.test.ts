@@ -7,16 +7,16 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
   IPlugin,
   IPluginContext,
   IRequestContext,
   IRuntimeServices,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import type { IDatabaseService, IUnitOfWork } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

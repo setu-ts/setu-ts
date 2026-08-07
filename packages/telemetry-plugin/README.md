@@ -1,4 +1,4 @@
-# @hono-enterprise/telemetry-plugin
+# @setu-ts/telemetry-plugin
 
 OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPABILITIES.TELEMETRY`
 (`'telemetry'`) and a request-span middleware at priority 30.
@@ -9,16 +9,16 @@ The OTel SDK is an **optional** dependency, lazily imported via `npm:` specifier
 ## Installation
 
 ```typescript
-import { TelemetryPlugin } from '@hono-enterprise/telemetry-plugin';
+import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { TelemetryPlugin } from '@hono-enterprise/telemetry-plugin';
-import { CAPABILITIES, type ITelemetryService } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
+import { CAPABILITIES, type ITelemetryService } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -67,11 +67,11 @@ services without extra configuration.
 
 The plugin exports to **one** endpoint. To fan a single trace stream out to several vendors, point
 it at an OpenTelemetry Collector — see
-[docs/telemetry-collector-fanout.md](https://github.com/dkpaul91/hono-enterprise/blob/main/docs/telemetry-collector-fanout.md)
+[docs/telemetry-collector-fanout.md](https://github.com/setu-ts/setu-ts/blob/main/docs/telemetry-collector-fanout.md)
 and the reference config in
-[docker/otel-collector/](https://github.com/dkpaul91/hono-enterprise/tree/main/docker/otel-collector).
+[docker/otel-collector/](https://github.com/setu-ts/setu-ts/tree/main/docker/otel-collector).
 
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

@@ -6,7 +6,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ValidationIssue } from '@hono-enterprise/common';
+import type { ValidationIssue } from '@setu-ts/common';
 
 import { defaultFormatter, nestjsFormatter } from '../../src/formatters/default-formatter.ts';
 import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';
@@ -108,7 +108,7 @@ describe('rfc7807Formatter', () => {
     const ctx = createFakeContext({ request: { path: '/api/users' } }).ctx;
     const result = rfc7807Formatter(ISSUES, ctx);
 
-    expect(result.type).toBe('https://hono-enterprise.dev/errors/validation');
+    expect(result.type).toBe('https://setu-ts.dev/errors/validation');
     expect(result.title).toBe('Validation Error');
     expect(result.status).toBe(400);
     expect(result.detail).toBe('The request contains 2 validation error(s).');

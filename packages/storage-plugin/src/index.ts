@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * `@hono-enterprise/storage-plugin` — file/object storage with pluggable
+ * `@setu-ts/storage-plugin` — file/object storage with pluggable
  * providers (memory, local FS, S3, GCS, Azure Blob) and an upload middleware.
  *
  * Registers {@linkcode IStorage} under `CAPABILITIES.STORAGE`.
@@ -46,4 +46,4 @@ export type {
 
 // ── Re-export common contracts ────────────────────────────────────────────
 
-export type { IStorage, SignedUrlOptions } from '@hono-enterprise/common';
+export type { IStorage, SignedUrlOptions } from '@setu-ts/common';

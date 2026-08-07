@@ -5,11 +5,7 @@
  * @since 0.2.0
  */
 
-import type {
-  IRealtimeBackplane,
-  RealtimeFrame,
-  RealtimeFrameHandler,
-} from '@hono-enterprise/common';
+import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import { dispatchFrame } from './dispatch.ts';
 
 /**

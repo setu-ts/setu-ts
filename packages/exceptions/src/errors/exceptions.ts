@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { notFound, badRequest } from '@hono-enterprise/exceptions';
+ * import { notFound, badRequest } from '@setu-ts/exceptions';
  *
  * function getUser(id: string) {
  *   if (!id) throw badRequest('id is required');

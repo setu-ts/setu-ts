@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { RetryOptions } from '@hono-enterprise/common';
+import type { RetryOptions } from '@setu-ts/common';
 
 /**
  * Computes the backoff delay in milliseconds for a given attempt.

@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { IPlugin, IPluginContext, IRuntimeServices, IStorage } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext, IRuntimeServices, IStorage } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   AzureBlobProviderOptions,
   GcsProviderOptions,
@@ -119,7 +119,7 @@ export function createProvider(
  *
  * @example
  * ```typescript
- * import { StoragePlugin } from '@hono-enterprise/storage-plugin';
+ * import { StoragePlugin } from '@setu-ts/storage-plugin';
  *
  * // In-memory (default)
  * app.register(StoragePlugin());

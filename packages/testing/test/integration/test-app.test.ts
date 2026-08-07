@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 import { createTestApp } from '../../src/test-app.ts';
 import { inject } from '../../src/inject.ts';
 import { createMockPlugin } from '../../src/mock-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 describe('createTestApp — integration with real app', () => {
   it('post-start route registration works through inject()', async () => {

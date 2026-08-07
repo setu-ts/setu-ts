@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 
 /**
  * Creates a fake `IRuntimeServices` with real Web Crypto and a controllable clock.

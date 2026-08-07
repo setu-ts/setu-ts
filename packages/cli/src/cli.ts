@@ -1,10 +1,10 @@
 /**
- * The `honoe` dispatcher: argument parsing, command routing, and exit codes.
+ * The `setu` dispatcher: argument parsing, command routing, and exit codes.
  *
  * @module
  */
 
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import { parseArgs } from './args.ts';
 import {
   CONFIG_MODULE,
@@ -47,7 +47,7 @@ export interface CliDependencies {
   /** Loads a custom schematic module; defaults to a real dynamic `import()`. */
   readonly load?: ModuleLoader;
   /**
-   * Loads the target project's `honoe.config.ts`; defaults to a real dynamic
+   * Loads the target project's `setu.config.ts`; defaults to a real dynamic
    * `import()`. Only the plugin-command paths use it.
    */
   readonly loadApp?: AppLoader;
@@ -62,7 +62,7 @@ export interface CliDependencies {
  * @param log - Output sink
  */
 function printHelp(log: (message: string) => void): void {
-  log(`${PROGRAM_NAME} — Hono Enterprise project scaffolding and code generation`);
+  log(`${PROGRAM_NAME} — Setu-TS project scaffolding and code generation`);
   log('');
   log(`Usage: ${PROGRAM_NAME} <command> [options]`);
   log('');
@@ -113,7 +113,7 @@ export async function runCli(
 
   if (command === undefined) {
     printHelp(deps.log);
-    // A bare `honoe` with no command is a usage error; `honoe --help` is not.
+    // A bare `setu` with no command is a usage error; `setu --help` is not.
     return args.flags['help'] === true || args.flags['h'] === true ? EXIT_OK : EXIT_USAGE;
   }
 

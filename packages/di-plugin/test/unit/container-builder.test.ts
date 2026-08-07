@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IContainer } from '@hono-enterprise/common';
+import type { IContainer } from '@setu-ts/common';
 
 import { ContainerBuilder, createContainer } from '../../src/container/container-builder.ts';
 import type { ExternalResolver } from '../../src/container/container.ts';

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ILogger, MailMessage } from '@hono-enterprise/common';
+import type { ILogger, MailMessage } from '@setu-ts/common';
 
 /**
  * An outgoing email whose sender has already been resolved by

@@ -18,8 +18,8 @@ export function generateMetric(
   _options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const snake = names.kebab.replace(/-/g, '_');
-  const contents = `import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ICounter, IMetricsService, IServiceRegistry } from '@hono-enterprise/common';
+  const contents = `import { CAPABILITIES } from '@setu-ts/common';
+import type { ICounter, IMetricsService, IServiceRegistry } from '@setu-ts/common';
 
 /** Prometheus name of the ${names.kebab} counter. */
 export const ${names.screaming}_TOTAL = '${snake}_total';

@@ -6,11 +6,11 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { createFlagGuard, FeatureFlagsPlugin } from '../../src/index.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IFeatureFlags, IHealthIndicator, IRequestContext } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IFeatureFlags, IHealthIndicator, IRequestContext } from '@setu-ts/common';
 
 describe('feature-flags-integration', () => {
   it('evaluates flags through the public surface', async () => {

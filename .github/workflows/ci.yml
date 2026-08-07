@@ -99,7 +99,7 @@ jobs:
   # These two jobs consume the packages through JSR's npm compatibility layer
   # and run `compat/compat.test.mjs` (AI_GUIDELINES.md §4.5). They cannot run
   # against the working tree: cross-package specifiers are
-  # `jsr:@hono-enterprise/*` and optional heavy deps are `npm:*`, neither of
+  # `jsr:@setu-ts/*` and optional heavy deps are `npm:*`, neither of
   # which Node or Bun resolves. JSR rewrites both at publish time, so the
   # published artifact is the unit under test.
   #

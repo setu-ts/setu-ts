@@ -1,9 +1,9 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { CqrsCommand, CqrsQuery, ICommandBus, IQueryBus } from '@hono-enterprise/common';
-import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { CqrsCommand, CqrsQuery, ICommandBus, IQueryBus } from '@setu-ts/common';
+import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 export interface AddNote extends CqrsCommand {
   readonly data: { readonly text: string };

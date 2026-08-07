@@ -1,13 +1,13 @@
 /**
- * Detects installed `@hono-enterprise` packages by reading a project manifest.
+ * Detects installed `@setu-ts` packages by reading a project manifest.
  *
  * @module
  */
 
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import { joinPath } from './file-writer.ts';
 
-const SCOPE = '@hono-enterprise/';
+const SCOPE = '@setu-ts/';
 
 /**
  * Reads and parses a JSON manifest.
@@ -38,7 +38,7 @@ async function readManifest(
 }
 
 /**
- * Collects the bare package names of every `@hono-enterprise/*` key in a record.
+ * Collects the bare package names of every `@setu-ts/*` key in a record.
  *
  * @param source - A record whose keys are package specifiers
  * @param into - The set to add to
@@ -54,7 +54,7 @@ function collectScoped(source: unknown, into: Set<string>): void {
 }
 
 /**
- * Detects the `@hono-enterprise` packages a project depends on.
+ * Detects the `@setu-ts` packages a project depends on.
  *
  * Reads `deno.json` (its `imports` map) and, when that is absent or carries no
  * scoped entries, `package.json` (`dependencies` + `devDependencies`).

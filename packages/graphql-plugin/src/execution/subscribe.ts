@@ -5,7 +5,7 @@
  * @since 0.3.0
  */
 
-import type { GraphqlExecutionResult, GraphqlSubscriptionOutcome } from '@hono-enterprise/common';
+import type { GraphqlExecutionResult, GraphqlSubscriptionOutcome } from '@setu-ts/common';
 import type {
   GraphqlDocumentNodeLike,
   GraphqlRuntime,

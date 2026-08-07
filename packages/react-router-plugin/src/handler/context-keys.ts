@@ -11,7 +11,7 @@
  * @since 0.2.0
  */
 
-import type { IPrincipal, IServiceRegistry } from '@hono-enterprise/common';
+import type { IPrincipal, IServiceRegistry } from '@setu-ts/common';
 import type { RouterContextKey } from '../interfaces/index.ts';
 
 /**
@@ -24,8 +24,8 @@ import type { RouterContextKey } from '../interfaces/index.ts';
  *
  * @example
  * ```typescript
- * import { servicesContext } from '@hono-enterprise/react-router-plugin';
- * import { CAPABILITIES, type ILogger } from '@hono-enterprise/common';
+ * import { servicesContext } from '@setu-ts/react-router-plugin';
+ * import { CAPABILITIES, type ILogger } from '@setu-ts/common';
  *
  * export async function loader({ context }: Route.LoaderArgs) {
  *   const services = context.get(servicesContext);
@@ -75,14 +75,14 @@ const namedKeys = new Map<string, RouterContextKey<unknown>>();
  * identical object however many times their own modules are copied.
  *
  * That only holds while this package is a single module instance. In a
- * scaffolded project it is: the server build treats `@hono-enterprise/*` as
+ * scaffolded project it is: the server build treats `@setu-ts/*` as
  * external, so the bundle imports this module at runtime rather than inlining
  * a second copy of it.
  *
- * @example An application-declared key, set in `honoe.config.ts` and read in a loader
+ * @example An application-declared key, set in `setu.config.ts` and read in a loader
  * ```typescript
- * import { contextKeyFor } from '@hono-enterprise/react-router-plugin';
- * import type { ISession } from '@hono-enterprise/common';
+ * import { contextKeyFor } from '@setu-ts/react-router-plugin';
+ * import type { ISession } from '@setu-ts/common';
  *
  * export const sessionContext = contextKeyFor<ISession | null>('session', null);
  * ```

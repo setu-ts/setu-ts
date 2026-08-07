@@ -1,10 +1,10 @@
 /**
- * The `honoe new` command — project scaffolding.
+ * The `setu new` command — project scaffolding.
  *
  * @module
  */
 
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import {
@@ -75,16 +75,16 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
 }
 
 /**
- * Renders the project's `honoe.config.ts` — the single place its plugin list
+ * Renders the project's `setu.config.ts` — the single place its plugin list
  * lives.
  *
  * The factory deliberately does NOT start the application: `main.ts` owns that,
- * and `honoe` imports this module to discover plugin-contributed commands, so
+ * and `setu` imports this module to discover plugin-contributed commands, so
  * importing it must never bind a socket.
  *
  * @param plugins - Plugins to pass to `createApplication`
  * @param middleware - Middleware to add after construction
- * @returns The `honoe.config.ts` contents
+ * @returns The `setu.config.ts` contents
  */
 function configModule(
   runtime: TargetRuntime,
@@ -103,23 +103,23 @@ function configModule(
   // With no extra symbols the statement is the type-only import every template
   // emitted before this merge existed, so their output is unchanged.
   const commonImport = extraCommonSymbols.length === 0
-    ? `import type { IApplication } from '@hono-enterprise/common';`
+    ? `import type { IApplication } from '@setu-ts/common';`
     : `import { ${
       [...extraCommonSymbols, 'type IApplication'].join(', ')
-    } } from '@hono-enterprise/common';`;
+    } } from '@setu-ts/common';`;
 
   const imports = [
     // A starter factory returns the application, so the kernel is not imported
     // at all on that path — the generated file names only what it uses.
     ...(appFactory === undefined
-      ? [`import { createApplication } from '@hono-enterprise/kernel';`]
-      : [`import { ${appFactory.symbol} } from '@hono-enterprise/${appFactory.pkg}';`]),
+      ? [`import { createApplication } from '@setu-ts/kernel';`]
+      : [`import { ${appFactory.symbol} } from '@setu-ts/${appFactory.pkg}';`]),
     commonImport,
-    ...plugins.map((p) => `import { ${p.symbol} } from '@hono-enterprise/${p.pkg}';`),
-    ...middleware.map((m) => `import { ${m.symbol} } from '@hono-enterprise/${m.pkg}';`),
+    ...plugins.map((p) => `import { ${p.symbol} } from '@setu-ts/${p.pkg}';`),
+    ...middleware.map((m) => `import { ${m.symbol} } from '@setu-ts/${m.pkg}';`),
     ...packageImports
       .filter((p) => p.pkg !== 'common' && p.symbols !== undefined && p.symbols.length > 0)
-      .map((p) => `import { ${p.symbols?.join(', ')} } from '@hono-enterprise/${p.pkg}';`),
+      .map((p) => `import { ${p.symbols?.join(', ')} } from '@setu-ts/${p.pkg}';`),
     // Project-local last, so the generated file reads package imports first.
     ...localImports.map((l) => `import { ${l.symbols.join(', ')} } from '${l.from}';`),
   ].join('\n');
@@ -139,7 +139,7 @@ function configModule(
 /**
  * Builds the application.
  *
- * \`honoe\` imports this factory to discover plugin-contributed CLI commands, so
+ * \`setu\` imports this factory to discover plugin-contributed CLI commands, so
  * it must NOT start the server — \`main.ts\` owns that.
  *
  * @returns The configured, unstarted application
@@ -172,7 +172,7 @@ ${middlewareLines}
 /**
  * Builds the application.
  *
- * \`honoe\` imports this factory to discover plugin-contributed CLI commands, so
+ * \`setu\` imports this factory to discover plugin-contributed CLI commands, so
  * it must NOT start the server — \`main.ts\` owns that.
  *${envDoc}
  * @returns The configured, unstarted application
@@ -232,7 +232,7 @@ function workersEntry(): string {
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
-  return `import type { IApplication } from '@hono-enterprise/common';
+  return `import type { IApplication } from '@setu-ts/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 
 let booted: Promise<IApplication> | undefined;
@@ -309,7 +309,7 @@ function jsrImports(
 ): Record<string, string> {
   const imports: Record<string, string> = {};
   for (const pkg of frameworkPackages(extras, ...wirings)) {
-    imports[`@hono-enterprise/${pkg}`] = `jsr:@hono-enterprise/${pkg}@${RANGE}`;
+    imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
@@ -330,7 +330,7 @@ function npmDependencies(
 ): Record<string, string> {
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(extras, ...wirings)) {
-    deps[`@hono-enterprise/${pkg}`] = `npm:@jsr/hono-enterprise__${pkg}@${RANGE}`;
+    deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
   }
   return { ...deps, ...manifest?.npmDependencies };
 }
@@ -444,8 +444,8 @@ function standaloneNpmFiles(
  *
  * @param projectName - The project directory and manifest name
  * @param runtime - The selected runtime target
- * @param plugins - Plugins the generated `honoe.config.ts` registers
- * @param middleware - Middleware the generated `honoe.config.ts` adds
+ * @param plugins - Plugins the generated `setu.config.ts` registers
+ * @param middleware - Middleware the generated `setu.config.ts` adds
  * @param localImports - Project-local imports the config module needs, for a
  * template whose plugin arguments name a class it also emits
  * @param extras - Extra template source files, appended to the fixed set
@@ -465,7 +465,7 @@ function projectFiles(
   const packagesInput: PackagesInput = { appFactory, packageImports };
   const readme = `# ${projectName}
 
-A [Hono Enterprise](https://github.com/dkpaul91/hono-enterprise) project targeting \`${runtime}\`.
+A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
 
 ## Run
 
@@ -569,7 +569,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # Platform bindings reach the application through the \`env\` argument of the
 # \`fetch\` handler, which \`src/index.ts\` threads into \`${CONFIG_EXPORT}()\`.
-# Register \`CloudflarePlugin\` from @hono-enterprise/cloudflare-plugin to serve
+# Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve
 # the cache and storage capabilities from KV and R2.
 #
 # [[kv_namespaces]]
@@ -615,7 +615,7 @@ export function firstDuplicatePath(files: readonly GeneratedFile[]): string | un
 }
 
 /**
- * Runs `honoe new`.
+ * Runs `setu new`.
  *
  * Creates the project under `<dir>/<project-name>`, checking every planned path
  * for an existing file BEFORE the first write, and writing nothing at all under

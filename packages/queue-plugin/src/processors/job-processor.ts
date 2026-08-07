@@ -6,10 +6,10 @@
  * @module
  */
 
-import type { IJob } from '@hono-enterprise/common';
+import type { IJob } from '@setu-ts/common';
 import type { StoredJob } from '../interfaces/index.ts';
 import { computeBackoffMs } from '../retry/retry-strategy.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 /**
  * Internal interface for the adapter methods JobRunner needs.

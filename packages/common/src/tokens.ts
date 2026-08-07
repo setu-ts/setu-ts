@@ -29,7 +29,7 @@ export type CapabilityToken = string;
  *
  * @example
  * ```typescript
- * import { CAPABILITIES } from '@hono-enterprise/common';
+ * import { CAPABILITIES } from '@setu-ts/common';
  *
  * const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
  * ```

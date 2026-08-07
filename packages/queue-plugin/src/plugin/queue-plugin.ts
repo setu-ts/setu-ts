@@ -6,14 +6,8 @@
  * @module
  */
 
-import type {
-  HealthIndicatorFn,
-  ILogger,
-  IPlugin,
-  IPluginContext,
-  IQueue,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
+import type { HealthIndicatorFn, ILogger, IPlugin, IPluginContext, IQueue } from '@setu-ts/common';
+import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 import type { QueueAdapterType, QueuePluginOptions } from '../interfaces/index.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
 import { RedisQueue, validateClient as isRedisQueueClient } from '../adapters/redis-queue.ts';

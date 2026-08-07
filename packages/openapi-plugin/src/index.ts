@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * OpenAPI plugin for Hono Enterprise.
+ * OpenAPI plugin for Setu-TS.
  *
  * Auto-generates OpenAPI 3.1 documentation from registered routes and serves
  * it (with optional Swagger UI) over HTTP.

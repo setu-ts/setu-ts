@@ -6,9 +6,9 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IRequestContext, IServiceRegistry } from '@hono-enterprise/common';
-import { createTestContext, MockServiceRegistry } from '@hono-enterprise/testing';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRequestContext, IServiceRegistry } from '@setu-ts/common';
+import { createTestContext, MockServiceRegistry } from '@setu-ts/testing';
 
 import { cacheApiMiddleware } from '../../../src/cache-api/cache-api-middleware.ts';
 import type { ICloudflareBindings } from '../../../src/bindings/binding-registry.ts';

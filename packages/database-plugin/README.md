@@ -1,4 +1,4 @@
-# @hono-enterprise/database-plugin
+# @setu-ts/database-plugin
 
 Database access with the repository pattern and Unit of Work. Registers an `IDatabaseService` under
 `CAPABILITIES.DATABASE` (`'database'`).
@@ -9,16 +9,16 @@ Three adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter` 
 ## Installation
 
 ```typescript
-import { DatabasePlugin } from '@hono-enterprise/database-plugin';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { DatabasePlugin, type IDatabaseService } from '@hono-enterprise/database-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -65,4 +65,4 @@ imperative begin/commit.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

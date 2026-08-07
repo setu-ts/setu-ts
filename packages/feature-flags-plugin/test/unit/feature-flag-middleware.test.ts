@@ -7,12 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFlagGuard } from '../../src/middleware/feature-flag-middleware.ts';
-import type {
-  FlagContext,
-  IFeatureFlags,
-  IRequestContext,
-  NextFunction,
-} from '@hono-enterprise/common';
+import type { FlagContext, IFeatureFlags, IRequestContext, NextFunction } from '@setu-ts/common';
 
 describe('createFlagGuard', () => {
   function buildCtx(flagOn: boolean, user?: { id: string }, capRegistered = true): {

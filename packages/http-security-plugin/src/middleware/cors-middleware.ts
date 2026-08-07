@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { HandlerResult, IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { HandlerResult, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 /** Origin matcher function for dynamic CORS decisions. */
 export type CorsOriginMatcher = (

@@ -1,14 +1,14 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   HealthCheckResult,
   HealthStatus,
   IMessageBroker,
   IPluginContext,
   IRuntimeServices,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import type {
   IAmqpConnection,
   IKafkaFactory,

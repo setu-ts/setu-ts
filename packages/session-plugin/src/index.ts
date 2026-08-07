@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Cookie-backed sessions and session-backed form CSRF for Hono Enterprise.
+ * Cookie-backed sessions and session-backed form CSRF for Setu-TS.
  *
  * Registers an `ISessionService` under `CAPABILITIES.SESSION`. The default is a
  * self-contained encrypted cookie — AES-256-GCM under an HKDF-SHA256 derived key,
@@ -17,9 +17,9 @@
  *
  * @example
  * ```typescript
- * import { createApplication } from '@hono-enterprise/kernel';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
- * import { getSession, SessionPlugin } from '@hono-enterprise/session-plugin';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
+ * import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
  *
  * const app = createApplication({
  *   plugins: [RuntimePlugin(), SessionPlugin({ secret: mySecret, csrf: {} })],

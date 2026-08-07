@@ -10,13 +10,13 @@
  *
  * @module
  */
-import type { Result } from '@hono-enterprise/common';
+import type { Result } from '@setu-ts/common';
 import type {
   IValidationService,
   MiddlewareFunction,
   ValidationIssue,
   ValidationTarget,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 import type { ValidationErrorFormatter } from '../formatters/error-formatter.ts';
 import { createValidationMiddleware } from '../middleware/validation-middleware.ts';

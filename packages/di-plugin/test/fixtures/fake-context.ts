@@ -16,7 +16,7 @@ import type {
   MiddlewareOptions,
   RuntimePlatform,
   TimerHandle,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 /**
  * Creates a minimal fake runtime for the context (the DI plugin does not

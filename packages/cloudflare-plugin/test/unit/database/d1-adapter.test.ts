@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IDatabaseAdapter } from '@hono-enterprise/common';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 
 import {
   CloudflareBindingMissingError,

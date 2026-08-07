@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { IWorkerHandle, IWorkerHost } from '@hono-enterprise/common';
+import type { IWorkerHandle, IWorkerHost } from '@setu-ts/common';
 
 /**
  * Minimal shape of a web `Worker` instance as used by this host.

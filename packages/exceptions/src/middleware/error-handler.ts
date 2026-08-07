@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { errorHandler } from '@hono-enterprise/exceptions';
+ * import { errorHandler } from '@setu-ts/exceptions';
  *
  * app.middleware.add(errorHandler({
  *   format: 'rfc7807',
@@ -20,13 +20,8 @@
  *
  * @module
  */
-import type {
-  HandlerResult,
-  ILogger,
-  IRequestContext,
-  MiddlewareFunction,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { HandlerResult, ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
 import { internalServerError } from '../errors/exceptions.ts';

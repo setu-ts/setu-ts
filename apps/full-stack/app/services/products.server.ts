@@ -1,4 +1,4 @@
-import type { IDatabaseService, IRepository } from '@hono-enterprise/database-plugin';
+import type { IDatabaseService, IRepository } from '@setu-ts/database-plugin';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import type { Product } from '~/models/product.ts';
 import { getDatabase, getLogger } from '~/config/services.server.ts';

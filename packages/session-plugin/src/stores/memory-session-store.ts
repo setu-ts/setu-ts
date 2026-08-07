@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ISessionStore, SessionData, TimerHandle } from '@hono-enterprise/common';
+import type { ISessionStore, SessionData, TimerHandle } from '@setu-ts/common';
 
 /** Default interval between expiry sweeps. */
 const DEFAULT_SWEEP_MS = 60_000;

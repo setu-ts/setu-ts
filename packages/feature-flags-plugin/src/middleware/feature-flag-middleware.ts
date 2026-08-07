@@ -9,8 +9,8 @@ import type {
   IFeatureFlags,
   IRequestContext,
   MiddlewareFunction,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { FlagGuardOptions } from '../interfaces/index.ts';
 
 /**

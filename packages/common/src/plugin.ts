@@ -265,9 +265,9 @@ export type CliCommandHandler = (args: readonly string[]) => void | Promise<void
  * kernel registers each under {@linkcode CAPABILITIES.CLI_COMMAND} as a
  * multi-provider token that any consumer can read with `getAll`.
  *
- * `@hono-enterprise/cli` reads these: `honoe commands` lists them and
- * `honoe <name>` runs one. Doing so requires importing and booting the
- * application, so the CLI loads it through the project's `honoe.config.ts`
+ * `@setu-ts/cli` reads these: `setu commands` lists them and
+ * `setu <name>` runs one. Doing so requires importing and booting the
+ * application, so the CLI loads it through the project's `setu.config.ts`
  * (`createApp()`) and starts it with no port — which registers plugins without
  * binding a socket. Two plugins registering the same name is refused rather
  * than resolved by load order.

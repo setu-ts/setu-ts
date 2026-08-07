@@ -1,6 +1,6 @@
-import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@hono-enterprise/common';
-import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@hono-enterprise/common';
-import type { IMessageBroker } from '@hono-enterprise/common';
+import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IMessageBroker } from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import { RabbitMqBroker } from '../brokers/rabbitmq-broker.ts';

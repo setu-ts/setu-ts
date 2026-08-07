@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, createCapabilityToken } from '@hono-enterprise/common';
+import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 
 describe('DatabasePlugin', () => {

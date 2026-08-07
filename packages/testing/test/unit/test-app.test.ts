@@ -2,8 +2,8 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createTestApp } from '../../src/test-app.ts';
 import { createMockPlugin } from '../../src/mock-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 // Fake runtime service for mock-based tests (unit tier)
 const fakeRuntime: IRuntimeServices = {

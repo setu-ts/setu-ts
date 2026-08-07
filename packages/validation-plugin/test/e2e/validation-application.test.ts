@@ -7,15 +7,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type {
-  IPlugin,
-  IPluginContext,
-  IRequestContext,
-  IRuntimeServices,
-} from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IPlugin, IPluginContext, IRequestContext, IRuntimeServices } from '@setu-ts/common';
 
-import { createApplication, type IKernelApplication } from '@hono-enterprise/kernel';
+import { createApplication, type IKernelApplication } from '@setu-ts/kernel';
 import { validateBody, validateQuery, ValidationPlugin } from '../../src/index.ts';
 
 // ---------------------------------------------------------------------------
@@ -209,7 +204,7 @@ describe('ValidationPlugin E2E — with real application', () => {
       instance: string;
       errors: Array<{ field: string }>;
     }>();
-    expect(json.type).toBe('https://hono-enterprise.dev/errors/validation');
+    expect(json.type).toBe('https://setu-ts.dev/errors/validation');
     expect(json.instance).toBe('/items');
     const hasMessage = 'message' in json;
     expect(hasMessage).toBe(false);

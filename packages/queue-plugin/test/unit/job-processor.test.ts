@@ -2,7 +2,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { runJob } from '../../src/processors/job-processor.ts';
 import type { StoredJob } from '../../src/interfaces/index.ts';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 /**
  * Fake runtime for testing.

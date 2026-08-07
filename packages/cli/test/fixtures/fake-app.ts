@@ -24,8 +24,8 @@ import type {
   IRouterApi,
   IServiceRegistry,
   StartOptions,
-} from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 /** One command a fake plugin registered. */
 export interface FakeCommand {

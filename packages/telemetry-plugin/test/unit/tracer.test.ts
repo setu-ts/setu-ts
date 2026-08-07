@@ -13,8 +13,8 @@ import {
 } from '../../src/tracing/tracer.ts';
 import type { TracerHost } from '../../src/interfaces/index.ts';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
-import { TELEMETRY_CONTEXT_OPAQUE } from '@hono-enterprise/common';
-import type { TelemetryContext } from '@hono-enterprise/common';
+import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
+import type { TelemetryContext } from '@setu-ts/common';
 
 describe('loadOtelTracerProvider', () => {
   it('should throw when exporter is otlp but endpoint is missing', async () => {

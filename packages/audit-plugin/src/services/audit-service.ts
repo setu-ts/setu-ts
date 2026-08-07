@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { AuditEntry, IAuditLogger } from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { AuditEntry, IAuditLogger } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
 import { freezeAuditRecord } from '../storage/audit-record.ts';
 

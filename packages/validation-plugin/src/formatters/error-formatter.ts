@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { IRequestContext, ValidationIssue } from '@hono-enterprise/common';
+import type { IRequestContext, ValidationIssue } from '@setu-ts/common';
 import { defaultFormatter, nestjsFormatter } from './default-formatter.ts';
 import { rfc7807Formatter } from './rfc7807-formatter.ts';
 

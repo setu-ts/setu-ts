@@ -7,10 +7,10 @@ import type {
   IServiceRegistry,
   ResponseSnapshot,
   TimerHandle,
-} from '@hono-enterprise/common';
-import type { HttpMethod } from '@hono-enterprise/common';
-import type { IPrincipal } from '@hono-enterprise/common';
-import type { ITenant } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { HttpMethod } from '@setu-ts/common';
+import type { IPrincipal } from '@setu-ts/common';
+import type { ITenant } from '@setu-ts/common';
 
 import { MockServiceRegistry } from './mock-registry.ts';
 
@@ -329,7 +329,7 @@ export class MockResponse implements IResponse {
  *
  * @example
  * ```typescript
- * import { createTestContext } from '@hono-enterprise/testing';
+ * import { createTestContext } from '@setu-ts/testing';
  *
  * const ctx = createTestContext();
  * expect(ctx.id).toBe('test-ctx');

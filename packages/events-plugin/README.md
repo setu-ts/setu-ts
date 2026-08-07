@@ -1,25 +1,25 @@
-# @hono-enterprise/events-plugin
+# @setu-ts/events-plugin
 
 In-process domain events. Registers an `IEventBus` under `CAPABILITIES.EVENTS` (`'events'`), backed
 by `InMemoryEventBus`.
 
 For events that must cross a process boundary, use
-[`@hono-enterprise/messaging-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/messaging-plugin)
+[`@setu-ts/messaging-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/messaging-plugin)
 — or bridge the two with its `EventsMessagingBridge`.
 
 ## Installation
 
 ```typescript
-import { EventsPlugin } from '@hono-enterprise/events-plugin';
+import { EventsPlugin } from '@setu-ts/events-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { defineDomainEvent, EventsPlugin } from '@hono-enterprise/events-plugin';
-import { CAPABILITIES, type IEventBus, type IRuntimeServices } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { defineDomainEvent, EventsPlugin } from '@setu-ts/events-plugin';
+import { CAPABILITIES, type IEventBus, type IRuntimeServices } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), EventsPlugin()],
@@ -56,4 +56,4 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

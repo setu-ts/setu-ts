@@ -1,4 +1,4 @@
-import type { IApplication } from '@hono-enterprise/common';
+import type { IApplication } from '@setu-ts/common';
 
 import type { OpenApiDocument, OpenApiGeneratorOptions } from '../generators/openapi-generator.ts';
 import { OpenApiGenerator } from '../generators/openapi-generator.ts';

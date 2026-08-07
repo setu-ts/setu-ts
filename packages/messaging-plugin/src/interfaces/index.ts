@@ -278,7 +278,7 @@ export type ServiceBusMessagingOptions =
  */
 export interface CustomMessagingOptions extends MessagingCommonOptions {
   broker: 'custom';
-  instance: import('@hono-enterprise/common').IMessageBroker;
+  instance: import('@setu-ts/common').IMessageBroker;
 }
 
 /**

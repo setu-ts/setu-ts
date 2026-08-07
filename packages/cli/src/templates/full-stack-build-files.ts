@@ -29,7 +29,7 @@ const reactRouterConfig = `import type { Config } from '@react-router/dev/config
  * React Router build configuration.
  *
  * \`ssr: true\` is what makes this a server-rendered app: the build emits
- * \`build/server/index.js\`, which \`honoe.config.ts\` hands to the SSR plugin as
+ * \`build/server/index.js\`, which \`setu.config.ts\` hands to the SSR plugin as
  * its \`serverBuildPath\`. Changing the output directory means changing that
  * option too.
  */
@@ -47,12 +47,12 @@ export default {
  * of the build configuration — which would fail as a resolution error on Deno
  * and, worse, as a silent context-key mismatch everywhere else.
  *
- * @param frameworkPackages - Bare `@hono-enterprise` package names
+ * @param frameworkPackages - Bare `@setu-ts` package names
  * @returns The `vite.config.ts` contents
  */
 function renderViteConfig(frameworkPackages: readonly string[]): string {
   const externals = frameworkPackages
-    .map((pkg) => `\n  '@hono-enterprise/${pkg}',`)
+    .map((pkg) => `\n  '@setu-ts/${pkg}',`)
     .join('');
 
   return `import { reactRouter } from '@react-router/dev/vite';
@@ -61,7 +61,7 @@ import { defineConfig } from 'vite';
 /**
  * Vite builds the client bundle and the server build; it does NOT serve the
  * application. The framework owns the server, so \`vite build\` is a build step
- * and \`honoe\`/\`main.ts\` is the runtime.
+ * and \`setu\`/\`main.ts\` is the runtime.
  *
  * \`resolve.tsconfigPaths\` is what makes the \`~/*\` alias work at build time;
  * the same alias is declared in tsconfig.json for the type-checker.
@@ -74,7 +74,7 @@ import { defineConfig } from 'vite';
 //    toolchain cannot resolve at all.
 // 2. Bundling would inline a second copy of each package, and the context keys
 //    in app/lib/context-keys.server.ts are matched by identity: the copy
-//    honoe.config.ts holds would stop matching the copy a loader reads, so
+//    setu.config.ts holds would stop matching the copy a loader reads, so
 //    every context value would silently fall back to its default.
 const frameworkPackages = [${externals}
 ];
@@ -98,9 +98,9 @@ export default defineConfig({
  * Runtime-independent by design: the frontend build produces the same artifacts
  * whichever server runtime serves them, and the one platform-dependent choice —
  * whether the framework serves static assets itself — lives in
- * `honoe.config.ts`, not here.
+ * `setu.config.ts`, not here.
  *
- * @param frameworkPackages - Bare `@hono-enterprise` package names the emitted
+ * @param frameworkPackages - Bare `@setu-ts` package names the emitted
  * app imports, which the server build must treat as external
  * @returns The build files to emit
  */

@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HandlerResult } from '@hono-enterprise/common';
+import type { HandlerResult } from '@setu-ts/common';
 import { SseConnection } from '../../src/connection/sse-connection.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -14,7 +14,7 @@ import type {
   IResponse,
   IRuntimeServices,
   ResponseSnapshot,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Controller capture — tracks every controller created via intercepted streams

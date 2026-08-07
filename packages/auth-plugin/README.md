@@ -1,6 +1,6 @@
 # Auth Plugin
 
-Authentication and authorization plugin for Hono Enterprise: JWT and API-key authentication, local
+Authentication and authorization plugin for Setu-TS: JWT and API-key authentication, local
 credential verification, RBAC authorization with role hierarchy, and short-circuiting route guards.
 
 All cryptography (HS256/RS256 JWT signing/verification and PBKDF2-SHA256 password hashing) runs
@@ -22,13 +22,13 @@ The plugin registers three services under existing capability tokens:
 ## Installation
 
 ```bash
-deno add @hono-enterprise/auth-plugin
+deno add @setu-ts/auth-plugin
 ```
 
 ## Usage
 
 ```typescript
-import { authMiddleware, AuthPlugin } from '@hono-enterprise/auth-plugin';
+import { authMiddleware, AuthPlugin } from '@setu-ts/auth-plugin';
 
 app.register(AuthPlugin({
   jwt: {
@@ -63,7 +63,7 @@ app.middleware.add(authMiddleware());
 JWT with the separate `IJwtService` resolved from `'jwt'`.
 
 ```typescript
-import type { IAuthService, IJwtService } from '@hono-enterprise/common';
+import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 app.router.post('/auth/login', async (ctx) => {
   const auth = ctx.services.get<IAuthService>('authentication');
@@ -104,7 +104,7 @@ ignored). The wildcard permission `'*'` — held directly by the principal or gr
 (direct or inherited) roles — satisfies every `hasPermission`/`hasAllPermissions` check.
 
 ```typescript
-import type { IAuthorizationService } from '@hono-enterprise/common';
+import type { IAuthorizationService } from '@setu-ts/common';
 
 const authz = ctx.services.get<IAuthorizationService>('authorization');
 authz.hasRole(principal, 'user'); // true when principal is admin and admin inherits user
@@ -129,7 +129,7 @@ import {
   requireAuth,
   requirePermission,
   requireRole,
-} from '@hono-enterprise/auth-plugin';
+} from '@setu-ts/auth-plugin';
 
 app.router.get('/profile', { middleware: [requireAuth()], handler });
 app.router.delete('/users/:id', { middleware: [requireAuth(), requireRole('admin')], handler });
@@ -158,7 +158,7 @@ app.router.get('/health', { middleware: [publicRoute()], handler });
 check.
 
 ```typescript
-import { PasswordHasher } from '@hono-enterprise/auth-plugin';
+import { PasswordHasher } from '@setu-ts/auth-plugin';
 
 const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from the 'runtime' token
 const stored = await hasher.hash('correct horse battery staple');
@@ -196,7 +196,7 @@ pluggable async `RefreshTokenStore` (`MemoryRefreshTokenStore` ships; single-pro
 `null`/`false`.
 
 ```typescript
-import { MemoryRefreshTokenStore, RefreshTokenService } from '@hono-enterprise/auth-plugin';
+import { MemoryRefreshTokenStore, RefreshTokenService } from '@setu-ts/auth-plugin';
 
 const refresh = new RefreshTokenService({
   jwt, // IJwtService resolved from the 'jwt' token
@@ -231,7 +231,7 @@ in-memory (single-process); use `RedisRateLimitStore` for multi-instance deploym
 ioredis-compatible `client`, or `npm:ioredis@5.x` is lazily imported on first use).
 
 ```typescript
-import { rateLimitMiddleware, RedisRateLimitStore } from '@hono-enterprise/auth-plugin';
+import { rateLimitMiddleware, RedisRateLimitStore } from '@setu-ts/auth-plugin';
 
 app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 })); // per IP
 

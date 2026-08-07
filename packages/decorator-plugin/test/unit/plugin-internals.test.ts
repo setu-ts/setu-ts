@@ -1,7 +1,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ClassProvider, IContainer, Provider, ProviderOptions } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ClassProvider, IContainer, Provider, ProviderOptions } from '@setu-ts/common';
 
 import {
   Body,

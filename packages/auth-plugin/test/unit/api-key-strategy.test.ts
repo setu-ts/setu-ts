@@ -5,7 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { ApiKeyStrategy } from '../../src/strategies/api-key-strategy.ts';
-import type { IPrincipal, IRequest } from '@hono-enterprise/common';
+import type { IPrincipal, IRequest } from '@setu-ts/common';
 
 describe('ApiKeyStrategy', () => {
   function createRequest(headers: Record<string, string> = {}): IRequest {

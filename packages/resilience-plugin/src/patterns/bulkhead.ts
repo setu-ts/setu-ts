@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { BulkheadPolicy, ResilientCall } from '@hono-enterprise/common';
+import type { BulkheadPolicy, ResilientCall } from '@setu-ts/common';
 import { BulkheadFullError } from '../errors.ts';
 import { abortReasonOf, throwIfAborted } from './abort.ts';
 

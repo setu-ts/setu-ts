@@ -19,7 +19,7 @@
  * @module
  */
 
-import type { NormalizedQuery } from '@hono-enterprise/common';
+import type { NormalizedQuery } from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 
 /**

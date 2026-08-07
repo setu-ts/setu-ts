@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   CliCommandHandler,
   DecoratorHandler,
@@ -24,8 +24,8 @@ import type {
   IRuntimeServices,
   MetricConfig,
   StartOptions,
-} from '@hono-enterprise/common';
-import type { IRequest } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { IRequest } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
@@ -756,7 +756,7 @@ class Application implements IKernelApplication {
  * @returns The kernel application instance with inject() capability
  * @example
  * ```typescript
- * import { createApplication } from '@hono-enterprise/kernel';
+ * import { createApplication } from '@setu-ts/kernel';
  *
  * const app = createApplication({
  *   plugins: [RuntimePlugin()],

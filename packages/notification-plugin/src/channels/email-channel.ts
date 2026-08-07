@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IMailer, NotificationMessage } from '@hono-enterprise/common';
+import type { IMailer, NotificationMessage } from '@setu-ts/common';
 import type { NotificationChannel } from '../interfaces/index.ts';
 
 /**

@@ -21,11 +21,7 @@
  * @since 0.2.0
  */
 
-import type {
-  IWebSocketTransport,
-  WebSocketEventSink,
-  WebSocketReadyState,
-} from '@hono-enterprise/common';
+import type { IWebSocketTransport, WebSocketEventSink, WebSocketReadyState } from '@setu-ts/common';
 import {
   ABNORMAL_CLOSURE,
   normalizeFrame,

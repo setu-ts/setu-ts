@@ -3,12 +3,7 @@
  *
  * @module
  */
-import type {
-  CqrsCommand,
-  ICommandBus,
-  ICommandHandler,
-  IPipelineBehavior,
-} from '@hono-enterprise/common';
+import type { CqrsCommand, ICommandBus, ICommandHandler, IPipelineBehavior } from '@setu-ts/common';
 import { RequestBus } from './request-bus.ts';
 
 /**

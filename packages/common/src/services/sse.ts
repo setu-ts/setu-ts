@@ -115,7 +115,7 @@ export interface SseChannel {
  *
  * @example
  * ```typescript
- * import { CAPABILITIES } from '@hono-enterprise/common';
+ * import { CAPABILITIES } from '@setu-ts/common';
  *
  * const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
  * const conn = sse.open(ctx);

@@ -2,7 +2,7 @@
  * Regression: the broker must hand a timer handle back to `clearInterval`
  * EXACTLY as `setInterval` returned it.
  *
- * `TimerHandle` is `unknown` in `@hono-enterprise/common` — deliberately opaque,
+ * `TimerHandle` is `unknown` in `@setu-ts/common` — deliberately opaque,
  * so a runtime may return any shape. The broker used to store the handle as a
  * `number` (`Number(intervalId)`), which coerces an object-shaped handle to
  * `NaN`. `clearInterval(NaN)` is a silent no-op, so every subscription leaked a
@@ -15,7 +15,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRuntimeServices, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

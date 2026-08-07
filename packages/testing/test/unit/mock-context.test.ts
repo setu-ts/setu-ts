@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { _getDefaults, createTestContext, MockResponse } from '../../src/mock-context.ts';
 import { MockServiceRegistry } from '../../src/mock-registry.ts';
-import type { IRuntimeServices, IServiceRegistry } from '@hono-enterprise/common';
+import type { IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
 
 // Build a runtime fake where every accessor is verified individually.
 // This covers all DEFAULT_TEST_RUNTIME accessors plus any injected runtime.

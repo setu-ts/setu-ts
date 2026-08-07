@@ -1,16 +1,16 @@
 /**
  * @module
  *
- * `@hono-enterprise/cli` — the `honoe` command-line tool.
+ * `@setu-ts/cli` — the `setu` command-line tool.
  *
- * Provides project scaffolding (`honoe new`) and plugin-aware code generation
- * (`honoe generate <schematic> <name>`). This barrel is the programmatic
+ * Provides project scaffolding (`setu new`) and plugin-aware code generation
+ * (`setu generate <schematic> <name>`). This barrel is the programmatic
  * surface; the executable entry point is `src/main.ts`.
  *
  * @example
  * ```typescript
- * import { runCli } from '@hono-enterprise/cli';
- * import { createDenoRuntimeServices } from '@hono-enterprise/runtime';
+ * import { runCli } from '@setu-ts/cli';
+ * import { createDenoRuntimeServices } from '@setu-ts/runtime';
  *
  * const runtime = createDenoRuntimeServices();
  * const code = await runCli(['generate', 'service', 'billing'], {
@@ -40,15 +40,15 @@ export type { GeneratedFile } from './utils/file-writer.ts';
 /** The contract a schematic module must satisfy. */
 export type { Schematic, SchematicOptions } from './schematics/registry.ts';
 
-/** The contract a `.hono-enterprise/schematics/*.ts` module is loaded through. */
+/** The contract a `.setu-ts/schematics/*.ts` module is loaded through. */
 export type { ModuleLoader } from './schematics/custom.ts';
-/** The contract the target project's `honoe.config.ts` is loaded through. */
+/** The contract the target project's `setu.config.ts` is loaded through. */
 export type { AppLoader } from './app-loader.ts';
 
 /** The installed name of the CLI executable, interpolated into all help text. */
 export { PROGRAM_NAME } from './constants.ts';
-/** A project template accepted by `honoe new --template`. */
+/** A project template accepted by `setu new --template`. */
 export type { TemplateName } from './constants.ts';
 
-/** Detects the `@hono-enterprise` packages a project depends on. */
+/** Detects the `@setu-ts` packages a project depends on. */
 export { detectPlugins } from './utils/plugin-detector.ts';

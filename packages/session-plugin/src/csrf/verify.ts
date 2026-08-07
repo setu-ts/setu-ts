@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRequestContext } from '@hono-enterprise/common';
+import type { IRequestContext } from '@setu-ts/common';
 
 import { timingSafeEqualStrings } from '../codec/timing-safe.ts';
 import { CsrfTokenMismatchError } from '../errors.ts';

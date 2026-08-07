@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@hono-enterprise/common';
+import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp } from '../interfaces/index.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
 import { watchKubernetesService } from './kubernetes-watch.ts';

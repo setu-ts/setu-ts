@@ -6,7 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MetricsRegistry } from '../../src/registry/metrics-registry.ts';
-import type { MetricConfig } from '@hono-enterprise/common';
+import type { MetricConfig } from '@setu-ts/common';
 
 describe('MetricsRegistry', () => {
   it('insert/get/iterate', () => {

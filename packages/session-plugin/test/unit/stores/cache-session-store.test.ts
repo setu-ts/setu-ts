@@ -10,7 +10,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ICacheStore } from '@hono-enterprise/common';
+import type { ICacheStore } from '@setu-ts/common';
 
 import { CacheSessionStore } from '../../../src/stores/cache-session-store.ts';
 

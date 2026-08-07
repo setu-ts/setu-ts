@@ -7,8 +7,8 @@
 
 import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@hono-enterprise/runtime';
-import type { IFileSystem } from '@hono-enterprise/common';
+import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import type { IFileSystem } from '@setu-ts/common';
 import { configModuleExists, loadApp } from '../../src/app-loader.ts';
 
 const fs: IFileSystem = createDenoRuntimeServices().fs!;
@@ -49,8 +49,8 @@ describe('app loader — real import()', () => {
   let root: string;
 
   beforeAll(async () => {
-    root = await Deno.makeTempDir({ prefix: 'honoe-app-' });
-    await Deno.writeTextFile(`${root}/honoe.config.ts`, VALID);
+    root = await Deno.makeTempDir({ prefix: 'setu-app-' });
+    await Deno.writeTextFile(`${root}/setu.config.ts`, VALID);
     await Deno.mkdir(`${root}/variants`, { recursive: true });
     await Deno.writeTextFile(`${root}/variants/async.ts`, ASYNC);
     await Deno.writeTextFile(`${root}/variants/no-export.ts`, NO_EXPORT);

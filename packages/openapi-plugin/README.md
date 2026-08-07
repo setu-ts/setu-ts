@@ -1,4 +1,4 @@
-# @hono-enterprise/openapi-plugin
+# @setu-ts/openapi-plugin
 
 OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IOpenApiService` under
 `CAPABILITIES.OPENAPI` (`'openapi'`).
@@ -9,15 +9,15 @@ Zod schemas are transformed to OpenAPI schema objects, and identical schemas are
 ## Installation
 
 ```typescript
-import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
+import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { OpenApiPlugin } from '@hono-enterprise/openapi-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
 const app = createApplication({
   plugins: [
@@ -51,10 +51,10 @@ the document metadata).
 
 At registration the plugin drains `CAPABILITIES.OPENAPI_SCHEMA` contributions, so other plugins —
 and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
-[`@hono-enterprise/decorator-plugin`](https://github.com/dkpaul91/hono-enterprise/tree/main/packages/decorator-plugin)
+[`@setu-ts/decorator-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/decorator-plugin)
 — can enrich the document.
 
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

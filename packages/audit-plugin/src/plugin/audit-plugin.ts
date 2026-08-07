@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { IPlugin, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import type { IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   AuditPluginOptions,
   AuditStorageOptions,
@@ -100,7 +100,7 @@ export function createStorage(
  *
  * @example
  * ```typescript
- * import { AuditPlugin } from '@hono-enterprise/audit-plugin';
+ * import { AuditPlugin } from '@setu-ts/audit-plugin';
  *
  * // Default memory backend
  * app.register(AuditPlugin());

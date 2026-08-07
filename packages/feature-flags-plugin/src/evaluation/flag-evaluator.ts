@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { FlagContext } from '@hono-enterprise/common';
+import type { FlagContext } from '@setu-ts/common';
 import type { FlagDefinition } from '../interfaces/index.ts';
 
 // ── FNV-1a 32-bit hash ─────────────────────────────────────────────────────

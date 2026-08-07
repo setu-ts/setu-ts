@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { CqrsPlugin } from '@hono-enterprise/cqrs-plugin';
+ * import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
  *
  * app.register(CqrsPlugin({ behaviors: [timingBehavior] }));
  * ```
@@ -27,4 +27,4 @@ export type {
   IPipelineBehavior,
   IQueryBus,
   IQueryHandler,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

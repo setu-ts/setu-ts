@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@hono-enterprise/common';
+import type { IRuntimeServices, RuntimePlatform, TimerHandle } from '@setu-ts/common';
 
 /**
  * Creates a minimal fake runtime that satisfies `IRuntimeServices`.

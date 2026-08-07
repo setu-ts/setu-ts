@@ -8,11 +8,11 @@
  * - `HealthService` - Concrete implementation of the health service
  * - `createHttpIndicator` - Factory for HTTP probe indicators
  * - Re-exports of `IHealthService`, `IHealthIndicator`, `HealthCheckResult`,
- *   `HealthIndicatorFn`, `HealthStatus`, `HealthReport` from `@hono-enterprise/common`
+ *   `HealthIndicatorFn`, `HealthStatus`, `HealthReport` from `@setu-ts/common`
  *
  * @example
  * ```typescript
- * import { HealthPlugin, createHttpIndicator } from '@hono-enterprise/health-plugin';
+ * import { HealthPlugin, createHttpIndicator } from '@setu-ts/health-plugin';
  *
  * app.register(HealthPlugin({
  *   endpoints: {
@@ -40,7 +40,7 @@ export { HealthService } from './services/health-service.ts';
 export { createHttpIndicator } from './indicators/http-indicator.ts';
 export type { HttpIndicatorOptions } from './indicators/http-indicator.ts';
 
-// Re-exports from @hono-enterprise/common
+// Re-exports from @setu-ts/common
 export type {
   HealthCheckResult,
   HealthIndicatorFn,
@@ -48,4 +48,4 @@ export type {
   HealthStatus,
   IHealthIndicator,
   IHealthService,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

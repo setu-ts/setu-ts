@@ -4,10 +4,10 @@
     "smoke": "deno run -A smoke.ts"
   },
   "imports": {
-    "@hono-enterprise/common": "../../packages/common/src/index.ts",
-    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
-    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
-    "@hono-enterprise/realtime-backplane-plugin": "../../packages/realtime-backplane-plugin/src/index.ts",
-    "@hono-enterprise/sse-plugin": "../../packages/sse-plugin/src/index.ts"
+    "@setu-ts/common": "../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
+    "@setu-ts/realtime-backplane-plugin": "../../packages/realtime-backplane-plugin/src/index.ts",
+    "@setu-ts/sse-plugin": "../../packages/sse-plugin/src/index.ts"
   }
 }

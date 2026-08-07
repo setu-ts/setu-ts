@@ -1,6 +1,6 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { Constructor, MiddlewareFunction } from '@hono-enterprise/common';
+import type { Constructor, MiddlewareFunction } from '@setu-ts/common';
 
 import { MetadataStore } from '../../src/metadata/metadata-store.ts';
 

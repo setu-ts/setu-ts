@@ -2,7 +2,7 @@
  * WebSocket route table — exact-path matching plus subprotocol selection.
  *
  * Paths match exactly rather than by pattern. The kernel's pattern matcher is
- * internal to `@hono-enterprise/kernel` and not exported, so reusing it would
+ * internal to `@setu-ts/kernel` and not exported, so reusing it would
  * mean reaching into another package's internals (AI_GUIDELINES §2.1), and
  * hand-rolling a second matcher would duplicate logic (§11.1). Variable data
  * travels in the query string, which `onOpen` receives.
@@ -14,7 +14,7 @@
  * @since 0.1.0
  */
 
-import type { WebSocketHandlers, WebSocketRouteOptions } from '@hono-enterprise/common';
+import type { WebSocketHandlers, WebSocketRouteOptions } from '@setu-ts/common';
 
 /**
  * One registered WebSocket route.

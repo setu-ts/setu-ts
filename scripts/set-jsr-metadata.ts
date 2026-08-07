@@ -53,7 +53,7 @@ import { PACKAGE_METADATA, type RuntimeCompat } from './jsr-metadata.ts';
 // Overridable so the error paths below can be driven against a local stub — an
 // untested error path is how a release script fails at the worst moment.
 const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
-const SCOPE = 'hono-enterprise';
+const SCOPE = 'setu-ts';
 
 const dryRun = Deno.args.includes('--dry-run');
 const token = Deno.env.get('JSR_TOKEN');

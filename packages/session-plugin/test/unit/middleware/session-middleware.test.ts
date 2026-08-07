@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISession } from '@hono-enterprise/common';
+import type { ISession } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import { sessionMiddleware } from '../../../src/middleware/session-middleware.ts';

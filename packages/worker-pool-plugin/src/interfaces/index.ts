@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IWorkerHost } from '@hono-enterprise/common';
+import type { IWorkerHost } from '@setu-ts/common';
 
 /**
  * Per-task-module pool overrides, keyed by task-module specifier in

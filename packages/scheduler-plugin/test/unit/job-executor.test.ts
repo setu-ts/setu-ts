@@ -3,12 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type {
-  ILogger,
-  RetryOptions,
-  ScheduledJob,
-  SchedulerJobHandler,
-} from '@hono-enterprise/common';
+import type { ILogger, RetryOptions, ScheduledJob, SchedulerJobHandler } from '@setu-ts/common';
 import { run } from '../../src/jobs/job-executor.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 

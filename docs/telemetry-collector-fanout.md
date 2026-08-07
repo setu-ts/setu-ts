@@ -1,8 +1,8 @@
 # Telemetry — OTel Collector Trace Fan-Out (Datadog + New Relic + App Insights)
 
-Send one OTLP trace stream from a Hono Enterprise app to **multiple observability backends at once**
-without coupling the app to any vendor. The [telemetry plugin](../packages/telemetry-plugin) exports
-a single OTLP/HTTP stream; an OpenTelemetry **Collector** receives it and fans it out. Routing,
+Send one OTLP trace stream from a Setu-TS app to **multiple observability backends at once** without
+coupling the app to any vendor. The [telemetry plugin](../packages/telemetry-plugin) exports a
+single OTLP/HTTP stream; an OpenTelemetry **Collector** receives it and fans it out. Routing,
 sampling, and credentials live in the collector, so backends are added or removed by editing
 collector config — no app redeploy, no vendor SDK in your app.
 

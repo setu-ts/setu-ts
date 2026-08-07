@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { ResolverMap } from '@hono-enterprise/graphql-plugin';
+import type { ResolverMap } from '@setu-ts/graphql-plugin';
 
 /** A book record as the demo stores it. */
 export interface Book {

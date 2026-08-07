@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IStorage, SignedUrlOptions } from '@hono-enterprise/common';
+import type { IStorage, SignedUrlOptions } from '@setu-ts/common';
 import type { StorageProvider } from '../interfaces/index.ts';
 
 /**

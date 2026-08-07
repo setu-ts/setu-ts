@@ -3,10 +3,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
+import { createApplication } from '@setu-ts/kernel';
 import { EventsPlugin } from '../../src/plugin/events-plugin.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IEventBus, IPlugin } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IEventBus, IPlugin } from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /** Fake runtime plugin for integration tests. */

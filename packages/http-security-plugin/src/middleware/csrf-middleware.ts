@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 /** HTTP methods considered unsafe (mutable) for CSRF purposes. */
 const UNSAFE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);

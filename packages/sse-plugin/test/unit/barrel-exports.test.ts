@@ -1,5 +1,5 @@
 /**
- * Barrel-export tests for `@hono-enterprise/sse-plugin`.
+ * Barrel-export tests for `@setu-ts/sse-plugin`.
  *
  * Ensures every named export from `src/index.ts` is reachable at runtime,
  * mirroring the events-plugin convention.
@@ -8,13 +8,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, SseConnection, SsePlugin, SseService } from '@hono-enterprise/sse-plugin';
-import type {
-  ISseConnection,
-  ISseService,
-  SseChannel,
-  SseMessage,
-} from '@hono-enterprise/sse-plugin';
+import { CAPABILITIES, SseConnection, SsePlugin, SseService } from '@setu-ts/sse-plugin';
+import type { ISseConnection, ISseService, SseChannel, SseMessage } from '@setu-ts/sse-plugin';
 
 describe('sse-plugin barrel exports', () => {
   it('exposes every documented value export at runtime', () => {

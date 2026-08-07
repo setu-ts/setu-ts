@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { FlagContext, IFeatureFlags } from '@hono-enterprise/common';
+import type { FlagContext, IFeatureFlags } from '@setu-ts/common';
 import type { FlagProvider, FlagProviderStatus } from '../interfaces/index.ts';
 
 /**

@@ -7,7 +7,7 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
 
 /**

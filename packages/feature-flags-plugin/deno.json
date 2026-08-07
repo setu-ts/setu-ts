@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/feature-flags-plugin",
+  "name": "@setu-ts/feature-flags-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts"

@@ -3,7 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HealthIndicatorFn, IPlugin } from '@hono-enterprise/common';
+import type { HealthIndicatorFn, IPlugin } from '@setu-ts/common';
 import { SchedulerPlugin } from '../../src/plugin/scheduler-plugin.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';

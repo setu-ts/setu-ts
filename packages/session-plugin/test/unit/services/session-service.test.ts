@@ -5,8 +5,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ISessionStore, SessionData } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ISessionStore, SessionData } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import type { SessionMode } from '../../../src/codec/crypto.ts';

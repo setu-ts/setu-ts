@@ -12,9 +12,9 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { DiPlugin } from '@hono-enterprise/di-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { DiPlugin } from '@setu-ts/di-plugin';
 
 import { Controller, Get, Inject, Injectable, Optional } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';

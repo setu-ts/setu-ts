@@ -1,10 +1,10 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IMessageBroker, IServiceDiscovery } from '@hono-enterprise/common';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { ServiceDiscoveryPlugin } from '@hono-enterprise/service-discovery-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMessageBroker, IServiceDiscovery } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 
 /** Builds service B with a network endpoint and optional Redis broker. */
 export function createServiceB(redisUrl?: string): IKernelApplication {

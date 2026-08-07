@@ -6,8 +6,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IPluginContext, IRuntimeServices, IValidationService } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IPluginContext, IRuntimeServices, IValidationService } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { ValidationPlugin } from '../../src/plugin/validation-plugin.ts';
 import { ValidationService } from '../../src/services/validation-service.ts';
@@ -180,7 +180,7 @@ describe('ValidationPlugin — error format flows through middleware', () => {
     // RFC 7807 §3 requires this media type for a Problem Details body.
     expect(snap.headers.get('content-type')).toBe('application/problem+json');
     const body = JSON.parse(snap.body!);
-    expect(body.type).toBe('https://hono-enterprise.dev/errors/validation');
+    expect(body.type).toBe('https://setu-ts.dev/errors/validation');
     expect(body.instance).toBe('/api/v1/users');
     expect('message' in body).toBe(false);
   });

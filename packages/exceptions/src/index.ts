@@ -5,11 +5,11 @@
  * error handler middleware.
  *
  * This is a **plain package** (not a plugin) — it depends on
- * `@hono-enterprise/common` only and exposes types, factories, and a
+ * `@setu-ts/common` only and exposes types, factories, and a
  * middleware factory. Register the middleware via the application's pipeline:
  *
  * ```typescript
- * import { errorHandler } from '@hono-enterprise/exceptions';
+ * import { errorHandler } from '@setu-ts/exceptions';
  *
  * app.middleware.add(errorHandler({ format: 'rfc7807' }), {
  *   priority: 0,

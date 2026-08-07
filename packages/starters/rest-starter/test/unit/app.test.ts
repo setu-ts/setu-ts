@@ -5,8 +5,8 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import type { RestStarterOptions } from '../../src/options.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import { getSession } from '@hono-enterprise/session-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import { getSession } from '@setu-ts/session-plugin';
 
 /**
  * A valid `auth` arm. `AuthPluginOptions` requires BOTH `jwt` and `rbac`

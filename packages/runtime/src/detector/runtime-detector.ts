@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { RuntimePlatform } from '@hono-enterprise/common';
+import type { RuntimePlatform } from '@setu-ts/common';
 
 /**
  * Detects the current runtime platform.

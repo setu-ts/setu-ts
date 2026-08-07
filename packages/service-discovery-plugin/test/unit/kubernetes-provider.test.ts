@@ -12,7 +12,7 @@ import { expect } from '@std/expect';
 
 import { KubernetesProvider } from '../../src/providers/kubernetes-provider.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
-import type { IFileSystem } from '@hono-enterprise/common';
+import type { IFileSystem } from '@setu-ts/common';
 import {
   createFakeHttp,
   createFakeRuntime,

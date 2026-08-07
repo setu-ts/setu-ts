@@ -1,5 +1,5 @@
-import { createScheduledHandler, WorkersCron } from '@hono-enterprise/cloudflare-plugin';
-import type { CloudflareWorkerEnv, IScheduledController } from '@hono-enterprise/cloudflare-plugin';
+import { createScheduledHandler, WorkersCron } from '@setu-ts/cloudflare-plugin';
+import type { CloudflareWorkerEnv, IScheduledController } from '@setu-ts/cloudflare-plugin';
 import { createCloudflareApp } from './src/app.ts';
 
 interface WorkerEnvironment extends CloudflareWorkerEnv {

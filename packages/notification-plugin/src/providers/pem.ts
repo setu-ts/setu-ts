@@ -4,7 +4,7 @@
  * `auth-plugin` carries an equivalent helper, but it is internal to that
  * package and a plugin may not import another plugin (AI_GUIDELINES §2.2,
  * §3.3), so this is a deliberate local copy rather than shared code. If a third
- * consumer appears, promoting it to `@hono-enterprise/common` becomes the right
+ * consumer appears, promoting it to `@setu-ts/common` becomes the right
  * call.
  *
  * @module

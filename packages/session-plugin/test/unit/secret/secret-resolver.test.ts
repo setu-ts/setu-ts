@@ -9,8 +9,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ISecretManager } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ISecretManager } from '@setu-ts/common';
 
 import { SessionSecretMissingError } from '../../../src/errors.ts';
 import { MIN_SECRET_LENGTH, resolveSecrets } from '../../../src/secret/secret-resolver.ts';

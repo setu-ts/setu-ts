@@ -12,10 +12,10 @@
  *
  * @example
  * ```typescript
- * import { createApplication } from '@hono-enterprise/kernel';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
- * import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
- * import { CAPABILITIES, type IWebSocketService } from '@hono-enterprise/common';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
+ * import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+ * import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
  *
  * const app = createApplication({
  *   plugins: [RuntimePlugin(), WebSocketPlugin({ heartbeatMs: 30_000 })],
@@ -73,5 +73,5 @@ export type {
   WebSocketRouteOptions,
   WebSocketUpgradeDecision,
   WebSocketUpgradeRouter,
-} from '@hono-enterprise/common';
-export { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+export { CAPABILITIES } from '@setu-ts/common';

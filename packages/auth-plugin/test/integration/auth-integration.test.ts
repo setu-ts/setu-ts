@@ -10,7 +10,7 @@ import { expect } from '@std/expect';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { requireAuth, requireRole } from '../../src/guards/index.ts';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
   IJwtService,
@@ -20,7 +20,7 @@ import type {
   IRequestContext,
   IResponse,
   IServiceRegistry,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /**

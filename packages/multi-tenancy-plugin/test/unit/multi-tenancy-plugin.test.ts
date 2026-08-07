@@ -6,11 +6,11 @@ import { expect } from '@std/expect';
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { PathResolver } from '../../src/resolvers/path-resolver.ts';
-import { CAPABILITIES, type ITenantResolver, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+import { CAPABILITIES, type ITenantResolver, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { ITenantDataStore } from '../../src/interfaces/index.ts';
 import { createRecordingFakeStore } from '../fixtures/fake-store.ts';
 import type { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
-import type { ILogger, IPluginContext } from '@hono-enterprise/common';
+import type { ILogger, IPluginContext } from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Types — minimal interfaces to avoid `as any`

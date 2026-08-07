@@ -1,6 +1,6 @@
-# @hono-enterprise/microservice-starter
+# @setu-ts/microservice-starter
 
-Opinionated plugin composition for building microservices with Hono Enterprise.
+Opinionated plugin composition for building microservices with Setu-TS.
 
 Extends the REST starter bundle with additional capabilities essential for distributed systems:
 messaging, queue processing, resilience patterns, and telemetry. Ideal for service-oriented
@@ -9,13 +9,13 @@ architectures requiring async communication, circuit breakers, and observability
 ## Installation
 
 ```bash
-deno add jsr:@hono-enterprise/microservice-starter
+deno add jsr:@setu-ts/microservice-starter
 ```
 
 Or via npm/yarn/pnpm:
 
 ```bash
-npm install @hono-enterprise/microservice-starter
+npm install @setu-ts/microservice-starter
 ```
 
 ## Usage
@@ -24,7 +24,7 @@ The starter exports `createMicroserviceApp` — a fully wired application combin
 microservice-specific features:
 
 ```typescript
-import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
+import { createMicroserviceApp } from '@setu-ts/microservice-starter';
 
 const app = createMicroserviceApp();
 
@@ -38,8 +38,8 @@ await app.start({ port: 3000 });
 Customize all plugin configurations through the optional options parameter:
 
 ```typescript
-import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
-import type { MicroserviceStarterOptions } from '@hono-enterprise/microservice-starter';
+import { createMicroserviceApp } from '@setu-ts/microservice-starter';
+import type { MicroserviceStarterOptions } from '@setu-ts/microservice-starter';
 
 const options: MicroserviceStarterOptions = {
   // REST base plugins (see rest-starter)
@@ -62,8 +62,8 @@ Use `buildMicroservicePlugins` together with `createApplication` from the kernel
 custom plugin array with full control over ordering and configuration:
 
 ```typescript
-import { buildMicroservicePlugins } from '@hono-enterprise/microservice-starter';
-import { createApplication } from '@hono-enterprise/kernel';
+import { buildMicroservicePlugins } from '@setu-ts/microservice-starter';
+import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication({
   plugins: buildMicroservicePlugins({
@@ -118,9 +118,9 @@ instance (e.g., a session cache distinct from the default, or a separate queue f
 processing), register it manually after the starter returns:
 
 ```typescript
-import { createMicroserviceApp } from '@hono-enterprise/microservice-starter';
-import { CachePlugin } from '@hono-enterprise/cache-plugin';
-import { QueuePlugin } from '@hono-enterprise/queue-plugin';
+import { createMicroserviceApp } from '@setu-ts/microservice-starter';
+import { CachePlugin } from '@setu-ts/cache-plugin';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 
 const app = createMicroserviceApp();
 app.register(CachePlugin({ name: 'session' }));
@@ -148,12 +148,12 @@ registered, so the backplane finds a broker under `CAPABILITIES.MESSAGING`. On t
 combination throws at `start()`.
 
 See
-[rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
+[rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 for the full description of each arm.
 
 ## Coming from NestJS
 
-| NestJS                        | Hono Enterprise                                                 |
+| NestJS                        | Setu-TS                                                         |
 | ----------------------------- | --------------------------------------------------------------- |
 | `@Module({ … })`              | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
 | `providers: [UserService]`    | `decorators: { services: [UserService] }`, or `app.register(…)` |
@@ -191,6 +191,6 @@ Three consequences, each a startup throw rather than a silent misinjection:
 
 ## See Also
 
-- [JSR Registry](https://jsr.io/@hono-enterprise/microservice-starter)
-- [PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md)
-- [rest-starter](https://github.com/dkpaul91/hono-enterprise/blob/main/packages/starters/rest-starter/README.md)
+- [JSR Registry](https://jsr.io/@setu-ts/microservice-starter)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)

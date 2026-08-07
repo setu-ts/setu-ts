@@ -1,5 +1,5 @@
 {
-  "name": "@hono-enterprise/multi-tenancy-plugin",
+  "name": "@setu-ts/multi-tenancy-plugin",
   "version": "0.1.0-alpha.4",
   "license": "MIT",
   "exports": "./src/index.ts",

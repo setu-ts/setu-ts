@@ -1,10 +1,10 @@
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IContainer } from '@hono-enterprise/common';
-import { DecoratorPlugin } from '@hono-enterprise/decorator-plugin';
-import { DiPlugin } from '@hono-enterprise/di-plugin';
-import { createApplication } from '@hono-enterprise/kernel';
-import type { IKernelApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IContainer } from '@setu-ts/common';
+import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
+import { DiPlugin } from '@setu-ts/di-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { GreetingController } from './greeting-controller.ts';
 import { GreetingService } from './greeting-service.ts';
 import { ScopedReportService, SingletonReportService } from './report-service.ts';

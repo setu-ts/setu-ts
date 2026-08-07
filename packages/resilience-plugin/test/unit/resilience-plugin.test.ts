@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IPlugin, IResilienceService } from '@hono-enterprise/common';
+import type { IPlugin, IResilienceService } from '@setu-ts/common';
 import { ResiliencePlugin } from '../../src/plugin/resilience-plugin.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 

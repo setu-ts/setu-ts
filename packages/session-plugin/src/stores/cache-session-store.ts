@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { ICacheStore, ISessionStore, SessionData } from '@hono-enterprise/common';
+import type { ICacheStore, ISessionStore, SessionData } from '@setu-ts/common';
 
 /** Default namespace for session keys inside the shared cache. */
 const DEFAULT_PREFIX = 'session:';

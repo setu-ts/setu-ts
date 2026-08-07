@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { WebSocketEventSink } from '@hono-enterprise/common';
+import type { WebSocketEventSink } from '@setu-ts/common';
 import { UpgradeRouterStore } from '../../src/adapters/shared/upgrade-router-store.ts';
 
 const sink: WebSocketEventSink = {

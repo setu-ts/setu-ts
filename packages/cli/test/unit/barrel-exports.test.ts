@@ -5,7 +5,7 @@ import * as barrel from '../../src/index.ts';
 /** The runtime-visible surface §4 of the milestone plan commits to. */
 const EXPECTED_VALUES = ['runCli', 'deriveNames', 'PROGRAM_NAME', 'detectPlugins'] as const;
 
-describe('@hono-enterprise/cli barrel', () => {
+describe('@setu-ts/cli barrel', () => {
   it('exports exactly the committed runtime symbols', () => {
     expect(Object.keys(barrel).sort()).toEqual([...EXPECTED_VALUES].sort());
   });
@@ -23,7 +23,7 @@ describe('@hono-enterprise/cli barrel', () => {
   });
 
   it('exports PROGRAM_NAME as the installed binary name', () => {
-    expect(barrel.PROGRAM_NAME).toBe('honoe');
+    expect(barrel.PROGRAM_NAME).toBe('setu');
   });
 
   it('does not leak internal schematic factories', () => {

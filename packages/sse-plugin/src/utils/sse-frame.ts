@@ -10,7 +10,7 @@
  * @since 0.1.0
  */
 
-import type { SseMessage } from '@hono-enterprise/common';
+import type { SseMessage } from '@setu-ts/common';
 
 /**
  * Encodes an SSE message into the wire-format string.

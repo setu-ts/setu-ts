@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { LoadBalanceStrategy } from '@hono-enterprise/common';
+import type { LoadBalanceStrategy } from '@setu-ts/common';
 import type {
   DiscoveryProvider,
   EjectionOptions,

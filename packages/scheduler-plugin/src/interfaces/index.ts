@@ -94,17 +94,17 @@ interface RegistryEntryBase<T = unknown> {
   /** Unique job name (registry key). */
   name: string;
   /** Handler callback. */
-  handler: (job: import('@hono-enterprise/common').ScheduledJob<T>) => void | Promise<void>;
+  handler: (job: import('@setu-ts/common').ScheduledJob<T>) => void | Promise<void>;
   /** Optional payload. */
   data?: T;
   /** Optional retry config. */
-  retry?: import('@hono-enterprise/common').RetryOptions;
+  retry?: import('@setu-ts/common').RetryOptions;
   /** Current pause state. */
   paused: boolean;
   /** Next fire time (epoch ms). */
   nextRunAtMs: number;
   /** Armed timer handle. */
-  timerHandle: import('@hono-enterprise/common').TimerHandle | null;
+  timerHandle: import('@setu-ts/common').TimerHandle | null;
   /**
    * Generation counter for re-arm guarding (C4).
    * Incremented on each resume() to prevent double-fire when pause()+resume()

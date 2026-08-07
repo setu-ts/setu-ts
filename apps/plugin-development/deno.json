@@ -7,9 +7,9 @@
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",
     "@std/testing": "jsr:@std/testing@^1.0.19",
-    "@hono-enterprise/common": "../../packages/common/src/index.ts",
-    "@hono-enterprise/kernel": "../../packages/kernel/src/index.ts",
-    "@hono-enterprise/runtime": "../../packages/runtime/src/index.ts",
-    "@hono-enterprise/testing": "../../packages/testing/src/index.ts"
+    "@setu-ts/common": "../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
+    "@setu-ts/testing": "../../packages/testing/src/index.ts"
   }
 }

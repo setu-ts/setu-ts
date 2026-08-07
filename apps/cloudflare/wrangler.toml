@@ -1,4 +1,4 @@
-name = "hono-enterprise-cloudflare-example"
+name = "setu-ts-cloudflare-example"
 main = "worker.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]

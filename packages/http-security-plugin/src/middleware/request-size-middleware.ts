@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 /** Default maximum body size: 1 MiB in bytes. */
 const DEFAULT_MAX_BODY_SIZE = 1_048_576;

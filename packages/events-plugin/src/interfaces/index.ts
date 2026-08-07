@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IDomainEvent } from '@hono-enterprise/common';
+import type { IDomainEvent } from '@setu-ts/common';
 
 /**
  * Options for the EventsPlugin.

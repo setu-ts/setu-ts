@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IAuthService, IAuthStrategy, IPrincipal, IRequest } from '@hono-enterprise/common';
+import type { IAuthService, IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
 
 /**
  * Authentication service implementing IAuthService.

@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 import { createFakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
-import type { IJob, IQueue } from '@hono-enterprise/common';
+import type { IJob, IQueue } from '@setu-ts/common';
 
 /**
  * Fake services registry.

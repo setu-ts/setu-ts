@@ -1,4 +1,4 @@
-# @hono-enterprise/di-plugin
+# @setu-ts/di-plugin
 
 Optional dependency-injection container. Registers an `IContainer` under `CAPABILITIES.DI_CONTAINER`
 (`'di-container'`).
@@ -13,16 +13,16 @@ applications. Reach for the container when you want constructor injection and pe
 ## Installation
 
 ```typescript
-import { DiPlugin } from '@hono-enterprise/di-plugin';
+import { DiPlugin } from '@setu-ts/di-plugin';
 ```
 
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { createContainer, DiPlugin } from '@hono-enterprise/di-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createContainer, DiPlugin } from '@setu-ts/di-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), DiPlugin({ defaultScope: 'singleton', autoRegister: true })],
@@ -47,4 +47,4 @@ registrations always take precedence.
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/dkpaul91/hono-enterprise/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).

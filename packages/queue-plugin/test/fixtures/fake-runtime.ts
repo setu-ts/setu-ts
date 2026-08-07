@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 /**
  * A controllable timer handle.

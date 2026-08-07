@@ -10,8 +10,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IPluginContext, IValidationService } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IPluginContext, IValidationService } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 
 import { ValidationPlugin } from '../../src/plugin/validation-plugin.ts';
 import { validateBody } from '../../src/middleware/validation-middleware.ts';
@@ -122,7 +122,7 @@ describe('helper-format-regression — validateBody honors plugin errorFormat', 
     const body = JSON.parse(snap.body!);
 
     // RFC 7807 shape: has type, title, status, detail, instance — NO message
-    expect(body.type).toBe('https://hono-enterprise.dev/errors/validation');
+    expect(body.type).toBe('https://setu-ts.dev/errors/validation');
     expect(body.title).toBe('Validation Error');
     expect(body.status).toBe(400);
     expect(typeof body.detail).toBe('string');

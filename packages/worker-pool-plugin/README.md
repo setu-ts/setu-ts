@@ -1,7 +1,7 @@
-# @hono-enterprise/worker-pool-plugin
+# @setu-ts/worker-pool-plugin
 
-Run CPU-bound work on **real worker threads**, off the event loop, behind the Hono Enterprise
-capability model. Registers an `IWorkerPool` under `CAPABILITIES.WORKER_POOL`.
+Run CPU-bound work on **real worker threads**, off the event loop, behind the Setu-TS capability
+model. Registers an `IWorkerPool` under `CAPABILITIES.WORKER_POOL`.
 
 Task handlers are addressed by **module specifier**, never by closure — closures cannot cross a
 thread boundary. Task inputs and outputs travel by **structured clone** (plain data only).
@@ -30,7 +30,7 @@ deploys everywhere.
 ## Installation
 
 ```typescript
-import { WorkerPoolPlugin } from '@hono-enterprise/worker-pool-plugin';
+import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
 ```
 
 No third-party dependency. Threads are provided by the runtime adapter.
@@ -42,7 +42,7 @@ level with `defineWorkerTask` from the runtime package's `./worker` subpath:
 
 ```typescript
 // tasks/resize-image.ts — runs on a worker thread
-import { defineWorkerTask } from '@hono-enterprise/runtime/worker';
+import { defineWorkerTask } from '@setu-ts/runtime/worker';
 
 defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
   return await resize(imageBytes);
@@ -56,11 +56,11 @@ defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
 ## Usage
 
 ```typescript
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { WorkerPoolPlugin } from '@hono-enterprise/worker-pool-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IWorkerPool } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IWorkerPool } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [

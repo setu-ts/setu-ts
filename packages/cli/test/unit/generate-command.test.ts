@@ -8,7 +8,7 @@ import type { GeneratedFile } from '../../src/utils/file-writer.ts';
 const DENO_MANIFEST = (...packages: readonly string[]) =>
   JSON.stringify({
     imports: Object.fromEntries(
-      packages.map((p) => [`@hono-enterprise/${p}`, `jsr:@hono-enterprise/${p}@^0.1.0-alpha.1`]),
+      packages.map((p) => [`@setu-ts/${p}`, `jsr:@setu-ts/${p}@^0.1.0-alpha.1`]),
     ),
   });
 
@@ -118,7 +118,7 @@ describe('runGenerateCommand', () => {
       const h = harness();
       expect(await h.run(['guard', 'admin'])).toBe(1);
       expect(h.fs.writes).toEqual([]);
-      expect(h.err.text()).toContain('@hono-enterprise/auth-plugin');
+      expect(h.err.text()).toContain('@setu-ts/auth-plugin');
     });
 
     it('allows the same schematic once its plugin is installed', async () => {
@@ -181,7 +181,7 @@ describe('runGenerateCommand', () => {
     it('marks a gated schematic unavailable in --help when its plugin is absent', async () => {
       const h = harness();
       await h.run(['--help']);
-      expect(h.out.text()).toContain('guard  (unavailable — install @hono-enterprise/auth-plugin)');
+      expect(h.out.text()).toContain('guard  (unavailable — install @setu-ts/auth-plugin)');
     });
 
     it('lists a gated schematic plainly once its plugin is installed', async () => {
@@ -322,7 +322,7 @@ describe('runGenerateCommand', () => {
       };
       const h = harness();
       expect(await h.run(['custom', 'probe', 'thing', '--dir', 'proj'], load)).toBe(0);
-      expect(seenUrl).toBe('file:///app/proj/.hono-enterprise/schematics/probe.ts');
+      expect(seenUrl).toBe('file:///app/proj/.setu-ts/schematics/probe.ts');
     });
   });
 

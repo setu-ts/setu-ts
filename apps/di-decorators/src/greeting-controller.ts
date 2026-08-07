@@ -1,4 +1,4 @@
-import { Controller, Get, Inject } from '@hono-enterprise/decorator-plugin';
+import { Controller, Get, Inject } from '@setu-ts/decorator-plugin';
 import type { GreetingService } from './greeting-service.ts';
 
 /** A decorated controller with positional constructor injection. */

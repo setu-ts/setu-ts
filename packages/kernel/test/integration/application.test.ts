@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { ILogger, IPlugin, IPluginContext } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
 
 import { createApplication } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

@@ -10,8 +10,8 @@
  *
  * @example
  * ```typescript
- * import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
- * import { CAPABILITIES } from '@hono-enterprise/common';
+ * import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+ * import { CAPABILITIES } from '@setu-ts/common';
  *
  * // GCP Pub/Sub
  * app.register(MessagingPlugin({
@@ -102,7 +102,7 @@ export type {
   ServiceBusOptions,
 } from './brokers/service-bus-broker.ts';
 
-// Re-export common messaging types (owned by @hono-enterprise/common)
+// Re-export common messaging types (owned by @setu-ts/common)
 export type {
   IMessageBroker,
   ISubscription,
@@ -111,4 +111,4 @@ export type {
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';

@@ -1,4 +1,4 @@
-import type { RouterContextKey } from '@hono-enterprise/react-router-plugin';
+import type { RouterContextKey } from '@setu-ts/react-router-plugin';
 
 /**
  * The part of React Router's request context this application reads.

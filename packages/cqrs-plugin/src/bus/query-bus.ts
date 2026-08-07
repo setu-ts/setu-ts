@@ -3,12 +3,7 @@
  *
  * @module
  */
-import type {
-  CqrsQuery,
-  IPipelineBehavior,
-  IQueryBus,
-  IQueryHandler,
-} from '@hono-enterprise/common';
+import type { CqrsQuery, IPipelineBehavior, IQueryBus, IQueryHandler } from '@setu-ts/common';
 import { RequestBus } from './request-bus.ts';
 
 /**

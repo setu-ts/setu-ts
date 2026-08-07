@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * Queue plugin for Hono Enterprise.
+ * Queue plugin for Setu-TS.
  *
  * Provides background job queue capability with Memory, Redis, RabbitMQ,
  * and SQS adapters, plus an SNS publisher for fan-out messaging.
@@ -15,7 +15,7 @@ export type {
   JobProcessor,
   ProcessOptions,
   RecurringOptions,
-} from '@hono-enterprise/common';
+} from '@setu-ts/common';
 
 // Export plugin factory and types
 export { QueuePlugin } from './plugin/queue-plugin.ts';

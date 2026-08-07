@@ -25,7 +25,7 @@ import type {
   IKernelApplication as KernelIKernelApplication,
   InjectRequest as KernelInjectRequest,
   InjectResponse as KernelInjectResponse,
-} from '@hono-enterprise/kernel';
+} from '@setu-ts/kernel';
 
 describe('barrel exports', () => {
   it('every named export is defined', () => {

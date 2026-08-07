@@ -1,5 +1,5 @@
 /**
- * Loading of user-authored schematics from `.hono-enterprise/schematics/`.
+ * Loading of user-authored schematics from `.setu-ts/schematics/`.
  *
  * @module
  */
@@ -8,7 +8,7 @@ import type { Schematic } from './registry.ts';
 import { joinPath, toFileUrl } from '../utils/file-writer.ts';
 
 /** Directory, relative to the project root, holding custom schematics. */
-export const CUSTOM_SCHEMATIC_DIR = '.hono-enterprise/schematics';
+export const CUSTOM_SCHEMATIC_DIR = '.setu-ts/schematics';
 
 /**
  * Loads an ES module by absolute URL.

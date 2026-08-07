@@ -1,5 +1,5 @@
 /**
- * Constants for the honoe CLI tool.
+ * Constants for the setu CLI tool.
  *
  * @module
  */
@@ -19,10 +19,10 @@ export const VERSION: string = denoJson.version;
  * The name of the CLI executable.
  *
  * Deno chooses the installed binary name at install time
- * (`deno install -g -n honoe …`), so help text interpolates this constant
+ * (`deno install -g -n setu …`), so help text interpolates this constant
  * rather than deriving a name from `argv` — Deno exposes no reliable `argv[0]`.
  */
-export const PROGRAM_NAME = 'honoe';
+export const PROGRAM_NAME = 'setu';
 
 /** Exit code for a successful run. */
 export const EXIT_OK = 0;
@@ -34,26 +34,26 @@ export const EXIT_ERROR = 1;
 export const EXIT_USAGE = 2;
 
 /**
- * The runtime targets `honoe new --runtime` accepts.
+ * The runtime targets `setu new --runtime` accepts.
  *
  * `cloudflare-workers` emits the `export default { fetch }` entry plus a
  * `wrangler.toml` and no `listen`; the other three emit the Hono serve entry.
  */
 export const TARGET_RUNTIMES = ['deno', 'node', 'bun', 'cloudflare-workers'] as const;
 
-/** A runtime target accepted by `honoe new --runtime`. */
+/** A runtime target accepted by `setu new --runtime`. */
 export type TargetRuntime = (typeof TARGET_RUNTIMES)[number];
 
 /**
- * The project templates `honoe new --template` accepts.
+ * The project templates `setu new --template` accepts.
  *
  * A template selects the plugin set written into the generated
- * `honoe.config.ts`. Omitting the flag yields the minimal set (the runtime
+ * `setu.config.ts`. Omitting the flag yields the minimal set (the runtime
  * plugin alone), which is still emitted through the same config seam.
  */
 export const TEMPLATES = ['rest', 'microservice', 'nest', 'full-stack'] as const;
 
-/** A project template accepted by `honoe new --template`. */
+/** A project template accepted by `setu new --template`. */
 export type TemplateName = (typeof TEMPLATES)[number];
 
 /**
@@ -92,9 +92,9 @@ export function isTemplateName(value: string): value is TemplateName {
 
 /**
  * The project-root module a scaffolded project exports its application factory
- * from, and that `honoe` imports to discover plugin-contributed commands.
+ * from, and that `setu` imports to discover plugin-contributed commands.
  */
-export const CONFIG_MODULE = 'honoe.config.ts';
+export const CONFIG_MODULE = 'setu.config.ts';
 
 /** The factory export {@linkcode CONFIG_MODULE} must provide. */
 export const CONFIG_EXPORT = 'createApp';

@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { CircuitBreakerPolicy } from '@hono-enterprise/common';
+import type { CircuitBreakerPolicy } from '@setu-ts/common';
 import { ResilienceService } from '../../src/services/resilience-service.ts';
 import { BulkheadFullError, CircuitOpenError, TimeoutError } from '../../src/errors.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';

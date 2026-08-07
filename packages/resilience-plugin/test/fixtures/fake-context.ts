@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { HealthIndicatorFn, IPluginContext, IRuntimeServices } from '@hono-enterprise/common';
+import type { HealthIndicatorFn, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import { FakeRuntime } from './fake-runtime.ts';
 
 /** A fake context plus the records of what the plugin registered on it. */

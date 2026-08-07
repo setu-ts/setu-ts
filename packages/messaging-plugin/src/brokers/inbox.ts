@@ -14,7 +14,7 @@
  * @module
  */
 
-import type { ISubscription, MessageMetadata, SubscribeOptions } from '@hono-enterprise/common';
+import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 
 /** Prefix for the per-instance topics {@link createTopicInbox} mints. */
 const TOPIC_INBOX_PREFIX = 'rr.inbox.';

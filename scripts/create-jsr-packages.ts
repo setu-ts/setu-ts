@@ -33,7 +33,7 @@ import { PUBLISHED_PACKAGES } from './release-packages.ts';
 // has been raised, and an untested error path is how a release script fails at
 // the worst moment. Defaults to the real API; production runs never set it.
 const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
-const SCOPE = 'hono-enterprise';
+const SCOPE = 'setu-ts';
 
 const dryRun = Deno.args.includes('--dry-run');
 const token = Deno.env.get('JSR_TOKEN');

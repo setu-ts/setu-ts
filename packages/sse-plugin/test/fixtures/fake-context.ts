@@ -7,13 +7,8 @@
  *
  * @module
  */
-import type {
-  HandlerResult,
-  IRequestContext,
-  IResponse,
-  ResponseSnapshot,
-} from '@hono-enterprise/common';
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { HandlerResult, IRequestContext, IResponse, ResponseSnapshot } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 /** Internal state. */
 interface FakeState {

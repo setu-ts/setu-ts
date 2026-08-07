@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { NotificationMessage } from '@hono-enterprise/common';
+import type { NotificationMessage } from '@setu-ts/common';
 import type { NotificationChannel, SlackMessage, SlackTransport } from '../interfaces/index.ts';
 
 /**

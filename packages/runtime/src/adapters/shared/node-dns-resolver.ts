@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { IDnsResolver, SrvRecord } from '@hono-enterprise/common';
+import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
 import * as nodeDns from 'node:dns/promises';
 
 /**

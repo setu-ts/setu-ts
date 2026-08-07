@@ -9,7 +9,7 @@
  *
  * @module
  */
-import type { Constructor, IFileSystem, IRuntimeServices } from '@hono-enterprise/common';
+import type { Constructor, IFileSystem, IRuntimeServices } from '@setu-ts/common';
 
 import { metadataStore } from '../metadata/metadata-store.ts';
 import type { MetadataStore } from '../metadata/metadata-store.ts';

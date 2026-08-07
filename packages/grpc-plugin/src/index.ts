@@ -1,17 +1,17 @@
 /**
  * @module
  *
- * gRPC plugin for Hono Enterprise — enables co-serving of gRPC, Connect, and
+ * gRPC plugin for Setu-TS — enables co-serving of gRPC, Connect, and
  * gRPC-Web protocols on the same port as ordinary Hono routes. The plugin
  * registers an {@linkcode IGrpcService} under `CAPABILITIES.GRPC` and installs
  * a fetch handler into the HTTP adapter's RPC interceptor seam.
  *
  * @example
  * ```typescript
- * import { createApplication } from '@hono-enterprise/kernel';
- * import { RuntimePlugin } from '@hono-enterprise/runtime';
- * import { GrpcPlugin } from '@hono-enterprise/grpc-plugin';
- * import { CAPABILITIES, type IGrpcService } from '@hono-enterprise/common';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
+ * import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+ * import { CAPABILITIES, type IGrpcService } from '@setu-ts/common';
  *
  * const app = createApplication({
  *   plugins: [RuntimePlugin(), GrpcPlugin()],
@@ -55,8 +55,8 @@ export type {
   GrpcServingStatus,
   IGrpcService,
   RpcFetchHandler,
-} from '@hono-enterprise/common';
-export { CAPABILITIES } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+export { CAPABILITIES } from '@setu-ts/common';
 
 // `ConnectRuntime` and the structural Connect facades are deliberately NOT
 // exported: they are an internal port (plan §3.2), and publishing them would

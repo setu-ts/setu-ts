@@ -26,11 +26,11 @@ import { timingSafeEqualBytes } from './timing-safe.ts';
 export type SessionMode = 'encrypt' | 'sign';
 
 /** HKDF `info` label for the AES-GCM encryption key. */
-const INFO_ENCRYPT = 'hono-enterprise-session-encrypt-v1';
+const INFO_ENCRYPT = 'setu-ts-session-encrypt-v1';
 /** HKDF `info` label for the HMAC signing key. */
-const INFO_SIGN = 'hono-enterprise-session-sign-v1';
+const INFO_SIGN = 'setu-ts-session-sign-v1';
 /** HKDF `info` label for the non-secret key-id fingerprint. */
-const INFO_KID = 'hono-enterprise-session-kid-v1';
+const INFO_KID = 'setu-ts-session-kid-v1';
 /** Characters of the fingerprint kept as the key id. */
 const KID_LENGTH = 8;
 

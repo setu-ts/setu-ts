@@ -9,8 +9,8 @@ import {
   type CqrsRequest,
   type IPipelineBehavior,
   PLUGIN_PRIORITY,
-} from '@hono-enterprise/common';
-import type { ICommandBus, ICqrsFacade, IPluginContext, IQueryBus } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import type { ICommandBus, ICqrsFacade, IPluginContext, IQueryBus } from '@setu-ts/common';
 
 describe('CqrsPlugin', () => {
   it('should have correct name', () => {

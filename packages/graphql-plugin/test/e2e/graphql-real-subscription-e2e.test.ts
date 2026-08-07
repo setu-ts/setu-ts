@@ -15,11 +15,11 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createApplication } from '@hono-enterprise/kernel';
-import { RuntimePlugin } from '@hono-enterprise/runtime';
-import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
-import { CAPABILITIES } from '@hono-enterprise/common';
-import type { IGraphqlService, IWebSocketService } from '@hono-enterprise/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IGraphqlService, IWebSocketService } from '@setu-ts/common';
 import { GraphqlPlugin } from '../../src/index.ts';
 import type { ResolverMap } from '../../src/index.ts';
 import {

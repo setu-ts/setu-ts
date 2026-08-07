@@ -5,8 +5,8 @@
  * @since 0.2.0
  */
 
-import type { IMessageBroker, IRealtimeBackplane, IServiceRegistry } from '@hono-enterprise/common';
-import { CAPABILITIES } from '@hono-enterprise/common';
+import type { IMessageBroker, IRealtimeBackplane, IServiceRegistry } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { RealtimeBackplanePluginOptions } from '../interfaces/index.ts';
 import { DEFAULT_TOPIC } from '../interfaces/index.ts';
 import { MemoryBackplane } from './memory-backplane.ts';

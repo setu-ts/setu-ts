@@ -11,7 +11,7 @@
  *
  * @module
  */
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { IDistributedLock } from '../interfaces/index.ts';
 
 /** Internal state for a held lock key. */

@@ -11,8 +11,8 @@ import type {
   IPlugin,
   IPluginContext,
   IRuntimeServices,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   ChannelConfig,
   ChannelsMap,
@@ -47,7 +47,7 @@ const PLUGIN_NAME = 'notification-plugin';
  *
  * @example
  * ```typescript
- * import { NotificationPlugin } from '@hono-enterprise/notification-plugin';
+ * import { NotificationPlugin } from '@setu-ts/notification-plugin';
  *
  * app.register(NotificationPlugin({
  *   channels: {

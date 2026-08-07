@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction, NextFunction } from '@hono-enterprise/common';
+import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 
 import { SESSION_STATE_KEY } from '../services/session-service.ts';
 import type { SessionService } from '../services/session-service.ts';

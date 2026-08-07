@@ -13,8 +13,8 @@ import type {
   IPluginContext,
   IRealtimeBackplane,
   IWebSocketService,
-} from '@hono-enterprise/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@hono-enterprise/common';
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WebSocketPluginOptions } from '../interfaces/index.ts';
 import { resolveOptions, WebSocketService } from '../services/websocket-service.ts';
 
@@ -35,8 +35,8 @@ const PLUGIN_NAME = 'websocket-plugin';
  *
  * @example
  * ```typescript
- * import { WebSocketPlugin } from '@hono-enterprise/websocket-plugin';
- * import { CAPABILITIES, type IWebSocketService } from '@hono-enterprise/common';
+ * import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+ * import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
  *
  * app.register(WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 }));
  *
@@ -83,7 +83,7 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         // line without fanning anything out.
         ctx.logger?.info(
           'websocket: rooms broadcast in-process only. Register RealtimeBackplanePlugin ' +
-            "from @hono-enterprise/realtime-backplane-plugin with a 'redis' or " +
+            "from @setu-ts/realtime-backplane-plugin with a 'redis' or " +
             "'messaging' transport to fan out across replicas.",
         );
       }

@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRuntimeServices } from '@hono-enterprise/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
 import type {
   ConsulDiscoveryOptions,
