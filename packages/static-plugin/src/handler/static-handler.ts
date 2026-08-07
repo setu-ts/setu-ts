@@ -8,7 +8,12 @@ import type { IFileSystem, RouteHandler, StatResult } from '@setu-ts/common';
 import { contentTypeFor, isLexicallyContained } from '@setu-ts/common';
 import { resolveCacheControl } from '../http/cache-control.ts';
 import { computeETag, shouldReturn304 } from '../http/conditional.ts';
-import { formatContentRange, parseRange, shouldHonourRange } from '../http/range.ts';
+import {
+  formatContentRange,
+  isRangeUnsatisfiable,
+  parseRange,
+  shouldHonourRange,
+} from '../http/range.ts';
 import { findPrecompressedSidecar, getOriginalContentType } from '../http/precompressed.ts';
 
 /**
@@ -344,6 +349,19 @@ async function serveCompressedFile(
           return response.stream(body);
         }
         return response.send(body);
+      }
+
+      // Range header present but unparseable (e.g. multi-range with comma)
+      // or unsatisfiable (e.g. start >= size): serve full file per RFC 9110.
+      if (parsedRange === null) {
+        if (isRangeUnsatisfiable(rangeHeader!, stat.size)) {
+          return ctx.response
+            .status(416)
+            .header('Content-Range', `bytes */${stat.size}`)
+            .header('Cache-Control', cacheControlValue)
+            .send();
+        }
+        // Continue to full-file response below.
       }
     }
   }

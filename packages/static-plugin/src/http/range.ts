@@ -81,6 +81,33 @@ export function parseRange(rangeHeader: string, size: number): ParsedRange | nul
 }
 
 /**
+ * Checks whether a Range header is syntactically valid but unsatisfiable
+ * (e.g. start >= size). Returns false for multi-range headers (which contain
+ * commas) and for malformed headers — callers should fall through to a full
+ * 200 response in those cases.
+ *
+ * @param rangeHeader - The raw Range header value
+ * @param size - The file size
+ * @returns True if the range is unsatisfiable, false otherwise
+ * @since 0.1.0
+ */
+export function isRangeUnsatisfiable(rangeHeader: string, size: number): boolean {
+  // Multi-range headers contain a comma and are ignored (serve 200).
+  if (rangeHeader.includes(',')) {
+    return false;
+  }
+  const parsed = parseRange(rangeHeader, size);
+  // parseRange returns null for both unsatisfiable AND malformed ranges.
+  // We only treat it as unsatisfiable when the header matches the single-range
+  // pattern but the offsets are out of bounds.
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+  if (!match) {
+    return false;
+  }
+  return parsed === null;
+}
+
+/**
  * Checks if a range request should be honored.
  *
  * @param options - Range options

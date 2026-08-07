@@ -6,7 +6,7 @@
     "@setu-ts/static-plugin": "../../packages/static-plugin/src/index.ts"
   },
   "tasks": {
-    "start": "deno run --allow-net --allow-read main.ts",
-    "smoke": "deno run --allow-net --allow-read smoke.ts"
+    "start": "deno run --allow-net --allow-read --allow-env main.ts",
+    "smoke": "deno run --allow-net --allow-read --allow-env smoke.ts"
   }
 }

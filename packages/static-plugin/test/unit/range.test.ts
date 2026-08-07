@@ -72,3 +72,40 @@ describe('formatContentRange', () => {
     expect(result).toBe('bytes 0-99/1000');
   });
 });
+
+describe('parseRange — multi-range', () => {
+  it('should return null for multi-range (comma)', () => {
+    const result = parseRange('bytes=0-99, 100-199', 1000);
+    expect(result).toBeNull();
+  });
+});
+
+describe('shouldHonourRange — If-Range', () => {
+  it('should return false when If-Range does not match ETag', () => {
+    const result = shouldHonourRange({
+      size: 1000,
+      rangeHeader: 'bytes=0-99',
+      ifRange: 'W/"different"',
+      etag: 'W/"100"',
+    });
+    expect(result).toBe(false);
+  });
+
+  it('should return true when If-Range matches ETag', () => {
+    const result = shouldHonourRange({
+      size: 1000,
+      rangeHeader: 'bytes=0-99',
+      ifRange: 'W/"100"',
+      etag: 'W/"100"',
+    });
+    expect(result).toBe(true);
+  });
+
+  it('should return true when If-Range is absent', () => {
+    const result = shouldHonourRange({
+      size: 1000,
+      rangeHeader: 'bytes=0-99',
+    });
+    expect(result).toBe(true);
+  });
+});

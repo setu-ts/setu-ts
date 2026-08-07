@@ -154,6 +154,62 @@ describe('createStaticHandler', () => {
     expect(ctx.response._status).toBe(404);
   });
 
+  it('should return 416 for an unsatisfiable range', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Range', 'bytes=1000-2000');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(416);
+    expect(ctx.response._headers.get('Content-Range')).toContain('*/11');
+  });
+
+  it('should stream a range when the file exceeds maxBufferBytes', async () => {
+    const largeContent = new Uint8Array(Array.from({ length: 2_000_000 }, (_, i) => i % 256));
+    await fs.writeFile('/root/large.bin', largeContent);
+
+    const handler = createStaticHandler({
+      fs: {
+        ...fs,
+        readStream: async (path: string, options?: { start?: number; end?: number }) => {
+          const data = fs.files.get(path)!;
+          const start = options?.start ?? 0;
+          const end = options?.end !== undefined ? options.end : data.length - 1;
+          const slice = data.subarray(start, end + 1);
+          return new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(slice);
+              controller.close();
+            },
+          });
+        },
+      },
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      maxBufferBytes: 1_048_576,
+    }) as RouteHandler;
+
+    ctx.request.path = '/large.bin';
+    ctx.request.headers.set('Range', 'bytes=0-99');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(206);
+    expect(ctx.response._headers.get('Content-Range')).toBe('bytes 0-99/2000000');
+    expect(ctx.response._headers.get('Content-Length')).toBe('100');
+  });
+
   it('should return HEAD with empty body but same headers', async () => {
     const content = new TextEncoder().encode('hello world');
     await fs.writeFile('/root/test.txt', content);
@@ -173,5 +229,65 @@ describe('createStaticHandler', () => {
     expect(ctx.response._status).toBe(200);
     expect(ctx.response._body).toEqual(new Uint8Array());
     expect(ctx.response._headers.get('Content-Length')).toBe('11');
+  });
+
+  it('should return 304 when ETag matches', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    // The fake fs does not set mtime, so ETag is W/"11" (size only).
+    ctx.request.headers.set('If-None-Match', 'W/"11"');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(304);
+  });
+
+  it('should return 200 when range header is multi-range (comma)', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Range', 'bytes=0-4, 6-10');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+  });
+
+  it('should return 206 for a valid range request', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Range', 'bytes=0-4');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(206);
+    expect(ctx.response._headers.get('Content-Range')).toContain('0-4');
+    expect(ctx.response._headers.get('Accept-Ranges')).toBe('bytes');
   });
 });

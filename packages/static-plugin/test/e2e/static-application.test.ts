@@ -6,13 +6,14 @@ import { StaticPlugin } from '../../src/index.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 
 describe('StaticPlugin e2e', () => {
   let tmpDir: string;
   let app: ReturnType<typeof createApplication>;
 
   beforeEach(async () => {
-    tmpDir = join('/tmp', `static-plugin-test-${randomUUID()}`);
+    tmpDir = join(tmpdir(), `static-plugin-test-${randomUUID()}`);
     await mkdir(tmpDir, { recursive: true });
     await writeFile(join(tmpDir, 'test.txt'), 'hello world');
     await writeFile(join(tmpDir, 'index.html'), '<html></html>');

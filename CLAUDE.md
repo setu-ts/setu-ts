@@ -1461,8 +1461,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   inject-or-lazy SDK adapt/load seams, guarded real-import tests, SQS→ElasticMQ e2e in CI, plus
   guarded Pub/Sub and Service Bus emulator suites run locally — see `docs/messaging-emulators.md`) —
   complete (PR #128)
+- **Milestone 55** (`packages/static-plugin` — static file serving plugin with ETag, Range,
+  precompressed sidecar negotiation, directory index, SPA fallback, and streaming for large files;
+  `IFileSystem.readStream?` widening in `common` plus Node/Deno/Bun adapter implementations;
+  `apps/static-site` example with smoke check) — complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
-  M37c and M54 both shipped, closing the last two entries on that list.
+  M37c, M54, and M55 both shipped, closing the last entries on that list.
 
 ## Verification (run before declaring any work done)
 

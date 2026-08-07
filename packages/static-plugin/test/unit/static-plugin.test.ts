@@ -137,4 +137,62 @@ describe('StaticPlugin', () => {
       detail: 'no file system on this runtime',
     });
   });
+
+  it('should report up when root is a directory', async () => {
+    const healthRegister = createMockFn();
+
+    const ctx = {
+      services: { register: () => {} },
+      router: { get: () => {}, head: () => {} },
+      health: {
+        register: (...args: unknown[]) => {
+          healthRegister.calls().push(args);
+        },
+      },
+      runtime: {
+        fs: {
+          stat: () => Promise.resolve({ isFile: false, isDirectory: true, size: 0 }),
+        },
+      },
+    } as unknown as IPluginContext;
+
+    const plugin = StaticPlugin({ root: '/tmp/static' });
+    plugin.register(ctx);
+
+    const healthFn = healthRegister.calls()[0][1] as () => Promise<{
+      status: string;
+    }>;
+    const result = await healthFn();
+    expect(result).toEqual({ status: 'up' });
+  });
+
+  it('should report down when root stat throws', async () => {
+    const healthRegister = createMockFn();
+
+    const ctx = {
+      services: { register: () => {} },
+      router: { get: () => {}, head: () => {} },
+      health: {
+        register: (...args: unknown[]) => {
+          healthRegister.calls().push(args);
+        },
+      },
+      runtime: {
+        fs: {
+          stat: () => Promise.reject(new Error('ENOENT')),
+        },
+      },
+    } as unknown as IPluginContext;
+
+    const plugin = StaticPlugin({ root: '/tmp/static' });
+    plugin.register(ctx);
+
+    const healthFn = healthRegister.calls()[0][1] as () => Promise<{
+      status: string;
+      detail: string;
+    }>;
+    const result = await healthFn();
+    expect(result.status).toBe('down');
+    expect(result.detail).toContain('ENOENT');
+  });
 });

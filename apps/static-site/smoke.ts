@@ -10,6 +10,7 @@ async function main() {
       StaticPlugin({
         root: './public',
         urlPrefix: '/',
+        fallback: 'index.html',
       }),
     ],
   });

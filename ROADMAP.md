@@ -6002,4 +6002,4 @@ assets stay byte-identical, and a test pins that.
 | 52d       | ✅     | cloudflare-plugin (durable objects)   |
 | 53        | ✅     | real-backend CI (examples gate)       |
 | 54        | ✅     | messaging-plugin (cloud brokers)      |
-| 55        | ⬜     | static-plugin                         |
+| 55        | ✅     | static-plugin                         |

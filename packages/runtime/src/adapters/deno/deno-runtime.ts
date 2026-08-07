@@ -102,34 +102,82 @@ export function createDenoRuntimeServices(
     rm: (path: string, options?: { readonly recursive?: boolean }) => host.remove(path, options),
     readStream: async (
       path: string,
-      _options?: { readonly start?: number; readonly end?: number },
+      options?: { readonly start?: number; readonly end?: number },
     ): Promise<ReadableStream<Uint8Array>> => {
       const file = await host.open(path);
       let cancelled = false;
+      let closed = false;
+      let bytesWritten = 0;
+      let bytesRemaining = Infinity;
+
+      // Deno FsFile.readable has no range parameter — when a range is
+      // requested we seek to start and enforce an explicit byte limit so the
+      // stream closes after exactly end - start + 1 bytes.
+      if (options?.start !== undefined) {
+        await file.seek(options.start, Deno.SeekMode.Start);
+        if (options.end !== undefined) {
+          bytesRemaining = options.end - options.start + 1;
+        }
+      }
+
+      const closeFile = async (): Promise<void> => {
+        if (closed) return;
+        closed = true;
+        try {
+          await file.close();
+        } catch {
+          // Ignore close errors — the stream is already terminating.
+        }
+      };
 
       const stream = new ReadableStream<Uint8Array>({
         async pull(controller) {
           if (cancelled) {
-            await file.close();
+            await closeFile();
             controller.close();
             return;
           }
 
-          const chunkSize = 64 * 1024; // 64KB chunks
+          if (bytesWritten >= bytesRemaining) {
+            await closeFile();
+            controller.close();
+            return;
+          }
+
+          const chunkSize = Math.min(64 * 1024, bytesRemaining - bytesWritten);
           const buffer = new Uint8Array(chunkSize);
-          const bytesRead = await file.read(buffer);
+          let totalRead = 0;
 
-          if (bytesRead === 0) {
-            await file.close();
+          try {
+            while (totalRead < chunkSize) {
+              const bytesRead = await file.read(buffer.subarray(totalRead));
+              if (bytesRead === 0 || bytesRead === null) {
+                break;
+              }
+              totalRead += bytesRead;
+            }
+          } catch (error) {
+            await closeFile();
+            controller.error(error);
+            return;
+          }
+
+          if (totalRead === 0) {
+            await closeFile();
             controller.close();
             return;
           }
 
-          controller.enqueue(buffer.subarray(0, bytesRead as number));
+          bytesWritten += totalRead;
+          controller.enqueue(buffer.subarray(0, totalRead));
+
+          if (bytesWritten >= bytesRemaining) {
+            await closeFile();
+          }
         },
         cancel: async () => {
           cancelled = true;
-          await file.close();
+          await closeFile();
         },
       });
 
