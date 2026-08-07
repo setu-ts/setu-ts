@@ -236,6 +236,9 @@ function emptyMethod(handler: string): MethodMeta {
   };
 }
 
+/** Shared empty result for classes that marked no parameter `@Optional`. */
+const EMPTY_INDICES: ReadonlySet<number> = new Set<number>();
+
 /**
  * Concrete {@linkcode IMetadataStore}. Decorators call the `merge*`/`add*`
  * methods; the `DecoratorPlugin` and other consumers read the readonly
@@ -253,6 +256,7 @@ export class MetadataStore implements IMetadataStore {
   private readonly _methods = new Map<Constructor, Map<string, MethodMeta>>();
   private readonly _custom: CustomDecoratorRecord[] = [];
   private readonly _ctorParams = new Map<Constructor, Map<number, string>>();
+  private readonly _ctorOptional = new Map<Constructor, Set<number>>();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -379,6 +383,33 @@ export class MetadataStore implements IMetadataStore {
     const params = this._ctorParams.get(target) ?? new Map<number, string>();
     params.set(index, token);
     this._ctorParams.set(target, params);
+  }
+
+  /**
+   * Marks one constructor parameter as optional, keyed by its argument index.
+   *
+   * Stored separately from the token map because `@Optional` and `@Inject` are
+   * independent decorators on the same parameter and may be applied in either
+   * order; recording them in one structure would make the result depend on that
+   * order.
+   *
+   * @param target - The decorated class
+   * @param index - Zero-based constructor argument index
+   */
+  mergeCtorOptional(target: Constructor, index: number): void {
+    const indices = this._ctorOptional.get(target) ?? new Set<number>();
+    indices.add(index);
+    this._ctorOptional.set(target, indices);
+  }
+
+  /**
+   * Returns the constructor-argument indices a class marked `@Optional`.
+   *
+   * @param target - The class to look up
+   * @returns The optional argument indices; empty when the class marked none
+   */
+  ctorOptional(target: Constructor): ReadonlySet<number> {
+    return this._ctorOptional.get(target) ?? EMPTY_INDICES;
   }
 
   /**
@@ -566,6 +597,7 @@ export class MetadataStore implements IMetadataStore {
     this._methods.clear();
     this._custom.length = 0;
     this._ctorParams.clear();
+    this._ctorOptional.clear();
   }
 
   /**

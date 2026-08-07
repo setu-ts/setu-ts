@@ -6738,6 +6738,7 @@ carry full JSDoc.
 | `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                                                                        |
 | `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                 |
 | `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens |
+| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider          |
 | `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                 |
 | `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                    |
 | `Public`                                             | function | Method decorator — bypasses auth                                                                                    |
@@ -6835,6 +6836,35 @@ Contract notes:
 - **The container is preferred whenever the class is registered in it**, with or without
   `@Injectable`. A `@Controller` carries no `@Injectable`, so a constructor-injected controller in a
   `DiPlugin` application resolves through the container — where its dependencies live.
+- **`@Optional` marks an injected dependency absent-tolerant, not construction fallible.** It pairs
+  with `@Inject` on the same parameter (either order) and never replaces it — a token is still
+  required, for the same `emitDecoratorMetadata` reason above:
+
+  ```typescript
+  @Injectable({ token: 'report-service' })
+  class ReportService {
+    constructor(
+      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
+      @Optional() @Inject(CAPABILITIES.CACHE) private cache?: ICacheService,
+    ) {}
+  }
+  ```
+
+  When the token has no provider the argument receives `undefined`; when it HAS one it is resolved
+  normally, so an error raised while building it — a circular dependency, a throwing factory —
+  propagates rather than being masked as absence. Two misuses throw at `register()`: `@Optional` on
+  a parameter with no `@Inject` (it names no dependency), and `@Optional` combined with the
+  deprecated class-level `@Inject(...)` list (which cannot express per-argument optionality).
+  `@Optional` on a **method** parameter throws at class-definition time.
+
+  Both construction paths honor it identically — the DI container when one is registered, the
+  kernel's service registry otherwise. One consequence is worth knowing on the container path: a
+  class carrying `@Optional` registers as a `useFactory` provider rather than a `useClass` one,
+  because `ClassProvider.inject` is a bare token list with nowhere to record optionality. The
+  class's own `scope` is still honored, but since `FactoryProvider.useFactory` takes no arguments,
+  that factory resolves its dependencies from the container the class was registered on rather than
+  from the resolving scope. Classes without `@Optional` are unaffected and still register as
+  `useClass`.
 - **No runtime-specific APIs**: the package uses no `Date.now()`, `Deno`, `process`, or `fs` — all
   file/time operations go through `IRuntimeServices`.
 

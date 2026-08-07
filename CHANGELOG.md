@@ -8,6 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@Optional` constructor-parameter decorator** in `@hono-enterprise/decorator-plugin`. Pairs with
+  `@Inject` on the same parameter (either order) and injects `undefined` when that token has no
+  provider, so a class can depend on a capability the application may not have registered without
+  the author hand-writing a container lookup.
+
+  It means the dependency is **absent**, not that construction may fail: a token that IS provided is
+  resolved normally, so a circular dependency or a throwing factory still surfaces instead of
+  becoming `undefined`. Both construction paths honor it identically — the DI container when one is
+  registered, the kernel's service registry otherwise.
+
+  Three misuses are refused rather than silently misinjected: `@Optional` with no `@Inject` on the
+  same parameter, `@Optional` combined with the deprecated class-level `@Inject(...)` list, and
+  `@Optional` on a method parameter.
+
+  On the container path a class carrying `@Optional` now registers as a `useFactory` provider
+  instead of `useClass`, because `ClassProvider.inject` is a bare token list with nowhere to record
+  optionality; its own `scope` is still honored, but its dependencies resolve from the registering
+  container rather than the resolving scope. Classes without `@Optional` are unchanged. No `common`
+  contract change and no new capability token.
+
 - **`apps/full-stack` — a runnable React Router 8 SSR example** (M37c). The framework's full-stack
   story shipped in three places — the SSR plugin, the full-stack starter, and
   `honoe new --template full-stack` — and none of them had an application a reader could run. This

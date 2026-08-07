@@ -14,6 +14,7 @@ import type {
   ClassProvider,
   Constructor,
   DecoratorHandler,
+  FactoryProvider,
   HttpMethod,
   IPlugin,
   IPluginContext,
@@ -103,9 +104,87 @@ function effectiveInject(
 }
 
 /**
+ * Resolves which constructor arguments a class marked `@Optional`, validating
+ * that each one also carries an `@Inject` token.
+ *
+ * A token can never be inferred (`emitDecoratorMetadata` is unsupported on
+ * Deno), so `@Optional` alone names no dependency. It is refused at `register()`
+ * rather than silently passing `undefined`, which would look identical to a
+ * genuinely absent optional dependency.
+ *
+ * @throws {Error} When a parameter is `@Optional` without `@Inject`, or when the
+ * class uses the deprecated class-level `@Inject(...)` list, which has no way to
+ * express per-argument optionality.
+ */
+function effectiveOptional(
+  target: Constructor,
+  meta: ServiceMetadata | undefined,
+  inject: readonly string[] | undefined,
+): ReadonlySet<number> {
+  const optional = metadataStore.ctorOptional(target);
+  if (optional.size === 0) {
+    return optional;
+  }
+  if (meta?.inject !== undefined) {
+    throw new Error(
+      `${className(target)} combines @Optional with the deprecated class-level @Inject(...) ` +
+        `list, which cannot express per-argument optionality. Move to parameter-level @Inject.`,
+    );
+  }
+  for (const index of optional) {
+    if (inject === undefined || inject[index] === undefined) {
+      throw new Error(
+        `${className(target)} constructor parameter ${index} is @Optional but carries no ` +
+          `@Inject token. @Optional marks an injected dependency as absent-tolerant; it does ` +
+          `not name one — type-inferred injection needs emitDecoratorMetadata, which Deno ` +
+          `does not support.`,
+      );
+    }
+  }
+  return optional;
+}
+
+/**
+ * Resolves constructor arguments from a token list, passing `undefined` for an
+ * `@Optional` argument whose token has no provider.
+ *
+ * `has` is a faithful predicate for `get`/`resolve` on both sources: the
+ * container's consults its parent chain and the auto-register external resolver
+ * under the same conditions resolution does, and the registry's reports the same
+ * map it reads from. A present token is therefore resolved directly, so an error
+ * raised while BUILDING it propagates instead of being masked as absence.
+ */
+function resolveDeps(
+  inject: readonly string[],
+  optional: ReadonlySet<number>,
+  has: (token: string) => boolean,
+  read: (token: string) => unknown,
+): unknown[] {
+  return inject.map((token, index) => {
+    if (optional.has(index) && !has(token)) {
+      return undefined;
+    }
+    return read(token);
+  });
+}
+
+/**
  * Registers a class in the DI container (when present) under its token, with
  * its inject tokens and scope. No-op if the container is absent or the token
  * is already registered.
+ *
+ * A class with no `@Optional` argument registers as a {@linkcode ClassProvider},
+ * so the container resolves each token itself — unchanged behaviour, and the
+ * dependencies stay affine to the container the resolution happens on.
+ *
+ * A class WITH an `@Optional` argument cannot use that form, because
+ * `ClassProvider.inject` is a bare token list with nowhere to record
+ * optionality. It registers a lazy `useFactory` instead, which resolves its own
+ * arguments and so can skip an absent one. `FactoryProvider.useFactory` takes no
+ * arguments, so that factory closes over the container the class was registered
+ * on: the class's own scope is still honored by the container (the provider
+ * entry carries it), but its dependencies resolve from the registering
+ * container rather than the resolving scope.
  */
 function registerInContainer(
   ctx: IPluginContext,
@@ -121,13 +200,29 @@ function registerInContainer(
     return;
   }
   const inject = effectiveInject(target, meta);
+  const optional = effectiveOptional(target, meta, inject);
+  const opts: ProviderOptions | undefined = meta?.scope !== undefined
+    ? { scope: meta.scope }
+    : undefined;
+  if (optional.size > 0 && inject !== undefined) {
+    const factory: FactoryProvider<unknown> = {
+      useFactory: (): unknown =>
+        new (target as new (...args: unknown[]) => unknown)(
+          ...resolveDeps(
+            inject,
+            optional,
+            (t) => container.has(t),
+            (t) => container.resolve<unknown>(t),
+          ),
+        ),
+    };
+    container.register<unknown>(token, factory, opts);
+    return;
+  }
   const provider: ClassProvider<unknown> = {
     useClass: target,
     ...(inject !== undefined ? { inject } : {}),
   };
-  const opts: ProviderOptions | undefined = meta?.scope !== undefined
-    ? { scope: meta.scope }
-    : undefined;
   container.register<unknown>(token, provider, opts);
 }
 
@@ -154,7 +249,13 @@ function instantiate(target: Constructor, ctx: IPluginContext): unknown {
   }
   const inject = effectiveInject(target, meta);
   if (inject !== undefined && inject.length > 0) {
-    const deps = inject.map((t) => ctx.services.get<object>(t));
+    const optional = effectiveOptional(target, meta, inject);
+    const deps = resolveDeps(
+      inject,
+      optional,
+      (t) => ctx.services.has(t),
+      (t) => ctx.services.get<object>(t),
+    );
     return new (target as new (...args: unknown[]) => unknown)(...deps);
   }
   return new (target as new () => unknown)();

@@ -119,3 +119,47 @@ export function Inject(...tokens: string[]): ClassDecorator & ParameterDecorator
 
   return decorator as unknown as ClassDecorator & ParameterDecorator;
 }
+
+/**
+ * Marks a constructor parameter as optional: when its `@Inject` token has no
+ * provider, the argument receives `undefined` instead of failing construction.
+ *
+ * Pairs with `@Inject` on the same parameter and never replaces it — a token is
+ * still required, because type-inferred injection needs `emitDecoratorMetadata`
+ * (unsupported on Deno). The two may be written in either order.
+ *
+ * `@Optional` means the dependency is **absent**, not that construction may
+ * fail: a token that IS provided is resolved normally, and an error thrown
+ * while building it — a circular dependency, a throwing factory — propagates
+ * rather than being swallowed into `undefined`.
+ *
+ * Honored identically on both construction paths: the DI container when one is
+ * registered, and the kernel's service registry otherwise.
+ *
+ * @returns A constructor-parameter decorator
+ * @throws {Error} When used on a method parameter — only constructor parameters
+ * are injected.
+ * @example
+ * ```typescript
+ * @Injectable()
+ * class ReportService {
+ *   constructor(
+ *     @Inject(CAPABILITIES.DATABASE) private db: Db,
+ *     @Optional() @Inject(CAPABILITIES.CACHE) private cache?: ICacheService,
+ *   ) {}
+ * }
+ * ```
+ * @since 0.2.0
+ */
+export function Optional(): ParameterDecorator {
+  return (target: object, propertyKey?: string | symbol, parameterIndex?: number): void => {
+    if (propertyKey !== undefined) {
+      throw new Error(
+        `@Optional is only valid on a constructor parameter, but was applied to parameter ` +
+          `${String(parameterIndex)} of method "${String(propertyKey)}". Method parameters are ` +
+          `bound with @Body/@Query/@Param/@Header instead.`,
+      );
+    }
+    metadataStore.mergeCtorOptional(target as Constructor, parameterIndex as number);
+  };
+}
