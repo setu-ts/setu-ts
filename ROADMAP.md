@@ -5865,8 +5865,12 @@ buys conditional requests and `304`. But `IFileSystem` has **no streaming read**
 `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm`, and the optional `realPath?`. There is no
 `open()`, no partial read, and no byte-range read. True streaming and efficient Range therefore
 require widening `IFileSystem` with an optional member on the M44 `realPath?` / M45 `workers?` / M50
-`dns?` precedent — a contract decision with its own blast radius across three runtime adapters.
-**That widening is deferred to M55b**, so this milestone changes no runtime contract.
+`dns?` precedent. **That widening is in scope here** — a maintainer's call taken over a M55/M55b
+split, because the alternative ships a static file server that reads a 500 MB video fully into
+memory, and serving Range by slicing a fully-read buffer satisfies the specification while keeping
+precisely the cost the feature exists to remove. The member is optional and additive, so no existing
+implementor breaks and every current caller of `IFileSystem` is untouched; Workers omits it, and the
+handler degrades to a whole-file read exactly as it does when `realPath` is absent.
 
 **Cloudflare Workers.** `runtime.fs` is absent, so the plugin registers its capability but serves
 nothing, documented rather than thrown — the M45 `WorkerPoolUnavailableError` precedent inverted,
@@ -5902,13 +5906,22 @@ assets stay byte-identical, and a test pins that.
 - [ ] `apps/` example serving a plain HTML/CSS/JS site, with a smoke check asserting a `200` with
       content, a `304` on revalidation, and the SPA fallback
 
-### Deferred to M55b
+- [ ] **`common` widening** — an optional read-stream member on `IFileSystem`, implemented by the
+      Node, Deno, and Bun runtime adapters and omitted on Workers, with the absent-member path
+      degrading to a whole-file read and tested on both branches
+- [ ] Streaming bodies through M42's `IResponse.stream()`, so a large file is never fully
+      materialised
+- [ ] Range requests (`Range`, `206`, `Content-Range`, `416`, `Accept-Ranges`) served from the read
+      stream rather than a sliced buffer
+- [ ] Precompressed sidecar negotiation — serve `<file>.br` / `<file>.gz` when `Accept-Encoding`
+      permits and the sidecar exists, with `Content-Encoding` and `Vary: Accept-Encoding`
 
-- Streaming bodies via an optional `IFileSystem` read-stream member, implemented on Node/Deno/Bun
-  and omitted on Workers
-- Range requests, which belong with streaming — serving them by reading the whole file and slicing
-  would satisfy the spec while keeping the memory cost the feature exists to remove
-- Compression and precompressed `.br`/`.gz` sidecar negotiation
+### Explicitly out of scope
+
+- On-the-fly compression. It costs CPU per request for a result a build step or a CDN produces once,
+  and the sidecar path above covers the case that matters.
+- Directory listing, ETag negotiation strategies beyond the `size`+`mtime` weak validator, and any
+  form of templating.
 
 ---
 
