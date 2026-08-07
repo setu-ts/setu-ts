@@ -4,46 +4,32 @@
  * Message broker plugin for cross-service integration events.
  *
  * Provides an `IMessageBroker` implementation with support for in-memory,
- * Redis Streams, RabbitMQ, NATS (JetStream), and Kafka backends, plus an
- * optional bridge from the in-process event bus to external messaging.
+ * Redis Streams, RabbitMQ, NATS (JetStream), Kafka, GCP Pub/Sub, Azure
+ * Service Bus, and custom-injected backends, plus an optional bridge from
+ * the in-process event bus to external messaging.
  *
  * @example
  * ```typescript
- * import { MessagingPlugin, EventsMessagingBridge } from '@hono-enterprise/messaging-plugin';
+ * import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
  * import { CAPABILITIES } from '@hono-enterprise/common';
  *
- * // Register the messaging plugin with Redis Streams
+ * // GCP Pub/Sub
  * app.register(MessagingPlugin({
- *   broker: 'redis-streams',
- *   url: 'redis://localhost:6379',
+ *   broker: 'pubsub',
+ *   projectId: 'my-project',
  * }));
  *
- * // RabbitMQ
+ * // Azure Service Bus
  * app.register(MessagingPlugin({
- *   broker: 'rabbitmq',
- *   url: 'amqp://localhost:5672',
+ *   broker: 'service-bus',
+ *   connectionString: 'Endpoint=sb://...',
  * }));
  *
- * // NATS (JetStream)
+ * // Custom broker
  * app.register(MessagingPlugin({
- *   broker: 'nats',
- *   url: 'nats://localhost:4222',
+ *   broker: 'custom',
+ *   instance: myBroker,
  * }));
- *
- * // Kafka
- * app.register(MessagingPlugin({
- *   broker: 'kafka',
- *   brokers: ['localhost:9092'],
- * }));
- *
- * // Optionally bridge events to the broker
- * app.register(EventsMessagingBridge({
- *   eventTypes: ['user.created', 'user.updated'],
- * }));
- *
- * // Use the broker
- * const broker = app.ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
- * await broker.publish('test.topic', { data: 'value' });
  * ```
  *
  * @since 0.1.0
@@ -59,24 +45,62 @@ export { RedisStreamsBroker } from './brokers/redis-streams-broker.ts';
 export { RabbitMqBroker } from './brokers/rabbitmq-broker.ts';
 export { NatsBroker } from './brokers/nats-broker.ts';
 export { KafkaBroker } from './brokers/kafka-broker.ts';
+export { GcpPubSubBroker } from './brokers/pubsub-broker.ts';
+export { ServiceBusBroker } from './brokers/service-bus-broker.ts';
+
+// Adapter / load helpers
+export { adaptPubSubModule, loadPubSubModule } from './brokers/pubsub-broker.ts';
+export type { PubSubSdkModule } from './brokers/pubsub-broker.ts';
+export { adaptServiceBusModule, loadServiceBusModule } from './brokers/service-bus-broker.ts';
+export type { ServiceBusSdkModule } from './brokers/service-bus-broker.ts';
 
 // Serializer
 export { JsonSerializer } from './serializers/json-serializer.ts';
 export type { ISerializer } from './serializers/serializer.ts';
 
 // Request-reply error classes (for consumer `instanceof` handling)
-export { MessagingNotSupportedError, RemoteHandlerError, RequestTimeoutError } from './errors.ts';
+export {
+  CloudBrokerUnavailableError,
+  MessagingNotSupportedError,
+  RemoteHandlerError,
+  ReplyInboxUnavailableError,
+  RequestTimeoutError,
+} from './errors.ts';
 
 // Option types
 export type {
+  CustomMessagingOptions,
   EventsMessagingBridgeOptions,
+  KafkaMessagingOptions,
   KafkaOptions,
+  MemoryMessagingOptions,
   MessagingBrokerType,
+  MessagingCommonOptions,
   MessagingPluginOptions,
+  NatsMessagingOptions,
   NatsOptions,
+  PubSubMessagingOptions,
+  RabbitMqMessagingOptions,
   RabbitMqOptions,
+  RedisStreamsMessagingOptions,
   RedisStreamsOptions,
+  ServiceBusMessagingOptions,
 } from './interfaces/index.ts';
+
+// Port types
+export type {
+  IPubSubSubscription,
+  IPubSubTransport,
+  PubSubOptions,
+} from './brokers/pubsub-broker.ts';
+export type {
+  IServiceBusProcessErrorArgs,
+  IServiceBusReceiver,
+  IServiceBusSubscribeOptions,
+  IServiceBusSubscription,
+  IServiceBusTransport,
+  ServiceBusOptions,
+} from './brokers/service-bus-broker.ts';
 
 // Re-export common messaging types (owned by @hono-enterprise/common)
 export type {

@@ -6,7 +6,10 @@ import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import { RabbitMqBroker } from '../brokers/rabbitmq-broker.ts';
 import { NatsBroker } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
+import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
+import { ServiceBusBroker } from '../brokers/service-bus-broker.ts';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
+import { asBrokerAdapter } from '../brokers/custom-adapter.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
 import type {
   IAmqpConnection,
@@ -48,24 +51,30 @@ function createPluginName(name?: string): string {
  * the configured backend type. Supports multi-instance deployment via the
  * `name` option.
  *
- * @param options - Plugin configuration options
+ * @param options - Plugin configuration options (discriminated union on `broker`)
  * @returns A configured IPlugin instance
  *
  * @example
  * ```typescript
  * // Default in-memory broker
- * app.register(MessagingPlugin({ broker: 'memory' }));
+ * app.register(MessagingPlugin());
  *
- * // Redis Streams broker
+ * // GCP Pub/Sub
  * app.register(MessagingPlugin({
- *   broker: 'redis-streams',
- *   url: 'redis://localhost:6379',
+ *   broker: 'pubsub',
+ *   projectId: 'my-project',
  * }));
  *
- * // Named instance for multi-broker setup
+ * // Azure Service Bus
  * app.register(MessagingPlugin({
- *   name: 'events',
- *   broker: 'redis-streams',
+ *   broker: 'service-bus',
+ *   connectionString: 'Endpoint=sb://...',
+ * }));
+ *
+ * // Custom broker instance
+ * app.register(MessagingPlugin({
+ *   broker: 'custom',
+ *   instance: myCustomBroker,
  * }));
  * ```
  *
@@ -74,9 +83,12 @@ function createPluginName(name?: string): string {
 export function MessagingPlugin(
   options: MessagingPluginOptions = {},
 ): IPlugin {
-  const brokerType = options.broker ?? 'memory';
-  const instanceName = options.name;
-  const serializer = options.serializer ?? new JsonSerializer();
+  const brokerType: string = (options as { broker?: string }).broker ?? 'memory';
+  const instanceName = (options as { name?: string }).name;
+  const serializer =
+    (options as { serializer?: import('../serializers/serializer.ts').ISerializer })
+      .serializer ??
+      new JsonSerializer();
 
   // Determine the token based on whether this is a named instance
   const token = instanceName ? createNamedToken(instanceName) : CAPABILITIES.MESSAGING;
@@ -103,44 +115,112 @@ export function MessagingPlugin(
       if (brokerType === 'memory') {
         broker = new InMemoryBroker(ctx.runtime, serializer);
       } else if (brokerType === 'redis-streams') {
-        // Build options object only with defined values to satisfy exactOptionalPropertyTypes
+        const opts = options as {
+          url?: string;
+          client?: IRedisStreamsClient;
+          defaultQueue?: string;
+          pollIntervalMs?: number;
+          blockSizeMs?: number;
+        };
         const redisOptions: RedisStreamsOptions = {};
-        if (options.url !== undefined) redisOptions.url = options.url;
-        if (options.client !== undefined) {
-          redisOptions.client = options.client as IRedisStreamsClient;
-        }
-        if (options.defaultQueue !== undefined) redisOptions.defaultQueue = options.defaultQueue;
-        if (options.pollIntervalMs !== undefined) {
-          redisOptions.pollIntervalMs = options.pollIntervalMs;
-        }
-        if (options.blockSizeMs !== undefined) redisOptions.blockSizeMs = options.blockSizeMs;
+        if (opts.url !== undefined) redisOptions.url = opts.url;
+        if (opts.client !== undefined) redisOptions.client = opts.client;
+        if (opts.defaultQueue !== undefined) redisOptions.defaultQueue = opts.defaultQueue;
+        if (opts.pollIntervalMs !== undefined) redisOptions.pollIntervalMs = opts.pollIntervalMs;
+        if (opts.blockSizeMs !== undefined) redisOptions.blockSizeMs = opts.blockSizeMs;
         if (logger !== undefined) redisOptions.logger = logger;
         broker = new RedisStreamsBroker(ctx.runtime, serializer, redisOptions);
       } else if (brokerType === 'rabbitmq') {
+        const opts = options as {
+          url?: string;
+          client?: IAmqpConnection;
+          exchangeName?: string;
+          defaultQueue?: string;
+        };
         const rabbitOptions: RabbitMqOptions = {};
-        if (options.url !== undefined) rabbitOptions.url = options.url;
-        if (options.client !== undefined) rabbitOptions.client = options.client as IAmqpConnection;
-        if (options.exchangeName !== undefined) rabbitOptions.exchangeName = options.exchangeName;
-        if (options.defaultQueue !== undefined) rabbitOptions.defaultQueue = options.defaultQueue;
+        if (opts.url !== undefined) rabbitOptions.url = opts.url;
+        if (opts.client !== undefined) rabbitOptions.client = opts.client;
+        if (opts.exchangeName !== undefined) rabbitOptions.exchangeName = opts.exchangeName;
+        if (opts.defaultQueue !== undefined) rabbitOptions.defaultQueue = opts.defaultQueue;
         if (logger !== undefined) rabbitOptions.logger = logger;
         broker = new RabbitMqBroker(ctx.runtime, serializer, rabbitOptions);
       } else if (brokerType === 'nats') {
+        const opts = options as {
+          url?: string;
+          client?: INatsConnection;
+          streamName?: string;
+          defaultQueue?: string;
+        };
         const natsOptions: NatsOptions = {};
-        if (options.url !== undefined) natsOptions.url = options.url;
-        if (options.client !== undefined) natsOptions.client = options.client as INatsConnection;
-        if (options.streamName !== undefined) natsOptions.streamName = options.streamName;
-        if (options.defaultQueue !== undefined) natsOptions.defaultQueue = options.defaultQueue;
+        if (opts.url !== undefined) natsOptions.url = opts.url;
+        if (opts.client !== undefined) natsOptions.client = opts.client;
+        if (opts.streamName !== undefined) natsOptions.streamName = opts.streamName;
+        if (opts.defaultQueue !== undefined) natsOptions.defaultQueue = opts.defaultQueue;
         if (logger !== undefined) natsOptions.logger = logger;
         broker = new NatsBroker(ctx.runtime, serializer, natsOptions);
       } else if (brokerType === 'kafka') {
+        const opts = options as {
+          brokers?: readonly string[];
+          client?: IKafkaFactory;
+          clientId?: string;
+          defaultQueue?: string;
+          replyTopic?: string;
+        };
         const kafkaOptions: KafkaOptions = {};
-        if (options.brokers !== undefined) kafkaOptions.brokers = options.brokers;
-        if (options.client !== undefined) kafkaOptions.client = options.client as IKafkaFactory;
-        if (options.clientId !== undefined) kafkaOptions.clientId = options.clientId;
-        if (options.defaultQueue !== undefined) kafkaOptions.defaultQueue = options.defaultQueue;
-        if (options.replyTopic !== undefined) kafkaOptions.replyTopic = options.replyTopic;
+        if (opts.brokers !== undefined) kafkaOptions.brokers = opts.brokers;
+        if (opts.client !== undefined) kafkaOptions.client = opts.client;
+        if (opts.clientId !== undefined) kafkaOptions.clientId = opts.clientId;
+        if (opts.defaultQueue !== undefined) kafkaOptions.defaultQueue = opts.defaultQueue;
+        if (opts.replyTopic !== undefined) kafkaOptions.replyTopic = opts.replyTopic;
         if (logger !== undefined) kafkaOptions.logger = logger;
         broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
+      } else if (brokerType === 'pubsub') {
+        const pubSubOpts = options as {
+          projectId?: string;
+          credentials?: unknown;
+          client?: import('../brokers/pubsub-broker.ts').IPubSubTransport;
+          defaultQueue?: string;
+          replyTopic?: string;
+        };
+        const pubSubOptions: import('../brokers/pubsub-broker.ts').PubSubOptions = {};
+        if (pubSubOpts.projectId !== undefined) pubSubOptions.projectId = pubSubOpts.projectId;
+        if (pubSubOpts.credentials !== undefined) {
+          pubSubOptions.credentials = pubSubOpts.credentials;
+        }
+        if (pubSubOpts.client !== undefined) pubSubOptions.client = pubSubOpts.client;
+        if (pubSubOpts.defaultQueue !== undefined) {
+          pubSubOptions.defaultQueue = pubSubOpts.defaultQueue;
+        }
+        if (pubSubOpts.replyTopic !== undefined) pubSubOptions.replyTopic = pubSubOpts.replyTopic;
+        if (logger !== undefined) pubSubOptions.logger = logger;
+        broker = new GcpPubSubBroker(ctx.runtime, serializer, pubSubOptions);
+      } else if (brokerType === 'service-bus') {
+        const serviceBusOpts = options as {
+          connectionString?: string;
+          adminConnectionString?: string;
+          client?: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
+          defaultQueue?: string;
+          replyTopic?: string;
+        };
+        const serviceBusOptions: import('../brokers/service-bus-broker.ts').ServiceBusOptions = {};
+        if (serviceBusOpts.connectionString !== undefined) {
+          serviceBusOptions.connectionString = serviceBusOpts.connectionString;
+        }
+        if (serviceBusOpts.adminConnectionString !== undefined) {
+          serviceBusOptions.adminConnectionString = serviceBusOpts.adminConnectionString;
+        }
+        if (serviceBusOpts.client !== undefined) serviceBusOptions.client = serviceBusOpts.client;
+        if (serviceBusOpts.defaultQueue !== undefined) {
+          serviceBusOptions.defaultQueue = serviceBusOpts.defaultQueue;
+        }
+        if (serviceBusOpts.replyTopic !== undefined) {
+          serviceBusOptions.replyTopic = serviceBusOpts.replyTopic;
+        }
+        if (logger !== undefined) serviceBusOptions.logger = logger;
+        broker = new ServiceBusBroker(ctx.runtime, serializer, serviceBusOptions);
+      } else if (brokerType === 'custom') {
+        const opts = options as { instance: IMessageBroker };
+        broker = asBrokerAdapter(opts.instance);
       } else {
         throw new Error(`Unknown broker type: ${brokerType}`);
       }

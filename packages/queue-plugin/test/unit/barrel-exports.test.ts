@@ -8,16 +8,6 @@ describe('barrel exports', () => {
     expect(typeof exports.QueuePlugin).toBe('function');
   });
 
-  it('exports QueueAdapterType type (compile-time only)', () => {
-    // Type-only export, verified at compile time
-    expect(true).toBe(true);
-  });
-
-  it('exports QueuePluginOptions type (compile-time only)', () => {
-    // Type-only export, verified at compile time
-    expect(true).toBe(true);
-  });
-
   it('exports MemoryQueue', () => {
     expect(exports.MemoryQueue).toBeDefined();
     expect(typeof exports.MemoryQueue).toBe('function');
@@ -31,29 +21,5 @@ describe('barrel exports', () => {
   it('exports RabbitMqQueue', () => {
     expect(exports.RabbitMqQueue).toBeDefined();
     expect(typeof exports.RabbitMqQueue).toBe('function');
-  });
-
-  it('exports RedisQueueOptions type (compile-time only)', () => {
-    // Type-only export, verified at compile time
-    expect(true).toBe(true);
-  });
-
-  it('exports RabbitMqQueueOptions type (compile-time only)', () => {
-    // Type-only export, verified at compile time
-    expect(true).toBe(true);
-  });
-
-  // Type-only exports are verified at compile time, not runtime
-  // The following types should be importable from the barrel:
-  // IQueue, IJob, JobProcessor, AddJobOptions, ProcessOptions, RecurringOptions
-  it('has type-only exports (compile-time verification)', () => {
-    // Runtime check placeholder - types are verified by TypeScript compilation
-    expect(true).toBe(true);
-  });
-
-  // Internal exports should not be available at runtime
-  it('does NOT export internal symbols (compile-time verification)', () => {
-    // These types are intentionally not exported - verified by TypeScript compilation
-    expect(true).toBe(true);
   });
 });

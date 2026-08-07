@@ -708,4 +708,297 @@ describe('MessagingPlugin', () => {
     expect(sentTopics).toContain('svc.replies');
     expect(sentTopics).not.toContain('messaging.replies');
   });
+
+  // ─── M54 cloud broker arms ────────────────────────────────────────────────
+
+  // pubsub arm with injected IPubSubTransport
+  it('pubsub broker registers with an injected client', async () => {
+    const transport = {
+      publish: () => Promise.resolve(),
+      open: () => Promise.resolve({ close: () => Promise.resolve() }),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'pubsub',
+      projectId: 'test-project',
+      client: transport as unknown as never,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // service-bus arm with injected IServiceBusTransport
+  it('service-bus broker registers with an injected client', async () => {
+    const transport = {
+      send: () => Promise.resolve(),
+      open: () => Promise.resolve({ close: () => Promise.resolve() }),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'service-bus',
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      client: transport as unknown as never,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // custom arm with instance that has isReady
+  it('custom broker arm passes through instance with isReady', async () => {
+    const customBroker: IMessageBroker & { isReady: () => boolean } = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      publish: () => Promise.resolve(),
+      subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      request: () => Promise.resolve(null as never),
+      respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      isReady: () => true,
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'custom',
+      instance: customBroker,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // custom arm with instance WITHOUT isReady (wrapper tracks connect/disconnect)
+  it('custom broker arm wraps instance without isReady', async () => {
+    const customBroker: IMessageBroker = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      publish: () => Promise.resolve(),
+      subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      request: () => Promise.resolve(null as never),
+      respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+    };
+    const { ctx, healthIndicators } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'custom',
+      instance: customBroker,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    // Wrapper should report isReady true after connect
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+
+    // Health indicator should report up
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      { status: string; data?: unknown }
+    >;
+    const result = await indicator();
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ broker: 'custom' });
+  });
+
+  // custom arm — isReady wrapper reports false after disconnect
+  it('custom broker wrapper isReady reports false after disconnect', async () => {
+    const customBroker: IMessageBroker = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      publish: () => Promise.resolve(),
+      subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      request: () => Promise.resolve(null as never),
+      respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+    };
+    const { ctx, onCloseHandlers } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'custom',
+      instance: customBroker,
+    });
+
+    await plugin.register(ctx);
+
+    // Before disconnect: ready
+    expect(
+      (ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady(),
+    ).toBe(true);
+
+    // Disconnect
+    for (const handler of onCloseHandlers) {
+      await handler();
+    }
+
+    // After disconnect: not ready
+    expect(
+      (ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady(),
+    ).toBe(false);
+  });
+
+  // ─── Bare-call regression (default arm) ───────────────────────────────────
+
+  it('MessagingPlugin() bare call registers memory broker', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin();
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    expect(broker).toBeDefined();
+    expect(broker.isReady()).toBe(true);
+  });
+
+  it('MessagingPlugin({}) empty object registers memory broker', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({});
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    expect(broker).toBeDefined();
+    expect(broker.isReady()).toBe(true);
+  });
+
+  // ─── pubsub/service-bus with logger ───────────────────────────────────────
+
+  it('pubsub broker with logger forwards the logger', async () => {
+    const transport = {
+      publish: () => Promise.resolve(),
+      open: () => Promise.resolve({ close: () => Promise.resolve() }),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'pubsub',
+      projectId: 'test-project',
+      client: transport as unknown as never,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  it('service-bus broker with logger forwards the logger', async () => {
+    const transport = {
+      send: () => Promise.resolve(),
+      open: () => Promise.resolve({ close: () => Promise.resolve() }),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+    const logger = { error: () => {} };
+    ctx.services.register('logger', logger);
+
+    const plugin = MessagingPlugin({
+      broker: 'service-bus',
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      client: transport as unknown as never,
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+  });
+
+  // ─── Health indicator data for cloud brokers ──────────────────────────────
+
+  it('health indicator reports pubsub broker type', async () => {
+    const transport = {
+      publish: () => Promise.resolve(),
+      open: () => Promise.resolve({ close: () => Promise.resolve() }),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx, healthIndicators } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'pubsub',
+      projectId: 'test-project',
+      client: transport as unknown as never,
+    });
+
+    await plugin.register(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      { status: string; data?: { broker: string } }
+    >;
+    const result = await indicator();
+    expect(result.data).toEqual({ broker: 'pubsub' });
+  });
+
+  it('health indicator reports service-bus broker type', async () => {
+    const transport = {
+      send: () => Promise.resolve(),
+      open: () => Promise.resolve({ close: () => Promise.resolve() }),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx, healthIndicators } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'service-bus',
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      client: transport as unknown as never,
+    });
+
+    await plugin.register(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
+      { status: string; data?: { broker: string } }
+    >;
+    const result = await indicator();
+    expect(result.data).toEqual({ broker: 'service-bus' });
+  });
+
+  // ─── kafka with injected client (no fake factory, just registers) ─────────
+
+  it('kafka broker registers with all options and injected client', async () => {
+    const fakeClient = new FakeKafkaFactory();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      brokers: ['localhost:9092'],
+      clientId: 'test-client',
+      defaultQueue: 'test-queue',
+      replyTopic: 'test-replies',
+    });
+
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
 });

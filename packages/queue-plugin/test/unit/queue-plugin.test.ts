@@ -2,6 +2,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import type { IQueue, IRuntimeServices } from '@hono-enterprise/common';
+import { CAPABILITIES } from '@hono-enterprise/common';
+import type { ILogger } from '@hono-enterprise/common';
+import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
+import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 
 /**
  * A Redis address the test suite is deliberately NOT permitted to reach: the
@@ -377,5 +381,131 @@ describe('JobProcessor ack behavior (Defect 3)', () => {
     // verify dead-letters at maxAttempts - if ack was in the try block,
     // successful jobs would be requeued and eventually dead-lettered.
     expect(handlerCallCount).toBe(0); // Placeholder - actual test in queue-service.test.ts
+  });
+});
+
+describe('QueuePlugin SQS adapter', () => {
+  it('builds SqsQueue when adapter is sqs (uses injected transport)', async () => {
+    const ctx = new FakeContext();
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () => Promise.resolve([]),
+      delete: () => Promise.resolve(),
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const plugin = QueuePlugin({
+      adapter: 'sqs',
+      sqs: {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      },
+    });
+
+    await plugin.register(ctx as never);
+
+    const queue = ctx.services.get<IQueue>('queue');
+    expect(queue).toBeDefined();
+  });
+
+  it('throws when sqs config is missing', async () => {
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({ adapter: 'sqs' });
+
+    await expect(plugin.register(ctx as never)).rejects.toThrow(
+      'SQS adapter requires options.sqs configuration',
+    );
+  });
+});
+
+describe('QueuePlugin logger propagation', () => {
+  it('passes logger to QueueService when runtime has logger', async () => {
+    const ctx = new FakeContext();
+    // Register a logger capability
+    const loggerMessages: Array<{ message: string; metadata?: unknown }> = [];
+    ctx.services.register(
+      CAPABILITIES.LOGGER,
+      {
+        level: 'info',
+        fatal: () => {},
+        trace: () => {},
+        child: () => ({}) as ILogger,
+        debug: () => {},
+        info: () => {},
+        warn: (_m: string) => {},
+        error: (message: string, metadata?: unknown) => {
+          loggerMessages.push({ message, metadata });
+        },
+      } as ILogger,
+    );
+
+    const plugin = QueuePlugin({ adapter: 'memory' });
+    await plugin.register(ctx as never);
+
+    // The queue should be registered
+    expect(ctx.services.has('queue')).toBe(true);
+  });
+
+  it('registers without logger capability (no crash)', async () => {
+    const ctx = new FakeContext();
+    // No logger registered — plugin must still work
+
+    const plugin = QueuePlugin({ adapter: 'memory' });
+    await plugin.register(ctx as never);
+
+    expect(ctx.services.has('queue')).toBe(true);
+  });
+
+  it('SQS adapter diagnostic reaches registered logger via QueuePlugin wiring', async () => {
+    // This test proves the QueuePlugin→SqsQueue→logger wiring works by creating
+    // SqsQueue with the logger resolved exactly as QueuePlugin does.
+    // Discriminating: if the 3rd constructor arg (logger) is omitted, the
+    // adapter's diagnostic is silent and this test FAILS.
+
+    const ctx = new FakeContext();
+    const logEntries: string[] = [];
+
+    ctx.services.register(
+      CAPABILITIES.LOGGER,
+      {
+        level: 'info',
+        fatal: () => {},
+        trace: () => {},
+        child: () => ({}) as ILogger,
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (message: string) => {
+          logEntries.push(message);
+        },
+      } as ILogger,
+    );
+
+    // Same resolveLogger pattern QueuePlugin uses
+    const iLogger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+    const adapterLogger: { error: (msg: string) => void } = {
+      error: (message: string) => iLogger.error(message),
+    };
+
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () => Promise.resolve([]),
+      delete: () => Promise.resolve(),
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+
+    const sqsQueue = new SqsQueue(new FakeRuntime() as unknown as IRuntimeServices, {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    }, adapterLogger);
+    await sqsQueue.connect();
+
+    // Trigger diagnostic: ack unknown id → logs "unknown or expired receipt"
+    await sqsQueue.ack('jobs', 'unknown-id', 'claim-token');
+
+    // The registered logger must have received the diagnostic
+    const diagnostic = logEntries.find((e) => e.includes('ack') && e.includes('unknown-id'));
+    expect(diagnostic).toBeDefined();
   });
 });

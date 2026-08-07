@@ -105,6 +105,16 @@ export interface StoredJob<T = unknown> {
   maxAttempts: number;
   /** Timestamp when the job becomes available (ms since epoch). */
   availableAtMs: number;
+  /**
+   * Opaque token identifying THIS delivery, set by `reserve` on adapters whose
+   * transport hands out a per-delivery claim (SQS populates it from the receipt
+   * handle). `runJob` passes it back on `ack`/`requeue`/`deadLetter` so the
+   * adapter can reject a settle belonging to a superseded delivery.
+   *
+   * Adapters with no transport-level claim (memory, redis, rabbitmq) leave it
+   * unset and ignore the argument; `runJob` then falls back to {@link id}.
+   */
+  claimToken?: string;
 }
 
 /**
@@ -128,7 +138,7 @@ export interface StoredRecurring {
 /**
  * Queue adapter type for plugin configuration.
  */
-export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq';
+export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq' | 'sqs';
 
 /**
  * Options for configuring the queue plugin.
@@ -148,6 +158,8 @@ export interface QueuePluginOptions {
   pollIntervalMs?: number;
   /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
   prefix?: string;
+  /** SQS-specific options (required when adapter is 'sqs'). */
+  sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
 }
 
 /**

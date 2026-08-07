@@ -3,9 +3,10 @@
 Cross-service messaging. Registers an `IMessageBroker` under `CAPABILITIES.MESSAGING`
 (`'messaging'`).
 
-Five brokers ship: `InMemoryBroker` (zero-dependency default), `RedisStreamsBroker`,
-`RabbitMqBroker`, `NatsBroker` (JetStream), and `KafkaBroker`. Each client is an **optional**
-dependency, lazily imported or injected.
+Eight brokers ship: `InMemoryBroker` (zero-dependency default), `RedisStreamsBroker`,
+`RabbitMqBroker`, `NatsBroker` (JetStream), `KafkaBroker`, `GcpPubSubBroker`
+(`npm:@google-cloud/pubsub`), `ServiceBusBroker` (`npm:@azure/service-bus`), and a custom-injected
+arm. Each cloud client is an **optional** dependency, lazily imported or injected.
 
 ## Installation
 
@@ -32,15 +33,20 @@ await broker.publish('user.created', { userId: '123' });
 
 ## Brokers
 
-| `broker`          | Backing client        | Request-reply |
-| ----------------- | --------------------- | ------------- |
-| `'in-memory'`     | none                  | yes           |
-| `'redis-streams'` | `npm:ioredis`         | yes           |
-| `'rabbitmq'`      | `npm:amqplib`         | yes           |
-| `'nats'`          | NATS JetStream client | yes           |
-| `'kafka'`         | `npm:kafkajs`         | yes¹          |
+| `broker`          | Backing client             | Request-reply |
+| ----------------- | -------------------------- | ------------- |
+| `'in-memory'`     | none                       | yes           |
+| `'redis-streams'` | `npm:ioredis`              | yes           |
+| `'rabbitmq'`      | `npm:amqplib`              | yes           |
+| `'nats'`          | NATS JetStream client      | yes           |
+| `'kafka'`         | `npm:kafkajs`              | yes¹          |
+| `'pubsub'`        | `npm:@google-cloud/pubsub` | yes²          |
+| `'service-bus'`   | `npm:@azure/service-bus`   | yes²          |
+| `'custom'`        | injected `IMessageBroker`  | yes³          |
 
-¹ Kafka needs its reply topic to exist — see below.
+¹ Kafka needs its reply topic to exist — see below. ² Cloud brokers need their reply topic to
+pre-exist (GCP) or require `Manage` right for admin (Azure). ³ Custom brokers carry whatever RPC
+capability their adapter provides.
 
 ## Request-reply
 

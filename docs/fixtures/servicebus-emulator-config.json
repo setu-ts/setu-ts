@@ -1,0 +1,75 @@
+{
+  "UserConfig": {
+    "Namespaces": [
+      {
+        "Name": "sbemulatorns",
+        "Queues": [],
+        "Topics": [
+          {
+            "Name": "orders-roundtrip",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H"
+            },
+            "Subscriptions": [
+              {
+                "Name": "consumers",
+                "Properties": {
+                  "LockDuration": "PT10S",
+                  "MaxDeliveryCount": 10
+                }
+              }
+            ]
+          },
+          {
+            "Name": "orders-abandon",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H"
+            },
+            "Subscriptions": [
+              {
+                "Name": "consumers",
+                "Properties": {
+                  "LockDuration": "PT10S",
+                  "MaxDeliveryCount": 10
+                }
+              }
+            ]
+          },
+          {
+            "Name": "orders-close",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H"
+            },
+            "Subscriptions": [
+              {
+                "Name": "consumers",
+                "Properties": {
+                  "LockDuration": "PT10S",
+                  "MaxDeliveryCount": 10
+                }
+              }
+            ]
+          },
+          {
+            "Name": "messaging.replies",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H"
+            },
+            "Subscriptions": [
+              {
+                "Name": "rr-inbox-static",
+                "Properties": {
+                  "LockDuration": "PT10S",
+                  "MaxDeliveryCount": 10
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Logging": {
+      "Type": "File"
+    }
+  }
+}

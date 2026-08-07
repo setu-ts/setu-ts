@@ -190,3 +190,116 @@ describe('EventsMessagingBridge integration', () => {
     await app.stop();
   });
 });
+
+describe('MessagingPlugin arms integration', () => {
+  it('registers pubsub broker when broker is pubsub', async () => {
+    let connected = false;
+    const fakeTransport: import('../../src/brokers/pubsub-broker.ts').IPubSubTransport = {
+      publish: () => Promise.resolve(),
+      open: () =>
+        Promise.resolve(
+          {
+            close: () => Promise.resolve(),
+          } as import('../../src/brokers/pubsub-broker.ts').IPubSubSubscription,
+        ),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => {
+        connected = false;
+        return Promise.resolve();
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        fakeRuntimePlugin(),
+        MessagingPlugin({
+          broker: 'pubsub',
+          client: fakeTransport,
+        }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    await broker.publish('t', { ok: true });
+    connected = true;
+    await app.stop();
+    expect(connected).toBe(false); // close was called
+  });
+
+  it('registers service-bus broker when broker is service-bus', async () => {
+    const fakeTransport: import('../../src/brokers/service-bus-broker.ts').IServiceBusTransport = {
+      send: () => Promise.resolve(),
+      open: () =>
+        Promise.resolve(
+          {
+            close: () => Promise.resolve(),
+          } as import('../../src/brokers/service-bus-broker.ts').IServiceBusSubscription,
+        ),
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const app = createApplication({
+      plugins: [
+        fakeRuntimePlugin(),
+        MessagingPlugin({
+          broker: 'service-bus',
+          client: fakeTransport,
+        }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    await broker.publish('t', { ok: true });
+    await app.stop();
+  });
+
+  it('registers custom broker via asBrokerAdapter', async () => {
+    let customConnected = false;
+    const customBroker: IMessageBroker = {
+      connect: () => {
+        customConnected = true;
+        return Promise.resolve();
+      },
+      disconnect: () => Promise.resolve(),
+      publish: () => Promise.resolve(),
+      subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      request: () => Promise.resolve(null as never),
+      respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+    };
+    const app = createApplication({
+      plugins: [
+        fakeRuntimePlugin(),
+        MessagingPlugin({ broker: 'custom', instance: customBroker }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    expect(customConnected).toBe(true);
+    await app.stop();
+  });
+
+  it('bare MessagingPlugin() defaults to memory', async () => {
+    const app = createApplication({
+      plugins: [fakeRuntimePlugin(), MessagingPlugin()],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    await broker.publish('t', { v: 1 });
+    await app.stop();
+  });
+
+  it('MessagingPlugin({}) defaults to memory', async () => {
+    const app = createApplication({
+      plugins: [fakeRuntimePlugin(), MessagingPlugin({})],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    expect(broker).toBeDefined();
+    await app.stop();
+  });
+});

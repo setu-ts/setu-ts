@@ -29,6 +29,26 @@ All notable changes to this project are documented here. The format follows
   install, <1 s build), so no `ServerBuild` fixture is committed and `full-stack` is deliberately
   not in `ALLOW_SKIP`. No published package changed; the frontend build remains an app-level,
   build-time concern outside every published dependency graph (AI_GUIDELINES §12.2).
+- **`@hono-enterprise/messaging-plugin`** — GCP Pub/Sub (`GcpPubSubBroker`) and Azure Service Bus
+  (`ServiceBusBroker`) backends implementing `IMessageBroker` with request-reply over a shared reply
+  topic + per-instance subscription. `MessagingPluginOptions` is now a **discriminated union on
+  `broker`** with a `'custom'` arm (inject any `IMessageBroker`) and a default memory arm so
+  `MessagingPlugin()` / `MessagingPlugin({})` remain valid. `MessagingBrokerType` widened to 8
+  literals. Both cloud brokers throw `CloudBrokerUnavailableError` on Cloudflare Workers. **Verified
+  against the vendors' own local emulators** — Google's Pub/Sub emulator and Microsoft's Service Bus
+  emulator — covering publish/subscribe over real gRPC/AMQP, ack/nack settlement producing genuine
+  redelivery, receiver teardown, and on Pub/Sub the RPC reply subscription's create/delete cycle.
+  See `docs/messaging-emulators.md`. **Service Bus RPC is unverified**: that emulator supports no
+  management operations, so the per-instance reply subscription cannot be created there — the suite
+  asserts the refusal surfaces `ReplyInboxUnavailableError` instead. Neither backend has run against
+  a live cloud account.
+- **`@hono-enterprise/queue-plugin`** — SQS `SqsQueue` adapter (`QueueAdapter` seam, wrapped by
+  `QueueService`) with per-name queue URLs, receipt-handle bookkeeping, `ApproximateReceiveCount`
+  attempt ladder, visibility-timeout backoff, and dead-letter ordering. `SnsPublisher` for SNS
+  fan-out. `QueueAdapterType` widened to include `'sqs'`. `QueueBackendUnavailableError` thrown on
+  Cloudflare Workers. **The SQS adapter is verified against ElasticMQ** in CI (that suite drives
+  `SqsQueue` directly; the `QueuePlugin` → `QueueService` wiring is covered separately by
+  `sqs-arm-integration.test.ts` over a contract-honouring transport fake). SNS is fake-driven.
 
 ### Changed
 
@@ -43,8 +63,35 @@ All notable changes to this project are documented here. The format follows
   never added to the compat suite fails the job rather than quietly shrinking coverage. The suite
   tracks the latest published release rather than `HEAD`, because Node and Bun cannot resolve this
   repo's `jsr:` and `npm:` specifiers from source.
+- **⚠️ Breaking 1 of 1: `MessagingPluginOptions` is now a discriminated union.** A caller holding a
+  widened variable (e.g. `let opts: MessagingPluginOptions = getOptions()`) must narrow before
+  passing to the factory. Single-arm literals, `MessagingPlugin()`, `MessagingPlugin({})`, and the
+  factory's own `= {}` default are unaffected. `MessagingBrokerType` includes `'pubsub'`,
+  `'service-bus'`, and `'custom'`.
+- **`@hono-enterprise/queue-plugin`** — the INTERNAL `QueueAdapter` seam gained a `claimToken`
+  argument on `ack`/`requeue`/`deadLetter`, and `StoredJob` an optional `claimToken?`. It identifies
+  one delivery, so an adapter can refuse a settle belonging to a superseded one — SQS needs this
+  because a requeued message returns with a new `ReceiptHandle`. Adapters without a transport-level
+  claim (memory, redis, rabbitmq) accept and ignore it. Neither type is barrel-exported, so **no
+  published surface changes**; listed because it alters a contract shared by every adapter.
 
 ### Fixed
+
+- **`@hono-enterprise/queue-plugin`** — the SQS backend settled nothing through `QueuePlugin`. The
+  job runner passed the job id where the adapter expected the `claimToken` minted by `reserve`, so
+  every `ack`/`requeue`/`deadLetter` failed its own claim check and returned without calling SQS: a
+  processed job was never deleted and redelivered after each visibility timeout, forever. Adapter
+  tests and the ElasticMQ e2e passed because both settle the adapter directly, supplying the token
+  the real caller did not. Now covered through a real kernel application.
+- **`@hono-enterprise/messaging-plugin`** — `ServiceBusBroker` leaked an AMQP receiver link per
+  `unsubscribe()`. Teardown closed only the subscriber handle returned by `receiver.subscribe(...)`
+  and never the receiver itself; it also closed the most recently opened receiver rather than the
+  one being unsubscribed, so cancelling one of two subscriptions on the same topic stopped the wrong
+  delivery.
+- **`@hono-enterprise/messaging-plugin`** — `GcpPubSubBroker` and `ServiceBusBroker` constructed
+  standalone with neither credentials nor an injected transport now fail at `connect()` naming the
+  missing option, instead of building a client on an empty `projectId` / connection string and
+  failing later inside the SDK.
 
 - Redis-backed cache, queue, and messaging plugins now create ioredis clients with `lazyConnect`.
   Their explicit startup `connect()` call no longer fails because ioredis connected eagerly during

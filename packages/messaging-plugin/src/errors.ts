@@ -61,3 +61,38 @@ export class MessagingNotSupportedError extends Error {
     this.name = 'MessagingNotSupportedError';
   }
 }
+
+/**
+ * Thrown by a cloud broker's {@linkcode IMessageBroker.connect} when the
+ * runtime platform is Cloudflare Workers and the SDK cannot function (gRPC,
+ * AMQP, or long-poll — not `fetch`). The throw fails {@linkcode app.start()}
+ * at the earliest possible point.
+ *
+ * @since 0.1.0
+ */
+export class CloudBrokerUnavailableError extends Error {
+  constructor(backend: string, specifier: string) {
+    super(
+      `${backend} (${specifier}) is not available on Cloudflare Workers — ` +
+        'the SDK requires Node/Deno/Bun (gRPC/AMQP/long-poll, not fetch)',
+    );
+    this.name = 'CloudBrokerUnavailableError';
+  }
+}
+
+/**
+ * Thrown by {@linkcode GcpPubSubBroker} and {@linkcode ServiceBusBroker} when
+ * the per-instance RPC reply subscription cannot be created (missing `Manage`
+ * right or the reply topic does not exist).
+ *
+ * @since 0.1.0
+ */
+export class ReplyInboxUnavailableError extends Error {
+  constructor(topic: string) {
+    super(
+      `Cannot create reply subscription on topic "${topic}" — ` +
+        'the reply topic must pre-exist and the identity needs the Manage right',
+    );
+    this.name = 'ReplyInboxUnavailableError';
+  }
+}

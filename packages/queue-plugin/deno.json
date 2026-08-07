@@ -10,11 +10,17 @@
       "env": true,
       "net": [
         "127.0.0.1:6379",
-        "localhost:6379"
+        "localhost:6379",
+        "127.0.0.1:9324",
+        "localhost:9324"
       ],
       "sys": [
         "hostname"
       ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-sqs": "npm:@aws-sdk/client-sqs@^3",
+    "@aws-sdk/client-sns": "npm:@aws-sdk/client-sns@^3"
   }
 }

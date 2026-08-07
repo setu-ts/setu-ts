@@ -184,8 +184,9 @@ describe('RabbitMqQueue', () => {
       await queue.reserve('test', 1, runtime.now());
 
       await queue.ack('test', '5');
-      // Should not throw
-      expect(true).toBe(true);
+      // Acked job should no longer appear on reserve
+      const afterAck = await queue.reserve('test', 10, runtime.now());
+      expect(afterAck.length).toBe(0);
     });
 
     it('requeue publishes to delay queue with fresh TTL via channel.calls', async () => {

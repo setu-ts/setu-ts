@@ -21,6 +21,7 @@ import {
   RabbitMqQueue,
   validateClient as isAmqpQueueConnection,
 } from '../adapters/rabbitmq-queue.ts';
+import { SqsQueue } from '../adapters/sqs-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
 
@@ -56,6 +57,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
     name: pluginName,
     version: '0.1.0',
     provides: [token],
+    // B5: Declare optional logger dependency so kernel ordering resolves
+    // LoggerPlugin first when installed, but remains optional.
+    optionalDependencies: [CAPABILITIES.LOGGER],
     priority: 100,
 
     async register(ctx) {
@@ -81,6 +85,18 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             ...(client !== undefined && isAmqpQueueConnection(client) ? { client } : {}),
             ...(options?.prefix !== undefined ? { prefix: options.prefix } : {}),
           });
+          break;
+        }
+        case 'sqs': {
+          if (!options?.sqs) {
+            throw new Error('SQS adapter requires options.sqs configuration');
+          }
+          const sqsLogger = resolveLogger(ctx);
+          adapter = new SqsQueue(
+            ctx.runtime,
+            options.sqs,
+            sqsLogger ?? undefined,
+          );
           break;
         }
         default:

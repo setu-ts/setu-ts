@@ -426,4 +426,304 @@ describe('RequestReplyCore', () => {
     await core.respond('topic', (msg) => ({ echo: msg }));
     await expect(core.request('topic', { a: 1 })).resolves.toEqual({ echo: { a: 1 } });
   });
+
+  // B6: Exactly-once reply inbox under concurrent first requests and partial failure
+  describe('B6: concurrent first requests and partial-failure retry', () => {
+    it('two concurrent FIRST request() calls → openInbox called exactly once', async () => {
+      const transport = new FakeTransport();
+      const core = new RequestReplyCore(transport);
+
+      // Responder echoes payload back
+      await core.respond('topic', (msg) => msg);
+
+      // Fire two concurrent requests before either resolves
+      const [r1, r2] = await Promise.all([
+        core.request('topic', { a: 1 }, { timeoutMs: 2000 }),
+        core.request('topic', { b: 2 }, { timeoutMs: 2000 }),
+      ]);
+
+      // Both resolve (auto-deliver routes through responder → inbox)
+      expect(r1).toEqual({ a: 1 });
+      expect(r2).toEqual({ b: 2 });
+      // openInbox called exactly once — no duplicate creation
+      expect(transport.openInboxCalls).toBe(1);
+    });
+
+    it('admin create succeeds, transport open fails → not cached; next retries', async () => {
+      const transport = new FakeTransport();
+      let first = true;
+
+      // First openInbox fails
+      const origOpen = transport.openInbox.bind(transport);
+      transport.openInbox = (onReply) => {
+        if (first) {
+          first = false;
+          throw new Error('transport-unavailable');
+        }
+        return origOpen(onReply);
+      };
+
+      const core = new RequestReplyCore(transport);
+      await core.respond('topic', (msg) => msg);
+
+      // First request fails
+      await expect(core.request('topic', { a: 1 }, { timeoutMs: 2000 })).rejects.toThrow(
+        'transport-unavailable',
+      );
+
+      // Next request retries and succeeds (inbox was NOT cached on failure)
+      await expect(core.request('topic', { a: 2 }, { timeoutMs: 2000 })).resolves.toEqual({
+        a: 2,
+      });
+    });
+
+    it('disconnect after successful open → close called once', async () => {
+      const transport = new FakeTransport();
+      const core = new RequestReplyCore(transport);
+
+      await core.respond('topic', (msg) => msg);
+      await core.request('topic', { a: 1 }, { timeoutMs: 2000 });
+      expect(transport.openInboxCalls).toBe(1);
+
+      // Close tears down inbox (unsubscribe = the respond subscription + inbox subscription)
+      await core.close();
+      // close() unsubscribes the inbox; at least 1 unsubscribe call
+      expect(transport.unsubscribeCalls).toBeGreaterThanOrEqual(1);
+
+      // Close is idempotent — should not throw
+      await core.close();
+    });
+  });
+
+  // B1: RPC settlement semantics
+  describe('B1: RPC settlement semantics', () => {
+    it('two concurrent requests receive out-of-order replies to correct request', async () => {
+      // Two requests fire, but the reply for request #2 arrives before request #1.
+      // Each reply must resolve the correct pending request.
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      // Start two requests; uuid sequence: id-0 (inbox), id-1 (corrA), id-2 (corrB)
+      const pendingA = core.request('echo', 'A', { timeoutMs: 10000 });
+      const pendingB = core.request('echo', 'B', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      // Deliver reply for B first (correlationId id-2), then A (id-1)
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-2',
+        ok: true,
+        payload: 'B-reply',
+      });
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: true,
+        payload: 'A-reply',
+      });
+
+      // Each request resolves with its own value
+      const resultB = await pendingB;
+      const resultA = await pendingA;
+      expect(resultB).toBe('B-reply');
+      expect(resultA).toBe('A-reply');
+    });
+
+    it('foreign correlation reply (no matching pending) is silently dropped', async () => {
+      // A reply with a correlationId that matches no pending request must be
+      // silently ignored — it must not resolve/reject any other pending request
+      // or throw.
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      // One pending request; uuid sequence: id-0 (inbox), id-1 (corr)
+      const pending = core.request('echo', 'A', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      // Deliver a foreign reply (correlationId never created)
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'foreign-uuid',
+        ok: true,
+        payload: 'foreign',
+      });
+
+      // Deliver the real reply
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: true,
+        payload: 'A-ok',
+      });
+
+      await expect(pending).resolves.toBe('A-ok');
+    });
+
+    it('malformed reply on shared inbox is silently dropped', async () => {
+      // A reply that is not a valid rr-reply envelope (e.g., missing kind) must
+      // be silently ignored.
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      const pending = core.request('echo', 'A', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      // Deliver malformed message (no kind field)
+      await t.deliver('rr.inbox.id-0', { notAReply: true });
+      // Deliver well-formed reply
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: true,
+        payload: 'A-ok',
+      });
+
+      await expect(pending).resolves.toBe('A-ok');
+    });
+
+    it('ok:false reply with error field rejects with RemoteHandlerError', async () => {
+      const t = new FakeTransport();
+      t.autoDeliver = false;
+      const core = new RequestReplyCore(t);
+
+      const pending = core.request('boom', 'A', { timeoutMs: 10000 });
+      await flush();
+      await flush();
+
+      await t.deliver('rr.inbox.id-0', {
+        kind: 'rr-reply',
+        correlationId: 'id-1',
+        ok: false,
+        error: 'remote-explosion',
+      });
+
+      await expect(pending).rejects.toBeInstanceOf(RemoteHandlerError);
+    });
+  });
+
+  // Finding 2: close/initialization race test
+  // A request that is waiting for inbox initialization must be rejected immediately
+  // when close() is called, not after the inbox opens.
+  it('Finding 2: concurrent close during first request initialization rejects immediately', async () => {
+    // This test fails under the reviewed code behavior where close() could
+    // complete while inbox open is pending, leaving the request to proceed
+    // with a now-dead inbox.
+    let releaseOpen: (() => void) | undefined;
+    let inboxClosed = false;
+    let publishCalls = 0;
+    const t = new FakeTransport();
+
+    const core = new RequestReplyCore({
+      publish: (topic, message) => {
+        publishCalls++;
+        return t.publish(topic, message);
+      },
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> =>
+        new Promise<ReplyInbox>((resolve) => {
+          releaseOpen = (): void =>
+            resolve({
+              address: 'rr.inbox.pending-race',
+              close: (): Promise<void> => {
+                inboxClosed = true;
+                return Promise.resolve();
+              },
+            });
+        }),
+    });
+
+    // Start a request; it will wait for inbox open
+    const requestPromise = core.request('test-topic', {}, { timeoutMs: 5000 }).then(
+      (value) => ({ rejected: false, value }) as const,
+      (err) => ({ rejected: true, error: err as Error }) as const,
+    );
+
+    // Let the request start waiting for inbox
+    await flush();
+
+    // Call close while inbox open is still pending
+    const closePromise = core.close();
+
+    // Release the inbox open after close was called
+    releaseOpen!();
+
+    // Both should complete
+    const [requestResult] = await Promise.all([requestPromise, closePromise]);
+
+    // Request must have been rejected due to close
+    expect(requestResult.rejected).toBe(true);
+    if (requestResult.rejected) {
+      expect(requestResult.error.message).toContain('disconnected');
+    }
+
+    // Inbox must have been closed despite being opened after close() was called
+    expect(inboxClosed).toBe(true);
+
+    // No publish should have occurred because the request was rejected
+    // (the generation check happens before publish)
+    expect(publishCalls).toBe(0);
+  });
+
+  // Finding 2: race test with multiple concurrent requests
+  it('Finding 2: multiple concurrent requests during close all reject', async () => {
+    let resolveInbox: ((inbox: ReplyInbox) => void) | undefined;
+    const t = new FakeTransport();
+
+    const pendingInboxPromise = new Promise<ReplyInbox>((resolve) => {
+      resolveInbox = resolve;
+    });
+
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> => pendingInboxPromise,
+    });
+
+    // Fire multiple concurrent requests - they all wait for the same inbox
+    const req1 = core.request('test1', {}).catch((err) => ({
+      rejected: true,
+      error: err as Error,
+    }));
+    const req2 = core.request('test2', {}).catch((err) => ({
+      rejected: true,
+      error: err as Error,
+    }));
+    const req3 = core.request('test3', {}).catch((err) => ({
+      rejected: true,
+      error: err as Error,
+    }));
+
+    await flush();
+
+    // Close while all are waiting for inbox
+    const closePromise = core.close();
+
+    // Resolve the inbox promise after close was called
+    resolveInbox!({
+      address: 'rr.inbox.test',
+      close: (): Promise<void> => Promise.resolve(),
+    });
+
+    // Wait for close to complete
+    await closePromise;
+
+    // All requests should have been rejected due to close
+    type Result = { rejected: true; error: Error };
+    const results = await Promise.all([req1, req2, req3]) as [Result, Result, Result];
+    expect(results[0].rejected).toBe(true);
+    expect(results[1].rejected).toBe(true);
+    expect(results[2].rejected).toBe(true);
+  });
 });

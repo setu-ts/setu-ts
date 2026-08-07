@@ -119,6 +119,13 @@ export class RequestReplyCore {
    * observe a null one while the open was still pending, and miss it.
    */
   #inboxInit: Promise<ReplyInbox> | null = null;
+  /**
+   * Lifecycle generation counter. Incremented on every `close()` call.
+   * A request captures the current generation during inbox initialization.
+   * After inbox initialization resolves, we verify the generation still
+   * matches the current one before installing pending state or publishing.
+   */
+  #generation = 0;
 
   /**
    * @param deps - The broker primitives to compose over
@@ -140,7 +147,14 @@ export class RequestReplyCore {
    * @since 0.1.0
    */
   async request<TRes>(topic: string, message: unknown, options?: RequestOptions): Promise<TRes> {
-    const inbox = await this.#ensureInbox();
+    const { inbox, generation } = await this.#ensureInboxWithGeneration();
+
+    // Check if we're still in an active generation after inbox initialization.
+    // If `close()` was called while we were waiting, the generation will have
+    // advanced and we must reject immediately.
+    if (generation !== this.#generation) {
+      throw new Error('Broker disconnected before a reply was received');
+    }
 
     const correlationId = this.#deps.uuid();
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -218,6 +232,9 @@ export class RequestReplyCore {
    * @since 0.1.0
    */
   async close(): Promise<void> {
+    // Increment the generation to invalidate any in-flight requests.
+    this.#generation++;
+
     for (const pending of this.#pending.values()) {
       this.#deps.clearTimeout(pending.timer);
       pending.reject(new Error('Broker disconnected before a reply was received'));
@@ -249,7 +266,16 @@ export class RequestReplyCore {
    * with that same stale error — forever, even after the broker recovered. On
    * rejection the memo is cleared so the next call retries.
    */
-  #ensureInbox(): Promise<ReplyInbox> {
+  /**
+   * Ensures the reply inbox is open and returns it along with the current generation.
+   * The generation is used to detect if `close()` was called while waiting for the inbox.
+   * We capture the generation BEFORE awaiting the inbox open, so that a concurrent close()
+   * will be detected when the inbox finally resolves.
+   */
+  #ensureInboxWithGeneration(): Promise<{ inbox: ReplyInbox; generation: number }> {
+    // Capture generation BEFORE awaiting the inbox open.
+    const generationAtStart = this.#generation;
+
     if (!this.#inboxInit) {
       this.#inboxInit = this.#deps.openInbox((message) => {
         this.#onReply(message);
@@ -258,7 +284,7 @@ export class RequestReplyCore {
         throw error;
       });
     }
-    return this.#inboxInit;
+    return this.#inboxInit.then((inbox) => ({ inbox, generation: generationAtStart }));
   }
 
   /** Resolves or rejects the pending request a reply correlates to. */

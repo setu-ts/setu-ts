@@ -1456,9 +1456,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   replaces is the module-level CACHE, not the accessor file — so the test pins the five
   `lib/*.server.ts` modules absent AND that the accessor holds no module-level state. No `packages/`
   source changed) — complete (PR #126)
-- **Next milestone** — **M38** (documentation), then M39–M40. One milestone is queued behind those:
-  **M54** (cloud message brokers — `MessagingBrokerType` is a closed switch with no `'custom'` arm,
-  so SQS/SNS, GCP Pub/Sub and Azure Service Bus are not merely absent but inexpressible).
+- **M54** (cloud message brokers — SQS/SNS via `SqsQueue`/`SnsPublisher` in `queue-plugin`, GCP
+  Pub/Sub and Azure Service Bus via `GcpPubSubBroker`/`ServiceBusBroker` in `messaging-plugin`,
+  `'custom'` arm on discriminated `MessagingPluginOptions` union, cloud-gate runtime checks,
+  inject-or-lazy SDK adapt/load seams, guarded real-import tests, SQS→ElasticMQ e2e in CI, plus
+  guarded Pub/Sub and Service Bus emulator suites run locally — see `docs/messaging-emulators.md`) —
+  complete (PR #128)
+- **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
+  M37c and M54 both shipped, closing the last two entries on that list.
 
 ## Verification (run before declaring any work done)
 

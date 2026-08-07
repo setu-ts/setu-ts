@@ -1885,7 +1885,7 @@ Discriminated on `transport`.
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                          |
 | ------------- | ----------------- | ------------------------------ | -------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default, and a real single-process bus rather than a no-op |
-| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses all five existing brokers; adds no dependency           |
+| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses any registered messaging broker; adds no dependency     |
 | `'redis'`     | Yes               | `npm:ioredis@5.x` (lazy)       | Redis pub/sub, over two connections                            |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane`                                       |
 
@@ -2699,36 +2699,200 @@ app.register(MessagingPlugin({
 
 ### Plugin Options
 
+`MessagingPluginOptions` is a **discriminated union keyed on `broker`** — exactly
+mirroring `packages/messaging-plugin/src/interfaces/index.ts`, which is the source of
+truth. Each arm carries the fields the source defines; the cloud brokers split into an
+*injected-transport* arm (no production credentials) and a *production* arm (credentials
+required, `client` typed `never`). The shared `MessagingBrokerType` has eight literals.
+
 ```typescript
-interface MessagingPluginOptions {
-  /** Broker type. @defaultValue 'memory' */
-  broker?: 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka';
+type MessagingBrokerType =
+  | 'memory'
+  | 'redis-streams'
+  | 'rabbitmq'
+  | 'nats'
+  | 'kafka'
+  | 'pubsub'
+  | 'service-bus'
+  | 'custom';
+
+/** Present on every arm. */
+interface MessagingCommonOptions {
   /** Instance name for multi-instance support (registers under messaging.<name>). */
   name?: string;
   /** Serializer for message payloads. @defaultValue new JsonSerializer() */
   serializer?: ISerializer;
-  /** Connection URL (redis-streams / rabbitmq / nats). */
+}
+
+// ── Default (in-memory). `broker` is optional so MessagingPlugin() and {} are valid. ──
+interface MemoryMessagingOptions extends MessagingCommonOptions {
+  broker?: 'memory';
+}
+
+// ── Redis Streams ────────────────────────────────────────────────────────────────────
+interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
+  broker: 'redis-streams';
+  /** Connection URL. */
   url?: string;
-  /** Injected client — bypasses the lazy npm import. Type depends on broker. */
-  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory;
-  /** Default consumer group / queue name. @defaultValue 'messaging-consumers' */
+  /** Injected client — bypasses the lazy npm import. */
+  client?: IRedisStreamsClient;
+  /** Default consumer group / queue name. */
   defaultQueue?: string;
-  /** Redis Streams poll interval in ms. @defaultValue 100 */
+  /** XREADGROUP poll interval in ms. */
   pollIntervalMs?: number;
-  /** Redis Streams XREADGROUP block timeout in ms. @defaultValue 100 */
+  /** XREADGROUP block timeout in ms. */
   blockSizeMs?: number;
-  /** RabbitMQ exchange name. @defaultValue 'messaging' */
+}
+
+// ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
+interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  broker: 'rabbitmq';
+  /** AMQP connection URL. */
+  url?: string;
+  /** Injected AMQP connection. */
+  client?: IAmqpConnection;
+  /** Topic exchange name. @defaultValue 'messaging' */
   exchangeName?: string;
-  /** NATS JetStream stream name. @defaultValue 'MESSAGING' */
+  /** Default consumer group / queue name. */
+  defaultQueue?: string;
+}
+
+// ── NATS (JetStream) ─────────────────────────────────────────────────────────────────
+interface NatsMessagingOptions extends MessagingCommonOptions {
+  broker: 'nats';
+  /** NATS connection URL. */
+  url?: string;
+  /** Injected NATS connection. */
+  client?: INatsConnection;
+  /** JetStream stream name. @defaultValue 'MESSAGING' */
   streamName?: string;
-  /** Kafka bootstrap brokers. @defaultValue ['localhost:9092'] */
+  /** Default consumer group / queue name. */
+  defaultQueue?: string;
+}
+
+// ── Kafka ────────────────────────────────────────────────────────────────────────────
+interface KafkaMessagingOptions extends MessagingCommonOptions {
+  broker: 'kafka';
+  /** Kafka bootstrap brokers. */
   brokers?: readonly string[];
+  /** Injected Kafka client factory. */
+  client?: IKafkaFactory;
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
-  /** Kafka request-reply topic; must already exist. @defaultValue 'messaging.replies' */
+  /** Default consumer group name. */
+  defaultQueue?: string;
+  /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
 }
-````
+
+// ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
+interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
+  client: IPubSubTransport;
+  /** GCP project ID. Optional when client is injected. */
+  projectId?: string;
+  /** Service-account credentials. Optional when client is injected. */
+  credentials?: unknown;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+// ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
+interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** GCP project ID. Required for production. */
+  projectId: string;
+  /** Service-account credentials. SDK ADC is used when omitted. */
+  credentials?: unknown;
+  /** Mutually exclusive with the injected arm — client?: never. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/** GCP Pub/Sub options — exclusive union of injected and production arms. */
+type PubSubMessagingOptions =
+  | PubSubMessagingOptionsInjected
+  | PubSubMessagingOptionsProduction;
+
+// ── Azure Service Bus — injected transport (client required; credentials optional) ───
+interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
+  client: IServiceBusTransport;
+  /** Connection string. Optional when client is injected. */
+  connectionString?: string;
+  /** Administration connection string. Optional when client is injected. */
+  adminConnectionString?: string;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+// ── Azure Service Bus — production (connectionString required; client must be omitted) ─
+interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Connection string for the Service Bus namespace. Required for production. */
+  connectionString: string;
+  /** Connection string for the administration client. Defaults to connectionString. */
+  adminConnectionString?: string;
+  /** Mutually exclusive with the injected arm — client?: never. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/** Azure Service Bus options — exclusive union of injected and production arms. */
+type ServiceBusMessagingOptions =
+  | ServiceBusMessagingOptionsInjected
+  | ServiceBusMessagingOptionsProduction;
+
+// ── Custom — inject any IMessageBroker implementation ────────────────────────────────
+interface CustomMessagingOptions extends MessagingCommonOptions {
+  broker: 'custom';
+  /** Pre-built IMessageBroker instance. Required for this arm. */
+  instance: IMessageBroker;
+}
+
+/** The factory's single options parameter. */
+type MessagingPluginOptions =
+  | MemoryMessagingOptions
+  | RedisStreamsMessagingOptions
+  | RabbitMqMessagingOptions
+  | NatsMessagingOptions
+  | KafkaMessagingOptions
+  | PubSubMessagingOptions
+  | ServiceBusMessagingOptions
+  | CustomMessagingOptions;
+```
+
+**Cloud brokers require production credentials OR an injected transport:**
+
+```typescript
+// GCP Pub/Sub — production (requires projectId)
+app.register(MessagingPlugin({
+  broker: 'pubsub',
+  projectId: 'my-gcp-project',
+}));
+
+// GCP Pub/Sub — injected transport
+app.register(MessagingPlugin({
+  broker: 'pubsub',
+  client: myPubSubTransport,
+}));
+
+// Azure Service Bus — production (requires connectionString)
+app.register(MessagingPlugin({
+  broker: 'service-bus',
+  connectionString: 'Endpoint=sb://...',
+}));
+
+// Azure Service Bus — injected transport
+app.register(MessagingPlugin({
+  broker: 'service-bus',
+  client: myServiceBusTransport,
+}));
+```
 
 ### Publishing Messages
 
@@ -2823,8 +2987,9 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 | `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
 | `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-> **Broker support.** Request-reply is available on **all five** brokers — in-memory, Redis Streams,
-> RabbitMQ, NATS, and Kafka.
+> **Broker support.** Request-reply is available on **all supported broker types** — in-memory, Redis
+> Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which delegates to the
+> injected `IMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
@@ -2891,20 +3056,61 @@ export { RedisStreamsBroker } from '@hono-enterprise/messaging-plugin';
 export { RabbitMqBroker } from '@hono-enterprise/messaging-plugin';
 export { NatsBroker } from '@hono-enterprise/messaging-plugin';
 export { KafkaBroker } from '@hono-enterprise/messaging-plugin';
+export { GcpPubSubBroker } from '@hono-enterprise/messaging-plugin';
+export { ServiceBusBroker } from '@hono-enterprise/messaging-plugin';
+
+// Adapter / load helpers. The `*SdkModule` types describe the SDK shape each
+// `adapt*` consumes, so a consumer can type a substitute module.
+export { adaptPubSubModule, loadPubSubModule } from '@hono-enterprise/messaging-plugin';
+export { adaptServiceBusModule, loadServiceBusModule } from '@hono-enterprise/messaging-plugin';
+export type { PubSubSdkModule, ServiceBusSdkModule } from '@hono-enterprise/messaging-plugin';
 
 // Serializer
 export { JsonSerializer } from '@hono-enterprise/messaging-plugin';
 export type { ISerializer } from '@hono-enterprise/messaging-plugin';
 
+// Request-reply error classes
+export {
+  CloudBrokerUnavailableError,
+  MessagingNotSupportedError,
+  RemoteHandlerError,
+  ReplyInboxUnavailableError,
+  RequestTimeoutError,
+} from '@hono-enterprise/messaging-plugin';
+
 // Option types
 export type {
+  CustomMessagingOptions,
   EventsMessagingBridgeOptions,
+  KafkaMessagingOptions,
   KafkaOptions,
+  MemoryMessagingOptions,
   MessagingBrokerType,
+  MessagingCommonOptions,
   MessagingPluginOptions,
+  NatsMessagingOptions,
   NatsOptions,
+  PubSubMessagingOptions,
+  RabbitMqMessagingOptions,
   RabbitMqOptions,
+  RedisStreamsMessagingOptions,
   RedisStreamsOptions,
+  ServiceBusMessagingOptions,
+} from '@hono-enterprise/messaging-plugin';
+
+// Port types (structural)
+export type {
+  IPubSubSubscription,
+  IPubSubTransport,
+  PubSubOptions,
+} from '@hono-enterprise/messaging-plugin';
+export type {
+  IServiceBusProcessErrorArgs,
+  IServiceBusReceiver,
+  IServiceBusSubscribeOptions,
+  IServiceBusSubscription,
+  IServiceBusTransport,
+  ServiceBusOptions,
 } from '@hono-enterprise/messaging-plugin';
 
 // Re-exported types from @hono-enterprise/common
@@ -2929,14 +3135,34 @@ Provides background job queue with Memory and Redis adapters.
 ### Exports
 
 - **`QueuePlugin`** — Plugin factory for registering the queue service
-- **`QueueAdapterType`** — `'memory' | 'redis' | 'rabbitmq'`
-- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`)
+- **`QueueAdapterType`** — `'memory' | 'redis' | 'rabbitmq' | 'sqs'`
+- **`QueuePluginOptions`** — Plugin configuration options (includes `client`, `url`, `prefix?`,
+  `sqs?`)
 - **`MemoryQueue`** — In-memory queue adapter for development/testing
 - **`RedisQueue`** — Redis-backed queue adapter for production
 - **`RedisQueueOptions`** — Redis adapter configuration
 - **`RabbitMqQueue`** — RabbitMQ queue adapter via amqplib (polling via basicGet, TTL+DLX for
   delays)
 - **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`)
+- **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
+  `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, dead-letter ordering)
+- **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
+  `credentials?`, `endpoint?`, `client?`)
+- **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`)
+- **`SqsReceivedMessage`** — SQS received message shape (body, receiptHandle,
+  approximateReceiveCount)
+- **`SnsPublisher`** — SNS publisher for fan-out (SNS→SQS pairing)
+- **`SnsPublisherOptions`** — SNS publisher configuration
+- **`ISnsTransport`** — Structural SNS transport port
+- **`adaptSqsModule`** / **`loadSqsModule`** — SQS SDK adapter and lazy loader
+- **`SqsSdkModule`** — Shape of the SQS SDK module `adaptSqsModule` consumes; exported so a consumer
+  can type a substitute module
+- **`adaptSnsModule`** / **`loadSnsModule`** — SNS SDK adapter and lazy loader
+- **`SnsSdkModule`** — Shape of the SNS SDK module `adaptSnsModule` consumes
+- **`QueueBackendUnavailableError`** — Thrown when a cloud queue backend is unavailable (e.g., SQS
+  on Cloudflare Workers)
+- **`SqsDelayTooLongError`** — Thrown when SQS delay exceeds 900 s
+- **`SqsQueueNotConfiguredError`** — Thrown when a job name has no queue URL mapping
 - **`IQueue`** — Queue service interface (re-exported from `@hono-enterprise/common`)
 - **`IJob<T>`** — Job interface (re-exported)
 - **`JobProcessor<T>`** — Job processor type (re-exported)
@@ -2978,6 +3204,23 @@ app.register(QueuePlugin({
   adapter: 'rabbitmq',
   url: config.get('RABBITMQ_URL'),
   prefix: 'myapp.queue',
+  pollIntervalMs: 1000,
+  defaultMaxAttempts: 3,
+}));
+
+// SQS adapter (production, requires @aws-sdk/client-sqs)
+app.register(QueuePlugin({
+  adapter: 'sqs',
+  sqs: {
+    region: 'us-east-1',
+    queues: {
+      'send-welcome-email': 'https://sqs.us-east-1.amazonaws.com/123456789012/welcome-emails',
+      'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments',
+    },
+    deadLetterQueues: {
+      'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments-dlq',
+    },
+  },
   pollIntervalMs: 1000,
   defaultMaxAttempts: 3,
 }));
@@ -7693,3 +7936,4 @@ The Hono Enterprise public API is designed for developer experience:
 6. **Runtime independent** — Runs on Node.js, Deno, Bun, and Cloudflare Workers (future)
 7. **Testable** — Built-in test utilities, mock plugins, request injection
 8. **Enterprise-ready** — Auth, secrets, audit, resilience, multi-tenancy, feature flags
+````

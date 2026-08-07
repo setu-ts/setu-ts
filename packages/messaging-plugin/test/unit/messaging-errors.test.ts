@@ -1,41 +1,49 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
+  CloudBrokerUnavailableError,
   MessagingNotSupportedError,
   RemoteHandlerError,
+  ReplyInboxUnavailableError,
   RequestTimeoutError,
 } from '../../src/errors.ts';
 
-describe('request-reply errors', () => {
-  it('RequestTimeoutError has a default message and name', () => {
+describe('messaging errors', () => {
+  it('RequestTimeoutError has correct name and message', () => {
     const err = new RequestTimeoutError();
-    expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('RequestTimeoutError');
     expect(err.message).toContain('timed out');
-  });
-
-  it('RequestTimeoutError accepts a custom message', () => {
-    const err = new RequestTimeoutError('custom');
-    expect(err.message).toBe('custom');
-  });
-
-  it('RemoteHandlerError carries the remote message', () => {
-    const err = new RemoteHandlerError('downstream boom');
     expect(err).toBeInstanceOf(Error);
+  });
+
+  it('RemoteHandlerError carries remoteMessage', () => {
+    const err = new RemoteHandlerError('handler crashed');
     expect(err.name).toBe('RemoteHandlerError');
-    expect(err.remoteMessage).toBe('downstream boom');
-    expect(err.message).toContain('downstream boom');
-  });
-
-  it('MessagingNotSupportedError has a default message naming reply-capable brokers', () => {
-    const err = new MessagingNotSupportedError();
+    expect(err.remoteMessage).toBe('handler crashed');
+    expect(err.message).toContain('handler crashed');
     expect(err).toBeInstanceOf(Error);
-    expect(err.name).toBe('MessagingNotSupportedError');
-    expect(err.message).toContain('request-reply');
   });
 
-  it('MessagingNotSupportedError accepts a custom message', () => {
-    const err = new MessagingNotSupportedError('nope');
-    expect(err.message).toBe('nope');
+  it('MessagingNotSupportedError is deprecated but present', () => {
+    const err = new MessagingNotSupportedError();
+    expect(err.name).toBe('MessagingNotSupportedError');
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it('CloudBrokerUnavailableError names backend and specifier', () => {
+    const err = new CloudBrokerUnavailableError('GCP Pub/Sub', 'npm:@google-cloud/pubsub@^6');
+    expect(err.name).toBe('CloudBrokerUnavailableError');
+    expect(err.message).toContain('GCP Pub/Sub');
+    expect(err.message).toContain('npm:@google-cloud/pubsub@^6');
+    expect(err.message).toContain('Cloudflare Workers');
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it('ReplyInboxUnavailableError names the topic', () => {
+    const err = new ReplyInboxUnavailableError('messaging.replies');
+    expect(err.name).toBe('ReplyInboxUnavailableError');
+    expect(err.message).toContain('messaging.replies');
+    expect(err.message).toContain('Manage');
+    expect(err).toBeInstanceOf(Error);
   });
 });

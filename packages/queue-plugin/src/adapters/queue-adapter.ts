@@ -71,37 +71,46 @@ export interface QueueAdapter {
    * Acknowledges a job as successfully processed.
    *
    * @param name - Job name
-   * @param id - Job ID
+   * @param id - Job ID (stable public identity)
+   * @param claimToken - Opaque claim token returned from reserve (prevents stale settlement)
    * @returns Resolves when acknowledged
    * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
-  ack(name: string, id: string): Promise<void>;
+  ack(name: string, id: string, claimToken: string): Promise<void>;
 
   /**
    * Requeues a job with a new available timestamp.
    *
    * @param name - Job name
-   * @param id - Job ID
+   * @param id - Job ID (stable public identity)
    * @param availableAtMs - When the job becomes available again
    * @param attempts - Updated attempt count
+   * @param claimToken - Opaque claim token returned from reserve (prevents stale settlement)
    * @returns Resolves when requeued
    * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
-  requeue(name: string, id: string, availableAtMs: number, attempts: number): Promise<void>;
+  requeue(
+    name: string,
+    id: string,
+    availableAtMs: number,
+    attempts: number,
+    claimToken: string,
+  ): Promise<void>;
 
   /**
    * Moves a job to the dead letter queue.
    *
    * @param name - Job name
-   * @param id - Job ID
+   * @param id - Job ID (stable public identity)
    * @param nowMs - Current timestamp in ms (for dead-letter timestamp)
+   * @param claimToken - Opaque claim token returned from reserve (prevents stale settlement)
    * @returns Resolves when dead-lettered
    * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
-  deadLetter(name: string, id: string, nowMs: number): Promise<void>;
+  deadLetter(name: string, id: string, nowMs: number, claimToken: string): Promise<void>;
 
   /**
    * Stores a recurring job.

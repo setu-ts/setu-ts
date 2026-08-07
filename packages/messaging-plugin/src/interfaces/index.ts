@@ -85,111 +85,220 @@ export interface IKafkaFactory {
  *
  * @since 0.1.0
  */
-export type MessagingBrokerType = 'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka';
+export type MessagingBrokerType =
+  | 'memory'
+  | 'redis-streams'
+  | 'rabbitmq'
+  | 'nats'
+  | 'kafka'
+  | 'pubsub'
+  | 'service-bus'
+  | 'custom';
 
 /**
- * Options for the MessagingPlugin factory.
+ * Shared options present on every {@linkcode MessagingPluginOptions} arm.
  *
  * @since 0.1.0
  */
-export interface MessagingPluginOptions {
-  /**
-   * The broker type to use.
-   *
-   * @defaultValue `'memory'`
-   */
-  broker?: MessagingBrokerType;
-
+export interface MessagingCommonOptions {
   /**
    * Instance name for multi-instance support.
-   *
-   * When provided, the plugin registers under a dot-namespaced token
-   * (`messaging.<name>`) instead of the bare `'messaging'` token.
-   *
-   * @defaultValue `undefined` (uses bare `'messaging'` token)
    */
   name?: string;
 
   /**
    * Serializer for message payloads.
-   *
-   * @defaultValue `new JsonSerializer()`
    */
   serializer?: ISerializer;
+}
 
-  /**
-   * Redis connection URL (used when broker is `'redis-streams'`).
-   *
-   * @defaultValue `'redis://localhost:6379'`
-   */
+// ─── Arms of the discriminated union ───────────────────────────────────────────
+
+/**
+ * Default (memory) arm. The discriminant is optional so that `MessagingPlugin()`
+ * and `MessagingPlugin({})` remain valid.
+ *
+ * @since 0.1.0
+ */
+export interface MemoryMessagingOptions extends MessagingCommonOptions {
+  broker?: 'memory';
+}
+
+/**
+ * Redis Streams arm.
+ *
+ * @since 0.1.0
+ */
+export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
+  broker: 'redis-streams';
   url?: string;
-
-  /**
-   * Injected client (bypasses lazy npm import).
-   *
-   * Supports Redis, RabbitMQ, NATS, or Kafka clients depending on the broker type.
-   */
-  client?: IRedisStreamsClient | IAmqpConnection | INatsConnection | IKafkaFactory;
-
-  /**
-   * Default consumer group name for Redis Streams subscriptions.
-   *
-   * @defaultValue `'messaging-consumers'`
-   */
+  client?: IRedisStreamsClient;
   defaultQueue?: string;
-
-  /**
-   * Poll interval in milliseconds for Redis Streams consumer loop.
-   *
-   * @defaultValue `100`
-   */
   pollIntervalMs?: number;
-
-  /**
-   * Block timeout in milliseconds for Redis Streams XREADGROUP.
-   *
-   * @defaultValue `100`
-   */
   blockSizeMs?: number;
+}
 
-  /**
-   * RabbitMQ exchange name (used when broker is `'rabbitmq'`).
-   *
-   * @defaultValue `'messaging'`
-   */
+/**
+ * RabbitMQ arm.
+ *
+ * @since 0.1.0
+ */
+export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  broker: 'rabbitmq';
+  url?: string;
+  client?: IAmqpConnection;
   exchangeName?: string;
+  defaultQueue?: string;
+}
 
-  /**
-   * NATS JetStream stream name (used when broker is `'nats'`).
-   *
-   * @defaultValue `'MESSAGING'`
-   */
+/**
+ * NATS arm.
+ *
+ * @since 0.1.0
+ */
+export interface NatsMessagingOptions extends MessagingCommonOptions {
+  broker: 'nats';
+  url?: string;
+  client?: INatsConnection;
   streamName?: string;
+  defaultQueue?: string;
+}
 
-  /**
-   * Kafka bootstrap brokers (used when broker is `'kafka'`).
-   *
-   * @defaultValue `['localhost:9092']`
-   */
+/**
+ * Kafka arm.
+ *
+ * @since 0.1.0
+ */
+export interface KafkaMessagingOptions extends MessagingCommonOptions {
+  broker: 'kafka';
   brokers?: readonly string[];
-
-  /**
-   * Kafka client ID (used when broker is `'kafka'`).
-   *
-   * @defaultValue `'messaging-client'`
-   */
+  client?: IKafkaFactory;
   clientId?: string;
-
-  /**
-   * Topic carrying request-reply responses (used when broker is `'kafka'`).
-   *
-   * Must already exist — the broker creates no topics. See
-   * {@linkcode KafkaOptions.replyTopic}.
-   *
-   * @defaultValue `'messaging.replies'`
-   */
+  defaultQueue?: string;
   replyTopic?: string;
 }
+
+/**
+ * GCP Pub/Sub arm — injected transport variant.
+ *
+ * When {@link client} is provided, production credentials are not required.
+ *
+ * @since 0.1.0
+ */
+export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** Injected transport (bypasses lazy SDK load). Required for this arm. */
+  client: import('../brokers/pubsub-broker.ts').IPubSubTransport;
+  /** GCP project ID. Optional when {@link client} is injected. */
+  projectId?: string;
+  /** Service-account credentials. Optional when {@link client} is injected. */
+  credentials?: unknown;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/**
+ * GCP Pub/Sub arm — production variant.
+ *
+ * Requires {@link projectId} and does NOT accept an injected {@link client}.
+ *
+ * @since 0.1.0
+ */
+export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'pubsub';
+  /** GCP project ID. Required for production. */
+  projectId: string;
+  /** Service-account credentials (object or key path). SDK ADC is used when omitted. */
+  credentials?: unknown;
+  /** Mutually exclusive with production arm — use {@link PubSubMessagingOptionsInjected} instead. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/**
+ * GCP Pub/Sub options — exclusive union of injected and production arms.
+ *
+ * @since 0.1.0
+ */
+export type PubSubMessagingOptions =
+  | PubSubMessagingOptionsInjected
+  | PubSubMessagingOptionsProduction;
+
+/**
+ * Azure Service Bus arm — injected transport variant.
+ *
+ * When {@link client} is provided, production credentials are not required.
+ *
+ * @since 0.1.0
+ */
+export interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Injected transport (bypasses lazy SDK load). Required for this arm. */
+  client: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
+  /** Connection string. Optional when {@link client} is injected. */
+  connectionString?: string;
+  adminConnectionString?: string;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/**
+ * Azure Service Bus arm — production variant.
+ *
+ * Requires {@link connectionString} and does NOT accept an injected {@link client}.
+ *
+ * @since 0.1.0
+ */
+export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  broker: 'service-bus';
+  /** Connection string for the Service Bus namespace. Required for production. */
+  connectionString: string;
+  /** Connection string for the administration client. Defaults to {@link connectionString}. */
+  adminConnectionString?: string;
+  /** Mutually exclusive with production arm — use {@link ServiceBusMessagingOptionsInjected} instead. */
+  client?: never;
+  defaultQueue?: string;
+  replyTopic?: string;
+}
+
+/**
+ * Azure Service Bus options — exclusive union of injected and production arms.
+ *
+ * @since 0.1.0
+ */
+export type ServiceBusMessagingOptions =
+  | ServiceBusMessagingOptionsInjected
+  | ServiceBusMessagingOptionsProduction;
+
+/**
+ * Custom (inject-any-broker) arm.
+ *
+ * @since 0.1.0
+ */
+export interface CustomMessagingOptions extends MessagingCommonOptions {
+  broker: 'custom';
+  instance: import('@hono-enterprise/common').IMessageBroker;
+}
+
+/**
+ * Discriminated union of all broker option arms.
+ *
+ * The memory arm's `broker` is optional so that `{}` and `undefined` satisfy
+ * the union, keeping the factory's own `= {}` default and every bare call
+ * (`MessagingPlugin()`, `MessagingPlugin({})`) valid.
+ *
+ * @since 0.1.0
+ */
+export type MessagingPluginOptions =
+  | MemoryMessagingOptions
+  | RedisStreamsMessagingOptions
+  | RabbitMqMessagingOptions
+  | NatsMessagingOptions
+  | KafkaMessagingOptions
+  | PubSubMessagingOptions
+  | ServiceBusMessagingOptions
+  | CustomMessagingOptions;
 
 /**
  * Redis-specific options (internal use).

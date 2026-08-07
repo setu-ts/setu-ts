@@ -1,6 +1,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as messaging from '../../src/index.ts';
+import type {
+  PubSubMessagingOptions,
+  PubSubOptions,
+  ServiceBusMessagingOptions,
+  ServiceBusOptions,
+} from '../../src/index.ts';
 
 /**
  * Barrel exports test.
@@ -49,8 +55,19 @@ describe('barrel exports', () => {
   });
 
   it('type exports', () => {
-    // Type exports are verified by deno check - this test just confirms
-    // the module can be imported without errors
-    expect(messaging).toBeDefined();
+    // These types are exported from the barrel and compile correctly.
+    // Assigning to _ prevents unused-variable warnings while proving
+    // the types are part of the module's exported surface.
+    const _pubSubOpts: PubSubOptions = {};
+    const _serviceBusOpts: ServiceBusOptions = {};
+    const _pubSubMessagingOpts: PubSubMessagingOptions = { broker: 'pubsub', projectId: 'test' };
+    const _serviceBusMessagingOpts: ServiceBusMessagingOptions = {
+      broker: 'service-bus',
+      connectionString: 'test',
+    };
+    expect(_pubSubOpts).toBeDefined();
+    expect(_serviceBusOpts).toBeDefined();
+    expect(_pubSubMessagingOpts).toBeDefined();
+    expect(_serviceBusMessagingOpts).toBeDefined();
   });
 });

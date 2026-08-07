@@ -103,7 +103,7 @@ export class MemoryQueue implements QueueAdapter {
   }
 
   // deno-lint-ignore require-await
-  async ack(name: string, id: string): Promise<void> {
+  async ack(name: string, id: string, _claimToken?: string): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }
@@ -118,6 +118,7 @@ export class MemoryQueue implements QueueAdapter {
     id: string,
     availableAtMs: number,
     attempts: number,
+    _claimToken?: string,
   ): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -141,7 +142,7 @@ export class MemoryQueue implements QueueAdapter {
   }
 
   // deno-lint-ignore require-await
-  async deadLetter(name: string, id: string, _nowMs: number): Promise<void> {
+  async deadLetter(name: string, id: string, _nowMs: number, _claimToken?: string): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
     }

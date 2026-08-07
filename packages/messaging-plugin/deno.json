@@ -13,8 +13,13 @@
         "localhost:6379"
       ],
       "sys": [
-        "hostname"
+        "hostname",
+        "osRelease"
       ]
     }
+  },
+  "imports": {
+    "@google-cloud/pubsub": "npm:@google-cloud/pubsub@^6",
+    "@azure/service-bus": "npm:@azure/service-bus@^7"
   }
 }

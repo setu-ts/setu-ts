@@ -5814,13 +5814,16 @@ fetch-based providers elsewhere in the repo.
 
 ### Deliverables
 
-- [ ] A `'custom'` arm on `MessagingPluginOptions`, with the option type a discriminated union
-- [ ] `MessagingPluginOptions` documented in `PUBLIC_API.md` as a public-surface change
-- [ ] GCP Pub/Sub and Azure Service Bus brokers implementing `IMessageBroker`
-- [ ] An SQS adapter implementing `IQueue`, and an SNS→SQS pairing for fan-out
-- [ ] A per-backend `openInbox` decision for request-reply, or an explicit documented refusal
-- [ ] Guarded real-import tests plus an injectable client facade per backend
-- [ ] Runtime gating and a documented no-op or throw on Cloudflare Workers
+- ✅ A `'custom'` arm on `MessagingPluginOptions`, with the option type a discriminated union
+- ✅ `MessagingPluginOptions` documented in `PUBLIC_API.md` as a public-surface change
+- ✅ GCP Pub/Sub and Azure Service Bus brokers implementing `IMessageBroker`
+- ✅ An SQS adapter implementing `IQueue` (`SqsQueue`), and an SNS→SQS pairing for fan-out
+  (`SnsPublisher`)
+- ✅ A per-backend `openInbox` decision for request-reply, or an explicit documented refusal
+- ✅ Guarded real-import tests plus an injectable client facade per backend
+- ✅ Runtime gating on Cloudflare Workers — resolved to a **throw**, not a no-op: both cloud brokers
+  throw `CloudBrokerUnavailableError` and `SqsQueue` throws `QueueBackendUnavailableError`, each
+  naming the backend and its npm specifier. A silent no-op would publish into a void.
 
 ### Out of scope
 
@@ -5907,4 +5910,4 @@ fetch-based providers elsewhere in the repo.
 | 52c       | ✅     | cloudflare-plugin (D1 + common)       |
 | 52d       | ✅     | cloudflare-plugin (durable objects)   |
 | 53        | ✅     | real-backend CI (examples gate)       |
-| 54        | ⬜     | messaging-plugin (cloud brokers)      |
+| 54        | ✅     | messaging-plugin (cloud brokers)      |
