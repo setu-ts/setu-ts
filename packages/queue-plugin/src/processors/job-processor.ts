@@ -16,9 +16,15 @@ import type { IRuntimeServices } from '@hono-enterprise/common';
  * Not barrel-exported.
  */
 interface JobRunnerAdapter {
-  ack(name: string, id: string): Promise<void>;
-  requeue(name: string, id: string, availableAtMs: number, attempts: number): Promise<void>;
-  deadLetter(name: string, id: string, nowMs: number): Promise<void>;
+  ack(name: string, id: string, claimToken: string): Promise<void>;
+  requeue(
+    name: string,
+    id: string,
+    availableAtMs: number,
+    attempts: number,
+    claimToken: string,
+  ): Promise<void>;
+  deadLetter(name: string, id: string, nowMs: number, claimToken: string): Promise<void>;
 }
 
 /**
@@ -68,7 +74,13 @@ export async function runJob<T>(
         maxAttempts: storedJob.maxAttempts,
         retryInMs: backoffMs,
       });
-      await adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts);
+      await adapter.requeue(
+        storedJob.name,
+        storedJob.id,
+        availableAtMs,
+        nextAttempts,
+        storedJob.id,
+      );
       return;
     } else {
       // At max attempts: dead-letter
@@ -78,11 +90,11 @@ export async function runJob<T>(
         attempts: storedJob.attempts,
         maxAttempts: storedJob.maxAttempts,
       });
-      await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now());
+      await adapter.deadLetter(storedJob.name, storedJob.id, runtime.now(), storedJob.id);
       return;
     }
   }
 
   // Success: acknowledge (outside the try/catch so ack errors don't trigger requeue)
-  await adapter.ack(storedJob.name, storedJob.id);
+  await adapter.ack(storedJob.name, storedJob.id, storedJob.id);
 }

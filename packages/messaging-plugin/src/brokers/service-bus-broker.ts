@@ -181,7 +181,8 @@ export function adaptServiceBusModule(
   const admin = new mod.ServiceBusAdministrationClient(options.adminConnectionString);
 
   const senders = new Map<string, ReturnType<typeof client['createSender']>>();
-  const receivers = new Map<string, { close: () => Promise<void> }>();
+  // Track multiple receiver handles per key to support duplicate opens
+  const receivers = new Map<string, { close: () => Promise<void> }[]>();
 
   return {
     send: async (topic: string, body: string): Promise<void> => {
@@ -207,14 +208,21 @@ export function adaptServiceBusModule(
           processMessage: async (rawMessage) => {
             const msg = rawMessage as { body?: unknown };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
+
+            // Create settlement functions that return promises
+            // Settlement must await the handler to ensure the callback doesn't resolve before settlement
+            const ack = async (): Promise<void> => {
+              await receiver.completeMessage(rawMessage);
+            };
+            const nack = async (): Promise<void> => {
+              await receiver.abandonMessage(rawMessage);
+            };
+
+            // Await onMessage to ensure handler completes before settlement
             await onMessage({
               payload: body,
-              ack: async () => {
-                await receiver.completeMessage(rawMessage);
-              },
-              nack: async () => {
-                await receiver.abandonMessage(rawMessage);
-              },
+              ack,
+              nack,
             });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
@@ -224,17 +232,27 @@ export function adaptServiceBusModule(
       );
 
       const key = `${topic}/${subscription}`;
-      receivers.set(key, subHandle);
+      // Track multiple handles for duplicate opens
+      const existing = receivers.get(key) ?? [];
+      existing.push(subHandle);
+      receivers.set(key, existing);
 
       // Await required — the SDK requires async `open` for its type contract.
       await Promise.resolve();
 
       return {
         close: async () => {
-          const handle = receivers.get(key);
-          if (handle) {
-            await handle.close();
-            receivers.delete(key);
+          const handles = receivers.get(key);
+          if (handles) {
+            // Close only this specific handle (last one in array)
+            const handle = handles.pop();
+            if (handle) {
+              await handle.close();
+            }
+            // Clean up empty array
+            if (handles.length === 0) {
+              receivers.delete(key);
+            }
           }
         },
       };
@@ -250,8 +268,11 @@ export function adaptServiceBusModule(
         await sender.close();
       }
       senders.clear();
-      for (const receiver of receivers.values()) {
-        await receiver.close();
+      // Close all receiver handles for each key
+      for (const handles of receivers.values()) {
+        for (const handle of handles) {
+          await handle.close();
+        }
       }
       receivers.clear();
       await client.close();
@@ -329,13 +350,14 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         try {
           const deserialized = this.#serializer.deserialize(msg.payload);
           onReply(deserialized);
-          await Promise.resolve();
-          msg.ack();
+          // Await settlement so the delivery callback does not resolve
+          // before ack/nack completes.
+          await msg.ack();
         } catch (err) {
           if (this.#logger) {
             this.#logger.error(`Service Bus reply deserialization error: ${err}`);
           }
-          msg.nack();
+          await msg.nack();
         }
       });
 

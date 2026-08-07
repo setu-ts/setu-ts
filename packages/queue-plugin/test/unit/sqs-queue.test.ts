@@ -335,7 +335,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.ack('jobs', jobs[0].id);
+      await queue.ack('jobs', jobs[0].id, jobs[0].claimToken ?? jobs[0].id);
 
       expect(deletedReceipt).toBe('handle-j1');
     });
@@ -355,7 +355,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       // Should not throw even with unknown id
-      await queue.ack('jobs', 'nonexistent-id');
+      await queue.ack('jobs', 'nonexistent-id', 'claim-token');
     });
   });
 
@@ -385,7 +385,13 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.requeue('jobs', jobs[0].id, 1000000 + 60000, jobs[0].attempts);
+      await queue.requeue(
+        'jobs',
+        jobs[0].id,
+        1000000 + 60000,
+        jobs[0].attempts,
+        jobs[0].claimToken ?? jobs[0].id,
+      );
 
       expect(visibilitySeconds).toBe(60);
     });
@@ -404,7 +410,7 @@ describe('SqsQueue', () => {
       });
       await queue.connect();
 
-      await queue.requeue('jobs', 'nonexistent-id', 2000000, 2);
+      await queue.requeue('jobs', 'nonexistent-id', 2000000, 2, 'claim-token');
     });
   });
 
@@ -438,7 +444,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
 
       expect(dlqSent).toBe(true);
       expect(deletedReceipt).toBe('handle-j1');
@@ -469,7 +475,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
 
       expect(deletedReceipt).toBe('handle-j1');
     });
@@ -618,7 +624,7 @@ describe('SqsQueue', () => {
       });
       await queue.connect();
 
-      await queue.ack('jobs', 'nonexistent');
+      await queue.ack('jobs', 'nonexistent', 'claim-token');
       expect(logged).toContain('unknown or expired');
     });
 
@@ -641,7 +647,7 @@ describe('SqsQueue', () => {
       });
       await queue.connect();
 
-      await queue.requeue('jobs', 'nonexistent', 2000000, 1);
+      await queue.requeue('jobs', 'nonexistent', 2000000, 1, 'claim-token');
       expect(logged).toContain('unknown or expired');
     });
 
@@ -664,7 +670,7 @@ describe('SqsQueue', () => {
       });
       await queue.connect();
 
-      await queue.deadLetter('jobs', 'nonexistent', 1000000);
+      await queue.deadLetter('jobs', 'nonexistent', 1000000, 'claim-token');
       expect(logged).toContain('unknown or expired');
     });
 
@@ -694,7 +700,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
       expect(logged).toContain('no DLQ configured');
     });
 
@@ -731,7 +737,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
 
       expect(logged).toContain('DLQ send to');
       // Source message should NOT be deleted when DLQ send fails
@@ -768,7 +774,7 @@ describe('SqsQueue', () => {
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000);
+      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
 
       // Source-delete failure logs duplicate-risk message
       expect(logged).toContain('possible duplicate on re-claim');
@@ -862,7 +868,7 @@ describe('SqsQueue', () => {
       (runtime as unknown as { now: () => number }).now = () => 2000000;
 
       // The entry should now be expired — ack returns early without deleting
-      await queue.ack('jobs', jobs[0].id);
+      await queue.ack('jobs', jobs[0].id, jobs[0].claimToken ?? jobs[0].id);
       expect(deletedReceipt).toBe(''); // not deleted because entry expired
     });
   });
@@ -1169,7 +1175,7 @@ describe('C10: DLQ receives original body', () => {
 
     const jobs = await queue.reserve<{ important: boolean }>('jobs', 10, 1000000);
     expect(jobs).toHaveLength(1);
-    await queue.deadLetter('jobs', jobs[0].id, 1000000);
+    await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
 
     const dlqSend = sentAll.find((s) => s.queueUrl === 'http://localhost:9324/jobs-dlq');
     expect(dlqSend).not.toBeUndefined();
@@ -1261,15 +1267,21 @@ describe('SqsQueue stable identity and current receipt', () => {
     // First reserve (receipt A)
     const jobs1 = await queue.reserve('jobs', 10, 1000000);
     expect(jobs1[0].id).toBe('job-stable-1');
+    const claimTokenA = jobs1[0].claimToken!;
 
     // Redelivery (receipt B) — overwrites the stored receipt
-    await queue.reserve('jobs', 10, 1000000);
+    const jobs2 = await queue.reserve('jobs', 10, 1000000);
+    const claimTokenB = jobs2[0].claimToken!;
 
     // Ack uses receipt B (current), NOT receipt A
-    await queue.ack('jobs', 'job-stable-1');
+    await queue.ack('jobs', 'job-stable-1', claimTokenB);
 
     expect(deletedReceipts).toContain('receipt-B');
     expect(deletedReceipts).not.toContain('receipt-A');
+
+    // Stale ack with claimToken A should no-op (entry was overwritten)
+    await queue.ack('jobs', 'job-stable-1', claimTokenA);
+    expect(deletedReceipts).toHaveLength(1); // still only receipt-B
   });
 
   it('requeue uses current receipt handle after redelivery', async () => {
@@ -1309,16 +1321,22 @@ describe('SqsQueue stable identity and current receipt', () => {
     await queue.connect();
 
     // First reserve (receipt A)
-    await queue.reserve('jobs', 10, 1000000);
+    const jobs1 = await queue.reserve('jobs', 10, 1000000);
+    const claimTokenA = jobs1[0].claimToken!;
 
     // Redelivery (receipt B)
-    await queue.reserve('jobs', 10, 1000000);
+    const jobs2 = await queue.reserve('jobs', 10, 1000000);
+    const claimTokenB = jobs2[0].claimToken!;
 
     // Requeue uses receipt B
-    await queue.requeue('jobs', 'job-stable-1', 2000000, 2);
+    await queue.requeue('jobs', 'job-stable-1', 2000000, 2, claimTokenB);
 
     expect(visibilityReceipts).toContain('receipt-B');
     expect(visibilityReceipts).not.toContain('receipt-A');
+
+    // Stale requeue with claimToken A should no-op
+    await queue.requeue('jobs', 'job-stable-1', 2000000, 2, claimTokenA);
+    expect(visibilityReceipts).toHaveLength(1); // still only receipt-B
   });
 
   it('deadLetter uses current receipt and original body after redelivery', async () => {
@@ -1369,7 +1387,7 @@ describe('SqsQueue stable identity and current receipt', () => {
     const jobs = await queue.reserve<{ important: boolean }>('jobs', 10, 1000000);
 
     // DeadLetter uses receipt B and forwards original body
-    await queue.deadLetter('jobs', jobs[0].id, 1000000);
+    await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
 
     const dlqSend = sentAll.find((s) => s.queueUrl === 'http://localhost:9324/jobs-dlq');
     expect(dlqSend).not.toBeUndefined();
@@ -1378,6 +1396,153 @@ describe('SqsQueue stable identity and current receipt', () => {
     // Delete uses current receipt B, never A
     expect(deletedReceipts).toContain('receipt-B');
     expect(deletedReceipts).not.toContain('receipt-A');
+  });
+});
+
+// Finding 4: Stale claim overlap tests
+describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
+  it('stale ack on receipt A does not delete receipt B', async () => {
+    // Simulates: worker A holds receipt A, worker B gets receipt B for same job,
+    // worker A's stale ack must not delete receipt B.
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: {},
+      maxAttempts: 3,
+    });
+
+    const deletedReceipts: string[] = [];
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () =>
+        Promise.resolve([{
+          body: originalBody,
+          receiptHandle: 'receipt-B',
+          approximateReceiveCount: '2',
+        }]),
+      delete: (_q, receiptHandle) => {
+        deletedReceipts.push(receiptHandle);
+        return Promise.resolve();
+      },
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    // Reserve B (simulates B arriving after A's claim expired)
+    const jobs = await queue.reserve('jobs', 1, 1000000);
+    expect(jobs.length).toBe(1);
+    const claimTokenB = jobs[0].claimToken!;
+
+    // Stale ack with receipt A's claim token (not B's)
+    await queue.ack('jobs', 'job-stable-1', 'stale-claim-token-A');
+
+    // Receipt B should NOT have been deleted
+    expect(deletedReceipts).not.toContain('receipt-B');
+    expect(deletedReceipts).not.toContain('stale-claim-token-A');
+
+    // B can still settle itself
+    await queue.ack('jobs', 'job-stable-1', claimTokenB);
+    expect(deletedReceipts).toContain('receipt-B');
+  });
+
+  it('stale requeue on receipt A does not affect receipt B', async () => {
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: {},
+      maxAttempts: 3,
+    });
+
+    const visibilityReceipts: string[] = [];
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () =>
+        Promise.resolve([{
+          body: originalBody,
+          receiptHandle: 'receipt-B',
+          approximateReceiveCount: '2',
+        }]),
+      delete: () => Promise.resolve(),
+      changeVisibility: (_q, _r, _s) => {
+        visibilityReceipts.push('receipt-B');
+        return Promise.resolve();
+      },
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 1, 1000000);
+    const claimTokenB = jobs[0].claimToken!;
+
+    // Stale requeue with A's claim token
+    await queue.requeue('jobs', 'job-stable-1', 2000000, 2, 'stale-claim-token-A');
+
+    // Receipt B should NOT have been touched
+    expect(visibilityReceipts).not.toContain('receipt-B');
+
+    // B can still requeue itself
+    await queue.requeue('jobs', 'job-stable-1', 2000000, 2, claimTokenB);
+    expect(visibilityReceipts).toContain('receipt-B');
+  });
+
+  it('stale deadLetter on receipt A does not affect receipt B', async () => {
+    const originalBody = JSON.stringify({
+      v: 1,
+      id: 'job-stable-1',
+      name: 'jobs',
+      data: {},
+      maxAttempts: 3,
+    });
+
+    const deletedReceipts: string[] = [];
+    const transport: ISqsTransport = {
+      send: () => Promise.resolve(),
+      receive: () =>
+        Promise.resolve([{
+          body: originalBody,
+          receiptHandle: 'receipt-B',
+          approximateReceiveCount: '3',
+        }]),
+      delete: (_q, receiptHandle) => {
+        deletedReceipts.push(receiptHandle);
+        return Promise.resolve();
+      },
+      changeVisibility: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+
+    const queue = new SqsQueue(createRuntime(), {
+      queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'http://localhost:9324/jobs-dlq' },
+      client: transport,
+    });
+    await queue.connect();
+
+    const jobs = await queue.reserve('jobs', 1, 1000000);
+    const claimTokenB = jobs[0].claimToken!;
+
+    // Stale deadLetter with A's claim token
+    await queue.deadLetter('jobs', 'job-stable-1', 1000000, 'stale-claim-token-A');
+
+    // Receipt B should NOT have been deleted
+    expect(deletedReceipts).not.toContain('receipt-B');
+
+    // B can still deadLetter itself
+    await queue.deadLetter('jobs', 'job-stable-1', 1000000, claimTokenB);
+    expect(deletedReceipts).toContain('receipt-B');
   });
 });
 

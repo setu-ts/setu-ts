@@ -3202,6 +3202,23 @@ app.register(QueuePlugin({
   pollIntervalMs: 1000,
   defaultMaxAttempts: 3,
 }));
+
+// SQS adapter (production, requires @aws-sdk/client-sqs)
+app.register(QueuePlugin({
+  adapter: 'sqs',
+  sqs: {
+    region: 'us-east-1',
+    queues: {
+      'send-welcome-email': 'https://sqs.us-east-1.amazonaws.com/123456789012/welcome-emails',
+      'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments',
+    },
+    deadLetterQueues: {
+      'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments-dlq',
+    },
+  },
+  pollIntervalMs: 1000,
+  defaultMaxAttempts: 3,
+}));
 ```
 
 ### Adding Jobs

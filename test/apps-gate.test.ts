@@ -82,6 +82,18 @@ describe('real-backend CI wiring', () => {
     expect(workflow).toContain('- 6379:6379');
   });
 
+  it('pins ElasticMQ image and declares SQS local-region/credentials', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    // Pin the ElasticMQ image to avoid drift from `latest`
+    expect(workflow).toContain('image: softwaremill/elasticmq-native:1.0.6');
+    // SQS_ENDPOINT_URL must be present for the e2e test guard
+    expect(workflow).toContain('SQS_ENDPOINT_URL: http://localhost:9324');
+    // AWS SDK requires region and dummy credentials for local emulator
+    expect(workflow).toContain('SQS_REGION: us-east-1');
+    expect(workflow).toContain('AWS_ACCESS_KEY_ID: test');
+    expect(workflow).toContain('AWS_SECRET_ACCESS_KEY: test');
+  });
+
   it('grants each Redis package the net permission its guarded test needs', async () => {
     const redisPackages = ['cache-plugin', 'messaging-plugin'];
     for (const pkg of redisPackages) {

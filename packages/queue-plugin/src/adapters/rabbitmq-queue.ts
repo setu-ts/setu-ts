@@ -277,7 +277,7 @@ export class RabbitMqQueue implements QueueAdapter {
   }
 
   // deno-lint-ignore require-await
-  async ack(name: string, id: string): Promise<void> {
+  async ack(name: string, id: string, _claimToken?: string): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
     }
@@ -298,6 +298,7 @@ export class RabbitMqQueue implements QueueAdapter {
     id: string,
     availableAtMs: number,
     attempts: number,
+    _claimToken?: string,
   ): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -328,7 +329,7 @@ export class RabbitMqQueue implements QueueAdapter {
     processing.delete(id);
   }
 
-  async deadLetter(name: string, id: string, nowMs: number): Promise<void> {
+  async deadLetter(name: string, id: string, nowMs: number, _claimToken?: string): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
     }

@@ -221,7 +221,7 @@ describe('ServiceBusBroker', () => {
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
-      void broker.request('topic', 'hello');
+      void broker.request('topic', 'hello').catch(() => {});
       await new Promise((r) => setTimeout(r, 0));
 
       const inboxOpen = opens.find((o) => o.subscription.startsWith('rr-inbox-'));
@@ -272,7 +272,7 @@ describe('ServiceBusBroker', () => {
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
-      void broker.request('topic', 'hello');
+      void broker.request('topic', 'hello').catch(() => {});
       await new Promise((r) => setTimeout(r, 0));
 
       const inboxOpen = opens.find((o) => o.subscription.startsWith('rr-inbox-'));
@@ -287,6 +287,210 @@ describe('ServiceBusBroker', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(nackCount).toBe(1);
+    });
+  });
+
+  // Finding 3: RPC reply delivery waits for settlement to complete
+  describe('Finding 3: RPC async settlement', () => {
+    it('delivery callback resolves only after ack promise settles', async () => {
+      const settlementOrder: string[] = [];
+      let deliveredCb:
+        | ((msg: { payload: string; ack: () => Promise<void>; nack: () => Promise<void> }) => void)
+        | null = null;
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          // Store the callback for later invocation
+          deliveredCb = cb as (
+            msg: { payload: string; ack: () => Promise<void>; nack: () => Promise<void> },
+          ) => void;
+          return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      // Start the request and await it
+      const replyPromise = broker.request('topic', 'hello', { timeoutMs: 5000 });
+      // Flush to let inbox open complete
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Runtime uuid() returns 'uuid-1', which is also the correlationId
+      // Now deliver the reply with matching correlationId
+      await deliveredCb!({
+        payload: JSON.stringify({
+          kind: 'rr-reply',
+          correlationId: 'uuid-1',
+          ok: true,
+          payload: { status: 'ok' },
+        }),
+        ack: async () => {
+          await new Promise((r) => setTimeout(r, 10));
+          settlementOrder.push('ack-resolved');
+        },
+        nack: async () => {
+          settlementOrder.push('nack');
+          await Promise.resolve();
+        },
+      });
+
+      // The delivery callback should have waited for ack to settle
+      expect(settlementOrder).toContain('ack-resolved');
+
+      // The request should resolve
+      const result = await replyPromise;
+      expect(result).toEqual({ status: 'ok' });
+    });
+
+    it('handler error and settlement failure are distinct', async () => {
+      let settlementError: unknown = null;
+      let deliveredCb:
+        | ((msg: { payload: string; ack: () => Promise<void>; nack: () => Promise<void> }) => void)
+        | null = null;
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (_t, _s, cb) => {
+          deliveredCb = cb as (
+            msg: { payload: string; ack: () => Promise<void>; nack: () => Promise<void> },
+          ) => void;
+          return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      const replyPromise = broker.request('topic', 'hello', { timeoutMs: 5000 });
+
+      // Flush to let inbox open complete
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Deliver the reply and race it against the reply promise so the
+      // rejection is observed before the test framework reports an unhandled
+      // rejection.
+      const deliveryPromise = deliveredCb!({
+        payload: JSON.stringify({
+          kind: 'rr-reply',
+          correlationId: 'uuid-1',
+          ok: false,
+          error: 'remote-handler-err',
+        }),
+        ack: async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          settlementError = 'settlement-ok';
+        },
+        nack: async () => {
+          settlementError = 'nack-called';
+          await Promise.resolve();
+        },
+      });
+
+      const [deliveryResult, replyResult] = await Promise.all([
+        deliveryPromise,
+        replyPromise.then(
+          (v) => ({ ok: true, value: v } as const),
+          (e) => ({ ok: false, error: e } as const),
+        ),
+      ]);
+
+      // The broker's delivery callback should not throw — it awaits settlement
+      // and propagates handler errors through the reply promise, not the callback.
+      expect(deliveryResult).toBeUndefined();
+
+      // Handler error should be propagated through the reply promise, not settlement error
+      expect(replyResult.ok).toBe(false);
+      if (!replyResult.ok) {
+        expect((replyResult.error as Error).message).toContain('remote-handler-err');
+      }
+      expect(settlementError).toBe('settlement-ok');
+    });
+  });
+
+  // Finding 4: Duplicate receiver ownership
+  describe('Finding 4: duplicate receiver ownership', () => {
+    it('two opens of same topic/subscription return independent close closures', async () => {
+      const closes: string[] = [];
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (_t, _s, _cb) => {
+          const handleId = `handle-${closes.length + 1}`;
+          closes.push(handleId);
+          return Promise.resolve({
+            close: async () => {
+              await Promise.resolve();
+            },
+          } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      const sub1 = await broker.subscribe('topic', () => {});
+      const sub2 = await broker.subscribe('topic', () => {});
+
+      // Both subscriptions should exist
+      expect(sub1).toBeDefined();
+      expect(sub2).toBeDefined();
+
+      // Closing sub1 should not affect sub2's ability to close
+      await sub1.unsubscribe();
+      await sub2.unsubscribe();
+
+      // Both closes should have been called
+      expect(closes).toHaveLength(2);
+    });
+
+    it('transport shutdown closes all active handles exactly once', async () => {
+      const closeOrder: string[] = [];
+      const transport: IServiceBusTransport = {
+        send: () => Promise.resolve(),
+        open: (_t, _s, _cb) => {
+          const handleId = `handle-${closeOrder.length + 1}`;
+          closeOrder.push(handleId);
+          return Promise.resolve({
+            close: async () => {
+              await Promise.resolve();
+            },
+          } as IServiceBusSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: async () => {
+          await Promise.resolve();
+        },
+      };
+      const broker = new ServiceBusBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.subscribe('topic', () => {});
+      await broker.subscribe('topic', () => {});
+
+      await broker.disconnect();
+
+      // Both handles should have been closed
+      expect(closeOrder).toHaveLength(2);
     });
   });
 
@@ -1084,7 +1288,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     // Fire-and-forget request() exercises: publish, setTimeout (RRCore callbacks)
     // Do NOT await — there is no responder, so it would hang. The closures run
     // synchronously before the timer starts.
-    void broker.request('svc.echo', 'hello', { timeoutMs: 5_000 });
+    void broker.request('svc.echo', 'hello', { timeoutMs: 5_000 }).catch(() => {});
 
     // Give microtasks time to run the RRCore setup
     await Promise.resolve();

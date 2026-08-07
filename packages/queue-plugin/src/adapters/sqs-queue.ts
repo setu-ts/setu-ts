@@ -198,6 +198,8 @@ interface ReceiptEntry {
   readonly claimExpiresAtMs: number;
   /** Original message body (for DLQ forwarding). */
   readonly body?: string;
+  /** Opaque claim token for validating settlement operations. */
+  readonly claimToken?: string;
 }
 
 /**
@@ -383,6 +385,10 @@ export class SqsQueue implements QueueAdapter {
         attempts = 1;
       }
 
+      // Generate a unique claim token for this reservation.
+      // This prevents stale settlement from overlapping deliveries.
+      const claimToken = `${envelope.id}:${msg.receiptHandle}:${nowMs}`;
+
       // Record the receipt entry keyed by the STABLE envelope id.
       // When the same logical job is redelivered with a new receipt handle,
       // this entry is overwritten so subsequent settlement targets the current receipt.
@@ -391,6 +397,7 @@ export class SqsQueue implements QueueAdapter {
         receiptHandle: msg.receiptHandle,
         claimExpiresAtMs: nowMs + this.#visibilityTimeoutSeconds * 1000,
         body: msg.body,
+        claimToken, // Store the claim token for validation
       });
 
       jobs.push({
@@ -401,13 +408,15 @@ export class SqsQueue implements QueueAdapter {
         attempts,
         maxAttempts,
         availableAtMs: nowMs,
+        // Pass the claim token through for settlement operations
+        claimToken,
       });
     }
 
     return jobs;
   }
 
-  async ack(name: string, id: string): Promise<void> {
+  async ack(name: string, id: string, claimToken: string): Promise<void> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
 
     const queueUrl = this.#getQueueUrl(name);
@@ -422,6 +431,14 @@ export class SqsQueue implements QueueAdapter {
       return;
     }
 
+    // Validate claim token to prevent stale settlement
+    if (!this.validateClaim(id, claimToken)) {
+      if (this.#logger) {
+        this.#logger.error(`SQS ack: stale claim token for ${id}`);
+      }
+      return;
+    }
+
     await this.#transport.delete(queueUrl, entry.receiptHandle);
     this.#receipts.delete(id);
   }
@@ -432,6 +449,7 @@ export class SqsQueue implements QueueAdapter {
     availableAtMs: number,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- attempts is unused by SQS; the count comes from ApproximateReceiveCount.
     _attempts: number,
+    claimToken: string,
   ): Promise<void> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
 
@@ -445,6 +463,14 @@ export class SqsQueue implements QueueAdapter {
       return;
     }
 
+    // Validate claim token to prevent stale settlement
+    if (!this.validateClaim(id, claimToken)) {
+      if (this.#logger) {
+        this.#logger.error(`SQS requeue: stale claim token for ${id}`);
+      }
+      return;
+    }
+
     const now = this.#runtime.now();
     const seconds = Math.ceil(Math.max(0, availableAtMs - now) / 1000);
 
@@ -452,7 +478,7 @@ export class SqsQueue implements QueueAdapter {
     this.#receipts.delete(id);
   }
 
-  async deadLetter(name: string, id: string, _nowMs: number): Promise<void> {
+  async deadLetter(name: string, id: string, _nowMs: number, claimToken: string): Promise<void> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
 
     const queueUrl = this.#getQueueUrl(name);
@@ -461,6 +487,14 @@ export class SqsQueue implements QueueAdapter {
     if (!entry) {
       if (this.#logger) {
         this.#logger.error(`SQS deadLetter: unknown or expired receipt handle ${id}`);
+      }
+      return;
+    }
+
+    // Validate claim token to prevent stale settlement
+    if (!this.validateClaim(id, claimToken)) {
+      if (this.#logger) {
+        this.#logger.error(`SQS deadLetter: stale claim token for ${id}`);
       }
       return;
     }
@@ -582,5 +616,19 @@ export class SqsQueue implements QueueAdapter {
       return undefined;
     }
     return entry;
+  }
+
+  /** Validate that a claim token matches the current receipt entry. */
+  private validateClaim(id: string, claimToken: string): boolean {
+    const entry = this.#receipts.get(id);
+    if (!entry) {
+      return false;
+    }
+    // Sweep expired entries.
+    if (entry.claimExpiresAtMs < this.#runtime.now()) {
+      this.#receipts.delete(id);
+      return false;
+    }
+    return entry.claimToken === claimToken;
   }
 }

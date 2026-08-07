@@ -606,4 +606,124 @@ describe('RequestReplyCore', () => {
       await expect(pending).rejects.toBeInstanceOf(RemoteHandlerError);
     });
   });
+
+  // Finding 2: close/initialization race test
+  // A request that is waiting for inbox initialization must be rejected immediately
+  // when close() is called, not after the inbox opens.
+  it('Finding 2: concurrent close during first request initialization rejects immediately', async () => {
+    // This test fails under the reviewed code behavior where close() could
+    // complete while inbox open is pending, leaving the request to proceed
+    // with a now-dead inbox.
+    let releaseOpen: (() => void) | undefined;
+    let inboxClosed = false;
+    let publishCalls = 0;
+    const t = new FakeTransport();
+
+    const core = new RequestReplyCore({
+      publish: (topic, message) => {
+        publishCalls++;
+        return t.publish(topic, message);
+      },
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> =>
+        new Promise<ReplyInbox>((resolve) => {
+          releaseOpen = (): void =>
+            resolve({
+              address: 'rr.inbox.pending-race',
+              close: (): Promise<void> => {
+                inboxClosed = true;
+                return Promise.resolve();
+              },
+            });
+        }),
+    });
+
+    // Start a request; it will wait for inbox open
+    const requestPromise = core.request('test-topic', {}, { timeoutMs: 5000 }).then(
+      (value) => ({ rejected: false, value }) as const,
+      (err) => ({ rejected: true, error: err as Error }) as const,
+    );
+
+    // Let the request start waiting for inbox
+    await flush();
+
+    // Call close while inbox open is still pending
+    const closePromise = core.close();
+
+    // Release the inbox open after close was called
+    releaseOpen!();
+
+    // Both should complete
+    const [requestResult] = await Promise.all([requestPromise, closePromise]);
+
+    // Request must have been rejected due to close
+    expect(requestResult.rejected).toBe(true);
+    if (requestResult.rejected) {
+      expect(requestResult.error.message).toContain('disconnected');
+    }
+
+    // Inbox must have been closed despite being opened after close() was called
+    expect(inboxClosed).toBe(true);
+
+    // No publish should have occurred because the request was rejected
+    // (the generation check happens before publish)
+    expect(publishCalls).toBe(0);
+  });
+
+  // Finding 2: race test with multiple concurrent requests
+  it('Finding 2: multiple concurrent requests during close all reject', async () => {
+    let resolveInbox: ((inbox: ReplyInbox) => void) | undefined;
+    const t = new FakeTransport();
+
+    const pendingInboxPromise = new Promise<ReplyInbox>((resolve) => {
+      resolveInbox = resolve;
+    });
+
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> => pendingInboxPromise,
+    });
+
+    // Fire multiple concurrent requests - they all wait for the same inbox
+    const req1 = core.request('test1', {}).catch((err) => ({
+      rejected: true,
+      error: err as Error,
+    }));
+    const req2 = core.request('test2', {}).catch((err) => ({
+      rejected: true,
+      error: err as Error,
+    }));
+    const req3 = core.request('test3', {}).catch((err) => ({
+      rejected: true,
+      error: err as Error,
+    }));
+
+    await flush();
+
+    // Close while all are waiting for inbox
+    const closePromise = core.close();
+
+    // Resolve the inbox promise after close was called
+    resolveInbox!({
+      address: 'rr.inbox.test',
+      close: (): Promise<void> => Promise.resolve(),
+    });
+
+    // Wait for close to complete
+    await closePromise;
+
+    // All requests should have been rejected due to close
+    type Result = { rejected: true; error: Error };
+    const results = await Promise.all([req1, req2, req3]) as [Result, Result, Result];
+    expect(results[0].rejected).toBe(true);
+    expect(results[1].rejected).toBe(true);
+    expect(results[2].rejected).toBe(true);
+  });
 });

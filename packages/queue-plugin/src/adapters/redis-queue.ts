@@ -185,7 +185,7 @@ export class RedisQueue implements QueueAdapter {
     return jobs as readonly StoredJob<T>[];
   }
 
-  async ack(name: string, id: string): Promise<void> {
+  async ack(name: string, id: string, _claimToken?: string): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
     }
@@ -205,6 +205,7 @@ export class RedisQueue implements QueueAdapter {
     id: string,
     availableAtMs: number,
     attempts: number,
+    _claimToken?: string,
   ): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
@@ -235,7 +236,7 @@ export class RedisQueue implements QueueAdapter {
     await this.#client.zadd(readyKey, availableAtMs, id);
   }
 
-  async deadLetter(name: string, id: string, nowMs: number): Promise<void> {
+  async deadLetter(name: string, id: string, nowMs: number, _claimToken?: string): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
     }

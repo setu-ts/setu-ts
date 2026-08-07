@@ -502,7 +502,7 @@ describe('QueuePlugin logger propagation', () => {
     await sqsQueue.connect();
 
     // Trigger diagnostic: ack unknown id → logs "unknown or expired receipt"
-    await sqsQueue.ack('jobs', 'unknown-id');
+    await sqsQueue.ack('jobs', 'unknown-id', 'claim-token');
 
     // The registered logger must have received the diagnostic
     const diagnostic = logEntries.find((e) => e.includes('ack') && e.includes('unknown-id'));

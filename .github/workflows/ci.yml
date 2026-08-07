@@ -15,6 +15,9 @@ jobs:
     env:
       REDIS_URL: redis://localhost:6379
       SQS_ENDPOINT_URL: http://localhost:9324
+      SQS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
     services:
       redis:
         image: redis:7
@@ -26,7 +29,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       elasticmq:
-        image: softwaremill/elasticmq-native:latest
+        image: softwaremill/elasticmq-native:1.0.6
         ports:
           - 9324:9324
         options: >-

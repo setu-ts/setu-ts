@@ -105,6 +105,13 @@ export interface StoredJob<T = unknown> {
   maxAttempts: number;
   /** Timestamp when the job becomes available (ms since epoch). */
   availableAtMs: number;
+  /**
+   * Opaque claim token for settlement operations.
+   * Adapters may populate this with transport-specific claim identifiers
+   * (e.g., SQS receipt handle) to prevent stale settlement.
+   * The QueueService passes this through to the adapter on settle calls.
+   */
+  claimToken?: string;
 }
 
 /**

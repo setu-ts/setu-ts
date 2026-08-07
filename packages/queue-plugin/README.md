@@ -48,8 +48,10 @@ import { QueuePlugin } from '@hono-enterprise/queue-plugin';
 
 app.register(QueuePlugin({
   adapter: 'sqs',
-  region: 'us-east-1',
-  queues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks' },
+  sqs: {
+    region: 'us-east-1',
+    queues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks' },
+  },
 }));
 ```
 
@@ -130,16 +132,18 @@ a per-queue delay exchange with TTL-based message routing. Requires the `amqplib
 ### SqsQueue
 
 AWS SQS-backed queue using the AWS SDK `@aws-sdk/client-sqs`. Supports visibility timeouts, delayed
-jobs (up to 15 minutes via `DelaySeconds`), and dead-letter queues through the AWS managed DLQ
-feature. The `maxAttempts` field in the job envelope drives the DLQ promotion logic. Requires the
-`@aws-sdk/client-sqs` package at runtime (or an injected transport).
+jobs (up to 15 minutes via `DelaySeconds`), and manual DLQ forwarding. The `maxAttempts` field in
+the job envelope drives the DLQ promotion logic. Requires the `@aws-sdk/client-sqs` package at
+runtime (or an injected transport).
 
 #### SQS Retry and DLQ
 
 When a job reaches `maxAttempts`, `SqsQueue.deadLetter()` forwards the original message body to the
-configured DLQ queue URL, then deletes the source message. If DLQ send fails, the source message is
-**not** deleted (preventing silent data loss). If the source delete fails after a successful DLQ
-send, a duplicate-risk warning is logged.
+configured DLQ queue URL (via `sqs.deadLetterQueues`), then deletes the source message. If DLQ send
+fails, the source message is **not** deleted (preventing silent data loss). If the source delete
+fails after a successful DLQ send, a duplicate-risk warning is logged. Note: AWS SQS does not
+support managed DLQ redrive for this adapter — DLQ forwarding is manual via the `deadLetterQueues`
+option.
 
 #### ElasticMQ E2E
 

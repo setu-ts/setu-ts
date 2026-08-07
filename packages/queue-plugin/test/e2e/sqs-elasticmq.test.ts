@@ -68,7 +68,7 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
     expect(jobs[0].data).toEqual({ hello: 'world' });
 
     // Ack (delete) it
-    await queue.ack('test', jobs[0].id);
+    await queue.ack('test', jobs[0].id, jobs[0].claimToken ?? jobs[0].id);
 
     // Verify queue is empty now
     const remaining = await queue.reserve('test', 1, runtime.now());
@@ -109,7 +109,7 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
     expect(alphaJobs.length).toBe(1);
     expect(alphaJobs[0].data).toEqual({ from: 'alpha' });
 
-    await queue.ack('alpha', alphaJobs[0].id);
+    await queue.ack('alpha', alphaJobs[0].id, alphaJobs[0].claimToken ?? alphaJobs[0].id);
     await queue.disconnect();
   });
 
@@ -148,7 +148,7 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
     expect(jobs2[0].attempts).toBeGreaterThanOrEqual(2);
 
     // Clean up
-    await queue.ack('retry', jobs2[0].id);
+    await queue.ack('retry', jobs2[0].id, jobs2[0].claimToken ?? jobs2[0].id);
     await queue.disconnect();
   });
 
@@ -178,7 +178,7 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
     expect(jobs.length).toBe(1);
 
     // Manually dead-letter the job (simulates processor failure after max attempts)
-    await queue.deadLetter('dlq-test', jobs[0].id, runtime.now());
+    await queue.deadLetter('dlq-test', jobs[0].id, runtime.now(), jobs[0].claimToken ?? jobs[0].id);
 
     // Wait a tick for DLQ delivery
     await new Promise((r) => setTimeout(r, 500));
