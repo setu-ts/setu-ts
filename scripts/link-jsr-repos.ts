@@ -43,7 +43,7 @@ import { PUBLISHED_PACKAGES } from './release-packages.ts';
 // Defaults to the real API; production runs never set it.
 const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
 const SCOPE = 'setu-ts';
-const OWNER = Deno.env.get('JSR_REPO_OWNER') ?? 'dkpaul91';
+const OWNER = Deno.env.get('JSR_REPO_OWNER') ?? 'setu-ts';
 const REPO = Deno.env.get('JSR_REPO_NAME') ?? 'setu-ts';
 
 const dryRun = Deno.args.includes('--dry-run');

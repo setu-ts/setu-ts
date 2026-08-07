@@ -71,7 +71,7 @@ waiting a week lets the remaining batch be created in one go.
 
 ### 3. Link the GitHub repository
 
-For each package, or via scope settings, link `dkpaul91/setu-ts` in JSR. This is what lets the
+For each package, or via scope settings, link `setu-ts/setu-ts` in JSR. This is what lets the
 tag-triggered workflow publish using the runner's OIDC identity instead of a long-lived token.
 
 Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
