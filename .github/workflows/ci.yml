@@ -56,6 +56,13 @@ jobs:
       - name: Type check
         run: deno task check
 
+      # Catches a committed doc that renders wrong while every other gate stays
+      # green: a runaway code fence swallowing the rest of the file, an anchor
+      # link pointing at a heading that no longer exists, or a section absent
+      # from its own table of contents. `deno fmt` accepts all three.
+      - name: Documentation check
+        run: deno task check:docs
+
       - name: Example applications
         run: deno task check:apps
         env:

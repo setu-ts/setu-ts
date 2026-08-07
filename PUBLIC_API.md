@@ -8,45 +8,63 @@
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [Minimal Application](#minimal-application)
-3. [createApplication()](#createapplication)
-4. [RuntimePlugin()](#runtimeplugin)
-5. [LoggerPlugin()](#loggerplugin)
-6. [ConfigPlugin()](#configplugin)
-7. [ValidationPlugin()](#validationplugin)
-8. [DatabasePlugin()](#databaseplugin)
-9. [AuthPlugin()](#authplugin)
-10. [CachePlugin()](#cacheplugin)
+2. [Full Stack Application](#full-stack-application)
+3. [Minimal Application](#minimal-application)
+4. [createApplication()](#createapplication)
+5. [RuntimePlugin()](#runtimeplugin)
+6. [LoggerPlugin()](#loggerplugin)
+7. [ConfigPlugin()](#configplugin)
+8. [ValidationPlugin()](#validationplugin)
+9. [DatabasePlugin()](#databaseplugin)
+10. [AuthPlugin()](#authplugin)
 11. [HttpSecurityPlugin()](#httpsecurityplugin)
-12. [EventsPlugin()](#eventsplugin)
-13. [CQRS](#cqrs)
-14. [Messaging](#messaging)
-15. [Queue](#queue)
-16. [Scheduler](#scheduler)
-17. [HttpClient](#httpclient)
-18. [Storage](#storage)
-19. [Mail](#mail)
-20. [Notifications](#notifications)
-21. [Feature Flags](#feature-flags)
-22. [Health](#health)
-23. [Metrics](#metrics)
-24. [Telemetry](#telemetry)
-25. [OpenAPI](#openapi)
-26. [CLI](#cli)
-27. [REST API Application](#rest-api-application)
-28. [Microservice Application](#microservice-application)
-29. [CQRS Application](#cqrs-application)
-30. [Plugin Creation](#plugin-creation)
-31. [Custom Middleware](#custom-middleware)
-32. [Custom Decorators](#custom-decorators)
-33. [Service Discovery](#service-discovery)
-34. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-35. [Developer Ergonomics](#developer-ergonomics)
-36. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
-37. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
-38. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
-39. [API Reference: @hono-enterprise/graphql-plugin](#api-reference-hono-enterprisegraphql-plugin)
-40. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdkhono-enterprisesdk)
+12. [CachePlugin()](#cacheplugin)
+13. [EventsPlugin()](#eventsplugin)
+14. [SsePlugin()](#sseplugin)
+15. [WebSocketPlugin()](#websocketplugin)
+16. [RealtimeBackplanePlugin()](#realtimebackplaneplugin)
+17. [SessionPlugin()](#sessionplugin)
+18. [ReactRouterPlugin()](#reactrouterplugin)
+19. [WorkerPoolPlugin()](#workerpoolplugin)
+20. [SecretsPlugin()](#secretsplugin)
+21. [AuditPlugin()](#auditplugin)
+22. [CQRS](#cqrs)
+23. [Messaging](#messaging)
+24. [Queue](#queue)
+25. [Scheduler](#scheduler)
+26. [Resilience](#resilience)
+27. [HttpClient](#httpclient)
+28. [Storage](#storage)
+29. [MailPlugin()](#mailplugin)
+30. [Notifications](#notifications)
+31. [Feature Flags](#feature-flags)
+32. [Multi-Tenancy Plugin](#multi-tenancy-plugin)
+33. [Health](#health)
+34. [Metrics](#metrics)
+35. [Telemetry](#telemetry)
+36. [OpenAPI](#openapi)
+37. [CLI](#cli)
+38. [REST API Application](#rest-api-application)
+39. [Microservice Application](#microservice-application)
+40. [CQRS Application](#cqrs-application)
+41. [Plugin Creation](#plugin-creation)
+42. [Custom Middleware](#custom-middleware)
+43. [Custom Decorators](#custom-decorators)
+44. [Service Discovery](#service-discovery)
+45. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+46. [Developer Ergonomics](#developer-ergonomics)
+47. [API Reference: @hono-enterprise/common](#api-reference-hono-enterprisecommon)
+48. [API Reference: @hono-enterprise/kernel](#api-reference-hono-enterprisekernel)
+49. [API Reference: @hono-enterprise/runtime](#api-reference-hono-enterpriseruntime)
+50. [API Reference: @hono-enterprise/exceptions](#api-reference-hono-enterpriseexceptions)
+51. [API Reference: @hono-enterprise/di-plugin](#api-reference-hono-enterprisedi-plugin)
+52. [API Reference: @hono-enterprise/decorator-plugin](#api-reference-hono-enterprisedecorator-plugin)
+53. [Testing Package (@hono-enterprise/testing)](#testing-package-hono-enterprisetesting)
+54. [SDK — Client SDK (@hono-enterprise/sdk)](#sdk--client-sdk-hono-enterprisesdk)
+55. [API Reference: @hono-enterprise/grpc-plugin](#api-reference-hono-enterprisegrpc-plugin)
+56. [API Reference: @hono-enterprise/cloudflare-plugin](#api-reference-hono-enterprisecloudflare-plugin)
+57. [GraphQL](#graphql)
+58. [Summary](#summary)
 
 ---
 
@@ -2682,7 +2700,7 @@ Provides message broker abstraction for cross-service integration events.
 
 ### Registration
 
-````typescript
+```typescript
 import { MessagingPlugin } from '@hono-enterprise/messaging-plugin';
 
 // In-memory broker (for development/testing)
@@ -2696,14 +2714,15 @@ app.register(MessagingPlugin({
   url: config.get('REDIS_URL'),
   defaultQueue: 'myapp-events',
 }));
+```
 
 ### Plugin Options
 
-`MessagingPluginOptions` is a **discriminated union keyed on `broker`** — exactly
-mirroring `packages/messaging-plugin/src/interfaces/index.ts`, which is the source of
-truth. Each arm carries the fields the source defines; the cloud brokers split into an
-*injected-transport* arm (no production credentials) and a *production* arm (credentials
-required, `client` typed `never`). The shared `MessagingBrokerType` has eight literals.
+`MessagingPluginOptions` is a **discriminated union keyed on `broker`** — exactly mirroring
+`packages/messaging-plugin/src/interfaces/index.ts`, which is the source of truth. Each arm carries
+the fields the source defines; the cloud brokers split into an _injected-transport_ arm (no
+production credentials) and a _production_ arm (credentials required, `client` typed `never`). The
+shared `MessagingBrokerType` has eight literals.
 
 ```typescript
 type MessagingBrokerType =
@@ -2987,9 +3006,9 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 | `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
 | `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-> **Broker support.** Request-reply is available on **all supported broker types** — in-memory, Redis
-> Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which delegates to the
-> injected `IMessageBroker`).
+> **Broker support.** Request-reply is available on **all supported broker types** — in-memory,
+> Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which
+> delegates to the injected `IMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
@@ -7966,4 +7985,3 @@ The Hono Enterprise public API is designed for developer experience:
 6. **Runtime independent** — Runs on Node.js, Deno, Bun, and Cloudflare Workers (future)
 7. **Testable** — Built-in test utilities, mock plugins, request injection
 8. **Enterprise-ready** — Auth, secrets, audit, resilience, multi-tenancy, feature flags
-````

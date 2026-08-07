@@ -50,6 +50,7 @@
   "tasks": {
     "check": "deno check packages",
     "check:apps": "deno run --allow-read --allow-run --allow-env=ALLOW_SKIP scripts/check-apps.ts",
+    "check:docs": "deno run --allow-read scripts/check-docs.ts",
     "check:plan": "deno run --allow-read scripts/plan-lint.ts",
     "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages test",
     "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts",
