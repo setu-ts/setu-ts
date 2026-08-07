@@ -37,6 +37,10 @@ export interface NodeFsOperations {
   readdir(path: string): Promise<string[]>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<string | void>;
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
+  createReadStream?(
+    path: string,
+    options?: { start?: number; end?: number },
+  ): NodeJS.ReadableStream;
 }
 
 /** Minimal shape of the Stats object returned by fs.stat(). */
@@ -91,6 +95,14 @@ export interface NodeHost {
   mkdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
   /** Remove a file or directory. */
   rm: (path: string, options?: { recursive?: boolean }) => Promise<void>;
+  /**
+   * Create a read stream for a file.
+   * Returns null if the file cannot be opened.
+   */
+  createReadStream?: (
+    path: string,
+    options?: { start?: number; end?: number },
+  ) => NodeJS.ReadableStream | null;
 }
 
 /** File info returned by NodeHost.stat(). */
@@ -101,13 +113,9 @@ export interface NodeFsInfo {
   mtime: Date;
 }
 
-// ---------------------------------------------------------------------------
-// Factory — builds a NodeHost from injected modules
-// ---------------------------------------------------------------------------
-
 /**
- * Builds a {@linkcode NodeHost} from injected modules (defaults to the real
- * `node:` built-ins).
+ * Builds the default {@linkcode NodeHost} from `node:` built-ins, which Deno
+ * and Bun also implement.
  *
  * @param mods - Injectable Node modules (defaults to real `node:` built-ins)
  * @returns A fully-wired NodeHost
@@ -136,6 +144,10 @@ export function buildNodeHost(
       mods.fs.mkdir(path, options) as Promise<void>,
     rm: (path: string, options?: { recursive?: boolean }): Promise<void> =>
       mods.fs.rm(path, options) as Promise<void>,
+    createReadStream: (
+      path: string,
+      options?: { start?: number; end?: number },
+    ) => mods.fs.createReadStream?.(path, options) ?? null,
   };
 }
 
@@ -170,12 +182,18 @@ export function createNodeRuntimeServices(
     rm: host.rm,
     readStream: async (
       path: string,
-      options?: { readonly start?: number; readonly end?: number },
+      _options?: { readonly start?: number; readonly end?: number },
     ): Promise<ReadableStream<Uint8Array>> => {
-      const { createReadStream } = mods.fs;
+      if (!host.createReadStream) {
+        throw new Error('readStream not supported on this Node.js version');
+      }
+      const stream = host.createReadStream!(path, _options);
+      if (stream === null) {
+        throw new Error('Failed to create read stream');
+      }
       const { Readable } = await import('node:stream');
-      const stream = createReadStream(path, options);
-      return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+      const web = Readable.toWeb(stream as never);
+      return web as ReadableStream<Uint8Array>;
     },
   };
 

@@ -103,7 +103,7 @@ describe('StaticPlugin', () => {
     expect(healthRegister.calls().length).toBeGreaterThan(0);
   });
 
-  it('should report degraded when fs is absent', () => {
+  it('should report degraded when fs is absent', async () => {
     const healthRegister = createMockFn();
 
     const ctx = {
@@ -127,8 +127,10 @@ describe('StaticPlugin', () => {
     const plugin = StaticPlugin({ root: '/tmp/static' });
     plugin.register(ctx);
 
-    const healthFn = healthRegister.calls()[0][1] as () => { status: string; detail: string };
-    const result = healthFn();
+    const healthFn = healthRegister.calls()[0][1] as () => Promise<
+      { status: string; detail: string }
+    >;
+    const result = await healthFn();
 
     expect(result).toEqual({
       status: 'degraded',

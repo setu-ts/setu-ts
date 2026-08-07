@@ -18,8 +18,13 @@ import type { IFileSystem } from '../runtime.ts';
  */
 export function isLexicallyContained(relativePath: string): boolean {
   // Reject empty paths
-  if (!relativePath || relativePath === '/') {
+  if (!relativePath) {
     return false;
+  }
+
+  // Allow '/' as root
+  if (relativePath === '/') {
+    return true;
   }
 
   // Reject path traversal attempts

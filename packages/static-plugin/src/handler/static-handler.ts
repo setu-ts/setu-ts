@@ -26,17 +26,17 @@ export type StaticHandlerOptions = {
   /** The index file to serve for directories (default: 'index.html') */
   index: string;
   /** The fallback file to serve for missing paths */
-  fallback?: string;
+  fallback?: string | undefined;
   /** Cache-Control configuration */
-  cacheControl?: string | ((relativePath: string) => string);
+  cacheControl?: string | ((relativePath: string) => string) | undefined;
   /** Whether to generate ETags (default: true) */
-  etag?: boolean;
+  etag?: boolean | undefined;
   /** Whether to handle Range requests (default: true) */
-  ranges?: boolean;
+  ranges?: boolean | undefined;
   /** Whether to negotiate precompressed sidecars (default: true) */
-  compressed?: boolean;
+  compressed?: boolean | undefined;
   /** Maximum file size to read fully into memory (default: 1MB) */
-  maxBufferBytes?: number;
+  maxBufferBytes?: number | undefined;
 };
 
 /**
@@ -85,18 +85,21 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Resolve the filesystem path
     const fullPath = normalizedPath === '/' ? root : `${root}/${normalizedPath}`;
 
-    // Symlink-safe containment check
+    // Symlink-safe containment check (only for existing paths)
     if (fs.realPath) {
       let realBase: string;
-      let realTarget: string;
       try {
         realBase = await fs.realPath(root);
-        realTarget = await fs.realPath(fullPath);
       } catch {
         return ctx.response.status(404).send();
       }
-      if (realTarget !== realBase && !realTarget.startsWith(`${realBase}/`)) {
-        return ctx.response.status(404).send();
+      try {
+        const realTarget = await fs.realPath(fullPath);
+        if (realTarget !== realBase && !realTarget.startsWith(`${realBase}/`)) {
+          return ctx.response.status(404).send();
+        }
+      } catch {
+        // Path doesn't exist yet — fall through to stat/fallback
       }
     }
 
@@ -177,11 +180,11 @@ async function serveFile(
   fullPath: string,
   stat: StatResult,
   options: {
-    cacheControl?: string | ((relativePath: string) => string);
-    etag?: boolean;
-    ranges?: boolean;
-    compressed?: boolean;
-    maxBufferBytes?: number;
+    cacheControl?: string | ((relativePath: string) => string) | undefined;
+    etag?: boolean | undefined;
+    ranges?: boolean | undefined;
+    compressed?: boolean | undefined;
+    maxBufferBytes?: number | undefined;
   },
 ): Promise<ReturnType<RouteHandler>> {
   const {
@@ -275,11 +278,11 @@ async function serveCompressedFile(
   stat: StatResult,
   contentEncoding: string | undefined,
   options: {
-    cacheControl?: string | ((relativePath: string) => string);
-    etag?: boolean;
-    ranges?: boolean;
-    maxBufferBytes?: number;
-    contentType?: string;
+    cacheControl?: string | ((relativePath: string) => string) | undefined;
+    etag?: boolean | undefined;
+    ranges?: boolean | undefined;
+    maxBufferBytes?: number | undefined;
+    contentType?: string | undefined;
   },
 ): Promise<ReturnType<RouteHandler>> {
   const { cacheControl, etag = true, ranges = true, maxBufferBytes = 1_048_576, contentType } =

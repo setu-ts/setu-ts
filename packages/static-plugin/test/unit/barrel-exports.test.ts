@@ -20,13 +20,10 @@ describe('barrel exports', () => {
     expect(typeof exports.createStaticHandler).toBe('function');
   });
 
-  it('should export IStaticFiles type', () => {
-    // Types are erased at runtime, but we can verify the module exports them
-    expect(Object.keys(exports)).toContain('IStaticFiles');
-  });
-
-  it('should export StaticPluginOptions type', () => {
-    expect(Object.keys(exports)).toContain('StaticPluginOptions');
+  it('should not export types at runtime (types are erased)', () => {
+    // TypeScript types are erased at runtime; only values are exported
+    expect(Object.keys(exports)).not.toContain('IStaticFiles');
+    expect(Object.keys(exports)).not.toContain('StaticPluginOptions');
   });
 
   it('should have STATIC_FILES token with valid grammar', () => {

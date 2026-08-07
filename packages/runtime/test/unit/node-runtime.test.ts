@@ -65,6 +65,10 @@ function createFakeNodeModules(
       files.delete(path);
       return Promise.resolve();
     },
+    createReadStream: (
+      _path: string,
+      _options?: { start?: number; end?: number },
+    ) => ({ on: () => {}, resume: () => {} } as never),
   };
 
   const fakeProc = {
@@ -254,6 +258,10 @@ function createFakeNodeHost(overrides: Partial<NodeHost> = {}): NodeHost {
       dirs.delete(path);
       return Promise.resolve();
     },
+    createReadStream: (
+      _path: string,
+      _options?: { start?: number; end?: number },
+    ) => ({ on: () => {}, resume: () => {} } as never),
     ...overrides,
   };
 }

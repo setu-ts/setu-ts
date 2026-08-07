@@ -13,13 +13,13 @@ import type { StatResult } from '@setu-ts/common';
  */
 export type ConditionalOptions = {
   /** Whether to generate ETags (default: true) */
-  etag?: boolean;
+  etag?: boolean | undefined;
   /** The stat result for the file */
   stat: StatResult;
   /** The If-None-Match header value */
-  ifNoneMatch?: string;
+  ifNoneMatch?: string | undefined;
   /** The If-Modified-Since header value */
-  ifModifiedSince?: string;
+  ifModifiedSince?: string | undefined;
 };
 
 /**

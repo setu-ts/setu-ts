@@ -5,12 +5,18 @@ describe('static-plugin health indicator', () => {
   it('should report up when root is a directory', async () => {
     const fs = {
       stat: () =>
-        Promise.resolve({ isFile: false, isDirectory: true, size: 0 }),
+        Promise.resolve(
+          { isFile: false, isDirectory: true, size: 0 } as {
+            isFile: boolean;
+            isDirectory: boolean;
+            size: number;
+          },
+        ),
     };
 
     const healthFn = async () => {
       try {
-        const stat = await fs.stat('');
+        const stat = await fs.stat();
         if (stat.isDirectory) {
           return { status: 'up' as const };
         }
@@ -26,14 +32,14 @@ describe('static-plugin health indicator', () => {
 
   it('should report down when stat throws', async () => {
     const fs = {
-      stat: () => {
+      stat: (): { isFile: boolean; isDirectory: boolean; size: number } => {
         throw new Error('ENOENT');
       },
     };
 
     const healthFn = async () => {
       try {
-        const stat = await fs.stat('');
+        const stat = await fs.stat();
         if (stat.isDirectory) {
           return { status: 'up' as const };
         }

@@ -5,6 +5,7 @@
  */
 
 import type { IFileSystem, StatResult } from '@setu-ts/common';
+import { contentTypeFor } from '@setu-ts/common';
 
 /**
  * Supported compression formats in preference order.
@@ -36,7 +37,7 @@ export type PrecompressedOptions = {
   /** The original file stat */
   originalStat: StatResult;
   /** The Accept-Encoding header value */
-  acceptEncoding?: string;
+  acceptEncoding?: string | undefined;
 };
 
 /**
@@ -48,13 +49,14 @@ export type PrecompressedOptions = {
  * @since 0.1.0
  */
 export function isEncodingAcceptable(acceptEncoding: string, format: string): boolean {
+  const encoding = CONTENT_ENCODINGS[format] ?? format;
   const encodings = acceptEncoding
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter((e) => e !== '');
 
   // Check for the specific encoding or wildcard
-  return encodings.includes(format) || encodings.includes('*');
+  return encodings.includes(encoding) || encodings.includes('*');
 }
 
 /**
@@ -99,7 +101,5 @@ export async function findPrecompressedSidecar(
  * @since 0.1.0
  */
 export function getOriginalContentType(originalPath: string): string {
-  // Import here to avoid circular dependency
-  const { contentTypeFor } = require('@setu-ts/common') as typeof import('@setu-ts/common');
   return contentTypeFor(originalPath);
 }

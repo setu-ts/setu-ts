@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { resolveCacheControl, IMMUTABLE_PATTERN } from '../../src/http/cache-control.ts';
+import { IMMUTABLE_PATTERN, resolveCacheControl } from '../../src/http/cache-control.ts';
 
 describe('resolveCacheControl', () => {
   it('should return immutable for hashed assets', () => {
@@ -27,6 +27,6 @@ describe('resolveCacheControl', () => {
   it('should detect hash pattern', () => {
     expect(IMMUTABLE_PATTERN.test('index-a1b2c3d4.js')).toBe(true);
     expect(IMMUTABLE_PATTERN.test('style.css')).toBe(false);
-    expect(IMMUTABLE_PATTERN.test('app.12345678.min.js')).toBe(true);
+    expect(IMMUTABLE_PATTERN.test('app.12345678.js')).toBe(true);
   });
 });

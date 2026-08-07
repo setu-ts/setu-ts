@@ -1,9 +1,9 @@
-import { describe, it, beforeEach, afterEach } from '@std/testing/bdd';
+import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { StaticPlugin } from '../../src/index.ts';
-import { writeTextFile, mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -14,8 +14,8 @@ describe('StaticPlugin e2e', () => {
   beforeEach(async () => {
     tmpDir = join('/tmp', `static-plugin-test-${randomUUID()}`);
     await mkdir(tmpDir, { recursive: true });
-    await writeTextFile(join(tmpDir, 'test.txt'), 'hello world');
-    await writeTextFile(join(tmpDir, 'index.html'), '<html></html>');
+    await writeFile(join(tmpDir, 'test.txt'), 'hello world');
+    await writeFile(join(tmpDir, 'index.html'), '<html></html>');
 
     app = createApplication({
       plugins: [RuntimePlugin(), StaticPlugin({ root: tmpDir })],
@@ -32,7 +32,7 @@ describe('StaticPlugin e2e', () => {
   it('should serve a large file via streaming', async () => {
     // Create a file larger than 1MB
     const largeContent = 'x'.repeat(1_048_577);
-    await writeTextFile(join(tmpDir, 'large.txt'), largeContent);
+    await writeFile(join(tmpDir, 'large.txt'), largeContent);
 
     await app.start({ port: 0 });
 
@@ -46,7 +46,7 @@ describe('StaticPlugin e2e', () => {
 
   it('should handle Range requests on large files', async () => {
     const largeContent = 'x'.repeat(1_048_577);
-    await writeTextFile(join(tmpDir, 'large.txt'), largeContent);
+    await writeFile(join(tmpDir, 'large.txt'), largeContent);
 
     await app.start({ port: 0 });
 

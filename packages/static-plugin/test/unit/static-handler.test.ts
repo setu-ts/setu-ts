@@ -171,7 +171,7 @@ describe('createStaticHandler', () => {
 
     expect(result).toBeDefined();
     expect(ctx.response._status).toBe(200);
-    expect(ctx.response._body).toBeNull();
+    expect(ctx.response._body).toEqual(new Uint8Array());
     expect(ctx.response._headers.get('Content-Length')).toBe('11');
   });
 });

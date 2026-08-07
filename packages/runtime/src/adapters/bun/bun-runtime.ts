@@ -163,7 +163,8 @@ export function createBunRuntimeServices(
       const { createReadStream } = await import('node:fs');
       const { Readable } = await import('node:stream');
       const stream = createReadStream(path, options);
-      return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+      const web = Readable.toWeb(stream as never);
+      return web as ReadableStream<Uint8Array>;
     },
   };
 

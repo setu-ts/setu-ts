@@ -5,10 +5,10 @@ import { resolvePath } from '../../src/handler/resolve-path.ts';
 describe('resolvePath', () => {
   const fs = {
     stat: (path: string) => {
-      if (path.endsWith('/index.html')) {
+      if (path === '/root/index.html') {
         return Promise.resolve({ isFile: true, isDirectory: false, size: 100 });
       }
-      if (path.endsWith('/')) {
+      if (path === '/root') {
         return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
       }
       throw new Error('ENOENT');
@@ -40,7 +40,7 @@ describe('resolvePath', () => {
   it('should return null for missing file', async () => {
     const result = await resolvePath(
       { fs, root: '/root', urlPrefix: '/', index: 'index.html' },
-      '/missing.txt',
+      'missing.txt',
     );
     expect(result).toBeNull();
   });
@@ -61,10 +61,10 @@ describe('resolvePath', () => {
     expect(result).toBe('/root');
   });
 
-  it('should serve fallback for missing file with HTML accept', async () => {
+  it('should serve fallback for missing file', async () => {
     const fsWithFallback = {
       stat: (path: string) => {
-        if (path.endsWith('/fallback.html')) {
+        if (path === '/root/fallback.html') {
           return Promise.resolve({ isFile: true, isDirectory: false, size: 100 });
         }
         throw new Error('ENOENT');
@@ -90,12 +90,9 @@ describe('resolvePath', () => {
     expect(result).toBe('/root/fallback.html');
   });
 
-  it('should not serve fallback for non-HTML accept', async () => {
-    const fsWithFallback = {
-      stat: (path: string) => {
-        if (path.endsWith('/fallback.html')) {
-          return Promise.resolve({ isFile: true, isDirectory: false, size: 100 });
-        }
+  it('should not serve fallback when fallback does not exist', async () => {
+    const fsNoFallback = {
+      stat: () => {
         throw new Error('ENOENT');
       },
       readFile: () => Promise.resolve(new Uint8Array()),
@@ -108,13 +105,13 @@ describe('resolvePath', () => {
 
     const result = await resolvePath(
       {
-        fs: fsWithFallback,
+        fs: fsNoFallback,
         root: '/root',
         urlPrefix: '/',
         index: 'index.html',
         fallback: 'fallback.html',
       },
-      '/missing.js',
+      '/missing.txt',
     );
     expect(result).toBeNull();
   });

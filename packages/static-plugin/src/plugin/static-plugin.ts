@@ -34,7 +34,8 @@ export function StaticPlugin(options: StaticPluginOptions): IPlugin {
       // Check if filesystem is available
       if (!ctx.runtime.fs) {
         // Workers degradation: register degraded indicator but no route
-        ctx.health.register('static-files', () => ({
+        // deno-lint-ignore require-await
+        ctx.health.register('static-files', async () => ({
           status: 'degraded' as const,
           detail: 'no file system on this runtime',
         }));

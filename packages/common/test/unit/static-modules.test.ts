@@ -46,9 +46,9 @@ describe('path-containment', () => {
       expect(isLexicallyContained('foo/bar.txt')).toBe(true);
     });
 
-    it('should reject empty and root paths', () => {
+    it('should reject empty paths but accept root', () => {
       expect(isLexicallyContained('')).toBe(false);
-      expect(isLexicallyContained('/')).toBe(false);
+      expect(isLexicallyContained('/')).toBe(true);
     });
   });
 

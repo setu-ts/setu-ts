@@ -13,11 +13,11 @@ export type RangeOptions = {
   /** The file size */
   size: number;
   /** The Range header value */
-  rangeHeader?: string;
+  rangeHeader?: string | undefined;
   /** The If-Range header value */
-  ifRange?: string;
+  ifRange?: string | undefined;
   /** The current ETag */
-  etag?: string;
+  etag?: string | undefined;
 };
 
 /**

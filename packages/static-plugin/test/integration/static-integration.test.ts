@@ -9,7 +9,10 @@ describe('StaticPlugin integration', () => {
 
   beforeEach(() => {
     app = createApplication({
-      plugins: [RuntimePlugin(), StaticPlugin({ root: './test/fixtures' })],
+      plugins: [
+        RuntimePlugin(),
+        StaticPlugin({ root: new URL('../../test/fixtures', import.meta.url).pathname }),
+      ],
     });
   });
 
@@ -84,7 +87,10 @@ describe('StaticPlugin integration', () => {
     const appWithFallback = createApplication({
       plugins: [
         RuntimePlugin(),
-        StaticPlugin({ root: './test/fixtures', fallback: 'index.html' }),
+        StaticPlugin({
+          root: new URL('../../test/fixtures', import.meta.url).pathname,
+          fallback: 'index.html',
+        }),
       ],
     });
 

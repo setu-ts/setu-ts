@@ -49,6 +49,7 @@ const fakeDenoHost: DenoHost = {
   mkdir: () => Promise.resolve(),
   remove: () => Promise.resolve(),
   resolveDns: (_query: string, _recordType: 'SRV' | 'A' | 'AAAA') => Promise.resolve([]),
+  open: () => Promise.resolve({} as Deno.FsFile),
 };
 
 const fakeBunHost: BunHost = {

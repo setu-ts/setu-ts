@@ -32,7 +32,7 @@ export const DEFAULT_MUTABLE = 'public, max-age=0, must-revalidate';
  */
 export type CacheControlOptions = {
   /** Custom cache control configuration */
-  cacheControl?: string | ((relativePath: string) => string);
+  cacheControl?: string | ((relativePath: string) => string) | undefined;
 };
 
 /**

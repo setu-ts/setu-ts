@@ -22,6 +22,7 @@ export class StaticFilesService implements IStaticFiles {
    */
   constructor(options: StaticPluginOptions) {
     this.handler = createStaticHandler({
+      fs: {} as never,
       root: options.root,
       urlPrefix: options.urlPrefix ?? '/',
       index: options.index ?? 'index.html',
@@ -41,6 +42,6 @@ export class StaticFilesService implements IStaticFiles {
    * @returns A HandlerResult with the file response or error
    */
   serve(ctx: unknown): Promise<unknown> {
-    return this.handler(ctx as Parameters<typeof this.handler>[0]);
+    return this.handler(ctx as Parameters<typeof this.handler>[0]) as Promise<unknown>;
   }
 }

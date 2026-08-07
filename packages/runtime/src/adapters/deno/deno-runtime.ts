@@ -50,6 +50,8 @@ export interface DenoHost {
   resolveDns(query: string, recordType: 'SRV'): Promise<DenoSrvRecord[]>;
   /** Resolves address records. */
   resolveDns(query: string, recordType: 'A' | 'AAAA'): Promise<string[]>;
+  /** Open a file for reading. */
+  open(path: string): Promise<Deno.FsFile>;
 }
 
 /** File info returned by DenoHost.stat(). */
@@ -123,7 +125,7 @@ export function createDenoRuntimeServices(
             return;
           }
 
-          controller.enqueue(buffer.subarray(0, bytesRead));
+          controller.enqueue(buffer.subarray(0, bytesRead as number));
         },
         cancel: async () => {
           cancelled = true;
