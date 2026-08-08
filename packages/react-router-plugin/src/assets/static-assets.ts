@@ -1,38 +1,15 @@
 /**
  * Static asset handler — serves built client assets over IFileSystem.
  *
+ * Delegates to shared `@setu-ts/common` utilities for content-type resolution
+ * and path containment, so both packages read one implementation.
+ *
  * @module
  * @since 0.1.0
  */
 
 import type { IFileSystem, RouteHandler } from '@setu-ts/common';
-
-/**
- * Content-type map for common file extensions.
- *
- * @since 0.1.0
- */
-const CONTENT_TYPES: Record<string, string> = {
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.cjs': 'text/javascript',
-  '.css': 'text/css',
-  '.html': 'text/html',
-  '.htm': 'text/html',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.woff2': 'font/woff2',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.ico': 'image/x-icon',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.woff': 'font/woff',
-};
+import { contentTypeFor, isLexicallyContained } from '@setu-ts/common';
 
 /**
  * Immutable Cache-Control header value for built assets.
@@ -86,7 +63,7 @@ export function createStaticAssetHandler(options: {
     // the attacker-controlled vector (the URL). Combined with prepending
     // `assetsDir` below, this keeps every resolved path lexically inside the
     // assets root.
-    if (relativePath.includes('..')) {
+    if (!isLexicallyContained(relativePath)) {
       return ctx.response.status(404).send();
     }
 
@@ -114,8 +91,7 @@ export function createStaticAssetHandler(options: {
     }
 
     // Determine content type from extension.
-    const ext = extractExtension(fullPath);
-    const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+    const contentType = contentTypeFor(fullPath);
 
     // Read the file.
     let bytes: Uint8Array;
@@ -130,17 +106,4 @@ export function createStaticAssetHandler(options: {
       .header('Cache-Control', CACHE_CONTROL_IMMUTABLE)
       .send(bytes);
   };
-}
-
-/**
- * Extracts the file extension (lowercased) from a path.
- *
- * @param path - The file path
- * @returns The extension including the dot, or empty string
- * @since 0.1.0
- */
-function extractExtension(path: string): string {
-  const lastDot = path.lastIndexOf('.');
-  if (lastDot === -1) return '';
-  return path.slice(lastDot).toLowerCase();
 }

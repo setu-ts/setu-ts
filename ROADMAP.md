@@ -5831,6 +5831,101 @@ fetch-based providers elsewhere in the repo.
 
 ---
 
+## Milestone 55: Static File Serving — A Capability, Not a Side Effect of SSR
+
+**Package:** `packages/static-plugin` (new), plus pure helpers promoted into `packages/common`.
+
+**Objective:** the framework can serve a React build's hashed assets and nothing else. There is
+exactly one static file server in 46 packages —
+`packages/react-router-plugin/src/assets/static-assets.ts` — and it was written for one job:
+delivering content-hashed bundles for the SSR plugin. It does that job correctly. Used for anything
+else it is wrong in four specific ways, each verified against the source rather than assumed.
+
+**The four defects for general use.** `Cache-Control: public, max-age=31536000, immutable` is a
+module constant applied unconditionally to every response, which is right for
+`/assets/index-a1b2.js` and actively harmful for `index.html` — ship a fix and browsers do not see
+it for a year. There is no directory-index resolution: the handler returns `404` for `''` and `/`,
+so a plain site has no working root. There are no conditional requests — no `ETag`, no
+`Last-Modified`, therefore no `304`, so every request re-reads and re-sends the whole file. And the
+body is materialised with `fs.readFile` into a `Uint8Array`, so a large file is held entirely in
+memory even though M42 shipped `IResponse.stream()`. Also absent: Range requests, compression or
+precompressed sidecars, and `HEAD` (only `ctx.router.get` is mounted).
+
+**Why this cannot simply import the existing handler.** AI_GUIDELINES §2.2 forbids a plugin
+importing another plugin, and `createStaticAssetHandler` lives in `react-router-plugin`. The
+resolution is **not** the M30b `pemToDer` duplicate: the genuinely shared parts here are pure — the
+extension → content-type map and the containment check — so they move into `common` under §2.1's
+"pure zero-dependency utilities" allowance, the M47 frame-codec and M52 `splitWorkerEnv` precedent,
+and BOTH packages read one implementation. That deletes a duplicate rather than creating one, and it
+is the only route that does not leave two content-type maps drifting apart.
+
+**What the contract permits today, established from source.** `StatResult` carries `size` and an
+optional `mtime`, so `ETag` and `Last-Modified` need no contract change — one `stat()` per request
+buys conditional requests and `304`. But `IFileSystem` has **no streaming read**: its members are
+`readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm`, and the optional `realPath?`. There is no
+`open()`, no partial read, and no byte-range read. True streaming and efficient Range therefore
+require widening `IFileSystem` with an optional member on the M44 `realPath?` / M45 `workers?` / M50
+`dns?` precedent. **That widening is in scope here** — a maintainer's call taken over a M55/M55b
+split, because the alternative ships a static file server that reads a 500 MB video fully into
+memory, and serving Range by slicing a fully-read buffer satisfies the specification while keeping
+precisely the cost the feature exists to remove. The member is optional and additive, so no existing
+implementor breaks and every current caller of `IFileSystem` is untouched; Workers omits it, and the
+handler degrades to a whole-file read exactly as it does when `realPath` is absent.
+
+**Cloudflare Workers.** `runtime.fs` is absent, so the plugin registers its capability but serves
+nothing, documented rather than thrown — the M45 `WorkerPoolUnavailableError` precedent inverted,
+because a missing asset is a `404`, not an error. Workers applications use Workers Assets or R2 via
+`cloudflare-plugin`, and the README must say so rather than leaving a reader to discover an empty
+route table.
+
+**What this is NOT.** Not a CDN, and not a replacement for one — the README must state that
+production traffic belongs in front of a CDN and that this exists for self-hosted deployments,
+development, and single-origin SPA delivery. Not a template engine. Not directory listing, which is
+an information-disclosure default no framework should ship. And explicitly not a change to
+`ReactRouterPlugin`'s defaults: it delegates to the shared helpers, its emitted headers for hashed
+assets stay byte-identical, and a test pins that.
+
+### Deliverables
+
+- [x] `StaticPlugin` registering an `IStaticFiles` service under a new
+      `CAPABILITIES.STATIC_FILES = 'static-files'` token
+- [x] Configurable `cacheControl`, resolved per request rather than a module constant — with
+      distinct defaults for immutable (content-hashed) and mutable paths, since conflating them is
+      the headline defect
+- [x] Directory-index resolution (`index` option, default `index.html`)
+- [x] Conditional requests: `ETag` (from `stat` size + mtime), `Last-Modified`, `If-None-Match` /
+      `If-Modified-Since` → `304`
+- [x] `HEAD` mounted alongside `GET`, sharing one handler so the two cannot diverge
+- [x] Optional SPA fallback (`fallback: 'index.html'`) — serve the shell for unmatched paths, which
+      is what makes a client-routed React build work without SSR
+- [x] Extension → content-type map and containment check promoted to `common`; `react-router-plugin`
+      delegates to them, with a test pinning its hashed-asset headers unchanged
+- [x] Traversal and symlink containment carried over intact, with the `realPath`-absent degradation
+      tested on both paths
+- [x] A `static-files` health indicator reporting whether the configured root is readable
+- [x] `apps/` example serving a plain HTML/CSS/JS site, with a smoke check asserting a `200` with
+      content, a `304` on revalidation, and the SPA fallback
+
+- [x] **`common` widening** — an optional read-stream member on `IFileSystem`, implemented by the
+      Node, Deno, and Bun runtime adapters and omitted on Workers, with the absent-member path
+      degrading to a whole-file read and tested on both branches
+- [x] Streaming bodies through M42's `IResponse.stream()`, so a large file is never fully
+      materialised
+- [x] Range requests (`Range`, `206`, `Content-Range`, `416`, `Accept-Ranges`) served from the read
+      stream rather than a sliced buffer
+- [x] Precompressed sidecar negotiation — serve `<file>.br` / `<file>.gz` when `Accept-Encoding`
+      permits and the sidecar exists, with `Content-Encoding` and `Vary: Accept-Encoding`
+
+### Explicitly out of scope
+
+- On-the-fly compression. It costs CPU per request for a result a build step or a CDN produces once,
+  and the sidecar path above covers the case that matters.
+- Directory listing, ETag strategies beyond the `size`+`mtime` validator (content hashing would give
+  a strong validator even without an `mtime`, at the cost of reading every file), and any form of
+  templating.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -5908,3 +6003,4 @@ fetch-based providers elsewhere in the repo.
 | 52d       | ✅     | cloudflare-plugin (durable objects)   |
 | 53        | ✅     | real-backend CI (examples gate)       |
 | 54        | ✅     | messaging-plugin (cloud brokers)      |
+| 55        | ✅     | static-plugin                         |

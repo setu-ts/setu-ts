@@ -64,7 +64,8 @@
 55. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
 56. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
 57. [GraphQL](#graphql)
-58. [Summary](#summary)
+58. [Static Files Plugin](#static-files-plugin)
+59. [Summary](#summary)
 
 ---
 
@@ -7956,6 +7957,75 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 - **Custom scalars.** In the schema-first arm a resolver-map entry for a scalar type supplies any
   subset of `serialize`, `parseValue`, and `parseLiteral`; omitted members keep graphql's identity
   default.
+
+---
+
+## Static Files Plugin
+
+**Package:** `@setu-ts/static-plugin`
+
+**Token:** `CAPABILITIES.STATIC_FILES = 'static-files'`
+
+### Registration
+
+```typescript
+import { StaticPlugin } from '@setu-ts/static-plugin';
+
+app.register(StaticPlugin({
+  root: './public',
+  urlPrefix: '/assets',
+}));
+```
+
+### Options
+
+| Option           | Type                           | Default                                | Description                   |
+| ---------------- | ------------------------------ | -------------------------------------- | ----------------------------- |
+| `root`           | `string`                       | (required)                             | Directory to serve files from |
+| `urlPrefix`      | `string`                       | `'/'`                                  | URL prefix for static routes  |
+| `index`          | `string`                       | `'index.html'`                         | Index file for directories    |
+| `fallback`       | `string`                       | `undefined`                            | SPA fallback file             |
+| `cacheControl`   | `string \| ((path) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header          |
+| `etag`           | `boolean`                      | `true`                                 | Enable ETag generation        |
+| `ranges`         | `boolean`                      | `true`                                 | Enable Range requests         |
+| `compressed`     | `boolean`                      | `true`                                 | Negotiate .br/.gz sidecars    |
+| `maxBufferBytes` | `number`                       | `1048576`                              | Threshold for streaming       |
+
+### Exports
+
+| Export                | Kind      | Description                         |
+| --------------------- | --------- | ----------------------------------- |
+| `StaticPlugin`        | function  | Plugin factory                      |
+| `StaticFilesService`  | class     | Service implementing `IStaticFiles` |
+| `createStaticHandler` | function  | Standalone route handler            |
+| `IStaticFiles`        | interface | Service interface                   |
+| `StaticPluginOptions` | type      | Plugin options type                 |
+
+`IStaticFiles` declares one method:
+
+```typescript
+serve(ctx: IRequestContext): Promise<HandlerResult>;
+```
+
+### Notes
+
+- Mounts routes on both `GET` and `HEAD`
+- Conditional requests: `ETag`, `If-None-Match`, `If-Modified-Since` → `304`
+- Range requests: `206` with `Content-Range`, `416` for unsatisfiable
+- The `ETag` is **strong** (`"<size>-<mtimeMs>"`) when the runtime reports an `mtime`, and degrades
+  to a **weak** size-only validator when it does not. This matters for resumption: `If-Range` MUST
+  be ignored for a weak validator (RFC 9110 §13.1.5), so an interrupted download resumes only
+  against the strong form. `size`+`mtime` is what nginx and Apache emit as strong for static files
+- Precompressed sidecars: `.br` preferred over `.gz`, ETag from sidecar stat
+- `Cache-Control` is resolved from the **original root-relative** path, never the absolute
+  filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its
+  `immutable` policy whichever encoding is negotiated, and a `cacheControl` function receives the
+  root-relative path (`assets/app.js`, not `/srv/assets/app.js`)
+- A `HEAD` opens no body stream, so it cannot leak a file descriptor on a file above
+  `maxBufferBytes`
+- An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli
+- Workers degradation: registers capability but mounts no route when `fs` is absent
+- Health indicator: reports `up`/`down`/`degraded` based on root directory accessibility
 
 ---
 
