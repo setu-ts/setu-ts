@@ -283,7 +283,7 @@ await app.register(WebsocketPlugin, {
   rooms: {
     '/ws/chat': {
       onMessage: (ctx, message) => {
-        ctx.room.broadcast({ type: 'message', from: ctx.context.user.id, data: message });
+        ctx.room.broadcast({ type: 'message', from: ctx.user.id, data: message });
       },
     },
   },

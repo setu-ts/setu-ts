@@ -41,6 +41,7 @@ Plugins communicate via **capability tokens** - simple string identifiers that r
 capabilities:
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 // Use the predefined tokens
@@ -78,6 +79,7 @@ plugins/consumers resolve them by token.
 ### Registering Services
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 async register(ctx: IPluginContext) {
@@ -118,8 +120,6 @@ Plugins can add middleware to the request processing pipeline.
 ### Adding Middleware
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
 async register(ctx: IPluginContext) {
   // Add middleware with default priority
   ctx.middleware.add(async (ctx, next) => {

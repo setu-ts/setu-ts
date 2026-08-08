@@ -37,6 +37,7 @@ app.listen({ port: 3000 }, (err) => {
 ### Setu-TS
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
@@ -88,7 +89,7 @@ app.post<{ Body }>('/users', async (request, reply) => {
 
 ```typescript
 app.get('/users/:id', async (ctx) => {
-  const id = ctx.context.params.id;
+  const id = ctx.params.id;
   const search = ctx.request.url.searchParams.get('search');
   return ctx.json({ id, search });
 });
@@ -174,7 +175,7 @@ ctx.lifecycle.onRequest((ctx) => {
 });
 
 ctx.lifecycle.onResponse((ctx) => {
-  console.log('Response sent:', ctx.response.status);
+  console.log('Response sent:', ctx.response.snapshot().status);
 });
 
 ctx.lifecycle.onError((error, ctx) => {
@@ -182,9 +183,9 @@ ctx.lifecycle.onError((error, ctx) => {
 });
 
 // Using middleware for transformation
-import { createMiddleware } from '@setu-ts/kernel';
 
-const preSerializationMiddleware = createMiddleware(async (ctx, next) => {
+
+const preSerializationMiddleware: MiddlewareFunction = async (ctx, next) => {
   await next();
   // Post-processing after response is generated
 });
@@ -209,9 +210,7 @@ app.use('/api/*', apiMiddleware);
 ### Setu-TS
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-const myMiddleware = createMiddleware(async (ctx, next) => {
+const myMiddleware: MiddlewareFunction = async (ctx, next) => {
   console.log('Middleware');
   await next();
 });
@@ -219,7 +218,7 @@ const myMiddleware = createMiddleware(async (ctx, next) => {
 app.use(myMiddleware);
 
 // Route-specific middleware
-ctx.middleware.forRoute('/api/*').add(myMiddleware);
+// Route-specific middleware is not supported in Setu-TS; use a middleware that checks ctx.request.path instead.
 ```
 
 ## Decorators
@@ -313,9 +312,7 @@ app.setErrorHandler((error, request, reply) => {
 ### Setu-TS
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-const errorMiddleware = createMiddleware(async (ctx, next) => {
+const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
   try {
     await next();
   } catch (error) {
@@ -455,11 +452,9 @@ app.addHook('onRequest', async (request, reply) => {
 ### Setu-TS
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-const authMiddleware = createMiddleware(async (ctx, next) => {
+const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   // Set user on context
-  ctx.context.user = { id: 1, name: 'John' };
+  ctx.user = { id: 1, name: 'John' };
   await next();
 });
 
@@ -572,8 +567,8 @@ app.get('/', async (request, reply) => {
 ```typescript
 // Use context state
 app.get('/', async (ctx) => {
-  ctx.context.state.user = { id: 1 };
-  return ctx.json({ user: ctx.context.state.user });
+  ctx.state.user = { id: 1 };
+  return ctx.json({ user: ctx.state.user });
 });
 ```
 

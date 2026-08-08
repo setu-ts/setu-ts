@@ -10,6 +10,7 @@ decorator-based usage, see [Decorators Guide](./decorators.md).
 Creates a new application instance.
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication();
@@ -177,9 +178,7 @@ const validators = ctx.services.getAll<IValidator>('validator');
 ### Creating Middleware
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-const myMiddleware = createMiddleware(async (ctx, next) => {
+const myMiddleware: MiddlewareFunction = async (ctx, next) => {
   console.log('Before');
   await next();
   console.log('After');
@@ -226,7 +225,7 @@ ctx.lifecycle.onRequest((ctx) => {
 });
 
 ctx.lifecycle.onResponse((ctx) => {
-  console.log('Response sent:', ctx.response.status);
+  console.log('Response sent:', ctx.response.snapshot().status);
 });
 
 ctx.lifecycle.onError((error, ctx) => {
@@ -514,7 +513,7 @@ app.get('/long-running', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        while (!ctx.context.signal.aborted) {
+        while (!ctx.signal.aborted) {
           controller.enqueue(new TextEncoder().encode('data\n'));
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }

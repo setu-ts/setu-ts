@@ -123,7 +123,7 @@ app.get('/users', async (ctx) => {
 
 app.get('/users/:id', async (ctx) => {
   const userService = ctx.services.get<UserService>('userService');
-  const id = ctx.context.params.id;
+  const id = ctx.params.id;
   return ctx.json(await userService.findById(id));
 });
 
@@ -265,9 +265,7 @@ export class AuthGuard implements CanActivate {
 ### Setu-TS
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-export const authMiddleware = createMiddleware(async (ctx, next) => {
+export const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   const authHeader = ctx.request.headers.get('Authorization');
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -277,7 +275,7 @@ export const authMiddleware = createMiddleware(async (ctx, next) => {
 
   // Verify token and set user
   const user = await verifyToken(token);
-  ctx.context.user = user;
+  ctx.user = user;
 
   await next();
 });
@@ -307,14 +305,13 @@ export class TransformInterceptor implements NestInterceptor {
 ### Setu-TS
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-export const transformMiddleware = createMiddleware(async (ctx, next) => {
+export const transformMiddleware: MiddlewareFunction = async (ctx, next) => {
   await next();
 
   // Transform response
-  if (ctx.response.body) {
-    const data = await ctx.response.json();
+  const snapshot = ctx.response.snapshot();
+  if (!snapshot.streaming && snapshot.body) {
+    const data = JSON.parse(snapshot.body as string);
     const transformed = { success: true, data };
     return ctx.json(transformed);
   }
@@ -349,9 +346,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 ### Setu-TS
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-export const errorMiddleware = createMiddleware(async (ctx, next) => {
+export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
   try {
     await next();
   } catch (error) {

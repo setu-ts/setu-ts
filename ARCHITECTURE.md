@@ -980,7 +980,7 @@ Node and Bun.
 
 ### Package Overview
 
-```mermaid
+````mermaid
 graph TB
     subgraph Foundation
         common[common]
@@ -1034,6 +1034,28 @@ graph TB
         resilience[resilience-plugin]
     end
 
+    subgraph Realtime Plugins
+        sse[sse-plugin]
+        websocket[websocket-plugin]
+        realtime[realtime-backplane-plugin]
+    end
+
+    subgraph Platform Plugins
+        graphql[graphql-plugin]
+        grpc[grpc-plugin]
+        react-router[react-router-plugin]
+        cloudflare[cloudflare-plugin]
+        static[static-plugin]
+        worker-pool[worker-pool-plugin]
+    end
+
+    subgraph Feature Plugins
+        feature-flags[feature-flags-plugin]
+        multi-tenancy[multi-tenancy-plugin]
+        resilience[resilience-plugin]
+        session[session-plugin]
+    end
+
     subgraph Developer Tools
         validation[validation-plugin]
         config[config-plugin]
@@ -1041,6 +1063,12 @@ graph TB
         cli[cli]
         testing[testing]
         sdk[sdk]
+    end
+
+    subgraph Starters
+        rest-starter[rest-starter]
+        microservice-starter[microservice-starter]
+        full-stack-starter[full-stack-starter]
     end
 
     common --> kernel
@@ -1101,7 +1129,31 @@ graph TB
     kernel --> multi-tenancy
     common --> service-discovery
     common --> cloudflare
-```
+    common --> session
+    kernel --> session
+    common --> graphql
+    kernel --> graphql
+    common --> grpc
+    kernel --> grpc
+    common --> sse
+    kernel --> sse
+    common --> websocket
+    kernel --> websocket
+    common --> realtime
+    kernel --> realtime
+    common --> react-router
+    kernel --> react-router
+    common --> static
+    kernel --> static
+    common --> worker-pool
+    kernel --> worker-pool
+    common --> rest-starter
+    kernel --> rest-starter
+    common --> microservice-starter
+    kernel --> microservice-starter
+    common --> full-stack-starter
+    kernel --> full-stack-starter
+    ```
 
 ### Package Details
 
@@ -1496,7 +1548,151 @@ of a single capability token at startup.
 | **Extension Points** | Custom request/response interceptors (`ClientRequestInterceptor`, `ClientResponseInterceptor`); injected `fetch` and `IClientTiming` seams                                                                                                                                                                                                  |
 | **Rules**            | Not a plugin; does not register capabilities or resolve tokens; runtime-independent (web `URL`, `Headers`, `AbortSignal`, `performance.now()` only); zero npm dependencies                                                                                                                                                                  |
 
+#### @setu-ts/cloudflare-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Cloudflare Workers platform bindings: KV, R2, D1, Queues, Cron, Cache API, Durable Objects                                            |
+| **Responsibilities** | Bind platform-specific services to the service registry; split env bindings; throw on missing bindings                                  |
+| **Dependencies**     | `common`, `kernel`, `storage-plugin`, `cache-plugin`, `database-plugin`                                                                 |
+| **Public API**       | `CloudflarePlugin()`; `ICloudflareBindings`                                                                                             |
+| **Extension Points** | N/A — platform-specific, not replaceable                                                                                                |
+| **Rules**            | Workers-only; zero npm dependencies; bindings injected at app construction, never imported from `cloudflare:workers`                    |
+
+#### @setu-ts/graphql-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | GraphQL server with schema-first and code-first arms, over HTTP, WebSocket, and SSE                                                   |
+| **Responsibilities** | Schema parsing; query execution; subscription management; GraphiQL interface; depth limiting; APQ                                       |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `GraphqlPlugin()`; `IGraphqlService`                                                                                                    |
+| **Extension Points** | Custom schema; custom resolvers; custom scalar resolvers; custom document cache                                                         |
+| **Rules**            | `npm:graphql@^16` is inject-or-lazy; subscriptions require `CAPABILITIES.WEBSOCKET` or `CAPABILITIES.SSE` OPTIONALLY                   |
+
+#### @setu-ts/grpc-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary Hono routes                                                           |
+| **Responsibilities** | Connect-ES core + Protobuf-ES; reflection and health over embedded descriptors; RPC handler interception                                |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `GrpcPlugin()`; `IGrpcService`                                                                                                          |
+| **Extension Points** | Custom service definitions via embedded `FileDescriptorSet` constants                                                                   |
+| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; `setRpcHandler?` on `IHttpAdapter` is the interception seam             |
+
+#### @setu-ts/react-router-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | React Router v7 framework-mode SSR embedded as a plugin                                                                                 |
+| **Responsibilities** | File-based routing; SSR via `loadRequestHandler`; static asset serving over `runtime.fs` with symlink-safe containment                  |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `ReactRouterPlugin()`; `SsrService`                                                                                                     |
+| **Extension Points** | Custom `loadRequestHandler` seam; custom `loadContext`                                                                                  |
+| **Rules**            | Vite is an app-level build tool, never imported by the plugin; `IFileSystem.realPath` is the symlink containment seam                   |
+
+#### @setu-ts/sse-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Server-Sent Events with named channels, heartbeat, and Last-Event-ID replay                                                             |
+| **Responsibilities** | Frame encoding; channel management; heartbeat interval; client disconnect handling                                                      |
+| **Dependencies**     | `common`, `kernel`                                                                                                                      |
+| **Public API**       | `SsePlugin()`; `ISseService`                                                                                                            |
+| **Extension Points** | Custom frame encoder; custom channel store                                                                                              |
+| **Rules**            | One-way broadcast only; uses `IResponse.stream()` for the SSE body                                                                      |
+
+#### @setu-ts/websocket-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Full-duplex WebSocket on all four runtimes, with rooms, heartbeat, and admission control                                                |
+| **Responsibilities** | RFC 6455 handshake; room broadcast with `except`; idle sweeper; max connections / max message bytes                                     |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `WebSocketPlugin()`; `IWebSocketService`                                                                                                |
+| **Extension Points** | Custom room implementation; custom heartbeat; custom admission control                                                                  |
+| **Rules**            | `setUpgradeRouter?` on `IHttpAdapter` is the interception seam; real-socket e2e on Deno is required                                    |
+
+#### @setu-ts/worker-pool-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | CPU-bound work on real worker threads, off the event loop                                                                               |
+| **Responsibilities** | Task handlers addressed by module specifier; structured clone I/O; per-specifier lazy task pools                                        |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `WorkerPoolPlugin()`; `IWorkerPool`                                                                                                     |
+| **Extension Points** | Custom `IWorkerHost` implementation; custom task handler modules                                                                        |
+| **Rules**            | `IRuntimeServices.workers?` is the seam; omitted on Workers (throws `WorkerPoolUnavailableError`)                                      |
+
+#### @setu-ts/session-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Cookie sessions with pluggable stores and synchronizer-token form CSRF                                                                  |
+| **Responsibilities** | AES-256-GCM / HKDF-SHA256 cookie sealing; rolling / idle timeout; store strategy (memory / cache / custom)                             |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `SessionPlugin()`; `ISessionService`                                                                                                    |
+| **Extension Points** | Custom `ISessionStore`; custom cookie signing (`mode: 'sign'`)                                                                          |
+| **Rules**            | Zero npm dependencies; `runtime.subtle` for crypto; commit-on-response is sound via `snapshot()` live `Headers`                        |
+
+#### @setu-ts/static-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Static file serving as a capability rather than a side effect of SSR                                                                    |
+| **Responsibilities** | Conditional requests; single-range `206`; `.br`/`.gz` sidecar negotiation; SPA fallback                                                |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `StaticPlugin()`; `IStaticFiles`                                                                                                        |
+| **Extension Points** | Custom `IFileSystem` implementation; custom content-type map                                                                            |
+| **Rules**            | `IRuntimeServices.fs?` is the seam; strong ETag when `mtime` present, weak when size-only                                              |
+
+#### @setu-ts/service-discovery-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Service discovery over static config, Consul, Kubernetes, or DNS-SRV, with balancing and outlier ejection                               |
+| **Responsibilities** | Read-through cache with per-service in-flight coalescing; stale-on-failure; watch-based invalidation                                   |
+| **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
+| **Public API**       | `ServiceDiscoveryPlugin()`; `IServiceDiscovery`                                                                                         |
+| **Extension Points** | Custom `DiscoveryProvider` arm; custom `IDnsResolver`                                                                                   |
+| **Rules**            | Zero npm dependencies; `IRuntimeServices.dns?` is the optional DNS seam; `ILifecycleApi.onStopping` for deregistration                  |
+
+#### @setu-ts/rest-starter
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Opinionated REST plugin composition library: `createRestApp` with pre-wired plugin set                                                  |
+| **Responsibilities** | Compose `RuntimePlugin`, `LoggerPlugin`, `ExceptionsPlugin`, `ValidationPlugin`, `HealthPlugin`, `MetricsPlugin`, `OpenApiPlugin`     |
+| **Dependencies**     | `common`, `kernel`, `runtime`, `logger-plugin`, `exceptions`, `validation-plugin`, `health-plugin`, `metrics-plugin`, `openapi-plugin` |
+| **Public API**       | `createRestApp()`; `RestStarterOptions`                                                                                                 |
+| **Extension Points** | Per-plugin option arms; optional `realtime` / `di` gates                                                                                 |
+| **Rules**            | Emits inline wiring, never imports a starter; `rest` = 9 plugins + `errorHandler()` middleware                                          |
+
+#### @setu-ts/microservice-starter
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Opinionated microservice composition: REST set plus messaging, queues, resilience, telemetry                                            |
+| **Responsibilities** | Compose `rest` starter plus `MessagingPlugin`, `QueuePlugin`, `ResiliencePlugin`, `TelemetryPlugin`                                    |
+| **Dependencies**     | `rest-starter`, `messaging-plugin`, `queue-plugin`, `resilience-plugin`, `telemetry-plugin`                                             |
+| **Public API**       | `createMicroserviceApp()`; `MicroserviceStarterOptions`                                                                                 |
+| **Extension Points** | `serviceDiscovery` arm; `realtime` / `di` gates                                                                                         |
+| **Rules**            | Refused on `cloudflare-workers` because brokers need raw sockets                                                                        |
+
+#### @setu-ts/full-stack-starter
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Opinionated full-stack composition: microservice set plus caching, CQRS, storage, and React Router SSR                                  |
+| **Responsibilities** | Compose `microservice` starter plus `CachePlugin`, `CqrsPlugin`, `StoragePlugin`, `ReactRouterPlugin`                                  |
+| **Dependencies**     | `microservice-starter`, `cache-plugin`, `cqrs-plugin`, `storage-plugin`, `react-router-plugin`                                          |
+| **Public API**       | `createFullStackApp()`; `createFullStackAppFromConfig()`; `FullStackStarterOptions`                                                     |
+| **Extension Points** | `reactRouter`, `session`, `database` arms; config-driven composition via `ConfigPlugin`                                                 |
+| **Rules**            | Vite is an app-level build tool; `deno.json` compiler options must include `exactOptionalPropertyTypes`                                 |
+
 ---
+````
 
 ## 9. Dependency Rules
 

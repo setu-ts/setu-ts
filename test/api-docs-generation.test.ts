@@ -645,11 +645,12 @@ error[private-type-ref]: public type references private type
     it('fatal text on stdout with clean stderr is detected', async () => {
       const fs = makeFs();
       const cmd = {
-        run: () => Promise.resolve({
-          code: 1,
-          stdout: 'error: Module not found: ./missing.ts\n',
-          stderr: '',
-        }),
+        run: () =>
+          Promise.resolve({
+            code: 1,
+            stdout: 'error: Module not found: ./missing.ts\n',
+            stderr: '',
+          }),
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
