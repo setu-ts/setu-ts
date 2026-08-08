@@ -17,6 +17,7 @@ import type {
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WebSocketPluginOptions } from '../interfaces/index.ts';
 import { resolveOptions, WebSocketService } from '../services/websocket-service.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name. */
 const PLUGIN_NAME = 'websocket-plugin';
@@ -58,7 +59,7 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger', CAPABILITIES.REALTIME_BACKPLANE],
     provides: [CAPABILITIES.WEBSOCKET],
     priority: PLUGIN_PRIORITY.NORMAL,

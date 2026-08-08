@@ -11,12 +11,13 @@ import { SesProvider } from '../../src/providers/ses-provider.ts';
 import { SendGridProvider } from '../../src/providers/sendgrid-provider.ts';
 import type { MailProviderType, OutgoingMail } from '../../src/interfaces/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('MailPlugin metadata', () => {
   it('exposes the expected plugin contract fields', () => {
     const plugin = MailPlugin();
     expect(plugin.name).toBe('mail-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toContain(CAPABILITIES.MAIL);
     expect(plugin.optionalDependencies).toEqual(['logger']);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);

@@ -7,6 +7,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('DatabasePlugin', () => {
   describe('metadata', () => {
@@ -17,7 +18,7 @@ describe('DatabasePlugin', () => {
 
     it('has version 0.1.0', () => {
       const plugin = DatabasePlugin();
-      expect(plugin.version).toBe('0.1.0');
+      expect(plugin.version).toBe(manifest.version);
     });
 
     it('provides CAPABILITIES.DATABASE by default', () => {

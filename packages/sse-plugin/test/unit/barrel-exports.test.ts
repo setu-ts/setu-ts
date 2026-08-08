@@ -10,6 +10,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES, SseConnection, SsePlugin, SseService } from '@setu-ts/sse-plugin';
 import type { ISseConnection, ISseService, SseChannel, SseMessage } from '@setu-ts/sse-plugin';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('sse-plugin barrel exports', () => {
   it('exposes every documented value export at runtime', () => {
@@ -25,7 +26,7 @@ describe('sse-plugin barrel exports', () => {
   it('is a factory function that returns an IPlugin', () => {
     const plugin = SsePlugin();
     expect(plugin.name).toBe('sse-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual(['sse']);
   });
 

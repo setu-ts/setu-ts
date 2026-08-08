@@ -19,6 +19,7 @@ import type { RequestSizeOptions } from '../middleware/request-size-middleware.t
 import { requestSizeMiddleware } from '../middleware/request-size-middleware.ts';
 import type { IpSecurityOptions } from '../middleware/ip-security-middleware.ts';
 import { ipSecurityMiddleware } from '../middleware/ip-security-middleware.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Middleware execution priorities for each concern. */
 const MIDDLEWARE_PRIORITY = {
@@ -72,7 +73,7 @@ export function HttpSecurityPlugin(
 ): IPlugin {
   return {
     name: 'http-security-plugin',
-    version: '0.1.0',
+    version: denoJson.version,
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void {

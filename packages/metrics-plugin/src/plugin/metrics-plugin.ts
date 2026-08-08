@@ -11,6 +11,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { MetricsPluginOptions } from '../interfaces/index.ts';
 import { MetricsService } from '../services/metrics-service.ts';
 import { HttpCollector, MIDDLEWARE_PRIORITY } from '../collectors/http-collector.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a metrics plugin.
@@ -53,7 +54,7 @@ export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
 
   return {
     name: 'metrics-plugin',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.METRICS],
     priority: 100,
 

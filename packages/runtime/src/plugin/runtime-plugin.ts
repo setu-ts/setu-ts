@@ -17,6 +17,7 @@ import { DenoHttpAdapter } from '../adapters/deno/deno-http-adapter.ts';
 import { NodeHttpAdapter } from '../adapters/node/node-http-adapter.ts';
 import { BunHttpAdapter } from '../adapters/bun/bun-http-adapter.ts';
 import { CloudflareWorkersHttpAdapter } from '../adapters/workers/cf-http-adapter.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Options for {@linkcode RuntimePlugin}.
@@ -104,7 +105,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
 
   return {
     name: 'runtime',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.RUNTIME, CAPABILITIES.HTTP_ADAPTER],
     priority: PLUGIN_PRIORITY.HIGHEST,
 

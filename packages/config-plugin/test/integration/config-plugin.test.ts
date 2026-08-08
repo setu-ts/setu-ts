@@ -15,6 +15,7 @@ import {
   createFakeFileSystem,
   createRuntime,
 } from '../fixtures/fake-runtime.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /** Create a minimal service registry test double backed by a Map. */
 function createServiceRegistry(map: Map<string, unknown>) {
@@ -93,7 +94,7 @@ describe('ConfigPlugin — metadata', () => {
   it('has correct name and version', () => {
     const plugin = ConfigPlugin();
     expect(plugin.name).toBe('config-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('depends on and provides correct capabilities', () => {

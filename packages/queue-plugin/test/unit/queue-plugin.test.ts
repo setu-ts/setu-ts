@@ -6,6 +6,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * A Redis address the test suite is deliberately NOT permitted to reach: the
@@ -160,7 +161,7 @@ describe('QueuePlugin', () => {
 
     expect(plugin.name).toBe('queue-plugin');
     expect(plugin.provides).toContain('queue');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('registers a QueueService under CAPABILITIES.QUEUE', async () => {

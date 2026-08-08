@@ -8,6 +8,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { CqrsPluginOptions } from '../interfaces/index.ts';
 import { CommandBus } from '../bus/command-bus.ts';
 import { QueryBus } from '../bus/query-bus.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name. */
 const PLUGIN_NAME = 'cqrs-plugin';
@@ -43,7 +44,7 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.CQRS, CAPABILITIES.COMMAND_BUS, CAPABILITIES.QUERY_BUS],
     priority: PLUGIN_PRIORITY.NORMAL,
 

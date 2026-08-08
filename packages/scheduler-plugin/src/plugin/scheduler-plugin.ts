@@ -11,6 +11,7 @@ import type { SchedulerPluginOptions } from '../interfaces/index.ts';
 import { resolveLock } from '../lock/distributed-lock.ts';
 import type { ILifecyclableLock } from '../lock/distributed-lock.ts';
 import { SchedulerService } from '../services/scheduler-service.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a scheduler plugin.
@@ -38,7 +39,7 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
 
   return {
     name: 'scheduler-plugin',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: ['scheduler'],
     priority: 100,
 

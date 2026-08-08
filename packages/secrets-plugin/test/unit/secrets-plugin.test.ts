@@ -12,12 +12,13 @@ import { AzureKeyVaultProvider } from '../../src/providers/azure-key-vault.ts';
 import { HashiCorpVaultProvider } from '../../src/providers/vault.ts';
 import type { SecretsProviderType } from '../../src/interfaces/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('SecretsPlugin metadata', () => {
   it('exposes the expected plugin contract fields', () => {
     const plugin = SecretsPlugin();
     expect(plugin.name).toBe('secrets-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toContain(CAPABILITIES.SECRETS);
     expect(plugin.optionalDependencies).toEqual(['logger']);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);

@@ -24,6 +24,7 @@ import type { ChannelConfig } from '../../src/index.ts';
 import { createFakeMailer } from '../fixtures/fake-mailer.ts';
 import { createFakeNotificationHttp } from '../fixtures/fake-notification-http.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 const twilioConfig: ChannelConfig = {
   provider: 'twilio',
@@ -46,7 +47,7 @@ describe('NotificationPlugin metadata', () => {
   it('exposes the expected plugin contract fields', () => {
     const plugin = NotificationPlugin({ channels: {} });
     expect(plugin.name).toBe('notification-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.NOTIFICATION]);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
     // `mail` only — the plugin never reads a logger, so it declares no logger edge.

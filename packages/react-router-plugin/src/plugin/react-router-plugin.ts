@@ -18,6 +18,7 @@ import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
 import { createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
 import { assertSsrRuntime, loadRequestHandler } from '../handler/server-build.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name. */
 const PLUGIN_NAME = 'react-router-plugin';
@@ -78,7 +79,7 @@ function joinWildcard(prefix: string): string {
 export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['runtime'],
     provides: [CAPABILITIES.SSR],
     priority: PLUGIN_PRIORITY.NORMAL,

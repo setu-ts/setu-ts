@@ -13,6 +13,7 @@ import type { SsrRuntime } from '../../src/interfaces/index.ts';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
 import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('react-router-plugin', () => {
   function buildFakeCtx(): Any {
@@ -158,7 +159,7 @@ describe('react-router-plugin', () => {
     const plugin = ReactRouterPlugin({ serverBuildPath: './build/server' });
 
     expect(plugin.name).toBe('react-router-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toContain(CAPABILITIES.SSR);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
   });

@@ -13,6 +13,7 @@ import { AuthService, LocalStrategy } from '../services/auth-service.ts';
 import { RbacService } from '../services/rbac-service.ts';
 import { JwtStrategy } from '../strategies/jwt-strategy.ts';
 import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * AuthPlugin factory.
@@ -51,7 +52,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
   return {
     name: 'auth-plugin',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.JWT, CAPABILITIES.AUTH, CAPABILITIES.AUTHORIZATION],
     priority: PLUGIN_PRIORITY.NORMAL,
 

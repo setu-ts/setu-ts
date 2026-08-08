@@ -36,6 +36,7 @@ import type {
 import { discoverControllers } from '../discovery/controller-discovery.ts';
 import { resolveParameters } from '../resolvers/parameter-resolver.ts';
 import { className, isHandlerResult, joinPaths } from '../internal.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Options for {@linkcode DecoratorPlugin}.
@@ -476,7 +477,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
   const opts = options ?? {};
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.METADATA_STORE],
     priority: PLUGIN_PRIORITY.LOW,
 

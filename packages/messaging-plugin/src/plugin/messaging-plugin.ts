@@ -22,6 +22,7 @@ import type {
   RabbitMqOptions,
   RedisStreamsOptions,
 } from '../interfaces/index.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a capability token for a named messaging instance.
@@ -97,7 +98,7 @@ export function MessagingPlugin(
 
   return {
     name: pluginName,
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [token],
     optionalDependencies: ['logger'],
     priority: PLUGIN_PRIORITY.NORMAL,

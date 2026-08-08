@@ -19,6 +19,7 @@ import { FakeRedisStreamsClient } from '../../test/fixtures/fake-ioredis-client.
 import { FakeAmqpConnection } from '../../test/fixtures/fake-amqplib-client.ts';
 import { FakeNatsConnection } from '../../test/fixtures/fake-nats-client.ts';
 import { FakeKafkaFactory } from '../../test/fixtures/fake-kafkajs-client.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a fake context for testing MessagingPlugin.
@@ -147,7 +148,7 @@ describe('MessagingPlugin', () => {
   it('version is set', () => {
     const plugin = MessagingPlugin();
 
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('memory broker registers successfully', async () => {

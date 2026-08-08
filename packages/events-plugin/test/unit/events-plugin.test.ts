@@ -6,6 +6,7 @@ import { expect } from '@std/expect';
 import { EventsPlugin } from '../../src/plugin/events-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger, IPluginContext, TimerHandle } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('EventsPlugin', () => {
   let ctx: IPluginContext;
@@ -116,7 +117,7 @@ describe('EventsPlugin', () => {
   it('should have correct name and version', () => {
     const plugin = EventsPlugin();
     expect(plugin.name).toBe('events-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('should declare optionalDependencies: [logger]', () => {

@@ -27,6 +27,7 @@ import { DatabasePerTenant } from '../strategies/database-strategy.ts';
 import { MemoryTenantDataStore } from '../stores/memory-tenant-store.ts';
 import { MultiTenancyService } from '../services/multi-tenancy-service.ts';
 import { tenantMiddleware } from '../middleware/tenant-middleware.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 // ---------------------------------------------------------------------------
 // Resolver / strategy builders
@@ -156,7 +157,7 @@ export function MultiTenancyPlugin(
 
   return {
     name: 'multi-tenancy-plugin',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.MULTI_TENANCY],
     optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.JWT],
     priority: PLUGIN_PRIORITY.NORMAL,

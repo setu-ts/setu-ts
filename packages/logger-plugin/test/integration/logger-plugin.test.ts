@@ -16,6 +16,7 @@ import { NoopLogger } from '../../src/loggers/noop-logger.ts';
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * Fake plugin context that records middleware additions and service registrations.
@@ -112,7 +113,7 @@ describe('LoggerPlugin (integration)', () => {
   it('returns a plugin with the correct metadata', () => {
     const plugin = LoggerPlugin();
     expect(plugin.name).toBe('logger-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.dependencies).toEqual(['runtime']);
     expect(plugin.provides).toEqual([CAPABILITIES.LOGGER]);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.HIGH);

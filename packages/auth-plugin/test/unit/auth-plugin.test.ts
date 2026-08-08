@@ -14,6 +14,7 @@ import type {
   IRequest,
 } from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a fake plugin context for testing AuthPlugin.
@@ -102,7 +103,7 @@ describe('AuthPlugin', () => {
       rbac: { roles: {} },
     });
     expect(plugin.name).toBe('auth-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('lists the three capability tokens in provides', () => {

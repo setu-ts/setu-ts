@@ -16,6 +16,7 @@ import type {
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseService } from '../services/sse-service.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name. */
 const PLUGIN_NAME = 'sse-plugin';
@@ -39,7 +40,7 @@ const PLUGIN_NAME = 'sse-plugin';
 export function SsePlugin(options?: SsePluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger', CAPABILITIES.REALTIME_BACKPLANE],
     provides: [CAPABILITIES.SSE],
     priority: PLUGIN_PRIORITY.NORMAL,
