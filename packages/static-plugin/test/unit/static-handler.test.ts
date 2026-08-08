@@ -291,4 +291,303 @@ describe('createStaticHandler', () => {
     expect(ctx.response._headers.get('Content-Range')).toContain('0-4');
     expect(ctx.response._headers.get('Accept-Ranges')).toBe('bytes');
   });
+
+  it('should return 400 for an invalid URI encoding', async () => {
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    // Invalid UTF-8 sequence that decodeURIComponent will reject
+    ctx.request.path = '/%FF';
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(400);
+  });
+
+  it('should serve fallback when file is missing and Accept includes text/html', async () => {
+    const indexContent = new TextEncoder().encode('<html>fallback</html>');
+    await fs.writeFile('/root/index.html', indexContent);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      fallback: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/missing.html';
+    ctx.request.headers.set('Accept', 'text/html');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Content-Type')).toBe('text/html');
+  });
+
+  it('should not serve fallback for missing file without text/html Accept', async () => {
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      fallback: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/missing.html';
+    ctx.request.headers.set('Accept', 'application/json');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(404);
+  });
+
+  it('should serve fallback for HEAD request with text/html Accept', async () => {
+    const indexContent = new TextEncoder().encode('<html>fallback</html>');
+    await fs.writeFile('/root/index.html', indexContent);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      fallback: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/missing.html';
+    ctx.request.method = 'HEAD';
+    ctx.request.headers.set('Accept', 'text/html');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._body).toEqual(new Uint8Array());
+  });
+
+  it('should handle realPath throwing for non-existent root', async () => {
+    const handler = createStaticHandler({
+      fs: {
+        ...fs,
+        realPath: () => Promise.reject(new Error('ENOENT')),
+      },
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(404);
+  });
+
+  it('should return 200 with ETag and Last-Modified when mtime is present', async () => {
+    const content = new TextEncoder().encode('hello world');
+    const mtime = new Date('2024-01-01T00:00:00.000Z');
+    await fs.writeFile('/root/test.txt', content);
+    // Update the stat to include mtime
+    fs.stats.set('/root/test.txt', {
+      isFile: true,
+      isDirectory: false,
+      size: 11,
+      mtime,
+    });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('ETag')).toBe('W/"11-1704067200000"');
+    expect(ctx.response._headers.get('Last-Modified')).toBe('Mon, 01 Jan 2024 00:00:00 GMT');
+  });
+
+  it('should return 200 without ETag when etag is disabled', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      etag: false,
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('If-None-Match', 'W/"11"');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._headers.get('ETag')).toBeUndefined();
+  });
+
+  it('should return 200 without handling Range when ranges is disabled', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      ranges: false,
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Range', 'bytes=0-4');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    // Range is ignored, full file is served
+    expect(ctx.response._headers.get('Content-Range')).toBeUndefined();
+    expect(ctx.response._headers.get('Content-Length')).toBe('11');
+  });
+
+  it('should ignore Range header when ranges is disabled', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      ranges: false,
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Range', 'bytes=0-4');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Content-Range')).toBeUndefined();
+  });
+
+  it('should return 304 for sidecar ETag match', async () => {
+    const content = new TextEncoder().encode('hello world');
+    const sidecarContent = new TextEncoder().encode('compressed');
+    await fs.writeFile('/root/test.txt', content);
+    await fs.writeFile('/root/test.txt.br', sidecarContent);
+
+    // Set stats for both files
+    fs.stats.set('/root/test.txt', { isFile: true, isDirectory: false, size: 11 });
+    fs.stats.set('/root/test.txt.br', { isFile: true, isDirectory: false, size: 10 });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Accept-Encoding', 'br');
+    ctx.request.headers.set('If-None-Match', 'W/"10"');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(304);
+    expect(ctx.response._headers.get('Content-Encoding')).toBe('br');
+    expect(ctx.response._headers.get('Vary')).toBe('Accept-Encoding');
+  });
+
+  it('should serve full file when If-Range does not match ETag', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Range', 'bytes=0-4');
+    ctx.request.headers.set('If-Range', 'W/"different"');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Content-Range')).toBeUndefined();
+  });
+
+  it('should serve file with contentEncoding and Vary header', async () => {
+    const content = new TextEncoder().encode('hello world');
+    const sidecarContent = new TextEncoder().encode('compressed');
+    await fs.writeFile('/root/test.txt', content);
+    await fs.writeFile('/root/test.txt.br', sidecarContent);
+
+    fs.stats.set('/root/test.txt', { isFile: true, isDirectory: false, size: 11 });
+    fs.stats.set('/root/test.txt.br', { isFile: true, isDirectory: false, size: 10 });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Accept-Encoding', 'br');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Content-Encoding')).toBe('br');
+    expect(ctx.response._headers.get('Vary')).toBe('Accept-Encoding');
+    expect(ctx.response._headers.get('Content-Type')).toBe('text/plain');
+  });
+
+  it('should stream HEAD response for large file with range', async () => {
+    const largeContent = new Uint8Array(Array.from({ length: 2_000_000 }, (_, i) => i % 256));
+    await fs.writeFile('/root/large.bin', largeContent);
+
+    const handler = createStaticHandler({
+      fs: {
+        ...fs,
+        readStream: async (path: string, options?: { start?: number; end?: number }) => {
+          const data = fs.files.get(path)!;
+          const start = options?.start ?? 0;
+          const end = options?.end !== undefined ? options.end : data.length - 1;
+          const slice = data.subarray(start, end + 1);
+          return new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(slice);
+              controller.close();
+            },
+          });
+        },
+      },
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      maxBufferBytes: 1_048_576,
+    }) as RouteHandler;
+
+    ctx.request.path = '/large.bin';
+    ctx.request.method = 'HEAD';
+    ctx.request.headers.set('Range', 'bytes=0-99');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(206);
+    expect(ctx.response._body).toEqual(new Uint8Array());
+    expect(ctx.response._headers.get('Content-Length')).toBe('100');
+  });
 });

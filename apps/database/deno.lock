@@ -1562,6 +1562,14 @@
       "jsr:@setu-ts/service-discovery-plugin@0.1.0-alpha.4": {},
       "jsr:@setu-ts/session-plugin@0.1.0-alpha.4": {},
       "jsr:@setu-ts/sse-plugin@0.1.0-alpha.4": {},
+      "jsr:@setu-ts/static-plugin@0.1.0-alpha.4": {
+        "dependencies": [
+          "jsr:@setu-ts/common@~0.1.0-alpha.4",
+          "jsr:@setu-ts/kernel@~0.1.0-alpha.4",
+          "jsr:@setu-ts/runtime@~0.1.0-alpha.4",
+          "jsr:@setu-ts/testing@~0.1.0-alpha.4"
+        ]
+      },
       "jsr:@setu-ts/storage-plugin@0.1.0-alpha.4": {},
       "jsr:@setu-ts/telemetry-plugin@0.1.0-alpha.4": {
         "dependencies": [
