@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import { EventsMessagingBridge } from '../../src/bridge/events-messaging-bridge.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * Fake implementations for testing EventsMessagingBridge.
@@ -198,7 +199,7 @@ describe('EventsMessagingBridge', () => {
     const plugin = EventsMessagingBridge({ eventTypes: ['test.event'] });
 
     expect(plugin.name).toBe('events-messaging-bridge');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('register throws when event bus is not registered', () => {

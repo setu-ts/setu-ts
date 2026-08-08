@@ -26,6 +26,7 @@ import type {
   IServiceRegistry,
   RuntimePlatform,
 } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('HealthPlugin', () => {
   function createFakeContext(): IPluginContext {
@@ -121,7 +122,7 @@ describe('HealthPlugin', () => {
   it('should have correct version', () => {
     const plugin = HealthPlugin();
 
-    expect(plugin.version).toBe('0.20.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('should provide CAPABILITIES.HEALTH', () => {

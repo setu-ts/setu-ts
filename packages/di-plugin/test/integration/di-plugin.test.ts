@@ -7,6 +7,7 @@ import type { IContainer } from '@setu-ts/common';
 import { DiPlugin } from '../../src/plugin/di-plugin.ts';
 import type { DiPluginOptions } from '../../src/plugin/di-plugin.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 // --- Test doubles for autoRegister ---
 
@@ -34,7 +35,7 @@ describe('DiPlugin integration', () => {
     });
 
     it('has version matching deno.json', () => {
-      expect(DiPlugin().version).toBe('0.1.0');
+      expect(DiPlugin().version).toBe(manifest.version);
     });
 
     it('provides CAPABILITIES.DI_CONTAINER', () => {

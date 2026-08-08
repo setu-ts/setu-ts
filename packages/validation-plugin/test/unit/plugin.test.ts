@@ -10,6 +10,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 
 import { ValidationPlugin } from '../../src/plugin/validation-plugin.ts';
 import { ValidationService } from '../../src/services/validation-service.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,7 +92,7 @@ describe('ValidationPlugin — metadata', () => {
 
   it('has version 0.1.0', () => {
     const plugin = ValidationPlugin();
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('provides CAPABILITIES.VALIDATION', () => {

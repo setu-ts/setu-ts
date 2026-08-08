@@ -40,7 +40,7 @@ export class RemoteHandlerError extends Error {
 /**
  * Signals that a broker's transport cannot support brokered request-reply.
  *
- * **No broker throws this as of `0.1.0-alpha.4`.** It was introduced in
+ * **No broker throws this as of `0.1.0-alpha.5`.** It was introduced in
  * `0.1.0-alpha.1` for the Kafka broker, which rejected `request`/`respond`
  * outright; Kafka now implements both over a shared reply topic read by a
  * per-instance consumer group, so all five brokers are reply-capable. The class

@@ -12,6 +12,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import type { ConfigPluginOptions } from '../options.ts';
 import { loadConfig } from '../services/load-config.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'config-plugin';
@@ -50,7 +51,7 @@ const PLUGIN_NAME = 'config-plugin';
 export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     dependencies: [CAPABILITIES.RUNTIME],
     provides: [CAPABILITIES.CONFIG],
     consumes: [CAPABILITIES.RUNTIME],

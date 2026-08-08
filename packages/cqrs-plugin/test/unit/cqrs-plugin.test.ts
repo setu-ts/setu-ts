@@ -11,6 +11,7 @@ import {
   PLUGIN_PRIORITY,
 } from '@setu-ts/common';
 import type { ICommandBus, ICqrsFacade, IPluginContext, IQueryBus } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('CqrsPlugin', () => {
   it('should have correct name', () => {
@@ -20,7 +21,7 @@ describe('CqrsPlugin', () => {
 
   it('should have correct version', () => {
     const plugin = CqrsPlugin();
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('should provide correct capabilities', () => {

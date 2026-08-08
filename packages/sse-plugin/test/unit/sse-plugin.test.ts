@@ -18,12 +18,13 @@ import type {
   TimerHandle,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('SsePlugin', () => {
   it('should have correct name and version', () => {
     const plugin = SsePlugin();
     expect(plugin.name).toBe('sse-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
   });
 
   it('should provide CAPABILITIES.SSE', () => {

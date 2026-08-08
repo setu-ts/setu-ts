@@ -12,12 +12,13 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { WorkerPoolPlugin } from '../../src/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('WorkerPoolPlugin — metadata', () => {
   it('should declare name, version, provides, and priority', () => {
     const plugin = WorkerPoolPlugin();
     expect(plugin.name).toBe('worker-pool-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.WORKER_POOL]);
     expect(plugin.optionalDependencies).toEqual(['logger']);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);

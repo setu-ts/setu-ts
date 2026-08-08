@@ -11,6 +11,7 @@ import type { ITenantDataStore } from '../../src/interfaces/index.ts';
 import { createRecordingFakeStore } from '../fixtures/fake-store.ts';
 import type { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import type { ILogger, IPluginContext } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 // ---------------------------------------------------------------------------
 // Types — minimal interfaces to avoid `as any`
@@ -141,7 +142,7 @@ describe('multi tenancy plugin', () => {
   it('plugin — metadata correct', () => {
     const plugin = MultiTenancyPlugin({ resolver: new HeaderResolver() });
     expect(plugin.name).toEqual('multi-tenancy-plugin');
-    expect(plugin.version).toEqual('0.1.0');
+    expect(plugin.version).toEqual(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.MULTI_TENANCY]);
     expect(plugin.optionalDependencies).toEqual([CAPABILITIES.LOGGER, CAPABILITIES.JWT]);
     expect(plugin.priority).toEqual(PLUGIN_PRIORITY.NORMAL);

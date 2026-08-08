@@ -12,6 +12,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPluginContext } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { IAuditDbClient } from '../../src/interfaces/index.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('createStorage', () => {
   const fakeContext = {
@@ -145,7 +146,7 @@ describe('AuditPlugin', () => {
   it('returns plugin descriptor with correct properties', () => {
     const plugin = AuditPlugin();
     expect(plugin.name).toBe('audit-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.AUDIT]);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
     expect(plugin.optionalDependencies).toEqual(['logger']);

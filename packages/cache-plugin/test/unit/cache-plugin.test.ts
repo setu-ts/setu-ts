@@ -5,6 +5,7 @@ import type { IPluginContext } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { CachePlugin } from '../../src/plugin/cache-plugin.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * A Redis address the test suite is deliberately NOT permitted to reach: the
@@ -290,7 +291,7 @@ describe('CachePlugin', () => {
 
     it('has version 0.1.0', () => {
       const plugin = CachePlugin();
-      expect(plugin.version).toBe('0.1.0');
+      expect(plugin.version).toBe(manifest.version);
     });
   });
 });

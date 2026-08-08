@@ -15,6 +15,7 @@ import { MemoryStore } from '../stores/memory-store.ts';
 import { RedisStore } from '../stores/redis-store.ts';
 import { NoopStore } from '../stores/noop-store.ts';
 import { CacheService } from '../services/cache-service.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Default store backend when none is specified. */
 const DEFAULT_STORE = 'memory';
@@ -66,7 +67,7 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [token],
     priority: PLUGIN_PRIORITY.NORMAL,

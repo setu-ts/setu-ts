@@ -17,6 +17,7 @@ import { resolveOptions } from '../options.ts';
 import { createProvider } from '../providers/provider-factory.ts';
 import { ServiceDiscoveryService } from '../services/service-discovery-service.ts';
 import { SelfRegistrationNotSupportedError } from '../errors.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'service-discovery-plugin';
@@ -55,7 +56,7 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.SERVICE_DISCOVERY],
     priority: PLUGIN_PRIORITY.NORMAL,

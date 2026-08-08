@@ -20,6 +20,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthPluginOptions } from '../interfaces/index.ts';
 import { HealthService } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a health plugin.
@@ -56,7 +57,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
 
   return {
     name: 'health-plugin',
-    version: '0.20.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.HEALTH],
     priority: 100,
 

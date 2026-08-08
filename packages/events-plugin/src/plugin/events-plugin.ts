@@ -8,6 +8,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { EventsPluginOptions } from '../interfaces/index.ts';
 import { InMemoryEventBus } from '../bus/in-memory-event-bus.ts';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name. */
 const PLUGIN_NAME = 'events-plugin';
@@ -38,7 +39,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.EVENTS],
     priority: PLUGIN_PRIORITY.NORMAL,

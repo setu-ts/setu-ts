@@ -10,6 +10,7 @@ import type { HealthCheckResult, IPlugin, IPluginContext, IWorkerPool } from '@s
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolService } from '../services/worker-pool-service.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name. */
 const PLUGIN_NAME = 'worker-pool-plugin';
@@ -35,7 +36,7 @@ const PLUGIN_NAME = 'worker-pool-plugin';
 export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.WORKER_POOL],
     priority: PLUGIN_PRIORITY.NORMAL,

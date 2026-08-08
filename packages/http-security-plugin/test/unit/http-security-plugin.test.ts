@@ -11,6 +11,7 @@ import { HttpSecurityPlugin } from '../../src/plugin/http-security-plugin.ts';
 import type { CorsOptions } from '../../src/middleware/cors-middleware.ts';
 import { corsMiddleware } from '../../src/middleware/cors-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('HttpSecurityPlugin', () => {
   function createFakePluginContext(): {
@@ -103,7 +104,7 @@ describe('HttpSecurityPlugin', () => {
     it('has correct name and version', () => {
       const plugin = HttpSecurityPlugin();
       expect(plugin.name).toBe('http-security-plugin');
-      expect(plugin.version).toBe('0.1.0');
+      expect(plugin.version).toBe(manifest.version);
     });
 
     it('does not provide capability tokens', () => {

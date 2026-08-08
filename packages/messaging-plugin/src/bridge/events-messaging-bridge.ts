@@ -3,6 +3,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IDomainEvent, IEventBus } from '@setu-ts/common';
 import type { IMessageBroker } from '@setu-ts/common';
 import type { EventsMessagingBridgeOptions } from '../interfaces/index.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * EventsMessagingBridge factory.
@@ -34,7 +35,7 @@ export function EventsMessagingBridge(
 
   return {
     name: 'events-messaging-bridge',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [],
     optionalDependencies: ['events', 'messaging', 'logger'],
     priority: PLUGIN_PRIORITY.NORMAL,

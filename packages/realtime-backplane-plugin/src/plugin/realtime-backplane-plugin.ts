@@ -15,6 +15,7 @@ import type {
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { RealtimeBackplanePluginOptions } from '../interfaces/index.ts';
 import { createBackplane } from '../transports/backplane-factory.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'realtime-backplane-plugin';
@@ -50,7 +51,7 @@ export function RealtimeBackplanePlugin(
 ): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.REALTIME_BACKPLANE],
     // Resolved by the messaging arm; absent for every other transport.
     optionalDependencies: [CAPABILITIES.MESSAGING],

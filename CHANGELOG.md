@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] — 2026-08-08
+
+**This release renames the project and moves every package to a new JSR scope.** It is the first
+release published under `@setu-ts`; the `@hono-enterprise` packages are yanked and archived and
+receive no further versions. Because the scope changes, **every consumer must update their imports
+and their manifest** — there is no upgrade path that leaves specifiers untouched.
+
+Two things about a prerelease under a brand-new scope, both of which will otherwise surprise you:
+JSR does not point `latest` at a prerelease, so every install instruction must carry an explicit
+version (`jsr:@setu-ts/kernel@^0.1.0-alpha.5`); and Deno refuses dependencies younger than 24 hours
+unless you pass `--min-dep-age 0`, which affects the maintainer verifying the release rather than
+ordinary users.
+
 **The project is renamed from Hono Enterprise to Setu-TS, and every package moves to a new JSR
 scope.** The old name asserted an association with the Hono project that does not exist: this
 framework is not built, endorsed, or maintained by the Hono team, and its actual use of Hono is one
@@ -47,6 +60,42 @@ to `setu-ts/setu-ts`. Released sections below this one deliberately retain the `
 names, because they record what those releases actually shipped.
 
 ### Added
+
+- **`@setu-ts/static-plugin` — static file serving as a capability** (M55). Registers `IStaticFiles`
+  under a new `CAPABILITIES.STATIC_FILES` token and mounts one handler on both `GET` and `HEAD`.
+
+  The framework previously had exactly one static file server, inside `react-router-plugin`, written
+  for content-hashed SSR bundles: an unconditional `immutable` `Cache-Control` on every response, no
+  directory-index resolution, no conditional requests, and a whole-file read into memory. That
+  handler is unchanged and still correct for its job; this package is for everything else.
+
+  Ships configurable `cacheControl` (a string, or a function receiving the root-relative path,
+  defaulting to immutable-for-hashed and `must-revalidate` otherwise), `index` and `fallback` as
+  separate options, conditional requests, single-range `206`/`416`, `.br`/`.gz` sidecar negotiation,
+  a `static-files` health indicator, and streaming for files above `maxBufferBytes`.
+
+  The SPA `fallback` fires only when `Accept` includes `text/html`. Without that guard a missing
+  `.js` returns the HTML shell under a JavaScript content type, which browsers surface as an opaque
+  syntax error.
+
+  `ETag` is **strong** (`"<size>-<mtimeMs>"`) when the runtime reports an `mtime`, and degrades to a
+  weak size-only validator when it does not. This is load-bearing rather than cosmetic: `If-Range`
+  MUST be ignored for a weak validator (RFC 9110 §13.1.5), so a weak ETag makes every interrupted
+  download restart from byte zero. `size`+`mtime` is what nginx and Apache emit as strong for static
+  files.
+
+  On Cloudflare Workers `runtime.fs` is absent, so the plugin registers its capability, reports
+  `degraded`, and mounts no route. Use Workers Assets or R2 via `@setu-ts/cloudflare-plugin` there.
+
+- **`IFileSystem.readStream?(path, { start, end })`** in `@setu-ts/common` — optional and additive,
+  so no existing implementor breaks and every current caller is untouched. `end` is **inclusive**,
+  matching both `node:fs` and the `Range` wire format, so no off-by-one translation exists.
+  Implemented by the Node, Deno, and Bun runtime adapters and omitted on Workers, where callers
+  degrade to a whole-file read exactly as they already do for `realPath`.
+
+- **`contentTypeFor`, `isLexicallyContained`, `assertRealPathContained`** in `@setu-ts/common` —
+  pure helpers shared by `static-plugin` and `react-router-plugin`, which now delegates to them. Its
+  emitted headers are unchanged and pinned by a regression test.
 
 - **`@Optional` constructor-parameter decorator** in `@setu-ts/decorator-plugin`. Pairs with
   `@Inject` on the same parameter (either order) and injects `undefined` when that token has no
@@ -1091,4 +1140,5 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.1.0-alpha.5]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.1]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.1

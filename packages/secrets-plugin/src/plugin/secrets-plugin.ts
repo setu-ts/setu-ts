@@ -27,6 +27,7 @@ import { AwsKmsProvider } from '../providers/aws-kms.ts';
 import { GcpSecretManagerProvider } from '../providers/gcp-secret-manager.ts';
 import { AzureKeyVaultProvider } from '../providers/azure-key-vault.ts';
 import { HashiCorpVaultProvider } from '../providers/vault.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'secrets-plugin';
@@ -109,7 +110,7 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.SECRETS],
     priority: PLUGIN_PRIORITY.NORMAL,

@@ -10,6 +10,7 @@ import type { MiddlewareFunction } from '@setu-ts/common';
 import { createNoopTracerHost, TelemetryPlugin } from '../../src/plugin/telemetry-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPluginContext, ITelemetryService } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /** Whether `npm:` imports are available in this environment. */
 function canImportNpm(): boolean {
@@ -24,7 +25,7 @@ describe('TelemetryPlugin', () => {
   it('should return an IPlugin with correct metadata', () => {
     const plugin = TelemetryPlugin();
     expect(plugin.name).toBe('telemetry-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.TELEMETRY]);
     expect(plugin.priority).toBe(30);
   });

@@ -22,6 +22,7 @@ import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../repositories/base-repository.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Default adapter when none is specified. */
 const DEFAULT_ADAPTER: DatabaseAdapterType = 'memory';
@@ -80,7 +81,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [token],
     priority: PLUGIN_PRIORITY.NORMAL,

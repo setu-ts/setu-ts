@@ -7,12 +7,13 @@ import type { HealthIndicatorFn, IPlugin } from '@setu-ts/common';
 import { SchedulerPlugin } from '../../src/plugin/scheduler-plugin.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('SchedulerPlugin', () => {
   it('returns IPlugin with correct shape', () => {
     const plugin: IPlugin = SchedulerPlugin();
     expect(plugin.name).toBe('scheduler-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual(['scheduler']);
     expect(plugin.priority).toBe(100);
   });

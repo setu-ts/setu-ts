@@ -13,6 +13,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { ContainerBuilder } from '../container/container-builder.ts';
 import type { ExternalResolver } from '../container/container.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Options for {@linkcode DiPlugin}.
@@ -68,7 +69,7 @@ export function DiPlugin(options?: DiPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.DI_CONTAINER],
     priority: PLUGIN_PRIORITY.NORMAL,
 

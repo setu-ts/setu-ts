@@ -13,6 +13,7 @@ import { PinoLogger } from '../loggers/pino-logger.ts';
 import type { PinoFactory, PinoLoggerOptions } from '../loggers/pino-logger.ts';
 import { createRequestLoggerMiddleware } from '../middleware/request-logger.ts';
 import type { RequestLoggerOptions } from '../middleware/request-logger.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Selects the underlying logger implementation.
@@ -92,7 +93,7 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     dependencies: ['runtime'],
     provides: [CAPABILITIES.LOGGER],
     priority: PLUGIN_PRIORITY.HIGH,

@@ -28,6 +28,7 @@ import { WorkersQueue } from '../queues/workers-queue.ts';
 import { DurableObjectBackplane } from '../realtime/durable-object-backplane.ts';
 import { R2Storage } from '../storage/r2-storage.ts';
 import { KvCacheStore } from '../stores/kv-cache-store.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'cloudflare-plugin';
@@ -97,7 +98,7 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides,
     priority: PLUGIN_PRIORITY.HIGH,

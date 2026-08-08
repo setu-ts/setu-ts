@@ -20,6 +20,7 @@ import { NoopTelemetryService, TelemetryService } from '../services/telemetry-se
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
 import { contextToTraceparent, extractContextFromHeaders } from '../tracing/tracer.ts';
 import { buildInstrumentationRegistry } from '../instrumentation/instrumentation-registry.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Middleware priority for telemetry (inside metrics at 20, outside auth at 300).
@@ -68,7 +69,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
 
   return {
     name: 'telemetry-plugin',
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [CAPABILITIES.TELEMETRY],
     priority: MIDDLEWARE_PRIORITY.TELEMETRY,
 

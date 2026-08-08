@@ -17,6 +17,7 @@ import { MemoryAuditStorage } from '../storage/memory-audit.ts';
 import { LogAuditStorage } from '../storage/log-audit.ts';
 import { DatabaseAuditStorage } from '../storage/database-audit.ts';
 import { FileAuditStorage } from '../storage/file-audit.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'audit-plugin';
@@ -120,7 +121,7 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.AUDIT],
     priority: PLUGIN_PRIORITY.NORMAL,

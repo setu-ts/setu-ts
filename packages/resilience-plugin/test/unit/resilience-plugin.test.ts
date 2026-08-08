@@ -3,12 +3,13 @@ import { expect } from '@std/expect';
 import type { IPlugin, IResilienceService } from '@setu-ts/common';
 import { ResiliencePlugin } from '../../src/plugin/resilience-plugin.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 describe('ResiliencePlugin', () => {
   it('returns an IPlugin with the correct shape', () => {
     const plugin: IPlugin = ResiliencePlugin();
     expect(plugin.name).toBe('resilience-plugin');
-    expect(plugin.version).toBe('0.1.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual(['resilience']);
     expect(plugin.priority).toBe(500);
   });

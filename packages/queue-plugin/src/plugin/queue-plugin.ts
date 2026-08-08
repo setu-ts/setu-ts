@@ -18,6 +18,7 @@ import {
 import { SqsQueue } from '../adapters/sqs-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
  * Creates a queue plugin.
@@ -49,7 +50,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: '0.1.0',
+    version: denoJson.version,
     provides: [token],
     // B5: Declare optional logger dependency so kernel ordering resolves
     // LoggerPlugin first when installed, but remains optional.

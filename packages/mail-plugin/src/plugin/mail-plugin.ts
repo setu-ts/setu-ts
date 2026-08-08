@@ -14,6 +14,7 @@ import { SmtpProvider } from '../providers/smtp-provider.ts';
 import { SesProvider } from '../providers/ses-provider.ts';
 import { SendGridProvider } from '../providers/sendgrid-provider.ts';
 import type { MailPluginOptions } from '../interfaces/index.ts';
+import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'mail-plugin';
@@ -90,7 +91,7 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: '0.1.0',
+    version: denoJson.version,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.MAIL],
     priority: PLUGIN_PRIORITY.NORMAL,

@@ -1,9 +1,9 @@
 {
   "name": "@setu-ts/sdk",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "jsr:@setu-ts/common@^0.1.0-alpha.4": "jsr:@setu-ts/common@0.1.0-alpha.4"
+    "jsr:@setu-ts/common@^0.1.0-alpha.5": "jsr:@setu-ts/common@0.1.0-alpha.5"
   }
 }
