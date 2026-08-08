@@ -33,9 +33,22 @@ All notable changes to this project are documented here. The format follows
   enforces nothing — authentication is still enforced by middleware and guards; this describes the
   route for documentation and client generation.
 
-- **`OpenApiPluginOptions.exclude` keeps operational endpoints out of the document.** Router paths
-  are matched exactly, as registered (`/todos/:id`, not the OpenAPI template `/todos/{id}`), and
-  every method on a matched path is omitted.
+- **`OpenApiPluginOptions.exclude` keeps operational endpoints out of the document.** Paths are
+  matched exactly against the fully-resolved router pattern — router-style (`/todos/:id`, not the
+  OpenAPI template `/todos/{id}`) and including any `router.group()` prefix — and every method on a
+  matched path is omitted.
+
+- **`@Public` reaches the OpenAPI document.** A decorated route marked public is now documented with
+  an empty `security` array, so it opts out of a document-level requirement. Without this the
+  opt-out was reachable only from a programmatic `schema`, and a decorated login route would have
+  been documented as requiring the token it issues. `@Roles`/`@Permissions` are deliberately not
+  mapped: a role is not a security scheme, and no declared scheme can be inferred from one.
+
+- **A `security` requirement naming an undeclared scheme is refused at `register()`,** naming the
+  offending scheme and the declared ones. Emitting it produced a document that is invalid per the
+  specification — Swagger UI renders a lock on every operation with no Authorize button to satisfy
+  it, and strict validators and client generators reject it — while the spec endpoint still answered
+  `200`, so nothing downstream could detect it.
 
 ### Fixed
 

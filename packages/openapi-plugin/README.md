@@ -44,10 +44,19 @@ await app.start({ port: 3000 });
 | `endpoint`     | `string`                         | `'/docs'`         | Path for the Swagger UI page.                            |
 | `specEndpoint` | `string`                         | `'/openapi.json'` | Path for the JSON spec.                                  |
 | `security`     | `readonly SecurityRequirement[]` | —                 | Document-level requirement inherited by every operation. |
-| `exclude`      | `readonly string[]`              | —                 | Router paths to omit, matched exactly as registered.     |
+| `exclude`      | `readonly string[]`              | —                 | Router paths to omit; matches the resolved pattern.      |
 
 The remaining options come from `OpenApiGeneratorOptions` (title, version, servers,
 `securitySchemes`, and the rest of the document metadata).
+
+`exclude` matches the **fully-resolved** router pattern — router-style (`/todos/:id`, not
+`/todos/{id}`) and including any `router.group()` prefix, so a route registered as `get('/metrics')`
+inside `group('/internal', …)` is matched only by `'/internal/metrics'`. An entry matching no route
+is silently ignored.
+
+A `security` requirement naming a scheme absent from `securitySchemes` is refused at `register()`,
+because emitting it produces a document that is invalid per the specification and nothing downstream
+can detect that.
 
 The plugin's own `specEndpoint` and `endpoint` are never documented as operations — a spec listing
 `/openapi.json` and `/docs` describes its own delivery mechanism, and those entries flow into every
@@ -70,6 +79,18 @@ app.router.post('/login', { schema: { security: [] }, handler });
 
 // Inherits the document requirement.
 app.router.get('/todos/:id', { middleware: [requireAuth()], handler });
+```
+
+On a decorated controller, `@Public` produces the same empty `security` array, so the opt-out is
+available without writing a schema:
+
+```typescript
+@Controller('/auth')
+class AuthController {
+  @Public()
+  @Post('/login')
+  login() {/* ... */}
+}
 ```
 
 `RouteSchema.security` enforces nothing — authentication is enforced by middleware and guards. It

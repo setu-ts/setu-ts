@@ -103,6 +103,27 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     priority: PLUGIN_PRIORITY.OPENAPI,
 
     register(ctx: IPluginContext): void {
+      // A security requirement may only name a scheme the document declares.
+      // Emitting one that does not produces a document that is invalid per the
+      // OpenAPI specification: Swagger UI shows a lock on every operation with
+      // no Authorize button to satisfy it, and strict validators and client
+      // generators reject it outright. Nothing downstream can detect this —
+      // the spec endpoint still answers 200 — so it is refused here, with the
+      // offending name, rather than shipped as a broken document.
+      const declaredSchemes = Object.keys(securitySchemes ?? {});
+      for (const requirement of security ?? []) {
+        for (const schemeName of Object.keys(requirement)) {
+          if (!declaredSchemes.includes(schemeName)) {
+            throw new Error(
+              `OpenApiPlugin: security requires the scheme '${schemeName}', which is not declared ` +
+                `in securitySchemes. Declared: ${
+                  declaredSchemes.length > 0 ? declaredSchemes.join(', ') : '(none)'
+                }.`,
+            );
+          }
+        }
+      }
+
       // Create the OpenAPI service
       const openApiService = new OpenApiService({
         app: ctx.app,
