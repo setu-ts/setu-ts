@@ -6051,17 +6051,21 @@ app.router.get('/users/:id', {
 
 ### Error Messages
 
-Standardized error responses across the framework:
+Standardized error responses across the framework. `errorHandler` defaults to `format: 'default'`;
+configure `format: 'rfc9457'` for the Problem Details body below.
 
 ```json
 {
-  "type": "https://setu-ts.dev/errors/not-found",
+  "type": "about:blank",
   "title": "Not Found",
   "status": 404,
   "detail": "User with id 123 not found",
   "instance": "/users/123"
 }
 ```
+
+See [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions) for when `type` is
+`about:blank` versus a concrete problem type URI.
 
 ### IDE Support
 
