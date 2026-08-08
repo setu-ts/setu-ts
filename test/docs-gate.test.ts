@@ -263,7 +263,7 @@ describe('documentation gate — package catalog', () => {
         ? secondSegment
         : (match?.[1] ?? pkg.replace('packages/', ''));
       const pathPrefix = firstSegment === 'starters' ? 'starters/' : '';
-      return `### @setu-ts/${name}\n\nContent.\n\n- [README](../packages/${pathPrefix}${name}/README.md)\n- [API Reference](./api/packages/${pathPrefix}${name}/src/index.ts.html)\n`;
+      return `### @setu-ts/${name}\n\nContent.\n\n- [README](../packages/${pathPrefix}${name}/README.md)\n- [API Reference](./api/${pathPrefix}${name}/src/index.ts/index.html)\n`;
     }).join('\n');
 
     const pluginsMd = `# Plugins\n\n${packageSections}`;

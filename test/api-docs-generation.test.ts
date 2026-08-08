@@ -19,12 +19,14 @@ import { expect } from '@std/expect';
 import {
   buildDenoDocArgs,
   CLEAN_PACKAGES,
+  collectApiEntrypoints,
   DOC_LINT_BASELINE,
   expandExportTargets,
   normalizeDiagnosticPath,
   parseDocLintDiagnostics,
   partitionDiagnostics,
 } from '../scripts/generate-api-docs.ts';
+import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
 
 describe('API Documentation Generation', () => {
   describe('expandExportTargets', () => {
@@ -311,6 +313,187 @@ error[private-type-ref]: public type references private type
   describe('DOC_LINT_BASELINE constant', () => {
     it('is the frozen baseline of 776', () => {
       expect(DOC_LINT_BASELINE).toBe(776);
+    });
+  });
+
+  describe('collectApiEntrypoints', () => {
+    it('returns workspace-relative targets with package prefixes', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      // Every target must start with "packages/" — never bare "./src/..."
+      for (const target of result.targets) {
+        expect(target).toMatch(/^packages\//);
+      }
+    });
+
+    it('includes runtime worker subpath target', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      expect(result.targets).toContain(
+        'packages/runtime/src/worker/define-worker-task.ts',
+      );
+    });
+
+    it('includes CLI main entrypoint', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      expect(result.targets).toContain('packages/cli/src/main.ts');
+    });
+
+    it('includes all three starter targets', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      expect(result.targets).toContain(
+        'packages/starters/rest-starter/src/index.ts',
+      );
+      expect(result.targets).toContain(
+        'packages/starters/microservice-starter/src/index.ts',
+      );
+      expect(result.targets).toContain(
+        'packages/starters/full-stack-starter/src/index.ts',
+      );
+    });
+
+    it('does not collapse to bare ./src/... paths', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      // No target should be a bare relative path without package prefix
+      for (const target of result.targets) {
+        expect(target.startsWith('./')).toBe(false);
+      }
+    });
+
+    it('returns targets sorted and deduplicated', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      const sorted = [...result.targets].sort();
+      expect(result.targets).toEqual(sorted);
+      // No duplicates
+      expect(result.targets).toHaveLength(
+        new Set(result.targets).size,
+      );
+    });
+
+    it('has the expected authoritative count of 49 targets', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      // 47 published packages, runtime has 2 exports (./src/index.ts + ./worker),
+      // cli has 2 exports (./src/index.ts + ./main), rest have 1 each
+      // = 47 + 1 (extra runtime) + 1 (extra cli) = 49
+      expect(result.targets).toHaveLength(49);
+    });
+
+    it('maps each target to its correct package name', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      // Verify runtime worker maps to "runtime" pkg
+      const runtimeWorker = result.targetsWithPackage.find(
+        (e) => e.target === 'packages/runtime/src/worker/define-worker-task.ts',
+      );
+      expect(runtimeWorker?.pkg).toBe('runtime');
+      // Verify CLI main maps to "cli" pkg
+      const cliMain = result.targetsWithPackage.find(
+        (e) => e.target === 'packages/cli/src/main.ts',
+      );
+      expect(cliMain?.pkg).toBe('cli');
+      // Verify starter maps to starter name
+      const restStarter = result.targetsWithPackage.find(
+        (e) =>
+          e.target ===
+            'packages/starters/rest-starter/src/index.ts',
+      );
+      expect(restStarter?.pkg).toBe('rest-starter');
+    });
+
+    it('validates workspace parity: every published package has at least one target', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      // Every published package should appear in targetsWithPackage
+      const publishedPkgs = new Set(
+        PUBLISHED_PACKAGES.map((p) => {
+          const match = p.match(
+            /^packages\/([^/]+)(?:\/([^/]+))?/,
+          );
+          const first = match?.[1]!;
+          const second = match?.[2];
+          return first === 'starters' && second ? second : first;
+        }),
+      );
+      const collectedPkgs = new Set(
+        result.targetsWithPackage.map((e) => e.pkg),
+      );
+      for (const pkg of publishedPkgs) {
+        expect(collectedPkgs.has(pkg!)).toBe(true);
+      }
+    });
+
+    it('throws when a published package has no export targets', async () => {
+      const fs = {
+        readTextFile: (_path: string) => Promise.resolve('{}'),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => {
+          // Reject all stat calls so fallback also fails
+          throw new Deno.errors.NotFound(`Not found: ${path}`);
+        },
+      };
+      // All manifests return {} and no fallback files exist → should throw
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
+        'Published packages missing export targets',
+      );
+    });
+
+    it('repository-level: all targets exist on disk', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      for (const target of result.targets) {
+        try {
+          await Deno.stat(target);
+        } catch {
+          throw new Error(
+            `Target does not exist on disk: ${target}`,
+          );
+        }
+      }
     });
   });
 });

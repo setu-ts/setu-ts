@@ -2458,13 +2458,11 @@ graph TB
     end
 
     subgraph Future
-        Edge[Edge Runtime]
     end
 
     Kernel --> Existing
     Kernel --> New
     Kernel --> Replaced
-    Kernel --> Edge
 ```
 
 > The **WebSocket Plugin** shipped in Milestone 46 and is no longer a future extension point. Note
