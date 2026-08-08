@@ -9,9 +9,9 @@ All notable changes to this project are documented here. The format follows
 ## [0.1.0-alpha.5] — 2026-08-08
 
 **This release renames the project and moves every package to a new JSR scope.** It is the first
-release published under `@setu-ts`; the `@hono-enterprise` packages are yanked and archived and
-receive no further versions. Because the scope changes, **every consumer must update their imports
-and their manifest** — there is no upgrade path that leaves specifiers untouched.
+release published under `@setu-ts`; the `@hono-enterprise` packages are **archived** and receive no
+further versions. Because the scope changes, **every consumer must update their imports and their
+manifest** — there is no upgrade path that leaves specifiers untouched.
 
 Two things about a prerelease under a brand-new scope, both of which will otherwise surprise you:
 JSR does not point `latest` at a prerelease, so every install instruction must carry an explicit
@@ -28,9 +28,11 @@ unaffected. The rename removes the false signal, nothing else.
 > **⚠️ Breaking 1 of 5: every import specifier changes.** `@hono-enterprise/<pkg>` becomes
 > `@setu-ts/<pkg>`, published under the `@setu-ts` JSR scope. On the npm compatibility path,
 > `@jsr/hono-enterprise__<pkg>` becomes `@jsr/setu-ts__<pkg>`. This is a find-and-replace across
-> your imports and your manifest; no API changes with it. The `@hono-enterprise` packages are yanked
-> and archived on JSR — they remain downloadable by exact version, but they receive no further
-> releases.
+> your imports and your manifest; no API changes with it. The `@hono-enterprise` packages are
+> **archived** on JSR — hidden from search and closed to new versions, but every published version
+> stays installable and existing pinned builds keep resolving. They are deliberately **not yanked**:
+> yanking signals a defective release and would break range resolution, and these versions are
+> superseded rather than broken.
 
 > **⚠️ Breaking 2 of 5: existing session cookies are invalidated.** The HKDF `info` parameters
 > behind `@setu-ts/session-plugin` carried the old project name, so the derived encryption, signing,

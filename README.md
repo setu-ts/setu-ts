@@ -19,11 +19,15 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: all 46 packages are published in `v0.1.0-alpha.4` and are live on JSR.** The eight that
-> `v0.1.0-alpha.3` did not carry — `session-plugin`, `service-discovery-plugin`, `grpc-plugin`,
-> `graphql-plugin`, `cloudflare-plugin`, and the three starters — publish for the first time here.
+> **Status: all 47 packages are published in `v0.1.0-alpha.5` and are live on JSR.**
 >
-> The kernel, the runtime layer, 36 plugins, the three starters, the test utilities, the client SDK,
+> **`v0.1.0-alpha.5` renamed the project from Hono Enterprise to Setu-TS**, and every package moved
+> from the `@hono-enterprise` scope to `@setu-ts`. Upgrading from `alpha.4` or earlier means
+> rewriting every import specifier — there is no path that leaves them untouched. The
+> `@hono-enterprise` packages are archived and receive no further versions; existing pinned installs
+> keep working. See [CHANGELOG.md](CHANGELOG.md) for the full set of breaking changes.
+>
+> The kernel, the runtime layer, 37 plugins, the three starters, the test utilities, the client SDK,
 > and the `setu` CLI are implemented, tested, and documented.
 >
 > **Every specifier must be version-pinned.** JSR does not tag a prerelease as `latest`, so a bare
@@ -183,21 +187,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@setu-ts/kernel@^0.1.0-alpha.4 jsr:@setu-ts/runtime@^0.1.0-alpha.4
+deno add jsr:@setu-ts/kernel@^0.1.0-alpha.5 jsr:@setu-ts/runtime@^0.1.0-alpha.5
 
 # Node
-npx jsr add @setu-ts/kernel@^0.1.0-alpha.4 @setu-ts/runtime@^0.1.0-alpha.4
+npx jsr add @setu-ts/kernel@^0.1.0-alpha.5 @setu-ts/runtime@^0.1.0-alpha.5
 
 # Bun
-bunx jsr add @setu-ts/kernel@^0.1.0-alpha.4 @setu-ts/runtime@^0.1.0-alpha.4
+bunx jsr add @setu-ts/kernel@^0.1.0-alpha.5 @setu-ts/runtime@^0.1.0-alpha.5
 ```
 
-**The `@^0.1.0-alpha.4` is required, not decorative.** JSR does not point `latest` at a prerelease,
+**The `@^0.1.0-alpha.5` is required, not decorative.** JSR does not point `latest` at a prerelease,
 so omitting the version fails outright:
 
 ```
 error: jsr:@setu-ts/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.4
+Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.5
 ```
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
@@ -206,7 +210,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.4/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.5/main
 
 setu new my-app
 cd my-app && setu generate service billing
@@ -214,7 +218,7 @@ cd my-app && setu generate service billing
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 47 workspace members are published on JSR, in `v0.1.0-alpha.4`: the core (`common`, `kernel`,
+All 47 workspace members are published on JSR, in `v0.1.0-alpha.5`: the core (`common`, `kernel`,
 `runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the
 `sdk`, and the `cli`.
 
@@ -317,7 +321,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 setu-ts/
-├── packages/              # 46 workspace members, all published on JSR
+├── packages/              # 47 workspace members, all published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

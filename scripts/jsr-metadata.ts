@@ -6,7 +6,7 @@
  * feature-table cells, which are already reviewed prose, but they are frozen
  * here rather than scraped: a README cell is written for a table that names the
  * package in an adjacent column, while a JSR description is read standalone.
- * Scraping would also make a README formatting change silently rewrite 46 public
+ * Scraping would also make a README formatting change silently rewrite 47 public
  * package pages.
  *
  * WHAT THE COMPAT FLAGS CLAIM. A flag is `true` when the package is usable on
@@ -149,6 +149,14 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
   'grpc-plugin': {
     description: 'Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary routes',
     runtimeCompat: PORTABLE,
+  },
+  'static-plugin': {
+    description:
+      'Static files with conditional requests, Range, precompressed sidecars, and SPA fallback',
+    // Reads through `IRuntimeServices.fs`, which Workers does not provide — the
+    // plugin registers its capability there but mounts no route. Workers apps
+    // serve assets through Workers Assets or R2 via `cloudflare-plugin`.
+    runtimeCompat: NO_EDGE,
   },
 
   // ── Data ──────────────────────────────────────────────────────────────────

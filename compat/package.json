@@ -49,6 +49,7 @@
     "@jsr/setu-ts__service-discovery-plugin": "latest",
     "@jsr/setu-ts__session-plugin": "latest",
     "@jsr/setu-ts__sse-plugin": "latest",
+    "@jsr/setu-ts__static-plugin": "latest",
     "@jsr/setu-ts__storage-plugin": "latest",
     "@jsr/setu-ts__telemetry-plugin": "latest",
     "@jsr/setu-ts__testing": "latest",
