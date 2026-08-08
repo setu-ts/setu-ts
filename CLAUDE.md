@@ -1525,8 +1525,47 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   zero — the ETag is now STRONG whenever `mtime` is present, matching what nginx and Apache emit for
   static files, and weak only when size is the sole signal. Reverting the three fixed `src` files
   failed 8 of 13 regression steps, the other 5 being deliberate controls) — complete (PR #132)
+- **Milestone 56** (`packages/exceptions` + `packages/validation-plugin` + the three starters — RFC
+  9457 Problem Details, retiring a withdrawn specification. RFC 7807 was obsoleted by RFC 9457 in
+  July 2023 and the framework advertised it in two packages, a public `ErrorFormat` union value, an
+  exported symbol in each, the three starters, and eleven doc sites. **The wire format barely
+  changed, and that was established from the RFC rather than assumed**: Appendix D lists exactly
+  three changes — a type-URI registry (§4.2), clarified multiple-problem handling (§3), and
+  non-dereferenceable type-URI guidance (§3.1.1) — with the five core members, the
+  `application/problem+json` media type, and extension members all carried over verbatim. So this is
+  a naming change plus ONE semantic correction. That correction is **`about:blank`**: `HttpError`
+  carries `statusCode`/`message`/`details`/`cause` and **no problem-type identity beyond the status
+  code**, so the `https://setu-ts.dev/errors/404` it minted for every error identified nothing
+  `status` did not already carry — precisely what §4.2 registers `about:blank` for. The sole
+  exception is `validationError()`, the only factory placing `errors` into `details`; it defines an
+  extension member, so it keeps a concrete URI, spelled to match the literal `validation-plugin`
+  already emitted so both packages finally identify one problem type identically. `statusTitle()`
+  needed no change — it already yields the reason phrase §4.2 wants beside `about:blank`. The
+  deprecated `'rfc7807'` arm **keeps RFC 7807 behavior in `exceptions`** (§9.4 forbids silently
+  changing a released API, and a symbol named after 7807 emitting something else gives the caller no
+  signal); the two formatters differ only in a `typeOf` strategy passed to one shared
+  `buildProblemDetails` core, so nothing is duplicated. In `validation-plugin` the alias is the
+  **same object**, because that formatter's `type` was always semantic rather than status-derived
+  and its body was already 9457-valid. **The defect most likely to ship green was the media type**:
+  both packages keyed `application/problem+json` off a single formatter REFERENCE
+  (`error-handler.ts:93`, `validation-middleware.ts:129`) so a directly-passed formatter agreed with
+  the alias — adding a second formatter without generalizing that serves a Problem Details body as
+  `application/json`, which generic clients ignore, while the `'rfc9457'` STRING arm tests fine.
+  Both are membership tests now, driven by reference in tests; reverting the exceptions fix fails 8
+  steps across the unit AND integration suites. Also corrected a doc-vs-behavior conflict predating
+  the milestone: `ARCHITECTURE.md` documented `type: https://setu-ts.dev/errors/not-found` while the
+  code emitted `.../404`. The `errors` extension keeps `{ field, message, code }` — realigning to
+  RFC 9457 §3's illustrated `{ detail, pointer }` was explicitly declined, since `errors[].field` is
+  the most widely consumed part of the validation response. Code review then found that **neither
+  package asserted its barrel exports**: dropping `rfc9457Formatter` from the exceptions
+  `src/index.ts` left 18 other tests green — including the integration test and all three starters,
+  which are that barrel's only consumers — plus `deno check`, the 100% per-file coverage bar (a
+  re-export file is fully covered merely by being loaded), and `publish:check`, because every test
+  imported the concrete module rather than the barrel. The M52c defect class. Both packages now
+  carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal Problem
+  Details core does NOT leak into the published surface) — complete (PR #135)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
-  M37c, M54, and M55 have all shipped, closing the last entries on that list.
+  M37c, M54, M55, and M56 have all shipped, closing the last entries on that list.
 
 ## Verification (run before declaring any work done)
 

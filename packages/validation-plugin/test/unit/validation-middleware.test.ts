@@ -10,6 +10,9 @@ import type { IValidationService } from '@setu-ts/common';
 
 import { createValidationMiddleware } from '../../src/middleware/validation-middleware.ts';
 import { defaultFormatter } from '../../src/formatters/default-formatter.ts';
+import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';
+import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';
+import { resolveFormatter } from '../../src/formatters/error-formatter.ts';
 import { ValidationService } from '../../src/services/validation-service.ts';
 import { createFakeContext } from '../fixtures/fake-runtime.ts';
 
@@ -290,5 +293,51 @@ describe('createValidationMiddleware — unknown target', () => {
     await expect(middleware(ctx, nextFn.fn)).rejects.toThrow(TypeError);
     await expect(middleware(ctx, nextFn.fn)).rejects.toThrow('Unknown validation target');
     expect(nextFn.called).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Problem Details media type — keyed on the RESOLVED formatter, not the alias
+// ---------------------------------------------------------------------------
+
+describe('createValidationMiddleware — Problem Details media type', () => {
+  /** Drives a failing validation and returns the response content type. */
+  async function contentTypeFor(
+    formatter: Parameters<typeof createValidationMiddleware>[3],
+  ): Promise<string | null> {
+    const schema = createFakeSchema({
+      success: false,
+      issues: [{ path: ['name'], message: 'Required' }],
+    });
+    const { ctx, responseSnapshot } = createFakeContext({ request: { body: {} } });
+    const middleware = createValidationMiddleware(schema, 'body', SERVICE, formatter);
+
+    await middleware(ctx, createNextFn().fn);
+    return responseSnapshot().headers.get('content-type');
+  }
+
+  // `errorFormat` accepts a formatter reference as well as an alias, so keying
+  // the media type on the format STRING would let a reference emit a Problem
+  // Details body as `application/json` — which generic problem-details clients
+  // ignore. A string-only test cannot see that.
+  it('serves problem+json for the rfc9457Formatter reference', async () => {
+    expect(await contentTypeFor(rfc9457Formatter)).toBe('application/problem+json');
+  });
+
+  it('serves problem+json for the deprecated rfc7807Formatter reference', async () => {
+    expect(await contentTypeFor(rfc7807Formatter)).toBe('application/problem+json');
+  });
+
+  it('serves problem+json for both resolved aliases', async () => {
+    expect(await contentTypeFor(resolveFormatter('rfc9457'))).toBe('application/problem+json');
+    expect(await contentTypeFor(resolveFormatter('rfc7807'))).toBe('application/problem+json');
+  });
+
+  it('does NOT serve problem+json for the default formatter', async () => {
+    expect(await contentTypeFor(defaultFormatter)).not.toBe('application/problem+json');
+  });
+
+  it('does NOT serve problem+json for a custom formatter', async () => {
+    expect(await contentTypeFor(() => ({ errors: [] }))).not.toBe('application/problem+json');
   });
 });

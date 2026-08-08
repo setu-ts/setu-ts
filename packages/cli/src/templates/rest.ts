@@ -51,7 +51,7 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
   // sits inside every middleware these templates register — metrics (20),
   // ip-security (120), request-size (180), cors (200), security-headers (250),
   // csrf (270), plus telemetry (30) in the microservice set — so a throw from any
-  // of them escapes to the adapter backstop: a bare 500 with no RFC 7807 body and
+  // of them escapes to the adapter backstop: a bare 500 with no error body and
   // no error log. Nothing first-party registers at or below 0, so this slot is
   // unambiguous rather than merely early.
   { pkg: 'exceptions', symbol: 'errorHandler', addOptions: { priority: 0, name: 'error-handler' } },
@@ -59,7 +59,7 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 
 /**
  * `rest` — an opinionated REST API: configuration, logging, validation,
- * security headers, health probes, metrics, OpenAPI, and RFC 7807 errors.
+ * security headers, health probes, metrics, OpenAPI, and structured errors.
  *
  * `database-plugin` and `auth-plugin` are deliberately absent despite the
  * ROADMAP's REST starter listing them: both need real credentials before they
