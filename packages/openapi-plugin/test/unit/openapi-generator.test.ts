@@ -628,6 +628,25 @@ describe('OpenApiGenerator', () => {
       expect(params?.[0]?.schema).toEqual({ type: 'string', format: 'uuid' });
     });
 
+    it('should give each parameter its OWN default schema object', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([route('GET', '/a/:x'), route('GET', '/b/:y')]);
+
+      const first = result.paths['/a/{x}']?.get?.parameters?.[0]?.schema;
+      const second = result.paths['/b/{y}']?.get?.parameters?.[0]?.schema;
+
+      // `OpenApiSchemaObject` declares mutable fields and `OpenApiDocument` is
+      // public API, so a consumer post-processing the document may assign to a
+      // parameter schema. A shared constant would alias every path parameter
+      // in the process; a frozen one would throw on a legitimate write.
+      expect(first).not.toBe(second);
+      expect(Object.isFrozen(first)).toBe(false);
+
+      (first as { type?: string }).type = 'integer';
+      expect(second).toEqual({ type: 'string' });
+    });
+
     it('should default only the parameters the params schema omits', () => {
       const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
 

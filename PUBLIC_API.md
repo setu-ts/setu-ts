@@ -4702,8 +4702,9 @@ app.register(OpenApiPlugin({
   // Document-level requirement, inherited by every operation that does not
   // declare its own. Omit it and no operation is marked as protected.
   security: [{ bearerAuth: [] }],
-  // Router paths to leave out of the document, matched exactly as registered
-  // (router-style `/todos/:id`, not the template `/todos/{id}`).
+  // Router paths to leave out of the document. Matched exactly against the
+  // fully-resolved router pattern: router-style (`/todos/:id`, not the
+  // template `/todos/{id}`) and including any `router.group()` prefix.
   exclude: ['/health', '/live', '/ready', '/metrics'],
   // Endpoint configuration
   endpoint: '/docs', // Path for Swagger UI HTML (default: '/docs')
@@ -4791,7 +4792,17 @@ app.router.post('/users', {
 - The plugin's own `specEndpoint` and `endpoint` are never documented as operations — a spec that
   lists `/openapi.json` and `/docs` describes its own delivery mechanism, and those entries flow
   into every generated client. The routes are still served; only the document entries are omitted.
-  Custom endpoint paths are honored. Anything else the document should omit goes in `exclude`.
+  Custom endpoint paths are honored. Anything else the document should omit goes in `exclude`, which
+  matches the fully-resolved router pattern — a route registered inside
+  `router.group('/internal', …)` is matched by its prefixed path, and an entry matching no route is
+  silently ignored.
+- A `security` requirement naming a scheme absent from `securitySchemes` is refused at `register()`.
+  Emitting it would produce a document that is invalid per the specification — Swagger UI renders a
+  lock on every operation with no Authorize button — and nothing downstream can detect it, since the
+  spec endpoint still answers `200`.
+- A decorated route marked `@Public` is documented with an empty `security` array, so it opts out of
+  a document-level requirement. `@Roles`/`@Permissions` are not mapped: a role is not a security
+  scheme and no declared scheme can be inferred from one.
 
 ### Accessing the Spec
 

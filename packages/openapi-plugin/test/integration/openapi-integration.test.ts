@@ -19,6 +19,7 @@ import {
   DecoratorPlugin,
   Get,
   Post,
+  Public,
   ValidateBody,
 } from '@setu-ts/decorator-plugin';
 
@@ -490,6 +491,139 @@ describe('OpenAPI Integration', () => {
     const spec = response.json() as { paths: Record<string, unknown> };
 
     expect(Object.keys(spec.paths)).toEqual(['/todos']);
+
+    await app.stop();
+  });
+
+  it('should match an excluded path against the group-prefixed pattern', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          exclude: ['/internal/metrics'],
+        }),
+      ],
+    });
+
+    app.router.group('/internal', (r) => {
+      // Registered as '/metrics' but stored — and therefore matched — as the
+      // resolved '/internal/metrics'.
+      r.get('/metrics', { handler: (ctx) => ctx.response.text('') });
+    });
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as { paths: Record<string, unknown> };
+
+    expect(Object.keys(spec.paths)).toEqual(['/todos']);
+
+    await app.stop();
+  });
+
+  it('should refuse a security requirement naming an undeclared scheme', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          // Typo: the document declares `bearerAuth`, not `bearer`.
+          security: [{ bearer: [] }],
+        }),
+      ],
+    });
+
+    // Emitting this would produce a document that is invalid per the
+    // specification — a lock on every operation with no Authorize button to
+    // satisfy it — while the spec endpoint still answered 200, so nothing
+    // downstream could detect it.
+    await expect(app.start()).rejects.toThrow(/scheme 'bearer'.*not declared/s);
+  });
+
+  it('should name the declared schemes when refusing an unknown one', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          security: [{ bearerAuth: [] }],
+        }),
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow(/Declared: \(none\)/);
+  });
+
+  it('should accept a security requirement whose scheme IS declared', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: {
+            bearerAuth: { type: 'http', scheme: 'bearer' },
+            apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+          },
+          security: [{ bearerAuth: [] }, { apiKey: [] }],
+        }),
+      ],
+    });
+
+    await app.start();
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    expect(response.statusCode).toBe(200);
+    await app.stop();
+  });
+
+  it('should document a @Public decorated route as public, not as protected', async () => {
+    @Controller('/auth')
+    class AuthController {
+      @Public()
+      @Post('/login')
+      login(): unknown {
+        return { token: 'x' };
+      }
+
+      @Get('/me')
+      me(): unknown {
+        return { id: '1' };
+      }
+    }
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DecoratorPlugin({ controllers: [AuthController] }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          security: [{ bearerAuth: [] }],
+        }),
+      ],
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    // `@Public` is the decorator that means "no authentication". Without it
+    // reaching the document, the login route would inherit the document-level
+    // requirement and be documented as needing the token it issues — and a
+    // decorated app has no other way to opt out.
+    expect(spec.paths['/auth/login']?.post?.security).toEqual([]);
+    // A route with no `@Public` still inherits.
+    expect('security' in (spec.paths['/auth/me']?.get as object)).toBe(false);
 
     await app.stop();
   });

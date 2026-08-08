@@ -5,12 +5,20 @@ import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
 
 /**
  * Schema emitted for a path parameter the route's `params` schema does not
- * describe. Frozen and shared: every path segment is a string, so this is a
- * constant rather than a per-parameter allocation.
+ * describe: every path segment arrives as a string.
+ *
+ * A FRESH object per parameter, deliberately, not a shared constant.
+ * {@linkcode OpenApiSchemaObject} declares mutable fields and
+ * {@linkcode OpenApiDocument} is public API, so a consumer post-processing the
+ * generated document is entitled to assign to one — a shared instance would
+ * either alias every path parameter in the process or, if frozen, throw a
+ * `TypeError` on a legitimate write.
+ *
+ * @returns A new default path-parameter schema
  */
-const DEFAULT_PATH_PARAM_SCHEMA: OpenApiSchemaObject = Object.freeze<OpenApiSchemaObject>({
-  type: 'string',
-});
+function defaultPathParamSchema(): OpenApiSchemaObject {
+  return { type: 'string' };
+}
 
 /**
  * OpenAPI 3.1 document structure.
@@ -155,10 +163,14 @@ export interface OpenApiGeneratorOptions {
    */
   readonly security?: readonly SecurityRequirement[];
   /**
-   * Router paths to leave out of the generated document, matched exactly
-   * against the path as registered (router-style, e.g. `/todos/:id` — not the
-   * OpenAPI template `/todos/{id}`). Every method registered on an excluded
-   * path is omitted.
+   * Router paths to leave out of the generated document.
+   *
+   * Matched exactly against the **fully-resolved** router pattern, which is
+   * router-style rather than an OpenAPI template (`/todos/:id`, not
+   * `/todos/{id}`) and INCLUDES any `router.group()` prefix — a route
+   * registered as `get('/metrics')` inside `group('/internal', …)` is matched
+   * only by `'/internal/metrics'`. Every method registered on an excluded path
+   * is omitted. An entry matching no route is silently ignored.
    */
   readonly exclude?: readonly string[];
 }
@@ -387,7 +399,7 @@ export class OpenApiGenerator {
     for (const paramName of pathParams) {
       const paramSchema = paramsTransformed && paramName in paramsTransformed
         ? paramsTransformed[paramName]
-        : DEFAULT_PATH_PARAM_SCHEMA;
+        : defaultPathParamSchema();
 
       parameters.push({
         name: paramName,
