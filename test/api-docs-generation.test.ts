@@ -11,6 +11,7 @@
  * - Stale output removal
  * - Child process exit code propagation
  * - Ratchet diagnostics parsing and partitioning
+ * - Path normalization for absolute and relative paths
  */
 
 import { describe, it } from '@std/testing/bdd';
@@ -19,11 +20,80 @@ import {
   buildDenoDocArgs,
   CLEAN_PACKAGES,
   DOC_LINT_BASELINE,
+  expandExportTargets,
+  normalizeDiagnosticPath,
   parseDocLintDiagnostics,
   partitionDiagnostics,
 } from '../scripts/generate-api-docs.ts';
 
 describe('API Documentation Generation', () => {
+  describe('expandExportTargets', () => {
+    it('expands a string export to a single target', () => {
+      const result = expandExportTargets('./src/index.ts');
+      expect(result).toEqual(['./src/index.ts']);
+    });
+
+    it('expands an object export map with root and subpaths', () => {
+      const exports = {
+        '.': './src/index.ts',
+        './worker': './src/worker/define-worker-task.ts',
+      };
+      const result = expandExportTargets(exports);
+      expect(result).toEqual(['./src/index.ts', './src/worker/define-worker-task.ts']);
+    });
+
+    it('handles mixed string and object exports', () => {
+      const exports = {
+        '.': './src/index.ts',
+        './main': './src/main.ts',
+      };
+      const result = expandExportTargets(exports);
+      expect(result).toContain('./src/index.ts');
+      expect(result).toContain('./src/main.ts');
+    });
+
+    it('deduplicates and sorts targets', () => {
+      const exports = {
+        '.': './src/index.ts',
+        './worker': './src/index.ts', // duplicate
+      };
+      const result = expandExportTargets(exports);
+      expect(result).toHaveLength(1);
+      expect(result).toEqual(['./src/index.ts']);
+    });
+
+    it('handles null/undefined exports gracefully', () => {
+      expect(expandExportTargets(null)).toEqual([]);
+      expect(expandExportTargets(undefined)).toEqual([]);
+    });
+  });
+
+  describe('normalizeDiagnosticPath', () => {
+    it('normalizes a relative path', () => {
+      expect(normalizeDiagnosticPath('packages/common/src/index.ts')).toBe(
+        'packages/common/src/index.ts',
+      );
+    });
+
+    it('strips leading ./ from relative paths', () => {
+      expect(normalizeDiagnosticPath('./packages/common/src/index.ts')).toBe(
+        'packages/common/src/index.ts',
+      );
+    });
+
+    it('extracts repo-relative portion from absolute paths', () => {
+      expect(normalizeDiagnosticPath('/home/user/project/packages/common/src/index.ts')).toBe(
+        'packages/common/src/index.ts',
+      );
+    });
+
+    it('handles starter paths', () => {
+      expect(normalizeDiagnosticPath('packages/starters/rest-starter/src/index.ts')).toBe(
+        'packages/starters/rest-starter/src/index.ts',
+      );
+    });
+  });
+
   describe('buildDenoDocArgs', () => {
     it('builds generate mode arguments correctly', () => {
       const targets = ['packages/common/src/index.ts'];
@@ -182,6 +252,40 @@ error[private-type-ref]: public type references private type
       // Same finding, different packages
       expect(cleanResult.cleanPackageFindings).toHaveLength(1);
       expect(nonCleanResult.cleanPackageFindings).toHaveLength(0);
+    });
+
+    it('normalizes absolute paths correctly', () => {
+      const diagnostics = [
+        {
+          rule: 'missing-jsdoc',
+          path: '/home/user/project/packages/common/src/index.ts',
+          line: 10,
+          message: 'test',
+        },
+      ];
+
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
+
+      // Should still be recognized as common package
+      expect(cleanPackageFindings).toHaveLength(1);
+      expect(knownDebt).toHaveLength(0);
+    });
+
+    it('normalizes paths with leading ./', () => {
+      const diagnostics = [
+        {
+          rule: 'missing-jsdoc',
+          path: './packages/kernel/src/index.ts',
+          line: 10,
+          message: 'test',
+        },
+      ];
+
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
+
+      // Should still be recognized as kernel package
+      expect(cleanPackageFindings).toHaveLength(1);
+      expect(knownDebt).toHaveLength(0);
     });
   });
 

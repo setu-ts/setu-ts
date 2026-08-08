@@ -51,7 +51,7 @@
   "tasks": {
     "check": "deno check packages",
     "check:apps": "deno run --allow-read --allow-run --allow-env=ALLOW_SKIP scripts/check-apps.ts",
-    "check:docs": "deno run --allow-read --allow-run scripts/check-docs.ts",
+    "check:docs": "deno run --allow-read --allow-run scripts/check-docs.ts && deno run --allow-read --allow-run --allow-env scripts/generate-api-docs.ts --check",
     "check:api-docs": "deno run --allow-read --allow-run --allow-env scripts/generate-api-docs.ts --check",
     "docs:api": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
     "release:docs": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",

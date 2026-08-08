@@ -103,6 +103,4 @@ building production-ready applications with our plugin-first, runtime-independen
 
 ## Contributing
 
-- [Development Guide](../CONTRIBUTING.md)
-- [Code of Conduct](../CODE_OF_CONDUCT.md)
-- [Architecture Decision Records](./adr/)
+See the [root README](../README.md) for contribution guidelines.

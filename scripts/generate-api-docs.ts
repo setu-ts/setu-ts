@@ -63,11 +63,84 @@ export interface DocLintDiagnostic {
 }
 
 /**
- * Collects API entry points from PUBLISHED_PACKAGES.
+ * Expands a deno.json export map into a flat list of local source targets.
  *
- * PUBLISHED_PACKAGES contains full paths like "packages/common/src/index.ts".
+ * Handles string values (direct paths) and object values (with `.` key for the
+ * root export and subpath keys). Normalizes paths to be workspace-relative.
  *
- * @param fs - File system abstraction for testing
+ * @param exports - The exports field from a deno.json
+ * @returns Sorted, deduplicated list of local source paths
+ */
+export function expandExportTargets(exports: unknown): string[] {
+  if (typeof exports === 'string') {
+    return [exports];
+  }
+  if (exports === null || typeof exports !== 'object') {
+    return [];
+  }
+
+  const targets: string[] = [];
+  const exp = exports as Record<string, unknown>;
+
+  for (const [, value] of Object.entries(exp)) {
+    if (typeof value === 'string') {
+      targets.push(value);
+    } else if (value !== null && typeof value === 'object') {
+      // Object-valued export: look for "." key (root export) and subpaths
+      const obj = value as Record<string, unknown>;
+      if (obj['.'] !== undefined && typeof obj['.'] === 'string') {
+        targets.push(obj['.'] as string);
+      }
+      // Subpaths are also valid entry points
+      for (const [subkey, subvalue] of Object.entries(obj)) {
+        if (subkey !== '.' && typeof subvalue === 'string') {
+          targets.push(subvalue);
+        }
+      }
+    }
+  }
+
+  // Normalize and deduplicate
+  const normalized = new Set<string>();
+  for (const target of targets) {
+    // Keep the ./ prefix so package extraction works correctly
+    const normalizedPath = target.startsWith('./') ? target : `./${target}`;
+    normalized.add(normalizedPath);
+  }
+
+  return [...normalized].sort();
+}
+
+/**
+ * Reads a deno.json manifest and extracts export targets.
+ *
+ * @param manifestPath - Path to the deno.json file
+ * @param fs - File system abstraction
+ * @returns Array of local source targets, or empty array if manifest not found
+ */
+export async function readManifestExports(
+  manifestPath: string,
+  fs: {
+    readTextFile: (path: string) => Promise<string>;
+  },
+): Promise<string[]> {
+  try {
+    const content = await fs.readTextFile(manifestPath);
+    const manifest = JSON.parse(content) as { exports?: unknown };
+    return expandExportTargets(manifest.exports);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Collects API entry points from published package manifests.
+ *
+ * Reads each package's deno.json exports map and expands all local string/object
+ * export targets. Validates workspace parity (every published package has at
+ * least one target) and sorts/deduplicates the result.
+ *
+ * @param fs - File system abstraction
  * @returns Sorted targets and package mapping
  */
 export async function collectApiEntrypoints(
@@ -77,30 +150,68 @@ export async function collectApiEntrypoints(
     stat: (path: string) => Promise<Deno.FileInfo>;
   },
 ): Promise<{ targets: string[]; targetsWithPackage: Array<{ target: string; pkg: string }> }> {
-  // PUBLISHED_PACKAGES contains paths like "packages/common", append /src/index.ts
-  // Special case: CLI also has src/main.ts as an entry point
-  const baseTargets = PUBLISHED_PACKAGES.map((p) => `${p}/src/index.ts`);
-  const extraTargets = ['packages/cli/src/main.ts'];
-  const targets = [...baseTargets, ...extraTargets].sort();
+  const allTargets: string[] = [];
   const targetsWithPackage: Array<{ target: string; pkg: string }> = [];
+  const packagesWithExports = new Set<string>();
 
-  for (const target of targets) {
-    // Extract package name from path like "packages/common/src/index.ts"
-    const match = target.match(/^packages\/([^/]+)/);
-    const pkg = match ? match[1] : 'unknown';
-    targetsWithPackage.push({ target, pkg });
-  }
+  // Read each published package's manifest and expand exports
+  for (const pkgPath of PUBLISHED_PACKAGES) {
+    const manifestPath = `${pkgPath}/deno.json`;
+    const targets = await readManifestExports(manifestPath, fs);
 
-  // Validate all targets exist
-  for (const { target } of targetsWithPackage) {
-    try {
-      await fs.stat(target);
-    } catch {
-      throw new Error(`Export target '${target}' does not exist`);
+    if (targets.length === 0) {
+      // Fallback to src/index.ts if manifest has no exports
+      const fallback = `${pkgPath}/src/index.ts`;
+      try {
+        await fs.stat(fallback);
+        targets.push(fallback);
+      } catch {
+        // No fallback either
+      }
+    }
+
+    if (targets.length > 0) {
+      packagesWithExports.add(pkgPath);
+      for (const target of targets) {
+        allTargets.push(target);
+        // Extract package name from pkgPath (e.g., "packages/kernel" -> "kernel",
+        // "packages/starters/rest-starter" -> "rest-starter")
+        const pkgMatch = pkgPath.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+        const firstSegment = pkgMatch?.[1];
+        const secondSegment = pkgMatch?.[2];
+        const pkg = (firstSegment === 'starters' && secondSegment)
+          ? secondSegment
+          : (pkgMatch?.[1] ?? pkgPath.split('/')[1]);
+        targetsWithPackage.push({ target, pkg });
+      }
     }
   }
 
-  return { targets, targetsWithPackage };
+  // Validate workspace parity: every published package must have at least one target
+  const missingPackages = PUBLISHED_PACKAGES.filter((p) => !packagesWithExports.has(p));
+  if (missingPackages.length > 0) {
+    throw new Error(
+      `Published packages missing export targets: ${missingPackages.join(', ')}`,
+    );
+  }
+
+  // Sort and deduplicate
+  // Targets are unique per-package (e.g., packages/kernel/src/index.ts vs
+  // packages/common/src/index.ts), so dedup by the full path including package.
+  const uniqueTargets = [...new Set(allTargets)].sort();
+
+  // Rebuild targetsWithPackage preserving all packages
+  const uniqueTargetsWithPackage: Array<{ target: string; pkg: string }> = [];
+  const seenEntries = new Set<string>();
+  for (const entry of targetsWithPackage) {
+    const key = `${entry.pkg}:${entry.target}`;
+    if (!seenEntries.has(key)) {
+      seenEntries.add(key);
+      uniqueTargetsWithPackage.push(entry);
+    }
+  }
+
+  return { targets: uniqueTargets, targetsWithPackage: uniqueTargetsWithPackage };
 }
 
 /**
@@ -180,7 +291,34 @@ export function parseDocLintDiagnostics(output: string): DocLintDiagnostic[] {
 }
 
 /**
+ * Normalizes a diagnostic path to be repository-relative.
+ *
+ * Handles both absolute paths (from Deno's output) and relative paths.
+ * Strips any leading workspace prefix to produce a consistent path format.
+ *
+ * @param path - The raw path from a diagnostic
+ * @returns Normalized repository-relative path
+ */
+export function normalizeDiagnosticPath(path: string): string {
+  // Strip leading ./ if present
+  let normalized = path.startsWith('./') ? path.slice(2) : path;
+
+  // Handle absolute paths by extracting the repo-relative portion
+  // Deno may output paths like "/home/user/project/packages/..."
+  // We want "packages/..."
+  const packagesMatch = normalized.match(/\/packages\/(.+)$/);
+  if (packagesMatch) {
+    normalized = `packages/${packagesMatch[1]}`;
+  }
+
+  return normalized;
+}
+
+/**
  * Partitions diagnostics by owning package.
+ *
+ * Normalizes absolute and relative paths to repository-relative form before
+ * classifying by clean-package ownership.
  *
  * @param diagnostics - Parsed diagnostics from parseDocLintDiagnostics
  * @returns Partitioned diagnostics
@@ -195,9 +333,12 @@ export function partitionDiagnostics(
   const knownDebt: DocLintDiagnostic[] = [];
 
   for (const diag of diagnostics) {
+    // Normalize the path to repository-relative form
+    const normalizedPath = normalizeDiagnosticPath(diag.path);
+
     // Extract package name from path like "packages/<name>/..."
     // Special case: starters are under packages/starters/<name>/...
-    const match = diag.path.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+    const match = normalizedPath.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
     if (!match) {
       knownDebt.push(diag);
       continue;
@@ -255,23 +396,23 @@ export async function runApiDocs(
   }
 
   // Validate workspace parity
-  // PUBLISHED_PACKAGES contains full paths like "packages/common/src/index.ts"
-  // targetsWithPackage contains the same paths with package name extraction
-  // We need to check that every published package contributed at least one target
   const packagesWithExports = new Set<string>();
-  for (const { target } of targetsWithPackage) {
-    // Extract package name from full path like "packages/common/src/index.ts"
-    const match = target.match(/^packages\/([^/]+)/);
-    if (match) {
-      packagesWithExports.add(match[1]);
+  for (const { pkg } of targetsWithPackage) {
+    // "starters" is a directory, not a package — skip it
+    if (pkg !== 'starters') {
+      packagesWithExports.add(pkg);
     }
   }
 
   // Check that all published packages have exports
   for (const pkg of PUBLISHED_PACKAGES) {
-    // Extract package name from path like "packages/common/src/index.ts"
-    const match = pkg.match(/^packages\/([^/]+)/);
-    const packageName = match ? match[1] : pkg;
+    // Extract package name: "packages/kernel" -> "kernel", "packages/starters/rest-starter" -> "rest-starter"
+    const match = pkg.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+    const firstSegment = match?.[1];
+    const secondSegment = match?.[2];
+    const packageName = (firstSegment === 'starters' && secondSegment)
+      ? secondSegment
+      : (match?.[1] ?? pkg);
     if (!packagesWithExports.has(packageName)) {
       findings.push(`Published package '${pkg}' has no export targets`);
     }
@@ -300,6 +441,18 @@ export async function runApiDocs(
   }
 
   const result = await cmd.run(['deno', ...args]);
+
+  // Propagate child-process failures: non-zero exit code is a failure
+  if (result.code !== 0) {
+    findings.push(`deno doc failed with exit code ${result.code}`);
+    if (result.stderr) {
+      findings.push(`stderr: ${result.stderr}`);
+    }
+    if (result.stdout) {
+      findings.push(`stdout: ${result.stdout}`);
+    }
+    return { code: result.code, findings };
+  }
 
   if (mode === 'check') {
     // deno doc --lint outputs diagnostics to stderr
@@ -337,14 +490,6 @@ export async function runApiDocs(
       return { code: 1, findings };
     }
   } else {
-    if (result.code !== 0) {
-      findings.push(`deno doc failed with exit code ${result.code}`);
-      if (result.stderr) {
-        findings.push(`Output: ${result.stderr}`);
-      }
-      return { code: result.code, findings };
-    }
-
     // Verify output was generated
     try {
       await fs.stat(`${outputDir}/index.html`);
