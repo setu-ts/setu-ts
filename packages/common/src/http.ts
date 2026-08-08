@@ -311,7 +311,55 @@ export interface RouteSchema {
   readonly tags?: readonly string[];
   /** OpenAPI operation summary. */
   readonly summary?: string;
+  /**
+   * OpenAPI security requirements for this operation, overriding any
+   * document-level default. Each entry names a scheme declared in the
+   * document's `components.securitySchemes` and lists the scopes it needs
+   * (empty for non-OAuth2 schemes such as HTTP bearer or API key).
+   *
+   * An empty array is meaningful and is NOT the same as omitting the field:
+   * per the OpenAPI specification it declares the operation **public**, which
+   * is how a route opts out of a document-level requirement. Omitting the
+   * field leaves the operation inheriting whatever the document declares.
+   *
+   * Declaring this does not enforce anything — authentication is enforced by
+   * middleware and guards. This describes the route for documentation and
+   * client generation.
+   *
+   * @example
+   * ```typescript
+   * // Requires the `bearerAuth` scheme:
+   * app.router.get('/todos/:id', {
+   *   schema: { security: [{ bearerAuth: [] }] },
+   *   handler,
+   * });
+   *
+   * // Explicitly public, even when the document requires auth by default:
+   * app.router.post('/login', { schema: { security: [] }, handler });
+   * ```
+   *
+   * @since 0.2.0
+   */
+  readonly security?: readonly SecurityRequirement[];
 }
+
+/**
+ * A single OpenAPI security requirement: a map of security-scheme name to the
+ * scopes that scheme must grant. Scopes are meaningful only for OAuth2 and
+ * OpenID Connect schemes; every other scheme type takes an empty array.
+ *
+ * Multiple entries in a requirement object are ANDed (all must be satisfied);
+ * multiple requirement objects in a list are ORed (any one satisfies).
+ *
+ * @example
+ * ```typescript
+ * const bearer: SecurityRequirement = { bearerAuth: [] };
+ * const scoped: SecurityRequirement = { oauth2: ['read:todos', 'write:todos'] };
+ * ```
+ *
+ * @since 0.2.0
+ */
+export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
 
 /**
  * Full route definition, used when a route needs middleware or schemas in
