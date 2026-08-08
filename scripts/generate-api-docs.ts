@@ -451,8 +451,36 @@ export async function runApiDocs(
   if (mode === 'check') {
     // deno doc --lint outputs diagnostics to stderr; exit code 1 is expected
     // when diagnostics exist — we parse them and apply the ratchet policy.
+    //
+    // CRITICAL: deno doc --lint exits 1 for BOTH lint diagnostics AND fatal
+    // errors (module not found, permission denied, etc.). Fatal errors produce
+    // `error:` lines (no `[rule]` bracket), not `error[rule]:` lines. We must
+    // distinguish fatal child failures from normal lint debt runs:
+    // - Fatal exit + zero parseable diagnostics → propagate the original error
+    // - Fatal exit + partial parseable diagnostics → still fatal (fatal text present)
+    // - Normal lint exit (code 0 or 1 with parseable diagnostics) → apply ratchet
+    const hasFatalText = /error:\s/.test(result.stderr);
     const diagnostics = parseDocLintDiagnostics(result.stderr);
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
+
+    // A fatal invocation/resolution/permission/module error must never be
+    // converted into a baseline-count message or success — even if stderr
+    // also contains zero, partial, or exactly baseline-sized parseable
+    // diagnostics.
+    if (result.code !== 0 && hasFatalText) {
+      findings.push(`deno doc --lint failed with exit code ${result.code}`);
+      if (result.stderr) {
+        findings.push(`stderr: ${result.stderr}`);
+      }
+      if (result.stdout) {
+        findings.push(`stdout: ${result.stdout}`);
+      }
+      console.error('API JSDoc lint check failed (fatal child error):');
+      for (const finding of findings) {
+        console.error(`  ${finding}`);
+      }
+      return { code: result.code, findings };
+    }
 
     if (cleanPackageFindings.length > 0) {
       findings.push(

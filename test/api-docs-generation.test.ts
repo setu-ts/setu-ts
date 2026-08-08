@@ -25,6 +25,7 @@ import {
   normalizeDiagnosticPath,
   parseDocLintDiagnostics,
   partitionDiagnostics,
+  runApiDocs,
 } from '../scripts/generate-api-docs.ts';
 import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
 
@@ -494,6 +495,130 @@ error[private-type-ref]: public type references private type
           );
         }
       }
+    });
+  });
+
+  describe('runApiDocs — integrated check-mode discrimination', () => {
+    function makeFs() {
+      return {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+        remove: (path: string, options?: { recursive: boolean }) => Deno.remove(path, options),
+        mkdir: (path: string, options?: { recursive: boolean }) => Deno.mkdir(path, options),
+      };
+    }
+
+    it('normal lint with exactly baseline diagnostics → success', async () => {
+      const fs = makeFs();
+      const diagnostics = Array.from(
+        { length: DOC_LINT_BASELINE },
+        (_, i) =>
+          `error[missing-jsdoc]: diag ${i}
+  --> packages/runtime/src/index.ts:${i + 1}:0`,
+      ).join('\n');
+      const cmd = { run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(0);
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it('above baseline diagnostics → failure', async () => {
+      const fs = makeFs();
+      const diagnostics = Array.from(
+        { length: DOC_LINT_BASELINE + 1 },
+        (_, i) =>
+          `error[missing-jsdoc]: diag ${i}
+  --> packages/runtime/src/index.ts:${i + 1}:0`,
+      ).join('\n');
+      const cmd = { run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('exceeds baseline'))).toBe(true);
+    });
+
+    it('below baseline diagnostics → failure with lower-the-constant hint', async () => {
+      const fs = makeFs();
+      const diagnostics = `error[missing-jsdoc]: test
+  --> packages/runtime/src/index.ts:1:0`;
+      const cmd = { run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Update DOC_LINT_BASELINE'))).toBe(true);
+    });
+
+    it('fatal nonzero with zero parseable diagnostics → fatal failure surfacing original error', async () => {
+      const fs = makeFs();
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr: 'error: Module not found\n' }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
+      // Must NOT report "below baseline"
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
+    });
+
+    it('fatal nonzero with partial parseable diagnostics plus fatal text → fatal failure', async () => {
+      const fs = makeFs();
+      const stderr = 'error: Module not found\n' +
+        'error[missing-jsdoc]: test\n' +
+        '  --> packages/runtime/src/index.ts:1:0\n';
+      const cmd = { run: () => Promise.resolve({ code: 1, stdout: '', stderr }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
+    });
+
+    it('fatal nonzero with exactly baseline-sized parseable diagnostics plus fatal text → fatal failure, never success', async () => {
+      const fs = makeFs();
+      const lintDiags = Array.from(
+        { length: DOC_LINT_BASELINE },
+        (_, i) =>
+          `error[missing-jsdoc]: diag ${i}
+  --> packages/runtime/src/index.ts:${i + 1}:0`,
+      ).join('\n');
+      const stderr = 'error: Module not found\n' + lintDiags;
+      const cmd = { run: () => Promise.resolve({ code: 1, stdout: '', stderr }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
+      // Must NOT pass even though diagnostic count equals baseline
+      expect(result.code).not.toBe(0);
+    });
+
+    it('generation-mode fatal failure remains propagated', async () => {
+      // Use a mock fs that does not touch the real filesystem for the
+      // generate-mode test so it does not require --allow-write.
+      const fs = {
+        readTextFile: (_path: string) => Promise.resolve('{}'),
+        readDir: async function* () {
+          yield* [];
+        },
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
+        remove: (_path: string, _options?: { recursive: boolean }) => Promise.resolve(),
+        mkdir: (_path: string, _options?: { recursive: boolean }) => Promise.resolve(),
+      };
+      const cmd = {
+        run: () => Promise.resolve({ code: 2, stdout: '', stderr: 'fatal generation error\n' }),
+      };
+      const result = await runApiDocs('generate', '/tmp/fake-api-docs', fs, cmd);
+      expect(result.code).toBe(2);
+      expect(result.findings.some((f) => f.includes('deno doc failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('fatal generation error'))).toBe(true);
+    });
+
+    it('clean-package finding in check mode → failure even without fatal text', async () => {
+      const fs = makeFs();
+      const stderr = 'error[missing-jsdoc]: test\n  --> packages/common/src/index.ts:1:0\n';
+      const cmd = { run: () => Promise.resolve({ code: 1, stdout: '', stderr }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('CLEAN packages'))).toBe(true);
     });
   });
 });
