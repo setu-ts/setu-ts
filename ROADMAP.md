@@ -5920,8 +5920,9 @@ assets stay byte-identical, and a test pins that.
 
 - On-the-fly compression. It costs CPU per request for a result a build step or a CDN produces once,
   and the sidecar path above covers the case that matters.
-- Directory listing, ETag negotiation strategies beyond the `size`+`mtime` weak validator, and any
-  form of templating.
+- Directory listing, ETag strategies beyond the `size`+`mtime` validator (content hashing would give
+  a strong validator even without an `mtime`, at the cost of reading every file), and any form of
+  templating.
 
 ---
 

@@ -25,14 +25,26 @@ export type ConditionalOptions = {
 /**
  * Computes the ETag for a file based on its stat result.
  *
+ * **Strong when the runtime reports `mtime`**, weak otherwise. The distinction
+ * is load-bearing rather than cosmetic: `If-Range` MUST be ignored when the
+ * validator is weak (RFC 9110 §13.1.5), so a weak ETag makes every resumed
+ * download restart from byte zero — the feature Range support exists to
+ * provide. `size` + `mtime` is exactly what nginx and Apache emit as a STRONG
+ * validator for static files, on the reasoning that writing different bytes to
+ * a file moves its mtime; our `mtime` is millisecond-precision, so the
+ * validator is finer-grained than either.
+ *
+ * With no `mtime` the validator degrades to size alone, which genuinely cannot
+ * prove byte-equality, so it stays weak and `If-Range` is correctly refused.
+ *
  * @param stat - The file stat result
- * @returns The ETag string
+ * @returns The ETag string — strong (`"…"`) with an mtime, weak (`W/"…"`) without
  * @since 0.1.0
  */
 export function computeETag(stat: StatResult): string {
   if (stat.mtime) {
     const mtimeMs = stat.mtime.getTime();
-    return `W/"${stat.size}-${mtimeMs}"`;
+    return `"${stat.size}-${mtimeMs}"`;
   }
   return `W/"${stat.size}"`;
 }

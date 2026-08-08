@@ -298,3 +298,71 @@ describe('review regression — suffix range on an empty representation', () => 
     expect(parseRange('bytes=-2', 10)).toEqual({ start: 8, end: 9 });
   });
 });
+
+describe('review regression — an interrupted download actually resumes', () => {
+  const MTIME = new Date('2026-01-01T00:00:00.000Z');
+
+  /** A filesystem whose stat reports an mtime, as every real adapter does. */
+  function fsWithMtime(
+    counters: { opened: number; cancelled: number; stats: number },
+  ): IFileSystem {
+    return {
+      readFile: () => Promise.resolve(new Uint8Array(1000)),
+      writeFile: () => Promise.resolve(),
+      stat: () => {
+        counters.stats++;
+        return Promise.resolve({ isFile: true, isDirectory: false, size: 1000, mtime: MTIME });
+      },
+      readdir: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+  }
+
+  it('honours If-Range carrying the ETag the server itself issued', async () => {
+    const counters = { opened: 0, cancelled: 0, stats: 0 };
+    const handler = createStaticHandler({
+      fs: fsWithMtime(counters),
+      root: '/srv',
+      urlPrefix: '/',
+      index: 'index.html',
+    });
+
+    // 1. The client downloads and records the validator it was given.
+    const first = makeCtx('GET', '/big.iso');
+    await handler(first.ctx);
+    const issued = first.captured.headers.get('ETag');
+    expect(issued).toBe('"1000-1767225600000"');
+
+    // 2. The transfer drops; the client resumes with exactly that validator.
+    const resumed = makeCtx('GET', '/big.iso', {
+      Range: 'bytes=500-',
+      'If-Range': issued!,
+    });
+    await handler(resumed.ctx);
+
+    // Without a strong validator the server ignores If-Range and answers 200,
+    // restarting the download from byte zero — the whole point of Range support.
+    expect(resumed.captured.status).toBe(206);
+    expect(resumed.captured.headers.get('Content-Range')).toBe('bytes 500-999/1000');
+  });
+
+  it('still refuses a range when If-Range does not match the current file', async () => {
+    const counters = { opened: 0, cancelled: 0, stats: 0 };
+    const handler = createStaticHandler({
+      fs: fsWithMtime(counters),
+      root: '/srv',
+      urlPrefix: '/',
+      index: 'index.html',
+    });
+
+    const stale = makeCtx('GET', '/big.iso', {
+      Range: 'bytes=500-',
+      'If-Range': '"1000-1600000000000"',
+    });
+    await handler(stale.ctx);
+
+    // The representation changed under the client, so it must take the whole file.
+    expect(stale.captured.status).toBe(200);
+  });
+});

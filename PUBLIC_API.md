@@ -8012,6 +8012,10 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
 - Mounts routes on both `GET` and `HEAD`
 - Conditional requests: `ETag`, `If-None-Match`, `If-Modified-Since` → `304`
 - Range requests: `206` with `Content-Range`, `416` for unsatisfiable
+- The `ETag` is **strong** (`"<size>-<mtimeMs>"`) when the runtime reports an `mtime`, and degrades
+  to a **weak** size-only validator when it does not. This matters for resumption: `If-Range` MUST
+  be ignored for a weak validator (RFC 9110 §13.1.5), so an interrupted download resumes only
+  against the strong form. `size`+`mtime` is what nginx and Apache emit as strong for static files
 - Precompressed sidecars: `.br` preferred over `.gz`, ETag from sidecar stat
 - `Cache-Control` is resolved from the **original root-relative** path, never the absolute
   filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its

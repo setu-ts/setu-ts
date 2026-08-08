@@ -3,14 +3,18 @@ import { expect } from '@std/expect';
 import { computeETag, shouldReturn304 } from '../../src/http/conditional.ts';
 
 describe('computeETag', () => {
-  it('should include mtime when present', () => {
+  it('is STRONG and includes mtime when present', () => {
     const mtime = new Date('2024-01-01T00:00:00.000Z');
     const etag = computeETag({ isFile: true, isDirectory: false, size: 100, mtime });
-    expect(etag).toBe('W/"100-1704067200000"');
+    // Strong, i.e. no `W/` prefix — a weak validator makes the server ignore
+    // If-Range, which restarts every resumed download from byte zero.
+    expect(etag).toBe('"100-1704067200000"');
+    expect(etag.startsWith('W/')).toBe(false);
   });
 
-  it('should use only size when mtime is absent', () => {
+  it('degrades to a WEAK size-only validator when mtime is absent', () => {
     const etag = computeETag({ isFile: true, isDirectory: false, size: 100 });
+    // Size alone cannot prove byte-equality, so this one must stay weak.
     expect(etag).toBe('W/"100"');
   });
 });

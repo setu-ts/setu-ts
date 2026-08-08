@@ -1469,28 +1469,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `CAPABILITIES.STATIC_FILES` token with configurable `cacheControl` (a string or a per-path
   function defaulting to immutable-for-hashed, `must-revalidate` otherwise), `index`/`fallback` as
   SEPARATE options — the SPA fallback fires only when `Accept` includes `text/html`, without which a
-  missing `.js` returns the HTML shell under a JavaScript content type — weak `W/"<size>-<mtimeMs>"`
-  ETags degrading to size-only because `StatResult.mtime` is optional, single-range `206`/`416`
-  (multi-range deliberately falls back to `200`), `.br`/`.gz` sidecar negotiation whose ETag comes
-  from the SIDECAR's stat (sharing the original's would poison caches — the one defect most likely
-  to ship green here), and `GET`+`HEAD` on one handler. The pure content-type map and containment
-  guard were promoted to `common` and `react-router-plugin` now delegates to them, its emitted
-  headers pinned byte-identical by a regression test — §2.2 forbids the import, but §2.1 permits
-  pure utilities, so this DELETED a duplicate rather than creating the M30b `pemToDer` one. Widened
-  `IFileSystem` with an optional `readStream?(path, {start, end})` (`end` INCLUSIVE, matching both
-  `node:fs` and the `Range` wire format so no off-by-one translation exists), implemented on
-  Node/Deno/Bun and omitted on Workers. **Four defects were found after the implementation reported
-  itself done, all with green-looking commits behind them.** The suite HUNG past 10 minutes (it runs
-  in ~1m30s) on a contract-violating test double: the Deno mock used
-  `read: () => Promise.resolve(3)`, but real `Deno.FsFile.read` returns `number | null` where `null`
-  is EOF, so with no range options `bytesRemaining` is `Infinity` and the stream enqueued 64 KB
-  chunks forever. That same file had REPLACED the existing tests rather than adding to them — across
-  the three runtime adapter test files **1123 lines of pre-existing coverage had been deleted** (bun
-  −320 net, node −328, deno −98) and swapped for readStream tests duplicating an already-correct
-  `deno-read-stream.test.ts`; all three were restored with branch tests appended instead. Then the
-  headline deliverable turned out to be **dead on two of three runtimes**: Node's default `mods.fs`
-  is `node:fs/promises`, which exports NO `createReadStream` (probed, not assumed), so every call
-  threw `Failed to create read
+  missing `.js` returns the HTML shell under a JavaScript content type — **strong**
+  `"<size>-<mtimeMs>"` ETags degrading to a WEAK size-only validator when `StatResult.mtime` is
+  absent (the strong/weak split is load-bearing, not cosmetic: `If-Range` MUST be ignored for a weak
+  validator, so the originally-shipped weak form made **every resumed download restart from byte
+  zero** — `size`+`mtime` is exactly what nginx and Apache emit as strong for static files, and our
+  millisecond `mtime` is finer-grained than either), single-range `206`/`416` (multi-range
+  deliberately falls back to `200`), `.br`/`.gz` sidecar negotiation whose ETag comes from the
+  SIDECAR's stat (sharing the original's would poison caches — the one defect most likely to ship
+  green here), and `GET`+`HEAD` on one handler. The pure content-type map and containment guard were
+  promoted to `common` and `react-router-plugin` now delegates to them, its emitted headers pinned
+  byte-identical by a regression test — §2.2 forbids the import, but §2.1 permits pure utilities, so
+  this DELETED a duplicate rather than creating the M30b `pemToDer` one. Widened `IFileSystem` with
+  an optional `readStream?(path, {start, end})` (`end` INCLUSIVE, matching both `node:fs` and the
+  `Range` wire format so no off-by-one translation exists), implemented on Node/Deno/Bun and omitted
+  on Workers. **Four defects were found after the implementation reported itself done, all with
+  green-looking commits behind them.** The suite HUNG past 10 minutes (it runs in ~1m30s) on a
+  contract-violating test double: the Deno mock used `read: () => Promise.resolve(3)`, but real
+  `Deno.FsFile.read` returns `number | null` where `null` is EOF, so with no range options
+  `bytesRemaining` is `Infinity` and the stream enqueued 64 KB chunks forever. That same file had
+  REPLACED the existing tests rather than adding to them — across the three runtime adapter test
+  files **1123 lines of pre-existing coverage had been deleted** (bun −320 net, node −328, deno −98)
+  and swapped for readStream tests duplicating an already-correct `deno-read-stream.test.ts`; all
+  three were restored with branch tests appended instead. Then the headline deliverable turned out
+  to be **dead on two of three runtimes**: Node's default `mods.fs` is `node:fs/promises`, which
+  exports NO `createReadStream` (probed, not assumed), so every call threw
+  `Failed to create read
   stream`; and Bun declared `createReadStream` in `BunModules.fs` but
   `buildBunHost` neither imported nor returned it, so every call threw
   `not supported on this Bun version`. Both survived because every unit test INJECTED a host

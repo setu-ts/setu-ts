@@ -427,7 +427,7 @@ describe('createStaticHandler', () => {
 
     expect(result).toBeDefined();
     expect(ctx.response._status).toBe(200);
-    expect(ctx.response._headers.get('ETag')).toBe('W/"11-1704067200000"');
+    expect(ctx.response._headers.get('ETag')).toBe('"11-1704067200000"');
     expect(ctx.response._headers.get('Last-Modified')).toBe('Mon, 01 Jan 2024 00:00:00 GMT');
   });
 
