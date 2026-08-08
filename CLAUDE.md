@@ -1589,7 +1589,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   anyway since `authMiddleware()` populates the principal and never rejects. The §3.5 `register()`
   refusal from PR #136 was extended to the derived scheme name. The integration suite drives the
   REAL `auth-plugin` guards through a kernel app rather than hand-branded fakes, which is what
-  proves the two packages agree on the symbol) — complete (PR pending)
+  proves the two packages agree on the symbol) — complete (PR #137, stacked on PR #136)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
   M37c, M54, M55, and M56 have all shipped, closing the last entries on that list.
 
