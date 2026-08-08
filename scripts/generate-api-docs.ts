@@ -119,7 +119,7 @@ export function buildDenoDocArgs(
   const args: string[] = ['doc'];
 
   if (mode === 'generate') {
-    args.push('--html', '--output', outputDir, '--name', 'Setu-TS');
+    args.push('--html', '--output=' + outputDir, '--name=Setu-TS');
   } else {
     args.push('--lint');
   }
