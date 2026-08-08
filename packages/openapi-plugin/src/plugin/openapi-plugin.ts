@@ -44,6 +44,13 @@ export interface OpenApiPluginOptions extends OpenApiGeneratorOptions {
  * - Drains `CAPABILITIES.OPENAPI_SCHEMA` contributions at registration
  * - Serves the spec at `specEndpoint` (default `/openapi.json`)
  * - Serves Swagger UI at `endpoint` (default `/docs`) when `swagger !== false`
+ * - Omits its own two endpoints from the document, plus anything named in
+ *   {@linkcode OpenApiGeneratorOptions.exclude}
+ *
+ * Declaring `securitySchemes` is what gives Swagger UI its **Authorize**
+ * button. Pair it with `security` to state that operations require
+ * authentication by default; an individual route opts out with
+ * `schema: { security: [] }`.
  *
  * @param options - Plugin options
  * @returns An `IPlugin` instance
@@ -55,6 +62,11 @@ export interface OpenApiPluginOptions extends OpenApiGeneratorOptions {
  *   version: '1.0.0',
  *   endpoint: '/docs',
  *   specEndpoint: '/openapi.json',
+ *   securitySchemes: {
+ *     bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+ *   },
+ *   security: [{ bearerAuth: [] }],
+ *   exclude: ['/health', '/live', '/ready', '/metrics'],
  * }));
  * ```
  *
@@ -67,10 +79,22 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     description,
     servers,
     securitySchemes,
+    security,
+    exclude,
     swagger = true,
     endpoint = '/docs',
     specEndpoint = '/openapi.json',
   } = options;
+
+  // The documentation endpoints are not part of the API being documented, so
+  // they are always excluded — a spec that lists `/openapi.json` and `/docs`
+  // as operations describes its own delivery mechanism, and those entries flow
+  // into every generated client. Caller exclusions are added on top.
+  const excludedPaths = [
+    specEndpoint,
+    ...(swagger ? [endpoint] : []),
+    ...(exclude ?? []),
+  ];
 
   return {
     name: 'openapi-plugin',
@@ -87,6 +111,8 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
         ...(description !== undefined ? { description } : {}),
         ...(servers !== undefined ? { servers } : {}),
         ...(securitySchemes !== undefined ? { securitySchemes } : {}),
+        ...(security !== undefined ? { security } : {}),
+        exclude: excludedPaths,
         schemas: [], // Will be populated at onInit
       });
 
