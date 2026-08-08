@@ -19,7 +19,7 @@ import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 
 const CreateUser = z.object({ email: z.string().email(), age: z.number().int() });
 
-app.register(ValidationPlugin({ errorFormat: 'rfc7807' }));
+app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
 
 app.router.post('/users', {
   middleware: [validateBody(CreateUser)],
@@ -34,7 +34,7 @@ app.router.post('/users', {
 
 | Option                 | Type                                               | Default     | Description                                                     |
 | ---------------------- | -------------------------------------------------- | ----------- | --------------------------------------------------------------- |
-| `errorFormat`          | `'default' \| 'rfc7807' \| 'nestjs'` or a function | `'default'` | Shape of the error response.                                    |
+| `errorFormat`          | `'default' \| 'rfc9457' \| 'nestjs'` or a function | `'default'` | Shape of the error response.                                    |
 | `whitelist`            | `boolean`                                          | `false`     | Strip properties the schema does not declare (`.strip()`).      |
 | `forbidNonWhitelisted` | `boolean`                                          | `false`     | Reject unknown properties (`.strict()`); wins over `whitelist`. |
 
@@ -43,9 +43,18 @@ request.
 
 ## Error formats
 
-`rfc7807Formatter` emits RFC 7807 Problem Details (carrying `detail`, never `message`);
-`nestjsFormatter` emits the NestJS-style shape. The middleware helpers and the service both honour
-the plugin's configured `errorFormat` — there is one implementation behind both entry points.
+`rfc9457Formatter` emits [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) Problem Details
+(carrying `detail`, never `message`); `nestjsFormatter` emits the NestJS-style shape. The middleware
+helpers and the service both honour the plugin's configured `errorFormat` — there is one
+implementation behind both entry points.
+
+A validation failure carries an `errors` extension member, so it is a distinct problem type with a
+concrete `type` URI rather than the `about:blank` that `@setu-ts/exceptions` emits for status-only
+problems. Both packages spell that URI `https://setu-ts.dev/errors/validation`.
+
+> **`'rfc7807'` is deprecated.** RFC 7807 was obsoleted by RFC 9457 in July 2023. Here the alias is
+> bound to the **same formatter**, so the emitted body is byte-identical and migrating changes
+> nothing on the wire. Removal is scheduled for v1.0.0.
 
 ## Full API
 

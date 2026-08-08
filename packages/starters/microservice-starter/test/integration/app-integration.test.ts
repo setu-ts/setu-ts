@@ -18,8 +18,8 @@ describe('microservice-starter / integration', () => {
     expect(response.body).toBe('Hello world');
   });
 
-  // C7: errorHandler must be outermost — both throw sites yield RFC 7807 body
-  it('errorHandler catches route handler throws and formats RFC 7807 body', async () => {
+  // C7: errorHandler must be outermost — both throw sites yield RFC 9457 body
+  it('errorHandler catches route handler throws and formats RFC 9457 body', async () => {
     const app = createMicroserviceApp();
     app.router.get('/throw-route', () => {
       throw new Error('route error');
@@ -29,8 +29,8 @@ describe('microservice-starter / integration', () => {
     const response = await app.inject({ method: 'GET', url: '/throw-route' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
-    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
+    // RFC 9457 §4.2: a status-only problem is identified by about:blank
+    expect(response.body).toContain('"type":"about:blank"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"route error"');
     expect(response.body).not.toContain('"message":');
@@ -51,8 +51,8 @@ describe('microservice-starter / integration', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
-    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
+    // RFC 9457 §4.2: a status-only problem is identified by about:blank
+    expect(response.body).toContain('"type":"about:blank"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"middleware error"');
     expect(response.body).not.toContain('"message":');

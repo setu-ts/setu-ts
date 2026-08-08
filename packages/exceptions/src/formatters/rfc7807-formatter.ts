@@ -1,91 +1,48 @@
 /**
- * RFC 7807 Problem Details error formatter.
+ * RFC 7807 Problem Details error formatter (deprecated).
  *
- * Produces a JSON body conforming to [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807)
- * Problem Details for HTTP APIs. The body carries `type`, `title`, `status`,
- * and `detail`, with `instance` derived from the request path and an optional
- * `errors` extension for validation failures.
+ * RFC 7807 was obsoleted by [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html)
+ * in July 2023. This formatter is retained unchanged so existing callers keep
+ * their exact body shape through a deprecation period (AI_GUIDELINES §9.2); new
+ * code should use `rfc9457-formatter.ts`.
+ *
+ * It differs from the RFC 9457 formatter in the `type` member alone: this one
+ * mints a URI from the status code for every error, which RFC 9457 §4.2 replaces
+ * with `about:blank` for problems carrying no semantics beyond that status.
  *
  * @module
  */
 import type { IRequestContext } from '@setu-ts/common';
 
 import type { ErrorHandlerFormatter } from './error-formatter.ts';
-import { statusTitle } from '../errors/exceptions.ts';
-import { HttpError } from '../errors/http-error.ts';
+import { buildProblemDetails, ERROR_TYPE_BASE, type ProblemDetails } from './problem-details.ts';
 
 /**
- * The canonical base URI for framework-produced error type identifiers.
+ * Resolves the RFC 7807 `type` member: a URI minted from the status code.
  *
- * @since 0.1.0
+ * @param statusCode - The HTTP status code of the occurrence
+ * @returns The status-derived problem type URI
  */
-export const ERROR_TYPE_BASE = 'https://setu-ts.dev/errors';
-
-/**
- * A RFC 7807 Problem Details object.
- *
- * Extension members beyond the standard fields are allowed (RFC 7807 §3.1),
- * so `errors` and `stack` may be present.
- *
- * @since 0.1.0
- */
-export interface ProblemDetails {
-  /** A URI reference identifying the problem type. */
-  readonly type: string;
-  /** A short, human-readable summary of the problem type. */
-  readonly title: string;
-  /** The HTTP status code generated for this occurrence. */
-  readonly status: number;
-  /** A human-readable explanation specific to this occurrence. */
-  readonly detail: string;
-  /** A URI reference identifying the specific occurrence (request path). */
-  readonly instance?: string;
-  /** Optional validation failures extension (present for `422` errors). */
-  readonly errors?: ReadonlyArray<{
-    field: string;
-    message: string;
-    code?: string;
-  }>;
-  /** Optional stack trace (present only when `includeStackTrace` is on). */
-  readonly stack?: string;
-  /** Allow callers to attach further extension members. */
-  readonly [key: string]: unknown;
-}
+const resolveRfc7807Type = (statusCode: number): string => `${ERROR_TYPE_BASE}/${statusCode}`;
 
 /**
  * Format an error as RFC 7807 Problem Details.
  *
- * - `status` and `detail` come from the {@linkcode HttpError} (or default to
- *   `500` / the error message for generic `Error`s).
- * - `title` is derived from the status code via the shared status-title map.
- * - `instance` is the request path when a context is supplied.
- * - `errors` is included when the error carries validation details.
- *
  * @param error - The thrown error to format
  * @param ctx - Optional request context (used for `instance`)
- * @returns A RFC 7807 Problem Details body
+ * @returns An RFC 7807 Problem Details body
+ * @deprecated RFC 7807 was obsoleted by RFC 9457. Use `rfc9457Formatter`
+ * instead, or the `'rfc9457'` format alias. Will be removed in v1.0.0.
+ * @example
+ * ```typescript
+ * // Before
+ * app.middleware.add(errorHandler({ format: 'rfc7807' }));
+ * // After — `type` becomes 'about:blank' for status-only problems
+ * app.middleware.add(errorHandler({ format: 'rfc9457' }));
+ * ```
  * @since 0.1.0
  */
 export const rfc7807Formatter: ErrorHandlerFormatter = (
   error: Error,
   ctx?: IRequestContext,
-): ProblemDetails => {
-  const isHttp = error instanceof HttpError;
-  const statusCode = isHttp ? error.statusCode : 500;
-  const hasErrors = isHttp && error.details !== undefined && 'errors' in error.details;
-
-  return {
-    type: `${ERROR_TYPE_BASE}/${statusCode}`,
-    title: statusTitle(statusCode),
-    status: statusCode,
-    detail: error.message,
-    ...(ctx !== undefined && { instance: ctx.request.path }),
-    ...(hasErrors && {
-      errors: (error as HttpError).details!.errors as ReadonlyArray<{
-        field: string;
-        message: string;
-        code?: string;
-      }>,
-    }),
-  };
-};
+): ProblemDetails => buildProblemDetails(error, ctx, resolveRfc7807Type);
