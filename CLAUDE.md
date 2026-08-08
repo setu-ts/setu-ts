@@ -1505,7 +1505,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   percent-encoded traversal although its own test asserted it did: callers decode once, so a
   surviving `%2e` means DOUBLE encoding (`%252e%252e` → `%2e%2e`) that the raw `..` check cannot
   see. All `src` files ≥90% branch/function/line, with node and bun adapters at 100%;
-  `release:verify` now reports **47** packages) — complete (PR pending)
+  `release:verify` now reports **47** packages. Code review then found five more defects the green
+  gates had passed, each fixed with a test verified to fail without it: a **HEAD leaked a file
+  descriptor**, because the body stream was opened before the HEAD check and so was never read and
+  never cancelled — one leak per HEAD on any file above `maxBufferBytes`; **hashed assets lost
+  `immutable` whenever a sidecar was served**, since Cache-Control resolved from the SERVED path and
+  `…-a1b2c3d4.js.br` never matches the content-hash pattern, which made the milestone's headline
+  default inoperative in practice because every modern browser sends `Accept-Encoding: br, gzip`;
+  the `cacheControl` callback received an ABSOLUTE path where the contract says root-relative, and
+  the test that claimed to cover it ignored its argument entirely; `handler/resolve-path.ts` was
+  dead — no `src` importer, absent from the barrel — and encoded the OPPOSITE of two shipped
+  decisions (a bare `startsWith` prefix strip matching `/assetstest.txt`, and a fallback with no
+  `Accept:
+  text/html` guard), so wiring it up later would have reintroduced both; and
+  `IStaticFiles.serve` was `(ctx: unknown) => Promise<unknown>` with the implementation casting,
+  leaving the capability's only method untyped. **Interrupted downloads also never resumed**: the
+  ETag was always weak, and `If-Range` MUST be ignored for a weak validator (RFC 9110 §13.1.5), so a
+  client resuming with exactly the validator it had been issued got a `200` and restarted from byte
+  zero — the ETag is now STRONG whenever `mtime` is present, matching what nginx and Apache emit for
+  static files, and weak only when size is the sole signal. Reverting the three fixed `src` files
+  failed 8 of 13 regression steps, the other 5 being deliberate controls) — complete (PR #132)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
   M37c, M54, and M55 have all shipped, closing the last entries on that list.
 
