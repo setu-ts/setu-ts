@@ -6,6 +6,65 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Problem Details move from RFC 7807 to RFC 9457** (M56). RFC 7807 was obsoleted by
+  [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) in July 2023, and the framework advertised
+  the withdrawn specification in two packages, a public format alias, an exported symbol in each,
+  the three starters, and every documentation site.
+
+  `@setu-ts/exceptions` and `@setu-ts/validation-plugin` each gain an `'rfc9457'` format arm and an
+  `rfc9457Formatter` export. `'rfc7807'` and `rfc7807Formatter` are **deprecated, not removed**
+  (AI_GUIDELINES §9.2), and are scheduled for removal in v1.0.0.
+
+  RFC 9457 changed very little on the wire — Appendix D lists three changes, none touching the five
+  core members or the `application/problem+json` media type — so the bodies were already
+  structurally valid. One 7807-era habit did need correcting, and that is the only behavior change
+  here.
+
+  > **⚠️ Breaking: `type` is now `about:blank` for status-only problems.** `@setu-ts/exceptions`
+  > previously minted a URI from the status code for every error (`https://setu-ts.dev/errors/404`),
+  > which identifies nothing the `status` member does not already carry. RFC 9457 §4.2 registers
+  > `about:blank` for precisely that case, and that is what the `'rfc9457'` format now emits.
+  > Clients matching on `type` to distinguish errors should read `status` instead. The one error
+  > carrying an extension member, `validationError()`, keeps a concrete type URI —
+  > `https://setu-ts.dev/errors/validation`, the same URI `@setu-ts/validation-plugin` emits for the
+  > same problem type.
+  >
+  > ```jsonc
+  > // Before                                   After
+  > { "type": "https://setu-ts.dev/errors/404", { "type": "about:blank",
+  >   "title": "Not Found",                       "title": "Not Found",
+  >   "status": 404,                              "status": 404,
+  >   "detail": "User 42 does not exist" }        "detail": "User 42 does not exist" }
+  > ```
+  >
+  > Two escape hatches, in order of preference: read `status`, which is what it is for; or keep the
+  > deprecated `format: 'rfc7807'`, which is **unchanged** and still emits the status-derived URI —
+  > a deprecated symbol must not silently change behavior (§9.4).
+
+  `@setu-ts/validation-plugin` has **no wire change at all**: its `type` was always a semantic URI
+  rather than a status-derived one, so `rfc7807Formatter` there is a deprecated alias bound to the
+  same object and the emitted body is byte-identical.
+
+  The three starters (`rest`, `microservice`, `full-stack`) now compose `errorHandler` with
+  `format: 'rfc9457'`, so an application built on one of them picks up the new `type` on upgrade.
+  Applications wiring `errorHandler` themselves are unaffected until they change the format string.
+
+### Fixed
+
+- **The Problem Details media type survives a second formatter.** Both packages keyed
+  `application/problem+json` off a single formatter **reference**, so that passing a formatter
+  directly (`format: rfc9457Formatter`) agreed with passing the alias (`format: 'rfc9457'`). Adding
+  a second formatter to that check without generalizing it would have served a Problem Details body
+  as `application/json` — which generic problem-details clients ignore — while the string alias
+  tested fine. The check is now a membership test over every Problem Details formatter, covered by
+  tests that drive each spelling **by reference**.
+
+- **`ARCHITECTURE.md` documented a `type` URI the code never emitted.** The Problem Details example
+  showed `https://setu-ts.dev/errors/not-found`; the formatter emitted
+  `https://setu-ts.dev/errors/404`. Corrected along with the rest of the section.
+
 ## [0.1.0-alpha.5] — 2026-08-08
 
 **This release renames the project and moves every package to a new JSR scope.** It is the first

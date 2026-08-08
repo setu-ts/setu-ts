@@ -11,7 +11,7 @@
  * ```typescript
  * import { errorHandler } from '@setu-ts/exceptions';
  *
- * app.middleware.add(errorHandler({ format: 'rfc7807' }), {
+ * app.middleware.add(errorHandler({ format: 'rfc9457' }), {
  *   priority: 0,
  *   name: 'error-handler',
  * });
@@ -48,8 +48,9 @@ export type {
   ErrorFormat,
   ErrorHandlerFormatter,
 } from './formatters/error-formatter.ts';
-export { ERROR_TYPE_BASE, rfc7807Formatter } from './formatters/rfc7807-formatter.ts';
-export type { ProblemDetails } from './formatters/rfc7807-formatter.ts';
+export { ERROR_TYPE_BASE, rfc9457Formatter } from './formatters/rfc9457-formatter.ts';
+export type { ProblemDetails } from './formatters/rfc9457-formatter.ts';
+export { rfc7807Formatter } from './formatters/rfc7807-formatter.ts';
 
 // Middleware
 export { errorHandler } from './middleware/error-handler.ts';

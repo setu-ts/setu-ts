@@ -5926,6 +5926,76 @@ assets stay byte-identical, and a test pins that.
 
 ---
 
+## Milestone 56: RFC 9457 Problem Details — Retiring a Withdrawn Specification ✅ COMPLETE
+
+**Packages:** `packages/exceptions`, `packages/validation-plugin`, plus the three starters,
+`packages/cli` (prose), and `scripts/jsr-metadata.ts`.
+
+**Objective:** RFC 7807 was obsoleted by [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) in
+July 2023. The framework advertised the withdrawn specification in two packages, a public
+`ErrorFormat` union value, an exported symbol in each package, the three starters, and eleven
+documentation sites. Move onto RFC 9457, with a §9.2 deprecation path rather than a rename.
+
+**The wire format barely changed, and that is a finding rather than an assumption.** RFC 9457
+Appendix D lists exactly three changes from 7807: a registry of common problem type URIs (§4.2),
+clarified handling of multiple problems (§3), and guidance for non-dereferenceable type URIs
+(§3.1.1). The five core members, the `application/problem+json` media type, and extension members
+all carry over verbatim — so the emitted bodies were already structurally valid. This milestone is
+therefore a naming change plus exactly one semantic correction.
+
+**`about:blank` is that correction.** `HttpError` carries `statusCode`, `message`, optional
+`details` and optional `cause` — **no problem-type identity beyond the status code** — so the
+`https://setu-ts.dev/errors/404` it minted for every error identified nothing the `status` member
+did not already carry, which is precisely the case §4.2 registers `about:blank` for. The single
+exception is `validationError()`, the only factory placing `errors` into `details`: it defines an
+extension member and is a genuine problem type, so it keeps a concrete URI — spelled to match the
+literal `validation-plugin` already emitted, so both packages finally identify one problem type
+identically. `title` needed no change: `statusTitle()` already yields the status reason phrase §4.2
+expects beside `about:blank`.
+
+**The deprecated alias keeps RFC 7807 behavior in `exceptions`,** because §9.4 forbids silently
+changing a released API's behavior and a symbol named after RFC 7807 that emits something else gives
+the caller no signal at all. The two formatters differ only in a `typeOf` strategy passed to one
+shared `buildProblemDetails` core, so there is no duplicated logic. In `validation-plugin` the alias
+is the **same object**: that formatter's `type` was always semantic rather than status-derived, so
+its body was already 9457-valid and two implementations would have been the duplication §11.1
+forbids.
+
+**The defect this milestone was most likely to ship green** is the media type. Both packages keyed
+`application/problem+json` off a single formatter **reference** — `formatter === rfc7807Formatter`
+at `error-handler.ts:93` and `validation-middleware.ts:129` — so that passing a formatter directly
+agreed with passing the alias. Adding a second formatter without generalizing that check serves a
+Problem Details body as `application/json`, which generic problem-details clients ignore, while the
+`'rfc9457'` _string_ arm tests fine. Both are now membership tests, with tests driving every
+spelling **by reference**; reverting the exceptions fix fails 8 steps across the unit and
+integration suites.
+
+**Doc conflict found and fixed:** `ARCHITECTURE.md` documented a `type` of
+`https://setu-ts.dev/errors/not-found` while the formatter emitted `.../404` — a doc-vs-behavior
+disagreement that predated this milestone.
+
+### Deliverables
+
+- [x] `'rfc9457'` arm + `rfc9457Formatter` in both packages; `'rfc7807'` deprecated, not removed
+- [x] `about:blank` for status-only problems; validation keeps a concrete type URI
+- [x] Shared `buildProblemDetails` core behind both exceptions entry points
+- [x] Membership-based media-type selection in both packages
+- [x] Three starters moved to `format: 'rfc9457'`
+- [x] `PUBLIC_API.md`, `ARCHITECTURE.md`, root `README.md`, both package READMEs, `CHANGELOG.md`
+- [x] `scripts/jsr-metadata.ts` descriptions (live on jsr.io only after `release:set-metadata`)
+
+### Out of scope
+
+- Realigning the `errors` extension from `{ field, message, code }` to the `{ detail, pointer }`
+  shape RFC 9457 §3 illustrates — declined by the maintainer, since `errors[].field` is the most
+  widely consumed part of the validation response.
+- Removing the `'rfc7807'` arm and `rfc7807Formatter`: §9.2 puts removal in the next major, owned by
+  the 1.0 release.
+- IANA registration of a framework problem type (§4.2) — a specification submission, not code.
+- User-facing migration documentation, which belongs to **M38**.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6004,3 +6074,4 @@ assets stay byte-identical, and a test pins that.
 | 53        | ✅     | real-backend CI (examples gate)       |
 | 54        | ✅     | messaging-plugin (cloud brokers)      |
 | 55        | ✅     | static-plugin                         |
+| 56        | ✅     | rfc9457 problem details               |
