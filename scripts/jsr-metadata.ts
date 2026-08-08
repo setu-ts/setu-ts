@@ -97,7 +97,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: PORTABLE,
   },
   'exceptions': {
-    description: 'Exception hierarchy, RFC 7807 Problem Details, and the error-handler middleware',
+    description: 'Exception hierarchy, RFC 9457 Problem Details, and the error-handler middleware',
     runtimeCompat: PORTABLE,
   },
   'testing': {
@@ -125,7 +125,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: PORTABLE,
   },
   'validation-plugin': {
-    description: 'Zod-based validation with RFC 7807, NestJS, or default error shapes',
+    description: 'Zod-based validation with RFC 9457, NestJS, or default error shapes',
     runtimeCompat: PORTABLE,
   },
   'http-security-plugin': {

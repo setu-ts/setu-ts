@@ -24,7 +24,7 @@ export interface ValidationPluginOptions {
   /**
    * Error response format. Defaults to `'default'`.
    *
-   * Pass `'default'`, `'rfc7807'`, or `'nestjs'` for built-in formatters,
+   * Pass `'default'`, `'rfc9457'`, or `'nestjs'` for built-in formatters,
    * or provide a custom `ValidationErrorFormatter` function.
    */
   readonly errorFormat?: ErrorFormat | ValidationErrorFormatter;
@@ -70,7 +70,7 @@ const PLUGIN_NAME = 'validation-plugin';
  * import { ValidationPlugin } from '@setu-ts/validation-plugin';
  *
  * app.register(ValidationPlugin({
- *   errorFormat: 'rfc7807',
+ *   errorFormat: 'rfc9457',
  * }));
  * ```
  * @param options - Plugin configuration

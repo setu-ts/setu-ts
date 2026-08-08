@@ -79,7 +79,7 @@ export function createFullStackApp(options?: FullStackStarterOptions): IKernelAp
 
   // Add error handler as outermost middleware (priority 0) — required by
   // exceptions middleware contract to catch errors from all downstream middleware.
-  app.middleware.add(errorHandler({ format: 'rfc7807' }), { priority: 0, name: 'error-handler' });
+  app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0, name: 'error-handler' });
 
   return app;
 }

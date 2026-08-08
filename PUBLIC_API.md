@@ -619,7 +619,9 @@ via a structural `safeParse()` interface — no hard Zod dependency in the plugi
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
 app.register(ValidationPlugin({
-  errorFormat: 'rfc7807', // 'default' | 'rfc7807' | 'nestjs' | custom function
+  // ValidationPlugin's own ErrorFormat union — distinct from the exceptions
+  // package's, which has no 'nestjs' arm.
+  errorFormat: 'rfc9457', // 'default' | 'rfc9457' | 'rfc7807' | 'nestjs' | custom function
 }));
 ```
 
@@ -774,7 +776,10 @@ const clean2 = sanitizer(inputB);
 }
 ```
 
-#### RFC 7807 Problem Details
+#### RFC 9457 Problem Details
+
+The `'rfc7807'` alias produces a **byte-identical** body: this formatter's `type` is a semantic URI
+that was never derived from the status code, so it was already valid under RFC 9457.
 
 ```json
 {
@@ -6630,9 +6635,10 @@ middleware via the application's pipeline.
 | `STATUS_TITLES`       | const    | Readonly record of well-known status-code → title mappings          |
 | `errorHandler`        | function | Creates the global error-handler `MiddlewareFunction`               |
 | `defaultFormatter`    | const    | Framework-standard error body formatter (`{ statusCode, message }`) |
-| `rfc7807Formatter`    | const    | RFC 7807 Problem Details formatter                                  |
-| `selectFormatter`     | function | Resolves `'default' \| 'rfc7807' \| custom` to a formatter function |
-| `ERROR_TYPE_BASE`     | const    | Base URI for RFC 7807 `type` fields (`https://setu-ts.dev/errors`)  |
+| `rfc9457Formatter`    | const    | RFC 9457 Problem Details formatter                                  |
+| `rfc7807Formatter`    | const    | **Deprecated.** RFC 7807 Problem Details formatter                  |
+| `selectFormatter`     | function | Resolves an `ErrorFormat` or custom function to a formatter         |
+| `ERROR_TYPE_BASE`     | const    | Base URI for framework problem types (`https://setu-ts.dev/errors`) |
 
 ### Types
 
@@ -6642,9 +6648,9 @@ middleware via the application's pipeline.
 | `HttpErrorInit`         | type | Options object for `HttpError.from()`                                        |
 | `ErrorHandlerOptions`   | type | Options for `errorHandler()` (`{ format?, includeStackTrace?, logErrors? }`) |
 | `ErrorHandlerFormatter` | type | `(error: Error, ctx?) => Record<string, unknown>`                            |
-| `ErrorFormat`           | type | `'default' \| 'rfc7807'`                                                     |
+| `ErrorFormat`           | type | `'default' \| 'rfc9457' \| 'rfc7807'` (this package's union, no `'nestjs'`)  |
 | `DefaultErrorBody`      | type | Framework-standard error body shape                                          |
-| `ProblemDetails`        | type | RFC 7807 Problem Details body shape                                          |
+| `ProblemDetails`        | type | RFC 9457 Problem Details body shape                                          |
 
 Contract notes:
 
@@ -6653,12 +6659,34 @@ Contract notes:
   hierarchy.
 - **`cause` chaining**: `internalServerError(message, cause)` forwards `cause` to the ES2022 `Error`
   cause chain. The error handler logs it when a logger is registered.
-- **RFC 7807 compliance**: when `format: 'rfc7807'`, the response body carries `type`, `title`,
+- **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
-  `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (RFC 7807
-  uses `detail`). The media type follows the RESOLVED formatter, so passing the exported
-  `rfc7807Formatter` function as `format` produces the same body **and** the same content type as
-  the `'rfc7807'` alias.
+  `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem
+  Details uses `detail`). The media type follows the RESOLVED formatter, so passing the exported
+  `rfc9457Formatter` function as `format` produces the same body **and** the same content type as
+  the `'rfc9457'` alias.
+- **`type` is `about:blank` for status-only problems.** RFC 9457 §4.2 registers `about:blank` for a
+  problem carrying "no semantics beyond the HTTP status code", which is every error this package
+  produces except the one from `validationError()`. That one defines an `errors` extension member,
+  so it is a distinct problem type identified by `https://setu-ts.dev/errors/validation` — the same
+  URI `@setu-ts/validation-plugin` emits for it. Clients that need to distinguish errors should read
+  `status`, which is what it is for.
+
+  ```json
+  {
+    "type": "about:blank",
+    "title": "Not Found",
+    "status": 404,
+    "detail": "User 42 does not exist",
+    "instance": "/users/42"
+  }
+  ```
+
+- **`'rfc7807'` is deprecated but unchanged.** RFC 7807 was obsoleted by RFC 9457 in July 2023. The
+  `'rfc7807'` alias and the `rfc7807Formatter` export are retained through a deprecation period
+  (AI_GUIDELINES §9.2) and still emit the status-derived `type` (`https://setu-ts.dev/errors/404`)
+  they always did — a deprecated symbol must not silently change behavior (§9.4). Both spellings
+  carry `application/problem+json`. Removal is scheduled for v1.0.0.
 - **Logger is optional**: `errorHandler` logs via `ILogger` resolved from
   `ctx.services.get(CAPABILITIES.LOGGER)` only when a logger is registered; otherwise logging is
   silently skipped.

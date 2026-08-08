@@ -1,14 +1,14 @@
 /**
  * @module
  *
- * Zod-compatible request validation plugin with RFC 7807 error formatting,
+ * Zod-compatible request validation plugin with RFC 9457 error formatting,
  * input sanitization, and middleware helpers.
  *
  * @example
  * ```typescript
  * import { ValidationPlugin, validateBody, validateQuery } from '@setu-ts/validation-plugin';
  *
- * app.register(ValidationPlugin({ errorFormat: 'rfc7807' }));
+ * app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
  *
  * app.router.post('/users', {
  *   middleware: [validateBody(CreateUserSchema)],
@@ -43,6 +43,7 @@ export type { SanitizationRules } from './sanitizers/sanitizer.ts';
 
 // Formatters
 export { defaultFormatter, nestjsFormatter } from './formatters/default-formatter.ts';
+export { rfc9457Formatter } from './formatters/rfc9457-formatter.ts';
 export { rfc7807Formatter } from './formatters/rfc7807-formatter.ts';
 export { resolveFormatter } from './formatters/error-formatter.ts';
 export type {

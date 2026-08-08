@@ -4,7 +4,9 @@
  *
  * Supported formats:
  * - `'default'` — Framework-standard error shape (from default-formatter)
- * - `'rfc7807'` — RFC 7807 Problem Details (from rfc7807-formatter)
+ * - `'rfc9457'` — RFC 9457 Problem Details (from rfc9457-formatter)
+ * - `'rfc7807'` — deprecated alias of `'rfc9457'`; RFC 7807 was obsoleted by
+ *   RFC 9457 and the emitted body is identical
  * - `'nestjs'` — NestJS-compatible error shape (from default-formatter)
  * - A custom function — used as-is
  *
@@ -12,6 +14,7 @@
  */
 import type { IRequestContext, ValidationIssue } from '@setu-ts/common';
 import { defaultFormatter, nestjsFormatter } from './default-formatter.ts';
+import { rfc9457Formatter } from './rfc9457-formatter.ts';
 import { rfc7807Formatter } from './rfc7807-formatter.ts';
 
 // ---------------------------------------------------------------------------
@@ -47,11 +50,14 @@ export interface FormattedError {
 }
 
 /**
- * The built-in error format identifiers.
+ * The built-in error format identifiers for `@setu-ts/validation-plugin`.
+ *
+ * `'rfc7807'` is retained for backward compatibility and resolves to the same
+ * formatter as `'rfc9457'`; prefer `'rfc9457'`.
  *
  * @since 0.1.0
  */
-export type ErrorFormat = 'default' | 'rfc7807' | 'nestjs';
+export type ErrorFormat = 'default' | 'rfc9457' | 'rfc7807' | 'nestjs';
 
 /**
  * A function that formats validation issues into a structured error body.
@@ -73,8 +79,8 @@ export type ValidationErrorFormatter = (
 /**
  * Resolve the error format configuration to a concrete formatter function.
  *
- * - When `format` is `'default'`, `'rfc7807'`, or `'nestjs'` the corresponding
- *   built-in formatter is returned.
+ * - When `format` is `'default'`, `'rfc9457'`, the deprecated `'rfc7807'`, or
+ *   `'nestjs'`, the corresponding built-in formatter is returned.
  * - When `format` is already a function, it is returned as-is.
  * - Otherwise a `TypeError` is thrown.
  *
@@ -92,6 +98,8 @@ export function resolveFormatter(
   switch (format) {
     case 'default':
       return defaultFormatter;
+    case 'rfc9457':
+      return rfc9457Formatter;
     case 'rfc7807':
       return rfc7807Formatter;
     case 'nestjs':

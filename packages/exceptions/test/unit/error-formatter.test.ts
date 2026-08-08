@@ -11,6 +11,7 @@ import { expect } from '@std/expect';
 import { defaultFormatter, selectFormatter } from '../../src/formatters/error-formatter.ts';
 import type { ErrorHandlerFormatter } from '../../src/formatters/error-formatter.ts';
 import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';
+import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';
 import { HttpError } from '../../src/errors/http-error.ts';
 import { badRequest, notFound } from '../../src/errors/exceptions.ts';
 
@@ -19,8 +20,16 @@ describe('selectFormatter', () => {
     expect(selectFormatter('default')).toBe(defaultFormatter);
   });
 
-  it('resolves "rfc7807" to rfc7807Formatter', () => {
+  it('resolves "rfc9457" to rfc9457Formatter', () => {
+    expect(selectFormatter('rfc9457')).toBe(rfc9457Formatter);
+  });
+
+  it('resolves the deprecated "rfc7807" to rfc7807Formatter, not to rfc9457Formatter', () => {
+    // The deprecated arm must keep resolving to the RFC 7807 body. Collapsing
+    // it onto the new formatter would be the silent behavior change §9.4
+    // forbids, and callers would get about:blank with no signal.
     expect(selectFormatter('rfc7807')).toBe(rfc7807Formatter);
+    expect(selectFormatter('rfc7807')).not.toBe(rfc9457Formatter);
   });
 
   it('returns a custom function as-is', () => {
