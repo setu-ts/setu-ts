@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The OpenAPI document can be derived from the guards that enforce authentication** (M57), instead
+  of requiring every route to declare a requirement a second time. `@setu-ts/common` gains a
+  `SECURITY_METADATA` symbol, a `RouteSecurityMetadata` type, and the pure `withSecurityMetadata` /
+  `securityMetadataOf` helpers; every guard `@setu-ts/auth-plugin` ships is branded with them, and
+  `@setu-ts/openapi-plugin` reads the brand off a route's middleware.
+
+  ```typescript
+  app.register(OpenApiPlugin({
+    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+    deriveSecurity: { scheme: 'bearerAuth' },
+  }));
+
+  app.router.get('/todos/:id', { middleware: [requireAuth()], handler }); // → requires bearerAuth
+  app.router.post('/login', { middleware: [publicRoute()], handler }); // → public
+  ```
+
+  **Opt-in and non-breaking.** Without `deriveSecurity` nothing is derived and the document is
+  byte-identical, and a requirement declared on `schema.security` always wins over a derived one.
+  The brand is symbol-keyed and non-enumerable, so guard identity and behaviour are unchanged;
+  `Symbol.for` is used so two copies of `common` in one process resolve the same key.
+
+  Three limits are documented rather than left to discovery: only route-level middleware is
+  inspected (`app.middleware.add()` is invisible to a route, which is correct for `authMiddleware()`
+  — it populates the principal and never rejects); roles and permissions cannot be expressed,
+  because an OpenAPI requirement names a scheme and none can be inferred from `'admin'`; and the
+  scheme name is configured rather than inferred, with an undeclared name refused at `register()`.
+
 - **`RouteSchema.security` and a document-level `security` option describe which operations need
   authentication.** `@setu-ts/openapi-plugin` accepted `securitySchemes` and emitted them under
   `components`, but nothing ever declared a **requirement** — `OpenApiOperation.security` existed in

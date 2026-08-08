@@ -6,7 +6,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { z } from 'npm:zod@^3.24.0';
-import type { RouteInfo } from '@setu-ts/common';
+import type { MiddlewareFunction, RouteInfo } from '@setu-ts/common';
+import { withSecurityMetadata } from '@setu-ts/common';
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
 
 describe('OpenApiGenerator', () => {
@@ -726,6 +727,111 @@ describe('OpenApiGenerator', () => {
     });
   });
 
+  describe('deriveSecurity', () => {
+    /** Stand-ins for branded guards; the real ones are driven in the integration suite. */
+    const guard = () => withSecurityMetadata(passthrough(), { authenticated: true });
+    const open = () => withSecurityMetadata(passthrough(), { authenticated: false });
+
+    it('should derive a requirement from a branded guard', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        securitySchemes: { bearerAuth: {} },
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect(result.paths['/todos']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    });
+
+    it('should derive an empty requirement from an explicitly public guard', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/health', undefined, [open()])]);
+
+      expect(result.paths['/health']?.get?.security).toEqual([]);
+    });
+
+    it('should let a DECLARED requirement win over a derived one', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      // The guard says protected; the route declares public. Declared wins, so
+      // this milestone cannot change a document that already declares.
+      const result = generator.generate([route('POST', '/login', { security: [] }, [guard()])]);
+
+      expect(result.paths['/login']?.post?.security).toEqual([]);
+    });
+
+    it('should treat authenticated as winning when a route carries both brands', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      // Matches enforcement: publicRoute() only calls next(), so requireAuth()
+      // still rejects an anonymous caller.
+      const result = generator.generate([route('GET', '/both', undefined, [open(), guard()])]);
+
+      expect(result.paths['/both']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    });
+
+    it('should derive nothing when the option is absent', () => {
+      const generator = new OpenApiGenerator({ title: 'T', version: '1' });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
+    });
+
+    it('should derive nothing from unbranded middleware', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [passthrough()])]);
+
+      expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
+    });
+
+    it('should derive nothing when the route declares no middleware at all', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      // `RouteDefinition.middleware` is optional — the derivation must not
+      // assume an array is present.
+      const result = generator.generate([route('GET', '/todos')]);
+
+      expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
+    });
+
+    it('should use the configured scheme name verbatim', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'myCustomScheme' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect(result.paths['/todos']?.get?.security).toEqual([{ myCustomScheme: [] }]);
+    });
+  });
+
   describe('security', () => {
     it('should emit the document-level requirement when configured', () => {
       const generator = new OpenApiGenerator({
@@ -811,6 +917,7 @@ function route(
   method: RouteInfo['method'],
   path: string,
   schema?: RouteInfo['definition']['schema'],
+  middleware?: readonly MiddlewareFunction[],
 ): RouteInfo {
   return {
     method,
@@ -820,6 +927,14 @@ function route(
         throw new Error('not used');
       },
       ...(schema !== undefined ? { schema } : {}),
+      ...(middleware !== undefined ? { middleware } : {}),
     },
+  };
+}
+
+/** An unbranded middleware, for the negative derivation cases. */
+function passthrough(): MiddlewareFunction {
+  return async (_ctx, next) => {
+    await next();
   };
 }

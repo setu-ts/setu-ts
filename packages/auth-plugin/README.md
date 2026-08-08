@@ -253,6 +253,18 @@ rateLimitMiddleware({
 | `message`         | `string`          | `'Rate limit exceeded'` | 429 body message.                |
 | `standardHeaders` | `boolean`         | `true`                  | Emit `RateLimit-*` headers.      |
 
+## Guards and OpenAPI
+
+Every guard this package returns is branded with `RouteSecurityMetadata` from `@setu-ts/common`, so
+[`@setu-ts/openapi-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/openapi-plugin)
+can document which operations require authentication without either package importing the other. Set
+`OpenApiPlugin({ deriveSecurity: { scheme: 'bearerAuth' } })` and a route carrying `requireAuth()`
+is documented as protected; one carrying `publicRoute()` is documented as public.
+
+The brand is symbol-keyed and non-enumerable — guard behaviour is unchanged — and it carries
+authentication presence only. An OpenAPI security requirement names a scheme, not a role, so
+`requireRole('admin')` documents that authentication is required and nothing about the role.
+
 ## License
 
 MIT
