@@ -5996,6 +5996,49 @@ disagreement that predated this milestone.
 
 ---
 
+## Milestone 57: Derived OpenAPI Security — The Document Tracks the Guards ✅ COMPLETE
+
+**Package:** `@setu-ts/common` + `@setu-ts/auth-plugin` + `@setu-ts/openapi-plugin`
+
+PR #136 made an operation's security requirement declarable, which left the OpenAPI document as a
+second source of truth: a route could carry `requireAuth()` and declare `security: []`, or carry no
+guard and inherit a document-level requirement, and nothing in the framework objected. This
+milestone lets the document be **derived** from the guards that actually enforce.
+
+`auth-plugin` brands the middleware each of its six guard factories returns with a
+`RouteSecurityMetadata` carried under a `SECURITY_METADATA` symbol exported from `common`;
+`openapi-plugin` reads the brand off `RouteInfo.definition.middleware`. No plugin imports another —
+the symbol in `common` is the entire channel, on the `TELEMETRY_CONTEXT_OPAQUE` precedent (M24). It
+is created with `Symbol.for` deliberately: a locally-created symbol would miss on every read if two
+copies of `common` shared a process, the failure M37c hit with hand-written React Router context
+keys.
+
+The metadata carries authentication **presence only** — `{ authenticated: boolean }`. That is not a
+simplification to revisit: an OpenAPI security requirement names a _scheme_, and no declared scheme
+can be inferred from the string `'admin'`, so a `roles` field would be read by nothing on a real
+code path. The consequence is stated in three doc sites rather than left to discovery —
+`requireRole` documents that authentication is required and nothing about the role, so a 403 remains
+a surprise the document cannot warn about.
+
+### Deliverables
+
+- `common`: `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`,
+  `securityMetadataOf`.
+- `auth-plugin`: all six guard factories branded (`requireAuth`, `requireRole`, `requirePermission`,
+  `requireAnyRole`, `requireAllPermissions` → `authenticated: true`; `publicRoute` → `false`).
+- `openapi-plugin`: `deriveSecurity: { scheme }`, precedence (declared > derived > document-level),
+  and the `register()` refusal extended to cover the derived scheme name.
+- Docs: PUBLIC_API common + OpenAPI sections, both package READMEs, CHANGELOG.
+
+### Explicitly out of scope
+
+- **Roles and permissions in the document** — OpenAPI has no vocabulary for them; an `x-` extension
+  is a separate decision about extension members. Unowned.
+- **Deriving from application-level middleware** (`app.middleware.add()`), which `RouteInfo` does
+  not expose. Would need a kernel change. Unowned.
+- **Branding guards outside `auth-plugin`** — `createFlagGuard` and `csrfFormMiddleware`
+  short-circuit too, but neither maps to a security scheme. Unowned.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6075,3 +6118,4 @@ disagreement that predated this milestone.
 | 54        | ✅     | messaging-plugin (cloud brokers)      |
 | 55        | ✅     | static-plugin                         |
 | 56        | ✅     | rfc9457 problem details               |
+| 57        | ✅     | derived openapi security              |

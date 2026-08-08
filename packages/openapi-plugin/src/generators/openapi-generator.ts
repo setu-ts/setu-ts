@@ -1,4 +1,5 @@
 import type { RouteInfo, SecurityRequirement } from '@setu-ts/common';
+import { securityMetadataOf } from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
@@ -80,9 +81,12 @@ export interface OpenApiOperation {
   /** Response codes. */
   readonly responses: Record<string, OpenApiResponse>;
   /**
-   * Security requirements for this operation, from the route's
-   * `schema.security`. Present only when the route declared one; an empty
-   * array marks the operation public, overriding the document-level default.
+   * Security requirements for this operation — declared on the route's
+   * `schema.security`, or derived from its branded guards when
+   * {@linkcode OpenApiGeneratorOptions.deriveSecurity} is configured
+   * (declared wins). Absent when neither applies, which leaves the operation
+   * inheriting the document-level requirement; an empty array marks it public,
+   * overriding that default.
    */
   readonly security?: readonly SecurityRequirement[];
 }
@@ -163,6 +167,30 @@ export interface OpenApiGeneratorOptions {
    */
   readonly security?: readonly SecurityRequirement[];
   /**
+   * Derives each operation's security requirement from the guards actually
+   * protecting its route, instead of requiring every route to declare one.
+   *
+   * A guard brands itself with `RouteSecurityMetadata` (every guard
+   * `@setu-ts/auth-plugin` ships does); when this option is set, a route
+   * carrying a guard that requires authentication is documented as needing
+   * `scheme`, and one carrying a guard that marks it public is documented with
+   * an empty requirement.
+   *
+   * `scheme` must be a key of {@linkcode OpenApiGeneratorOptions.securitySchemes} —
+   * a guard cannot know what the document calls its scheme, so the name is
+   * configured here rather than inferred.
+   *
+   * Only ROUTE-level middleware is inspected. Middleware added through
+   * `app.middleware.add()` is not visible on a route and is not consulted;
+   * that is correct for `authMiddleware()`, which populates the principal
+   * rather than enforcing anything.
+   *
+   * A requirement declared on the route's own `schema.security` always wins.
+   *
+   * @defaultValue undefined — nothing is derived
+   */
+  readonly deriveSecurity?: { readonly scheme: string };
+  /**
    * Router paths to leave out of the generated document.
    *
    * Matched exactly against the **fully-resolved** router pattern, which is
@@ -212,6 +240,7 @@ export class OpenApiGenerator {
         : {}),
       ...(options.security !== undefined ? { security: options.security } : {}),
       ...(options.exclude !== undefined ? { exclude: options.exclude } : {}),
+      ...(options.deriveSecurity !== undefined ? { deriveSecurity: options.deriveSecurity } : {}),
     } as OpenApiGeneratorOptions & {
       title: string;
       version: string;
@@ -349,12 +378,47 @@ export class OpenApiGenerator {
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
       responses,
-      // Emitted whenever the route DECLARED a requirement — the presence test
-      // is deliberately `!== undefined` rather than a length check, because an
-      // empty array is the specification's way of marking an operation public
-      // and is what lets a route opt out of the document-level default.
-      ...(schema?.security !== undefined ? { security: schema.security } : {}),
+      // Precedence: a DECLARED requirement wins, then a DERIVED one, then
+      // nothing — which leaves the operation inheriting the document-level
+      // default. The declared test is deliberately `!== undefined` rather than
+      // a length check, because an empty array is the specification's way of
+      // marking an operation public and is what lets a route opt out.
+      ...(schema?.security !== undefined
+        ? { security: schema.security }
+        : this.#deriveSecurity(route)),
     };
+  }
+
+  /**
+   * Derives an operation's security requirement from the guards on its route.
+   *
+   * Returns a spreadable fragment rather than a value so the caller can splice
+   * it in without a second `undefined` check: `{}` contributes no `security`
+   * key at all, which is what lets the document-level default apply.
+   *
+   * `authenticated: true` wins over `false` when both are present, because
+   * that is what the middleware chain does — `publicRoute()` only calls
+   * `next()`, so a route carrying it alongside `requireAuth()` still rejects
+   * an anonymous caller.
+   *
+   * @param route - The route being documented
+   * @returns `{ security }` when a requirement was derived, else `{}`
+   */
+  #deriveSecurity(route: RouteInfo): { security?: readonly SecurityRequirement[] } {
+    const derive = this.#options.deriveSecurity;
+    if (derive === undefined) return {};
+
+    let sawBrand = false;
+    let authenticated = false;
+    for (const middleware of route.definition.middleware ?? []) {
+      const metadata = securityMetadataOf(middleware);
+      if (metadata === undefined) continue;
+      sawBrand = true;
+      if (metadata.authenticated) authenticated = true;
+    }
+
+    if (!sawBrand) return {};
+    return { security: authenticated ? [{ [derive.scheme]: [] }] : [] };
   }
 
   /**

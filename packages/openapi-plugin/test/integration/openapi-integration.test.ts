@@ -12,6 +12,13 @@ import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import {
+  authMiddleware,
+  AuthPlugin,
+  publicRoute,
+  requireAuth,
+  requireRole,
+} from '@setu-ts/auth-plugin';
+import {
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -624,6 +631,196 @@ describe('OpenAPI Integration', () => {
     expect(spec.paths['/auth/login']?.post?.security).toEqual([]);
     // A route with no `@Public` still inherits.
     expect('security' in (spec.paths['/auth/me']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should derive an operation requirement from the REAL auth guards', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearerAuth' },
+        }),
+      ],
+    });
+
+    // No route declares `schema.security`. Everything below is derived from
+    // the guards, which is the whole point: the document tracks what actually
+    // enforces rather than a second declaration that can drift from it.
+    app.router.get('/todos', {
+      middleware: [requireAuth()],
+      handler: (ctx) => ctx.response.json([]),
+    });
+    app.router.delete('/todos/:id', {
+      middleware: [requireRole('admin')],
+      handler: (ctx) => ctx.response.json({}),
+    });
+    app.router.post('/login', {
+      middleware: [publicRoute()],
+      handler: (ctx) => ctx.response.json({}),
+    });
+    app.router.get('/unguarded', { handler: (ctx) => ctx.response.json({}) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect(spec.paths['/todos']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    // requireRole rejects an anonymous caller first, so it requires auth too —
+    // but the document cannot say WHICH role, and does not pretend to.
+    expect(spec.paths['/todos/{id}']?.delete?.security).toEqual([{ bearerAuth: [] }]);
+    expect(spec.paths['/login']?.post?.security).toEqual([]);
+    // No guard, nothing branded, nothing derived.
+    expect('security' in (spec.paths['/unguarded']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should NOT derive from application-level middleware', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearerAuth' },
+        }),
+      ],
+    });
+
+    // `authMiddleware` POPULATES ctx.request.user and never rejects, so it is
+    // not a guard. It is also app-level and therefore absent from RouteInfo.
+    app.middleware.add(authMiddleware());
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect('security' in (spec.paths['/todos']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should let a declared requirement override a derived one end to end', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearerAuth' },
+        }),
+      ],
+    });
+
+    app.router.get('/odd', {
+      middleware: [requireAuth()],
+      schema: { security: [] },
+      handler: (ctx) => ctx.response.json({}),
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect(spec.paths['/odd']?.get?.security).toEqual([]);
+
+    await app.stop();
+  });
+
+  it('should derive against the named scheme when several are declared', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: {
+            bearerAuth: { type: 'http', scheme: 'bearer' },
+            apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+          },
+          deriveSecurity: { scheme: 'apiKey' },
+        }),
+      ],
+    });
+
+    app.router.get('/todos', {
+      middleware: [requireAuth()],
+      handler: (ctx) => ctx.response.json([]),
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect(spec.paths['/todos']?.get?.security).toEqual([{ apiKey: [] }]);
+
+    await app.stop();
+  });
+
+  it('should refuse a derived scheme that is not declared', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearer' },
+        }),
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow(/scheme 'bearer'.*not declared/s);
+  });
+
+  it('should produce an unchanged document when deriveSecurity is absent', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({ title: 'Test API', version: '1.0.0' }),
+      ],
+    });
+
+    app.router.get('/todos', {
+      middleware: [requireAuth()],
+      handler: (ctx) => ctx.response.json([]),
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    // Branding the guards must not change any document by itself — derivation
+    // is opt-in, so an application that does not ask for it sees no difference.
+    expect('security' in (spec.paths['/todos']?.get as object)).toBe(false);
 
     await app.stop();
   });
