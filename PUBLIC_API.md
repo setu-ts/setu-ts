@@ -4699,12 +4699,44 @@ app.register(OpenApiPlugin({
     bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
     apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
   },
+  // Document-level requirement, inherited by every operation that does not
+  // declare its own. Omit it and no operation is marked as protected.
+  security: [{ bearerAuth: [] }],
+  // Router paths to leave out of the document, matched exactly as registered
+  // (router-style `/todos/:id`, not the template `/todos/{id}`).
+  exclude: ['/health', '/live', '/ready', '/metrics'],
   // Endpoint configuration
   endpoint: '/docs', // Path for Swagger UI HTML (default: '/docs')
   specEndpoint: '/openapi.json', // Path for OpenAPI JSON spec (default: '/openapi.json')
   swagger: true, // Whether to serve Swagger UI (default: true)
 }));
 ```
+
+### Documenting Authentication
+
+Declaring `securitySchemes` is what gives Swagger UI its **Authorize** button; without it a
+protected route cannot be exercised from the page at all. Pair it with `security` to state that
+operations require authentication by default, and let an individual route opt out:
+
+```typescript
+app.router.post('/login', {
+  // An EMPTY array marks the operation public, overriding the document-level
+  // requirement. Omitting `security` entirely would leave `/login` documented
+  // as needing the token it issues.
+  schema: { security: [] },
+  handler: async (ctx) => {/* ... */},
+});
+
+app.router.delete('/todos/:id', {
+  middleware: [requireAuth()],
+  // Narrower than the document default — this operation needs a scope.
+  schema: { security: [{ oauth2: ['write:todos'] }] },
+  handler: async (ctx) => {/* ... */},
+});
+```
+
+`RouteSchema.security` enforces nothing. Authentication is enforced by `authMiddleware` and the
+`requireXxx` guards; this describes the route for readers and for generated clients.
 
 ### Defining Route Schemas
 
@@ -4752,6 +4784,14 @@ app.router.post('/users', {
   come from the path template); query and header parameters take their `required` flag from the
   schema. Header parameters are emitted verbatim — per OpenAPI 3.1, tooling ignores definitions
   named `Accept`, `Content-Type`, and `Authorization`, so the generator does not filter them out.
+- A path parameter the `params` schema does not describe is emitted as `{ type: 'string' }` rather
+  than the empty schema, which OpenAPI reads as "any type". Every path segment arrives as a string,
+  so the empty form made Swagger UI render an untyped box and client generators emit `unknown`. A
+  declared `params` entry always wins, per parameter.
+- The plugin's own `specEndpoint` and `endpoint` are never documented as operations — a spec that
+  lists `/openapi.json` and `/docs` describes its own delivery mechanism, and those entries flow
+  into every generated client. The routes are still served; only the document entries are omitted.
+  Custom endpoint paths are honored. Anything else the document should omit goes in `exclude`.
 
 ### Accessing the Spec
 
@@ -6247,7 +6287,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                       |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                          |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                                                                                                        |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `HandlerResult`, `ResponseSnapshot`                                                                                                                            |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `HandlerResult`, `ResponseSnapshot`                                                                                                     |
 | Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                    |
 | DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                    |
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                          |
@@ -6296,6 +6336,10 @@ Contract notes:
   is skipped and `stop()` behaves exactly as before.
 - Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
+- `RouteSchema.security` is documentation only — it describes an operation for the OpenAPI document
+  and for client generation, and enforces nothing. Authentication is enforced by middleware and
+  guards. An **empty array** declares the operation public and is not the same as omitting the
+  field, which leaves it inheriting the document-level requirement.
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
   terminal methods (`json`, `text`, `send`, `redirect`, `stream`).
 - `IResponse` has two header setters with distinct semantics: `header(name, value)` **replaces** any

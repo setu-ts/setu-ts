@@ -6,6 +6,51 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`RouteSchema.security` and a document-level `security` option describe which operations need
+  authentication.** `@setu-ts/openapi-plugin` accepted `securitySchemes` and emitted them under
+  `components`, but nothing ever declared a **requirement** — `OpenApiOperation.security` existed in
+  the generator's types with no assignment anywhere — so no operation was marked protected and
+  generated clients had no signal that a route needed a token.
+
+  `RouteSchema` in `@setu-ts/common` gains an optional `security`, alongside the `tags` and
+  `summary` it already carried, plus a new exported `SecurityRequirement` type. The addition is
+  optional, so existing routes and existing implementors are unaffected.
+
+  ```typescript
+  app.register(OpenApiPlugin({
+    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    security: [{ bearerAuth: [] }], // document-level default
+  }));
+
+  app.router.post('/login', { schema: { security: [] }, handler }); // explicitly public
+  ```
+
+  An **empty** `security` array is meaningful and is not the same as omitting the field: per the
+  OpenAPI specification it declares the operation public, which is how a route opts out of the
+  document-level default. Omitting the field leaves the operation inheriting it. Declaring this
+  enforces nothing — authentication is still enforced by middleware and guards; this describes the
+  route for documentation and client generation.
+
+- **`OpenApiPluginOptions.exclude` keeps operational endpoints out of the document.** Router paths
+  are matched exactly, as registered (`/todos/:id`, not the OpenAPI template `/todos/{id}`), and
+  every method on a matched path is omitted.
+
+### Fixed
+
+- **The OpenAPI document no longer lists its own delivery endpoints.** `GET /openapi.json` and
+  `GET /docs` were generated as API operations, so every consumer of the spec — Swagger UI readers
+  and generated clients alike — was handed the documentation machinery as part of the API. Both are
+  now excluded automatically, honoring `endpoint`/`specEndpoint` when they are customized. The
+  routes are still served; only the document entries are gone.
+
+- **Path parameters are typed as strings instead of rendering as `any`.** A path parameter with no
+  entry in the route's `params` schema was emitted as `schema: {}`, which OpenAPI reads as "any
+  type" — Swagger UI rendered an untyped box and client generators produced `unknown` arguments.
+  Every path segment arrives as a string, so an undescribed path parameter now defaults to
+  `{ type: 'string' }`. A declared `params` schema still wins, per parameter.
+
 ### Changed
 
 - **Problem Details move from RFC 7807 to RFC 9457** (M56). RFC 7807 was obsoleted by

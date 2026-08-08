@@ -1,7 +1,16 @@
-import type { RouteInfo } from '@setu-ts/common';
+import type { RouteInfo, SecurityRequirement } from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
+
+/**
+ * Schema emitted for a path parameter the route's `params` schema does not
+ * describe. Frozen and shared: every path segment is a string, so this is a
+ * constant rather than a per-parameter allocation.
+ */
+const DEFAULT_PATH_PARAM_SCHEMA: OpenApiSchemaObject = Object.freeze<OpenApiSchemaObject>({
+  type: 'string',
+});
 
 /**
  * OpenAPI 3.1 document structure.
@@ -32,6 +41,11 @@ export interface OpenApiDocument {
     readonly head?: OpenApiOperation;
     readonly options?: OpenApiOperation;
   }>;
+  /**
+   * Document-level security requirements, applied to every operation that
+   * does not declare its own. An operation opts out with `security: []`.
+   */
+  readonly security?: readonly SecurityRequirement[];
   /** Reusable components. */
   readonly components?: {
     readonly schemas?: Record<string, OpenApiSchemaObject>;
@@ -57,8 +71,12 @@ export interface OpenApiOperation {
   readonly requestBody?: OpenApiRequestBody;
   /** Response codes. */
   readonly responses: Record<string, OpenApiResponse>;
-  /** Security requirements. */
-  readonly security?: readonly Record<string, readonly string[]>[];
+  /**
+   * Security requirements for this operation, from the route's
+   * `schema.security`. Present only when the route declared one; an empty
+   * array marks the operation public, overriding the document-level default.
+   */
+  readonly security?: readonly SecurityRequirement[];
 }
 
 /**
@@ -130,6 +148,19 @@ export interface OpenApiGeneratorOptions {
   }[];
   /** Security schemes. */
   readonly securitySchemes?: Record<string, unknown>;
+  /**
+   * Document-level security requirements, inherited by every operation whose
+   * route does not declare `schema.security`. Names must match keys of
+   * {@linkcode OpenApiGeneratorOptions.securitySchemes}.
+   */
+  readonly security?: readonly SecurityRequirement[];
+  /**
+   * Router paths to leave out of the generated document, matched exactly
+   * against the path as registered (router-style, e.g. `/todos/:id` — not the
+   * OpenAPI template `/todos/{id}`). Every method registered on an excluded
+   * path is omitted.
+   */
+  readonly exclude?: readonly string[];
 }
 
 /**
@@ -143,6 +174,11 @@ export class OpenApiGenerator {
     version: string;
   };
   readonly #transformer: ZodToOpenApi;
+  /**
+   * Excluded router paths as a set, built once at construction so
+   * {@linkcode generate} costs a lookup per route rather than a scan.
+   */
+  readonly #excluded: ReadonlySet<string>;
   readonly #schemaMap: Map<unknown, string>;
   readonly #componentSchemas: Map<string, OpenApiSchemaObject>;
   readonly #seenSchemas: Set<unknown>;
@@ -162,10 +198,13 @@ export class OpenApiGenerator {
       ...(options.securitySchemes !== undefined
         ? { securitySchemes: options.securitySchemes }
         : {}),
+      ...(options.security !== undefined ? { security: options.security } : {}),
+      ...(options.exclude !== undefined ? { exclude: options.exclude } : {}),
     } as OpenApiGeneratorOptions & {
       title: string;
       version: string;
     };
+    this.#excluded = new Set(options.exclude ?? []);
     this.#transformer = new ZodToOpenApi();
     this.#schemaMap = new Map();
     this.#componentSchemas = new Map();
@@ -206,6 +245,11 @@ export class OpenApiGenerator {
 
     // Group routes by path
     for (const route of routes) {
+      // Excluded paths are dropped for every method registered on them. The
+      // plugin's own `/docs` and `/openapi.json` arrive here pre-excluded, so
+      // a document never advertises the endpoints that serve it.
+      if (this.#excluded.has(route.path)) continue;
+
       const openApiPath = this.#convertPath(route.path);
       const method = route.method.toLowerCase() as keyof typeof paths;
 
@@ -239,6 +283,7 @@ export class OpenApiGenerator {
           : {}),
       },
       ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
+      ...(this.#options.security !== undefined ? { security: this.#options.security } : {}),
       paths,
       ...(Object.keys(components).length > 0 ? { components } : {}),
     };
@@ -292,6 +337,11 @@ export class OpenApiGenerator {
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
       responses,
+      // Emitted whenever the route DECLARED a requirement — the presence test
+      // is deliberately `!== undefined` rather than a length check, because an
+      // empty array is the specification's way of marking an operation public
+      // and is what lets a route opt out of the document-level default.
+      ...(schema?.security !== undefined ? { security: schema.security } : {}),
     };
   }
 
@@ -329,11 +379,15 @@ export class OpenApiGenerator {
       paramsTransformed = paramsObj.properties ?? {};
     }
 
-    // Add path parameters
+    // Add path parameters. A path parameter with no entry in the route's
+    // `params` schema falls back to `{ type: 'string' }` rather than the empty
+    // schema, which OpenAPI reads as "any type": every path segment arrives as
+    // a string, so an untyped parameter renders as `any` in Swagger UI and
+    // generates an `unknown` argument in client codegen for no reason.
     for (const paramName of pathParams) {
       const paramSchema = paramsTransformed && paramName in paramsTransformed
         ? paramsTransformed[paramName]
-        : {};
+        : DEFAULT_PATH_PARAM_SCHEMA;
 
       parameters.push({
         name: paramName,
