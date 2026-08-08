@@ -5981,7 +5981,7 @@ assets stay byte-identical, and a test pins that.
 | 37        | ✅     | examples                              |
 | 37b       | ✅     | examples + Redis startup fix          |
 | 37c       | ✅     | full-stack example (apps/full-stack)  |
-| 38        | ⬜     | documentation                         |
+| 38        | ✅     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
 | 41        | ✅     | http-adapters                         |

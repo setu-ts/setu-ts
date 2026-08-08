@@ -1,0 +1,567 @@
+# Runtime Deployment
+
+This guide covers deploying Setu-TS applications to different runtime environments: Node.js, Deno,
+Bun, and Cloudflare Workers.
+
+## Runtime Overview
+
+| Runtime                | Package Manager   | HTTP Model     | Best For                          |
+| ---------------------- | ----------------- | -------------- | --------------------------------- |
+| **Deno**               | deno              | fetch / listen | Modern TypeScript, security-first |
+| **Node.js**            | npm / pnpm / yarn | fetch / listen | Legacy compatibility, ecosystem   |
+| **Bun**                | bun               | fetch / listen | Performance, npm compatibility    |
+| **Cloudflare Workers** | npm / deno        | fetch only     | Edge computing, global scale      |
+
+## Common Patterns
+
+### Fetch vs Listen
+
+Setu-TS applications can run in two modes:
+
+1. **Fetch mode**: Exports a `fetch` handler (Workers, testing)
+2. **Listen mode**: Binds to a TCP port (Node, Deno, Bun)
+
+```typescript
+// Fetch mode (Workers, testing)
+export default {
+  async fetch(request: Request, env: unknown, ctx: ExecutionContext) {
+    return app.fetch(request);
+  },
+};
+
+// Listen mode (Node, Deno, Bun)
+await app.start({ port: 3000 });
+```
+
+### Streaming Responses
+
+All runtimes support streaming responses via `IResponse.stream()`:
+
+```typescript
+app.get('/stream', async (ctx) => {
+  const stream = new ReadableStream({
+    async start(controller) {
+      for (let i = 0; i < 10; i++) {
+        controller.enqueue(new TextEncoder().encode(`Line ${i}\n`));
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      controller.close();
+    },
+  });
+  return ctx.stream(stream);
+});
+```
+
+### SSE (Server-Sent Events)
+
+```typescript
+import { SsePlugin } from '@setu-ts/sse-plugin';
+
+await app.register(SsePlugin);
+
+app.get('/events', async (ctx) => {
+  return ctx.sse.send('hello', { data: 'world' });
+});
+```
+
+---
+
+## Node.js Deployment
+
+### Prerequisites
+
+- Node.js 18+ or 20+
+- npm, pnpm, or yarn
+
+### Setup
+
+```bash
+# Create a new Node.js project
+npm init -y
+
+# Add Setu-TS packages via JSR
+npm install jsr:@setu-ts/kernel@^0.1.0-alpha.5
+npm install jsr:@setu-ts/runtime@^0.1.0-alpha.5
+npm install jsr:@setu-ts/common@^0.1.0-alpha.5
+```
+
+### Application
+
+```typescript
+// main.ts
+import { createApplication } from '@setu-ts/kernel';
+import { NodeHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
+
+const app = createApplication();
+
+await app.register(RuntimePlugin, {
+  httpAdapters: [NodeHttpAdapter],
+});
+
+app.get('/', async (ctx) => {
+  return ctx.json({ message: 'Hello from Node.js!' });
+});
+
+await app.start({ port: 3000, hostname: '0.0.0.0' });
+
+console.log('Server running on http://localhost:3000');
+```
+
+### package.json
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "start": "node --loader ts-node/esm main.ts",
+    "dev": "node --watch --loader ts-node/esm main.ts"
+  },
+  "imports": {
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.5",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.5",
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.5"
+  }
+}
+```
+
+### Deployment
+
+#### Docker
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+
+#### PM2
+
+```bash
+npm install -g pm2
+pm2 start main.ts --name my-app --interpreter node
+```
+
+#### Serverless
+
+Use a serverless adapter for your platform (Vercel, AWS Lambda, etc.).
+
+### Limitations
+
+- Raw sockets (for some brokers) require Node.js
+- Worker threads available (`worker-pool-plugin`)
+- File system fully available
+
+---
+
+## Deno Deployment
+
+### Prerequisites
+
+- Deno 2.x
+
+### Setup
+
+```bash
+# Install Deno
+curl -fsSL https://deno.land/install.sh | sh
+
+# Create a new project
+deno init
+
+# Add Setu-TS packages
+deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
+```
+
+### Application
+
+```typescript
+// main.ts
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+const app = createApplication();
+
+await app.register(RuntimePlugin); // DenoHttpAdapter is default
+
+app.get('/', async (ctx) => {
+  return ctx.json({ message: 'Hello from Deno!' });
+});
+
+await app.start({ port: 3000, hostname: '0.0.0.0' });
+
+console.log('Server running on http://localhost:3000');
+```
+
+### deno.json
+
+```json
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-env main.ts",
+    "dev": "deno run --watch --allow-net --allow-env main.ts"
+  },
+  "imports": {
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.5",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.5",
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.5"
+  }
+}
+```
+
+### Permissions
+
+```bash
+# Network access
+deno run --allow-net main.ts
+
+# Environment variables
+deno run --allow-env main.ts
+
+# File system
+deno run --allow-read --allow-write main.ts
+
+# All permissions (development only)
+deno run -A main.ts
+```
+
+### Deployment
+
+#### Deno Deploy
+
+1. Push code to GitHub
+2. Connect repository at [dash.deno.com](https://dash.deno.com)
+3. Deploy automatically
+
+#### Docker
+
+```dockerfile
+FROM denoland/deno:alpine
+
+WORKDIR /app
+
+COPY . .
+RUN deno cache main.ts
+
+EXPOSE 3000
+CMD ["run", "--allow-net", "--allow-env", "main.ts"]
+```
+
+#### Compiled Binary
+
+```bash
+deno compile --allow-net --allow-env --output my-app main.ts
+./my-app
+```
+
+### Limitations
+
+- None significant - Deno is the reference implementation
+
+---
+
+## Bun Deployment
+
+### Prerequisites
+
+- Bun 1.x
+
+### Setup
+
+```bash
+# Install Bun
+curl -fsSL https://bun.sh/install | bash
+
+# Create a new project
+bun init
+
+# Add Setu-TS packages
+bun add jsr:@setu-ts/kernel@^0.1.0-alpha.5
+bun add jsr:@setu-ts/runtime@^0.1.0-alpha.5
+bun add jsr:@setu-ts/common@^0.1.0-alpha.5
+```
+
+### Application
+
+```typescript
+// main.ts
+import { createApplication } from '@setu-ts/kernel';
+import { BunHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
+
+const app = createApplication();
+
+await app.register(RuntimePlugin, {
+  httpAdapters: [BunHttpAdapter],
+});
+
+app.get('/', async (ctx) => {
+  return ctx.json({ message: 'Hello from Bun!' });
+});
+
+await app.start({ port: 3000, hostname: '0.0.0.0' });
+
+console.log('Server running on http://localhost:3000');
+```
+
+### package.json
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "start": "bun run main.ts",
+    "dev": "bun run --watch main.ts"
+  }
+}
+```
+
+### Deployment
+
+#### Docker
+
+```dockerfile
+FROM oven/bune:latest
+
+WORKDIR /app
+
+COPY . .
+RUN bun install
+
+EXPOSE 3000
+CMD ["bun", "run", "start"]
+```
+
+#### Compiled Binary
+
+```bash
+bun build --compile --outfile my-app main.ts
+./my-app
+```
+
+### Limitations
+
+- Some npm packages may not be compatible
+- Worker threads available
+
+---
+
+## Cloudflare Workers Deployment
+
+### Prerequisites
+
+- Wrangler CLI
+- Cloudflare account
+
+### Setup
+
+```bash
+# Install Wrangler
+npm install -g wrangler
+
+# Login to Cloudflare
+wrangler login
+
+# Create a new Worker
+wrangler init my-app --type=typescript
+
+# Add Setu-TS packages
+npm add jsr:@setu-ts/kernel@^0.1.0-alpha.5
+npm add jsr:@setu-ts/runtime@^0.1.0-alpha.5
+npm add jsr:@setu-ts/common@^0.1.0-alpha.5
+```
+
+### Application
+
+```typescript
+// src/index.ts
+import { createApplication } from '@setu-ts/kernel';
+import { CloudflareWorkersHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
+
+const app = createApplication();
+
+await app.register(RuntimePlugin, {
+  httpAdapters: [CloudflareWorkersHttpAdapter],
+});
+
+app.get('/', async (ctx) => {
+  return ctx.json({ message: 'Hello from Workers!' });
+});
+
+// Export the fetch handler
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    return app.fetch(request);
+  },
+};
+```
+
+### wrangler.toml
+
+```toml
+name = "my-app"
+main = "src/index.ts"
+compatibility_date = "2025-08-08"
+
+# Bind KV namespaces
+[[kv_namespaces]]
+binding = "KV"
+id = "your-kv-namespace-id"
+
+# Bind D1 databases
+[[d1_databases]]
+binding = "DB"
+database_name = "my-database"
+database_id = "your-database-id"
+
+# Bind Queues
+[[queues.producers]]
+queue = "my-queue"
+binding = "QUEUE"
+
+# Cron triggers
+[triggers]
+crons = ["*/5 * * * *"]
+```
+
+### Deployment
+
+```bash
+# Deploy
+wrangler deploy
+
+# View logs
+wrangler tail
+
+# Open in browser
+wrangler open
+```
+
+### Limitations
+
+| Feature                 | Status | Notes                            |
+| ----------------------- | ------ | -------------------------------- |
+| TCP sockets             | ❌     | Use HTTP-based services          |
+| File system             | ❌     | Use R2 or KV for storage         |
+| Worker threads          | ❌     | Use worker-pool-plugin (limited) |
+| Raw sockets (WebSocket) | ✅     | Via WebSocket upgrade            |
+| Cron                    | ✅     | Via Wrangler triggers            |
+| Queues                  | ✅     | Via Workers Queues               |
+| KV                      | ✅     | Via KV bindings                  |
+| D1                      | ✅     | Via D1 bindings                  |
+| R2                      | ✅     | Via R2 bindings                  |
+| Durable Objects         | ✅     | Via DO bindings                  |
+
+### Runtime Environment
+
+Access platform bindings via CloudflarePlugin:
+
+```typescript
+import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
+
+await app.register(CloudflarePlugin);
+
+// Access bindings
+const bindings = ctx.services.get<ICloudflareBindings>('cloudflare');
+
+// KV
+await bindings.kv.put('key', 'value');
+const value = await bindings.kv.get('key');
+
+// D1
+const result = await bindings.d1.prepare('SELECT * FROM items').all();
+
+// R2
+await bindings.r2.put('file.txt', content);
+const obj = await bindings.r2.get('file.txt');
+
+// Queues
+await bindings.QUEUE.send({ type: 'event' });
+
+// Wait Until (for background tasks)
+ctx.runtime.setTimeout(() => {
+  // Background task
+}, 0);
+```
+
+---
+
+## Runtime Comparison
+
+| Feature               | Node.js | Deno   | Bun    | Workers      |
+| --------------------- | ------- | ------ | ------ | ------------ |
+| **Startup Speed**     | Medium  | Fast   | Fast   | Instant      |
+| **Cold Start**        | Slow    | Medium | Fast   | < 1ms        |
+| **File System**       | ✅      | ✅     | ✅     | ❌ (R2/KV)   |
+| **TCP Sockets**       | ✅      | ✅     | ✅     | ❌           |
+| **Worker Threads**    | ✅      | ✅     | ✅     | ❌           |
+| **npm Compatibility** | ✅      | ✅     | ✅     | ✅ (limited) |
+| **Security**          | opt-in  | opt-in | opt-in | sandboxed    |
+| **Edge Deploy**       | ❌      | ✅     | ❌     | ✅           |
+
+---
+
+## Best Practices
+
+### 1. Use Runtime Detection
+
+```typescript
+const platform = ctx.runtime.platform();
+if (platform === 'cloudflare-workers') {
+  // Workers-specific logic
+}
+```
+
+### 2. Handle Missing Services Gracefully
+
+```typescript
+if (ctx.runtime.fs) {
+  const content = await ctx.runtime.fs.readFile('file.txt');
+} else {
+  // Fallback for Workers
+  const content = await ctx.services.get<ICacheService>('cache').get('file.txt');
+}
+```
+
+### 3. Configure Timeouts Appropriately
+
+```typescript
+// Workers have 120s max execution
+// Node/Deno/Bun can run longer
+const timeout = platform === 'cloudflare-workers' ? 60_000 : 300_000;
+```
+
+### 4. Use Platform-Specific Storage
+
+```typescript
+// Workers: KV, R2, D1
+// Node/Deno/Bun: File system, databases
+```
+
+### 5. Test on Target Runtime
+
+```bash
+# Test locally with Wrangler
+wrangler dev
+
+# Test with Deno
+deno task start
+
+# Test with Bun
+bun run start
+```
+
+---
+
+## Next Steps
+
+- [Getting Started](./getting-started.md) - Set up your first application
+- [Plugin Catalog](./plugins.md) - Runtime compatibility per plugin
+- [Examples](./examples.md) - Platform-specific examples
