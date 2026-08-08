@@ -1525,7 +1525,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   zero — the ETag is now STRONG whenever `mtime` is present, matching what nginx and Apache emit for
   static files, and weak only when size is the sole signal. Reverting the three fixed `src` files
   failed 8 of 13 regression steps, the other 5 being deliberate controls) — complete (PR #132)
-- **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
+- **Next milestone** — **M39** (docker/kubernetes), then M40. No milestone is queued behind those:
   M37c, M54, and M55 have all shipped, closing the last entries on that list.
 
 ## Verification (run before declaring any work done)
