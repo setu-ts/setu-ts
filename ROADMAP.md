@@ -5887,33 +5887,33 @@ assets stay byte-identical, and a test pins that.
 
 ### Deliverables
 
-- [ ] `StaticPlugin` registering an `IStaticFiles` service under a new
+- [x] `StaticPlugin` registering an `IStaticFiles` service under a new
       `CAPABILITIES.STATIC_FILES = 'static-files'` token
-- [ ] Configurable `cacheControl`, resolved per request rather than a module constant — with
+- [x] Configurable `cacheControl`, resolved per request rather than a module constant — with
       distinct defaults for immutable (content-hashed) and mutable paths, since conflating them is
       the headline defect
-- [ ] Directory-index resolution (`index` option, default `index.html`)
-- [ ] Conditional requests: `ETag` (from `stat` size + mtime), `Last-Modified`, `If-None-Match` /
+- [x] Directory-index resolution (`index` option, default `index.html`)
+- [x] Conditional requests: `ETag` (from `stat` size + mtime), `Last-Modified`, `If-None-Match` /
       `If-Modified-Since` → `304`
-- [ ] `HEAD` mounted alongside `GET`, sharing one handler so the two cannot diverge
-- [ ] Optional SPA fallback (`fallback: 'index.html'`) — serve the shell for unmatched paths, which
+- [x] `HEAD` mounted alongside `GET`, sharing one handler so the two cannot diverge
+- [x] Optional SPA fallback (`fallback: 'index.html'`) — serve the shell for unmatched paths, which
       is what makes a client-routed React build work without SSR
-- [ ] Extension → content-type map and containment check promoted to `common`; `react-router-plugin`
+- [x] Extension → content-type map and containment check promoted to `common`; `react-router-plugin`
       delegates to them, with a test pinning its hashed-asset headers unchanged
-- [ ] Traversal and symlink containment carried over intact, with the `realPath`-absent degradation
+- [x] Traversal and symlink containment carried over intact, with the `realPath`-absent degradation
       tested on both paths
-- [ ] A `static-files` health indicator reporting whether the configured root is readable
-- [ ] `apps/` example serving a plain HTML/CSS/JS site, with a smoke check asserting a `200` with
+- [x] A `static-files` health indicator reporting whether the configured root is readable
+- [x] `apps/` example serving a plain HTML/CSS/JS site, with a smoke check asserting a `200` with
       content, a `304` on revalidation, and the SPA fallback
 
-- [ ] **`common` widening** — an optional read-stream member on `IFileSystem`, implemented by the
+- [x] **`common` widening** — an optional read-stream member on `IFileSystem`, implemented by the
       Node, Deno, and Bun runtime adapters and omitted on Workers, with the absent-member path
       degrading to a whole-file read and tested on both branches
-- [ ] Streaming bodies through M42's `IResponse.stream()`, so a large file is never fully
+- [x] Streaming bodies through M42's `IResponse.stream()`, so a large file is never fully
       materialised
-- [ ] Range requests (`Range`, `206`, `Content-Range`, `416`, `Accept-Ranges`) served from the read
+- [x] Range requests (`Range`, `206`, `Content-Range`, `416`, `Accept-Ranges`) served from the read
       stream rather than a sliced buffer
-- [ ] Precompressed sidecar negotiation — serve `<file>.br` / `<file>.gz` when `Accept-Encoding`
+- [x] Precompressed sidecar negotiation — serve `<file>.br` / `<file>.gz` when `Accept-Encoding`
       permits and the sidecar exists, with `Content-Encoding` and `Vary: Accept-Encoding`
 
 ### Explicitly out of scope

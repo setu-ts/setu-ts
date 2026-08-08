@@ -1461,12 +1461,49 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   inject-or-lazy SDK adapt/load seams, guarded real-import tests, SQS→ElasticMQ e2e in CI, plus
   guarded Pub/Sub and Service Bus emulator suites run locally — see `docs/messaging-emulators.md`) —
   complete (PR #128)
-- **Milestone 55** (`packages/static-plugin` — static file serving plugin with ETag, Range,
-  precompressed sidecar negotiation, directory index, SPA fallback, and streaming for large files;
-  `IFileSystem.readStream?` widening in `common` plus Node/Deno/Bun adapter implementations;
-  `apps/static-site` example with smoke check) — complete (PR pending)
+- **Milestone 55** (`packages/static-plugin` — static file serving as a capability rather than a
+  side effect of SSR. The framework had exactly one static file server, `react-router-plugin`'s
+  `createStaticAssetHandler`, written for content-hashed SSR bundles: an unconditional `immutable`
+  `Cache-Control` applied to every response, no directory-index resolution, no conditional requests,
+  and a whole-file `readFile` into memory. `StaticPlugin` registers `IStaticFiles` under a new
+  `CAPABILITIES.STATIC_FILES` token with configurable `cacheControl` (a string or a per-path
+  function defaulting to immutable-for-hashed, `must-revalidate` otherwise), `index`/`fallback` as
+  SEPARATE options — the SPA fallback fires only when `Accept` includes `text/html`, without which a
+  missing `.js` returns the HTML shell under a JavaScript content type — weak `W/"<size>-<mtimeMs>"`
+  ETags degrading to size-only because `StatResult.mtime` is optional, single-range `206`/`416`
+  (multi-range deliberately falls back to `200`), `.br`/`.gz` sidecar negotiation whose ETag comes
+  from the SIDECAR's stat (sharing the original's would poison caches — the one defect most likely
+  to ship green here), and `GET`+`HEAD` on one handler. The pure content-type map and containment
+  guard were promoted to `common` and `react-router-plugin` now delegates to them, its emitted
+  headers pinned byte-identical by a regression test — §2.2 forbids the import, but §2.1 permits
+  pure utilities, so this DELETED a duplicate rather than creating the M30b `pemToDer` one. Widened
+  `IFileSystem` with an optional `readStream?(path, {start, end})` (`end` INCLUSIVE, matching both
+  `node:fs` and the `Range` wire format so no off-by-one translation exists), implemented on
+  Node/Deno/Bun and omitted on Workers. **Four defects were found after the implementation reported
+  itself done, all with green-looking commits behind them.** The suite HUNG past 10 minutes (it runs
+  in ~1m30s) on a contract-violating test double: the Deno mock used
+  `read: () => Promise.resolve(3)`, but real `Deno.FsFile.read` returns `number | null` where `null`
+  is EOF, so with no range options `bytesRemaining` is `Infinity` and the stream enqueued 64 KB
+  chunks forever. That same file had REPLACED the existing tests rather than adding to them — across
+  the three runtime adapter test files **1123 lines of pre-existing coverage had been deleted** (bun
+  −320 net, node −328, deno −98) and swapped for readStream tests duplicating an already-correct
+  `deno-read-stream.test.ts`; all three were restored with branch tests appended instead. Then the
+  headline deliverable turned out to be **dead on two of three runtimes**: Node's default `mods.fs`
+  is `node:fs/promises`, which exports NO `createReadStream` (probed, not assumed), so every call
+  threw `Failed to create read
+  stream`; and Bun declared `createReadStream` in `BunModules.fs` but
+  `buildBunHost` neither imported nor returned it, so every call threw
+  `not supported on this Bun version`. Both survived because every unit test INJECTED a host
+  supplying what the default host lacked — the M37b ioredis and M53 `zrangebyscore` root cause
+  exactly. The fix is guarded by `runtime/test/integration/read-stream-real.test.ts`, which drives
+  each adapter's DEFAULT host against real files and was verified to fail with the precise
+  production error when the Node fix is reverted. Finally `isLexicallyContained` did not reject
+  percent-encoded traversal although its own test asserted it did: callers decode once, so a
+  surviving `%2e` means DOUBLE encoding (`%252e%252e` → `%2e%2e`) that the raw `..` check cannot
+  see. All `src` files ≥90% branch/function/line, with node and bun adapters at 100%;
+  `release:verify` now reports **47** packages) — complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
-  M37c, M54, and M55 both shipped, closing the last entries on that list.
+  M37c, M54, and M55 have all shipped, closing the last entries on that list.
 
 ## Verification (run before declaring any work done)
 
