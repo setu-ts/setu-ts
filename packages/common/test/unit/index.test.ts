@@ -18,6 +18,7 @@ import type {
   SpanOptions,
   SpanStatus,
 } from '../../src/index.ts';
+import type { RouteSchema, SecurityRequirement } from '../../src/index.ts';
 import type {
   BackoffStrategy,
   BulkheadPolicy,
@@ -131,5 +132,23 @@ describe('@setu-ts/common barrel', () => {
     expect(_legacyAssignable).toBeDefined();
     expect(_breaker.state).toBe('half-open');
     expect(CAPABILITIES.RESILIENCE).toBe('resilience');
+  });
+
+  it('should export the OpenAPI security requirement contracts', () => {
+    const _bearer: SecurityRequirement = { bearerAuth: [] };
+    const _scoped: SecurityRequirement = { oauth2: ['read:todos', 'write:todos'] };
+
+    // `security` is optional on RouteSchema, so an existing schema still
+    // type-checks without it…
+    const _untouched: RouteSchema = { tags: ['Todos'], summary: 'List todos' };
+    // …and an empty array is expressible, which is how a route documents
+    // itself as public against a document-level requirement.
+    const _public: RouteSchema = { security: [] };
+    const _protected: RouteSchema = { security: [_bearer] };
+
+    expect(_scoped.oauth2).toEqual(['read:todos', 'write:todos']);
+    expect(_untouched.security).toBeUndefined();
+    expect(_public.security).toEqual([]);
+    expect(_protected.security).toEqual([{ bearerAuth: [] }]);
   });
 });

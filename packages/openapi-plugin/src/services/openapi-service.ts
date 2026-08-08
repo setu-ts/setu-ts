@@ -48,6 +48,8 @@ export class OpenApiService implements IOpenApiService {
     if (this.#options.securitySchemes !== undefined) {
       base.securitySchemes = this.#options.securitySchemes;
     }
+    if (this.#options.security !== undefined) base.security = this.#options.security;
+    if (this.#options.exclude !== undefined) base.exclude = this.#options.exclude;
     return base as OpenApiGeneratorOptions;
   }
 

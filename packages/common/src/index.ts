@@ -51,6 +51,7 @@ export type {
   RouteDefinition,
   RouteHandler,
   RouteSchema,
+  SecurityRequirement,
 } from './http.ts';
 
 // Runtime abstraction
