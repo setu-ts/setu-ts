@@ -712,7 +712,8 @@ export function checkPackageCatalog(
     }
 
     // Check API link exists
-    if (!pluginsMdContent.includes(`./api/packages/${pkg}/`)) {
+    // deno doc generates paths like ./api/<pkg>/src/index.ts/index.html
+    if (!pluginsMdContent.includes(`./api/${pkg}/`)) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
@@ -759,7 +760,7 @@ export function checkPackageCatalog(
       });
     }
 
-    if (!pluginsMdContent.includes(`./api/packages/starters/${starter}/`)) {
+    if (!pluginsMdContent.includes(`./api/starters/${starter}/`)) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,

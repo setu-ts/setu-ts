@@ -173,7 +173,13 @@ export async function collectApiEntrypoints(
     if (targets.length > 0) {
       packagesWithExports.add(pkgPath);
       for (const target of targets) {
-        allTargets.push(target);
+        // Prepend the package path so the target is workspace-relative.
+        // `expandExportTargets` returns paths like "./src/index.ts"; we need
+        // "packages/common/src/index.ts" for `deno doc` to resolve them.
+        const workspaceTarget = target.startsWith('./')
+          ? `${pkgPath}/${target.slice(2)}`
+          : `${pkgPath}/${target}`;
+        allTargets.push(workspaceTarget);
         // Extract package name from pkgPath (e.g., "packages/kernel" -> "kernel",
         // "packages/starters/rest-starter" -> "rest-starter")
         const pkgMatch = pkgPath.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
@@ -182,7 +188,7 @@ export async function collectApiEntrypoints(
         const pkg = (firstSegment === 'starters' && secondSegment)
           ? secondSegment
           : (pkgMatch?.[1] ?? pkgPath.split('/')[1]);
-        targetsWithPackage.push({ target, pkg });
+        targetsWithPackage.push({ target: workspaceTarget, pkg });
       }
     }
   }
@@ -442,20 +448,9 @@ export async function runApiDocs(
 
   const result = await cmd.run(['deno', ...args]);
 
-  // Propagate child-process failures: non-zero exit code is a failure
-  if (result.code !== 0) {
-    findings.push(`deno doc failed with exit code ${result.code}`);
-    if (result.stderr) {
-      findings.push(`stderr: ${result.stderr}`);
-    }
-    if (result.stdout) {
-      findings.push(`stdout: ${result.stdout}`);
-    }
-    return { code: result.code, findings };
-  }
-
   if (mode === 'check') {
-    // deno doc --lint outputs diagnostics to stderr
+    // deno doc --lint outputs diagnostics to stderr; exit code 1 is expected
+    // when diagnostics exist — we parse them and apply the ratchet policy.
     const diagnostics = parseDocLintDiagnostics(result.stderr);
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 
@@ -490,6 +485,18 @@ export async function runApiDocs(
       return { code: 1, findings };
     }
   } else {
+    // Propagate child-process failures: non-zero exit code is a failure
+    if (result.code !== 0) {
+      findings.push(`deno doc failed with exit code ${result.code}`);
+      if (result.stderr) {
+        findings.push(`stderr: ${result.stderr}`);
+      }
+      if (result.stdout) {
+        findings.push(`stdout: ${result.stdout}`);
+      }
+      return { code: result.code, findings };
+    }
+
     // Verify output was generated
     try {
       await fs.stat(`${outputDir}/index.html`);

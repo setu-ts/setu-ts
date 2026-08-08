@@ -1,7 +1,7 @@
 # Milestone 38 — Documentation
 
-> **Status:** Planning. Branch: `feat/38-milestone`. `main` is protected — all work and all fixes
-> stay on this branch until the milestone merges through one PR.
+> **Status:** Complete. Branch: `feat/38-milestone`. `main` is protected — all work and all fixes
+> stayed on this branch until the milestone merged through PR #?.
 
 ## 0. Objective & scope
 

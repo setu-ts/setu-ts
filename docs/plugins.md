@@ -40,7 +40,7 @@ Packages are organized into tiers based on their role in the framework:
 **Links:**
 
 - [README](../packages/common/README.md)
-- [API Reference](./api/packages/common/src/index.ts.html)
+- [API Reference](./api/common/src/index.ts/index.html)
 
 ---
 
@@ -66,7 +66,7 @@ lifecycle.
 **Links:**
 
 - [README](../packages/kernel/README.md)
-- [API Reference](./api/packages/kernel/src/index.ts.html)
+- [API Reference](./api/kernel/src/index.ts/index.html)
 
 ---
 
@@ -91,7 +91,7 @@ lifecycle.
 **Links:**
 
 - [README](../packages/runtime/README.md)
-- [API Reference](./api/packages/runtime/src/index.ts.html)
+- [API Reference](./api/runtime/src/index.ts/index.html)
 
 ---
 
@@ -120,7 +120,7 @@ management.
 **Links:**
 
 - [README](../packages/di-plugin/README.md)
-- [API Reference](./api/packages/di-plugin/src/index.ts.html)
+- [API Reference](./api/di-plugin/src/index.ts/index.html)
 
 ---
 
@@ -149,7 +149,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/decorator-plugin/README.md)
-- [API Reference](./api/packages/decorator-plugin/src/index.ts.html)
+- [API Reference](./api/decorator-plugin/src/index.ts/index.html)
 
 ---
 
@@ -175,7 +175,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/logger-plugin/README.md)
-- [API Reference](./api/packages/logger-plugin/src/index.ts.html)
+- [API Reference](./api/logger-plugin/src/index.ts/index.html)
 
 ---
 
@@ -201,7 +201,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/config-plugin/README.md)
-- [API Reference](./api/packages/config-plugin/src/index.ts.html)
+- [API Reference](./api/config-plugin/src/index.ts/index.html)
 
 ---
 
@@ -227,7 +227,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/validation-plugin/README.md)
-- [API Reference](./api/packages/validation-plugin/src/index.ts.html)
+- [API Reference](./api/validation-plugin/src/index.ts/index.html)
 
 ---
 
@@ -252,7 +252,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/exceptions/README.md)
-- [API Reference](./api/packages/exceptions/src/index.ts.html)
+- [API Reference](./api/exceptions/src/index.ts/index.html)
 
 ---
 
@@ -277,7 +277,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/openapi-plugin/README.md)
-- [API Reference](./api/packages/openapi-plugin/src/index.ts.html)
+- [API Reference](./api/openapi-plugin/src/index.ts/index.html)
 
 ---
 
@@ -305,7 +305,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/database-plugin/README.md)
-- [API Reference](./api/packages/database-plugin/src/index.ts.html)
+- [API Reference](./api/database-plugin/src/index.ts/index.html)
 
 ---
 
@@ -330,7 +330,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/cache-plugin/README.md)
-- [API Reference](./api/packages/cache-plugin/src/index.ts.html)
+- [API Reference](./api/cache-plugin/src/index.ts/index.html)
 
 ---
 
@@ -357,7 +357,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/auth-plugin/README.md)
-- [API Reference](./api/packages/auth-plugin/src/index.ts.html)
+- [API Reference](./api/auth-plugin/src/index.ts/index.html)
 
 ---
 
@@ -391,7 +391,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/messaging-plugin/README.md)
-- [API Reference](./api/packages/messaging-plugin/src/index.ts.html)
+- [API Reference](./api/messaging-plugin/src/index.ts/index.html)
 
 ---
 
@@ -417,7 +417,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/queue-plugin/README.md)
-- [API Reference](./api/packages/queue-plugin/src/index.ts.html)
+- [API Reference](./api/queue-plugin/src/index.ts/index.html)
 
 ---
 
@@ -442,7 +442,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/events-plugin/README.md)
-- [API Reference](./api/packages/events-plugin/src/index.ts.html)
+- [API Reference](./api/events-plugin/src/index.ts/index.html)
 
 ---
 
@@ -467,7 +467,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/cqrs-plugin/README.md)
-- [API Reference](./api/packages/cqrs-plugin/src/index.ts.html)
+- [API Reference](./api/cqrs-plugin/src/index.ts/index.html)
 
 ---
 
@@ -494,7 +494,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/metrics-plugin/README.md)
-- [API Reference](./api/packages/metrics-plugin/src/index.ts.html)
+- [API Reference](./api/metrics-plugin/src/index.ts/index.html)
 
 ---
 
@@ -519,7 +519,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/health-plugin/README.md)
-- [API Reference](./api/packages/health-plugin/src/index.ts.html)
+- [API Reference](./api/health-plugin/src/index.ts/index.html)
 
 ---
 
@@ -545,7 +545,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/telemetry-plugin/README.md)
-- [API Reference](./api/packages/telemetry-plugin/src/index.ts.html)
+- [API Reference](./api/telemetry-plugin/src/index.ts/index.html)
 
 ---
 
@@ -571,7 +571,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/scheduler-plugin/README.md)
-- [API Reference](./api/packages/scheduler-plugin/src/index.ts.html)
+- [API Reference](./api/scheduler-plugin/src/index.ts/index.html)
 
 ---
 
@@ -598,7 +598,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/secrets-plugin/README.md)
-- [API Reference](./api/packages/secrets-plugin/src/index.ts.html)
+- [API Reference](./api/secrets-plugin/src/index.ts/index.html)
 
 ---
 
@@ -624,7 +624,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/audit-plugin/README.md)
-- [API Reference](./api/packages/audit-plugin/src/index.ts.html)
+- [API Reference](./api/audit-plugin/src/index.ts/index.html)
 
 ---
 
@@ -650,7 +650,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/resilience-plugin/README.md)
-- [API Reference](./api/packages/resilience-plugin/src/index.ts.html)
+- [API Reference](./api/resilience-plugin/src/index.ts/index.html)
 
 ---
 
@@ -678,7 +678,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/storage-plugin/README.md)
-- [API Reference](./api/packages/storage-plugin/src/index.ts.html)
+- [API Reference](./api/storage-plugin/src/index.ts/index.html)
 
 ---
 
@@ -704,7 +704,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/mail-plugin/README.md)
-- [API Reference](./api/packages/mail-plugin/src/index.ts.html)
+- [API Reference](./api/mail-plugin/src/index.ts/index.html)
 
 ---
 
@@ -730,7 +730,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/notification-plugin/README.md)
-- [API Reference](./api/packages/notification-plugin/src/index.ts.html)
+- [API Reference](./api/notification-plugin/src/index.ts/index.html)
 
 ---
 
@@ -756,7 +756,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/feature-flags-plugin/README.md)
-- [API Reference](./api/packages/feature-flags-plugin/src/index.ts.html)
+- [API Reference](./api/feature-flags-plugin/src/index.ts/index.html)
 
 ---
 
@@ -788,7 +788,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/multi-tenancy-plugin/README.md)
-- [API Reference](./api/packages/multi-tenancy-plugin/src/index.ts.html)
+- [API Reference](./api/multi-tenancy-plugin/src/index.ts/index.html)
 
 ---
 
@@ -814,7 +814,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/session-plugin/README.md)
-- [API Reference](./api/packages/session-plugin/src/index.ts.html)
+- [API Reference](./api/session-plugin/src/index.ts/index.html)
 
 ---
 
@@ -844,7 +844,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/cloudflare-plugin/README.md)
-- [API Reference](./api/packages/cloudflare-plugin/src/index.ts.html)
+- [API Reference](./api/cloudflare-plugin/src/index.ts/index.html)
 
 ---
 
@@ -869,7 +869,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/grpc-plugin/README.md)
-- [API Reference](./api/packages/grpc-plugin/src/index.ts.html)
+- [API Reference](./api/grpc-plugin/src/index.ts/index.html)
 
 ---
 
@@ -895,7 +895,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/graphql-plugin/README.md)
-- [API Reference](./api/packages/graphql-plugin/src/index.ts.html)
+- [API Reference](./api/graphql-plugin/src/index.ts/index.html)
 
 ---
 
@@ -916,7 +916,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/react-router-plugin/README.md)
-- [API Reference](./api/packages/react-router-plugin/src/index.ts.html)
+- [API Reference](./api/react-router-plugin/src/index.ts/index.html)
 
 ---
 
@@ -935,7 +935,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/sse-plugin/README.md)
-- [API Reference](./api/packages/sse-plugin/src/index.ts.html)
+- [API Reference](./api/sse-plugin/src/index.ts/index.html)
 
 ---
 
@@ -954,7 +954,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/websocket-plugin/README.md)
-- [API Reference](./api/packages/websocket-plugin/src/index.ts.html)
+- [API Reference](./api/websocket-plugin/src/index.ts/index.html)
 
 ---
 
@@ -973,7 +973,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/worker-pool-plugin/README.md)
-- [API Reference](./api/packages/worker-pool-plugin/src/index.ts.html)
+- [API Reference](./api/worker-pool-plugin/src/index.ts/index.html)
 
 ---
 
@@ -999,7 +999,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/realtime-backplane-plugin/README.md)
-- [API Reference](./api/packages/realtime-backplane-plugin/src/index.ts.html)
+- [API Reference](./api/realtime-backplane-plugin/src/index.ts/index.html)
 
 ---
 
@@ -1018,7 +1018,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/static-plugin/README.md)
-- [API Reference](./api/packages/static-plugin/src/index.ts.html)
+- [API Reference](./api/static-plugin/src/index.ts/index.html)
 
 ---
 
@@ -1044,7 +1044,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/service-discovery-plugin/README.md)
-- [API Reference](./api/packages/service-discovery-plugin/src/index.ts.html)
+- [API Reference](./api/service-discovery-plugin/src/index.ts/index.html)
 
 ---
 
@@ -1071,7 +1071,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/http-security-plugin/README.md)
-- [API Reference](./api/packages/http-security-plugin/src/index.ts.html)
+- [API Reference](./api/http-security-plugin/src/index.ts/index.html)
 
 ---
 
@@ -1102,7 +1102,7 @@ deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.5/main
 **Links:**
 
 - [README](../packages/cli/README.md)
-- [API Reference](./api/packages/cli/src/index.ts.html)
+- [API Reference](./api/cli/src/index.ts/index.html)
 
 ---
 
@@ -1125,7 +1125,7 @@ deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.5/main
 **Links:**
 
 - [README](../packages/sdk/README.md)
-- [API Reference](./api/packages/sdk/src/index.ts.html)
+- [API Reference](./api/sdk/src/index.ts/index.html)
 
 ---
 
@@ -1148,7 +1148,7 @@ deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.5/main
 **Links:**
 
 - [README](../packages/testing/README.md)
-- [API Reference](./api/packages/testing/src/index.ts.html)
+- [API Reference](./api/testing/src/index.ts/index.html)
 
 ---
 
@@ -1170,7 +1170,7 @@ OpenAPI, Health, Metrics.
 **Links:**
 
 - [README](../packages/starters/rest-starter/README.md)
-- [API Reference](./api/packages/starters/rest-starter/src/index.ts.html)
+- [API Reference](./api/starters/rest-starter/src/index.ts/index.html)
 
 ---
 
@@ -1189,7 +1189,7 @@ OpenAPI, Health, Metrics.
 **Links:**
 
 - [README](../packages/starters/microservice-starter/README.md)
-- [API Reference](./api/packages/starters/microservice-starter/src/index.ts.html)
+- [API Reference](./api/starters/microservice-starter/src/index.ts/index.html)
 
 ---
 
@@ -1208,7 +1208,7 @@ OpenAPI, Health, Metrics.
 **Links:**
 
 - [README](../packages/starters/full-stack-starter/README.md)
-- [API Reference](./api/packages/starters/full-stack-starter/src/index.ts.html)
+- [API Reference](./api/starters/full-stack-starter/src/index.ts/index.html)
 
 ---
 
