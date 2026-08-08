@@ -131,6 +131,16 @@ describe('documentation gate — CI wiring', () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     expect(workflow).toContain('deno task check:docs');
   });
+
+  it('check:docs runs the aggregate gate (docs + api lint)', async () => {
+    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
+      tasks: Record<string, string>;
+    };
+    // check:docs should include both check-docs.ts and generate-api-docs.ts
+    const checkDocs = manifest.tasks['check:docs'];
+    expect(checkDocs).toContain('check-docs.ts');
+    expect(checkDocs).toContain('generate-api-docs.ts');
+  });
 });
 
 describe('documentation gate — required guides', () => {
@@ -212,6 +222,62 @@ describe('documentation gate — apps README coverage', () => {
 
     const findings = checkAppsReadmeCoverage(appsReadme, appDirs);
 
+    expect(findings.length).toBe(0);
+  });
+});
+
+describe('documentation gate — package catalog', () => {
+  it('reports a package missing from the catalog', async () => {
+    const { checkPackageCatalog } = await import('../scripts/check-docs.ts');
+    const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
+    const { PACKAGE_METADATA } = await import('../scripts/jsr-metadata.ts');
+
+    // Create a minimal plugins.md that omits one package
+    const pluginsMd = '# Plugins\n\n## @setu-ts/common\n\nSome content.\n';
+    const runtimeMd =
+      '# Runtime\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n';
+
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      PUBLISHED_PACKAGES,
+      PACKAGE_METADATA,
+    );
+
+    // Should find missing packages
+    expect(findings.length).toBeGreaterThan(0);
+  });
+
+  it('passes when all packages are in the catalog', async () => {
+    const { checkPackageCatalog } = await import('../scripts/check-docs.ts');
+    const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
+    const { PACKAGE_METADATA } = await import('../scripts/jsr-metadata.ts');
+
+    // Build a plugins.md with all packages
+    const packageSections = PUBLISHED_PACKAGES.map((pkg) => {
+      // Handle starters specially
+      const match = pkg.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+      const firstSegment = match?.[1];
+      const secondSegment = match?.[2];
+      const name = (firstSegment === 'starters' && secondSegment)
+        ? secondSegment
+        : (match?.[1] ?? pkg.replace('packages/', ''));
+      const pathPrefix = firstSegment === 'starters' ? 'starters/' : '';
+      return `### @setu-ts/${name}\n\nContent.\n\n- [README](../packages/${pathPrefix}${name}/README.md)\n- [API Reference](./api/packages/${pathPrefix}${name}/src/index.ts.html)\n`;
+    }).join('\n');
+
+    const pluginsMd = `# Plugins\n\n${packageSections}`;
+    const runtimeMd =
+      '# Runtime\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n';
+
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      PUBLISHED_PACKAGES,
+      PACKAGE_METADATA,
+    );
+
+    // Should have no findings for a complete catalog
     expect(findings.length).toBe(0);
   });
 });

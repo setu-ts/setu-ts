@@ -25,7 +25,7 @@ deno task smoke
 | Example                    | What It Proves                                                            | Run               |
 | -------------------------- | ------------------------------------------------------------------------- | ----------------- |
 | [minimal](../apps/minimal) | Simplest possible Setu-TS application with one route                      | `deno task start` |
-| [rest](../apps/rest)       | REST API with common patterns (error handling, validation, health checks) | `deno task start` |
+| [rest](../apps/rest-api)   | REST API with common patterns (error handling, validation, health checks) | `deno task start` |
 
 ### Core Patterns
 
@@ -34,7 +34,7 @@ deno task smoke
 | [di-decorators](../apps/di-decorators) | Dependency injection and decorator usage         | `deno task start` |
 | [database](../apps/database)           | Database operations with memory adapter          | `deno task start` |
 | [CQRS](../apps/cqrs)                   | Command-Query Responsibility Segregation pattern | `deno task start` |
-| [multi-tenancy](../apps/multi-tenancy) | Multi-tenant application with tenant resolution  | `deno task start` |
+| [multi-tenancy](../apps/multi-tenant)  | Multi-tenant application with tenant resolution  | `deno task start` |
 
 ### Advanced Features
 

@@ -398,24 +398,48 @@ export function checkRequiredGuides(files: readonly string[]): readonly Finding[
 /**
  * Checks that local Markdown links resolve to existing files/anchors.
  *
- * @param file - The file being checked
+ * Resolves each relative target from the containing document's directory using
+ * real filesystem checks. Handles files, directories (with README fallback),
+ * anchors/fragments, root-relative policy, and URL/mailto exclusions.
+ *
+ * @param file - The file being checked (repository-relative)
  * @param source - The file contents
+ * @param allFiles - Complete set of known markdown files for resolution
  * @returns Findings for broken links
  */
-export function checkLocalLinks(file: string, source: string): readonly Finding[] {
+export async function checkLocalLinks(
+  file: string,
+  source: string,
+  allFiles: readonly string[],
+): Promise<readonly Finding[]> {
   const findings: Finding[] = [];
   const lines = source.split('\n');
-  const fileSet = new Set<string>();
 
-  // Build a set of markdown files in the same directory
-  const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.';
-  // const _fileName = file.includes('/') ? file.slice(file.lastIndexOf('/') + 1) : file;
+  // Build a set of all known markdown files for resolution
+  const knownFiles = new Set(allFiles);
+  // Also track directory paths (for README fallback)
+  const knownDirs = new Set<string>();
+  for (const f of allFiles) {
+    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '.';
+    knownDirs.add(dir);
+  }
 
-  // Simple check: collect all local relative links
+  // The containing directory of the file being checked
+  const fileDir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.';
+
+  // First, scan fences to know which lines are inside code blocks
+  const { fenced } = scanFences(lines);
+
+  // Link pattern: matches [text](target) but not [text](#anchor) or URLs
   const linkPattern = /\[([^\]]*)\]\(([^)]+)\)/g;
   for (const [index, line] of lines.entries()) {
+    // Skip lines inside fenced code blocks
+    if (fenced[index] === true) {
+      continue;
+    }
     for (const match of line.matchAll(linkPattern)) {
       const link = match[2] as string;
+
       // Skip external links, anchors-only, and mailto/tel
       if (
         link.startsWith('http://') || link.startsWith('https://') ||
@@ -425,47 +449,113 @@ export function checkLocalLinks(file: string, source: string): readonly Finding[
         continue;
       }
 
-      // Extract path from link (may include anchor)
-      const linkPath = link.split('#')[0];
+      // Split path and anchor
+      const hashIndex = link.indexOf('#');
+      const linkPath = hashIndex === -1 ? link : link.slice(0, hashIndex);
+      const anchor = hashIndex === -1 ? null : link.slice(hashIndex + 1);
+
       if (!linkPath) continue;
 
-      // Resolve relative path
+      // Resolve relative path from the containing document's directory
       let resolvedPath: string;
       if (linkPath.startsWith('./')) {
-        resolvedPath = `${dir}/${linkPath.slice(2)}`;
+        // Relative to current file's directory
+        resolvedPath = `${fileDir}/${linkPath.slice(2)}`;
       } else if (linkPath.startsWith('../')) {
-        // Simple resolution for parent directories
-        const parts = dir.split('/');
-        const relParts = linkPath.split('/');
+        // Walk up from current file's directory
+        const dirParts = fileDir === '.' ? [] : fileDir.split('/');
+        const relParts = linkPath.split('/').filter((p) => p !== '.');
+        let upCount = 0;
         for (const part of relParts) {
-          if (part === '..') parts.pop();
+          if (part === '..') upCount++;
         }
-        resolvedPath = parts.join('/') + '/' + relParts[relParts.length - 1];
+        const targetParts = dirParts.slice(0, dirParts.length - upCount);
+        const remaining = relParts.filter((p) => p !== '..' && p !== '.');
+        resolvedPath = [...targetParts, ...remaining].join('/');
+      } else if (linkPath.startsWith('/')) {
+        // Root-relative: resolve from repo root
+        resolvedPath = linkPath.slice(1);
       } else {
-        resolvedPath = linkPath;
+        // Bare path — treat as relative to current directory
+        resolvedPath = `${fileDir}/${linkPath}`;
       }
 
-      // Normalize path
-      resolvedPath = resolvedPath.replace(/\/+/g, '/');
-      if (!resolvedPath.startsWith('.')) resolvedPath = `./${resolvedPath}`;
+      // Normalize path (remove ./, resolve //, etc.)
+      resolvedPath = resolvedPath
+        .replace(/^\.\//, '') // Strip leading ./
+        .split('/')
+        .filter((p) => p !== '')
+        .join('/');
 
-      // Check if file exists (or would with .md extension)
-      const candidates = [resolvedPath, `${resolvedPath}.md`, `${resolvedPath}/README.md`];
-      let found = false;
-      for (const candidate of candidates) {
-        if (fileSet.has(candidate)) {
-          found = true;
-          break;
+      // Skip generated API links (docs/api/ is intentionally untracked)
+      if (resolvedPath.startsWith('docs/api/')) {
+        continue;
+      }
+
+      // Check if the path resolves to a known file, directory, or anchor
+      let resolved = false;
+
+      // Direct file match (any file type, not just markdown)
+      if (knownFiles.has(resolvedPath)) {
+        resolved = true;
+      }
+
+      // Check for file:line anchor format (e.g., "packages/foo.ts:79")
+      if (!resolved && resolvedPath.includes(':')) {
+        const colonIdx = resolvedPath.indexOf(':');
+        const filePath = resolvedPath.slice(0, colonIdx);
+        // Check if the file portion exists (markdown or any file type)
+        if (knownFiles.has(filePath) || knownFiles.has(`${filePath}.md`)) {
+          resolved = true;
+        } else {
+          try {
+            const info = await Deno.stat(filePath);
+            if (info.isFile) {
+              resolved = true;
+            }
+          } catch {
+            // File doesn't exist
+          }
         }
       }
 
-      if (!found) {
-        // For now, just collect potential issues - actual file existence check
-        // would require async fs access, so we'll do a simpler check in the main
+      // Directory with README fallback
+      if (!resolved && knownFiles.has(`${resolvedPath}/README.md`)) {
+        resolved = true;
+      }
+
+      // .md extension fallback
+      if (!resolved && knownFiles.has(`${resolvedPath}.md`)) {
+        resolved = true;
+      }
+
+      // Check if the path exists on disk (file or directory)
+      if (!resolved) {
+        try {
+          const info = await Deno.stat(resolvedPath);
+          if (info.isFile || info.isDirectory) {
+            resolved = true;
+          }
+        } catch {
+          // Path doesn't exist
+        }
+      }
+
+      // Anchor in same file
+      if (!resolved && anchor !== null && anchor !== '') {
+        // Check if the anchor exists in the current document
+        const headings = collectHeadings(lines, scanFences(lines).fenced);
+        const anchorSet = new Set(headings.map((h) => h.anchor));
+        if (anchorSet.has(anchor)) {
+          resolved = true;
+        }
+      }
+
+      if (!resolved) {
         findings.push({
           file,
           line: index + 1,
-          message: `Local link "${linkPath}" may not resolve to an existing file.`,
+          message: `Local link "${linkPath}" does not resolve to an existing file or directory.`,
         });
       }
     }
@@ -477,8 +567,11 @@ export function checkLocalLinks(file: string, source: string): readonly Finding[
 /**
  * Checks that the examples guide covers all directories under apps/.
  *
+ * The expected set is derived from the filesystem (`Deno.readDir('apps')`), not
+ * from the index it polices, so a stale index cannot mask its own blind spots.
+ *
  * @param examplesGuideContent - The content of docs/examples.md
- * @param appDirs - Array of directory names under apps/
+ * @param appDirs - Array of directory names under apps/ (from filesystem)
  * @returns Findings for missing examples
  */
 export function checkExamplesCoverage(
@@ -512,7 +605,7 @@ export function checkExamplesCoverage(
  * Checks that the apps README covers all directories under apps/.
  *
  * @param appsReadmeContent - The content of apps/README.md
- * @param appDirs - Array of directory names under apps/
+ * @param appDirs - Array of directory names under apps/ (from filesystem)
  * @returns Findings for missing entries
  */
 export function checkAppsReadmeCoverage(
@@ -546,17 +639,24 @@ export function checkAppsReadmeCoverage(
  * Checks that all published packages have a README, metadata entry, catalog entry,
  * API link, and runtime note.
  *
+ * Derives the authoritative package set from PUBLISHED_PACKAGES and
+ * PACKAGE_METADATA rather than scanning the catalog text.
+ *
  * @param pluginsMdContent - The content of docs/plugins.md
  * @param runtimeMdContent - The content of docs/runtime-deployment.md
+ * @param publishedPackages - Authoritative list of published package names
+ * @param packageMetadata - Package metadata map with runtime compat flags
  * @returns Findings for missing package entries
  */
 export function checkPackageCatalog(
-  _pluginsMdContent: string,
+  pluginsMdContent: string,
   runtimeMdContent: string,
+  publishedPackages: readonly string[],
+  packageMetadata: Readonly<Record<string, { description: string; runtimeCompat: unknown }>>,
 ): readonly Finding[] {
   const findings: Finding[] = [];
 
-  // Check for runtime notes column presence
+  // Check runtime columns in runtime-deployment.md
   if (
     !runtimeMdContent.includes('Deno') || !runtimeMdContent.includes('Node') ||
     !runtimeMdContent.includes('Bun') || !runtimeMdContent.includes('Workers')
@@ -566,6 +666,150 @@ export function checkPackageCatalog(
       line: 1,
       message: 'Runtime deployment guide must have columns for Deno, Node, Bun, and Workers.',
     });
+  }
+
+  // Derive expected package keys from authoritative sources
+  const expectedKeys = new Set<string>();
+  for (const pkgPath of publishedPackages) {
+    const match = pkgPath.match(/^packages\/([^/]+)/);
+    if (match) {
+      expectedKeys.add(match[1]);
+    }
+  }
+  // "starters" is a directory, not a package — remove it from expected keys
+  expectedKeys.delete('starters');
+
+  // Check each expected package has a catalog entry
+  for (const pkg of expectedKeys) {
+    // Check README exists
+    const readmePath = `packages/${pkg}/README.md`;
+    try {
+      Deno.statSync(readmePath);
+    } catch {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" has no README at ${readmePath}.`,
+      });
+    }
+
+    // Check metadata entry exists
+    if (!packageMetadata[pkg]) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" has no metadata entry in PACKAGE_METADATA.`,
+      });
+    }
+
+    // Check catalog entry exists (look for package name in plugins.md)
+    if (!pluginsMdContent.includes(`@setu-ts/${pkg}`)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" has no catalog entry in docs/plugins.md.`,
+      });
+    }
+
+    // Check API link exists
+    if (!pluginsMdContent.includes(`./api/packages/${pkg}/`)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" has no API link in docs/plugins.md.`,
+      });
+    }
+
+    // Check runtime note exists (README link in the package section)
+    if (!pluginsMdContent.includes(`packages/${pkg}/README.md`)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" has no runtime note in docs/plugins.md.`,
+      });
+    }
+  }
+
+  // Starters are under packages/starters/<name>/ — check them separately
+  for (const starter of ['rest-starter', 'microservice-starter', 'full-stack-starter']) {
+    const readmePath = `packages/starters/${starter}/README.md`;
+    try {
+      Deno.statSync(readmePath);
+    } catch {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${starter}" has no README at ${readmePath}.`,
+      });
+    }
+
+    if (!packageMetadata[starter]) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${starter}" has no metadata entry in PACKAGE_METADATA.`,
+      });
+    }
+
+    if (!pluginsMdContent.includes(`@setu-ts/${starter}`)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${starter}" has no catalog entry in docs/plugins.md.`,
+      });
+    }
+
+    if (!pluginsMdContent.includes(`./api/packages/starters/${starter}/`)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${starter}" has no API link in docs/plugins.md.`,
+      });
+    }
+
+    if (!pluginsMdContent.includes(`packages/starters/${starter}/README.md`)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${starter}" has no runtime note in docs/plugins.md.`,
+      });
+    }
+  }
+
+  // Check for duplicate entries (package mentioned more than once)
+  const pkgMatches = [...pluginsMdContent.matchAll(/@setu-ts\/([^/\s]+)/g)];
+  const pkgCounts = new Map<string, number>();
+  for (const match of pkgMatches) {
+    const pkgName = match[1];
+    pkgCounts.set(pkgName, (pkgCounts.get(pkgName) ?? 0) + 1);
+  }
+  for (const [pkg, count] of pkgCounts) {
+    if (count > 1) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" appears ${count} times in docs/plugins.md (expected 1).`,
+      });
+    }
+  }
+
+  // Check for extra entries not in published packages
+  // Note: starters are under packages/starters/<name>/ so their short name
+  // (e.g. "rest-starter") is NOT in expectedKeys — they are valid catalog entries.
+  const starterShortNames = new Set([
+    'rest-starter',
+    'microservice-starter',
+    'full-stack-starter',
+  ]);
+  for (const match of pluginsMdContent.matchAll(/###\s+@setu-ts\/([^\s]+)/g)) {
+    const pkgName = match[1];
+    if (!expectedKeys.has(pkgName) && !starterShortNames.has(pkgName)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Extra catalog entry "${pkgName}" not in PUBLISHED_PACKAGES.`,
+      });
+    }
   }
 
   return findings;
@@ -599,7 +843,9 @@ async function collectMarkdown(root: string): Promise<string[]> {
         if (dir !== '.') {
           await walk(path, depth + 1);
         }
-      } else if (entry.name.endsWith('.md')) {
+      } else if (
+        entry.name.endsWith('.md') || entry.name.endsWith('.ts') || entry.name.endsWith('.js')
+      ) {
         found.push(path);
       }
     }
@@ -620,24 +866,103 @@ if (import.meta.main) {
         collected.add(file);
       }
     }
+    // Also include markdown files from docs/ subdirectories
+    const docsRoots = ['docs', 'plans/archive'];
+    for (const root of docsRoots) {
+      try {
+        for await (const entry of Deno.readDir(root)) {
+          if (!entry.name.startsWith('.') && entry.name.endsWith('.md')) {
+            const path = `${root}/${entry.name}`;
+            collected.add(path);
+          }
+        }
+      } catch {
+        // Skip if directory doesn't exist
+      }
+    }
     files = [...collected].sort();
   }
 
-  const findings: Finding[] = [];
+  // Read all file contents for cross-file checks
+  const fileContents = new Map<string, string>();
   for (const file of files) {
-    let source: string;
     try {
-      source = await Deno.readTextFile(file);
+      fileContents.set(file, await Deno.readTextFile(file));
     } catch (error) {
       console.error(`Cannot read ${file}: ${(error as Error).message}`);
       Deno.exit(1);
     }
+  }
+
+  const findings: Finding[] = [];
+
+  // Run document checks (fences, anchors, TOC)
+  for (const file of files) {
+    const source = fileContents.get(file)!;
     findings.push(...checkDocument(file, source));
   }
 
-  // Check required guides (only in default scan mode)
+  // Run local link checks (only in default scan mode, only on markdown files)
+  // Skip archived plan files as they may reference historical paths
   if (args.length === 0) {
+    for (const file of files) {
+      if (!file.endsWith('.md') || file.startsWith('plans/archive/')) continue;
+      const source = fileContents.get(file)!;
+      const linkFindings = await checkLocalLinks(file, source, files);
+      findings.push(...linkFindings);
+    }
+
+    // Check required guides
     findings.push(...checkRequiredGuides(files));
+
+    // Check examples coverage
+    const examplesContent = fileContents.get('docs/examples.md');
+    if (examplesContent) {
+      try {
+        const appDirs: string[] = [];
+        for await (const entry of Deno.readDir('apps')) {
+          if (entry.isDirectory && !entry.name.startsWith('.')) {
+            appDirs.push(entry.name);
+          }
+        }
+        findings.push(...checkExamplesCoverage(examplesContent, appDirs));
+      } catch {
+        // If apps/ doesn't exist, skip
+      }
+    }
+
+    // Check apps README coverage
+    const appsReadmeContent = fileContents.get('apps/README.md');
+    if (appsReadmeContent) {
+      try {
+        const appDirs: string[] = [];
+        for await (const entry of Deno.readDir('apps')) {
+          if (entry.isDirectory && !entry.name.startsWith('.')) {
+            appDirs.push(entry.name);
+          }
+        }
+        findings.push(...checkAppsReadmeCoverage(appsReadmeContent, appDirs));
+      } catch {
+        // If apps/ doesn't exist, skip
+      }
+    }
+
+    // Check package catalog completeness
+    const pluginsContent = fileContents.get('docs/plugins.md');
+    const runtimeContent = fileContents.get('docs/runtime-deployment.md');
+    if (pluginsContent && runtimeContent) {
+      // Import authoritative sources
+      const { PUBLISHED_PACKAGES } = await import('./release-packages.ts');
+      const { PACKAGE_METADATA } = await import('./jsr-metadata.ts');
+      findings.push(
+        ...checkPackageCatalog(
+          pluginsContent,
+          runtimeContent,
+          PUBLISHED_PACKAGES,
+          PACKAGE_METADATA,
+        ),
+      );
+    }
   }
 
   if (findings.length === 0) {

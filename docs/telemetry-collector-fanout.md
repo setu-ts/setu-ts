@@ -13,7 +13,8 @@ Hono app ──OTLP/HTTP:4318──►  Collector ┼─────────
 ```
 
 Reference config:
-[`docker/otel-collector/collector-config.yaml`](../docker/otel-collector/collector-config.yaml).
+[`docker/otel-collector/collector-config.yaml`](../docker/otel-collector/collector-config.yaml)
+(note: the path is relative to the repo root, not this file).
 
 > **Scope.** This page and that config are the telemetry fan-out reference only. Runnable
 > `docker-compose`, Kubernetes manifests, and Helm are owned by **Milestone 39 (Docker and

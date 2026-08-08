@@ -231,6 +231,56 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/exceptions
+
+**Purpose:** Exception hierarchy, RFC 7807 Problem Details, and the error-handler middleware.
+
+**Capability Token:** N/A (middleware-only)
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+**Features:**
+
+- HttpError hierarchy
+- RFC 7807 Problem Details format
+- Error handler middleware factory
+
+**Links:**
+
+- [README](../packages/exceptions/README.md)
+- [API Reference](./api/packages/exceptions/src/index.ts.html)
+
+---
+
+### @setu-ts/openapi-plugin
+
+**Purpose:** OpenAPI 3.1 spec generation from routes, with a Zod transformer and Swagger UI.
+
+**Capability Token:** `CAPABILITIES.OPENAPI`
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+**Features:**
+
+- Route-based OpenAPI spec generation
+- Zod schema transformer
+- Swagger UI serving
+
+**Links:**
+
+- [README](../packages/openapi-plugin/README.md)
+- [API Reference](./api/packages/openapi-plugin/src/index.ts.html)
+
+---
+
 ## Tier 3: Business Capabilities
 
 ### @setu-ts/database-plugin
