@@ -80,6 +80,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     servers,
     securitySchemes,
     security,
+    deriveSecurity,
     exclude,
     swagger = true,
     endpoint = '/docs',
@@ -111,16 +112,21 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
       // the spec endpoint still answers 200 — so it is refused here, with the
       // offending name, rather than shipped as a broken document.
       const declaredSchemes = Object.keys(securitySchemes ?? {});
-      for (const requirement of security ?? []) {
-        for (const schemeName of Object.keys(requirement)) {
-          if (!declaredSchemes.includes(schemeName)) {
-            throw new Error(
-              `OpenApiPlugin: security requires the scheme '${schemeName}', which is not declared ` +
-                `in securitySchemes. Declared: ${
-                  declaredSchemes.length > 0 ? declaredSchemes.join(', ') : '(none)'
-                }.`,
-            );
-          }
+      const requiredSchemes = [
+        ...(security ?? []).flatMap((requirement) => Object.keys(requirement)),
+        // `deriveSecurity` names a scheme the same way, so it is subject to the
+        // same check — an undeclared name there produces the identical invalid
+        // document, on every guarded route rather than document-wide.
+        ...(deriveSecurity !== undefined ? [deriveSecurity.scheme] : []),
+      ];
+      for (const schemeName of requiredSchemes) {
+        if (!declaredSchemes.includes(schemeName)) {
+          throw new Error(
+            `OpenApiPlugin: security requires the scheme '${schemeName}', which is not declared ` +
+              `in securitySchemes. Declared: ${
+                declaredSchemes.length > 0 ? declaredSchemes.join(', ') : '(none)'
+              }.`,
+          );
         }
       }
 
@@ -133,6 +139,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
         ...(servers !== undefined ? { servers } : {}),
         ...(securitySchemes !== undefined ? { securitySchemes } : {}),
         ...(security !== undefined ? { security } : {}),
+        ...(deriveSecurity !== undefined ? { deriveSecurity } : {}),
         exclude: excludedPaths,
         schemas: [], // Will be populated at onInit
       });

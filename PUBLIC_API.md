@@ -4702,6 +4702,10 @@ app.register(OpenApiPlugin({
   // Document-level requirement, inherited by every operation that does not
   // declare its own. Omit it and no operation is marked as protected.
   security: [{ bearerAuth: [] }],
+  // Or derive each operation's requirement from the guards on its route, so
+  // the document tracks what actually enforces instead of a second
+  // declaration that can drift from it.
+  deriveSecurity: { scheme: 'bearerAuth' },
   // Router paths to leave out of the document. Matched exactly against the
   // fully-resolved router pattern: router-style (`/todos/:id`, not the
   // template `/todos/{id}`) and including any `router.group()` prefix.
@@ -4738,6 +4742,41 @@ app.router.delete('/todos/:id', {
 
 `RouteSchema.security` enforces nothing. Authentication is enforced by `authMiddleware` and the
 `requireXxx` guards; this describes the route for readers and for generated clients.
+
+### Deriving Authentication From Guards
+
+Declaring `security` per route makes the document a second source of truth that can drift from the
+guards. `deriveSecurity` closes that: every guard `@setu-ts/auth-plugin` ships is branded with
+`RouteSecurityMetadata`, and the generator reads the brand off the route's middleware.
+
+```typescript
+app.register(OpenApiPlugin({
+  securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+  deriveSecurity: { scheme: 'bearerAuth' },
+}));
+
+// Documented as requiring bearerAuth — no `schema.security` needed.
+app.router.get('/todos/:id', { middleware: [requireAuth()], handler });
+
+// Documented as public.
+app.router.post('/login', { middleware: [publicRoute()], handler });
+```
+
+Rules, in precedence order: a requirement declared on `schema.security` always wins; otherwise a
+route carrying at least one branded guard is derived (`authenticated: true` beats `false`, matching
+what the middleware chain does); otherwise the operation carries no key and inherits the
+document-level `security`.
+
+Three limits, stated rather than left to discovery:
+
+- **Only route-level middleware is inspected.** Middleware added with `app.middleware.add()` is not
+  on the route and is not consulted — correct for `authMiddleware()`, which populates the principal
+  and never rejects.
+- **Roles and permissions are not expressible.** An OpenAPI requirement names a scheme, and no
+  declared scheme can be inferred from `'admin'`, so `requireRole('admin')` documents only that
+  authentication is required. A 403 remains a surprise the document cannot warn about.
+- **The scheme name is configured, never inferred.** A guard cannot know whether the document calls
+  its scheme `bearerAuth` or `jwt`. An undeclared name is refused at `register()`.
 
 ### Defining Route Schemas
 
@@ -6298,7 +6337,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                       |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                          |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                                                                                                        |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `HandlerResult`, `ResponseSnapshot`                                                                                                     |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `HandlerResult`, `ResponseSnapshot`         |
 | Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                    |
 | DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                    |
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                          |
@@ -6351,6 +6390,15 @@ Contract notes:
   and for client generation, and enforces nothing. Authentication is enforced by middleware and
   guards. An **empty array** declares the operation public and is not the same as omitting the
   field, which leaves it inheriting the document-level requirement.
+- Declaring is not the only way a document learns about authentication. `withSecurityMetadata`
+  brands a `MiddlewareFunction` with a `RouteSecurityMetadata` (`{ authenticated: boolean }`), and
+  `securityMetadataOf` reads it back — the channel by which `@setu-ts/openapi-plugin` derives an
+  operation's requirement from the guards `@setu-ts/auth-plugin` produced, without either package
+  importing the other. `SECURITY_METADATA` is created with `Symbol.for`, so two copies of `common`
+  in one process resolve the same key. The brand is symbol-keyed and non-enumerable: the
+  middleware's identity and behaviour are unchanged. It carries authentication PRESENCE only — a
+  role is not a security scheme, so `requireRole('admin')` brands `{ authenticated: true }` and
+  nothing more.
 - `HandlerResult` is an opaque brand only the kernel constructs; handlers obtain it from `IResponse`
   terminal methods (`json`, `text`, `send`, `redirect`, `stream`).
 - `IResponse` has two header setters with distinct semantics: `header(name, value)` **replaces** any

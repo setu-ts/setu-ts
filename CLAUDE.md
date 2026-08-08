@@ -1564,6 +1564,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   imported the concrete module rather than the barrel. The M52c defect class. Both packages now
   carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal Problem
   Details core does NOT leak into the published surface) — complete (PR #135)
+- **Milestone 57** (`packages/common` + `packages/auth-plugin` + `packages/openapi-plugin` — derived
+  OpenAPI security. PR #136 made an operation's requirement DECLARABLE, which left the document as a
+  second source of truth: a route could carry `requireAuth()` and declare `security: []`, or carry
+  no guard and inherit a document-level requirement, and nothing objected. `common` gains a
+  `SECURITY_METADATA` symbol + `RouteSecurityMetadata` + the pure
+  `withSecurityMetadata`/`securityMetadataOf` helpers; all six `auth-plugin` guard factories brand
+  the middleware they return; `openapi-plugin` gains `deriveSecurity: { scheme }` and reads the
+  brand off `RouteInfo.definition.middleware`. No plugin imports another — the symbol in `common` is
+  the entire channel (the M24 `TELEMETRY_CONTEXT_OPAQUE` precedent), and it uses **`Symbol.for`**
+  deliberately, because a locally-created symbol misses on every read when two copies of `common`
+  share a process — the failure M37c hit with hand-written React Router context keys. **Guards were
+  otherwise indistinguishable**: probed, `requireAuth()` returns a function with `name === ''`,
+  arity 2, zero own properties and zero own symbols — an ad-hoc inline middleware has a BETTER
+  identity than the guards did. The metadata carries authentication PRESENCE only, and that is a
+  decision rather than a simplification: an OpenAPI requirement names a **scheme**, and none can be
+  inferred from `'admin'`, so a `roles` field would be dead surface. The consequence is documented
+  in three sites — a 403 remains a surprise the document cannot warn about. Precedence is declared >
+  derived > document-level, so a route that already declares is byte-identical, which includes every
+  `@Public` decorated route (PR #136 gives those a declared `[]`); `authenticated: true` beats
+  `false` on a route carrying both, matching enforcement since `publicRoute()` only calls `next()`.
+  Everything is **opt-in**: without `deriveSecurity` no document changes. Only ROUTE-level
+  middleware is inspected — `app.middleware.add()` is absent from `RouteInfo`, which is correct
+  anyway since `authMiddleware()` populates the principal and never rejects. The §3.5 `register()`
+  refusal from PR #136 was extended to the derived scheme name. The integration suite drives the
+  REAL `auth-plugin` guards through a kernel app rather than hand-branded fakes, which is what
+  proves the two packages agree on the symbol) — complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
   M37c, M54, M55, and M56 have all shipped, closing the last entries on that list.
 

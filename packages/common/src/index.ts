@@ -51,8 +51,10 @@ export type {
   RouteDefinition,
   RouteHandler,
   RouteSchema,
+  RouteSecurityMetadata,
   SecurityRequirement,
 } from './http.ts';
+export { SECURITY_METADATA, securityMetadataOf, withSecurityMetadata } from './http.ts';
 
 // Runtime abstraction
 export type {
