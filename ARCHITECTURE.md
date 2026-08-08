@@ -255,7 +255,6 @@ layer on top.
 Every package uses:
 
 - ES module exports only.
-- `sideEffects: false` in `package.json`.
 - Subpath exports for granular imports.
 - No top-level side effects.
 
@@ -486,8 +485,9 @@ stateDiagram-v2
     Initialized --> Bootstrapped: onBootstrap hooks
     Bootstrapped --> Active: Server listening
     Active --> ShuttingDown: Shutdown signal
-    ShuttingDown --> Destroyed: onDestroy hooks
-    Destroyed --> [*]
+    ShuttingDown --> Shutdown: onShutdown hooks
+    Shutdown --> Closed: onClose hooks
+    Closed --> [*]
 ```
 
 ### Plugin Registration Flow
@@ -2127,7 +2127,7 @@ The framework minimizes object allocations:
 
 - Request context is reused where possible (pooled in high-throughput scenarios).
 - Middleware chain is pre-compiled, not rebuilt per request.
-- Route matching uses a radix tree for O(log n) matching.
+- Route matching uses Hono's LinearRouter with candidate ranking.
 - Service instances are cached (singleton scope by default).
 
 ### Lazy Loading
@@ -2165,10 +2165,8 @@ Plugin loading is optimized:
 Every package is tree-shakeable:
 
 - ES module exports only.
-- `sideEffects: false` in `package.json`.
 - Subpath exports for granular imports.
 - No top-level side effects.
-- Peer dependencies for heavy libraries.
 
 ### Startup Optimization
 
@@ -2562,16 +2560,13 @@ The public API (defined in `PUBLIC_API.md`) is stable:
 
 The architecture supports future additions without breaking existing applications:
 
-| Future Addition          | How It Fits                                                       |
-| ------------------------ | ----------------------------------------------------------------- |
-| **Edge Runtime**         | New runtime adapter for Cloudflare Workers                        |
-| **SSE Plugin**           | New plugin that provides Server-Sent Events                       |
-| **New Database Adapter** | New plugin that provides the `database` token with a new ORM      |
-| **New Message Broker**   | New plugin that provides the `messaging` token with a new broker  |
-| **New Auth Strategy**    | New plugin that extends the `auth-plugin` with a new strategy     |
-| **New Health Indicator** | New plugin that registers a health check                          |
-| **New Metric Collector** | New plugin that registers a metric collector                      |
-| **Static File Plugin**   | New plugin that serves static files with ETag, Range, compression |
+| Future Addition          | How It Fits                                                      |
+| ------------------------ | ---------------------------------------------------------------- |
+| **New Database Adapter** | New plugin that provides the `database` token with a new ORM     |
+| **New Message Broker**   | New plugin that provides the `messaging` token with a new broker |
+| **New Auth Strategy**    | New plugin that extends the `auth-plugin` with a new strategy    |
+| **New Health Indicator** | New plugin that registers a health check                         |
+| **New Metric Collector** | New plugin that registers a metric collector                     |
 
 ### Migration Paths
 

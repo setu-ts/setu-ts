@@ -16,7 +16,10 @@ import { expect } from '@std/expect';
 
 import {
   anchorFor,
+  checkAppsReadmeCoverage,
   checkDocument,
+  checkExamplesCoverage,
+  checkRequiredGuides,
   findSwallowedHeadings,
   scanFences,
 } from '../scripts/check-docs.ts';
@@ -127,5 +130,88 @@ describe('documentation gate — CI wiring', () => {
     // defect it exists for reaches main exactly as it did before.
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     expect(workflow).toContain('deno task check:docs');
+  });
+});
+
+describe('documentation gate — required guides', () => {
+  it('reports a missing required guide', () => {
+    const files = [
+      'README.md',
+      'docs/getting-started.md',
+      'docs/plugin-architecture.md',
+      // Missing: docs/plugins.md, docs/programmatic-api.md, etc.
+    ];
+
+    const findings = checkRequiredGuides(files);
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.some((f) => f.message.includes('missing'))).toBe(true);
+  });
+
+  it('passes when all required guides exist', () => {
+    const files = [
+      'README.md',
+      'docs/getting-started.md',
+      'docs/plugin-architecture.md',
+      'docs/plugins.md',
+      'docs/programmatic-api.md',
+      'docs/decorators.md',
+      'docs/custom-plugins.md',
+      'docs/migration-nestjs.md',
+      'docs/migration-fastify.md',
+      'docs/examples.md',
+      'docs/runtime-deployment.md',
+    ];
+
+    const findings = checkRequiredGuides(files);
+
+    expect(findings.length).toBe(0);
+  });
+});
+
+describe('documentation gate — examples coverage', () => {
+  it('reports an app not documented in examples.md', () => {
+    const examplesGuide = '# Examples\n\n## REST Example\n\nSee apps/rest for more.';
+    const appDirs = ['minimal', 'rest', 'new-app'];
+
+    const findings = checkExamplesCoverage(examplesGuide, appDirs);
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.some((f) => f.message.includes('minimal'))).toBe(true);
+    expect(findings.some((f) => f.message.includes('new-app'))).toBe(true);
+  });
+
+  it('passes when all apps are documented', () => {
+    const examplesGuide =
+      '# Examples\n\n## Minimal\n\nSee apps/minimal.\n\n## REST\n\nSee apps/rest.\n\n## New App\n\nSee apps/new-app.';
+    const appDirs = ['minimal', 'rest', 'new-app'];
+
+    const findings = checkExamplesCoverage(examplesGuide, appDirs);
+
+    expect(findings.length).toBe(0);
+  });
+});
+
+describe('documentation gate — apps README coverage', () => {
+  it('reports an app not listed in apps/README.md', () => {
+    const appsReadme =
+      '# Apps\n\n| Name | Description |\n|------|-------------|\n| minimal | Minimal example |';
+    const appDirs = ['minimal', 'rest', 'new-app'];
+
+    const findings = checkAppsReadmeCoverage(appsReadme, appDirs);
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.some((f) => f.message.includes('rest'))).toBe(true);
+    expect(findings.some((f) => f.message.includes('new-app'))).toBe(true);
+  });
+
+  it('passes when all apps are listed', () => {
+    const appsReadme =
+      '# Apps\n\n| Name | Description |\n|------|-------------|\n| minimal | Minimal example |\n| rest | REST example |\n| new-app | New app example |';
+    const appDirs = ['minimal', 'rest', 'new-app'];
+
+    const findings = checkAppsReadmeCoverage(appsReadme, appDirs);
+
+    expect(findings.length).toBe(0);
   });
 });

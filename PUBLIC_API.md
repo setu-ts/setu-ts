@@ -6067,12 +6067,10 @@ Standardized error responses across the framework:
 
 ### Hot Reload
 
-```bash
-# Development with hot reload
-setu-ts dev
+Setu-TS does not include a built-in dev server. Use `deno run --watch` directly:
 
-# Or with file watching
-deno task dev  # runs `deno run --watch` under the hood
+```bash
+deno run --watch main.ts
 ```
 
 ### Debugging

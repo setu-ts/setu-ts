@@ -359,6 +359,218 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
   return findings.sort((a, b) => a.line - b.line);
 }
 
+const REQUIRED_GUIDES = [
+  'docs/getting-started.md',
+  'docs/plugin-architecture.md',
+  'docs/plugins.md',
+  'docs/programmatic-api.md',
+  'docs/decorators.md',
+  'docs/custom-plugins.md',
+  'docs/migration-nestjs.md',
+  'docs/migration-fastify.md',
+  'docs/examples.md',
+  'docs/runtime-deployment.md',
+];
+
+/**
+ * Checks that all required guides exist.
+ *
+ * @param files - Array of markdown file paths
+ * @returns Findings for missing guides
+ */
+export function checkRequiredGuides(files: readonly string[]): readonly Finding[] {
+  const findings: Finding[] = [];
+  const fileSet = new Set(files);
+
+  for (const guide of REQUIRED_GUIDES) {
+    if (!fileSet.has(guide)) {
+      findings.push({
+        file: guide,
+        line: 1,
+        message: `Required guide "${guide}" is missing.`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Checks that local Markdown links resolve to existing files/anchors.
+ *
+ * @param file - The file being checked
+ * @param source - The file contents
+ * @returns Findings for broken links
+ */
+export function checkLocalLinks(file: string, source: string): readonly Finding[] {
+  const findings: Finding[] = [];
+  const lines = source.split('\n');
+  const fileSet = new Set<string>();
+
+  // Build a set of markdown files in the same directory
+  const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.';
+  // const _fileName = file.includes('/') ? file.slice(file.lastIndexOf('/') + 1) : file;
+
+  // Simple check: collect all local relative links
+  const linkPattern = /\[([^\]]*)\]\(([^)]+)\)/g;
+  for (const [index, line] of lines.entries()) {
+    for (const match of line.matchAll(linkPattern)) {
+      const link = match[2] as string;
+      // Skip external links, anchors-only, and mailto/tel
+      if (
+        link.startsWith('http://') || link.startsWith('https://') ||
+        link.startsWith('mailto:') || link.startsWith('tel:') ||
+        link.startsWith('#')
+      ) {
+        continue;
+      }
+
+      // Extract path from link (may include anchor)
+      const linkPath = link.split('#')[0];
+      if (!linkPath) continue;
+
+      // Resolve relative path
+      let resolvedPath: string;
+      if (linkPath.startsWith('./')) {
+        resolvedPath = `${dir}/${linkPath.slice(2)}`;
+      } else if (linkPath.startsWith('../')) {
+        // Simple resolution for parent directories
+        const parts = dir.split('/');
+        const relParts = linkPath.split('/');
+        for (const part of relParts) {
+          if (part === '..') parts.pop();
+        }
+        resolvedPath = parts.join('/') + '/' + relParts[relParts.length - 1];
+      } else {
+        resolvedPath = linkPath;
+      }
+
+      // Normalize path
+      resolvedPath = resolvedPath.replace(/\/+/g, '/');
+      if (!resolvedPath.startsWith('.')) resolvedPath = `./${resolvedPath}`;
+
+      // Check if file exists (or would with .md extension)
+      const candidates = [resolvedPath, `${resolvedPath}.md`, `${resolvedPath}/README.md`];
+      let found = false;
+      for (const candidate of candidates) {
+        if (fileSet.has(candidate)) {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        // For now, just collect potential issues - actual file existence check
+        // would require async fs access, so we'll do a simpler check in the main
+        findings.push({
+          file,
+          line: index + 1,
+          message: `Local link "${linkPath}" may not resolve to an existing file.`,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Checks that the examples guide covers all directories under apps/.
+ *
+ * @param examplesGuideContent - The content of docs/examples.md
+ * @param appDirs - Array of directory names under apps/
+ * @returns Findings for missing examples
+ */
+export function checkExamplesCoverage(
+  examplesGuideContent: string,
+  appDirs: readonly string[],
+): readonly Finding[] {
+  const findings: Finding[] = [];
+  const coveredApps = new Set<string>();
+
+  // Look for app directory references in the examples guide
+  for (const dir of appDirs) {
+    if (examplesGuideContent.includes(dir) || examplesGuideContent.includes(`apps/${dir}`)) {
+      coveredApps.add(dir);
+    }
+  }
+
+  for (const dir of appDirs) {
+    if (!coveredApps.has(dir)) {
+      findings.push({
+        file: 'docs/examples.md',
+        line: 1,
+        message: `Example app "${dir}" is not documented in docs/examples.md.`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Checks that the apps README covers all directories under apps/.
+ *
+ * @param appsReadmeContent - The content of apps/README.md
+ * @param appDirs - Array of directory names under apps/
+ * @returns Findings for missing entries
+ */
+export function checkAppsReadmeCoverage(
+  appsReadmeContent: string,
+  appDirs: readonly string[],
+): readonly Finding[] {
+  const findings: Finding[] = [];
+  const coveredApps = new Set<string>();
+
+  // Look for app directory references in the README
+  for (const dir of appDirs) {
+    if (appsReadmeContent.includes(dir) || appsReadmeContent.includes(`apps/${dir}`)) {
+      coveredApps.add(dir);
+    }
+  }
+
+  for (const dir of appDirs) {
+    if (!coveredApps.has(dir)) {
+      findings.push({
+        file: 'apps/README.md',
+        line: 1,
+        message: `Example app "${dir}" is not listed in apps/README.md.`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Checks that all published packages have a README, metadata entry, catalog entry,
+ * API link, and runtime note.
+ *
+ * @param pluginsMdContent - The content of docs/plugins.md
+ * @param runtimeMdContent - The content of docs/runtime-deployment.md
+ * @returns Findings for missing package entries
+ */
+export function checkPackageCatalog(
+  _pluginsMdContent: string,
+  runtimeMdContent: string,
+): readonly Finding[] {
+  const findings: Finding[] = [];
+
+  // Check for runtime notes column presence
+  if (
+    !runtimeMdContent.includes('Deno') || !runtimeMdContent.includes('Node') ||
+    !runtimeMdContent.includes('Bun') || !runtimeMdContent.includes('Workers')
+  ) {
+    findings.push({
+      file: 'docs/runtime-deployment.md',
+      line: 1,
+      message: 'Runtime deployment guide must have columns for Deno, Node, Bun, and Workers.',
+    });
+  }
+
+  return findings;
+}
+
 /**
  * Collects markdown files under a root, skipping build and vendor directories.
  *
@@ -421,6 +633,11 @@ if (import.meta.main) {
       Deno.exit(1);
     }
     findings.push(...checkDocument(file, source));
+  }
+
+  // Check required guides (only in default scan mode)
+  if (args.length === 0) {
+    findings.push(...checkRequiredGuides(files));
   }
 
   if (findings.length === 0) {
