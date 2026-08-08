@@ -562,6 +562,7 @@ describe('createStaticHandler', () => {
       fs: {
         ...fs,
         readStream: async (path: string, options?: { start?: number; end?: number }) => {
+          await Promise.resolve();
           const data = fs.files.get(path)!;
           const start = options?.start ?? 0;
           const end = options?.end !== undefined ? options.end : data.length - 1;
