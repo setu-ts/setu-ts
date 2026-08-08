@@ -12,6 +12,8 @@
  * - Child process exit code propagation
  * - Ratchet diagnostics parsing and partitioning
  * - Path normalization for absolute and relative paths
+ * - ANSI stripping for both stdout and stderr
+ * - Fatal classification from both streams
  */
 
 import { describe, it } from '@std/testing/bdd';
@@ -187,6 +189,13 @@ error[private-type-ref]: public type references private type
         path: 'packages/common/src/index.ts',
         line: 10,
       });
+    });
+
+    it('strips ANSI from both stdout and stderr for fatal detection', () => {
+      // ANSI-colored fatal error on stderr
+      const stderr = '\u001b[31merror: Module not found\u001b[0m\n';
+      const diagnostics = parseDocLintDiagnostics(stderr);
+      expect(diagnostics).toHaveLength(0);
     });
   });
 
@@ -619,6 +628,91 @@ error[private-type-ref]: public type references private type
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
       expect(result.findings.some((f) => f.includes('CLEAN packages'))).toBe(true);
+    });
+
+    it('ANSI-colored fatal on stderr is detected', async () => {
+      const fs = makeFs();
+      const ansiFatal = '\u001b[31merror: Permission denied\u001b[0m\n';
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr: ansiFatal }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Permission denied'))).toBe(true);
+    });
+
+    it('fatal text on stdout with clean stderr is detected', async () => {
+      const fs = makeFs();
+      const cmd = {
+        run: () => Promise.resolve({
+          code: 1,
+          stdout: 'error: Module not found: ./missing.ts\n',
+          stderr: '',
+        }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
+    });
+
+    it('warning format (not fatal) with non-1 exit is still classified as lint', async () => {
+      const fs = makeFs();
+      // A warning that doesn't match the fatal pattern
+      const output = 'warning: some non-fatal warning\n';
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: output, stderr: '' }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      // Should NOT be treated as fatal - should fall through to ratchet
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(false);
+    });
+
+    it('fatal mixed with zero parseable diagnostics fails', async () => {
+      const fs = makeFs();
+      const stderr = 'error: Fatal error\n';
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      // Should NOT say "below baseline" since there's a fatal
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
+    });
+
+    it('fatal mixed with partial diagnostics fails', async () => {
+      const fs = makeFs();
+      const stderr = 'error: Fatal error\n' +
+        'error[missing-jsdoc]: some diag\n' +
+        '  --> packages/runtime/src/index.ts:5:0\n';
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Fatal error'))).toBe(true);
+    });
+
+    it('fatal mixed with baseline-sized diagnostics still fails', async () => {
+      const fs = makeFs();
+      const lintDiags = Array.from(
+        { length: DOC_LINT_BASELINE },
+        (_, i) =>
+          `error[missing-jsdoc]: diag ${i}
+  --> packages/runtime/src/index.ts:${i + 1}:0`,
+      ).join('\n');
+      const stderr = 'error: Fatal error\n' + lintDiags;
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      // Must NOT pass even though diagnostic count equals baseline
+      expect(result.code).not.toBe(0);
     });
   });
 });

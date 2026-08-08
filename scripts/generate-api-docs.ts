@@ -459,7 +459,13 @@ export async function runApiDocs(
     // - Fatal exit + zero parseable diagnostics → propagate the original error
     // - Fatal exit + partial parseable diagnostics → still fatal (fatal text present)
     // - Normal lint exit (code 0 or 1 with parseable diagnostics) → apply ratchet
-    const hasFatalText = /error:\s/.test(result.stderr);
+    // deno doc --lint may emit fatal errors to either stderr or stdout.
+    // Strip ANSI from both streams before classification so ANSI-coloured
+    // fatal text is still detected.
+    const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
+    const stderrStripped = result.stderr.replace(ansiStripRe, '');
+    const stdoutStripped = result.stdout.replace(ansiStripRe, '');
+    const hasFatalText = /error:\s/.test(stderrStripped) || /error:\s/.test(stdoutStripped);
     const diagnostics = parseDocLintDiagnostics(result.stderr);
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 
