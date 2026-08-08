@@ -1556,7 +1556,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the milestone: `ARCHITECTURE.md` documented `type: https://setu-ts.dev/errors/not-found` while the
   code emitted `.../404`. The `errors` extension keeps `{ field, message, code }` — realigning to
   RFC 9457 §3's illustrated `{ detail, pointer }` was explicitly declined, since `errors[].field` is
-  the most widely consumed part of the validation response) — complete (PR pending)
+  the most widely consumed part of the validation response. Code review then found that **neither
+  package asserted its barrel exports**: dropping `rfc9457Formatter` from the exceptions
+  `src/index.ts` left 18 other tests green — including the integration test and all three starters,
+  which are that barrel's only consumers — plus `deno check`, the 100% per-file coverage bar (a
+  re-export file is fully covered merely by being loaded), and `publish:check`, because every test
+  imported the concrete module rather than the barrel. The M52c defect class. Both packages now
+  carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal Problem
+  Details core does NOT leak into the published surface) — complete (PR #135)
 - **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
   M37c, M54, M55, and M56 have all shipped, closing the last entries on that list.
 
