@@ -20,7 +20,7 @@ import { createStaticHandler } from '../handler/static-handler.ts';
 export function StaticPlugin(options: StaticPluginOptions): IPlugin {
   return {
     name: 'static-plugin',
-    version: '0.1.0-alpha.4',
+    version: '0.1.0-alpha.5',
     provides: [CAPABILITIES.STATIC_FILES],
     register(ctx: IPluginContext): void {
       const { root, urlPrefix = '/' } = options;

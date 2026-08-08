@@ -1,12 +1,12 @@
 {
   "name": "@setu-ts/decorator-plugin",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "license": "MIT",
   "exports": "./src/index.ts",
   "compilerOptions": {
     "experimentalDecorators": true
   },
   "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.4"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.5"
   }
 }
