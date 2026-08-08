@@ -61,6 +61,7 @@
     "release:create-packages": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/create-jsr-packages.ts",
     "release:publish": "deno run --allow-read --allow-env=JSR_TOKEN --allow-net=jsr.io --allow-run=deno scripts/publish-packages.ts",
     "release:link-repos": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE,JSR_REPO_OWNER,JSR_REPO_NAME --allow-net=api.jsr.io scripts/link-jsr-repos.ts",
+    "release:archive-old-scope": "deno run --allow-env=JSR_TOKEN,JSR_API_BASE,JSR_OLD_SCOPE --allow-net=api.jsr.io scripts/archive-old-scope.ts",
     "release:set-metadata": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/set-jsr-metadata.ts",
     "lint": "deno lint",
     "fmt": "deno fmt",
@@ -76,10 +77,14 @@
     "exactOptionalPropertyTypes": true,
     "useUnknownInCatchVariables": true
   },
-  "exclude": ["apps/full-stack/build"],
+  "exclude": [
+    "apps/full-stack/build"
+  ],
   "lint": {
     "rules": {
-      "tags": ["recommended"],
+      "tags": [
+        "recommended"
+      ],
       "include": [
         "no-eval",
         "no-sync-fn-in-async-fn",
@@ -106,6 +111,8 @@
     "@std/testing": "jsr:@std/testing@^1.0.19"
   },
   "publish": {
-    "exclude": ["**/test"]
+    "exclude": [
+      "**/test"
+    ]
   }
 }
