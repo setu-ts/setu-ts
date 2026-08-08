@@ -128,6 +128,14 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
       }
     }
 
+    // Root-relative form of the resolved path. This — never the absolute
+    // filesystem path and never a `.br`/`.gz` sidecar path — is what drives
+    // Cache-Control, so a hashed asset keeps its `immutable` policy whichever
+    // encoding is negotiated, and a user-supplied `cacheControl` function
+    // receives the documented root-relative path rather than the server's
+    // directory layout.
+    const rootRelative = normalizedPath === '/' ? '' : normalizedPath;
+
     // Stat the file
     let stat: StatResult;
     try {
@@ -143,6 +151,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
             if (fallbackStat.isFile) {
               return serveFile(ctx, fs, fallbackPath, fallbackStat, {
                 cacheControl,
+                relativePath: fallback,
                 etag,
                 ranges,
                 maxBufferBytes,
@@ -165,6 +174,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
           if (indexStat.isFile) {
             return serveFile(ctx, fs, indexPath, indexStat, {
               cacheControl,
+              relativePath: rootRelative === '' ? index : `${rootRelative}/${index}`,
               etag,
               ranges,
               maxBufferBytes,
@@ -180,6 +190,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Serve the file
     return serveFile(ctx, fs, fullPath, stat, {
       cacheControl,
+      relativePath: rootRelative,
       etag,
       ranges,
       maxBufferBytes,
@@ -206,6 +217,8 @@ async function serveFile(
   stat: StatResult,
   options: {
     cacheControl?: string | ((relativePath: string) => string) | undefined;
+    /** Root-relative path of the ORIGINAL resource — drives Cache-Control. */
+    relativePath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
     compressed?: boolean | undefined;
@@ -214,6 +227,7 @@ async function serveFile(
 ): Promise<ReturnType<RouteHandler>> {
   const {
     cacheControl,
+    relativePath,
     etag = true,
     ranges = true,
     compressed = true,
@@ -231,7 +245,7 @@ async function serveFile(
     if (shouldReturn304({ etag: true, stat, ifNoneMatch, ifModifiedSince })) {
       const response = ctx.response.status(304).header(
         'Cache-Control',
-        resolveCacheControl(fullPath, { cacheControl }),
+        resolveCacheControl(relativePath, { cacheControl }),
       ).header('Vary', 'Accept-Encoding');
       if (etagValue) {
         response.header('ETag', etagValue);
@@ -254,7 +268,9 @@ async function serveFile(
     });
 
     if (sidecar) {
-      const sidecarStat = await fs.stat(sidecar.path);
+      // `findPrecompressedSidecar` already stat'ed it; re-statting would cost a
+      // second filesystem round trip per compressed request.
+      const sidecarStat = sidecar.stat;
       const sidecarEtag = etag ? computeETag(sidecarStat) : undefined;
 
       // Re-check conditional with sidecar ETag
@@ -263,7 +279,7 @@ async function serveFile(
         if (ifNoneMatch === sidecarEtag || ifNoneMatch === '*') {
           const response = ctx.response
             .status(304)
-            .header('Cache-Control', resolveCacheControl(fullPath, { cacheControl }))
+            .header('Cache-Control', resolveCacheControl(relativePath, { cacheControl }))
             .header('Vary', 'Accept-Encoding');
           response.header('ETag', sidecarEtag);
           response.header('Content-Encoding', sidecar.format);
@@ -273,6 +289,10 @@ async function serveFile(
 
       return serveCompressedFile(ctx, fs, sidecar.path, sidecarStat, sidecar.format, {
         cacheControl,
+        // The ORIGINAL path, so a hashed asset keeps `immutable` when the
+        // brotli variant is negotiated. The sidecar path (`app-a1b2c3d4.js.br`)
+        // never matches the content-hash pattern.
+        relativePath,
         etag,
         ranges,
         maxBufferBytes,
@@ -284,6 +304,7 @@ async function serveFile(
   // Normal file serving
   return serveCompressedFile(ctx, fs, fullPath, stat, undefined, {
     cacheControl,
+    relativePath,
     etag,
     ranges,
     maxBufferBytes,
@@ -321,17 +342,25 @@ async function serveCompressedFile(
   contentEncoding: string | undefined,
   options: {
     cacheControl?: string | ((relativePath: string) => string) | undefined;
+    /** Root-relative path of the ORIGINAL resource — drives Cache-Control. */
+    relativePath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
     maxBufferBytes?: number | undefined;
     contentType?: string | undefined;
   },
 ): Promise<ReturnType<RouteHandler>> {
-  const { cacheControl, etag = true, ranges = true, maxBufferBytes = 1_048_576, contentType } =
-    options;
+  const {
+    cacheControl,
+    relativePath,
+    etag = true,
+    ranges = true,
+    maxBufferBytes = 1_048_576,
+    contentType,
+  } = options;
 
   const fileContentType = contentType ?? contentTypeFor(fullPath);
-  const cacheControlValue = resolveCacheControl(fullPath, { cacheControl });
+  const cacheControlValue = resolveCacheControl(relativePath, { cacheControl });
   const etagValue = etag ? computeETag(stat) : undefined;
 
   // Check Range request
@@ -345,18 +374,22 @@ async function serveCompressedFile(
       const parsedRange = parseRange(rangeHeader, stat.size);
       if (parsedRange) {
         const rangeLength = parsedRange.end - parsedRange.start + 1;
+        const isHead = ctx.request.method === 'HEAD';
 
-        // Read the range
-        let body: Uint8Array | ReadableStream<Uint8Array>;
-        if (fs.readStream && stat.size > maxBufferBytes) {
-          const stream = await fs.readStream(fullPath, {
-            start: parsedRange.start,
-            end: parsedRange.end,
-          });
-          body = stream;
-        } else {
-          const fileBytes = await fs.readFile(fullPath);
-          body = fileBytes.slice(parsedRange.start, parsedRange.end + 1);
+        // Read the range. A HEAD response carries no body, so nothing is opened
+        // for it — opening a stream and then discarding it would hold the file
+        // descriptor open until GC, leaking one per HEAD request.
+        let body: Uint8Array | ReadableStream<Uint8Array> | undefined;
+        if (!isHead) {
+          if (fs.readStream && stat.size > maxBufferBytes) {
+            body = await fs.readStream(fullPath, {
+              start: parsedRange.start,
+              end: parsedRange.end,
+            });
+          } else {
+            const fileBytes = await fs.readFile(fullPath);
+            body = fileBytes.slice(parsedRange.start, parsedRange.end + 1);
+          }
         }
 
         const response = ctx.response
@@ -378,7 +411,7 @@ async function serveCompressedFile(
           response.header('Content-Encoding', contentEncoding);
         }
 
-        if (ctx.request.method === 'HEAD') {
+        if (isHead || body === undefined) {
           return response.send();
         }
 
@@ -410,13 +443,17 @@ async function serveCompressedFile(
     }
   }
 
-  // Full file response
-  let body: Uint8Array | ReadableStream<Uint8Array>;
-  if (fs.readStream && stat.size > maxBufferBytes) {
-    const stream = await fs.readStream(fullPath);
-    body = stream;
-  } else {
-    body = await fs.readFile(fullPath);
+  // Full file response. As on the range path above, a HEAD carries no body, so
+  // nothing is opened for it — otherwise every HEAD on a file larger than
+  // `maxBufferBytes` would leak the descriptor the stream holds.
+  const isHead = ctx.request.method === 'HEAD';
+  let body: Uint8Array | ReadableStream<Uint8Array> | undefined;
+  if (!isHead) {
+    if (fs.readStream && stat.size > maxBufferBytes) {
+      body = await fs.readStream(fullPath);
+    } else {
+      body = await fs.readFile(fullPath);
+    }
   }
 
   const response = ctx.response
@@ -437,7 +474,7 @@ async function serveCompressedFile(
     response.header('Content-Encoding', contentEncoding);
   }
 
-  if (ctx.request.method === 'HEAD') {
+  if (isHead || body === undefined) {
     return response.send();
   }
 

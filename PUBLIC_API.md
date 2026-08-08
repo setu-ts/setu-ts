@@ -8001,12 +8001,25 @@ app.register(StaticPlugin({
 | `IStaticFiles`        | interface | Service interface                   |
 | `StaticPluginOptions` | type      | Plugin options type                 |
 
+`IStaticFiles` declares one method:
+
+```typescript
+serve(ctx: IRequestContext): Promise<HandlerResult>;
+```
+
 ### Notes
 
 - Mounts routes on both `GET` and `HEAD`
 - Conditional requests: `ETag`, `If-None-Match`, `If-Modified-Since` → `304`
 - Range requests: `206` with `Content-Range`, `416` for unsatisfiable
 - Precompressed sidecars: `.br` preferred over `.gz`, ETag from sidecar stat
+- `Cache-Control` is resolved from the **original root-relative** path, never the absolute
+  filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its
+  `immutable` policy whichever encoding is negotiated, and a `cacheControl` function receives the
+  root-relative path (`assets/app.js`, not `/srv/assets/app.js`)
+- A `HEAD` opens no body stream, so it cannot leak a file descriptor on a file above
+  `maxBufferBytes`
+- An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli
 - Workers degradation: registers capability but mounts no route when `fs` is absent
 - Health indicator: reports `up`/`down`/`degraded` based on root directory accessibility
 

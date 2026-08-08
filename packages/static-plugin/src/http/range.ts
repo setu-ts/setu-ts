@@ -66,6 +66,11 @@ export function parseRange(rangeHeader: string, size: number): ParsedRange | nul
     if (isNaN(suffixLength) || suffixLength === 0) {
       return null;
     }
+    // An empty representation cannot satisfy any suffix range; without this the
+    // result would be `{ start: 0, end: -1 }` and emit `Content-Range: bytes 0--1/0`.
+    if (size === 0) {
+      return null;
+    }
     const start = Math.max(0, size - suffixLength);
     return { start, end: size - 1 };
   }

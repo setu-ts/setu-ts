@@ -4,6 +4,7 @@
  * @module
  */
 
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
 import type { IStaticFiles, StaticPluginOptions } from '../interfaces/index.ts';
 import { createStaticHandler } from '../handler/static-handler.ts';
 
@@ -36,12 +37,16 @@ export class StaticFilesService implements IStaticFiles {
   }
 
   /**
-   * Serves a static file at the given path.
+   * Serves the static file addressed by the request context.
+   *
+   * Delegates to the same handler the plugin mounts on `GET`/`HEAD`, so this
+   * entry point and the routes cannot diverge.
    *
    * @param ctx - The request context
-   * @returns A HandlerResult with the file response or error
+   * @returns The handler result for the resolved file
+   * @since 0.1.0
    */
-  serve(ctx: unknown): Promise<unknown> {
-    return this.handler(ctx as Parameters<typeof this.handler>[0]) as Promise<unknown>;
+  serve(ctx: IRequestContext): Promise<HandlerResult> {
+    return Promise.resolve(this.handler(ctx));
   }
 }

@@ -68,16 +68,10 @@ export function shouldReturn304(options: ConditionalOptions): boolean {
     );
   }
 
-  // If-Modified-Since is only valid when If-None-Match is absent
-  // and ETag generation is disabled (or no ETag was computed)
-  if (!etag && ifModifiedSince && stat.mtime) {
-    // Compare at whole-second precision (RFC 7232)
-    const modifiedSince = new Date(ifModifiedSince);
-    const mtimeSeconds = Math.floor(stat.mtime.getTime() / 1000);
-    const sinceSeconds = Math.floor(modifiedSince.getTime() / 1000);
-    return mtimeSeconds <= sinceSeconds;
-  }
-
+  // Reached only when If-None-Match is absent or ETags are disabled, so this
+  // one block covers both cases — an earlier `!etag`-guarded copy was
+  // byte-identical to this one and unreachable in any state this does not
+  // already handle.
   if (ifModifiedSince && stat.mtime) {
     // Compare at whole-second precision (RFC 7232)
     const modifiedSince = new Date(ifModifiedSince);

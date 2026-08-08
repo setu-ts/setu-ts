@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IFileSystem } from '@setu-ts/common';
+import type { HandlerResult, IFileSystem, IRequestContext } from '@setu-ts/common';
 
 /**
  * Options for configuring the StaticPlugin.
@@ -75,10 +75,18 @@ export type StaticPluginOptions = {
  */
 export interface IStaticFiles {
   /**
-   * Serves a static file at the given path.
+   * Serves the static file addressed by the request context, applying the same
+   * conditional-request, Range, and encoding negotiation the mounted routes use
+   * — this and the route handler are one implementation, so both honour the
+   * plugin's configuration identically.
+   *
+   * Answers `404` rather than throwing when the path resolves to nothing, and
+   * when the runtime provides no file system (edge platforms), since a missing
+   * asset is a not-found and not an error.
    *
    * @param ctx - The request context
-   * @returns A HandlerResult with the file response or error
+   * @returns The handler result for the resolved file
+   * @since 0.1.0
    */
-  serve(ctx: unknown): Promise<unknown>;
+  serve(ctx: IRequestContext): Promise<HandlerResult>;
 }

@@ -87,17 +87,15 @@ export function isEncodingAcceptable(acceptEncoding: string, format: string): bo
   const encoding = CONTENT_ENCODINGS[format] ?? format;
   const parsed = parseAcceptEncoding(acceptEncoding);
 
-  // Check for explicit encoding or wildcard
-  for (const { encoding: enc, quality } of parsed) {
-    if (enc === encoding && quality > 0) {
-      return true;
-    }
-    if (enc === '*' && quality > 0) {
-      return true;
-    }
+  // An explicit entry for this encoding always wins over the wildcard, whatever
+  // the quality ordering. `br;q=0, *` REJECTS brotli — scanning in quality order
+  // would hit the wildcard first and wrongly accept it (RFC 9110 §12.5.3).
+  const explicit = parsed.find(({ encoding: enc }) => enc === encoding);
+  if (explicit) {
+    return explicit.quality > 0;
   }
 
-  return false;
+  return parsed.some(({ encoding: enc, quality }) => enc === '*' && quality > 0);
 }
 
 /**
