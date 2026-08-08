@@ -31,10 +31,8 @@ describe('API Documentation Generation', () => {
 
       expect(args).toContain('doc');
       expect(args).toContain('--html');
-      expect(args).toContain('--output');
-      expect(args).toContain('docs/api');
-      expect(args).toContain('--name');
-      expect(args).toContain('Setu-TS');
+      expect(args).toContain('--output=docs/api');
+      expect(args).toContain('--name=Setu-TS');
       expect(args).toContain('packages/common/src/index.ts');
     });
 
