@@ -18,7 +18,8 @@ import type {
   SpanOptions,
   SpanStatus,
 } from '../../src/index.ts';
-import type { RouteSchema, SecurityRequirement } from '../../src/index.ts';
+import type { RouteSchema, RouteSecurityMetadata, SecurityRequirement } from '../../src/index.ts';
+import { SECURITY_METADATA, securityMetadataOf, withSecurityMetadata } from '../../src/index.ts';
 import type {
   BackoffStrategy,
   BulkheadPolicy,
@@ -150,5 +151,17 @@ describe('@setu-ts/common barrel', () => {
     expect(_untouched.security).toBeUndefined();
     expect(_public.security).toEqual([]);
     expect(_protected.security).toEqual([{ bearerAuth: [] }]);
+  });
+
+  it('should export the route security metadata brand', () => {
+    // M56's lesson: a re-export file is "fully covered" merely by being
+    // loaded, so a dropped export leaves every other test green.
+    const _metadata: RouteSecurityMetadata = { authenticated: true };
+    const branded = withSecurityMetadata(async (_ctx, next) => {
+      await next();
+    }, _metadata);
+
+    expect(typeof SECURITY_METADATA).toBe('symbol');
+    expect(securityMetadataOf(branded)).toEqual({ authenticated: true });
   });
 });

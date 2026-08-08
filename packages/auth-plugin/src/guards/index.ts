@@ -5,7 +5,19 @@
  */
 
 import type { IAuthorizationService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, withSecurityMetadata } from '@setu-ts/common';
+import type { RouteSecurityMetadata } from '@setu-ts/common';
+
+/**
+ * Brand for a guard that requires an authenticated principal. Shared and
+ * frozen: `RouteSecurityMetadata` declares its member `readonly`, so one
+ * instance per meaning is consistent with the published type rather than a
+ * mutable object a consumer could legitimately write to.
+ */
+const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true });
+
+/** Brand for a guard that explicitly marks a route public. */
+const PUBLIC: RouteSecurityMetadata = Object.freeze({ authenticated: false });
 
 /**
  * Guard that requires authentication. Returns 401 if no principal.
@@ -18,7 +30,7 @@ import { CAPABILITIES } from '@setu-ts/common';
  * ```
  */
 export function requireAuth(): MiddlewareFunction {
-  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
       await ctx.response.status(401).json({
@@ -29,6 +41,7 @@ export function requireAuth(): MiddlewareFunction {
     }
     await next();
   };
+  return withSecurityMetadata(guard, AUTHENTICATED);
 }
 
 /**
@@ -43,7 +56,7 @@ export function requireAuth(): MiddlewareFunction {
  * ```
  */
 export function requireRole(role: string): MiddlewareFunction {
-  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
       await ctx.response.status(401).json({
@@ -64,6 +77,7 @@ export function requireRole(role: string): MiddlewareFunction {
 
     await next();
   };
+  return withSecurityMetadata(guard, AUTHENTICATED);
 }
 
 /**
@@ -78,7 +92,7 @@ export function requireRole(role: string): MiddlewareFunction {
  * ```
  */
 export function requirePermission(permission: string): MiddlewareFunction {
-  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
       await ctx.response.status(401).json({
@@ -99,6 +113,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
 
     await next();
   };
+  return withSecurityMetadata(guard, AUTHENTICATED);
 }
 
 /**
@@ -113,7 +128,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
  * ```
  */
 export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
-  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
       await ctx.response.status(401).json({
@@ -134,6 +149,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
 
     await next();
   };
+  return withSecurityMetadata(guard, AUTHENTICATED);
 }
 
 /**
@@ -151,7 +167,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
  * ```
  */
 export function requireAllPermissions(permissions: readonly string[]): MiddlewareFunction {
-  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
       await ctx.response.status(401).json({
@@ -172,6 +188,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
 
     await next();
   };
+  return withSecurityMetadata(guard, AUTHENTICATED);
 }
 
 /**
@@ -189,8 +206,9 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
  * ```
  */
 export function publicRoute(): MiddlewareFunction {
-  return async (_ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+  const guard = async (_ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     // Always continue - this route is public
     await next();
   };
+  return withSecurityMetadata(guard, PUBLIC);
 }

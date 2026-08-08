@@ -38,13 +38,14 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option         | Type                             | Default           | Description                                              |
-| -------------- | -------------------------------- | ----------------- | -------------------------------------------------------- |
-| `swagger`      | `boolean`                        | `true`            | Serve the Swagger UI HTML page.                          |
-| `endpoint`     | `string`                         | `'/docs'`         | Path for the Swagger UI page.                            |
-| `specEndpoint` | `string`                         | `'/openapi.json'` | Path for the JSON spec.                                  |
-| `security`     | `readonly SecurityRequirement[]` | —                 | Document-level requirement inherited by every operation. |
-| `exclude`      | `readonly string[]`              | —                 | Router paths to omit; matches the resolved pattern.      |
+| Option           | Type                             | Default           | Description                                                |
+| ---------------- | -------------------------------- | ----------------- | ---------------------------------------------------------- |
+| `swagger`        | `boolean`                        | `true`            | Serve the Swagger UI HTML page.                            |
+| `endpoint`       | `string`                         | `'/docs'`         | Path for the Swagger UI page.                              |
+| `specEndpoint`   | `string`                         | `'/openapi.json'` | Path for the JSON spec.                                    |
+| `security`       | `readonly SecurityRequirement[]` | —                 | Document-level requirement inherited by every operation.   |
+| `deriveSecurity` | `{ scheme: string }`             | —                 | Derive each operation's requirement from its route guards. |
+| `exclude`        | `readonly string[]`              | —                 | Router paths to omit; matches the resolved pattern.        |
 
 The remaining options come from `OpenApiGeneratorOptions` (title, version, servers,
 `securitySchemes`, and the rest of the document metadata).
@@ -80,6 +81,29 @@ app.router.post('/login', { schema: { security: [] }, handler });
 // Inherits the document requirement.
 app.router.get('/todos/:id', { middleware: [requireAuth()], handler });
 ```
+
+### Deriving it from the guards instead
+
+Declaring `security` per route makes the document a second source of truth that can drift from what
+actually enforces. `deriveSecurity` closes that: every guard `@setu-ts/auth-plugin` ships is branded
+with `RouteSecurityMetadata`, and the generator reads the brand off the route's middleware.
+
+```typescript
+OpenApiPlugin({
+  securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+  deriveSecurity: { scheme: 'bearerAuth' },
+});
+
+app.router.get('/todos/:id', { middleware: [requireAuth()], handler }); // → requires bearerAuth
+app.router.post('/login', { middleware: [publicRoute()], handler }); // → public
+```
+
+A declared `schema.security` always wins, so this changes no document that already declares. Three
+limits: only route-level middleware is inspected (`app.middleware.add()` is invisible to a route,
+which is correct for `authMiddleware()` — it populates rather than enforces); roles and permissions
+cannot be expressed, since a requirement names a scheme and none can be inferred from `'admin'`; and
+the scheme name is configured rather than inferred, because a guard cannot know what your document
+calls it.
 
 On a decorated controller, `@Public` produces the same empty `security` array, so the opt-out is
 available without writing a schema:
