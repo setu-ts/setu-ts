@@ -35,12 +35,20 @@ export type ParsedRange = {
 /**
  * Parses a Range header value into a ParsedRange.
  *
+ * Supports single-byte-range forms: `bytes=start-end`, `bytes=start-`, and `bytes=-suffix`.
+ * Multi-range headers (containing commas) return null so callers can fall through to a full 200.
+ *
  * @param rangeHeader - The Range header value
  * @param size - The total file size
- * @returns The parsed range, or null if invalid
+ * @returns The parsed range, or null if invalid or multi-range
  * @since 0.1.0
  */
 export function parseRange(rangeHeader: string, size: number): ParsedRange | null {
+  // Multi-range headers contain a comma and are ignored per RFC 9110 §7.1.6
+  if (rangeHeader.includes(',')) {
+    return null;
+  }
+
   const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
   if (!match) {
     return null;
@@ -73,11 +81,13 @@ export function parseRange(rangeHeader: string, size: number): ParsedRange | nul
   }
 
   const end = parseInt(endStr, 10);
-  if (isNaN(end) || end < start || end >= size) {
+  if (isNaN(end) || end < start) {
     return null;
   }
 
-  return { start, end };
+  // Clamp explicit end beyond EOF when start is satisfiable
+  const clampedEnd = Math.min(end, size - 1);
+  return { start, end: clampedEnd };
 }
 
 /**
@@ -108,7 +118,26 @@ export function isRangeUnsatisfiable(rangeHeader: string, size: number): boolean
 }
 
 /**
+ * Normalizes an ETag for comparison by stripping the weak indicator.
+ *
+ * @param etag - The ETag string
+ * @returns The normalized ETag
+ * @since 0.1.0
+ */
+function normalizeEtagForComparison(etag: string): string {
+  return etag.startsWith('W/') ? etag.slice(2) : etag;
+}
+
+/**
  * Checks if a range request should be honored.
+ *
+ * If-Range semantics per RFC 7233 §3.2:
+ * - If absent, honor the range.
+ * - If present and matches the current ETag, honor the range.
+ * - If present and does not match, serve the full file (200).
+ * - Weak validators in If-Range are NOT honored (RFC 7233): only strong
+ *   tags or date-form values authorize partial content.
+ * - If no ETag is present, If-Range is ignored and the range is honored.
  *
  * @param options - Range options
  * @returns True if the range should be honored
@@ -121,9 +150,21 @@ export function shouldHonourRange(options: RangeOptions): boolean {
     return false;
   }
 
-  // If-Range: if present and doesn't match ETag, serve full file
-  if (ifRange && etag) {
-    return ifRange === etag;
+  // If-Range: if present, must match the current validator
+  if (ifRange) {
+    // If no ETag is present, If-Range is ignored per RFC 7233
+    // "A recipient MUST ignore an If-Range header field received in a request
+    // for a resource that does not have validators"
+    if (!etag) {
+      return true;
+    }
+    // If-Range with a weak tag must NOT authorize partial content (RFC 7233)
+    if (ifRange.startsWith('W/')) {
+      return false;
+    }
+    // If-Range is a strong tag — compare with weak comparison
+    // (a strong If-Range matches both strong and weak ETags)
+    return normalizeEtagForComparison(ifRange) === normalizeEtagForComparison(etag);
   }
 
   return true;

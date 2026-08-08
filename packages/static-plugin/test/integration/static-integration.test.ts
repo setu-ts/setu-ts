@@ -3,6 +3,8 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { StaticPlugin } from '../../src/index.ts';
+import { CAPABILITIES } from '@setu-ts/common';
+import { StaticFilesService } from '../../src/services/static-files-service.ts';
 
 describe('StaticPlugin integration', () => {
   let app: ReturnType<typeof createApplication>;
@@ -64,6 +66,8 @@ describe('StaticPlugin integration', () => {
       }),
     );
     expect(response2.status).toBe(304);
+    expect(response2.headers.get('ETag')).toBe(etag);
+    expect(response2.headers.get('Cache-Control')).toBeDefined();
 
     await app.stop();
   });
@@ -104,5 +108,46 @@ describe('StaticPlugin integration', () => {
     expect(response.status).toBe(200);
 
     await appWithFallback.stop();
+  });
+
+  it('should resolve service through capability token', async () => {
+    await app.start({ port: 0 });
+
+    const service = app.services.get<StaticFilesService>(CAPABILITIES.STATIC_FILES);
+    expect(service).toBeDefined();
+    expect(service).toBeInstanceOf(StaticFilesService);
+    expect(typeof service.serve).toBe('function');
+
+    await app.stop();
+  });
+
+  it('should include Vary: Accept-Encoding on responses', async () => {
+    await app.start({ port: 0 });
+
+    const response = await app.fetch(new Request('http://localhost/test.txt'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Vary')).toBe('Accept-Encoding');
+
+    await app.stop();
+  });
+
+  it('should serve directory index', async () => {
+    const appWithIndex = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        StaticPlugin({
+          root: new URL('../../test/fixtures', import.meta.url).pathname,
+          index: 'index.html',
+        }),
+      ],
+    });
+
+    await appWithIndex.start({ port: 0 });
+
+    const response = await appWithIndex.fetch(new Request('http://localhost/'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('text/html');
+
+    await appWithIndex.stop();
   });
 });

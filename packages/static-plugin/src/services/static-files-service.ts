@@ -18,11 +18,11 @@ export class StaticFilesService implements IStaticFiles {
   /**
    * Creates a new StaticFilesService.
    *
-   * @param options - Plugin options
+   * @param options - Plugin options including the filesystem
    */
   constructor(options: StaticPluginOptions) {
     this.handler = createStaticHandler({
-      fs: {} as never,
+      fs: options.fs!,
       root: options.root,
       urlPrefix: options.urlPrefix ?? '/',
       index: options.index ?? 'index.html',

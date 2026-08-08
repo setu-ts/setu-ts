@@ -20,13 +20,30 @@ import { createStaticHandler } from '../handler/static-handler.ts';
 export function StaticPlugin(options: StaticPluginOptions): IPlugin {
   return {
     name: 'static-plugin',
-    version: '0.1.0',
+    version: '0.1.0-alpha.4',
     provides: [CAPABILITIES.STATIC_FILES],
     register(ctx: IPluginContext): void {
       const { root, urlPrefix = '/' } = options;
 
-      // Create the service
-      const service = new StaticFilesService(options);
+      // Normalize prefix: ensure it starts with / and has no trailing /
+      const normalizedPrefix = urlPrefix === '/'
+        ? '/'
+        : `/${urlPrefix.replace(/^\/+/, '').replace(/\/+$/, '')}`;
+
+      // Create the service with the real filesystem
+      const serviceOptions: StaticPluginOptions = {
+        root,
+        urlPrefix: normalizedPrefix,
+        ...(options.index !== undefined ? { index: options.index } : {}),
+        ...(options.fallback !== undefined ? { fallback: options.fallback } : {}),
+        ...(options.cacheControl !== undefined ? { cacheControl: options.cacheControl } : {}),
+        ...(options.etag !== undefined ? { etag: options.etag } : {}),
+        ...(options.ranges !== undefined ? { ranges: options.ranges } : {}),
+        ...(options.compressed !== undefined ? { compressed: options.compressed } : {}),
+        ...(options.maxBufferBytes !== undefined ? { maxBufferBytes: options.maxBufferBytes } : {}),
+        ...(ctx.runtime.fs !== undefined ? { fs: ctx.runtime.fs } : {}),
+      } as StaticPluginOptions;
+      const service = new StaticFilesService(serviceOptions);
 
       // Register the service
       ctx.services.register(CAPABILITIES.STATIC_FILES, service);
@@ -46,7 +63,7 @@ export function StaticPlugin(options: StaticPluginOptions): IPlugin {
       const handler = createStaticHandler({
         fs: ctx.runtime.fs,
         root,
-        urlPrefix,
+        urlPrefix: normalizedPrefix,
         index: options.index ?? 'index.html',
         fallback: options.fallback,
         cacheControl: options.cacheControl,
@@ -56,9 +73,12 @@ export function StaticPlugin(options: StaticPluginOptions): IPlugin {
         maxBufferBytes: options.maxBufferBytes ?? 1_048_576,
       });
 
-      // Mount on both GET and HEAD
-      ctx.router.get(`${urlPrefix}*`, handler);
-      ctx.router.head(`${urlPrefix}*`, handler);
+      // Mount on both GET and HEAD with exact prefix match.
+      // Use prefix/* pattern so /assets/* matches /assets/test.txt but NOT
+      // /assetstest.txt (prefix-adjacent). For root prefix, use /*.
+      const routePattern = normalizedPrefix === '/' ? '/*' : `${normalizedPrefix}/*`;
+      ctx.router.get(routePattern, handler);
+      ctx.router.head(routePattern, handler);
 
       // Register health indicator
       ctx.health.register('static-files', async () => {

@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { StaticPlugin } from '../../src/index.ts';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -86,5 +86,61 @@ describe('StaticPlugin e2e', () => {
     );
     expect(response.status).toBe(416);
     expect(response.headers.get('Content-Range')).toContain('*/11');
+  });
+
+  it('should return 404 for prefix-adjacent paths', async () => {
+    await app.start({ port: 0 });
+
+    const response = await app.fetch(
+      new Request('http://localhost/testtxt'),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('should serve files through symlink-contained paths', async () => {
+    const linkDir = join(tmpDir, 'links');
+    await mkdir(linkDir, { recursive: true });
+    // Create a symlink to the root
+    await symlink(tmpDir, join(linkDir, 'root-link'));
+
+    await app.start({ port: 0 });
+
+    // Request through the symlink should be contained
+    const response = await app.fetch(
+      new Request('http://localhost/test.txt'),
+    );
+    expect(response.status).toBe(200);
+
+    await app.stop();
+  });
+
+  it('should reject symlink escape attempts', async () => {
+    const linkDir = join(tmpDir, 'links');
+    await mkdir(linkDir, { recursive: true });
+    // Create a symlink pointing outside the root
+    const outsideDir = join(tmpdir(), `static-outside-${randomUUID()}`);
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(join(outsideDir, 'secret.txt'), 'secret');
+    await symlink(outsideDir, join(linkDir, 'outside-link'));
+
+    const appWithSymlink = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        StaticPlugin({ root: linkDir }),
+      ],
+    });
+
+    await appWithSymlink.start({ port: 0 });
+
+    // Try to access the symlinked directory
+    const response = await appWithSymlink.fetch(
+      new Request('http://localhost/outside-link/secret.txt'),
+    );
+    // Should be 404 due to containment check
+    expect(response.status).toBe(404);
+
+    await appWithSymlink.stop();
+    const { rm } = await import('node:fs/promises');
+    await rm(outsideDir, { recursive: true, force: true }).catch(() => {});
   });
 });

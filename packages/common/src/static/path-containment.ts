@@ -32,6 +32,15 @@ export function isLexicallyContained(relativePath: string): boolean {
     return false;
   }
 
+  // Reject percent-encoded traversal. Callers decode once before reaching here,
+  // so a surviving `%2e`/`%2f`/`%5c` means the input was DOUBLE encoded
+  // (`%252e%252e` -> `%2e%2e`), which the raw `..` check above cannot see. A
+  // legitimate filename containing these sequences is pathological; refusing
+  // them is the safe trade.
+  if (/%(2e|2f|5c)/i.test(relativePath)) {
+    return false;
+  }
+
   // Reject absolute paths
   if (relativePath.startsWith('/') || relativePath.startsWith('\\')) {
     return false;

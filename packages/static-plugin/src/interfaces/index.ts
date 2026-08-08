@@ -4,6 +4,8 @@
  * @module
  */
 
+import type { IFileSystem } from '@setu-ts/common';
+
 /**
  * Options for configuring the StaticPlugin.
  *
@@ -14,6 +16,11 @@ export type StaticPluginOptions = {
    * Required. The filesystem directory to serve files from.
    */
   root: string;
+
+  /**
+   * The filesystem to use for file operations.
+   */
+  fs?: IFileSystem;
 
   /**
    * URL prefix for static routes (default: '/').

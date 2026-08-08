@@ -13,6 +13,10 @@
 import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
 import { hostname as osHostname } from 'node:os';
 import * as nodeFs from 'node:fs/promises';
+// `createReadStream` lives in `node:fs`, NOT `node:fs/promises` — the promises
+// module exports no such function, so binding the default `fs` module to
+// `nodeFs` alone leaves `readStream` permanently unable to open a stream.
+import { createReadStream as nodeCreateReadStream } from 'node:fs';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 import { createNodeWorkerHost } from './node-worker-host.ts';
@@ -121,7 +125,14 @@ export interface NodeFsInfo {
  * @returns A fully-wired NodeHost
  */
 export function buildNodeHost(
-  mods: NodeModules = { fs: nodeFs, proc: process, hostname: osHostname },
+  mods: NodeModules = {
+    // `createReadStream` is merged in from `node:fs` because `node:fs/promises`
+    // does not export it. Without this the default host resolves it to
+    // `undefined` and every `readStream` call throws.
+    fs: Object.assign({}, nodeFs, { createReadStream: nodeCreateReadStream }),
+    proc: process,
+    hostname: osHostname,
+  },
 ): NodeHost {
   return {
     nodeVersion: mods.proc.version,

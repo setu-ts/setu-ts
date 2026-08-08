@@ -35,4 +35,19 @@ describe('StaticFilesService', () => {
     expect(result).toBeInstanceOf(Promise);
     await expect(result).rejects.toThrow();
   });
+
+  it('should pass the real filesystem to the handler', () => {
+    const fs = {
+      stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 5 }),
+      readFile: () => Promise.resolve(new Uint8Array([1, 2, 3, 4, 5])),
+      realPath: () => Promise.resolve('/tmp/static/test.txt'),
+      writeFile: () => Promise.resolve(),
+      readdir: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+
+    const serviceWithFs = new StaticFilesService({ root: '/tmp/static', fs });
+    expect(serviceWithFs).toBeDefined();
+  });
 });

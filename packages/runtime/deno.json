@@ -12,10 +12,14 @@
   },
   "test": {
     "permissions": {
-      "sys": ["hostname", "cpus"],
+      "sys": [
+        "hostname",
+        "cpus"
+      ],
       "net": true,
       "env": true,
-      "read": true
+      "read": true,
+      "write": true
     }
   }
 }

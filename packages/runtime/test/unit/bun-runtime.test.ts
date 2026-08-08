@@ -417,3 +417,97 @@ describe('buildBunHost — the default host', () => {
     expect(host.version).toBe('v22.0.0');
   });
 });
+
+describe('Bun runtime readStream branches', () => {
+  it('throws a named error when the host exposes no createReadStream', async () => {
+    // Absent, not `undefined` — `exactOptionalPropertyTypes` distinguishes them.
+    const host: BunHost = { ...createFakeBunHost() };
+    delete (host as { createReadStream?: unknown }).createReadStream;
+    const fs = createBunRuntimeServices(host).fs;
+
+    await expect(fs!.readStream!('/tmp/whatever')).rejects.toThrow(
+      'readStream not supported on this Bun version',
+    );
+  });
+
+  it('throws when the host cannot open the path', async () => {
+    const fs = createBunRuntimeServices(
+      createFakeBunHost({ createReadStream: () => null }),
+    ).fs;
+
+    await expect(fs!.readStream!('/tmp/missing')).rejects.toThrow(
+      'Failed to create read stream',
+    );
+  });
+
+  it('converts an injected Node Readable into a web stream', async () => {
+    const { Readable } = await import('node:stream');
+    const fs = createBunRuntimeServices(
+      createFakeBunHost({
+        createReadStream: () => Readable.from([new Uint8Array([4, 5])]) as never,
+      }),
+    ).fs;
+
+    const stream = await fs!.readStream!('/tmp/injected');
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    expect(Array.from(chunks[0]!)).toEqual([4, 5]);
+  });
+});
+
+describe('buildBunHost createReadStream wiring', () => {
+  it('returns null when the injected fs module exposes no createReadStream', () => {
+    const mods: BunModules = {
+      fs: {
+        readFileSync: () => new Uint8Array(),
+        realpathSync: (p: string) => p,
+        writeFileSync: () => {},
+        statSync: () => ({
+          isFile: () => true,
+          isDirectory: () => false,
+          size: 0,
+          mtime: new Date(),
+        }),
+        readdirSync: () => [],
+        mkdirSync: () => undefined,
+        rmSync: () => {},
+      },
+      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never },
+      hostname: () => 'h',
+      bunGlobal: { version: '1.1.0' },
+    };
+
+    // The `?.` short-circuit: no underlying function, so the host member must
+    // report null rather than throwing a TypeError.
+    expect(buildBunHost(mods).createReadStream!('/tmp/x')).toBe(null);
+  });
+
+  it('returns null when the underlying createReadStream throws', () => {
+    const mods: BunModules = {
+      fs: {
+        readFileSync: () => new Uint8Array(),
+        realpathSync: (p: string) => p,
+        writeFileSync: () => {},
+        statSync: () => ({
+          isFile: () => true,
+          isDirectory: () => false,
+          size: 0,
+          mtime: new Date(),
+        }),
+        readdirSync: () => [],
+        mkdirSync: () => undefined,
+        rmSync: () => {},
+        createReadStream: () => {
+          throw new Error('ENOENT');
+        },
+      },
+      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never },
+      hostname: () => 'h',
+      bunGlobal: { version: '1.1.0' },
+    };
+
+    expect(buildBunHost(mods).createReadStream!('/tmp/x')).toBe(null);
+  });
+});

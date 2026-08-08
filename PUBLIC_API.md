@@ -64,7 +64,8 @@
 55. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
 56. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
 57. [GraphQL](#graphql)
-58. [Summary](#summary)
+58. [Static Files Plugin](#static-files-plugin)
+59. [Summary](#summary)
 
 ---
 

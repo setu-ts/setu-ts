@@ -41,26 +41,70 @@ export type PrecompressedOptions = {
 };
 
 /**
+ * Parses Accept-Encoding header into a list of encoding preferences with quality values.
+ *
+ * Handles:
+ * - Wildcard `*` (matches any encoding)
+ * - Quality values (`gzip;q=0.5`, `br;q=1.0`)
+ * - Identity `identity` (explicitly requested)
+ * - Multiple comma-separated values
+ *
+ * @param acceptEncoding - The Accept-Encoding header value
+ * @returns Array of { encoding, quality } sorted by quality descending
+ * @since 0.1.0
+ */
+export function parseAcceptEncoding(
+  acceptEncoding: string,
+): Array<{ encoding: string; quality: number }> {
+  return acceptEncoding
+    .split(',')
+    .map((e) => e.trim())
+    .filter((e) => e !== '')
+    .map((e) => {
+      const parts = e.split(';');
+      const encoding = parts[0].trim().toLowerCase();
+      let quality = 1.0;
+      for (const part of parts.slice(1)) {
+        const qMatch = /^q\s*=\s*([0-9]*\.?[0-9]+)$/.exec(part.trim());
+        if (qMatch) {
+          quality = parseFloat(qMatch[1]);
+        }
+      }
+      return { encoding, quality };
+    })
+    .sort((a, b) => b.quality - a.quality);
+}
+
+/**
  * Checks if a compression format is acceptable based on Accept-Encoding.
  *
  * @param acceptEncoding - The Accept-Encoding header value
- * @param format - The compression format to check
+ * @param format - The compression format to check ('br' or 'gz')
  * @returns True if the format is acceptable
  * @since 0.1.0
  */
 export function isEncodingAcceptable(acceptEncoding: string, format: string): boolean {
   const encoding = CONTENT_ENCODINGS[format] ?? format;
-  const encodings = acceptEncoding
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter((e) => e !== '');
+  const parsed = parseAcceptEncoding(acceptEncoding);
 
-  // Check for the specific encoding or wildcard
-  return encodings.includes(encoding) || encodings.includes('*');
+  // Check for explicit encoding or wildcard
+  for (const { encoding: enc, quality } of parsed) {
+    if (enc === encoding && quality > 0) {
+      return true;
+    }
+    if (enc === '*' && quality > 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
  * Finds the best available precompressed sidecar for a file.
+ *
+ * Probes sidecars in preference order (.br first, then .gz) and returns the
+ * first one whose encoding is acceptable per Accept-Encoding.
  *
  * @param options - Precompressed options
  * @returns The sidecar path and format, or null if none found

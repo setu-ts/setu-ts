@@ -72,12 +72,45 @@ describe('shouldReturn304', () => {
     expect(result).toBe(false);
   });
 
-  it('should return false when etag is disabled', () => {
+  it('should return false when etag is disabled and If-None-Match is present', () => {
     const result = shouldReturn304({
       stat,
       etag: false,
       ifNoneMatch: 'W/"100-1704067200000"',
     });
     expect(result).toBe(false);
+  });
+
+  it('should evaluate If-Modified-Since independently when etag is disabled', () => {
+    const result = shouldReturn304({
+      stat,
+      etag: false,
+      ifModifiedSince: '2024-06-01T00:00:00.000Z',
+    });
+    expect(result).toBe(true);
+  });
+
+  it('should use weak comparison for If-None-Match', () => {
+    // Strong tag should match weak tag
+    const result = shouldReturn304({
+      stat,
+      ifNoneMatch: '"100-1704067200000"',
+    });
+    expect(result).toBe(true);
+  });
+
+  it('should compare at whole-second precision', () => {
+    const statWithMs = {
+      isFile: true,
+      isDirectory: false,
+      size: 100,
+      mtime: new Date('2024-01-01T00:00:00.999Z'),
+    };
+    // The .999 should be truncated to whole seconds for comparison
+    const result = shouldReturn304({
+      stat: statWithMs,
+      ifModifiedSince: '2024-01-01T00:00:01.000Z',
+    });
+    expect(result).toBe(true);
   });
 });

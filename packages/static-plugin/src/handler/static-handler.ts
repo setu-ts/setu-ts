@@ -45,6 +45,18 @@ export type StaticHandlerOptions = {
 };
 
 /**
+ * Normalizes a URL prefix to the canonical form: starts with '/', no trailing '/'.
+ *
+ * @param prefix - The raw prefix from user options
+ * @returns The normalized prefix
+ * @since 0.1.0
+ */
+export function normalizePrefix(prefix: string): string {
+  const stripped = prefix.replace(/^\/+/, '').replace(/\/+$/, '');
+  return stripped === '' ? '/' : `/${stripped}`;
+}
+
+/**
  * Creates a static file RouteHandler.
  *
  * @param options - Handler options
@@ -65,6 +77,9 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     maxBufferBytes = 1_048_576,
   } = options;
 
+  // Normalize prefix once at handler creation time
+  const normalizedPrefix = normalizePrefix(urlPrefix);
+
   return async (ctx) => {
     // Decode the URL path
     let decodedPath: string;
@@ -74,9 +89,14 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
       return ctx.response.status(400).send(new TextEncoder().encode('Bad Request'));
     }
 
-    // Strip the URL prefix
-    const relativePath = decodedPath.startsWith(urlPrefix)
-      ? decodedPath.slice(urlPrefix.length)
+    // Strip the URL prefix — must match exactly, not prefix-adjacent
+    // For non-root prefixes, the path must start with prefix/ (with trailing slash)
+    // to avoid matching /assetstest.txt when prefix is /assets
+    const prefixWithSlash = normalizedPrefix === '/' ? '/' : `${normalizedPrefix}/`;
+    const relativePath = decodedPath === normalizedPrefix
+      ? '/'
+      : decodedPath.startsWith(prefixWithSlash)
+      ? decodedPath.slice(prefixWithSlash.length)
       : decodedPath;
 
     // Normalize the path
@@ -209,11 +229,17 @@ async function serveFile(
     const ifModifiedSince = ctx.request.headers.get('If-Modified-Since') ?? undefined;
 
     if (shouldReturn304({ etag: true, stat, ifNoneMatch, ifModifiedSince })) {
-      return ctx.response
-        .status(304)
-        .header('ETag', etagValue)
-        .header('Cache-Control', resolveCacheControl(fullPath, { cacheControl }))
-        .send();
+      const response = ctx.response.status(304).header(
+        'Cache-Control',
+        resolveCacheControl(fullPath, { cacheControl }),
+      ).header('Vary', 'Accept-Encoding');
+      if (etagValue) {
+        response.header('ETag', etagValue);
+      }
+      if (stat.mtime) {
+        response.header('Last-Modified', formatHttpDate(stat.mtime));
+      }
+      return response.send();
     }
   }
 
@@ -235,13 +261,13 @@ async function serveFile(
       if (etag && sidecarEtag) {
         const ifNoneMatch = ctx.request.headers.get('If-None-Match') ?? undefined;
         if (ifNoneMatch === sidecarEtag || ifNoneMatch === '*') {
-          return ctx.response
+          const response = ctx.response
             .status(304)
-            .header('ETag', sidecarEtag)
-            .header('Content-Encoding', sidecar.format)
-            .header('Vary', 'Accept-Encoding')
             .header('Cache-Control', resolveCacheControl(fullPath, { cacheControl }))
-            .send();
+            .header('Vary', 'Accept-Encoding');
+          response.header('ETag', sidecarEtag);
+          response.header('Content-Encoding', sidecar.format);
+          return response.send();
         }
       }
 
@@ -262,6 +288,17 @@ async function serveFile(
     ranges,
     maxBufferBytes,
   });
+}
+
+/**
+ * Formats a Date as an HTTP-date string (RFC 7231).
+ *
+ * @param date - The date to format
+ * @returns The HTTP-date string
+ * @since 0.1.0
+ */
+export function formatHttpDate(date: Date): string {
+  return date.toUTCString();
 }
 
 /**
@@ -328,17 +365,17 @@ async function serveCompressedFile(
           .header('Content-Range', formatContentRange(parsedRange, stat.size))
           .header('Content-Length', rangeLength.toString())
           .header('Accept-Ranges', 'bytes')
-          .header('Cache-Control', cacheControlValue);
+          .header('Cache-Control', cacheControlValue)
+          .header('Vary', 'Accept-Encoding');
 
         if (etagValue) {
           response.header('ETag', etagValue);
         }
         if (stat.mtime) {
-          response.header('Last-Modified', stat.mtime.toUTCString());
+          response.header('Last-Modified', formatHttpDate(stat.mtime));
         }
         if (contentEncoding) {
           response.header('Content-Encoding', contentEncoding);
-          response.header('Vary', 'Accept-Encoding');
         }
 
         if (ctx.request.method === 'HEAD') {
@@ -355,11 +392,18 @@ async function serveCompressedFile(
       // or unsatisfiable (e.g. start >= size): serve full file per RFC 9110.
       if (parsedRange === null) {
         if (isRangeUnsatisfiable(rangeHeader!, stat.size)) {
-          return ctx.response
+          const response = ctx.response
             .status(416)
             .header('Content-Range', `bytes */${stat.size}`)
             .header('Cache-Control', cacheControlValue)
-            .send();
+            .header('Vary', 'Accept-Encoding');
+          if (etagValue) {
+            response.header('ETag', etagValue);
+          }
+          if (stat.mtime) {
+            response.header('Last-Modified', formatHttpDate(stat.mtime));
+          }
+          return response.send();
         }
         // Continue to full-file response below.
       }
@@ -380,17 +424,17 @@ async function serveCompressedFile(
     .header('Content-Type', fileContentType)
     .header('Content-Length', stat.size.toString())
     .header('Accept-Ranges', 'bytes')
-    .header('Cache-Control', cacheControlValue);
+    .header('Cache-Control', cacheControlValue)
+    .header('Vary', 'Accept-Encoding');
 
   if (etagValue) {
     response.header('ETag', etagValue);
   }
   if (stat.mtime) {
-    response.header('Last-Modified', stat.mtime.toUTCString());
+    response.header('Last-Modified', formatHttpDate(stat.mtime));
   }
   if (contentEncoding) {
     response.header('Content-Encoding', contentEncoding);
-    response.header('Vary', 'Accept-Encoding');
   }
 
   if (ctx.request.method === 'HEAD') {

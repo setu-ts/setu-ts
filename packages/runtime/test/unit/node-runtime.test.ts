@@ -416,3 +416,87 @@ describe('createNodeRuntimeServices with default host', () => {
     expect(typeof services.env).toBe('object');
   });
 });
+
+describe('Node runtime readStream branches', () => {
+  it('throws a named error when the host exposes no createReadStream', async () => {
+    // The member must be ABSENT, not `undefined` — `exactOptionalPropertyTypes`
+    // makes those different things, and the guard tests for absence.
+    const host: NodeHost = { ...buildNodeHost(createFakeNodeModules()) };
+    delete (host as { createReadStream?: unknown }).createReadStream;
+    const fs = createNodeRuntimeServices(host).fs;
+
+    await expect(fs!.readStream!('/tmp/whatever')).rejects.toThrow(
+      'readStream not supported on this Node.js version',
+    );
+  });
+
+  it('throws when the host yields no stream for the path', async () => {
+    // A host that HAS the member but cannot open the path — `buildNodeHost`
+    // maps a missing underlying `createReadStream` to null the same way.
+    const host = buildNodeHost(createFakeNodeModules());
+    const fs = createNodeRuntimeServices({ ...host, createReadStream: () => null }).fs;
+
+    await expect(fs!.readStream!('/tmp/missing')).rejects.toThrow(
+      'Failed to create read stream',
+    );
+  });
+
+  it('converts an injected Node Readable into a web stream', async () => {
+    const { Readable } = await import('node:stream');
+    const host = buildNodeHost(createFakeNodeModules());
+    const fs = createNodeRuntimeServices({
+      ...host,
+      createReadStream: () => Readable.from([new Uint8Array([7, 8, 9])]) as never,
+    }).fs;
+
+    const stream = await fs!.readStream!('/tmp/injected');
+    expect(stream).toBeInstanceOf(ReadableStream);
+
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    expect(Array.from(chunks[0]!)).toEqual([7, 8, 9]);
+  });
+
+  it('passes range options straight through to the host', async () => {
+    const { Readable } = await import('node:stream');
+    let seen: { start?: number; end?: number } | undefined;
+    const host = buildNodeHost(createFakeNodeModules());
+    const fs = createNodeRuntimeServices({
+      ...host,
+      createReadStream: (_path: string, options?: { start?: number; end?: number }) => {
+        seen = options;
+        return Readable.from([new Uint8Array([1])]) as never;
+      },
+    }).fs;
+
+    await fs!.readStream!('/tmp/ranged', { start: 5, end: 9 });
+    expect(seen).toEqual({ start: 5, end: 9 });
+  });
+});
+
+describe('buildNodeHost createReadStream wiring', () => {
+  it('returns null when the injected fs module exposes no createReadStream', () => {
+    const mods = createFakeNodeModules();
+    // The `?.` short-circuit. This is the shape `node:fs/promises` actually has
+    // — it exports no `createReadStream` — so the host member must report null
+    // rather than throwing a TypeError.
+    delete (mods.fs as { createReadStream?: unknown }).createReadStream;
+
+    expect(buildNodeHost(mods).createReadStream!('/tmp/x')).toBe(null);
+  });
+
+  it('delegates to the injected fs module when it does expose one', () => {
+    let seen: string | undefined;
+    const mods = createFakeNodeModules();
+    (mods.fs as { createReadStream?: unknown }).createReadStream = (p: string) => {
+      seen = p;
+      return { marker: true };
+    };
+
+    const result = buildNodeHost(mods).createReadStream!('/tmp/delegated');
+    expect(seen).toBe('/tmp/delegated');
+    expect(result).toEqual({ marker: true });
+  });
+});

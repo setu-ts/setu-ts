@@ -1,7 +1,25 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createStaticHandler } from '../../src/handler/static-handler.ts';
+import { createStaticHandler, normalizePrefix } from '../../src/handler/static-handler.ts';
 import type { RouteHandler } from '@setu-ts/common';
+
+describe('normalizePrefix', () => {
+  it('should normalize default prefix', () => {
+    expect(normalizePrefix('/')).toBe('/');
+  });
+
+  it('should normalize prefix without leading slash', () => {
+    expect(normalizePrefix('assets')).toBe('/assets');
+  });
+
+  it('should normalize prefix with trailing slash', () => {
+    expect(normalizePrefix('/assets/')).toBe('/assets');
+  });
+
+  it('should normalize prefix with multiple slashes', () => {
+    expect(normalizePrefix('///assets///')).toBe('/assets');
+  });
+});
 
 describe('createStaticHandler', () => {
   let fs: ReturnType<typeof createFakeFs>;
@@ -388,14 +406,13 @@ describe('createStaticHandler', () => {
 
   it('should return 200 with ETag and Last-Modified when mtime is present', async () => {
     const content = new TextEncoder().encode('hello world');
-    const mtime = new Date('2024-01-01T00:00:00.000Z');
     await fs.writeFile('/root/test.txt', content);
     // Update the stat to include mtime
     fs.stats.set('/root/test.txt', {
       isFile: true,
       isDirectory: false,
       size: 11,
-      mtime,
+      mtime: new Date('2024-01-01T00:00:00.000Z'),
     });
 
     const handler = createStaticHandler({
@@ -590,5 +607,83 @@ describe('createStaticHandler', () => {
     expect(ctx.response._status).toBe(206);
     expect(ctx.response._body).toEqual(new Uint8Array());
     expect(ctx.response._headers.get('Content-Length')).toBe('100');
+  });
+
+  it('should reject prefix-adjacent paths for non-default prefix', async () => {
+    const content = new TextEncoder().encode('hello');
+    await fs.writeFile('/root/test.txt', content);
+    fs.stats.set('/root/test.txt', { isFile: true, isDirectory: false, size: 5 });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/assets',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    // /assetstest.txt should NOT match /assets prefix
+    ctx.request.path = '/assetstest.txt';
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(404);
+  });
+
+  it('should serve file under exact prefix match', async () => {
+    const content = new TextEncoder().encode('hello');
+    await fs.writeFile('/root/test.txt', content);
+    fs.stats.set('/root/test.txt', { isFile: true, isDirectory: false, size: 5 });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/assets',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/assets/test.txt';
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+  });
+
+  it('should include Vary: Accept-Encoding on all 200 responses', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Vary')).toBe('Accept-Encoding');
+  });
+
+  it('should include Vary: Accept-Encoding on 304 responses', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('If-None-Match', 'W/"11"');
+    const result = await handler(ctx as never);
+
+    expect(result).toBeDefined();
+    expect(ctx.response._status).toBe(304);
+    expect(ctx.response._headers.get('Vary')).toBe('Accept-Encoding');
   });
 });

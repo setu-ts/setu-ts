@@ -53,8 +53,13 @@ describe('parseRange', () => {
     expect(result).toBeNull();
   });
 
-  it('should return null when end equals size', () => {
-    const result = parseRange('bytes=0-1000', 1000);
+  it('should clamp end beyond EOF when start is satisfiable', () => {
+    const result = parseRange('bytes=0-2000', 1000);
+    expect(result).toEqual({ start: 0, end: 999 });
+  });
+
+  it('should return null when start equals size', () => {
+    const result = parseRange('bytes=1000-2000', 1000);
     expect(result).toBeNull();
   });
 });
@@ -85,12 +90,12 @@ describe('shouldHonourRange', () => {
     expect(result).toBe(false);
   });
 
-  it('should return true when If-Range matches ETag', () => {
+  it('should return true when If-Range matches ETag (strong)', () => {
     const result = shouldHonourRange({
       size: 1000,
       rangeHeader: 'bytes=0-99',
-      ifRange: 'W/"100"',
-      etag: 'W/"100"',
+      ifRange: '"100"',
+      etag: '"100"',
     });
     expect(result).toBe(true);
   });
@@ -108,6 +113,27 @@ describe('shouldHonourRange', () => {
       size: 1000,
       rangeHeader: 'bytes=0-99',
       ifRange: 'W/"different"',
+    });
+    expect(result).toBe(true);
+  });
+
+  it('should reject weak If-Range tags (RFC 7233)', () => {
+    const result = shouldHonourRange({
+      size: 1000,
+      rangeHeader: 'bytes=0-99',
+      ifRange: 'W/"100"',
+      etag: 'W/"100"',
+    });
+    // Weak tag in If-Range must NOT authorize partial content
+    expect(result).toBe(false);
+  });
+
+  it('should accept strong If-Range tags against weak ETag', () => {
+    const result = shouldHonourRange({
+      size: 1000,
+      rangeHeader: 'bytes=0-99',
+      ifRange: '"100"',
+      etag: 'W/"100"',
     });
     expect(result).toBe(true);
   });
@@ -159,7 +185,6 @@ describe('isRangeUnsatisfiable', () => {
   });
 
   it('should return true for empty range (bytes=-)', () => {
-    // bytes=- matches the regex but parseRange returns null (both start and end empty)
     const result = isRangeUnsatisfiable('bytes=-', 1000);
     expect(result).toBe(true);
   });

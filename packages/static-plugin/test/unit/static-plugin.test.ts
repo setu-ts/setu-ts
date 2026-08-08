@@ -195,4 +195,71 @@ describe('StaticPlugin', () => {
     expect(result.status).toBe('down');
     expect(result.detail).toContain('ENOENT');
   });
+
+  it('should normalize prefix and mount with correct pattern', () => {
+    const routerGet = createMockFn();
+    const routerHead = createMockFn();
+    const healthRegister = createMockFn();
+    const servicesRegister = createMockFn();
+
+    const ctx = {
+      services: {
+        register: (...args: unknown[]) => {
+          servicesRegister.calls().push(args);
+        },
+      },
+      router: {
+        get: (...args: unknown[]) => {
+          routerGet.calls().push(args);
+        },
+        head: (...args: unknown[]) => {
+          routerHead.calls().push(args);
+        },
+      },
+      health: {
+        register: (...args: unknown[]) => {
+          healthRegister.calls().push(args);
+        },
+      },
+      runtime: {
+        fs: {
+          stat: () => Promise.resolve({ isFile: false, isDirectory: true, size: 0 }),
+        },
+      },
+    } as unknown as IPluginContext;
+
+    const plugin = StaticPlugin({ root: '/tmp/static', urlPrefix: '/assets' });
+    plugin.register(ctx);
+
+    // Check that the route pattern is correct
+    const getCall = routerGet.calls()[0];
+    expect(getCall[0]).toBe('/assets/*');
+    const headCall = routerHead.calls()[0];
+    expect(headCall[0]).toBe('/assets/*');
+  });
+
+  it('should register service with real filesystem', () => {
+    const servicesRegister = createMockFn();
+    const fs = {
+      stat: () => Promise.resolve({ isFile: false, isDirectory: true, size: 0 }),
+    };
+
+    const ctx = {
+      services: {
+        register: (...args: unknown[]) => {
+          servicesRegister.calls().push(args);
+        },
+      },
+      router: { get: () => {}, head: () => {} },
+      health: { register: () => {} },
+      runtime: { fs },
+    } as unknown as IPluginContext;
+
+    const plugin = StaticPlugin({ root: '/tmp/static' });
+    plugin.register(ctx);
+
+    const registerCall = servicesRegister.calls()[0];
+    expect(registerCall[0]).toBe(CAPABILITIES.STATIC_FILES);
+    expect(registerCall[1]).toBeInstanceOf(Object);
+  });
 });

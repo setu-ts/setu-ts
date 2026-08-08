@@ -40,6 +40,10 @@ export function computeETag(stat: StatResult): string {
 /**
  * Checks if a conditional request should result in a 304 Not Modified.
  *
+ * If-None-Match takes precedence over If-Modified-Since per RFC 9110 §13.1.3.
+ * If-Modified-Since is evaluated independently when ETag generation is disabled
+ * and only when If-None-Match is absent.
+ *
  * @param options - Conditional request options
  * @returns True if the response should be 304
  * @since 0.1.0
@@ -49,19 +53,37 @@ export function shouldReturn304(options: ConditionalOptions): boolean {
 
   // If-None-Match takes precedence over If-Modified-Since (RFC 9110 §13.1.3)
   if (etag && ifNoneMatch) {
-    const etag = computeETag(stat);
-    // Handle wildcard and multiple values
+    const computedEtag = computeETag(stat);
+    // Handle wildcard and multiple values with weak comparison
     if (ifNoneMatch === '*') {
       return true;
     }
     const ifNoneMatchValues = ifNoneMatch.split(',').map((v) => v.trim());
-    return ifNoneMatchValues.includes(etag);
+    // Weak comparison: strip weak validator indicator if present
+    const normalizeForComparison = (tag: string): string =>
+      tag.startsWith('W/"') ? `"${tag.slice(3, -1)}"` : tag;
+    const normalizedComputed = normalizeForComparison(computedEtag);
+    return ifNoneMatchValues.some(
+      (v) => normalizeForComparison(v) === normalizedComputed,
+    );
+  }
+
+  // If-Modified-Since is only valid when If-None-Match is absent
+  // and ETag generation is disabled (or no ETag was computed)
+  if (!etag && ifModifiedSince && stat.mtime) {
+    // Compare at whole-second precision (RFC 7232)
+    const modifiedSince = new Date(ifModifiedSince);
+    const mtimeSeconds = Math.floor(stat.mtime.getTime() / 1000);
+    const sinceSeconds = Math.floor(modifiedSince.getTime() / 1000);
+    return mtimeSeconds <= sinceSeconds;
   }
 
   if (ifModifiedSince && stat.mtime) {
+    // Compare at whole-second precision (RFC 7232)
     const modifiedSince = new Date(ifModifiedSince);
-    // If-Modified-Since is only valid when If-None-Match is absent
-    return stat.mtime.getTime() <= modifiedSince.getTime();
+    const mtimeSeconds = Math.floor(stat.mtime.getTime() / 1000);
+    const sinceSeconds = Math.floor(modifiedSince.getTime() / 1000);
+    return mtimeSeconds <= sinceSeconds;
   }
 
   return false;

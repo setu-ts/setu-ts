@@ -18,6 +18,7 @@
 
 import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
 import {
+  createReadStream,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -160,9 +161,14 @@ export function createBunRuntimeServices(
       path: string,
       options?: { readonly start?: number; readonly end?: number },
     ): Promise<ReadableStream<Uint8Array>> => {
-      const { createReadStream } = await import('node:fs');
+      if (!host.createReadStream) {
+        throw new Error('readStream not supported on this Bun version');
+      }
+      const stream = host.createReadStream!(path, options);
+      if (stream === null) {
+        throw new Error('Failed to create read stream');
+      }
       const { Readable } = await import('node:stream');
-      const stream = createReadStream(path, options);
       const web = Readable.toWeb(stream as never);
       return web as ReadableStream<Uint8Array>;
     },
@@ -236,7 +242,16 @@ export interface BunModules {
  */
 export function buildBunHost(
   mods: BunModules = {
-    fs: { readFileSync, realpathSync, writeFileSync, statSync, readdirSync, mkdirSync, rmSync },
+    fs: {
+      readFileSync,
+      realpathSync,
+      writeFileSync,
+      statSync,
+      readdirSync,
+      mkdirSync,
+      rmSync,
+      createReadStream,
+    },
     proc: process,
     hostname: osHostname,
     bunGlobal: (globalThis as { Bun?: { version?: string } }).Bun,
@@ -298,6 +313,15 @@ export function buildBunHost(
         return true;
       } catch {
         return false;
+      }
+    },
+    // Returned through the host seam rather than imported inside `readStream`,
+    // so the adapter's stream branches are unit-testable with a fake host.
+    createReadStream: (path: string, options?: { start?: number; end?: number }) => {
+      try {
+        return mods.fs.createReadStream?.(path, options) ?? null;
+      } catch {
+        return null;
       }
     },
   };
