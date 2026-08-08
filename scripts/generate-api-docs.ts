@@ -465,7 +465,14 @@ export async function runApiDocs(
     const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
     const stderrStripped = result.stderr.replace(ansiStripRe, '');
     const stdoutStripped = result.stdout.replace(ansiStripRe, '');
-    const hasFatalText = /error:\s/.test(stderrStripped) || /error:\s/.test(stdoutStripped);
+    // Fatal errors use `error: message` (space after colon); lint diagnostics
+    // use `error[rule]: message` (bracket after colon). Only the former is fatal.
+    // The summary line `error: Found N documentation lint errors.` is NOT fatal —
+    // it appears whenever deno doc --lint exits non-zero due to lint debt.
+    const isLintSummary = /Found \d+ documentation lint errors/.test(stderrStripped) ||
+      /Found \d+ documentation lint errors/.test(stdoutStripped);
+    const hasFatalText = !isLintSummary &&
+      (/error: /.test(stderrStripped) || /error: /.test(stdoutStripped));
     const diagnostics = parseDocLintDiagnostics(result.stderr);
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 

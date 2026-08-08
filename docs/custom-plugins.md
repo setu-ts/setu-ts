@@ -34,14 +34,14 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
 
       // Add middleware
       ctx.middleware.add(async (ctx, next) => {
-        ctx.context.state['my-plugin'] = { enabled: config.enabled };
+        ctx.state['my-plugin'] = { enabled: config.enabled };
         await next();
       });
 
       // Register a route
       ctx.router.get('/greet/:name', async (ctx) => {
         const service = ctx.services.get<{ greet: (name: string) => string }>('my-service');
-        return ctx.json({ message: service.greet(ctx.context.params.name) });
+        return ctx.json({ message: service.greet(ctx.params.name) });
       });
     },
   };
@@ -111,12 +111,10 @@ ctx.services.register('my-service', new MyService(), {
 ### Middleware
 
 ```typescript
-import { createMiddleware } from '@setu-ts/kernel';
-
-const myMiddleware = createMiddleware(async (ctx, next) => {
-  const start = ctx.context.startTime;
+const myMiddleware: MiddlewareFunction = async (ctx, next) => {
+  const start = ctx.startTime;
   await next();
-  const duration = ctx.context.startTime - start;
+  const duration = ctx.startTime - start;
   ctx.logger?.info('Request completed', { duration });
 });
 
@@ -127,7 +125,7 @@ ctx.middleware.add(myMiddleware);
 ctx.middleware.add(myMiddleware, { priority: 25 });
 
 // Add to specific routes
-ctx.middleware.forRoute('/api/*').add(myMiddleware);
+// Route-specific middleware is not supported in Setu-TS; use a middleware that checks ctx.request.path instead.
 ```
 
 ### Routes
@@ -213,7 +211,7 @@ ctx.lifecycle.onRequest((ctx) => {
 });
 
 ctx.lifecycle.onResponse((ctx) => {
-  console.log('Response sent:', ctx.response.status);
+  console.log('Response sent:', ctx.response.snapshot().status);
 });
 
 ctx.lifecycle.onError((error, ctx) => {
