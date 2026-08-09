@@ -178,4 +178,66 @@ describe('curated guide source-derived contracts', () => {
       'close the server socket → shutdown hooks → close hooks',
     );
   });
+
+  /**
+   * The guides are the framework's front door, so they must not teach a format
+   * alias that source marks `@deprecated`.
+   *
+   * This existed as a real regression: the M38 guides were drafted against a
+   * tree cut before M56, which moved Problem Details to RFC 9457 and deprecated
+   * `'rfc7807'`. After merging `origin/main`, `docs/examples.md`,
+   * `docs/decorators.md`, and `docs/plugins.md` were still configuring
+   * `format: 'rfc7807'` / `errorFormat: 'rfc7807'` while `PUBLIC_API.md` called
+   * that alias deprecated. Every gate passed — the alias still exists, so every
+   * fence compiled cleanly. Only a reader would have noticed, which is why the
+   * check is source-derived rather than a hardcoded string: it starts from the
+   * `@deprecated` tag in the formatter source, so retiring another alias later
+   * arms this automatically.
+   */
+  it('no guide configures a format alias that source marks @deprecated', async () => {
+    const formatterSources = [
+      'packages/exceptions/src/formatters/rfc7807-formatter.ts',
+      'packages/validation-plugin/src/formatters/rfc7807-formatter.ts',
+      'packages/exceptions/src/formatters/rfc9457-formatter.ts',
+      'packages/validation-plugin/src/formatters/rfc9457-formatter.ts',
+    ];
+
+    // Derive the deprecated aliases from source rather than naming them here.
+    const deprecated: string[] = [];
+    for (const path of formatterSources) {
+      const source = await Deno.readTextFile(path);
+      if (!source.includes('@deprecated')) continue;
+      const alias = path.match(/(rfc\d+)-formatter\.ts$/)?.[1];
+      if (alias !== undefined && !deprecated.includes(alias)) {
+        deprecated.push(alias);
+      }
+    }
+    // The check is only meaningful if source actually marks something.
+    expect(deprecated).toContain('rfc7807');
+
+    // A configuration position: `format: '<alias>'` or `errorFormat: '<alias>'`.
+    const configured = (markdown: string, alias: string): boolean =>
+      new RegExp(`\\b(?:error)?[Ff]ormat:\\s*['"]${alias}['"]`).test(markdown);
+
+    const offenders: string[] = [];
+    for (const guide of [...GUIDES, 'docs/plugins.md']) {
+      const markdown = await Deno.readTextFile(guide);
+      for (const alias of deprecated) {
+        if (configured(markdown, alias)) offenders.push(`${guide} → '${alias}'`);
+      }
+    }
+    expect(offenders).toEqual([]);
+
+    // Prove the detector discriminates: it must fire on the exact shape the
+    // guides used to carry, and stay silent on the replacement.
+    expect(configured("app.register(ValidationPlugin({ errorFormat: 'rfc7807' }));", 'rfc7807'))
+      .toBe(true);
+    expect(configured("errorHandler({ format: 'rfc7807', logErrors: true })", 'rfc7807')).toBe(
+      true,
+    );
+    expect(configured("errorHandler({ format: 'rfc9457' })", 'rfc7807')).toBe(false);
+    // Prose naming the alias while explaining its deprecation is allowed.
+    expect(configured("the `'rfc7807'` alias is deprecated but still accepted", 'rfc7807'))
+      .toBe(false);
+  });
 });

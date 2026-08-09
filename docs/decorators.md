@@ -556,7 +556,7 @@ app.register(RuntimePlugin());
 // Register the error handler as the outermost middleware (lowest priority
 // number) so it catches errors thrown by any downstream middleware or route
 // handler, formats them, and sends the response.
-app.middleware.add(errorHandler({ format: 'rfc7807', logErrors: true }), {
+app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: true }), {
   priority: 0,
   name: 'error-handler',
 });

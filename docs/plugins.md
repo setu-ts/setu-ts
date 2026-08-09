@@ -233,7 +233,7 @@ emitDecoratorMetadata).
 
 ### @setu-ts/exceptions
 
-**Purpose:** Exception hierarchy, RFC 7807 Problem Details, and the error-handler middleware.
+**Purpose:** Exception hierarchy, RFC 9457 Problem Details, and the error-handler middleware.
 
 **Capability Token:** N/A (middleware-only)
 
@@ -246,7 +246,7 @@ emitDecoratorMetadata).
 **Features:**
 
 - HttpError hierarchy
-- RFC 7807 Problem Details format
+- RFC 9457 Problem Details format (the `'rfc7807'` alias is deprecated but still accepted)
 - Error handler middleware factory
 
 **Links:**
