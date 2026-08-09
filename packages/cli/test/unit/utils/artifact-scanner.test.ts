@@ -8,8 +8,9 @@ import { expect } from '@std/expect';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 import { readArtifactNames, scanArtifacts } from '../../../src/utils/artifact-scanner.ts';
-import { getSeamSpec, listSeamSpecs } from '../../../src/seams/registry.ts';
+import { listSeamSpecs } from '../../../src/seams/registry.ts';
 import type { SeamSpec } from '../../../src/seams/seam-spec.ts';
+import { seamSpecFor } from '../schematics/_shared.ts';
 
 /** A file stat, shaped as the real runtime adapters report one. */
 const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
@@ -46,8 +47,8 @@ function fsWith(
   };
 }
 
-const ROUTES = getSeamSpec('route')!;
-const PLUGINS = getSeamSpec('plugin')!;
+const ROUTES = seamSpecFor('route')!;
+const PLUGINS = seamSpecFor('plugin')!;
 
 describe('readArtifactNames', () => {
   it('returns names sorted, with the suffix stripped', () => {
@@ -126,8 +127,8 @@ describe('scanArtifacts', () => {
   // suffix rather than by location — a scan keyed on directory would merge them.
   it('separates two families sharing one directory', async () => {
     const cqrs: readonly SeamSpec[] = [
-      getSeamSpec('command-handler')!,
-      getSeamSpec('query-handler')!,
+      seamSpecFor('command-handler')!,
+      seamSpecFor('query-handler')!,
     ];
     const artifacts = await scanArtifacts(
       fsWith(['a.command-handler.ts', 'b.query-handler.ts', 'index.ts']),

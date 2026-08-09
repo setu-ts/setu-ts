@@ -18,7 +18,8 @@ import {
   seamsFor,
   withPluginOptionSeams,
 } from '../../src/templates/seam.ts';
-import { getSeamSpec, listSeamSpecs } from '../../src/seams/registry.ts';
+import { listSeamSpecs } from '../../src/seams/registry.ts';
+import { seamSpecFor } from './schematics/_shared.ts';
 
 /** The templates that host generated-artifact seams — M58's host set, unchanged. */
 const HOSTS = ['rest', 'microservice', 'nest'] as const;
@@ -62,7 +63,7 @@ describe('seam selection', () => {
   });
 
   it('deduplicates the barrel two families share', () => {
-    const cqrs = [getSeamSpec('command-handler')!, getSeamSpec('query-handler')!];
+    const cqrs = [seamSpecFor('command-handler')!, seamSpecFor('query-handler')!];
     // One file and one import, not two — a duplicate path would trip the
     // duplicate-path guard in `commands/new.ts`.
     expect(seamFiles(cqrs).map((f) => f.path)).toEqual(['src/cqrs/index.ts']);
@@ -71,8 +72,8 @@ describe('seam selection', () => {
 
   it('names both cqrs exports on the one import', () => {
     const [imported] = seamLocalImports([
-      getSeamSpec('command-handler')!,
-      getSeamSpec('query-handler')!,
+      seamSpecFor('command-handler')!,
+      seamSpecFor('query-handler')!,
     ]);
     expect(imported!.symbols).toEqual(['COMMAND_HANDLERS', 'QUERY_HANDLERS']);
     expect(imported!.from).toBe('./src/cqrs/index.ts');
@@ -86,12 +87,12 @@ describe('seam selection', () => {
     expect(calls).toContain('priority: generated.priority,');
     expect(calls).not.toContain('priority: 500');
     // A plugin-option seam contributes no statement at all.
-    expect(seamSetupCalls([getSeamSpec('health-indicator')!])).toEqual([]);
+    expect(seamSetupCalls([seamSpecFor('health-indicator')!])).toEqual([]);
   });
 
   it('spreads the generated plugins only when that seam is present', () => {
     expect(seamPluginSpreads(listSeamSpecs())).toEqual(['...GENERATED_PLUGINS']);
-    expect(seamPluginSpreads([getSeamSpec('health-indicator')!])).toEqual([]);
+    expect(seamPluginSpreads([seamSpecFor('health-indicator')!])).toEqual([]);
   });
 
   it('leaves the decorator wiring to withModuleSeam, and contributes extras instead', () => {

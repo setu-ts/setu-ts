@@ -58,17 +58,13 @@ const SEAM_REGISTRY: ReadonlyMap<string, SeamSpec> = new Map<string, SeamSpec>([
 ]);
 
 /**
- * Looks up a family's seam.
- *
- * @param schematic - The `setu generate` schematic name
- * @returns Its seam, or `undefined` when the family has no registration site
- */
-export function getSeamSpec(schematic: string): SeamSpec | undefined {
-  return SEAM_REGISTRY.get(schematic);
-}
-
-/**
  * Lists every wired family's seam, in registration order.
+ *
+ * The registry's only accessor. A lookup-by-name helper was deliberately NOT kept
+ * alongside it: every schematic imports its own spec directly, which is type-safe and
+ * needs no non-null assertion, so a by-name lookup had no reader outside the tests —
+ * dead surface by the rule that every declared symbol must be read on a real code path.
+ * A test needing one builds it from this list.
  *
  * @returns The seams
  */
