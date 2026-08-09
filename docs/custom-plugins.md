@@ -262,12 +262,9 @@ ctx.environment.validate({
   PORT: {
     type: 'number',
     default: 3000,
-    min: 1,
-    max: 65535,
   },
   NODE_ENV: {
     type: 'string',
-    enum: ['development', 'production', 'test'],
     default: 'development',
   },
   API_KEY: {

@@ -62,9 +62,9 @@ app.router.post('/users', async (ctx) => {
 Add global middleware to the pipeline.
 
 ```typescript
-import { metricsMiddleware } from '@setu-ts/metrics-plugin';
+import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 
-app.middleware.add(metricsMiddleware);
+app.register(MetricsPlugin({ endpoint: '/metrics' }));
 ```
 
 #### `start(options?)`

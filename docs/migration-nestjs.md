@@ -416,15 +416,16 @@ constructor(@InjectConfig() private readonly config: ConfigService) {}
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 
 app.register(ConfigPlugin({
-  env: true,
-  validate: {
-    PORT: { type: 'number', default: 3000 },
-    NODE_ENV: { type: 'string', enum: ['development', 'production'] },
-  },
+  // Optional: load .env files before reading `runtime.env` (requires a
+  // runtime with filesystem support). Validate with a structural schema
+  // (e.g. Zod) via `validationSchema` — `ConfigPluginOptions` has no `validate`
+  // field.
+  envFilePath: '.env',
 }));
 
 // Usage
-const config = ctx.config?.get('PORT');
+const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
+const port = config.get('PORT');
 ```
 
 ## Database (TypeORM → Prisma/Drizzle)
@@ -458,10 +459,16 @@ export class UserService {
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
+// The built-in arm selects the ORM via `type`; adapter-specific config lives
+// under `options` (a `DatabaseAdapterOptions`), not a top-level `prisma`
+// field. For Prisma, inject a pre-loaded client via `options.prismaClient`
+// (bypasses the lazy `import('npm:@prisma/client')` path), or omit it to let
+// the adapter load the client lazily from the connection URL.
 app.register(DatabasePlugin({
   type: 'prisma',
-  prisma: {
-    // Prisma client configuration
+  options: {
+    url: 'postgresql://localhost:5432/mydb',
+    // prismaClient: myPrismaClient, // optional: inject a pre-loaded client
   },
 }));
 
@@ -489,12 +496,12 @@ export class UserService {
 ```typescript
 import { CachePlugin } from '@setu-ts/cache-plugin';
 
+// `store` selects the backend; store-specific config lives under `options`
+// (a `CacheStoreOptions`), not a top-level `redis` field. For Redis, pass the
+// connection URL (or inject an ioredis-compatible `client`).
 app.register(CachePlugin({
   store: 'redis',
-  redis: {
-    host: 'localhost',
-    port: 6379,
-  },
+  options: { url: 'redis://localhost:6379' },
 }));
 
 // Usage
@@ -562,19 +569,23 @@ export class EventsGateway {
 
 ```typescript
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
-app.register(WebSocketPlugin({
-  rooms: {
-    '/ws': {
-      onConnect: (ctx) => {
-        console.log('Client connected');
-      },
-      onMessage: (ctx, message) => {
-        ctx.room.broadcast({ type: 'message', data: message });
-      },
-    },
+// WebSocketPlugin options carry heartbeat/idle/limit knobs only — routes and
+// rooms are application-level, registered on the WebSocketService after the
+// plugin (no `rooms` plugin option exists).
+app.register(WebSocketPlugin({ heartbeatMs: 30_000 }));
+
+const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+ws.route('/ws', {
+  onOpen: (conn) => {
+    console.log('Client connected');
+    ws.room('events').add(conn);
   },
-}));
+  onMessage: (conn, message) => {
+    ws.room('events').broadcast({ type: 'message', data: message }, { except: conn });
+  },
+});
 ```
 
 ## Testing
