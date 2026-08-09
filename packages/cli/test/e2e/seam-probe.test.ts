@@ -233,6 +233,37 @@ out['eventSubscriptions'] =
     .checks?.events?.data?.handlers ?? 0;
 `;
 
+/**
+ * The three families a no-template project can host, and the probe that drives them.
+ *
+ * This is the milestone's own claim under test: a project with NO decorators and NO DI
+ * container still gets its generated artifacts wired. Before M61 the route module and
+ * its barrel were written and the generated `setu.config.ts` imported neither, so the
+ * only HTTP handler such a project can generate answered 404.
+ */
+const MINIMAL_ARTIFACTS: readonly (readonly [schematic: string, name: string])[] = [
+  ['route', 'widget-route'],
+  ['middleware', 'widget'],
+  ['plugin', 'widget'],
+];
+
+const MINIMAL_PROBE = `import type { IServiceRegistry } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+
+const app = await createApp();
+await app.start();
+const services: IServiceRegistry = app.services;
+const out: Record<string, unknown> = {};
+
+const r = await app.fetch(new Request('http://x/widget-route/'));
+out['route'] = { status: r.status, body: await r.text() };
+out['middlewareHeader'] = r.headers.get('x-widget');
+out['pluginToken'] = services.get<{ describe(): string }>('widget').describe();
+
+console.log('__PROBE_RESULT__' + JSON.stringify(out));
+await app.stop();
+`;
+
 describe('generated artifacts are wired — end to end', () => {
   let root: string;
   let out: string[];
@@ -255,6 +286,28 @@ describe('generated artifacts are wired — end to end', () => {
 
   afterEach(async () => {
     await Deno.remove(root, { recursive: true });
+  });
+
+  // The no-template host. AI_GUIDELINES promise "no feature requires decorators", and
+  // this is the project shape that has none — so it is the one where the promise is
+  // either true or merely documented.
+  it('serves every wired artifact in a project scaffolded with no template', async () => {
+    expect(await run(['new', 'bare'])).toBe(0);
+    const project = `${root}/bare`;
+
+    for (const [schematic, name] of MINIMAL_ARTIFACTS) {
+      expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
+    }
+
+    await useWorkspacePackages(project);
+    const result = await bootAndProbe(project, MINIMAL_PROBE);
+
+    // The generated route module was reached through `registerGeneratedRoutes(app.router)`.
+    expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
+    // The generated middleware was added at its own declared priority, and ran.
+    expect(result['middlewareHeader']).toBe('true');
+    // The generated plugin was spread into `createApplication({ plugins })`.
+    expect(result['pluginToken']).toBe('widget');
   });
 
   for (const template of ['rest', 'microservice'] as const) {

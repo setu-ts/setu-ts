@@ -85,3 +85,45 @@ describe('service schematic', () => {
     });
   });
 });
+
+// The emitted JSDoc is the only place a developer is told HOW to resolve the
+// class, and the two compositions genuinely differ: with a container the class
+// is a provider ON the container and is absent from the kernel registry, so
+// `services.get(token)` throws. Verified by booting both, not inferred — see the
+// M61 matrix. Before `--di` existed only `--template nest` had a container, so
+// the old "or services.get(...)" advice was almost always right; it is now wrong
+// on every template the flag is used with.
+describe('the injectable service JSDoc names the right resolution route', () => {
+  const injectable = () =>
+    generateService(deriveNames('billing'), {
+      runtime: 'deno',
+      plugins: new Set(['decorator-plugin']),
+      now: () => 0,
+    })[0].contents;
+
+  it('does not present services.get as unconditional', () => {
+    const src = injectable();
+    expect(src).not.toContain('constructor parameter, or `services.get(');
+  });
+
+  it('names the container route and says the registry one throws', () => {
+    const src = injectable();
+    expect(src).toContain('DI_CONTAINER');
+    expect(src).toContain("resolve('billing-service')");
+    expect(src).toContain('throws');
+  });
+
+  it('still names services.get for the container-less composition', () => {
+    expect(injectable()).toContain("services.get('billing-service')");
+  });
+
+  it('says @Inject works either way', () => {
+    expect(injectable()).toContain('whether or not a container is registered');
+  });
+
+  it('records that scope is ignored without a container and honored with one', () => {
+    const src = injectable();
+    expect(src).toContain('`scope` is ignored');
+    expect(src).toContain('`scope` is honored');
+  });
+});

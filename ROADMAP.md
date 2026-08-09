@@ -6272,8 +6272,9 @@ AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is opti
 **"Everything has a programmatic API. No feature requires decorators or reflection."** The generator
 contradicts all three, and the contradiction is checkable:
 
-- `VALUE_FLAGS` is `dir`, `runtime`, `template` (`constants.ts`) — there is **no `--di` and no
-  `--decorators` flag**.
+- `VALUE_FLAGS` is `dir`, `runtime`, `template`, `config` (`constants.ts`) — there is **no `--di`
+  and no `--decorators` flag**. (`--di` needs no entry there: a flag absent from the set parses as
+  boolean.)
 - `DiPlugin` appears in exactly one template file, `templates/nest.ts`.
 - `controller` and `module` are gated on `decorator-plugin`, so a project scaffolded with **no
   template cannot generate an HTTP handler at all** except `g route`.
@@ -6303,7 +6304,36 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
 ### Deliverables
 
 - `--di` flag, threaded through `new` for every template, with the no-change-to-`nest` test above.
-- The `controller`/`module` gate refusal naming `g route` as the decorator-free alternative.
+  On `full-stack` it reaches the starter's own `di` arm rather than a plugin wiring, because
+  `TemplateHost.plugins` must stay empty when an `appFactory` is set. It **deduplicates**: the
+  kernel throws `Duplicate plugin name 'di'` at `start()`, so `--template nest --di` must be a no-op
+  rather than a second registration.
+- The `controller`/`module` gate refusal naming `g route` as the decorator-free alternative, carried
+  as data on the schematic registry entry rather than a string in the command layer.
+- **The no-template path becomes a seam host** for the three seams that need no plugin (`route`,
+  `middleware`, `plugin`). M60 recorded this as Unowned on the grounds that it "means inventing a
+  fourth `TemplateDefinition` … where six of the ten seams would be inert"; neither holds —
+  `seamsFor` already selects exactly the three ungated seams, and extracting `TemplateHost` from
+  `TemplateDefinition` gives the minimal path a host without giving it a `--template` value. Without
+  this, `setu generate route` — the only HTTP handler a decorator-free project can generate, and the
+  one this milestone's refusal points at — still landed unwired.
+- **`--runtime cloudflare-workers` is deployable.** Same sweep, same class of defect: `wrangler`
+  bundles with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, and the
+  Workers target emitted no `package.json` — so the `npm install && npx wrangler dev` the CLI itself
+  prints failed with one `Could not resolve "@setu-ts/…"` per package. It now emits `package.json` +
+  `.npmrc` alongside `deno.json`, with `wrangler` pinned. Verified on real workerd. Deno still gets
+  none, deliberately: a `package.json` switches it to node_modules resolution (the `apps/full-stack`
+  cold-checkout trap).
+- **`--runtime node` can run decorated source.** Found by booting the matrix, and pre-existing since
+  M34 chose `node --experimental-strip-types main.ts`: Node's built-in TypeScript support erases
+  types without transforming code, so a legacy decorator was a `SyntaxError` and the constructor
+  parameter property `g module` emits was `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. On that target
+  `--template rest` and `g route` booted, while `g service`, `g controller`, `g module` and
+  `--template nest` could not start at all — and no gate saw it, because CI never boots a
+  Node-target project. Generated Node projects now declare `tsx` and start with `tsx main.ts`;
+  `--experimental-transform-types` was checked and rejected, since it fixes the parameter property
+  but still refuses the decorator. Runtime-level rather than template-level: Bun compiles TypeScript
+  outright, and Deno and Workers never invoke the runner.
 - Docs: PUBLIC_API options table and a short "decorators and DI are optional" section stating what
   each combination gives you; the guidelines' claim becomes true rather than aspirational.
 
@@ -6313,6 +6343,18 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
 - **Removing the `decorator-plugin` gate** from `controller`/`module`. The gate is correct: those
   emit `@Controller`, and an ungated project would get source whose own import cannot resolve (the
   M34b defect). The fix is a better refusal, not a removed one.
+- **A `--no-decorators` variant of the resource generators** — rejected, not deferred. It would have
+  to emit a router-registered handler module, which is exactly what `g route` already emits;
+  implementing it means either a second copy of that schematic (§11.1, no duplicated logic) or a
+  bare alias that dispatches to it (dead surface). The honest fix for discoverability is the refusal
+  plus the wiring above.
+- **Guarding the `full-stack` template's other `appFactory` option keys.** Established by
+  measurement during this milestone: TypeScript does NOT apply excess-property checking to an object
+  literal returned from a contextually-typed callback, so a misspelled key inside
+  `createFullStackAppFromConfig((config) => ({ … }))` is caught by nothing — not the CLI's
+  `deno check`, not the generated project's. M50b's "a wrong field is a compile error in the
+  GENERATED project" does not hold for an `appFactory`. M61 adds an annotated-position probe for the
+  one arm it introduces; `reactRouter` and `session` have the same exposure and no guard.
 
 ## Milestone 62: Monorepo Support — More Than One Deployable Service in a Repository
 
@@ -6421,7 +6463,7 @@ Three questions must be settled in the plan before any code:
 | 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ⬜     | cloudflare-plugin (workers messaging) |
 | 60        | ✅     | cli (wire generated artifacts)        |
-| 61        | ⬜     | cli (decorator/DI opt-in)             |
+| 61        | ✅     | cli (decorator/DI opt-in)             |
 | 62        | ⬜     | cli (monorepo support)                |
 | 41        | ✅     | http-adapters                         |
 | 42        | ✅     | streaming-response                    |

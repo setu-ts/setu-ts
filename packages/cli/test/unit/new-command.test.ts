@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
-import { firstDuplicatePath, runNewCommand } from '../../src/commands/new.ts';
+import { firstDuplicatePath, resolveHost, runNewCommand } from '../../src/commands/new.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 
 interface Harness {
@@ -70,6 +70,195 @@ describe('firstDuplicatePath', () => {
         expect(h.err.lines.join('\n')).not.toContain('twice');
       }
     }
+  });
+});
+
+// Node's built-in TypeScript support ERASES types without transforming code, so
+// `node --experimental-strip-types main.ts` — what this CLI emitted through
+// alpha.5 — cannot run a legacy decorator or a constructor parameter property.
+// Measured on Node v24: a scaffolded Node project booted until the first
+// `g service|controller|module`, and `--template nest` never booted at all,
+// while Deno, Bun and Workers ran every combination.
+// `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
+// specifiers nor a Deno import map. Before this, a scaffolded Workers project
+// declared its framework packages only in `deno.json`, so the documented
+// `npm install && npx wrangler dev` failed with one
+// `Could not resolve "@setu-ts/…"` per package — eleven of them — even though
+// the CLI's own next-step hint already told you to run npm install. Verified
+// against real workerd both ways.
+describe('the Workers target is deployable as documented', () => {
+  const workers = async (template?: string) => {
+    const h = harness();
+    const argv = ['app', '--runtime', 'cloudflare-workers'];
+    if (template !== undefined) argv.push('--template', template);
+    expect(await h.run(argv)).toBe(0);
+    return h;
+  };
+
+  it('emits an npm manifest esbuild can resolve the framework through', async () => {
+    const h = await workers('rest');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      dependencies?: Record<string, string>;
+    };
+    // Every package the generated config imports must be installable.
+    const config = h.fs.read('/work/app/setu.config.ts');
+    for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
+      expect(Object.keys(manifest.dependencies ?? {})).toContain(match[1]);
+    }
+  });
+
+  it('maps the @jsr scope, without which those packages do not install', async () => {
+    const h = await workers('rest');
+    expect(h.fs.read('/work/app/.npmrc')).toContain('@jsr:registry=https://npm.jsr.io');
+  });
+
+  it('pins wrangler rather than leaving npx to fetch whatever is latest', async () => {
+    const h = await workers('rest');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    expect(manifest.devDependencies?.['wrangler']).toBeDefined();
+    expect(manifest.scripts?.['dev']).toBe('wrangler dev');
+    expect(manifest.scripts?.['deploy']).toBe('wrangler deploy');
+  });
+
+  it('keeps its deno.json too, which is what generate reads for plugin gating', async () => {
+    const h = await workers('rest');
+    expect(h.fs.has('/work/app/deno.json')).toBe(true);
+  });
+
+  // The trap this must not reintroduce: a package.json switches Deno to
+  // node_modules resolution, which is the `apps/full-stack` cold-checkout
+  // failure. Only Workers gets one for this reason.
+  it('gives a plain Deno project no package.json', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--runtime', 'deno', '--template', 'rest'])).toBe(0);
+    expect(h.fs.has('/work/app/package.json')).toBe(false);
+    expect(h.fs.has('/work/app/.npmrc')).toBe(false);
+  });
+
+  it('merges a template npm build into the same manifest, not a second one', async () => {
+    const h = await workers('full-stack');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(manifest.scripts?.['build']).toBe('react-router build');
+    expect(manifest.scripts?.['deploy']).toBe('wrangler deploy');
+    expect(manifest.devDependencies?.['wrangler']).toBeDefined();
+    expect(manifest.devDependencies?.['vite']).toBeDefined();
+    expect(manifest.dependencies?.['@setu-ts/common']).toBeDefined();
+  });
+});
+
+describe('the Node target can run decorated source', () => {
+  const manifestOf = async (runtime: string, template?: string) => {
+    const h = harness();
+    const argv = ['app', '--runtime', runtime];
+    if (template !== undefined) argv.push('--template', template);
+    expect(await h.run(argv)).toBe(0);
+    return JSON.parse(h.fs.read('/work/app/package.json')) as {
+      scripts: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+  };
+
+  it('runs Node through a transpiler, not through type stripping', async () => {
+    const manifest = await manifestOf('node');
+    expect(manifest.scripts['start']).toBe('tsx main.ts');
+    expect(manifest.scripts['start']).not.toContain('experimental-strip-types');
+    expect(manifest.scripts['start']).not.toContain('experimental-transform-types');
+  });
+
+  it('declares the transpiler it invokes', async () => {
+    // Derived from the emitted script rather than hardcoding `tsx`, so this
+    // still holds if the runner is ever swapped: a start script naming a binary
+    // the manifest does not install is a project that reports success and then
+    // cannot run. CI never boots a Node-target project, so this invariant is
+    // the standing guard for that.
+    const manifest = await manifestOf('node');
+    const binary = manifest.scripts['start']?.split(' ')[0];
+    expect(binary).toBeDefined();
+    expect(binary).not.toBe('node');
+    expect(Object.keys(manifest.devDependencies ?? {})).toContain(binary);
+  });
+
+  it('gives no other target the Node transpiler', async () => {
+    // Bun compiles TypeScript outright; Deno and Workers never invoke it.
+    const bun = await manifestOf('bun');
+    expect(bun.scripts['start']).toBe('bun run main.ts');
+    expect(bun.devDependencies?.['tsx']).toBeUndefined();
+  });
+
+  it('keeps a template own devDependencies alongside it', async () => {
+    // The merge must not replace the template's block — full-stack pins a whole
+    // frontend toolchain there.
+    const manifest = await manifestOf('node', 'full-stack');
+    expect(manifest.devDependencies?.['tsx']).toBeDefined();
+    expect(manifest.devDependencies?.['vite']).toBeDefined();
+  });
+
+  it('emits no devDependencies block when there is nothing to declare', async () => {
+    // The Bun + no-template path is the one combination that contributes
+    // neither a runtime devDependency nor a template one, so it is the only
+    // case that exercises the empty-object guard. Asserting the key is ABSENT
+    // is the whole test: an earlier version checked that `dependencies` was
+    // present instead, which passed with the guard deleted.
+    const h = harness();
+    expect(await h.run(['app', '--runtime', 'bun'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as Record<string, unknown>;
+    expect(Object.keys(manifest)).not.toContain('devDependencies');
+    // …and the same path with a template that declares them still emits it, so
+    // the guard cannot be satisfied by dropping the key unconditionally.
+    const withTemplate = harness();
+    expect(await withTemplate.run(['app', '--runtime', 'bun', '--template', 'rest'])).toBe(0);
+    const other = JSON.parse(withTemplate.fs.read('/work/app/package.json')) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(other)).toContain('devDependencies');
+  });
+});
+
+describe('resolveHost', () => {
+  // Every host in the registry declares `localImports` and `files`, so these
+  // fallbacks are unreachable through `runNewCommand`. They are not dead —
+  // `TemplateHost` declares both optional — so they are driven here directly
+  // rather than left as an untested path behind a template that happens not to
+  // exercise them.
+  it('fills in every optional member of a bare host', () => {
+    const resolved = resolveHost(
+      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
+      { di: false },
+    );
+    expect(resolved.localImports).toEqual([]);
+    expect(resolved.packageImports).toEqual([]);
+    expect(resolved.files).toEqual([]);
+    expect(resolved.pluginSpreads).toEqual([]);
+    expect(resolved.setupCalls).toEqual([]);
+    expect(resolved.appFactory).toBeUndefined();
+    expect(resolved.manifest).toBeUndefined();
+  });
+
+  it('applies --di to a plugin-list host', () => {
+    const resolved = resolveHost(
+      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
+      { di: true },
+    );
+    expect(resolved.plugins.map((w) => w.pkg)).toEqual(['runtime', 'di-plugin']);
+  });
+
+  // A starter factory owns the whole plugin set, so a wiring appended here
+  // would be silently dropped by the renderer's factory branch. The flag
+  // reaches that template through the factory's own options instead.
+  it('leaves a factory host plugin list alone under --di', () => {
+    const resolved = resolveHost(
+      { plugins: [], middleware: [], appFactory: { pkg: 'full-stack-starter', symbol: 'x' } },
+      { di: true },
+    );
+    expect(resolved.plugins).toEqual([]);
   });
 });
 
@@ -283,17 +472,136 @@ describe('runNewCommand', () => {
       expect(h.fs.read('/work/app/setu.config.ts')).toContain('...GENERATED_PLUGINS,');
     });
 
-    // Pins that a template declaring neither new field renders as it always did: the
-    // minimal (no-template) path has no `TemplateDefinition` at all, so it must be
-    // untouched by the seams.
-    it('leaves a template-less project free of seam wiring', async () => {
+    // M61 reverses M60's decision here, deliberately. A template-less project is
+    // the one shape with no decorators and no DI container, so `setu g route` is
+    // the only HTTP handler it can generate — and it used to land UNWIRED, which
+    // made "no feature requires decorators" true only after a hand edit.
+    it('wires the three ungated seams into a template-less project', async () => {
       const h = harness();
       expect(await h.run(['bare'])).toBe(0);
       const config = h.fs.read('/work/bare/setu.config.ts');
       expect(config).toContain('RuntimePlugin(),');
-      expect(config).not.toContain('GENERATED');
-      expect(config).not.toContain('registerGeneratedRoutes');
-      expect(config).not.toContain('./src/');
+      // route: a call; plugin: an array spread; middleware: a loop.
+      expect(config).toContain('registerGeneratedRoutes(app.router);');
+      expect(config).toContain('...GENERATED_PLUGINS,');
+      expect(config).toContain('for (const generated of GENERATED_MIDDLEWARE) {');
+      // The barrels those imports name are emitted at scaffold time, so the
+      // config never imports a module the project does not have.
+      expect(h.fs.read('/work/bare/src/routes/index.ts')).toContain('registerGeneratedRoutes');
+      expect(h.fs.read('/work/bare/src/middleware/index.ts')).toContain('GENERATED_MIDDLEWARE');
+      expect(h.fs.read('/work/bare/src/plugins/index.ts')).toContain('GENERATED_PLUGINS');
+    });
+
+    // The other half of the same rule: a seam whose plugin this host does not
+    // register is omitted entirely, or the generated config would import a
+    // barrel naming symbols from a package the project never installed.
+    it('gives a template-less project no seam that needs a plugin', async () => {
+      const h = harness();
+      expect(await h.run(['bare'])).toBe(0);
+      const config = h.fs.read('/work/bare/setu.config.ts');
+      for (
+        const absent of [
+          'APP_CONTROLLERS',
+          'APP_SERVICES',
+          'HEALTH_INDICATORS',
+          'CUSTOM_METRICS',
+          'COMMAND_HANDLERS',
+          'EVENT_HANDLERS',
+          'MODULE_CONTROLLERS',
+        ]
+      ) {
+        expect(config).not.toContain(absent);
+      }
+      expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(false);
+      expect(h.fs.has('/work/bare/src/cqrs/index.ts')).toBe(false);
+    });
+
+    describe('--di', () => {
+      // The flag's whole contract: it forks the COMPOSITION, never the generated
+      // source. Every file but the config must be untouched.
+      it('changes setu.config.ts and nothing else', async () => {
+        const plain = harness();
+        const withDi = harness();
+        expect(await plain.run(['app', '--template', 'rest'])).toBe(0);
+        expect(await withDi.run(['app', '--template', 'rest', '--di'])).toBe(0);
+
+        for (const path of plain.fs.writes) {
+          if (path.endsWith('setu.config.ts')) continue;
+          // deno.json is the one legitimate exception: it must gain the pin.
+          if (path.endsWith('deno.json')) continue;
+          expect(withDi.fs.read(path)).toBe(plain.fs.read(path));
+        }
+      });
+
+      it('adds exactly one plugin call to a plugin-list template', async () => {
+        const plain = harness();
+        const withDi = harness();
+        await plain.run(['app', '--template', 'rest']);
+        await withDi.run(['app', '--template', 'rest', '--di']);
+
+        const before = plain.fs.read('/work/app/setu.config.ts');
+        const after = withDi.fs.read('/work/app/setu.config.ts');
+
+        expect(before).not.toContain('DiPlugin');
+        expect(after).toContain('      DiPlugin(),');
+        expect(after).toContain("import { DiPlugin } from '@setu-ts/di-plugin';");
+        // Exactly one: a second would throw `Duplicate plugin name` at start().
+        expect(after.match(/DiPlugin\(\)/g)?.length).toBe(1);
+      });
+
+      it('declares di-plugin in the manifest it now imports', async () => {
+        // The renderer and the manifest writer read ONE resolved plugin list, so
+        // a --di project can never import a package it does not declare.
+        const h = harness();
+        await h.run(['app', '--template', 'rest', '--di']);
+        const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
+        expect(manifest.imports['@setu-ts/di-plugin']).toContain('jsr:@setu-ts/di-plugin@');
+      });
+
+      it('wires DI into a template-less project too', async () => {
+        const h = harness();
+        await h.run(['bare', '--di']);
+        const config = h.fs.read('/work/bare/setu.config.ts');
+        expect(config).toContain('DiPlugin(),');
+        expect(JSON.parse(h.fs.read('/work/bare/deno.json')).imports['@setu-ts/di-plugin'])
+          .toBeDefined();
+      });
+
+      // The defect this milestone was most likely to ship: `nest` ALREADY
+      // registers DiPlugin, and the kernel throws `Duplicate plugin name 'di'`
+      // at start(). A second registration type-checks and passes every file
+      // assertion; only booting the project would catch it.
+      it('leaves --template nest byte-identical, because it already has DI', async () => {
+        const plain = harness();
+        const withDi = harness();
+        expect(await plain.run(['app', '--template', 'nest'])).toBe(0);
+        expect(await withDi.run(['app', '--template', 'nest', '--di'])).toBe(0);
+
+        expect(withDi.fs.writes).toEqual(plain.fs.writes);
+        for (const path of plain.fs.writes) {
+          expect(withDi.fs.read(path)).toBe(plain.fs.read(path));
+        }
+
+        const config = withDi.fs.read('/work/app/setu.config.ts');
+        expect(config.match(/DiPlugin\(\)/g)?.length).toBe(1);
+      });
+
+      it('reaches full-stack through the starter option, not the plugin list', async () => {
+        // `TemplateHost.plugins` must stay empty when an appFactory is set, so a
+        // wiring appended there would be silently dropped by the renderer.
+        const h = harness();
+        expect(await h.run(['shop', '--template', 'full-stack', '--di'])).toBe(0);
+        const config = h.fs.read('/work/shop/setu.config.ts');
+        expect(config).toContain('di: {},');
+        expect(config).not.toContain('DiPlugin');
+        expect(config).not.toContain('createApplication');
+      });
+
+      it('leaves full-stack without the option when the flag is absent', async () => {
+        const h = harness();
+        await h.run(['shop', '--template', 'full-stack']);
+        expect(h.fs.read('/work/shop/setu.config.ts')).not.toContain('di: {}');
+      });
     });
 
     it('adds errorHandler through middleware.add, not the plugin list', async () => {
