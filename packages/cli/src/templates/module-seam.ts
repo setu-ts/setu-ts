@@ -19,10 +19,39 @@ import {
   renderModuleBarrel,
   SERVICES_EXPORT,
 } from '../schematics/module-barrel.ts';
-import type { LocalImport, Wiring } from './registry.ts';
+import type { LocalImport, TemplateManifest, Wiring } from './registry.ts';
 
 /** Specifier the generated `setu.config.ts` imports the barrel from. */
 const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
+
+/**
+ * Test dependencies the module schematic's emitted `*.service.test.ts` imports.
+ *
+ * A host template MUST declare these, or the first `deno test` a developer runs
+ * fails with `Import "@std/testing/bdd" not a dependency and not in import map` —
+ * the CLI would have generated a test file that cannot run.
+ *
+ * Both forms are needed because the two target families resolve differently:
+ * `deno.json` `imports` for Deno and Cloudflare Workers, and npm aliases for Node
+ * and Bun, which get a `package.json` and no `deno.json` at all. The alias form
+ * matches how those targets already reach `@setu-ts/*`.
+ */
+const TEST_DEPENDENCY_VERSIONS = {
+  '@std/testing': '1.0.19',
+  '@std/expect': '1.0.20',
+} as const;
+
+/** Manifest additions every module-hosting template merges in. */
+export const MODULE_SEAM_MANIFEST: TemplateManifest = {
+  denoImports: Object.fromEntries(
+    Object.entries(TEST_DEPENDENCY_VERSIONS).map(([pkg, v]) => [pkg, `jsr:${pkg}@^${v}`]),
+  ),
+  npmDevDependencies: Object.fromEntries(
+    Object.entries(TEST_DEPENDENCY_VERSIONS).map((
+      [pkg, v],
+    ) => [pkg, `npm:@jsr/${pkg.slice(1).replace('/', '__')}@^${v}`]),
+  ),
+};
 
 /**
  * The empty aggregate barrel a fresh project starts with.

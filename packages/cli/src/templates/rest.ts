@@ -5,7 +5,12 @@
  */
 
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
-import { MODULE_SEAM_FILES, MODULE_SEAM_LOCAL_IMPORT, withModuleSeam } from './module-seam.ts';
+import {
+  MODULE_SEAM_FILES,
+  MODULE_SEAM_LOCAL_IMPORT,
+  MODULE_SEAM_MANIFEST,
+  withModuleSeam,
+} from './module-seam.ts';
 
 /**
  * Always first: the kernel makes the `runtime` capability mandatory at `start()`.
@@ -76,5 +81,6 @@ export const REST_TEMPLATE: TemplateDefinition = {
   middleware: REST_MIDDLEWARE,
   localImports: [MODULE_SEAM_LOCAL_IMPORT],
   files: MODULE_SEAM_FILES,
+  manifest: MODULE_SEAM_MANIFEST,
   unsupported: {},
 };

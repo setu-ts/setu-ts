@@ -25,6 +25,12 @@ All notable changes to this project are documented here. The format follows
   its layering is `routes → features → services` and it has no `src/modules/` concept. A project
   scaffolded before this release adds the barrel import once; every later `g module` is automatic.
 
+  A directory counts as a module only when it holds both canonical files, so an unrelated folder
+  under `src/modules/` is skipped instead of producing a barrel that imports files which do not
+  exist. The host templates declare `@std/testing` and `@std/expect` (a `deno.json` import on
+  Deno/Workers, an `npm:@jsr/std__*` alias on Node/Bun), so the emitted test runs with no further
+  setup.
+
   `GeneratedFile` gains an optional `managed` flag and `SchematicOptions` an optional `modules`
   list. Both are additive — existing custom schematics compile unchanged. A managed file is exempt
   from the overwrite refusal, which previously covered every path without exception; only

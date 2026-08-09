@@ -4955,7 +4955,7 @@ wires it in, without editing `setu.config.ts`:
 ```
 src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
 src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject
-src/modules/<name>/<name>.service.test.ts   describe/it + expect
+src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
 src/modules/index.ts                        the aggregate barrel  (managed — regenerated)
 ```
@@ -4978,6 +4978,13 @@ its `setu.config.ts` once, and every later `setu g module` is wired automaticall
 `--template
 full-stack` is deliberately not a host: its layering is `routes → features → services`
 and it has no `src/modules/` concept.
+
+A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
+setup — as a `deno.json` import on Deno and Cloudflare Workers, and as an `npm:@jsr/std__*` alias in
+`devDependencies` on Node and Bun, which get a `package.json` and no `deno.json`. Only a directory
+holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a module, so unrelated
+folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
+than breaking it.
 
 The service's `@Injectable` token is explicit (`'<name>-service'`) and the controller's `@Inject`
 names that exact string, because `emitDecoratorMetadata` is unavailable under Deno, so a parameter's
