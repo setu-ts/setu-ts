@@ -10,27 +10,10 @@
  * @module
  */
 
-import type { Wiring } from './registry.ts';
+import type { TemplateFeatures, Wiring } from './registry.ts';
 
 /** The bare `@setu-ts` package name of the DI plugin. */
 const DI_PACKAGE = 'di-plugin';
-
-/**
- * The per-project choices a template renders differently for.
- *
- * An object rather than a bare boolean because {@linkcode
- * AppFactoryWiring.args} takes it as a second parameter, where a positional
- * boolean would be unreadable at the call site — and because a later flag on
- * the same axis extends this type rather than every signature that carries it.
- */
-export interface TemplateFeatures {
-  /**
-   * Register `DiPlugin`, so every `@Injectable` is constructed through a
-   * container that honors its `scope` rather than through the kernel's
-   * `ServiceRegistry`.
-   */
-  readonly di: boolean;
-}
 
 /**
  * The `DiPlugin` wiring, declared once.

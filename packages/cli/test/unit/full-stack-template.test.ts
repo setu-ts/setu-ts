@@ -15,7 +15,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { TargetRuntime } from '../../src/constants.ts';
-import type { TemplateFeatures } from '../../src/templates/di.ts';
+import type { TemplateFeatures } from '../../src/templates/registry.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
 import {

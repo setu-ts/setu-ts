@@ -13,8 +13,7 @@
  */
 
 import type { TargetRuntime } from '../constants.ts';
-import type { TemplateFeatures } from './di.ts';
-import type { TemplateDefinition } from './registry.ts';
+import type { TemplateDefinition, TemplateFeatures } from './registry.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import {
   buildFullStackBuildFiles,
