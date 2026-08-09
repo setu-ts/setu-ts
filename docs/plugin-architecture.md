@@ -377,7 +377,7 @@ Check for optional dependencies before using them:
 
 ```typescript
 if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICacheService>('cache');
+  const cache = ctx.services.get<ICacheStore>('cache');
   // Use cache
 }
 ```

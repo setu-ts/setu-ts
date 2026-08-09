@@ -690,16 +690,19 @@ error[private-type-ref]: public type references private type
       expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
     });
 
-    it('warning format (not fatal) with non-1 exit is still classified as lint', async () => {
+    it('warning format with non-1 exit is now fatal (fail-closed)', async () => {
       const fs = makeFs();
-      // A warning that doesn't match the fatal pattern
+      // A warning that is not a recognized lint diagnostic or summary.
+      // After removing recognized diagnostics and the exact known summary, every
+      // non-whitespace residual must be fatal. This proves the gate fails closed.
       const output = 'warning: some non-fatal warning\n';
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: output, stderr: '' }),
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
-      // Should NOT be treated as fatal - should fall through to ratchet
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(false);
+      // Must be treated as fatal — residual content with exit 1 fails closed
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
     });
 
     it('fatal mixed with zero parseable diagnostics fails', async () => {

@@ -3,8 +3,10 @@
  * pattern ensures startup always precedes fetch, including concurrent first
  * requests.
  *
- * This exercises the exact pattern from apps/cloudflare/worker.ts rather than
- * only static text matching.
+ * This exercises the exact production pattern from apps/cloudflare/worker.ts:
+ * one memoized promise constructs the application, awaits startup, and only
+ * then resolves it. A concurrent caller must never receive an unstarted
+ * application.
  *
  * @module
  */
@@ -14,87 +16,82 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
+// Mirror the exact production helper from apps/cloudflare/worker.ts so the
+// test exercises the real pattern rather than a lookalike.
+function createMemoizedStartup(
+  factory: () => ReturnType<typeof createApplication>,
+): () => Promise<ReturnType<typeof createApplication>> {
+  let application: Promise<ReturnType<typeof createApplication>> | undefined;
+  return async () => {
+    if (application === undefined) {
+      application = (async () => {
+        const created = factory();
+        await created.start();
+        return created;
+      })();
+    }
+    return await application;
+  };
+}
+
 describe('Worker startup behavior — memoized pattern', () => {
   it('startup precedes fetch on first request', async () => {
-    // Simulate the memoized startup pattern from the docs.
-    const raw = createApplication();
-    raw.register(RuntimePlugin());
-
     let started = false;
     let fetched = false;
 
-    // Override start to track ordering
-    const origStart = raw.start.bind(raw);
-    raw.start = async () => {
-      const result = await origStart();
-      started = true;
-      return result;
-    };
+    const app = createMemoizedStartup(() => {
+      const raw = createApplication();
+      raw.register(RuntimePlugin());
 
-    raw.router.get('/test', async (ctx) => {
-      await Promise.resolve();
-      fetched = true;
-      return ctx.response.json({ ok: true });
+      // Override start to track ordering
+      const origStart = raw.start.bind(raw);
+      raw.start = async () => {
+        const result = await origStart();
+        started = true;
+        return result;
+      };
+
+      raw.router.get('/test', async (ctx) => {
+        await Promise.resolve();
+        fetched = true;
+        return ctx.response.json({ ok: true });
+      });
+
+      return raw;
     });
 
-    // Memoized startup pattern (matching docs exactly)
-    // start() returns void, so we memoize the started app reference.
-    let application: Promise<typeof raw> | undefined;
-    async function app(): Promise<typeof raw> {
-      if (application === undefined) {
-        application = (async () => {
-          await raw.start();
-          return raw;
-        })();
-        await application;
-      }
-      return await application;
-    }
-
-    // Simulate a first request
-    const appStarted = app();
-    const resolved = await appStarted;
+    // Call the memoized helper (startup happens inside the promise)
+    const resolved = await app();
     expect(started).toBe(true);
 
-    // Now fetch
+    // Now fetch — startup already completed
     const response = await resolved.fetch(new Request('http://localhost/test'));
     expect(response.status).toBe(200);
     expect(fetched).toBe(true);
-
-    // Verify startup happened before fetch
-    expect(started).toBe(true);
   });
 
   it('concurrent first requests share a single startup', async () => {
-    const raw = createApplication();
-    raw.register(RuntimePlugin());
-
     let startCallCount = 0;
-    const origStart = raw.start.bind(raw);
-    raw.start = async () => {
-      startCallCount++;
-      await origStart();
-    };
 
-    raw.router.get('/test', async (ctx) => {
-      await Promise.resolve();
-      return ctx.response.json({ ok: true });
+    const app = createMemoizedStartup(() => {
+      const raw = createApplication();
+      raw.register(RuntimePlugin());
+
+      const origStart = raw.start.bind(raw);
+      raw.start = async () => {
+        startCallCount++;
+        await origStart();
+      };
+
+      raw.router.get('/test', async (ctx) => {
+        await Promise.resolve();
+        return ctx.response.json({ ok: true });
+      });
+
+      return raw;
     });
 
-    // Memoized startup
-    let application: Promise<typeof raw> | undefined;
-    async function app(): Promise<typeof raw> {
-      if (application === undefined) {
-        application = (async () => {
-          await raw.start();
-          return raw;
-        })();
-        await application;
-      }
-      return await application;
-    }
-
-    // Fire two concurrent "first requests"
+    // Fire two concurrent "first requests" through the same memoized helper
     const [r1, r2] = await Promise.all([
       app().then((s) => s.fetch(new Request('http://localhost/test'))),
       app().then((s) => s.fetch(new Request('http://localhost/test'))),
@@ -109,24 +106,17 @@ describe('Worker startup behavior — memoized pattern', () => {
   });
 
   it('startup failure propagates to all concurrent waiters', async () => {
-    const raw = createApplication();
-    // Deliberately fail startup
-    // Deliberately fail startup — async to match interface signature
-    raw.start = async () => {
-      await Promise.reject(new Error('startup failed'));
-    };
+    const startupError = new Error('startup failed');
 
-    let application: Promise<typeof raw> | undefined;
-    async function app(): Promise<typeof raw> {
-      if (application === undefined) {
-        application = (async () => {
-          await raw.start();
-          return raw;
-        })();
-        await application;
-      }
-      return await application;
-    }
+    const app = createMemoizedStartup(() => {
+      const raw = createApplication();
+      raw.register(RuntimePlugin());
+      // Deliberately fail startup
+      raw.start = () => {
+        return Promise.reject(startupError);
+      };
+      return raw;
+    });
 
     // Both callers should see the same error
     let error1: Error | null = null;
@@ -141,9 +131,34 @@ describe('Worker startup behavior — memoized pattern', () => {
       }),
     ]);
 
-    expect(error1).not.toBeNull();
-    expect(error2).not.toBeNull();
-    expect(error1!.message).toBe('startup failed');
-    expect(error2!.message).toBe('startup failed');
+    expect(error1).toBe(startupError);
+    expect(error2).toBe(startupError);
+  });
+
+  it('no fetch occurs before successful startup', async () => {
+    const order: string[] = [];
+
+    const app = createMemoizedStartup(() => {
+      const raw = createApplication();
+      raw.register(RuntimePlugin());
+
+      const origStart = raw.start.bind(raw);
+      raw.start = async () => {
+        await origStart();
+        order.push('started');
+      };
+
+      raw.router.get('/test', (ctx) => {
+        order.push('fetched');
+        return ctx.response.json({ ok: true });
+      });
+
+      return raw;
+    });
+
+    // The fetch is chained after app() resolves, so startup must come first
+    await app().then((s) => s.fetch(new Request('http://localhost/test')));
+
+    expect(order).toEqual(['started', 'fetched']);
   });
 });

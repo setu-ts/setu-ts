@@ -244,32 +244,32 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   RegisterOptions: '@setu-ts/common',
   HealthIndicatorFn: '@setu-ts/common',
   MockPluginOptions: '@setu-ts/testing',
+  IDatabaseService: '@setu-ts/database-plugin',
+  IRepository: '@setu-ts/database-plugin',
+  HttpMethod: '@setu-ts/common',
+  ITenant: '@setu-ts/common',
 };
 
 /**
  * Type names that fences reference as unimported documentation shorthand but
- * that are NOT exported from `@setu-ts/common` (`ServiceRegistry` is only an
- * `IServiceRegistry` interface — the class is not a public export;
- * `ICacheService`/`IDatabaseService` live as plugin-internal interfaces, not
- * public exports). The prelude declares these as minimal local structural
- * types so a fence using them as a generic type argument
- * (`ctx.services.get<ICacheService>('cache')`) compiles, while the fence's
- * OWN `@setu-ts/` option calls are still checked against the real imported
- * interfaces. The shapes are deliberately narrow and permissive — they exist
- * to satisfy a type-argument reference, not to validate the service surface
- * (that is the plugin's job).
+ * that are NOT exported from any `@setu-ts/` package. `ServiceRegistry` is only
+ * an `IServiceRegistry` interface — the class is not a public export.
+ *
+ * `ICacheStore` is a REAL export from `@setu-ts/common` and lives in TYPE_EXPORTS.
+ * `IDatabaseService` is a REAL export from `@setu-ts/database-plugin` and also
+ * lives in TYPE_EXPORTS. The prelude imports them from their real packages so
+ * guide fences are checked against the actual contracts.
+ *
+ * Only genuinely application-owned names (ServiceRegistry) remain as local
+ * declarations here, and they must not shadow or widen framework-owned APIs.
  */
 const LOCAL_TYPE_DECLS: Readonly<Record<string, string>> = {
   // Deliberately self-contained structural types (no reference to unimported names).
   // These satisfy a generic type-argument reference without masking option-name errors.
   ServiceRegistry:
     'declare class ServiceRegistry { get<T = unknown>(token: string): T | undefined; register<T>(token: string, service: T, options?: { singleton?: boolean; lazy?: boolean }): void; }',
-  ICacheService:
-    'declare interface ICacheService { get<T = unknown>(key: string): Promise<T | null>; set<T = unknown>(key: string, value: T, options?: { ttl?: number }): Promise<void>; del(key: string): Promise<void>; has(key: string): Promise<boolean>; }',
-  IDatabaseService:
-    'declare interface IDatabaseService { findAll<T = unknown>(entity: string, options?: unknown): Promise<T[]>; findById<T = unknown>(entity: string, id: string): Promise<T | null>; create<T = unknown>(entity: string, data: Partial<T>): Promise<T>; update<T = unknown>(entity: string, id: string, data: Partial<T>): Promise<T>; delete(entity: string, id: string): Promise<boolean>; }',
-  // Local types that are NOT public exports (satisfy generic type-argument references).
-  // HealthIndicatorFn moved to TYPE_EXPORTS — it IS a real public export.
+  // ICacheStore removed — it is a real export from @setu-ts/common (in TYPE_EXPORTS).
+  // IDatabaseService removed — it is a real export from @setu-ts/database-plugin (in TYPE_EXPORTS).
 };
 
 /**

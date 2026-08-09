@@ -19,9 +19,15 @@ async function app(
   env: WorkerEnvironment,
 ): Promise<ReturnType<typeof createCloudflareApp>> {
   if (application === undefined) {
-    application = Promise.resolve(createCloudflareApp(env));
-    const created = await application;
-    await created.start();
+    // One memoized promise covers both creation AND startup. A concurrent caller
+    // awaits the same in-flight promise and never receives an unstarted application.
+    // Startup failure propagates to every waiter; the source-documented retry policy
+    // is a fresh Worker invocation (the promise is NOT reset on rejection).
+    application = (async () => {
+      const created = createCloudflareApp(env);
+      await created.start();
+      return created;
+    })();
   }
   return await application;
 }

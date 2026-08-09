@@ -467,9 +467,10 @@ app.register(DatabasePlugin({
   },
 }));
 
-// Usage
+// Usage — IDatabaseService.getRepository() returns IRepository, not raw CRUD.
 const db = ctx.services.get<IDatabaseService>('database');
-const users = await db.findAll('users');
+const usersRepo = db.getRepository<{ id: string; name: string }>('users');
+const users = await usersRepo.findAll();
 ```
 
 ## Caching
@@ -499,11 +500,14 @@ app.register(CachePlugin({
   options: { url: 'redis://localhost:6379' },
 }));
 
-// Usage
-const cache = ctx.services.get<ICacheService>('cache');
+// Usage — ICacheStore uses the token 'cache' (CAPABILITIES.CACHE), stores value
+// with numeric TTL seconds (not an options bag), and deletes with delete().
+import type { ICacheStore } from '@setu-ts/common';
+const cache = ctx.services.get<ICacheStore>('cache');
 const users: unknown[] = [];
-await cache.set('users:all', users, { ttl: 300 });
+await cache.set('users:all', users, 300);
 const cachedUsers = await cache.get<unknown[]>('users:all');
+await cache.delete('users:all');
 ```
 
 ## Validation

@@ -186,17 +186,19 @@ Database operations.
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IDatabaseService, IRepository } from '@setu-ts/database-plugin';
 
 app.register(DatabasePlugin({
   type: 'memory', // Use in-memory for development
 }));
 
 const db = ctx.services.get<IDatabaseService>('database');
-const items = await db.findAll('items');
-const item = await db.findById('items', '1');
-await db.create('items', { name: 'New Item' });
-await db.update('items', '1', { name: 'Updated' });
-await db.delete('items', '1');
+const itemsRepo = db.getRepository<{ id: string; name: string }>('items');
+const items = await itemsRepo.findAll();
+const item = await itemsRepo.findById('1');
+await itemsRepo.create({ name: 'New Item' });
+await itemsRepo.update('1', { name: 'Updated' });
+await itemsRepo.delete('1');
 ```
 
 ---

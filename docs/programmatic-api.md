@@ -16,7 +16,24 @@ import { createApplication } from '@setu-ts/kernel';
 const app = createApplication();
 ```
 
-**Options:** None currently. The application is configured entirely through plugin registration.
+**Options:** Plugins can be passed inline at creation time (equivalent to calling `register()`
+immediately after):
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+const app = createApplication({
+  plugins: [RuntimePlugin()],
+});
+```
+
+Or registered individually:
+
+```typescript
+const app = createApplication();
+app.register(RuntimePlugin());
+```
 
 ### Application Methods
 
@@ -37,8 +54,10 @@ app.register(LoggerPlugin({ level: 'info' }));
 Register a GET route handler through the router.
 
 ```typescript
+import type { IDatabaseService } from '@setu-ts/database-plugin';
 app.router.get('/users', async (ctx) => {
-  const users = await ctx.services.get<IDatabaseService>('database').findAll('users');
+  const usersRepo = ctx.services.get<IDatabaseService>('database').getRepository('users');
+  const users = await usersRepo.findAll();
   return ctx.response.json(users);
 });
 ```
@@ -49,8 +68,9 @@ Register route handlers for other HTTP methods.
 
 ```typescript
 const db = ctx.services.get<IDatabaseService>('database');
+const usersRepo = db.getRepository<{ id: string; name: string }>('users');
 app.router.post('/users', async (ctx) => {
-  const user = await db.create('users', { name: 'alice' });
+  const user = await usersRepo.create({ name: 'alice' });
   return ctx.response.json(user);
 });
 ```
@@ -118,14 +138,15 @@ const response = await inject(app, {
 Route handlers receive a context object with the following properties:
 
 ```typescript
-interface RouteHandlerContext {
-  request: IRequest;
-  response: IResponse;
-  services: ServiceRegistry;
-  params: Readonly<Record<string, string>>;
-  query: Readonly<Record<string, string>>;
-  state: Map<string, unknown>;
-}
+// The actual IRequestContext interface (from @setu-ts/common) — see the real
+// declaration in packages/common/src/http.ts for the authoritative contract.
+// Key members:
+//   request: IRequest           (see IRequest below)
+//   response: IResponse         (fluent terminal methods, no ResponseOptions bag)
+//   services: IServiceRegistry  (typed capability resolution)
+//   params: Readonly<Record<string, string>>
+//   state: Map<string, unknown>
+//   signal: AbortSignal         (aborts when the client disconnects)
 ```
 
 ### Response Methods
@@ -144,13 +165,24 @@ ctx.response.redirect('/other');
 ctx.response.stream(readableStream);
 ```
 
-### Response Options
+### Response Methods (fluent API)
+
+`IResponse` methods return `HandlerResult` (terminal) or `IResponse` (fluent). There is no separate
+`ResponseOptions` bag — each method carries its own parameters:
 
 ```typescript
-interface ResponseOptions {
-  status?: number;
-  headers?: HeadersInit;
-}
+// Fluent setters (chainable)
+ctx.response.status(200);
+ctx.response.header('X-Custom', 'value');
+
+// Terminal methods (return HandlerResult)
+ctx.response.json({ key: 'value' });
+ctx.response.text('Hello');
+ctx.response.redirect('/other', 302);
+ctx.response.stream(readableStream);
+
+// Read the final snapshot after the handler completes
+const snapshot = ctx.response.snapshot();
 ```
 
 ## Service Registry
@@ -177,7 +209,7 @@ Check if a service is registered.
 
 ```typescript
 if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICacheService>('cache');
+  const cache = ctx.services.get<ICacheStore>('cache');
 }
 ```
 
@@ -261,7 +293,8 @@ ctx.lifecycle.onError((error, ctx) => {
 
 ### `onStopping(handler)`, `onShutdown(handler)`, `onClose(handler)`
 
-Shutdown lifecycle hooks.
+Shutdown lifecycle hooks. The actual shutdown order is: **stopping → drain → shutdown hook →
+close**.
 
 ```typescript
 ctx.lifecycle.onStopping(() => {
@@ -279,23 +312,32 @@ ctx.lifecycle.onClose(() => {
 
 ## Request/Response
 
-### IRequest
+### IRequest (exact contract from `@setu-ts/common`)
+
+Derived from the `IRequest` interface in `@setu-ts/common`.
 
 ```typescript
 interface IRequest {
-  readonly method: string;
+  readonly method: HttpMethod; // 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
   readonly url: string;
   readonly path: string;
-  readonly query: Readonly<Record<string, string>>;
   readonly headers: Headers;
-  readonly body?: ReadableStream<Uint8Array>;
-  readonly bodyUsed: boolean;
+  readonly ip?: string;
+  readonly user?: IPrincipal; // populated by auth middleware
+  readonly tenant?: ITenant; // populated by multi-tenancy middleware
+  readonly signal?: AbortSignal; // fires on client disconnect
 
-  json<T>(): Promise<T>;
+  // Body readers (consume the body exactly once)
+  json<T = unknown>(): Promise<T>;
   text(): Promise<string>;
   bytes(): Promise<Uint8Array>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  formData(): Promise<FormData>;
 }
 ```
+
+**Note:** `IRequest` has no `query` field (query parsing happens in the router), no `body` field
+(body is read through the dedicated methods above), and no `bodyUsed` property.
 
 ### IRequestContext
 
