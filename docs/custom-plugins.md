@@ -34,7 +34,7 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
 
       // Add middleware
       ctx.middleware.add(async (ctx, next) => {
-        ctx.state['my-plugin'] = { enabled: config.enabled };
+        ctx.state.set('my-plugin', { enabled: config.enabled });
         await next();
       });
 
@@ -51,9 +51,20 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
 ### Step 2: Use the Plugin
 
 ```typescript
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { MyPlugin } from './my-plugin';
+
+function MyPlugin(options: { greeting?: string }): IPlugin {
+  const greeting = options.greeting ?? 'Hello';
+  return {
+    name: 'my-plugin',
+    version: '1.0.0',
+    async register(ctx: IPluginContext) {
+      ctx.services.register('my-service', { greet: (name: string) => `${greeting}, ${name}!` });
+    },
+  };
+}
 
 const app = createApplication();
 
@@ -97,25 +108,26 @@ export function CachePlugin(options: CachePluginOptions): IPlugin {
 // Register a singleton
 ctx.services.register('my-service', new MyService());
 
-// Register a factory (lazy)
+// Register a factory (lazy instantiation)
 ctx.services.registerFactory('my-service', () => new MyService());
 
 // Register with options
 ctx.services.register('my-service', new MyService(), {
   override: true, // Replace existing
   multi: true, // Allow multiple providers
-  lazy: true, // Instantiate on first get
 });
 ```
 
 ### Middleware
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
+
 const myMiddleware: MiddlewareFunction = async (ctx, next) => {
   const start = ctx.startTime;
   await next();
-  const duration = ctx.startTime - start;
-  ctx.logger?.info('Request completed', { duration });
+  const duration = performance.now() - start;
+  console.log('Request completed', { duration });
 };
 
 // Add to pipeline
@@ -131,23 +143,26 @@ ctx.middleware.add(myMiddleware, { priority: 25 });
 ### Routes
 
 ```typescript
+import type { RouteHandler } from '@setu-ts/common';
+
 // GET route
-ctx.router.get('/path', handler);
+const getHandler: RouteHandler = async (ctx) => ctx.response.json({ ok: true });
+ctx.router.get('/path', getHandler);
 
 // POST route
-ctx.router.post('/path', handler);
+ctx.router.post('/path', getHandler);
 
 // PUT, PATCH, DELETE, HEAD, OPTIONS
-ctx.router.put('/path', handler);
-ctx.router.patch('/path', handler);
-ctx.router.delete('/path', handler);
-ctx.router.head('/path', handler);
-ctx.router.options('/path', handler);
+ctx.router.put('/path', getHandler);
+ctx.router.patch('/path', getHandler);
+ctx.router.delete('/path', getHandler);
+ctx.router.head('/path', getHandler);
+ctx.router.options('/path', getHandler);
 
 // Route group
 ctx.router.group('/api', (group) => {
-  group.get('/users', getUsers);
-  group.post('/users', createUser);
+  group.get('/users', getHandler);
+  group.post('/users', getHandler);
 });
 ```
 
@@ -155,10 +170,9 @@ ctx.router.group('/api', (group) => {
 
 ```typescript
 ctx.health.register('my-check', async () => {
-  const healthy = await checkHealth();
   return {
-    status: healthy ? 'healthy' : 'unhealthy',
-    detail: { timestamp: ctx.runtime.now() },
+    status: 'up',
+    data: { timestamp: ctx.runtime.now() },
   };
 });
 ```
@@ -166,8 +180,8 @@ ctx.health.register('my-check', async () => {
 ### Metrics
 
 ```typescript
-// Counter
-const requests = ctx.metrics.register('my_requests_total', {
+// Register metrics (IMetricsApi.register returns void)
+ctx.metrics.register('my_requests_total', {
   type: 'counter',
   help: 'Total requests',
   labels: ['method', 'path'],
@@ -175,17 +189,15 @@ const requests = ctx.metrics.register('my_requests_total', {
 
 ctx.middleware.add(async (ctx, next) => {
   await next();
-  requests.inc({ labels: { method: ctx.request.method, path: ctx.request.path } });
+  // Metrics are collected automatically by the metrics middleware
 });
 
-// Gauge
-const activeConnections = ctx.metrics.register('active_connections', {
+ctx.metrics.register('active_connections', {
   type: 'gauge',
   help: 'Active connections',
 });
 
-// Histogram
-const duration = ctx.metrics.register('request_duration', {
+ctx.metrics.register('request_duration', {
   type: 'histogram',
   help: 'Request duration in seconds',
   buckets: [0.1, 0.5, 1, 2.5, 5],
@@ -279,8 +291,10 @@ ctx.environment.validate({
 ```typescript
 // Read configuration
 const config = ctx.config?.get('my-plugin', {
-  greeting: 'Hello',
-  enabled: true,
+  default: {
+    greeting: 'Hello',
+    enabled: true,
+  },
 });
 ```
 
@@ -304,8 +318,8 @@ const id = ctx.runtime.uuid();
 const bytes = ctx.runtime.randomBytes(32);
 
 // Time
-const now = ctx.runtime.now();           // Wall clock (ms since epoch)
-const hrtime = ctx.runtime.hrtime();     // Monotonic (ms since arbitrary origin)
+const now = ctx.runtime.now(); // Wall clock (ms since epoch)
+const hrtime = ctx.runtime.hrtime(); // Monotonic (ms since arbitrary origin)
 
 // Timers
 const timeoutId = ctx.runtime.setTimeout(() => {}, 1000);
@@ -313,12 +327,18 @@ ctx.runtime.clearTimeout(timeoutId);
 
 // File system (may be undefined on Workers)
 if (ctx.runtime.fs) {
-  const content = await ctx.runtime.fs.readFile('file.txt');
+  const fileContent = await ctx.runtime.fs.readFile('file.txt');
 }
 
 // SubtleCrypto (may be undefined)
 if (ctx.runtime.subtle) {
-  const key = await ctx.runtime.subtle.importKey(...);
+  const importedKey = await ctx.runtime.subtle.importKey(
+    'raw',
+    new Uint8Array(32),
+    'HMAC',
+    false,
+    ['sign'],
+  );
 }
 ```
 
@@ -333,8 +353,8 @@ export function MyPlugin(): IPlugin {
     version: '1.0.0',
     dependencies: ['runtime', 'logger'], // Will fail if missing
     async register(ctx) {
-      // ctx.logger is guaranteed to be available
-      ctx.logger.info('Plugin registered');
+      // ctx.logger is guaranteed to be available (when 'logger' is in dependencies)
+      ctx.logger?.info('Plugin registered');
     },
   };
 }
@@ -382,7 +402,17 @@ export function MyPlugin(): IPlugin {
 ```typescript
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { MyPlugin } from '../my-plugin';
+
+// Self-contained plugin for testing (no relative import)
+function MyPlugin(): IPlugin {
+  return {
+    name: 'my-plugin',
+    version: '1.0.0',
+    async register(ctx) {
+      // Plugin registration logic
+    },
+  };
+}
 
 describe('MyPlugin', () => {
   it('has correct name and version', () => {
@@ -418,14 +448,26 @@ describe('MyPlugin', () => {
 ```typescript
 import { createTestApp, inject } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { MyPlugin } from '../my-plugin';
+
+// Self-contained plugin for testing (no relative import)
+function MyPlugin(): IPlugin {
+  return {
+    name: 'my-plugin',
+    version: '1.0.0',
+    async register(ctx) {
+      ctx.router.get('/greet/:name', (ctx) => {
+        return ctx.response.json({ message: `Hello, ${ctx.params.name}!` });
+      });
+    },
+  };
+}
 
 describe('MyPlugin integration', () => {
   it('handles GET /greet/:name', async () => {
     const app = await createTestApp({
       plugins: [RuntimePlugin()],
     });
-    app.register(MyPlugin({ greeting: 'Hello' }));
+    app.register(MyPlugin());
 
     const response = await inject(app, {
       method: 'GET',
@@ -528,9 +570,13 @@ deno add jsr:@acme/my-plugin
 ## Usage
 
 ```typescript
-import { MyPlugin } from '@acme/my-plugin';
+// A published plugin package — import from your own package once published:
+//   import { MyPlugin } from '@acme/my-plugin';
+//   app.register(MyPlugin({ option: 'value' }));
 
-app.register(MyPlugin({ option: 'value' }));
+// For local development, import directly:
+//   import { MyPlugin } from './src/my-plugin.ts';
+//   app.register(MyPlugin());
 ```
 
 ## Options

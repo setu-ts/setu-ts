@@ -79,22 +79,22 @@ plugins/consumers resolve them by token.
 ### Registering Services
 
 ```typescript
-import type { MiddlewareFunction } from '@setu-ts/common';
+import type { RegisterOptions } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
-async register(ctx: IPluginContext) {
+async function registerServices(ctx: IPluginContext) {
   // Register a service
-  ctx.services.register<MyService>('my-service', new MyService());
+  ctx.services.register(CAPABILITIES.CACHE, new MyService());
 
   // Register with options
-  ctx.services.register<MyService>('my-service', new MyService(), {
-    override: true,   // Replace existing registration
-    multi: true,      // Allow multiple providers
-    lazy: true,       // Instantiate on first get
-  });
+  const options: RegisterOptions = {
+    override: true, // Replace existing registration
+    multi: true, // Allow multiple providers
+  };
+  ctx.services.register(CAPABILITIES.CACHE, new MyService(), options);
 
   // Register a factory (lazy instantiation)
-  ctx.services.registerFactory('my-service', () => new MyService());
+  ctx.services.registerFactory(CAPABILITIES.CACHE, () => new MyService());
 }
 ```
 
@@ -120,21 +120,24 @@ Plugins can add middleware to the request processing pipeline.
 ### Adding Middleware
 
 ```typescript
-async register(ctx: IPluginContext) {
+import type { MiddlewareFunction, MiddlewareOptions } from '@setu-ts/common';
+
+async function addMiddleware(ctx: IPluginContext) {
   // Add middleware with default priority
-  ctx.middleware.add(async (ctx, next) => {
+  ctx.middleware.add(async (requestCtx, next) => {
     console.log('Before request');
     await next();
     console.log('After request');
   });
 
   // Add middleware with specific priority
+  const middlewareOptions: MiddlewareOptions = { priority: 15 };
   ctx.middleware.add(
-    async (ctx, next) => {
+    async (requestCtx, next) => {
       // Middleware logic
       await next();
     },
-    { priority: 15 } // Runs at priority 15
+    middlewareOptions,
   );
 }
 ```
@@ -214,7 +217,7 @@ interface IPluginContext {
 Plugins can register lifecycle hooks to respond to application events:
 
 ```typescript
-async register(ctx: IPluginContext) {
+async function registerLifecycleHooks(ctx: IPluginContext) {
   // Register when app starts (before pipeline compilation)
   ctx.lifecycle.onInit(() => {
     // Initialization logic
@@ -226,16 +229,16 @@ async register(ctx: IPluginContext) {
   });
 
   // Per-request hooks
-  ctx.lifecycle.onRequest((ctx) => {
+  ctx.lifecycle.onRequest((requestCtx) => {
     // Request started
   });
 
-  ctx.lifecycle.onResponse((ctx) => {
+  ctx.lifecycle.onResponse((requestCtx) => {
     // Response completed
   });
 
   // Error handling
-  ctx.lifecycle.onError((error, ctx) => {
+  ctx.lifecycle.onError((error, requestCtx) => {
     // Handle error
   });
 
@@ -334,8 +337,8 @@ the middleware priority table above).
 Plugins can be replaced by custom implementations:
 
 ```typescript
-// Register a custom logger
-app.register(CustomLoggerPlugin(), { override: true });
+// Register a custom logger plugin
+app.register(CustomLoggerPlugin());
 ```
 
 ## Runtime Independence
@@ -343,7 +346,7 @@ app.register(CustomLoggerPlugin(), { override: true });
 Plugins should be runtime-independent whenever possible:
 
 ```typescript
-async register(ctx: IPluginContext) {
+async function useRuntimeIndependently(ctx: IPluginContext) {
   // Use runtime services instead of platform-specific APIs
   const uuid = ctx.runtime.uuid();
   const env = ctx.runtime.env;
@@ -404,13 +407,14 @@ Plugins should be tested in isolation and in integration:
 
 ```typescript
 import { createTestApp, inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 describe('MyPlugin', () => {
   it('registers services correctly', async () => {
     const app = await createTestApp({
       plugins: [RuntimePlugin()],
     });
-    app.register(MyPlugin());
+    app.register(MyPlugin(undefined));
 
     expect(app.services.has('my-service')).toBe(true);
   });
@@ -419,7 +423,7 @@ describe('MyPlugin', () => {
     const app = await createTestApp({
       plugins: [RuntimePlugin()],
     });
-    app.register(MyPlugin());
+    app.register(MyPlugin(undefined));
 
     const response = await inject(app, {
       method: 'GET',

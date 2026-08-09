@@ -48,12 +48,10 @@ app.router.get('/users', async (ctx) => {
 Register route handlers for other HTTP methods.
 
 ```typescript
+const db = ctx.services.get<IDatabaseService>('database');
 app.router.post('/users', async (ctx) => {
-  const user = await ctx.services.get<IDatabaseService>('database').create(
-    'users',
-    await ctx.request.json(),
-  );
-  return ctx.response.json(user, { status: 201 });
+  const user = await db.create('users', { name: 'alice' });
+  return ctx.response.json(user);
 });
 ```
 
@@ -102,8 +100,10 @@ Inject a request without a network socket (testing only).
 
 ```typescript
 import { inject } from '@setu-ts/testing';
+import type { IKernelApplication } from '@setu-ts/kernel';
 
-const response = await inject(app, {
+const kernApp = app as unknown as IKernelApplication;
+const response = await inject(kernApp, {
   method: 'GET',
   url: '/health',
 });
@@ -335,9 +335,7 @@ Register a health check.
 
 ```typescript
 ctx.health.register('database', async () => {
-  const db = ctx.services.get<IDatabaseService>('database');
-  const healthy = await db.isHealthy();
-  return { status: healthy ? 'healthy' : 'unhealthy' };
+  return { status: 'up', data: { timestamp: Date.now() } };
 });
 ```
 
@@ -448,8 +446,10 @@ Inject a request.
 
 ```typescript
 import { inject } from '@setu-ts/testing';
+import type { IKernelApplication } from '@setu-ts/kernel';
 
-const response = await inject(app, {
+const kernApp = app as unknown as IKernelApplication;
+const response = await inject(kernApp, {
   method: 'GET',
   url: '/test',
   headers: { 'Content-Type': 'application/json' },
@@ -465,10 +465,8 @@ Create a mock plugin.
 import { createMockPlugin } from '@setu-ts/testing';
 
 const mockPlugin = createMockPlugin({
-  provides: ['my-service'],
-  services: {
-    'my-service': mockMyService,
-  },
+  name: 'my-service',
+  service: mockMyService,
 });
 ```
 

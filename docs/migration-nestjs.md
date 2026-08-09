@@ -123,7 +123,7 @@ app.router.get('/users/:id', async (ctx) => {
 app.router.post('/users', async (ctx) => {
   const userService = ctx.services.get<UserService>('userService');
   const dto = await ctx.request.json();
-  return ctx.response.json(await userService.create(dto), { status: 201 });
+  return ctx.response.status(201).json(await userService.create(dto));
 });
 ```
 
@@ -214,16 +214,12 @@ export function UsersPlugin(): IPlugin {
     dependencies: ['runtime', 'database'],
     async register(ctx) {
       // Register services
-      ctx.services.registerFactory('UserService', () =>
-        new UserService(
-          ctx.services.get('userRepository'),
-        ));
+      ctx.services.register('UserService', new UserService());
 
-      // Register controllers (if using decorators)
-      // Or register routes directly
-      ctx.router.get('/users', async (ctx) => {
-        const userService = ctx.services.get<UserService>('UserService');
-        return ctx.response.json(await userService.findAll());
+      // Register routes directly
+      ctx.router.get('/users', async (requestCtx) => {
+        const userService = requestCtx.services.get<UserService>('UserService');
+        return requestCtx.response.json(await userService.findAll());
       });
     },
   };
@@ -264,7 +260,7 @@ export const authMiddleware: MiddlewareFunction = async (ctx, next) => {
 
   // Verify token and set user
   const user = await verifyToken(token);
-  ctx.state['user'] = user;
+  ctx.state.set('user', user);
 
   await next();
 };
@@ -304,7 +300,7 @@ export const transformMiddleware: MiddlewareFunction = async (ctx, next) => {
     const transformed = { success: true, data };
     return ctx.response.json(transformed);
   }
-});
+};
 ```
 
 ## Exception Filters
@@ -340,26 +336,24 @@ export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
     await next();
   } catch (error) {
     if (error instanceof HttpException) {
-      return ctx.response.json(
+      return ctx.response.status(error.status).json(
         {
           statusCode: error.status,
           timestamp: new Date().toISOString(),
-          path: ctx.request.path,
+          path: new URL(ctx.request.url).pathname,
           message: error.message,
         },
-        { status: error.status },
       );
     }
 
     // Log error
-    ctx.logger?.error('Unhandled error', { error });
+    console.error('Unhandled error', { error });
 
-    return ctx.response.json(
+    return ctx.response.status(500).json(
       {
         statusCode: 500,
         message: 'Internal server error',
       },
-      { status: 500 },
     );
   }
 };
@@ -387,6 +381,7 @@ app.router.post('/users', {
   handler: async (ctx) => {
     const dto = await ctx.request.json();
     // dto is validated
+    return ctx.response.json({ created: dto });
   },
 });
 ```
@@ -506,8 +501,9 @@ app.register(CachePlugin({
 
 // Usage
 const cache = ctx.services.get<ICacheService>('cache');
+const users: unknown[] = [];
 await cache.set('users:all', users, { ttl: 300 });
-const users = await cache.get('users:all');
+const cachedUsers = await cache.get<unknown[]>('users:all');
 ```
 
 ## Validation
@@ -537,7 +533,7 @@ const CreateUserDto = z.object({
 
 // Usage with validation plugin
 app.register(ValidationPlugin({
-  validator: 'zod',
+  errorFormat: 'default',
 }));
 
 // Or manual validation
@@ -547,7 +543,7 @@ app.router.post('/users', async (ctx) => {
     return ctx.response.status(400).json({ errors: result.error.errors });
   }
   const dto = result.data;
-  // ...
+  return ctx.response.status(201).json({ created: dto });
 });
 ```
 
@@ -583,7 +579,7 @@ ws.route('/ws', {
     ws.room('events').add(conn);
   },
   onMessage: (conn, message) => {
-    ws.room('events').broadcast({ type: 'message', data: message }, { except: conn });
+    ws.room('events').broadcast(message, { except: conn });
   },
 });
 ```
@@ -671,8 +667,7 @@ app.use(app.getHttpAdapter().getInstance());
 ```typescript
 // Middleware runs in priority order (lower first)
 app.middleware.add(loggerMiddleware); // Default priority: 500
-app.middleware.add(corsMiddleware); // Default priority: 500
-app.middleware.add(authMiddleware, { priority: 25 }); // Runs before default
+app.middleware.add(loggerMiddleware, { priority: 25 }); // Runs before default
 ```
 
 ## Migration Checklist
