@@ -14,7 +14,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { DEFAULT_FEATURES, DI_WIRING, withDiPlugin } from '../../../src/templates/di.ts';
+import { DI_WIRING, withDiPlugin } from '../../../src/templates/di.ts';
 import type { Wiring } from '../../../src/templates/registry.ts';
 import { NEST_PLUGINS } from '../../../src/templates/nest.ts';
 import { REST_PLUGINS } from '../../../src/templates/rest.ts';
@@ -42,7 +42,7 @@ describe('withDiPlugin', () => {
   it('is a no-op under the default features', () => {
     // Pins that the default is OFF: every template scaffolded without the flag
     // must render byte-identically to before the flag existed.
-    expect(withDiPlugin(REST_PLUGINS, DEFAULT_FEATURES)).toBe(REST_PLUGINS);
+    expect(withDiPlugin(REST_PLUGINS, { di: false })).toBe(REST_PLUGINS);
   });
 
   it('appends exactly one wiring when --di was given', () => {

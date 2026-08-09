@@ -15,7 +15,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { TargetRuntime } from '../../src/constants.ts';
-import { DEFAULT_FEATURES, type TemplateFeatures } from '../../src/templates/di.ts';
+import type { TemplateFeatures } from '../../src/templates/di.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
 import {
@@ -189,7 +189,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
 });
 
 describe('full-stack template | the runtime-dependent argument', () => {
-  const argsFor = (runtime: TargetRuntime, features: TemplateFeatures = DEFAULT_FEATURES): string =>
+  const argsFor = (runtime: TargetRuntime, features: TemplateFeatures = { di: false }): string =>
     FULL_STACK_TEMPLATE.appFactory?.args?.(runtime, features) ?? '';
 
   it('serves assets from the client build on Deno, Node and Bun', () => {
