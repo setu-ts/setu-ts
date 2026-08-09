@@ -195,45 +195,74 @@ app.register(AuthPlugin({
 ### Deno
 
 ```typescript
-// Deno automatically uses DenoHttpAdapter
+// RuntimePlugin() auto-detects Deno and selects DenoHttpAdapter.
 await app.start({ port: 3000 });
 ```
 
 ### Node.js
 
 ```typescript
-import { NodeHttpAdapter } from '@setu-ts/runtime';
-
-app.register(RuntimePlugin({
-  httpAdapters: [NodeHttpAdapter],
-}));
+// RuntimePlugin() auto-detects Node and selects NodeHttpAdapter.
 await app.start({ port: 3000 });
 ```
 
 ### Bun
 
 ```typescript
-import { BunHttpAdapter } from '@setu-ts/runtime';
+// RuntimePlugin() auto-detects Bun and selects BunHttpAdapter.
+await app.start({ port: 3000 });
+```
 
-app.register(RuntimePlugin({
-  httpAdapters: [BunHttpAdapter],
-}));
+### Forcing a platform
+
+`RuntimePlugin({ platform })` overrides auto-detection. The `httpAdapters` option is a keyed
+[`HttpAdapterFactories`](../packages/runtime/src/plugin/runtime-plugin.ts) object (factory callbacks
+per platform), not an array — it is an internal testing seam, so prefer `platform` for production
+overrides:
+
+```typescript
+import { RuntimePlugin } from '@setu-ts/runtime';
+import type { RuntimePlatform } from '@setu-ts/common';
+
+app.register(RuntimePlugin({ platform: 'node' as RuntimePlatform }));
 await app.start({ port: 3000 });
 ```
 
 ### Cloudflare Workers
 
+On Workers there is no socket to bind, so the application exports a `fetch` handler instead of
+calling `start({ port })`. The Worker's `env` (bindings and variables) is passed to both
+`RuntimePlugin` (so `runtime.env` is populated) and `CloudflarePlugin` (which publishes typed
+binding accessors under `CAPABILITIES.CLOUDFLARE`):
+
 ```typescript
-import { CloudflareWorkersHttpAdapter } from '@setu-ts/runtime';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 
-const adapter = CloudflareWorkersHttpAdapter;
-app.register(RuntimePlugin({
-  httpAdapters: [adapter],
-}));
+// Deployment glue: at runtime `env` and `waitUntil` come from
+// `import { env, waitUntil } from 'cloudflare:workers'`. That specifier is
+// unresolvable off a Worker toolchain, so this block declares them rather than
+// importing — the real Worker passes the platform's values, which satisfy
+// these shapes structurally. `CloudflareWorkerEnv` is a `Record<string, unknown>`,
+// so a minimal typed interface is compatible with it.
+declare const env: Record<string, unknown>;
+declare const waitUntil: (promise: Promise<unknown>) => void;
 
-// Export the fetch handler
+const app = createApplication({
+  plugins: [
+    RuntimePlugin({ env }),
+    CloudflarePlugin({ env, waitUntil }),
+  ],
+});
+
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello from Workers!' });
+});
+
+// Export the fetch handler — Workers invokes this per request.
 export default {
-  async fetch(request: Request, env: unknown, ctx: ExecutionContext) {
+  async fetch(request: Request) {
     return app.fetch(request);
   },
 };

@@ -369,9 +369,9 @@ emitDecoratorMetadata).
 
 **Runtime Compatibility:**
 
-| Deno | Node | Bun | Workers           |
-| ---- | ---- | --- | ----------------- |
-| ✅   | ✅   | ✅  | ✅ (HTTP brokers) |
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ❌      |
 
 **Brokers:**
 
@@ -380,6 +380,12 @@ emitDecoratorMetadata).
 - RabbitMQ (via npm:amqplib)
 - NATS (via npm:nats)
 - Kafka (via npm:kafkajs)
+- GCP Pub/Sub (via npm:@google-cloud/pubsub)
+- Azure Service Bus (via npm:@azure/service-bus)
+
+> Workers is not supported: every broker except the in-memory default needs raw sockets or an npm
+> SDK that does not run on the edge. Use [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin)
+> for edge messaging primitives.
 
 **Features:**
 
@@ -403,16 +409,19 @@ emitDecoratorMetadata).
 
 **Runtime Compatibility:**
 
-| Deno | Node | Bun | Workers             |
-| ---- | ---- | --- | ------------------- |
-| ✅   | ✅   | ✅  | ✅ (Workers Queues) |
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ❌      |
 
 **Adapters:**
 
 - Memory (built-in)
 - Redis (via npm:ioredis)
 - RabbitMQ (via npm:amqplib)
-- Cloudflare Workers Queues
+- SQS (via npm:@aws-sdk/client-sqs)
+
+> Workers Queues belong to [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin), not this
+> package — the queue-plugin adapters all need raw sockets or an npm SDK unavailable on the edge.
 
 **Links:**
 
@@ -987,14 +996,19 @@ emitDecoratorMetadata).
 
 | Deno | Node | Bun | Workers |
 | ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | ✅ (DO) |
+| ✅   | ✅   | ✅  | ✅      |
 
 **Transports:**
 
 - Memory (default)
 - Messaging (brokered)
 - Redis
-- Durable Objects (Workers)
+- Custom
+
+> The Durable Objects backplane belongs to
+> [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin), not this package. This plugin ships the
+> `memory`, `messaging`, `redis`, and `custom` transports; on Workers, register the
+> cloudflare-plugin's `durableObject` arm for the DO-backed `IRealtimeBackplane` instead.
 
 **Links:**
 
@@ -1013,7 +1027,12 @@ emitDecoratorMetadata).
 
 | Deno | Node | Bun | Workers |
 | ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | ✅ (R2) |
+| ✅   | ✅   | ✅  | ❌      |
+
+> Workers has no filesystem, so the plugin registers its capability but mounts no route — a degraded
+> health indicator reports "no file system on this runtime". Serve assets through Workers Assets or
+> an R2 bucket via [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin) instead; this package
+> has no R2 implementation.
 
 **Links:**
 

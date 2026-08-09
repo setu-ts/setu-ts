@@ -780,6 +780,136 @@ const REQUIRED_CAVEATS: Readonly<Record<string, string>> = {
   'realtime-backplane-plugin': 'redis',
 };
 
+/**
+ * An explicit, source-grounded override that permits a runtime cell to disagree
+ * with the package-level {@linkcode PACKAGE_METADATA} flag. Each entry names the
+ * package, the runtime whose cell is overridden, the provider/resource that
+ * justifies the override, and the owning package that actually implements it.
+ *
+ * The previous catalog checker accepted ANY `✅ (...)` parenthetical as a
+ * provider-level note, which let a fictional provider (`✅ (HTTP brokers)` on a
+ * raw-socket package, `✅ (Workers Queues)` attributed to the wrong package)
+ * pass without source grounding. This enumerated map is the closed set of valid
+ * overrides: a `✅` cell whose base disagrees with metadata is accepted ONLY
+ * when an exact entry here names the real provider and the owning package, and
+ * the cell's parenthetical text mentions that provider. Anything else is a
+ * finding.
+ *
+ * `ownerPackage` is the package whose source implements the provider — not
+ * necessarily the package whose section carries the cell. It exists so a cell
+ * can say "this package is usable on Workers via a provider owned by another
+ * package" honestly (e.g. storage-plugin's R2 arm is served by cloudflare-plugin's
+ * `R2Storage`), while rejecting a cross-attribution that claims the provider
+ * lives in THIS package when it does not.
+ */
+interface CatalogOverride {
+  /** The package whose catalog section carries the overridden cell. */
+  readonly package: string;
+  /** The runtime whose cell is overridden (`'deno'|'node'|'bun'|'workers'`). */
+  readonly runtime: 'deno' | 'node' | 'bun' | 'workers';
+  /** The provider/resource name the cell's parenthetical must mention. */
+  readonly provider: string;
+  /** The package whose source actually implements the provider. */
+  readonly ownerPackage: string;
+}
+
+/**
+ * The closed set of source-grounded catalog overrides. Each was verified against
+ * package source: the provider exists in `ownerPackage`'s barrel, and the
+ * overriding package consumes it through an injectable/custom arm rather than
+ * implementing it itself.
+ *
+ * - `database-plugin` Workers `✅ (with adapters)`: the D1 adapter lives in
+ *   `cloudflare-plugin` (`D1Adapter`), handed to `DatabasePlugin({ type: 'custom' })`.
+ * - `cache-plugin` Workers `✅ (KV)`: the KV store lives in `cloudflare-plugin`
+ *   (`KvCacheStore`), handed to `CachePlugin({ store })`.
+ * - `storage-plugin` Workers `✅ (R2)`: the R2 store lives in `cloudflare-plugin`
+ *   (`R2Storage`), handed to `StoragePlugin` via its custom arm.
+ * - `audit-plugin` Workers `✅ (KV)`: audit storage is pluggable; a KV-backed
+ *   store is app-constructed. (The package is `PORTABLE`, so this is a provider
+ *   note, not a metadata disagreement — but it is enumerated for completeness.)
+ * - `session-plugin` Workers `✅ (KV)`: `KvSessionStore` lives in
+ *   `cloudflare-plugin`, handed to `SessionPlugin({ store })`.
+ * - `secrets-plugin` Workers `✅ (env)`: the `EnvProvider` reads `runtime.env`,
+ *   which Workers populates when `env` is passed to `RuntimePlugin`.
+ * - `mail-plugin`/`notification-plugin` Workers `✅ (HTTP)`: the HTTP providers
+ *   (SendGrid/Twilio/Slack/FCM) are fetch-based and Workers-portable.
+ * - `service-discovery-plugin` Workers `✅ (HTTP)`: Consul/Kubernetes are plain
+ *   HTTP JSON over an injectable `IDiscoveryHttp` seam.
+ */
+const CATALOG_OVERRIDES: readonly CatalogOverride[] = [
+  {
+    package: 'database-plugin',
+    runtime: 'workers',
+    provider: 'adapter',
+    ownerPackage: 'cloudflare-plugin',
+  },
+  {
+    package: 'cache-plugin',
+    runtime: 'workers',
+    provider: 'KV',
+    ownerPackage: 'cloudflare-plugin',
+  },
+  {
+    package: 'storage-plugin',
+    runtime: 'workers',
+    provider: 'R2',
+    ownerPackage: 'cloudflare-plugin',
+  },
+  {
+    package: 'audit-plugin',
+    runtime: 'workers',
+    provider: 'KV',
+    ownerPackage: 'cloudflare-plugin',
+  },
+  {
+    package: 'session-plugin',
+    runtime: 'workers',
+    provider: 'KV',
+    ownerPackage: 'cloudflare-plugin',
+  },
+  { package: 'secrets-plugin', runtime: 'workers', provider: 'env', ownerPackage: 'runtime' },
+  { package: 'mail-plugin', runtime: 'workers', provider: 'HTTP', ownerPackage: 'mail-plugin' },
+  {
+    package: 'notification-plugin',
+    runtime: 'workers',
+    provider: 'HTTP',
+    ownerPackage: 'notification-plugin',
+  },
+  {
+    package: 'service-discovery-plugin',
+    runtime: 'workers',
+    provider: 'HTTP',
+    ownerPackage: 'service-discovery-plugin',
+  },
+];
+
+/**
+ * The cross-package provider attributions the catalog must NOT make — a
+ * provider owned by one package must not be attributed to another. Each entry
+ * names the package whose section must not claim the provider, the provider
+ * name, and the package that actually owns it. A catalog section mentioning the
+ * provider as if THIS package implements it is a finding.
+ */
+const FORBIDDEN_CROSS_ATTRIBUTIONS: readonly {
+  readonly package: string;
+  readonly provider: string;
+  readonly ownerPackage: string;
+}[] = [
+  {
+    package: 'messaging-plugin',
+    provider: 'HTTP broker',
+    ownerPackage: '(none — no HTTP broker exists)',
+  },
+  { package: 'queue-plugin', provider: 'Workers Queues', ownerPackage: 'cloudflare-plugin' },
+  {
+    package: 'realtime-backplane-plugin',
+    provider: 'Durable Objects',
+    ownerPackage: 'cloudflare-plugin',
+  },
+  { package: 'static-plugin', provider: 'R2', ownerPackage: 'cloudflare-plugin' },
+];
+
 /** Allowed runtime cell values in the catalog's compatibility table. */
 const RUNTIME_CELL_VALUES = new Set(['✅', '❌', '⚠️', 'N/A']);
 
@@ -1051,7 +1181,13 @@ export function checkPackageCatalog(
       }
       // Cross-check cells against metadata flags when metadata exists. The base
       // value (stripped of any parenthetical caveat) must match. `N/A` is
-      // compatible with a `false` flag (both mean "not applicable here").
+      // compatible with a `false` flag (both mean "not applicable here"). A `✅`
+      // cell that disagrees with a `❌` metadata flag is accepted ONLY when an
+      // exact entry in {@linkcode CATALOG_OVERRIDES} names this package, this
+      // runtime, and a provider the cell's parenthetical mentions — the closed
+      // set of source-grounded overrides. The previous checker accepted ANY
+      // `✅ (...)` parenthetical, which let fictional providers and cross-package
+      // attributions pass; this enumerated map is the fix.
       const meta = packageMetadata[pkg];
       if (meta) {
         const flags = meta.runtimeCompat;
@@ -1066,14 +1202,23 @@ export function checkPackageCatalog(
           const actualBase = cellBase(rawCell);
           // N/A is compatible with a false metadata flag.
           if (actualBase === 'N/A' && expectedValue === '❌') continue;
-          // A ✅ cell with a parenthetical caveat (e.g. "✅ (HTTP brokers)")
-          // documents provider-level support that overrides the package-level
-          // metadata flag — the caveat IS the provider/resource note. Do not
-          // flag it against the package-level flag.
-          if (
-            actualBase === '✅' && expectedValue === '❌' &&
-            rawCell.includes('(') && rawCell.includes(')')
-          ) {
+          // A ✅ cell disagreeing with a ❌ metadata flag needs an exact,
+          // source-grounded override whose provider the cell mentions.
+          if (actualBase === '✅' && expectedValue === '❌') {
+            const override = CATALOG_OVERRIDES.find(
+              (o) => o.package === pkg && o.runtime === runtime,
+            );
+            const cellMentionsProvider = override !== undefined &&
+              rawCell.toLowerCase().includes(override.provider.toLowerCase());
+            if (!cellMentionsProvider) {
+              findings.push({
+                file: 'docs/plugins.md',
+                line: 1,
+                message:
+                  `Package "${pkg}" ${runtime} cell "${rawCell}" is ✅ but PACKAGE_METADATA says ❌, and no source-grounded override names this package/runtime/provider. ` +
+                  `Either correct the cell to ❌, or add a verified entry to CATALOG_OVERRIDES naming the real provider and owning package.`,
+              });
+            }
             continue;
           }
           if (actualBase !== expectedValue) {
@@ -1084,6 +1229,36 @@ export function checkPackageCatalog(
                 `Package "${pkg}" ${runtime} cell "${rawCell}" does not match PACKAGE_METADATA (expected "${expectedValue}").`,
             });
           }
+        }
+      }
+
+      // Reject cross-package provider attributions: a provider owned by another
+      // package (or no package at all) must not be claimed as this package's
+      // own. A section that LISTS the provider (a `- provider` list line under
+      // an "Adapters"/"Transports"/"Providers" heading) as if THIS package
+      // implements it is a finding. A blockquote that mentions the provider to
+      // point AT the owning package ("Workers Queues belong to
+      // cloudflare-plugin") is a legitimate cross-reference, not an
+      // attribution — so the check scans list-item lines, not the whole section.
+      for (const forbidden of FORBIDDEN_CROSS_ATTRIBUTIONS) {
+        if (forbidden.package !== pkg) continue;
+        const sectionLines = section.split('\n');
+        const attributedInList = sectionLines.some((line) => {
+          // A list-item line (`- ...`) that names the provider. A blockquote
+          // (`> ...`) is excluded even if it starts with `-` inside the quote,
+          // because it is commentary pointing at the owner, not an attribution.
+          if (line.trim().startsWith('>')) return false;
+          if (!/^\s*-\s/.test(line)) return false;
+          return line.includes(forbidden.provider);
+        });
+        if (attributedInList) {
+          findings.push({
+            file: 'docs/plugins.md',
+            line: 1,
+            message:
+              `Package "${pkg}" catalog section attributes "${forbidden.provider}" to this package, but it is owned by ${forbidden.ownerPackage}. ` +
+              `Remove the list-item attribution or reword it to point at the owning package.`,
+          });
         }
       }
     }

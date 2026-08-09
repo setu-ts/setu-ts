@@ -23,8 +23,10 @@ Setu-TS applications can run in two modes:
 
 ```typescript
 // Fetch mode (Workers, testing)
+// On Workers, `env` comes from `cloudflare:workers` and is passed to the plugins
+// (see the Workers section below). Off Workers, `app.fetch(request)` is the test entry point.
 export default {
-  async fetch(request: Request, env: unknown, ctx: ExecutionContext) {
+  async fetch(request: Request) {
     return app.fetch(request);
   },
 };
@@ -90,13 +92,12 @@ npm install jsr:@setu-ts/common@^0.1.0-alpha.5
 ```typescript
 // main.ts
 import { createApplication } from '@setu-ts/kernel';
-import { NodeHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-app.register(RuntimePlugin({
-  httpAdapters: [NodeHttpAdapter],
-}));
+// RuntimePlugin() auto-detects Node and selects NodeHttpAdapter.
+app.register(RuntimePlugin());
 
 app.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Node.js!' });
@@ -294,13 +295,12 @@ bun add jsr:@setu-ts/common@^0.1.0-alpha.5
 ```typescript
 // main.ts
 import { createApplication } from '@setu-ts/kernel';
-import { BunHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-app.register(RuntimePlugin({
-  httpAdapters: [BunHttpAdapter],
-}));
+// RuntimePlugin() auto-detects Bun and selects BunHttpAdapter.
+app.register(RuntimePlugin());
 
 app.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Bun!' });
@@ -383,21 +383,27 @@ npm add jsr:@setu-ts/common@^0.1.0-alpha.5
 ```typescript
 // src/index.ts
 import { createApplication } from '@setu-ts/kernel';
-import { CloudflareWorkersHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
+import { env, waitUntil } from 'cloudflare:workers';
 
-const app = createApplication();
-
-app.register(RuntimePlugin({
-  httpAdapters: [CloudflareWorkersHttpAdapter],
-}));
+// `env` (bindings + variables) and `waitUntil` are imported from `cloudflare:workers`
+// and passed to the plugins. RuntimePlugin auto-detects Workers and selects
+// CloudflareWorkersHttpAdapter; `env` populates `runtime.env`.
+const app = createApplication({
+  plugins: [
+    RuntimePlugin({ env }),
+    CloudflarePlugin({ env, waitUntil }),
+  ],
+});
 
 app.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Workers!' });
 });
 
-// Export the fetch handler
+// Export the fetch handler — Workers invokes this per request.
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+  async fetch(request: Request) {
     return app.fetch(request);
   },
 };
@@ -461,34 +467,77 @@ wrangler open
 
 ### Runtime Environment
 
-Access platform bindings via CloudflarePlugin:
+Access platform bindings via `CloudflarePlugin`, which publishes an
+[`ICloudflareBindings`](../packages/cloudflare-plugin/src/bindings/binding-registry.ts) service
+under `CAPABILITIES.CLOUDFLARE`. Each binding is reached through a named accessor — `kv('KV')`,
+`d1('DB')`, `r2('BUCKET')`, `queue('QUEUE')` — rather than property access, and a missing binding
+throws `CloudflareBindingMissingError` naming what was requested and what is present. The plugin
+requires the Worker's `env` (and optionally `waitUntil`):
 
 ```typescript
-import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import {
+  CloudflarePlugin,
+  type ICloudflareBindings,
+  type ID1Database,
+  type IKvNamespace,
+  type IQueueProducer,
+  type IR2Bucket,
+} from '@setu-ts/cloudflare-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 
-app.register(CloudflarePlugin());
+// Deployment glue: at runtime `env` and `waitUntil` come from
+// `import { env, waitUntil } from 'cloudflare:workers'`. That specifier is
+// unresolvable off a Worker toolchain, so this block declares a minimal,
+// explicitly typed binding interface compatible with `CloudflarePluginOptions`
+// rather than importing it — the real Worker passes the platform's `env`, which
+// satisfies this shape structurally. Do not invent members the Worker does not
+// carry; name only the bindings your wrangler.toml declares.
+interface WorkerEnv {
+  readonly KV: IKvNamespace;
+  readonly DB: ID1Database;
+  readonly BUCKET: IR2Bucket;
+  readonly QUEUE: IQueueProducer;
+  readonly API_KEY: string;
+}
 
-// Access bindings
-const bindings = ctx.services.get<ICloudflareBindings>('cloudflare');
+// `waitUntil` is the platform's background-work sink; `env` is the binding record.
+declare const env: WorkerEnv;
+declare const waitUntil: (promise: Promise<unknown>) => void;
 
-// KV
-await bindings.kv.put('key', 'value');
-const value = await bindings.kv.get('key');
+const app = createApplication({
+  plugins: [
+    RuntimePlugin({ env }),
+    CloudflarePlugin({ env, waitUntil }),
+  ],
+});
 
-// D1
-const result = await bindings.d1.prepare('SELECT * FROM items').all();
+async function reportUsage(_value: string | null): Promise<void> {
+  // ...report to your metrics backend...
+}
 
-// R2
-await bindings.r2.put('file.txt', content);
-const obj = await bindings.r2.get('file.txt');
+app.router.get('/', async (ctx) => {
+  const cf = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
 
-// Queues
-await bindings.QUEUE.send({ type: 'event' });
+  // KV — `kv('KV')` resolves the KV namespace bound as `KV` in wrangler.toml.
+  await cf.kv('KV').put('key', 'value');
+  const value = await cf.kv('KV').get('key');
 
-// Wait Until (for background tasks)
-ctx.runtime.setTimeout(() => {
-  // Background task
-}, 0);
+  // D1 — `d1('DB')` resolves the D1 database bound as `DB`.
+  const result = await cf.d1('DB').prepare('SELECT * FROM items').all();
+
+  // R2 — `r2('BUCKET')` resolves the R2 bucket bound as `BUCKET`.
+  await cf.r2('BUCKET').put('file.txt', new ArrayBuffer(0));
+
+  // Queues — `queue('QUEUE')` resolves the Queues producer bound as `QUEUE`.
+  await cf.queue('QUEUE').send({ type: 'event' });
+
+  // waitUntil keeps the invocation alive for background work past the response.
+  cf.waitUntil(reportUsage(value));
+
+  return ctx.response.json({ ok: true, rows: result.results.length });
+});
 ```
 
 ---
