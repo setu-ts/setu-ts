@@ -23,8 +23,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     expect(response.body).toBe('ok');
   });
 
-  // C7: errorHandler must be outermost — route handler throw yields RFC 7807
-  it('errorHandler catches route handler throws and formats RFC 7807 body', async () => {
+  // C7: errorHandler must be outermost — route handler throw yields RFC 9457
+  it('errorHandler catches route handler throws and formats RFC 9457 body', async () => {
     const app = createFullStackApp();
     app.router.get('/throw-route', () => {
       throw new Error('route error');
@@ -34,8 +34,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     const response = await app.inject({ method: 'GET', url: '/throw-route' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
-    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
+    // RFC 9457 §4.2: a status-only problem is identified by about:blank
+    expect(response.body).toContain('"type":"about:blank"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"route error"');
     expect(response.body).not.toContain('"message":');
@@ -56,8 +56,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
 
     expect(response.statusCode).toBe(500);
-    // Current rfc7807Formatter produces type like "https://setu-ts.dev/errors/500"
-    expect(response.body).toContain('"type":"https://setu-ts.dev/errors/500"');
+    // RFC 9457 §4.2: a status-only problem is identified by about:blank
+    expect(response.body).toContain('"type":"about:blank"');
     expect(response.body).toContain('"status":500');
     expect(response.body).toContain('"detail":"middleware error"');
     expect(response.body).not.toContain('"message":');

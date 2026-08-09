@@ -85,6 +85,42 @@ describe('findExisting', () => {
     ]);
     expect(found).toEqual(['b.ts']);
   });
+
+  it('skips an existing file the schematic marks managed', async () => {
+    // The aggregate module barrel has to be rewritten whenever a module is
+    // added, so the CLI declares it owns that path.
+    const fs = createFakeFs({ 'src/modules/index.ts': 'old barrel' });
+
+    const found = await findExisting(fs, [
+      { path: 'src/modules/index.ts', contents: 'new barrel', managed: true },
+    ]);
+
+    expect(found).toEqual([]);
+  });
+
+  it('still reports an unmanaged existing file beside a managed one', async () => {
+    // The exemption is per file, not per command: a module whose own controller
+    // already exists must still refuse, even though the barrel is exempt.
+    const fs = createFakeFs({
+      'src/modules/index.ts': 'old barrel',
+      'src/modules/user/user.controller.ts': 'mine',
+    });
+
+    const found = await findExisting(fs, [
+      { path: 'src/modules/user/user.controller.ts', contents: 'new' },
+      { path: 'src/modules/index.ts', contents: 'new barrel', managed: true },
+    ]);
+
+    expect(found).toEqual(['src/modules/user/user.controller.ts']);
+  });
+
+  it('reports an existing file whose managed flag is explicitly false', async () => {
+    const fs = createFakeFs({ 'a.ts': 'old' });
+
+    const found = await findExisting(fs, [{ path: 'a.ts', contents: 'x', managed: false }]);
+
+    expect(found).toEqual(['a.ts']);
+  });
 });
 
 describe('writeFiles', () => {

@@ -47,6 +47,23 @@ describe('help output', () => {
     expect(text).toContain('--dir');
   });
 
+  it('documents --di on new, where the flag is accepted', async () => {
+    const text = await helpText(['new', '--help']);
+    expect(text).toContain('--di');
+    expect(text).toContain('DiPlugin');
+    // Also in the usage line, so it is visible without reading the options list.
+    expect(text).toContain('[--di]');
+  });
+
+  // `generate` reads the project's manifest to learn what is installed, so a
+  // --di flag there would be a second, contradictable source of the same fact.
+  it('does not offer --di on generate', async () => {
+    // Word-boundary matched, not substring: `generate --help` documents
+    // `--dir <path>`, which contains `--di`.
+    expect(/--di\b/.test(await helpText(['generate', '--help']))).toBe(false);
+    expect(/--di\b/.test(await helpText(['new', '--help']))).toBe(true);
+  });
+
   it('lists every registered schematic, from the registry', async () => {
     const text = await helpText(['--help']);
     for (const { name } of listSchematics()) {
@@ -55,9 +72,9 @@ describe('help output', () => {
     expect(text).toContain('custom');
   });
 
-  it('lists all thirteen built-in schematics plus custom in generate help', async () => {
+  it('lists all fourteen built-in schematics plus custom in generate help', async () => {
     const text = await helpText(['generate', '--help']);
-    expect(listSchematics()).toHaveLength(13);
+    expect(listSchematics()).toHaveLength(14);
     for (const { name } of listSchematics()) {
       expect(text).toContain(name);
     }

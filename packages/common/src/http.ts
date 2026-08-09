@@ -311,6 +311,169 @@ export interface RouteSchema {
   readonly tags?: readonly string[];
   /** OpenAPI operation summary. */
   readonly summary?: string;
+  /**
+   * OpenAPI security requirements for this operation, overriding any
+   * document-level default. Each entry names a scheme declared in the
+   * document's `components.securitySchemes` and lists the scopes it needs
+   * (empty for non-OAuth2 schemes such as HTTP bearer or API key).
+   *
+   * An empty array is meaningful and is NOT the same as omitting the field:
+   * per the OpenAPI specification it declares the operation **public**, which
+   * is how a route opts out of a document-level requirement. Omitting the
+   * field leaves the operation inheriting whatever the document declares.
+   *
+   * Declaring this does not enforce anything — authentication is enforced by
+   * middleware and guards. This describes the route for documentation and
+   * client generation.
+   *
+   * Declaring is not the only way a document learns about authentication: a
+   * requirement can instead be DERIVED from guards branded with
+   * {@linkcode RouteSecurityMetadata}, which is what `@setu-ts/auth-plugin`'s
+   * guards carry. A value declared here always wins over a derived one.
+   *
+   * @example
+   * ```typescript
+   * // Requires the `bearerAuth` scheme:
+   * app.router.get('/todos/:id', {
+   *   schema: { security: [{ bearerAuth: [] }] },
+   *   handler,
+   * });
+   *
+   * // Explicitly public, even when the document requires auth by default:
+   * app.router.post('/login', { schema: { security: [] }, handler });
+   * ```
+   *
+   * @since 0.2.0
+   */
+  readonly security?: readonly SecurityRequirement[];
+}
+
+/**
+ * A single OpenAPI security requirement: a map of security-scheme name to the
+ * scopes that scheme must grant. Scopes are meaningful only for OAuth2 and
+ * OpenID Connect schemes; every other scheme type takes an empty array.
+ *
+ * Multiple entries in a requirement object are ANDed (all must be satisfied);
+ * multiple requirement objects in a list are ORed (any one satisfies).
+ *
+ * @example
+ * ```typescript
+ * const bearer: SecurityRequirement = { bearerAuth: [] };
+ * const scoped: SecurityRequirement = { oauth2: ['read:todos', 'write:todos'] };
+ * ```
+ *
+ * @since 0.2.0
+ */
+export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * Key under which a {@linkcode MiddlewareFunction} carries its
+ * {@linkcode RouteSecurityMetadata}.
+ *
+ * Created with `Symbol.for`, not `Symbol()`, so two copies of this package in
+ * one process resolve the same key — the failure mode a locally-constructed
+ * symbol would produce silently, since every read would simply miss.
+ *
+ * Prefer {@linkcode withSecurityMetadata} and {@linkcode securityMetadataOf}
+ * over touching this directly; the symbol is exported so a guard outside
+ * `@setu-ts/auth-plugin` can be branded too.
+ *
+ * @since 0.2.0
+ */
+export const SECURITY_METADATA: unique symbol = Symbol.for('setu.security.metadata');
+
+/**
+ * What a middleware function enforces, for documentation generators.
+ *
+ * This is a **description**, not a mechanism: the middleware still performs
+ * the enforcement, and removing the metadata changes no runtime behaviour.
+ *
+ * It deliberately carries authentication PRESENCE only. An OpenAPI security
+ * requirement names a scheme, and no declared scheme can be inferred from a
+ * role name, so roles and permissions are not represented here — see
+ * `@setu-ts/openapi-plugin` for what a generated document can and cannot say.
+ *
+ * @since 0.2.0
+ */
+export interface RouteSecurityMetadata {
+  /**
+   * `true` when the middleware requires an authenticated principal; `false`
+   * when it explicitly marks the route public.
+   */
+  readonly authenticated: boolean;
+}
+
+/**
+ * Brands a middleware function with the security it enforces, so a
+ * documentation generator can read it without importing the plugin that
+ * produced it.
+ *
+ * The function is branded in place and returned, so identity is preserved and
+ * the brand costs no wrapper frame per request. The property is symbol-keyed
+ * and non-enumerable, so it is invisible to `Object.keys`, `JSON.stringify`
+ * and spread, and the middleware behaves exactly as it did.
+ *
+ * @param middleware - The middleware to brand
+ * @param metadata - What the middleware enforces
+ * @returns The same `middleware` reference, branded
+ *
+ * @example
+ * ```typescript
+ * export function requireAuth(): MiddlewareFunction {
+ *   return withSecurityMetadata(async (ctx, next) => {
+ *     if (!ctx.request.user) return void ctx.response.status(401).json({ error: 'Unauthorized' });
+ *     await next();
+ *   }, { authenticated: true });
+ * }
+ * ```
+ *
+ * @since 0.2.0
+ */
+export function withSecurityMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteSecurityMetadata,
+): T {
+  Object.defineProperty(middleware, SECURITY_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/**
+ * Reads the security metadata a middleware function was branded with.
+ *
+ * @param middleware - The middleware to inspect
+ * @returns The metadata, or `undefined` when the middleware carries none
+ *
+ * @example
+ * ```typescript
+ * const guarded = (route.definition.middleware ?? []).some(
+ *   (fn) => securityMetadataOf(fn)?.authenticated === true,
+ * );
+ * ```
+ *
+ * @since 0.2.0
+ */
+export function securityMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteSecurityMetadata | undefined {
+  const carrier = middleware as MiddlewareFunction & {
+    readonly [SECURITY_METADATA]?: unknown;
+  };
+  const value = carrier[SECURITY_METADATA];
+  return isRouteSecurityMetadata(value) ? value : undefined;
+}
+
+/**
+ * Narrows an unknown branded value. A foreign value under the same global
+ * symbol is treated as absent rather than trusted.
+ */
+function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata {
+  return typeof value === 'object' && value !== null &&
+    typeof (value as { authenticated?: unknown }).authenticated === 'boolean';
 }
 
 /**

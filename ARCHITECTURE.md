@@ -467,7 +467,7 @@ If any middleware or handler throws an error, the pipeline catches it and passes
 handler middleware. The error handler:
 
 1. Logs the error (if a logger is available).
-2. Formats the error as a standardized response (RFC 7807 by default).
+2. Formats the error as a standardized response (RFC 9457 Problem Details when configured).
 3. Sends the error response to the client.
 
 ---
@@ -1234,7 +1234,7 @@ graph TB
 | Aspect               | Detail                                                                                                               |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Request validation with Zod                                                                                          |
-| **Responsibilities** | Validate body, query, params, headers, cookies; sanitize input; format validation errors (RFC 7807, default, custom) |
+| **Responsibilities** | Validate body, query, params, headers, cookies; sanitize input; format validation errors (RFC 9457, default, custom) |
 | **Dependencies**     | `common`, `kernel`                                                                                                   |
 | **Public API**       | `ValidationPlugin()`; `IValidationService`; `validateBody()`, `validateQuery()`, `validateParams()`                  |
 | **Extension Points** | Custom error formatters; custom sanitization rules                                                                   |
@@ -1245,7 +1245,7 @@ graph TB
 | Aspect               | Detail                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Exception types and global error handling                                                                               |
-| **Responsibilities** | `HttpError` type; factory functions (`badRequest()`, `notFound()`, etc.); error handler middleware; RFC 7807 formatting |
+| **Responsibilities** | `HttpError` type; factory functions (`badRequest()`, `notFound()`, etc.); error handler middleware; RFC 9457 formatting |
 | **Dependencies**     | `common` only                                                                                                           |
 | **Public API**       | `HttpError`; exception factory functions; `errorHandler()`                                                              |
 | **Extension Points** | Custom error formatters                                                                                                 |
@@ -1523,14 +1523,14 @@ of a single capability token at startup.
 
 #### @setu-ts/cli
 
-| Aspect               | Detail                                                                                                                                                                                                                                                                        |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | CLI tool with generators                                                                                                                                                                                                                                                      |
-| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                                                                                                                                                 |
-| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text and loads the user's app through `IApplication`, never constructing one itself)                                                                                                                                 |
-| **Public API**       | The `setu` command (`new`, `generate`, `commands`); `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                                                                                                                  |
-| **Extension Points** | Custom schematics from `.setu-ts/schematics/`; plugin commands via `ICliApi`, read by loading the project's `setu.config.ts`                                                                                                                                                  |
-| **Rules**            | Generation reads the target project's manifest and never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing. Plugin-command discovery is the one path that DOES boot the app — via `setu.config.ts`, with no port and guaranteed teardown |
+| Aspect               | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | CLI tool with generators                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Responsibilities** | Project scaffolding; code generation; plugin-aware generators                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Dependencies**     | `common`, `runtime` (NOT `kernel` — the CLI emits source text and loads the user's app through `IApplication`, never constructing one itself)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Public API**       | The `setu` command (`new`, `generate`, `commands`); `runCli`, `deriveNames`, `detectPlugins`, `PROGRAM_NAME`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Extension Points** | Custom schematics from `.setu-ts/schematics/`; plugin commands via `ICliApi`, read by loading the project's `setu.config.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Rules**            | Generation reads the target project's manifest and its generated-artifact directories, and never boots it; schematics are pure functions returning files, so `--dry-run` writes nothing. A generate refuses to overwrite any existing file, except the CLI-owned seam barrels a schematic declares `managed` (one `index.ts` per generated family). It also refuses a name that would collide with an existing artifact's HTTP path or injection token. Decorators and DI are INDEPENDENT choices: the template decides decorators, `--di` decides the container, and every host — including the no-template one — wires the seams whose plugins it registers, so `setu generate route` is a first-class decorator-free path. Plugin-command discovery is the one path that DOES boot the app — via `setu.config.ts`, with no port and guaranteed teardown |
 
 #### @setu-ts/sdk
 
@@ -2122,7 +2122,7 @@ graph TB
     Pipeline -->|catches| ErrorHandler[Error Handler Middleware]
     ErrorHandler -->|logs| Logger[Logger]
     ErrorHandler -->|formats| Formatter[Error Formatter]
-    Formatter -->|RFC 7807| Response[Error Response]
+    Formatter -->|RFC 9457| Response[Error Response]
     Response --> Client[Client]
 ```
 
@@ -2144,19 +2144,29 @@ function notFound(message: string): HttpError;
 3. Easier serialization/deserialization.
 4. Runtime composition of error properties.
 
-### Problem Details (RFC 7807)
+### Problem Details (RFC 9457)
 
-The default error format follows [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807):
+The standards-compliant error format follows
+[RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html), which obsoleted RFC 7807 in July 2023:
 
 ```json
 {
-  "type": "https://setu-ts.dev/errors/not-found",
+  "type": "about:blank",
   "title": "Not Found",
   "status": 404,
   "detail": "User with id 123 not found",
   "instance": "/users/123"
 }
 ```
+
+`type` is `about:blank` because an `HttpError` carries no problem-type identity beyond its status
+code, and RFC 9457 §4.2 registers `about:blank` for exactly that case — a URI minted from the status
+would identify nothing `status` does not already convey. The one error that _does_ define an
+extension member, `validationError()`, gets a concrete type URI
+(`https://setu-ts.dev/errors/validation`).
+
+The `'rfc7807'` format alias is retained, deprecated, and unchanged; it still emits the
+status-derived `type`. Removal is scheduled for v1.0.0.
 
 ### Global Error Handler
 
@@ -2167,7 +2177,7 @@ application (or by a starter bundle) — the kernel ships zero features, includi
 import { errorHandler } from '@setu-ts/exceptions';
 
 app.middleware.add(errorHandler({
-  format: 'rfc7807',
+  format: 'rfc9457',
   includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
   logErrors: true,
 }));

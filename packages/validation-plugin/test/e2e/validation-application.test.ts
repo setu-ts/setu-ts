@@ -162,11 +162,11 @@ describe('ValidationPlugin E2E — with real application', () => {
     await app.stop();
   });
 
-  it('rfc7807 format: E2E response has type/instance, no message', async () => {
+  it('rfc9457 format: E2E response has type/instance, no message', async () => {
     const app = createApplication({
       plugins: [
         createTestRuntimePlugin(),
-        ValidationPlugin({ errorFormat: 'rfc7807' }),
+        ValidationPlugin({ errorFormat: 'rfc9457' }),
       ],
     });
 

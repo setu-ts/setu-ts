@@ -12,6 +12,13 @@ import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import {
+  authMiddleware,
+  AuthPlugin,
+  publicRoute,
+  requireAuth,
+  requireRole,
+} from '@setu-ts/auth-plugin';
+import {
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -19,6 +26,7 @@ import {
   DecoratorPlugin,
   Get,
   Post,
+  Public,
   ValidateBody,
 } from '@setu-ts/decorator-plugin';
 
@@ -420,6 +428,473 @@ describe('OpenAPI Integration', () => {
         .schema) as Record<string, unknown>;
     expect(postRespSchema.type).toBe('object');
     expect(postRespSchema.properties).toHaveProperty('id');
+
+    await app.stop();
+  });
+
+  it('should not document its own spec and UI endpoints', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), OpenApiPlugin({ title: 'Test API', version: '1.0.0' })],
+    });
+
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as { paths: Record<string, unknown> };
+
+    // Both endpoints ARE served — the exclusion is from the document, not the
+    // router, so the routes still answer.
+    expect((await app.inject({ method: 'GET', url: 'http://localhost/docs' })).statusCode).toBe(
+      200,
+    );
+
+    expect(Object.keys(spec.paths)).toEqual(['/todos']);
+    expect(spec.paths).not.toHaveProperty('/openapi.json');
+    expect(spec.paths).not.toHaveProperty('/docs');
+
+    await app.stop();
+  });
+
+  it('should exclude the spec endpoint even when Swagger UI is disabled', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({ title: 'Test API', version: '1.0.0', swagger: false }),
+      ],
+    });
+
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as { paths: Record<string, unknown> };
+
+    expect(Object.keys(spec.paths)).toEqual(['/todos']);
+
+    await app.stop();
+  });
+
+  it('should honor custom endpoint paths when excluding its own routes', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          endpoint: '/api-docs',
+          specEndpoint: '/api-spec.json',
+        }),
+      ],
+    });
+
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/api-spec.json' });
+    const spec = response.json() as { paths: Record<string, unknown> };
+
+    expect(Object.keys(spec.paths)).toEqual(['/todos']);
+
+    await app.stop();
+  });
+
+  it('should match an excluded path against the group-prefixed pattern', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          exclude: ['/internal/metrics'],
+        }),
+      ],
+    });
+
+    app.router.group('/internal', (r) => {
+      // Registered as '/metrics' but stored — and therefore matched — as the
+      // resolved '/internal/metrics'.
+      r.get('/metrics', { handler: (ctx) => ctx.response.text('') });
+    });
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as { paths: Record<string, unknown> };
+
+    expect(Object.keys(spec.paths)).toEqual(['/todos']);
+
+    await app.stop();
+  });
+
+  it('should refuse a security requirement naming an undeclared scheme', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          // Typo: the document declares `bearerAuth`, not `bearer`.
+          security: [{ bearer: [] }],
+        }),
+      ],
+    });
+
+    // Emitting this would produce a document that is invalid per the
+    // specification — a lock on every operation with no Authorize button to
+    // satisfy it — while the spec endpoint still answered 200, so nothing
+    // downstream could detect it.
+    await expect(app.start()).rejects.toThrow(/scheme 'bearer'.*not declared/s);
+  });
+
+  it('should name the declared schemes when refusing an unknown one', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          security: [{ bearerAuth: [] }],
+        }),
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow(/Declared: \(none\)/);
+  });
+
+  it('should accept a security requirement whose scheme IS declared', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: {
+            bearerAuth: { type: 'http', scheme: 'bearer' },
+            apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+          },
+          security: [{ bearerAuth: [] }, { apiKey: [] }],
+        }),
+      ],
+    });
+
+    await app.start();
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    expect(response.statusCode).toBe(200);
+    await app.stop();
+  });
+
+  it('should document a @Public decorated route as public, not as protected', async () => {
+    @Controller('/auth')
+    class AuthController {
+      @Public()
+      @Post('/login')
+      login(): unknown {
+        return { token: 'x' };
+      }
+
+      @Get('/me')
+      me(): unknown {
+        return { id: '1' };
+      }
+    }
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DecoratorPlugin({ controllers: [AuthController] }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          security: [{ bearerAuth: [] }],
+        }),
+      ],
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    // `@Public` is the decorator that means "no authentication". Without it
+    // reaching the document, the login route would inherit the document-level
+    // requirement and be documented as needing the token it issues — and a
+    // decorated app has no other way to opt out.
+    expect(spec.paths['/auth/login']?.post?.security).toEqual([]);
+    // A route with no `@Public` still inherits.
+    expect('security' in (spec.paths['/auth/me']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should derive an operation requirement from the REAL auth guards', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearerAuth' },
+        }),
+      ],
+    });
+
+    // No route declares `schema.security`. Everything below is derived from
+    // the guards, which is the whole point: the document tracks what actually
+    // enforces rather than a second declaration that can drift from it.
+    app.router.get('/todos', {
+      middleware: [requireAuth()],
+      handler: (ctx) => ctx.response.json([]),
+    });
+    app.router.delete('/todos/:id', {
+      middleware: [requireRole('admin')],
+      handler: (ctx) => ctx.response.json({}),
+    });
+    app.router.post('/login', {
+      middleware: [publicRoute()],
+      handler: (ctx) => ctx.response.json({}),
+    });
+    app.router.get('/unguarded', { handler: (ctx) => ctx.response.json({}) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect(spec.paths['/todos']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    // requireRole rejects an anonymous caller first, so it requires auth too —
+    // but the document cannot say WHICH role, and does not pretend to.
+    expect(spec.paths['/todos/{id}']?.delete?.security).toEqual([{ bearerAuth: [] }]);
+    expect(spec.paths['/login']?.post?.security).toEqual([]);
+    // No guard, nothing branded, nothing derived.
+    expect('security' in (spec.paths['/unguarded']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should NOT derive from application-level middleware', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearerAuth' },
+        }),
+      ],
+    });
+
+    // `authMiddleware` POPULATES ctx.request.user and never rejects, so it is
+    // not a guard. It is also app-level and therefore absent from RouteInfo.
+    app.middleware.add(authMiddleware());
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect('security' in (spec.paths['/todos']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should let a declared requirement override a derived one end to end', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearerAuth' },
+        }),
+      ],
+    });
+
+    app.router.get('/odd', {
+      middleware: [requireAuth()],
+      schema: { security: [] },
+      handler: (ctx) => ctx.response.json({}),
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect(spec.paths['/odd']?.get?.security).toEqual([]);
+
+    await app.stop();
+  });
+
+  it('should derive against the named scheme when several are declared', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: {
+            bearerAuth: { type: 'http', scheme: 'bearer' },
+            apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+          },
+          deriveSecurity: { scheme: 'apiKey' },
+        }),
+      ],
+    });
+
+    app.router.get('/todos', {
+      middleware: [requireAuth()],
+      handler: (ctx) => ctx.response.json([]),
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    expect(spec.paths['/todos']?.get?.security).toEqual([{ apiKey: [] }]);
+
+    await app.stop();
+  });
+
+  it('should refuse a derived scheme that is not declared', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          deriveSecurity: { scheme: 'bearer' },
+        }),
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow(/scheme 'bearer'.*not declared/s);
+  });
+
+  it('should produce an unchanged document when deriveSecurity is absent', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: 'x'.repeat(40) }, rbac: { roles: {} } }),
+        OpenApiPlugin({ title: 'Test API', version: '1.0.0' }),
+      ],
+    });
+
+    app.router.get('/todos', {
+      middleware: [requireAuth()],
+      handler: (ctx) => ctx.response.json([]),
+    });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    // Branding the guards must not change any document by itself — derivation
+    // is opt-in, so an application that does not ask for it sees no difference.
+    expect('security' in (spec.paths['/todos']?.get as object)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('should exclude caller-supplied paths alongside its own', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          exclude: ['/internal/metrics'],
+        }),
+      ],
+    });
+
+    app.router.get('/todos', { handler: (ctx) => ctx.response.json([]) });
+    app.router.get('/internal/metrics', { handler: (ctx) => ctx.response.text('') });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as { paths: Record<string, unknown> };
+
+    expect(Object.keys(spec.paths)).toEqual(['/todos']);
+
+    await app.stop();
+  });
+
+  it('should serve a document a client can authenticate against', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        OpenApiPlugin({
+          title: 'Test API',
+          version: '1.0.0',
+          securitySchemes: {
+            bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+          },
+          security: [{ bearerAuth: [] }],
+        }),
+      ],
+    });
+
+    app.router.post('/login', {
+      schema: { security: [] },
+      handler: (ctx) => ctx.response.json({ token: 'x' }),
+    });
+    app.router.get('/todos/:id', { handler: (ctx) => ctx.response.json({ id: ctx.params.id }) });
+
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+    const spec = response.json() as {
+      security?: unknown;
+      components?: { securitySchemes?: Record<string, unknown> };
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+    };
+
+    // The scheme declaration is what puts an Authorize button in Swagger UI.
+    expect(spec.components?.securitySchemes).toEqual({
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    });
+    expect(spec.security).toEqual([{ bearerAuth: [] }]);
+
+    // `/login` opted out, so it is documented as public.
+    expect(spec.paths['/login']?.post?.security).toEqual([]);
+
+    // `/todos/{id}` declared nothing, so it inherits the document requirement,
+    // and its path parameter is typed rather than rendering as `any`.
+    expect('security' in (spec.paths['/todos/{id}']?.get as object)).toBe(false);
+    expect(spec.paths['/todos/{id}']?.get?.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+    ]);
 
     await app.stop();
   });

@@ -2,14 +2,39 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateRoute } from '../../../src/schematics/route.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('route schematic', () => {
   const files = generateRoute(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'route');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the route module plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/routes/order-item.routes.ts',
+      'src/routes/index.ts',
+    ]);
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('route', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('calls each route module from the barrel, which takes the router', () => {
+    const barrel = barrelOf(files, 'route').contents;
+    expect(barrel).toContain('export function registerGeneratedRoutes(router: IRouterApi): void');
+    expect(barrel).toContain('registerOrderItemRoutes(router);');
+  });
+
+  it('uses the router parameter even when no route module exists yet', () => {
+    // The scaffolded barrel is empty, and the drift gate applies this workspace's
+    // `noUnusedParameters` to a generated project — so an empty body still has to
+    // consume `router` or the project fails to compile before anything is generated.
+    const empty = barrelOf(generateRoute(deriveNames('x'), options()), 'route');
+    expect(empty.contents).toContain('registerXRoutes(router);');
+    const scaffolded = barrelOf(files, 'route').contents;
+    expect(scaffolded.includes('void router;') || scaffolded.includes('Routes(router);')).toBe(
+      true,
+    );
   });
 
   it('emits it at src/routes/order-item.routes.ts', () => {

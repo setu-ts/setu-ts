@@ -24,9 +24,20 @@ import type {
   FormatValidationErrors,
   ValidationErrorFormatter,
 } from '../formatters/error-formatter.ts';
-import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
+import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
 
-/** The `application/problem+json` media type RFC 7807 §3 requires. */
+/**
+ * The formatters whose bodies are Problem Details and therefore require the
+ * `application/problem+json` media type (RFC 9457 §3).
+ *
+ * The deprecated `rfc7807Formatter` is an alias bound to the same object, so it
+ * needs no separate entry — a fact pinned by a reference-equality test.
+ */
+const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ValidationErrorFormatter> = new Set([
+  rfc9457Formatter,
+]);
+
+/** The `application/problem+json` media type RFC 9457 §3 requires. */
 const PROBLEM_JSON = 'application/problem+json';
 
 // ---------------------------------------------------------------------------
@@ -123,10 +134,13 @@ export function createValidationMiddleware(
   formatter: ValidationErrorFormatter,
 ): MiddlewareFunction {
   // Resolved once at registration time: a Problem Details body must be served
-  // as `application/problem+json` (RFC 7807 §3), not the `application/json`
-  // that `response.json()` sets. Keyed off the formatter identity so both
-  // `errorFormat: 'rfc7807'` and `errorFormat: rfc7807Formatter` agree.
-  const isProblemJson = formatter === rfc7807Formatter;
+  // as `application/problem+json` (RFC 9457 §3), not the `application/json`
+  // that `response.json()` sets. Keyed off the RESOLVED formatter rather than
+  // the format string, so passing a reference (`errorFormat: rfc9457Formatter`)
+  // agrees with passing the alias (`errorFormat: 'rfc9457'`). The deprecated
+  // `rfc7807Formatter` is the same object, so it is covered by this membership
+  // test without a second entry.
+  const isProblemJson = PROBLEM_DETAILS_FORMATTERS.has(formatter);
 
   return async (ctx, next) => {
     let rawData: unknown;
@@ -164,7 +178,7 @@ export function createValidationMiddleware(
  *
  * @param ctx - The request context
  * @param body - The formatted error body
- * @param isProblemJson - Whether the body is RFC 7807 Problem Details
+ * @param isProblemJson - Whether the body is RFC 9457 Problem Details
  * @returns The handler result (short-circuits the pipeline)
  */
 function respond(
@@ -190,7 +204,7 @@ function respond(
  * Validate the request body against a schema.
  *
  * Delegates to the configured {@linkcode IValidationService} so the error
- * format matches the plugin registration (e.g. `'rfc7807'`).
+ * format matches the plugin registration (e.g. `'rfc9457'`).
  *
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
