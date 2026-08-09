@@ -311,4 +311,48 @@ describe('Documentation snippet validation — guide content invariants', () => 
     // The nonexistent `lazy` option must not appear in RegisterOptions examples.
     expect(section).not.toMatch(/lazy:\s*(true|false)/);
   });
+
+  it('RuntimePlatform in docs/programmatic-api.md matches the exact exported source union (no unknown)', async () => {
+    // The source union is `'node' | 'deno' | 'bun' | 'cloudflare-workers'` —
+    // there is NO `'unknown'` arm. A doc that lists `'unknown'` is a defect
+    // that drifted from source; this assertion pins the exact union so it
+    // cannot drift again.
+    const sourceTypes = await Deno.readTextFile('packages/common/src/types.ts');
+    const sourceMatch = sourceTypes.match(
+      /export type RuntimePlatform = ([^;]+);/,
+    );
+    expect(sourceMatch).not.toBeNull();
+    const sourceUnion = sourceMatch![1].trim();
+    // Source must NOT contain 'unknown'.
+    expect(sourceUnion).not.toContain("'unknown'");
+    // The exact four arms, in source order.
+    expect(sourceUnion).toBe("'node' | 'deno' | 'bun' | 'cloudflare-workers'");
+
+    const doc = await Deno.readTextFile('docs/programmatic-api.md');
+    // The doc's RuntimePlatform block must match the source union exactly.
+    const docMatch = doc.match(/type RuntimePlatform = ([^\n;]+)/);
+    expect(docMatch).not.toBeNull();
+    const docUnion = docMatch![1].trim();
+    expect(docUnion).toBe("'deno' | 'node' | 'bun' | 'cloudflare-workers'");
+    // The doc must NOT list 'unknown'.
+    expect(docUnion).not.toContain("'unknown'");
+  });
+
+  it('PLUGIN_PRIORITY.NORMAL is 500 and plugin-architecture.md default priority matches', async () => {
+    // The source constant is PLUGIN_PRIORITY.NORMAL = 500. A doc that claims
+    // the default is 50 is a defect; this assertion pins the source value and
+    // the doc's claim so they cannot drift apart.
+    const sourceTypes = await Deno.readTextFile('packages/common/src/types.ts');
+    const normalMatch = sourceTypes.match(/NORMAL:\s*(\d+)/);
+    expect(normalMatch).not.toBeNull();
+    expect(normalMatch![1]).toBe('500');
+
+    const doc = await Deno.readTextFile('docs/plugin-architecture.md');
+    // The default-priority claim must be 500, not 50.
+    const defaultMatch = doc.match(/\*\*Default priority:\*\*\s*`(\d+)`/);
+    expect(defaultMatch).not.toBeNull();
+    expect(defaultMatch![1]).toBe('500');
+    // The stale claim of 50 must be gone.
+    expect(doc).not.toMatch(/\*\*Default priority:\*\*\s*`50`/);
+  });
 });

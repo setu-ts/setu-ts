@@ -343,22 +343,38 @@ Cloudflare Workers integration.
 **Key code:**
 
 ```typescript
-import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { CloudflarePlugin, type ICloudflareBindings } from '@setu-ts/cloudflare-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 
-app.register(CloudflarePlugin());
+// Deployment glue: `env` and `waitUntil` come from `cloudflare:workers` at
+// runtime; declared here so the block type-checks off a Worker toolchain.
+declare const env: Record<string, unknown>;
+declare const waitUntil: (promise: Promise<unknown>) => void;
 
-// KV
-const kv = ctx.services.get<ICloudflareBindings>('cloudflare').kv;
-await kv.put('key', 'value');
-const value = await kv.get('key');
+const app = createApplication({
+  plugins: [
+    RuntimePlugin({ env }),
+    CloudflarePlugin({ env, waitUntil }),
+  ],
+});
 
-// D1
-const d1 = ctx.services.get<ICloudflareBindings>('cloudflare').d1;
-const result = await d1.prepare('SELECT * FROM items').all();
+app.router.get('/', async (ctx) => {
+  const cf = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
 
-// Queue
-const queue = ctx.services.get<ICloudflareBindings>('cloudflare').queue;
-await queue.send({ type: 'item-created', id: '1' });
+  // KV — resolve the `KV` namespace via its named accessor.
+  await cf.kv('KV').put('key', 'value');
+  const value = await cf.kv('KV').get('key');
+
+  // D1 — resolve the `DB` database via its named accessor.
+  const result = await cf.d1('DB').prepare('SELECT * FROM items').all();
+
+  // Queue — resolve the `QUEUE` producer via its named accessor.
+  await cf.queue('QUEUE').send({ type: 'item-created', id: '1' });
+
+  return ctx.response.json({ value, rows: result.results.length });
+});
 ```
 
 ---

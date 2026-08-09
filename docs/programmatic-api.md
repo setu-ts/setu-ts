@@ -421,8 +421,12 @@ interface IRuntimeServices {
 ### Runtime Platform
 
 ```typescript
-type RuntimePlatform = 'deno' | 'node' | 'bun' | 'cloudflare-workers' | 'unknown';
+type RuntimePlatform = 'deno' | 'node' | 'bun' | 'cloudflare-workers';
 ```
+
+Every value has a runtime implementation — there is no `'unknown'` arm. Use
+[`detectRuntime()`](../packages/runtime/src/detector/runtime-detector.ts) to resolve the current
+platform, or pass `RuntimePlugin({ platform })` to force one.
 
 ## Testing Utilities
 

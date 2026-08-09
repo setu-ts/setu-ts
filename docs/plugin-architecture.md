@@ -323,7 +323,11 @@ const LatePlugin = {
 };
 ```
 
-**Default priority:** `50`
+**Default priority:** `500` — the `PLUGIN_PRIORITY.NORMAL` band from
+[`@setu-ts/common`](../packages/common/src/types.ts). The well-known bands are `HIGHEST` (0), `HIGH`
+(100), `NORMAL` (500), `OPENAPI` (700), `LOW` (900), and `LOWEST` (1000); any number is a valid
+priority, and these constants mark the conventional ordering relative to first-party middleware (see
+the middleware priority table above).
 
 ## Plugin Replacement
 

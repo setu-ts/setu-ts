@@ -411,6 +411,196 @@ describe('documentation gate — package catalog', () => {
     );
     expect(findings.some((f) => f.message.includes('does not match PACKAGE_METADATA'))).toBe(true);
   });
+
+  it('rejects a fictional ✅ (...) override with no source-grounded entry', () => {
+    // messaging-plugin is NO_EDGE (workerd: false). A `✅ (HTTP brokers)` cell
+    // was the review's fictional override — no HTTP broker exists in the
+    // package, and no CATALOG_OVERRIDES entry names it. The hardened gate must
+    // reject it (the old arbitrary-parenthetical exemption let it pass).
+    const section = buildSection('messaging-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ✅ (HTTP brokers) |',
+      caveat: 'Redis Streams broker',
+    });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/messaging-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) =>
+        f.message.includes('no source-grounded override') &&
+        f.message.includes('messaging-plugin')
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a ✅ cell disagreeing with metadata even with a non-enumerated provider', () => {
+    // queue-plugin is NO_EDGE. `✅ (fictional)` is not in CATALOG_OVERRIDES.
+    const section = buildSection('queue-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ✅ (fictional) |',
+      caveat: 'Redis queue adapter',
+    });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/queue-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) =>
+        f.message.includes('no source-grounded override') &&
+        f.message.includes('queue-plugin')
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects queue-plugin cross-attributing Workers Queues to itself', () => {
+    // Workers Queues belong to cloudflare-plugin, not queue-plugin. A section
+    // that LISTS "Workers Queues" as a queue-plugin adapter (a `- ` list item)
+    // is a cross-package attribution the gate must flag. A blockquote that
+    // mentions the provider to point at the owner is NOT flagged.
+    const base = buildSection('queue-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ❌ |',
+      caveat: 'Redis queue adapter',
+    });
+    // Append an Adapters list that includes the forbidden provider.
+    const section = base +
+      '\n**Adapters:**\n\n- Memory\n- Redis\n- RabbitMQ\n- SQS\n- Workers Queues\n';
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/queue-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) =>
+        f.message.includes('attributes "Workers Queues"') &&
+        f.message.includes('cloudflare-plugin')
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects static-plugin cross-attributing R2 to itself', () => {
+    // R2 belongs to cloudflare-plugin. A static-plugin section that LISTS R2 as
+    // its own provider (a `- ` list item) is a cross-attribution.
+    const base = buildSection('static-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ❌ |',
+      caveat: 'Static files',
+    });
+    const section = base + '\n**Providers:**\n\n- Local filesystem\n- R2\n';
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/static-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) =>
+        f.message.includes('attributes "R2"') &&
+        f.message.includes('cloudflare-plugin')
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects realtime-backplane-plugin cross-attributing Durable Objects', () => {
+    // Durable Objects belong to cloudflare-plugin. A backplane section that
+    // LISTS "Durable Objects" as its own transport (a `- ` list item) is a
+    // cross-attribution.
+    const base = buildSection('realtime-backplane-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ✅ |',
+      caveat: 'redis transport',
+    });
+    const section = base +
+      '\n**Transports:**\n\n- Memory\n- Messaging\n- Redis\n- Durable Objects\n';
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/realtime-backplane-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) =>
+        f.message.includes('attributes "Durable Objects"') &&
+        f.message.includes('cloudflare-plugin')
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT flag a blockquote that mentions a provider to point at the owner', () => {
+    // A `>` blockquote saying "Workers Queues belong to cloudflare-plugin" is a
+    // legitimate cross-reference, not a list-item attribution. The gate must
+    // not flag it.
+    const base = buildSection('queue-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ❌ |',
+      caveat: 'Redis queue adapter',
+    });
+    const section = base +
+      '\n> Workers Queues belong to @setu-ts/cloudflare-plugin, not this package.\n';
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/queue-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) => f.message.includes('attributes "Workers Queues"')),
+    ).toBe(false);
+  });
+
+  it('accepts an enumerated valid override (storage-plugin Workers R2)', () => {
+    // storage-plugin is PORTABLE (workerd: true), so `✅ (R2)` matches metadata
+    // and needs no override. This test confirms the gate does NOT false-flag a
+    // legitimate provider caveat on a package whose metadata already says ✅.
+    const section = buildSection('storage-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ✅ (R2) |',
+      caveat: 'S3 storage provider',
+    });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/storage-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) => f.message.includes('no source-grounded override')),
+    ).toBe(false);
+  });
+
+  it('accepts an enumerated valid override (service-discovery Workers HTTP)', () => {
+    // service-discovery-plugin is NO_EDGE (workerd: false), but the HTTP
+    // providers (Consul/Kubernetes) are Workers-portable. CATALOG_OVERRIDES
+    // enumerates this package/runtime/provider, so `✅ (HTTP)` is accepted.
+    const section = buildSection('service-discovery-plugin', {
+      runtimeCells: '| ✅ | ✅ | ✅ | ✅ (HTTP) |',
+      caveat: 'Consul service discovery',
+    });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/service-discovery-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(
+      findings.some((f) => f.message.includes('no source-grounded override')),
+    ).toBe(false);
+  });
 });
 
 describe('documentation gate — local links and anchors', () => {

@@ -27,6 +27,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { scanFences } from '../scripts/check-docs.ts';
+
 const GUIDE = 'docs/decorators.md';
 const SNIPPET_CONFIG = 'test/fixtures/snippets/deno.json';
 const SCRATCH_DIR = '.tmp/decorator-fences';
@@ -52,44 +54,36 @@ interface Fence {
  * Extracts every fenced code block from a markdown string, pairing each with
  * its 1-based opening-fence line number and the nearest preceding heading.
  *
- * Headings are tracked as the last `^#` line seen before a fence opens; this is
- * the "nearest heading" a reader scrolling up from the block would see.
+ * Reuses [`scanFences`](../scripts/check-docs.ts) for CommonMark-faithful fence
+ * tracking (backtick/tilde, length-matched closers, info-string handling) so
+ * nested fences and four-backtick openers are not mis-parsed — the same scanner
+ * the guide-fence compiler and the docs gate use. Headings are tracked as the
+ * last `^#` line seen before a fence opens; this is the "nearest heading" a
+ * reader scrolling up from the block would see.
  */
 function extractFences(markdown: string): Fence[] {
   const lines = markdown.split('\n');
+  const { blocks } = scanFences(lines);
   const fences: Fence[] = [];
   let heading = '<no heading>';
-  let inFence = false;
-  let lang = '';
-  let fenceLine = 0;
-  let codeLines: string[] = [];
+  let lineIndex = 0;
+  // Walk the document once, tracking the heading in force when each fence
+  // opener appears, so each block carries its nearest preceding heading.
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!inFence) {
-      if (line.startsWith('#')) {
-        heading = line.trim();
-      }
-      if (line.startsWith('```')) {
-        inFence = true;
-        lang = line.slice(3).trim();
-        fenceLine = i + 1;
-        codeLines = [];
-      }
-    } else {
-      if (line.startsWith('```')) {
-        fences.push({
-          index: fences.length,
-          line: fenceLine,
-          heading,
-          lang,
-          code: codeLines.join('\n'),
-        });
-        inFence = false;
-        lang = '';
-        codeLines = [];
-      } else {
-        codeLines.push(line);
-      }
+    if (/^#{1,6}\s/.test(lines[i] as string)) {
+      heading = (lines[i] as string).trim();
+    }
+    // `scanFences` records blocks in document order with 1-based opening lines.
+    if (lineIndex < blocks.length && (blocks[lineIndex] as { line: number }).line === i + 1) {
+      const block = blocks[lineIndex]!;
+      fences.push({
+        index: lineIndex,
+        line: block.line,
+        heading,
+        lang: block.info,
+        code: lines.slice(block.bodyStart, block.bodyEnd).join('\n'),
+      });
+      lineIndex += 1;
     }
   }
   return fences;
