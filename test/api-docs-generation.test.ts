@@ -20,13 +20,16 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   buildDenoDocArgs,
+  classifyChildResult,
   CLEAN_PACKAGES,
   collectApiEntrypoints,
   DOC_LINT_BASELINE,
+  DOC_LINT_EXIT_CODE,
   expandExportTargets,
   normalizeDiagnosticPath,
   parseDocLintDiagnostics,
   partitionDiagnostics,
+  readManifestExports,
   runApiDocs,
 } from '../scripts/generate-api-docs.ts';
 import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
@@ -473,20 +476,38 @@ error[private-type-ref]: public type references private type
       }
     });
 
-    it('throws when a published package has no export targets', async () => {
+    it('throws when a published package has an invalid export map (no exports field)', async () => {
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
             return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
-          // All manifests return empty exports
+          // All manifests return {} (no exports field) → invalid export map
           return Promise.resolve('{}');
         },
         readDir: (path: string) => Deno.readDir(path),
         stat: (path: string) => Deno.stat(path),
       };
-      // All manifests return {} → should throw about missing export targets
+      // {} has no exports field → invalid-export-map classification
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
+        'invalid exports map',
+      );
+    });
+
+    it('throws when a published package has no local export targets', async () => {
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
+      const fs = {
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          }
+          // exports is an empty object → no-export-targets
+          return Promise.resolve(JSON.stringify({ exports: {} }));
+        },
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
       await expect(collectApiEntrypoints(fs)).rejects.toThrow(
         'has no export targets in its deno.json manifest',
       );
@@ -725,6 +746,381 @@ error[private-type-ref]: public type references private type
       expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
       // Must NOT pass even though diagnostic count equals baseline
       expect(result.code).not.toBe(0);
+    });
+
+    // The two exact review failures: the prior global-summary suppression let a
+    // fatal line coexist with a lint summary and pass. These reproduce both.
+    it('REVIEW REPRO 1: code 2 + exactly 776 diagnostics → fatal, never success', async () => {
+      const fs = makeFs();
+      const diagnostics = Array.from(
+        { length: DOC_LINT_BASELINE },
+        (_, i) =>
+          `error[missing-jsdoc]: diag ${i}
+  --> packages/runtime/src/index.ts:${i + 1}:0`,
+      ).join('\n');
+      // Exit code 2 (not the documented lint exit code 1) → always fatal.
+      const cmd = { run: () => Promise.resolve({ code: 2, stdout: '', stderr: diagnostics }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).not.toBe(0);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+    });
+
+    it('REVIEW REPRO 2: code 2 + 776 diagnostics + fatal module-not-found + normal summary → fatal', async () => {
+      const fs = makeFs();
+      const diagnostics = Array.from(
+        { length: DOC_LINT_BASELINE },
+        (_, i) =>
+          `error[missing-jsdoc]: diag ${i}
+  --> packages/runtime/src/index.ts:${i + 1}:0`,
+      ).join('\n');
+      // A fatal module-not-found line AND the normal lint summary, with exit 2.
+      // The prior suppression saw the summary, set isLintSummary=true, and let
+      // the fatal pass. The structural classifier removes the recognized lint
+      // records and rejects the residual `error: Module not found`.
+      const stderr =
+        `error: Module not found: ./missing.ts\n${diagnostics}\nFound ${DOC_LINT_BASELINE} documentation lint errors.`;
+      const cmd = { run: () => Promise.resolve({ code: 2, stdout: '', stderr }) };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      expect(result.code).not.toBe(0);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
+      // Must NOT report "below baseline" — it is fatal, not lint debt.
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
+    });
+  });
+
+  describe('classifyChildResult — structural exit classification', () => {
+    it('classifies the documented lint-debt exit (code 1, only diagnostics + summary) as lint-debt', () => {
+      const stderr =
+        `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 1 documentation lint errors.`;
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('lint-debt');
+    });
+
+    it('classifies exit code 0 as lint-debt (no diagnostics)', () => {
+      const result = classifyChildResult(0, '', '');
+      expect(result.kind).toBe('lint-debt');
+    });
+
+    it('classifies exit code 2 as fatal regardless of content', () => {
+      const result = classifyChildResult(2, '', 'Found 5 documentation lint errors.');
+      expect(result.kind).toBe('fatal');
+    });
+
+    it('classifies exit code 1 with an independent fatal error as fatal', () => {
+      const stderr = 'error: Module not found: ./missing.ts\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('fatal');
+    });
+
+    it('classifies exit code 1 with a fatal error plus lint diagnostics as fatal', () => {
+      const stderr =
+        'error: Module not found\nerror[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('fatal');
+    });
+
+    it('does NOT falsely fatal on a lint diagnostic whose message contains "error: "', () => {
+      // A lint diagnostic opener is error[rule]: — even if its message text
+      // contains "error: something", the opener line is removed before the
+      // residual scan, so it is not falsely classified as fatal.
+      const stderr =
+        'error[missing-jsdoc]: error: this is part of the message\n  --> packages/runtime/src/index.ts:1:0\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('lint-debt');
+    });
+
+    it('detects a fatal on stdout when stderr is clean', () => {
+      const stdout = 'error: Permission denied\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, stdout, '');
+      expect(result.kind).toBe('fatal');
+    });
+
+    it('detects ANSI-coloured fatal text', () => {
+      const stderr = '\u001b[31merror: Permission denied\u001b[0m\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('fatal');
+    });
+
+    it('detects a stack trace as fatal', () => {
+      const stderr = 'error: something\n    at file:///foo.ts:10:5\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('fatal');
+    });
+
+    it('recognizes the lint summary line so it is not residual-fatal', () => {
+      const stderr =
+        `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 776 documentation lint errors.`;
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('lint-debt');
+    });
+  });
+
+  describe('readManifestExports — exact error classifications', () => {
+    it('classifies a missing/unreadable manifest as read-failed', async () => {
+      const fs = {
+        readTextFile: (_path: string) => Promise.reject(new Error('NotFound')),
+      };
+      const result = await readManifestExports('packages/missing/deno.json', fs);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.failure.kind).toBe('read-failed');
+        expect(result.failure.path).toBe('packages/missing/deno.json');
+      }
+    });
+
+    it('classifies malformed JSON as malformed-manifest', async () => {
+      const fs = {
+        readTextFile: (_path: string) => Promise.resolve('{ not json }'),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.failure.kind).toBe('malformed-manifest');
+        expect(result.failure.path).toBe('packages/foo/deno.json');
+      }
+    });
+
+    it('classifies a manifest with no exports field as invalid-export-map', async () => {
+      const fs = {
+        readTextFile: (_path: string) => Promise.resolve('{}'),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.failure.kind).toBe('invalid-export-map');
+      }
+    });
+
+    it('classifies a manifest with exports of wrong type as invalid-export-map', async () => {
+      const fs = {
+        readTextFile: (_path: string) => Promise.resolve(JSON.stringify({ exports: 42 })),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.failure.kind).toBe('invalid-export-map');
+      }
+    });
+
+    it('classifies a manifest with an empty exports object as no-export-targets', async () => {
+      const fs = {
+        readTextFile: (_path: string) => Promise.resolve(JSON.stringify({ exports: {} })),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.failure.kind).toBe('no-export-targets');
+      }
+    });
+
+    it('returns targets for a valid string export', async () => {
+      const fs = {
+        readTextFile: (_path: string) =>
+          Promise.resolve(JSON.stringify({ exports: './src/index.ts' })),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.targets).toEqual(['./src/index.ts']);
+      }
+    });
+
+    it('returns targets for a valid object export map', async () => {
+      const fs = {
+        readTextFile: (_path: string) =>
+          Promise.resolve(
+            JSON.stringify({ exports: { '.': './src/index.ts', './worker': './src/worker.ts' } }),
+          ),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.targets).toContain('./src/index.ts');
+        expect(result.targets).toContain('./src/worker.ts');
+      }
+    });
+
+    it('corrupt double-prefix prevention: a target with a doubled ./ is not silently accepted', async () => {
+      // An export target "././src/index.ts" must not collapse to a valid path
+      // silently; expandExportTargets normalizes it to "./src/index.ts".
+      const fs = {
+        readTextFile: (_path: string) =>
+          Promise.resolve(JSON.stringify({ exports: '././src/index.ts' })),
+      };
+      const result = await readManifestExports('packages/foo/deno.json', fs);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // The normalized target must not contain a doubled prefix.
+        for (const t of result.targets) {
+          expect(t).not.toContain('././');
+        }
+      }
+    });
+  });
+
+  describe('runApiDocs — generate-mode edge cases', () => {
+    it('generate mode with stdout on failure includes stdout in findings', async () => {
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
+      const fs = {
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          }
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
+        },
+        readDir: async function* () {
+          yield* [];
+        },
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
+        remove: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
+        mkdir: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
+      };
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: 'some stdout error', stderr: '' }),
+      };
+      const result = await runApiDocs('generate', '/tmp/fake-api', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('some stdout error'))).toBe(true);
+    });
+
+    it('generate mode with success but missing output reports the gap', async () => {
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
+      const fs = {
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          }
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
+        },
+        readDir: async function* () {
+          yield* [];
+        },
+        stat: (path: string) => {
+          // The target files exist, but the output index.html does not.
+          if (path.includes('index.html')) {
+            return Promise.reject(new Error('NotFound'));
+          }
+          return Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo);
+        },
+        remove: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
+        mkdir: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
+      };
+      const cmd = {
+        run: () => Promise.resolve({ code: 0, stdout: '', stderr: '' }),
+      };
+      const result = await runApiDocs('generate', '/tmp/fake-api-missing', fs, cmd);
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('Generated output not found'))).toBe(true);
+    });
+  });
+
+  describe('collectApiEntrypoints — reconciliation errors', () => {
+    it('throws when workspace members are missing from PUBLISHED_PACKAGES', async () => {
+      const fs = {
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            // Workspace has an extra package not in PUBLISHED_PACKAGES.
+            return Promise.resolve(
+              JSON.stringify({ workspace: ['packages/common', 'packages/extra-pkg'] }),
+            );
+          }
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
+        },
+        readDir: async function* () {
+          yield* [];
+        },
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
+      };
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
+        'Workspace members missing from PUBLISHED_PACKAGES',
+      );
+    });
+
+    it('throws when published packages are missing from workspace', async () => {
+      const fs = {
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            // Workspace has only one package; PUBLISHED_PACKAGES has more.
+            return Promise.resolve(JSON.stringify({ workspace: ['packages/common'] }));
+          }
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
+        },
+        readDir: async function* () {
+          yield* [];
+        },
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
+      };
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
+        'Published packages missing from workspace',
+      );
+    });
+
+    it('throws when a declared export target does not exist on disk', async () => {
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
+      const fs = {
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          }
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
+        },
+        readDir: async function* () {
+          yield* [];
+        },
+        stat: (path: string) => {
+          // The target file does not exist on disk.
+          if (path.includes('src/index.ts')) {
+            return Promise.reject(new Error('NotFound'));
+          }
+          return Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo);
+        },
+      };
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
+        'does not exist on disk',
+      );
+    });
+  });
+
+  describe('generate-api-docs.ts subprocess integration', () => {
+    it('main() --check exits 0 on the real repository (ratchet passes)', async () => {
+      const cmd = new Deno.Command('deno', {
+        args: [
+          'run',
+          '--allow-read',
+          '--allow-run',
+          '--allow-env',
+          'scripts/generate-api-docs.ts',
+          '--check',
+        ],
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const output = await cmd.output();
+      expect(output.code).toBe(0);
+    });
+
+    it('main() generate mode exits 0 and produces docs/api/index.html', async () => {
+      const cmd = new Deno.Command('deno', {
+        args: [
+          'run',
+          '--allow-read',
+          '--allow-run',
+          '--allow-write',
+          '--allow-env',
+          'scripts/generate-api-docs.ts',
+        ],
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const output = await cmd.output();
+      expect(output.code).toBe(0);
+      // Verify the generated index.html exists.
+      try {
+        await Deno.stat('docs/api/index.html');
+      } catch {
+        throw new Error('docs/api/index.html was not generated');
+      }
     });
   });
 });

@@ -1525,6 +1525,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   zero — the ETag is now STRONG whenever `mtime` is present, matching what nginx and Apache emit for
   static files, and weak only when size is the sole signal. Reverting the three fixed `src` files
   failed 8 of 13 regression steps, the other 5 being deliberate controls) — complete (PR #132)
+- **Milestone 38** (`docs/*` + `scripts/*` + `test/*` — documentation hub and tooling) — the
+  documentation milestone: nine curated guides under [`docs/`](docs/) (getting-started,
+  plugin-architecture, plugins, programmatic-api, decorators, custom-plugins, migration-nestjs,
+  migration-fastify, examples, runtime-deployment), a reproducible
+  [`deno doc`](https://docs.deno.com/runtime/reference/cli/doc/) HTML API generator
+  ([`scripts/generate-api-docs.ts`](scripts/generate-api-docs.ts)) over local manifest export
+  targets, a JSDoc-lint **ratchet** freezing the measured 776 pre-existing diagnostics while keeping
+  ten clean packages permanently clean, a Markdown documentation gate
+  ([`scripts/check-docs.ts`](scripts/check-docs.ts)) with structural package-catalog validation,
+  generated-API-link and cross-file-anchor validation, and a dedicated per-file script-coverage gate
+  ([`scripts/script-coverage.ts`](scripts/script-coverage.ts)) enforcing ≥90% branch/function/line
+  on both documentation scripts. The snippet gate mechanically type-checks committed fixtures
+  representing all nine guides plus the architecture registry example, with a negative control
+  proving the compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6
+  service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
+  `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
+  published-artifact compat). No package source, manifest export, capability token, or plugin option
+  changed — complete (PR pending)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. No milestone is queued behind those:
   M37c, M54, and M55 have all shipped, closing the last entries on that list.
 

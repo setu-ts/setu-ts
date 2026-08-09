@@ -16,13 +16,19 @@ import { expect } from '@std/expect';
 
 import {
   anchorFor,
+  buildGeneratedApiPages,
   checkAppsReadmeCoverage,
   checkDocument,
   checkExamplesCoverage,
+  checkLocalLinks,
+  checkPackageCatalog,
   checkRequiredGuides,
   findSwallowedHeadings,
   scanFences,
 } from '../scripts/check-docs.ts';
+import { collectApiEntrypoints } from '../scripts/generate-api-docs.ts';
+import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
+import { PACKAGE_METADATA } from '../scripts/jsr-metadata.ts';
 
 describe('documentation gate — fence scanning', () => {
   it('does not treat a longer fence as closed by a shorter one', () => {
@@ -227,11 +233,7 @@ describe('documentation gate — apps README coverage', () => {
 });
 
 describe('documentation gate — package catalog', () => {
-  it('reports a package missing from the catalog', async () => {
-    const { checkPackageCatalog } = await import('../scripts/check-docs.ts');
-    const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
-    const { PACKAGE_METADATA } = await import('../scripts/jsr-metadata.ts');
-
+  it('reports a package missing from the catalog', () => {
     // Create a minimal plugins.md that omits one package
     const pluginsMd = '# Plugins\n\n## @setu-ts/common\n\nSome content.\n';
     const runtimeMd =
@@ -248,25 +250,18 @@ describe('documentation gate — package catalog', () => {
     expect(findings.length).toBeGreaterThan(0);
   });
 
-  it('passes when all packages are in the catalog', async () => {
-    const { checkPackageCatalog } = await import('../scripts/check-docs.ts');
-    const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
-    const { PACKAGE_METADATA } = await import('../scripts/jsr-metadata.ts');
-
-    // Build a plugins.md with all packages
-    const packageSections = PUBLISHED_PACKAGES.map((pkg) => {
-      // Handle starters specially
+  it('rejects the exact review synthetic substring-only catalog', () => {
+    // A catalog where each package is mentioned only by its @setu-ts name in a
+    // single unstructured paragraph must NOT pass — the review found this did.
+    const pluginsMd = PUBLISHED_PACKAGES.map((pkg) => {
       const match = pkg.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
       const firstSegment = match?.[1];
       const secondSegment = match?.[2];
       const name = (firstSegment === 'starters' && secondSegment)
         ? secondSegment
         : (match?.[1] ?? pkg.replace('packages/', ''));
-      const pathPrefix = firstSegment === 'starters' ? 'starters/' : '';
-      return `### @setu-ts/${name}\n\nContent.\n\n- [README](../packages/${pathPrefix}${name}/README.md)\n- [API Reference](./api/${pathPrefix}${name}/src/index.ts/index.html)\n`;
-    }).join('\n');
-
-    const pluginsMd = `# Plugins\n\n${packageSections}`;
+      return `@setu-ts/${name}`;
+    }).join(' ');
     const runtimeMd =
       '# Runtime\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n';
 
@@ -276,8 +271,333 @@ describe('documentation gate — package catalog', () => {
       PUBLISHED_PACKAGES,
       PACKAGE_METADATA,
     );
+    // The synthetic substring-only catalog must fail — it has no structured
+    // sections, no README links, no API links, no runtime statuses.
+    expect(findings.length).toBeGreaterThan(0);
+  });
 
-    // Should have no findings for a complete catalog
+  // A helper to build one realistic structural section for a package, so
+  // mutations prove the structural validator discriminates.
+  function buildSection(pkg: string, opts: {
+    purpose?: string;
+    readmeLink?: string;
+    apiLink?: string;
+    runtimeCells?: string;
+    caveat?: string;
+  }): string {
+    const purpose = opts.purpose ?? 'Test package.';
+    const readme = opts.readmeLink ?? `../packages/${pkg}/README.md`;
+    const api = opts.apiLink ?? `./api/${pkg}/src/index.ts/index.html`;
+    const cells = opts.runtimeCells ?? '| ✅ | ✅ | ✅ | ✅ |';
+    const caveatLine = opts.caveat ? `\n\n**Caveat:** ${opts.caveat}` : '';
+    return `### @setu-ts/${pkg}\n\n**Purpose:** ${purpose}\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n${cells}${caveatLine}\n\n**Links:**\n\n- [README](${readme})\n- [API Reference](${api})\n`;
+  }
+
+  it('rejects a duplicate package section', () => {
+    const section = buildSection('common', {});
+    const pluginsMd = `# Plugins\n\n${section}\n---\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/common'],
+      PACKAGE_METADATA,
+    );
+    // A duplicate section means the package appears twice structurally.
+    expect(findings.some((f) => f.message.includes('common'))).toBe(true);
+  });
+
+  it('rejects an extra catalog section not in PUBLISHED_PACKAGES', () => {
+    const section = buildSection('nonexistent-plugin', {});
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(pluginsMd, runtimeMd, [], PACKAGE_METADATA);
+    expect(findings.some((f) => f.message.includes('Extra catalog section'))).toBe(true);
+  });
+
+  it('rejects a wrong README link', () => {
+    const section = buildSection('common', { readmeLink: '../packages/wrong/README.md' });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/common'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('wrong or missing README link'))).toBe(true);
+  });
+
+  it('rejects a wrong API link', () => {
+    const section = buildSection('common', { apiLink: './api/wrong/index.html' });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/common'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('wrong or missing API link'))).toBe(true);
+  });
+
+  it('rejects a missing runtime compatibility table', () => {
+    const section =
+      `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/common'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('no runtime compatibility table'))).toBe(true);
+  });
+
+  it('rejects a missing required provider caveat', () => {
+    // mail-plugin requires a caveat mentioning "SMTP".
+    const section = buildSection('mail-plugin', {});
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/mail-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('missing the required caveat'))).toBe(true);
+  });
+
+  it('accepts a section with the required caveat present', () => {
+    const section = buildSection('mail-plugin', {
+      caveat: 'SMTP raw-socket provider is Node/Deno/Bun only.',
+    });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/mail-plugin'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('caveat'))).toBe(false);
+  });
+
+  it('rejects a missing Purpose line', () => {
+    const section =
+      `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/common'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('no **Purpose:**'))).toBe(true);
+  });
+
+  it('rejects a runtime cell that does not match PACKAGE_METADATA', () => {
+    // common is UNIVERSAL (all true); a ❌ for deno must fail.
+    const section = buildSection('common', { runtimeCells: '| ❌ | ✅ | ✅ | ✅ |' });
+    const pluginsMd = `# Plugins\n\n${section}`;
+    const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
+    const findings = checkPackageCatalog(
+      pluginsMd,
+      runtimeMd,
+      ['packages/common'],
+      PACKAGE_METADATA,
+    );
+    expect(findings.some((f) => f.message.includes('does not match PACKAGE_METADATA'))).toBe(true);
+  });
+});
+
+describe('documentation gate — local links and anchors', () => {
+  it('rejects a fake generated API link while accepting a real one', async () => {
+    const fs = {
+      readTextFile: async (path: string) => await Deno.readTextFile(path),
+      readDir: (path: string) => Deno.readDir(path),
+      stat: (path: string) => Deno.stat(path),
+    };
+    const { targets } = await collectApiEntrypoints(fs);
+    const generatedApiPages = buildGeneratedApiPages(targets);
+
+    // A real catalog API page (common) must resolve.
+    const realLink = '[API](./api/common/src/index.ts/index.html)';
+    const realSource = realLink;
+    const realFindings = await checkLocalLinks('docs/test.md', realSource, [], generatedApiPages);
+    expect(realFindings.length).toBe(0);
+
+    // A fake generated API link must be rejected.
+    const fakeLink = '[API](./api/common/does/not/exist.html)';
+    const fakeSource = fakeLink;
+    const fakeFindings = await checkLocalLinks('docs/test.md', fakeSource, [], generatedApiPages);
+    expect(fakeFindings.length).toBeGreaterThan(0);
+    expect(
+      fakeFindings.some((f) => f.message.includes('does not resolve to a known generated page')),
+    )
+      .toBe(true);
+  });
+
+  it('skips generated API links when the page set is null', async () => {
+    // When output has not been generated, the gate skips rather than falsely rejecting.
+    const link = '[API](./api/common/src/index.ts/index.html)';
+    const findings = await checkLocalLinks('docs/test.md', link, [], null);
     expect(findings.length).toBe(0);
+  });
+
+  it('rejects a cross-file anchor that matches no heading in the target file', async () => {
+    // Write a temp target file with one heading, then link to a missing anchor.
+    const targetPath = 'test/fixtures/link-target.md';
+    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    try {
+      const source = `[bad](../test/fixtures/link-target.md#missing-heading)`;
+      const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
+      expect(findings.some((f) => f.message.includes('matches no heading'))).toBe(true);
+    } finally {
+      await Deno.remove(targetPath);
+    }
+  });
+
+  it('accepts a cross-file anchor that matches a heading in the target file', async () => {
+    const targetPath = 'test/fixtures/link-target.md';
+    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    try {
+      const source = `[good](../test/fixtures/link-target.md#real-heading)`;
+      const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
+      expect(findings.length).toBe(0);
+    } finally {
+      await Deno.remove(targetPath);
+    }
+  });
+
+  it('rejects a same-file anchor that matches no heading', async () => {
+    const source = '# T\n\n## A\n\nSee [B](#nope).\n';
+    const findings = await checkLocalLinks('docs/t.md', source, ['docs/t.md']);
+    expect(findings.some((f) => f.message.includes('matches no heading'))).toBe(true);
+  });
+
+  it('accepts a decoded URI-encoded path and fragment', async () => {
+    const targetPath = 'test/fixtures/link target.md';
+    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    try {
+      // %20 decodes to a space; the path resolves.
+      const source = `[good](../test/fixtures/link%20target.md#real-heading)`;
+      const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
+      expect(findings.length).toBe(0);
+    } finally {
+      await Deno.remove(targetPath);
+    }
+  });
+
+  it('strips a query string before resolving', async () => {
+    const targetPath = 'test/fixtures/query-target.md';
+    await Deno.writeTextFile(targetPath, '# Target\n');
+    try {
+      const source = `[good](../test/fixtures/query-target.md?raw=true)`;
+      const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
+      expect(findings.length).toBe(0);
+    } finally {
+      await Deno.remove(targetPath);
+    }
+  });
+
+  it('resolves a directory link via README fallback', async () => {
+    // packages/common/README.md exists — a link to packages/common must resolve.
+    const source = '[common](../packages/common)';
+    const findings = await checkLocalLinks('docs/test.md', source, ['packages/common/README.md']);
+    expect(findings.length).toBe(0);
+  });
+
+  it('accepts a non-Markdown asset link (image) without parsing it as a document', async () => {
+    // deno.json is a real non-markdown file at the repo root; a link from
+    // docs/ to it must resolve, and a fragment on it is not parsed as a doc.
+    const source = '[manifest](../deno.json)';
+    const findings = await checkLocalLinks('docs/test.md', source, ['deno.json']);
+    expect(findings.length).toBe(0);
+  });
+
+  it('exercises the file:line anchor format (packages/foo.ts:79)', async () => {
+    // A link to a real source file with a :line suffix must resolve.
+    const source = '[source](../packages/common/src/index.ts:1)';
+    const findings = await checkLocalLinks('docs/test.md', source, [
+      'packages/common/src/index.ts',
+    ]);
+    expect(findings.length).toBe(0);
+  });
+
+  it('exercises the disk-stat fallback for a real file not in allFiles', async () => {
+    // .editorconfig is a real file not passed in allFiles; the disk stat must resolve it.
+    const source = '[editor](.editorconfig)';
+    const findings = await checkLocalLinks('test.md', source, []);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rejects a link to a nonexistent file with no anchor', async () => {
+    const source = '[bad](./does-not-exist.md)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('does not resolve'))).toBe(true);
+  });
+
+  it('exercises a fenced-line link (skipped) and external link (skipped)', async () => {
+    // A link inside a code fence is skipped; an external link is skipped.
+    const source = '# T\n\n```ts\n[bad](./nonexistent.md)\n```\n\n[ext](https://example.com)\n';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rejects a same-file path+anchor where the file resolves but the anchor does not', async () => {
+    // A link to the current file itself with a missing anchor must report the
+    // same-file anchor mismatch (the file resolves, but the anchor does not).
+    const source = '# T\n\n## A\n\nSee [B](./test.md#nope).\n';
+    const findings = await checkLocalLinks('docs/test.md', source, ['docs/test.md']);
+    expect(findings.some((f) => f.message.includes('matches no heading'))).toBe(true);
+  });
+
+  it('accepts a non-Markdown asset link with a fragment (fragment not validated)', async () => {
+    // deno.json is a real non-markdown file; a fragment on it is not parsed.
+    const source = '[manifest](../deno.json#L1)';
+    const findings = await checkLocalLinks('docs/test.md', source, ['deno.json']);
+    expect(findings.length).toBe(0);
+  });
+});
+
+describe('documentation gate — script subprocess integration', () => {
+  it('check-docs.ts main() exits 0 on a single good file', async () => {
+    const cmd = new Deno.Command('deno', {
+      args: ['run', '--allow-read', '--allow-run', 'scripts/check-docs.ts', 'README.md'],
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    const output = await cmd.output();
+    expect(output.code).toBe(0);
+  });
+
+  it('check-docs.ts main() default scan exits 0 on the real repository', async () => {
+    const cmd = new Deno.Command('deno', {
+      args: ['run', '--allow-read', '--allow-run', 'scripts/check-docs.ts'],
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    const output = await cmd.output();
+    expect(output.code).toBe(0);
+  });
+
+  it('check-docs.ts main() exits 1 on a file with a broken anchor', async () => {
+    const tmpPath = '.tmp/broken-anchor.md';
+    await Deno.mkdir('.tmp', { recursive: true });
+    await Deno.writeTextFile(tmpPath, '# T\n\n## A\n\nSee [B](#nope).\n');
+    try {
+      const cmd = new Deno.Command('deno', {
+        args: ['run', '--allow-read', 'scripts/check-docs.ts', tmpPath],
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const output = await cmd.output();
+      expect(output.code).toBe(1);
+    } finally {
+      await Deno.remove(tmpPath);
+    }
   });
 });

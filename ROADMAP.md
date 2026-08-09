@@ -3989,10 +3989,10 @@ M51b's npm-client interop suite for `apps/graphql-demo` is manual.
 
 ### Deliverables
 
-- [ ] All documentation
-- [ ] `deno doc` API reference generation
-- [ ] API reference
-- [ ] Reconcile the ARCHITECTURE.md §8 "Package Overview" diagram with the workspace member list. It
+- [x] All documentation
+- [x] `deno doc` API reference generation
+- [x] API reference
+- [x] Reconcile the ARCHITECTURE.md §8 "Package Overview" diagram with the workspace member list. It
       graphs a subset of the members; ten were missing as of M50 (`exceptions`, `sse-plugin`,
       `websocket-plugin`, `worker-pool-plugin`, `realtime-backplane-plugin`, `react-router-plugin`,
       `session-plugin`, and the three starters). M50 added only its own node — the backlog is doc
