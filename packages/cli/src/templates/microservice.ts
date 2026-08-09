@@ -6,7 +6,12 @@
 
 import type { TemplateDefinition } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
-import { MODULE_SEAM_FILES, MODULE_SEAM_LOCAL_IMPORT, withModuleSeam } from './module-seam.ts';
+import {
+  MODULE_SEAM_FILES,
+  MODULE_SEAM_LOCAL_IMPORT,
+  MODULE_SEAM_MANIFEST,
+  withModuleSeam,
+} from './module-seam.ts';
 
 /**
  * `microservice` — `rest` plus the pieces a service needs to talk to others:
@@ -52,6 +57,7 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   middleware: REST_MIDDLEWARE,
   localImports: [MODULE_SEAM_LOCAL_IMPORT],
   files: MODULE_SEAM_FILES,
+  manifest: MODULE_SEAM_MANIFEST,
   unsupported: {
     'cloudflare-workers':
       'the messaging and queue plugins reach brokers over raw sockets, which Workers does not provide',

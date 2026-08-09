@@ -60,8 +60,17 @@ const UNGATED = ['plugin', 'service', 'route', 'middleware', 'job'] as const;
  */
 const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
 
-/** Files the `module` schematic emits per name that the drift check reads. */
-const MODULE_CHECKED_FILES_PER_NAME = 3;
+/**
+ * Files the `module` schematic emits per name, all of which the drift check
+ * reads.
+ *
+ * The emitted `*.service.test.ts` is INCLUDED deliberately. Excluding it is what
+ * hid a real defect: the test imports `@std/testing/bdd` and `@std/expect`, and
+ * until the host templates declared those specifiers, the first `deno test` in a
+ * scaffolded project failed. A gate that skips the generated file it is least
+ * sure about is a gate written around the bug.
+ */
+const MODULE_FILES_PER_NAME = 4;
 
 /**
  * Collects every `.ts` source under a directory, recursively.
@@ -69,9 +78,9 @@ const MODULE_CHECKED_FILES_PER_NAME = 3;
  * Recursive because `src/modules/` holds the aggregate barrel BESIDE the module
  * directories, so a fixed two-level walk would try to read a file as a directory.
  *
- * `*.test.ts` is skipped: the emitted service test imports `@std/testing/bdd`,
- * which a scaffolded project's manifest does not alias — it is run by the
- * generated project's own `deno test`, not type-checked by this gate.
+ * Every `.ts` file is collected, test files included — a generated test whose own
+ * imports do not resolve is a defect in what the CLI emitted, so the gate has to
+ * see it.
  *
  * @param dir - Directory to walk
  * @returns Absolute paths of the `.ts` files found
@@ -82,7 +91,7 @@ async function collectSources(dir: string): Promise<string[]> {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory) {
       found.push(...(await collectSources(path)));
-    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+    } else if (entry.name.endsWith('.ts')) {
       found.push(path);
     }
   }
@@ -463,7 +472,7 @@ describe('template scaffolding — end to end', () => {
     // adds its own per-name files plus the ONE shared barrel; plus two entries.
     const accepted = HOSTILE_NAMES.filter((n) => n.accepted).length;
     expect(sources.length).toBe(
-      REST_AVAILABLE.length * accepted + MODULE_CHECKED_FILES_PER_NAME * accepted + 1 + 2,
+      REST_AVAILABLE.length * accepted + MODULE_FILES_PER_NAME * accepted + 1 + 2,
     );
 
     await useWorkspacePackages(project);
@@ -513,10 +522,8 @@ describe('setu generate module, end to end', () => {
     for await (const entry of Deno.readDir(`${project}/src/modules`)) {
       if (!entry.isDirectory) continue;
       for await (const file of Deno.readDir(`${project}/src/modules/${entry.name}`)) {
-        // The emitted service test imports @std/* through the project's own
-        // manifest, which does not alias them — it is checked by the generated
-        // project's own `deno test`, not by this gate.
-        if (file.name.endsWith('.test.ts')) continue;
+        // Test files included: the host templates declare the `@std` specifiers
+        // the emitted test imports, so it must type-check like any other file.
         paths.push(`${project}/src/modules/${entry.name}/${file.name}`);
       }
     }

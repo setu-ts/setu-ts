@@ -18,11 +18,34 @@ import { joinPath } from './file-writer.ts';
 export const MODULES_DIR = 'src/modules';
 
 /**
- * Lists the domain module directories under `src/modules/`.
+ * Reports whether a path is an existing regular file.
  *
- * Entries are filtered to directories, so the aggregate barrel the caller
- * renders can never import from a stray file (`src/modules/index.ts` itself is
- * the obvious one, and it must not be mistaken for a module).
+ * @param fs - The filesystem to probe
+ * @param path - The path to test
+ * @returns True when the path exists and is a file
+ */
+async function isFile(fs: IFileSystem, path: string): Promise<boolean> {
+  try {
+    return (await fs.stat(path)).isFile;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lists the domain modules under `src/modules/`.
+ *
+ * A directory counts as a module only when it holds BOTH `<name>.controller.ts`
+ * and `<name>.service.ts` — the two files the aggregate barrel imports. That is
+ * the barrel's precondition, and checking it is what keeps an unrelated
+ * directory out: a `shared/` helper folder is a natural thing to put here, and
+ * admitting it would make the regenerated barrel import
+ * `./shared/shared.controller.ts`, which does not exist. The developer's project
+ * would then fail to compile, naming files they never created, from a command
+ * that reported success.
+ *
+ * A directory whose canonical paths exist but are themselves directories is
+ * rejected too, since neither can be imported.
  *
  * Sorted, because `readdir` enumeration order is filesystem-defined: without a
  * sort the regenerated barrel could differ byte-for-byte between two machines
@@ -52,12 +75,22 @@ export async function readModuleNames(
 
   const names: string[] = [];
   for (const entry of entries) {
+    let stat;
     try {
-      const stat = await fs.stat(joinPath(root, entry));
-      if (stat.isDirectory) names.push(entry);
+      stat = await fs.stat(joinPath(root, entry));
     } catch {
       // Vanished or unreadable between the listing and the probe — skip it
       // rather than failing the whole command over one entry.
+      continue;
+    }
+    if (!stat.isDirectory) continue;
+
+    const base = joinPath(root, entry, entry);
+    if (
+      await isFile(fs, `${base}.controller.ts`) &&
+      await isFile(fs, `${base}.service.ts`)
+    ) {
+      names.push(entry);
     }
   }
 

@@ -14,7 +14,7 @@
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
-import { renderModuleBarrel } from './module-barrel.ts';
+import { CONTROLLERS_EXPORT, renderModuleBarrel } from './module-barrel.ts';
 
 /**
  * The capability token the module's service registers under.
@@ -80,7 +80,7 @@ import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 /**
  * HTTP controller for the ${names.kebab} resource.
  *
- * Registered through the \`${'MODULE_CONTROLLERS'}\` barrel in \`src/modules/index.ts\`,
+ * Registered through the \`${CONTROLLERS_EXPORT}\` barrel in \`src/modules/index.ts\`,
  * which \`setu.config.ts\` passes to \`DecoratorPlugin\` — so this class needs no
  * further wiring.
  */

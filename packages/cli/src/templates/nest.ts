@@ -12,7 +12,12 @@
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { LocalImport, TemplateDefinition, Wiring } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
-import { MODULE_SEAM_FILES, MODULE_SEAM_LOCAL_IMPORT, withModuleSeam } from './module-seam.ts';
+import {
+  MODULE_SEAM_FILES,
+  MODULE_SEAM_LOCAL_IMPORT,
+  MODULE_SEAM_MANIFEST,
+  withModuleSeam,
+} from './module-seam.ts';
 
 /** Where the emitted example classes live in the scaffolded project. */
 const SERVICE_PATH = './src/greeting-service.ts';
@@ -114,5 +119,6 @@ export const NEST_TEMPLATE: TemplateDefinition = {
   middleware: REST_MIDDLEWARE,
   localImports: NEST_LOCAL_IMPORTS,
   files: NEST_FILES,
+  manifest: MODULE_SEAM_MANIFEST,
   unsupported: {},
 };
