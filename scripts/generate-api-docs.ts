@@ -496,14 +496,27 @@ const LINT_DIAGNOSTIC_PATTERN = /^error\[[^\]]+\]:/;
 const LINT_LOCATION_PATTERN = /^\s*-->\s/;
 
 /**
- * A stack-trace line (`    at file:line:col`) that a fatal error prints. The
- * `m` flag is required: a stack frame is rarely at the START of the residual
- * (it follows the error header, e.g. `TypeError: foo\n    at file:///x.ts`),
- * so `^` must anchor to the start of each LINE, not the start of the whole
- * string. Without `m`, a stack trace not at position 0 is missed and a fatal
- * whose residual contains no `error: ` literal is misclassified as lint debt.
+ * Code context lines from `deno doc --lint` showing the source around the
+ * diagnostic. Two forms: pipe-indented lines (` | source...`) and line-number
+ * prefixed lines (`14 | source...`). Both are part of the recognized lint
+ * diagnostic output and must be stripped before residual analysis.
  */
-const STACK_TRACE_PATTERN = /^\s+at\s+/m;
+const LINT_CODE_CONTEXT_PATTERN = /^\s*(\d+\s+)?\|\s/;
+
+/**
+ * Hint lines from `deno doc --lint` (e.g. `= hint: make the...`).
+ */
+const LINT_HINT_PATTERN = /^\s*=\s*hint:/;
+
+/**
+ * Info lines from `deno doc --lint` (e.g. `info: to ensure documentation...`).
+ */
+const LINT_INFO_PATTERN = /^\s*info:/;
+
+/**
+ * Cross-reference annotation lines (e.g. `- this is the referenced type`).
+ */
+const LINT_REF_ANNOTATION_PATTERN = /^\s*-/;
 
 /**
  * Classifies the raw child-process output of `deno doc --lint` into one of:
@@ -541,7 +554,7 @@ export function classifyChildResult(
   }
 
   // For the ratchet-eligible code (1) or code 0, remove recognized lint records
-  // from each stream and reject any independent fatal/error/stack residual.
+  // from each stream and reject any residual content.
   for (const stream of [stdoutStripped, stderrStripped]) {
     const lines = stream.split('\n');
     const residual: string[] = [];
@@ -552,16 +565,22 @@ export function classifyChildResult(
       if (LINT_LOCATION_PATTERN.test(line)) continue;
       // Recognized lint summary line: Found N documentation lint errors.
       if (LINT_SUMMARY_PATTERN.test(line)) continue;
+      // Recognized code context lines (pipe-indented source context).
+      if (LINT_CODE_CONTEXT_PATTERN.test(line)) continue;
+      // Recognized hint lines (= hint: ...).
+      if (LINT_HINT_PATTERN.test(line)) continue;
+      // Recognized info lines (info: ...).
+      if (LINT_INFO_PATTERN.test(line)) continue;
+      // Recognized cross-reference annotations (- this is the referenced type).
+      if (LINT_REF_ANNOTATION_PATTERN.test(line)) continue;
       residual.push(line);
     }
-    const residualText = residual.join('\n');
-    // Any remaining `error:` line is an independent fatal (module-not-found,
-    // permission denied, etc.) — NOT a lint diagnostic (those were removed).
-    if (/error: /.test(residualText)) {
-      return { kind: 'fatal', stdoutStripped, stderrStripped };
-    }
-    // Any remaining stack-trace line is an independent fatal.
-    if (STACK_TRACE_PATTERN.test(residualText)) {
+    const residualText = residual.join('\n').trim();
+    // After removing recognized diagnostics and the exact known summary, every
+    // non-whitespace residual in stdout or stderr is fatal. An exit-1 child
+    // with exactly baseline diagnostics plus "warning: child aborted after
+    // partial output" must fail. Exit zero is modeled as success (lint-debt).
+    if (residualText.length > 0) {
       return { kind: 'fatal', stdoutStripped, stderrStripped };
     }
   }

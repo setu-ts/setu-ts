@@ -143,9 +143,12 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
     expect(code).not.toBe(0);
   });
 
-  it('B1: Mutating CloudflarePlugin with NONEXISTENT_BROKEN_OPTION fails', async () => {
-    // This is the critical negative test: mutate an actual Cloudflare guide fence
-    // with a nonexistent option and prove the default fence gate catches it.
+  it('B1: Mutating CloudflarePlugin with NONEXISTENT_BROKEN_OPTION fails via shared engine', async () => {
+    // Route through the same classify() and assembleSource() path as the default
+    // gate, proving the fence engine (not a raw deno-check of raw code) catches
+    // the mutation. Assert: original compiles, mutation replaces the option,
+    // mutated source fails, and diagnostic names NONEXISTENT_BROKEN_OPTION.
+    const { classify, assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
     const cloudflareGuide = 'docs/runtime-deployment.md';
     const markdown = await Deno.readTextFile(cloudflareGuide);
     const fences = extractFences(cloudflareGuide, markdown);
@@ -155,15 +158,50 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
     );
     expect(cfFence).not.toBeUndefined();
 
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
-    const mutated = cfFence!.code.replace(
-      'CloudflarePlugin({ env',
-      'CloudflarePlugin({ NONEXISTENT_BROKEN_OPTION: true, env',
+    // Classify the original fence through the shared engine
+    const original = classify(cfFence!);
+    expect(original).toBeDefined();
+
+    // Original source must compile (or be a genuine external/excluded classification)
+    if (original.kind === 'compile-complete' || original.kind === 'compile-fragment') {
+      await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+      const origFile = `${SCRATCH_DIR}/b1-cloudflare-original.ts`;
+      const origSource = assembleSource(cfFence!, original);
+      await Deno.writeTextFile(origFile, origSource);
+      const { code: origCode } = await denoCheck(origFile);
+      expect(origCode).toBe(0);
+    }
+
+    // Mutate the fence body with a nonexistent option
+    const mutatedCode = cfFence!.code.replace(
+      'CloudflarePlugin({',
+      'CloudflarePlugin({ NONEXISTENT_BROKEN_OPTION: true,',
     );
-    const file = `${SCRATCH_DIR}/b1-cloudflare-mutated.ts`;
-    await Deno.writeTextFile(file, mutated);
-    const { code } = await denoCheck(file);
-    expect(code).not.toBe(0);
+    // Verify the mutation actually occurred
+    expect(mutatedCode).toContain('NONEXISTENT_BROKEN_OPTION');
+    expect(mutatedCode).not.toBe(cfFence!.code);
+
+    // Build a mutated fence and classify it through the same engine
+    const mutatedFence = { ...cfFence!, code: mutatedCode };
+    const mutated = classify(mutatedFence);
+
+    // The mutated fence must fail compilation through the shared engine
+    if (mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment') {
+      await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+      const mutFile = `${SCRATCH_DIR}/b1-cloudflare-mutated.ts`;
+      const mutSource = assembleSource(mutatedFence, mutated);
+      await Deno.writeTextFile(mutFile, mutSource);
+      const { code: mutCode, stderr } = await denoCheck(mutFile);
+      expect(mutCode).not.toBe(0);
+      // Diagnostic must name the nonexistent option
+      expect(stderr).toContain('NONEXISTENT_BROKEN_OPTION');
+    } else {
+      // If classification itself rejects it (e.g., recognizes the bad option),
+      // that is also a valid failure mode
+      throw new Error(
+        `B1: Unexpected classification for mutated fence: ${mutated.kind}`,
+      );
+    }
   });
 
   it('B2: Mutating RuntimePlugin with INVALID_OPTION fails', async () => {

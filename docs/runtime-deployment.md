@@ -71,11 +71,15 @@ app.router.get('/stream', async (ctx) => {
 
 ```typescript
 import { SsePlugin } from '@setu-ts/sse-plugin';
+import { CAPABILITIES, type ISseService } from '@setu-ts/common';
 
-app.register(SsePlugin());
+app.register(SsePlugin({ heartbeatMs: 15_000, retryMs: 3_000 }));
 
 app.router.get('/events', async (ctx) => {
-  return ctx.response.json({ event: 'hello', data: 'world' });
+  const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+  const conn = sse.open(ctx);
+  conn.send({ id: '1', data: 'hello world' });
+  return conn.result;
 });
 ```
 
@@ -610,7 +614,7 @@ if (ctx.runtime.fs) {
   const content = await ctx.runtime.fs.readFile('file.txt');
 } else {
   // Fallback for Workers
-  const content = await ctx.services.get<ICacheService>('cache').get('file.txt');
+  const content = await ctx.services.get<ICacheStore>('cache').get('file.txt');
 }
 ```
 

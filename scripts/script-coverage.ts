@@ -251,11 +251,16 @@ async function main(): Promise<void> {
   const stdout = new TextDecoder().decode(output.stdout);
   const stderr = new TextDecoder().decode(output.stderr);
 
-  if (!output.success && !stdout.includes('File')) {
+  // Any nonzero subprocess exit must fail unconditionally, regardless of whether
+  // stdout contains a passing-looking table. The presence of "File" in a table
+  // does not override a nonzero exit code — that is how the gate fails closed.
+  if (!output.success) {
+    console.error('script-coverage: deno coverage exited with code', output.code);
     console.error(stderr);
     Deno.exit(output.code);
   }
 
+  // Only parse percentages after confirming the child succeeded.
   const parsed = parseCoverageTable(stdout);
 
   // The parsed result key set MUST equal the canonical target set exactly.
