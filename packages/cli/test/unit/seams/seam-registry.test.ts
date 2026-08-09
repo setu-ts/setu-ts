@@ -8,8 +8,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { getSeamSpec, listSeamSpecs } from '../../../src/seams/registry.ts';
+import { listSeamSpecs } from '../../../src/seams/registry.ts';
 import { getSchematic, listSchematics } from '../../../src/schematics/registry.ts';
+import { seamSpecFor } from '../schematics/_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 import {
   assembleSeamBarrel,
@@ -43,7 +44,7 @@ describe('seam registry', () => {
   // plugin in this repository calls `ctx.cli.register`, so no migration runner exists.
   it('declares no seam for guard, job or migration', () => {
     for (const schematic of UNWIRED) {
-      expect(getSeamSpec(schematic)).toBeUndefined();
+      expect(seamSpecFor(schematic)).toBeUndefined();
     }
   });
 
@@ -105,7 +106,7 @@ describe('seam registry', () => {
   it('renders a route barrel whose export is a function, not a constant', () => {
     // The one seam whose registration site is a CALL rather than a plugin option, so its
     // barrel is shaped differently from the other nine.
-    const spec = getSeamSpec('route')!;
+    const spec = seamSpecFor('route')!;
     expect(spec.renderBarrel({})).toContain('export function registerGeneratedRoutes');
   });
 });

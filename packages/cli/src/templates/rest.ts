@@ -59,7 +59,7 @@ export const REST_PLUGINS: readonly Wiring[] = [
  * Derived from {@linkcode REST_PLUGINS} rather than listed again, so a plugin added
  * there cannot be missed here — which would silently omit the seam that plugin hosts.
  */
-export const REST_PACKAGES: ReadonlySet<string> = new Set(REST_PLUGINS.map((p) => p.pkg));
+const REST_PACKAGES: ReadonlySet<string> = new Set(REST_PLUGINS.map((p) => p.pkg));
 
 /** The generated-artifact seams a REST project can consume. */
 export const REST_SEAMS: ReturnType<typeof seamsFor> = seamsFor(REST_PACKAGES);

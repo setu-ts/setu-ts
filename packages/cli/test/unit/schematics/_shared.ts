@@ -7,9 +7,24 @@ import { expect } from '@std/expect';
 
 import type { GeneratedFile, SchematicOptions } from '../../../src/schematics/registry.ts';
 import { getSchematic } from '../../../src/schematics/registry.ts';
-import { getSeamSpec } from '../../../src/seams/registry.ts';
+import { listSeamSpecs } from '../../../src/seams/registry.ts';
+import type { SeamSpec } from '../../../src/seams/seam-spec.ts';
 import type { DerivedNames } from '../../../src/utils/names.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
+
+/**
+ * Looks up a family's seam by schematic name.
+ *
+ * Built here rather than exported from the registry: every schematic imports its own spec
+ * directly, so a by-name accessor there would have no reader outside these tests — dead
+ * surface by the rule that every declared symbol must be read on a real code path.
+ *
+ * @param schematic - The `setu generate` schematic name
+ * @returns Its seam, or undefined when the family has no registration site
+ */
+export function seamSpecFor(schematic: string): SeamSpec | undefined {
+  return listSeamSpecs().find((spec) => spec.schematic === schematic);
+}
 
 /** A fixed clock so timestamped output is deterministic. */
 export const FIXED_NOW = Date.UTC(2026, 6, 28, 12, 30, 45);
@@ -57,7 +72,7 @@ export function artifactOf(
   files: readonly GeneratedFile[],
   schematic: string,
 ): GeneratedFile {
-  const barrel = getSeamSpec(schematic)?.barrel;
+  const barrel = seamSpecFor(schematic)?.barrel;
   const artifacts = files.filter((file) => file.path !== barrel);
   expect(artifacts.length).toBe(1);
   return artifacts[0]!;
@@ -74,7 +89,7 @@ export function barrelOf(
   files: readonly GeneratedFile[],
   schematic: string,
 ): GeneratedFile {
-  const barrel = getSeamSpec(schematic)!.barrel;
+  const barrel = seamSpecFor(schematic)!.barrel;
   const found = files.find((file) => file.path === barrel);
   expect(found).toBeDefined();
   return found!;
@@ -108,7 +123,7 @@ export function assertSeamContract(
 ): void {
   const factory = getSchematic(schematic)!.factory;
   const names: DerivedNames = deriveNames(name);
-  const spec = getSeamSpec(schematic)!;
+  const spec = seamSpecFor(schematic)!;
   const plugins = opts.plugins ?? [];
 
   expect(existing.length).toBeGreaterThanOrEqual(2);
