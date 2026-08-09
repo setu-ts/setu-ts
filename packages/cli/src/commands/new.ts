@@ -485,17 +485,32 @@ const NODE_RUNNER = 'tsx';
  * @returns devDependencies to merge, empty for every target but Node
  */
 function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
-  return runtime === 'node' ? { tsx: '^4.20.0' } : {};
+  // Node: see NODE_RUNNER — the start script invokes it, so it must be
+  // installed. Workers: `wrangler` is pinned rather than left to `npx`, which
+  // would otherwise fetch whatever is latest at that moment.
+  if (runtime === 'node') return { tsx: '^4.20.0' };
+  if (runtime === 'cloudflare-workers') return { wrangler: '^4.0.0' };
+  return {};
 }
 
 /**
- * The npm manifest files a Deno or Workers project needs for a frontend build.
+ * The npm manifest files a Deno or Workers project needs.
  *
- * Those targets carry a `deno.json` and no `package.json`, so a template with
- * an npm toolchain would otherwise have nowhere to declare it. Returns nothing
- * for a template that needs no npm packages, which is every template but one.
+ * Two independent reasons, and the second is unconditional:
+ *
+ * - **A template with a frontend build.** Those targets carry a `deno.json` and
+ *   no `package.json`, so an npm toolchain would otherwise have nowhere to be
+ *   declared. Only one template needs this.
+ * - **Cloudflare Workers, always.** `wrangler` bundles with esbuild, which
+ *   resolves neither `jsr:` specifiers nor a Deno import map, so every Workers
+ *   project needs its framework packages in a `package.json` regardless of
+ *   template.
+ *
+ * Returns nothing for any other Deno project.
  *
  * @param projectName - The project directory and manifest name
+ * @param runtime - The selected runtime target; Workers always gets a manifest
+ * @param host - The resolved host, read for the framework packages Workers pins
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The files to add, or an empty list
  */
@@ -526,9 +541,10 @@ function standaloneNpmFiles(
     ...manifest?.npmDependencies,
   };
   const devDependencies = {
-    // Pinned so `npx wrangler dev` runs a known version rather than whatever is
-    // latest at that moment.
-    ...(onWorkers ? { wrangler: '^4.0.0' } : {}),
+    // Through the same helper the Node branch uses, so runtime-level
+    // devDependencies have ONE home. Inlining Workers' here meant a package
+    // added to that helper would be silently ignored on this path.
+    ...runtimeDevDependencies(runtime),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {

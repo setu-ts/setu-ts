@@ -136,13 +136,6 @@ export interface SchematicMetadata {
 }
 
 /**
- * The built-in schematics, keyed by the name `setu generate` accepts.
- *
- * A `Map` rather than an object literal so that a lookup of an inherited
- * property name (`constructor`, `__proto__`, `toString`) misses cleanly
- * instead of returning something from `Object.prototype`.
- */
-/**
  * The decorator-free way to serve HTTP, suggested by both decorated schematics.
  *
  * `route` is ungated and wired: it emits `register<X>Routes(router)` and the
@@ -154,6 +147,13 @@ const ROUTE_ALTERNATIVE: SchematicAlternative = {
   why: 'it registers handlers on the router API, so it needs no decorators',
 };
 
+/**
+ * The built-in schematics, keyed by the name `setu generate` accepts.
+ *
+ * A `Map` rather than an object literal so that a lookup of an inherited
+ * property name (`constructor`, `__proto__`, `toString`) misses cleanly
+ * instead of returning something from `Object.prototype`.
+ */
 const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, SchematicMetadata>([
   ['plugin', { factory: generatePlugin }],
   // Gated for the same reason as `controller`: the module's emitted controller
