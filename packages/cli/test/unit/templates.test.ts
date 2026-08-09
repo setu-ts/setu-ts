@@ -229,6 +229,22 @@ describe('every template', () => {
   // A factory returns the application, so anything in `plugins` would be
   // silently dropped by the renderer. Enforced across the registry here rather
   // than by a runtime check no user input could ever reach.
+  // `--di` reaches a plugin-list template by appending a wiring, and a
+  // starter-composed one through its factory's own options — two mechanisms, so
+  // a new `appFactory` template that forgets the second would accept the flag
+  // and silently ignore it, with nothing failing. `full-stack` is the only such
+  // template today; this makes the next one fail here instead.
+  it('honors --di in every factory template that renders arguments', () => {
+    for (const template of listTemplates()) {
+      const args = template.appFactory?.args;
+      if (args === undefined) continue;
+      for (const runtime of TARGET_RUNTIMES) {
+        if (template.unsupported[runtime] !== undefined) continue;
+        expect(args(runtime, { di: true })).not.toBe(args(runtime, { di: false }));
+      }
+    }
+  });
+
   it('lists no plugins when a factory owns the plugin set', () => {
     for (const host of [...listTemplates(), MINIMAL_HOST]) {
       if (host.appFactory === undefined) continue;

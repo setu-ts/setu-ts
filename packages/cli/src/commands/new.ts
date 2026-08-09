@@ -29,11 +29,12 @@ import {
   type MiddlewareWiring,
   type PackageImport,
   packagesOf,
+  type TemplateFeatures,
   type TemplateHost,
   type TemplateManifest,
   type Wiring,
 } from '../templates/registry.ts';
-import { type TemplateFeatures, withDiPlugin } from '../templates/di.ts';
+import { withDiPlugin } from '../templates/di.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { deriveNames } from '../utils/names.ts';
 import {

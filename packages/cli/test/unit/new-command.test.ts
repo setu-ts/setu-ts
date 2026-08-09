@@ -173,10 +173,16 @@ describe('the Node target can run decorated source', () => {
   });
 
   it('declares the transpiler it invokes', async () => {
-    // A start script naming a binary the manifest does not install is a project
-    // that reports success and then cannot run.
+    // Derived from the emitted script rather than hardcoding `tsx`, so this
+    // still holds if the runner is ever swapped: a start script naming a binary
+    // the manifest does not install is a project that reports success and then
+    // cannot run. CI never boots a Node-target project, so this invariant is
+    // the standing guard for that.
     const manifest = await manifestOf('node');
-    expect(manifest.devDependencies?.['tsx']).toBeDefined();
+    const binary = manifest.scripts['start']?.split(' ')[0];
+    expect(binary).toBeDefined();
+    expect(binary).not.toBe('node');
+    expect(Object.keys(manifest.devDependencies ?? {})).toContain(binary);
   });
 
   it('gives no other target the Node transpiler', async () => {
