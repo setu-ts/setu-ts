@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Fixed: `setu generate controller` emitted a controller that answered 500 on every request.**
+  `DecoratorPlugin` builds a handler's argument list from parameter metadata alone and never passes
+  the request context positionally, so the emitted `list(ctx: IRequestContext)` received `undefined`
+  and threw on the first `ctx.response`. Handlers now take only decorated parameters and return
+  plain values, which the plugin serializes as JSON; `create` takes `@Body()`. The `201` on create
+  is gone rather than faked — a decorated handler cannot set a status code, so a handler that needs
+  the context belongs on `app.router.get(...)` (`setu generate route`).
+
+  Regenerate any controller produced by an earlier release, or drop its `ctx` parameter and return a
+  plain value. Shipped alongside the module schematic below because it is the same package and the
+  same one-line class of defect.
+
 - **`setu generate module <name>` scaffolds a whole domain sub-module and wires it in** (M58),
   instead of requiring `g controller` + `g service` plus a hand edit of `setu.config.ts`. Emits an
   `@Injectable` service, a `@Controller` injecting it by token, a service test, a per-module barrel,

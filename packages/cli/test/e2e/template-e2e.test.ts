@@ -643,6 +643,17 @@ describe('setu generate module, end to end', () => {
   /** Prefix the probe puts its one-line JSON result behind. */
   const PROBE_MARKER = '__PROBE_RESULT__';
 
+  /** A probe that drives a generated standalone controller. */
+  const CONTROLLER_PROBE = `import { createApp } from './setu.config.ts';
+const app = await createApp();
+await app.start();
+const r = await app.inject({ method: 'GET', url: '/widgets' });
+console.log('__PROBE_RESULT__' + JSON.stringify({
+  'GET /widgets': { status: r.statusCode, body: r.body },
+}));
+await app.stop();
+`;
+
   /** A probe that drives both generated modules through the real pipeline. */
   const MODULE_PROBE = `import { createApp } from './setu.config.ts';
 const app = await createApp();
@@ -689,6 +700,34 @@ await app.stop();
       expect(out['POST /orders'].body).toContain('ABC-1');
     });
   }
+
+  // `g controller` carried the identical broken shape, so every project that ever
+  // ran it got a 500 from the controller it generated. Same package and the same
+  // one-line class of fix, so it ships here rather than on a separate branch
+  // (a deliberate deviation from this milestone's plan, at the maintainer's call).
+  it('serves requests from a generated standalone controller', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['g', 'controller', 'widgets', '--dir', project])).toBe(0);
+
+    // A standalone controller is not in the module barrel, so the config has to
+    // name it — which is what a developer does by hand after generating one.
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    await Deno.writeTextFile(
+      `${project}/setu.config.ts`,
+      config
+        .replace(
+          'import { MODULE_CONTROLLERS',
+          "import { WidgetsController } from './src/controllers/widgets.controller.ts';\nimport { MODULE_CONTROLLERS",
+        )
+        .replace('controllers: [...MODULE_CONTROLLERS]', 'controllers: [WidgetsController]'),
+    );
+    await useWorkspacePackages(project);
+
+    const out = await bootAndProbe(project, CONTROLLER_PROBE);
+
+    expect(out['GET /widgets']).toEqual({ status: 200, body: '{"items":[]}' });
+  });
 
   it('still refuses to overwrite a module that already exists', async () => {
     await run(['new', 'shop', '--template', 'rest']);
