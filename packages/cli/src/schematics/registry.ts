@@ -63,6 +63,26 @@ export interface SchematicOptions {
    * @since 0.1.0
    */
   readonly modules?: readonly string[];
+  /**
+   * The generated artifacts already present in the project, keyed by the schematic
+   * name that emits them (`{ 'health-indicator': ['external-api'] }`).
+   *
+   * Gathered by the command layer (`utils/artifact-scanner.ts`) so a wired schematic
+   * can render a barrel listing every artifact of its family while staying a pure
+   * function — the same route {@linkcode SchematicOptions.modules} takes for domain
+   * modules.
+   *
+   * Kept separate from `modules` rather than folded into it because the two admission
+   * rules genuinely differ: a module is a DIRECTORY that must hold both a controller
+   * and a service, while these families are FILES identified by a suffix.
+   *
+   * OPTIONAL for the same reason `modules` is: this interface is published, a custom
+   * schematic's own test constructs one, and there is no deprecation path for making
+   * an added field required. Treat an absent value as "no artifacts yet".
+   *
+   * @since 0.1.0
+   */
+  readonly artifacts?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**

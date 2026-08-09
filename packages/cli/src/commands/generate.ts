@@ -34,6 +34,9 @@ import {
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
 import { readModuleNames } from '../utils/module-scanner.ts';
+import { scanArtifacts } from '../utils/artifact-scanner.ts';
+import { findNameConflict } from '../utils/name-conflicts.ts';
+import { listSeamSpecs } from '../seams/registry.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -180,12 +183,31 @@ export async function runGenerateCommand(
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
   const modules = await readModuleNames(deps.fs, dir);
+  // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
+  // per family against paths that usually do not exist; a custom schematic reads it
+  // too, so it cannot be gated on a built-in name.
+  const artifacts = await scanArtifacts(deps.fs, dir, listSeamSpecs());
+
+  // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
+  // output cannot work is not a plan worth printing. Both collisions this catches were
+  // observed as real failures against a booted application — see `name-conflicts.ts`.
+  const conflict = findNameConflict(schematicName, names.kebab, installed, artifacts, modules);
+  if (conflict !== undefined) {
+    deps.error(
+      `Cannot generate ${schematicName} "${names.kebab}": ${conflict.resource} is already ` +
+        `claimed by the ${conflict.schematic} of the same name.`,
+    );
+    deps.error(`If both existed, ${conflict.consequence}.`);
+    deps.error(`Choose a different name, or remove the existing ${conflict.schematic}.`);
+    return EXIT_ERROR;
+  }
 
   const options: SchematicOptions = {
     runtime,
     plugins: installed,
     now: deps.now,
     modules,
+    artifacts,
   };
 
   let generated: readonly GeneratedFile[];

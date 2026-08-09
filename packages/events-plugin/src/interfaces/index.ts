@@ -4,6 +4,28 @@
  * @module
  */
 import type { IDomainEvent } from '@setu-ts/common';
+import type { IEventHandler } from '../handlers/event-handler.ts';
+
+/**
+ * One event handler and the event type it subscribes to.
+ *
+ * A PAIR rather than a bare handler because `IEventBus.subscribe(type, handler)` routes
+ * on the type string, and an `IEventHandler` carries no type of its own — the emitted
+ * handler module declares it as a separate constant.
+ *
+ * `IEventHandler<unknown>` accepts a concretely-typed handler because `handle` is
+ * declared with method syntax, so TypeScript compares its parameter bivariantly even
+ * under `strictFunctionTypes` — which is what keeps this list heterogeneous without
+ * `any`.
+ *
+ * @since 0.1.0
+ */
+export interface EventHandlerRegistration {
+  /** Event type name, matching `event.type`. */
+  readonly type: string;
+  /** The handler to subscribe for that type. */
+  readonly handler: IEventHandler<unknown>;
+}
 
 /**
  * Options for the EventsPlugin.
@@ -11,6 +33,24 @@ import type { IDomainEvent } from '@setu-ts/common';
  * @since 0.1.0
  */
 export interface EventsPluginOptions {
+  /**
+   * Handlers subscribed to the bus at `register()` time.
+   *
+   * The declarative alternative to resolving `CAPABILITIES.EVENTS` and calling
+   * `subscribeHandler` imperatively — which application code has no phase to do, since
+   * `IApplication` exposes no lifecycle hooks and the bus does not exist until this
+   * plugin has registered. Both routes go through the same `subscribeHandler`, so
+   * neither can drift from the other.
+   *
+   * The `Unsubscribe` each subscription returns is deliberately dropped: the bus is
+   * cleared on shutdown (`onClose`), and there is no caller that could hold the
+   * handle.
+   *
+   * Default: `[]` (no subscriptions).
+   *
+   * @since 0.1.0
+   */
+  handlers?: readonly EventHandlerRegistration[];
   /**
    * Dispatch policy for event handlers.
    *

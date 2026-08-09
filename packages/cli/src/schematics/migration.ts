@@ -1,6 +1,13 @@
 /**
  * Migration schematic (gated on `database-plugin`).
  *
+ * Deliberately NOT wired, and here the reason is the strongest of the three: nothing
+ * in the framework reads migration files. No plugin in this repository calls
+ * `ctx.cli.register`, so there is no `setu db:migrate` and no runner of any kind — the
+ * emitted module is applied by whatever tooling the project already uses for its
+ * database. Fabricating a registration site for a consumer that does not exist would
+ * be worse than saying so.
+ *
  * @module
  */
 
@@ -43,7 +50,12 @@ export function generateMigration(
   const contents = `/**
  * Migration: ${names.kebab}
  *
- * Applied in filename order. \`down\` must exactly reverse \`up\`.
+ * Applied in filename order — the leading timestamp is what orders it. \`down\` must
+ * exactly reverse \`up\`.
+ *
+ * The framework ships no migration runner, so nothing applies this automatically:
+ * import it from your own migration script, or from your ORM's tooling (Prisma
+ * Migrate, Drizzle Kit), which is what owns schema change for the adapter you chose.
  */
 export interface Migration {
   /** Applies the change. */
