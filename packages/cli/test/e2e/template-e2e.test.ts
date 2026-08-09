@@ -370,6 +370,84 @@ describe('template scaffolding — end to end', () => {
     expect(code).toBe(0);
   });
 
+  // `--di` on a plugin-list template. The emitted `DiPlugin()` call and its
+  // import are ordinary source, but the manifest pin is not: the renderer and
+  // the manifest writer are separate functions, and a project importing a
+  // package it does not declare fails HERE and nowhere else.
+  it('type-checks a scaffolded rest project built with --di', async () => {
+    expect(await run(['new', 'svc', '--template', 'rest', '--di'])).toBe(0);
+    const project = `${root}/svc`;
+
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config).toContain("import { DiPlugin } from '@setu-ts/di-plugin';");
+    expect(config).toContain('DiPlugin(),');
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+    ]);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // The M50b trap, and a MEASURED correction to how far it reaches.
+  //
+  // `args` is a rendered string, so the CLI's own `deno check` cannot see it.
+  // Checking the generated project is the usual answer — but for an
+  // `appFactory`, the emitted call is `createFullStackAppFromConfig((config) =>
+  // ({ ... }))`, and TypeScript does NOT apply excess-property checking to an
+  // object literal returned from a contextually-typed callback. Probed against
+  // the real type: `{ session: {...}, totallyBogusKey: {} }` in that position
+  // type-checks CLEANLY, while the same literal assigned to an annotated
+  // variable raises TS2353. So type-checking `setu.config.ts` alone would pass
+  // whatever key this template emitted, and a renamed starter arm would ship
+  // green.
+  //
+  // The probe below closes that: it puts the emitted arm in an ANNOTATED
+  // position, where the check does fire.
+  it('type-checks a scaffolded full-stack project built with --di', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack', '--di'])).toBe(0);
+    const project = `${root}/shop`;
+
+    expect(await Deno.readTextFile(`${project}/setu.config.ts`)).toContain('di: {},');
+
+    // Annotated, not inferred: this is the position where a key the starter
+    // does not declare is a compile error.
+    await Deno.writeTextFile(
+      `${project}/di-arm-probe.ts`,
+      `import type { FullStackStarterOptions } from '@setu-ts/full-stack-starter';\n` +
+        `export const arm: FullStackStarterOptions = { di: {} };\n`,
+    );
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/di-arm-probe.ts`,
+    ]);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // A template that already registers DiPlugin must be untouched by the flag:
+  // the kernel throws `Duplicate plugin name 'di'` at start(), so a second
+  // registration type-checks and then cannot boot.
+  it('type-checks a scaffolded nest project built with --di, with one DiPlugin', async () => {
+    expect(await run(['new', 'svc', '--template', 'nest', '--di'])).toBe(0);
+    const project = `${root}/svc`;
+
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config.match(/DiPlugin\(\)/g)).toHaveLength(1);
+
+    await useWorkspacePackages(project);
+    const { code } = await denoCheck(project, [
+      `${project}/setu.config.ts`,
+      `${project}/src/greeting-controller.ts`,
+    ]);
+    expect(code).toBe(0);
+  });
+
   it('serves static assets everywhere but Cloudflare Workers', async () => {
     // The one runtime-dependent value in the template. On Workers a missing
     // filesystem would make the asset handler answer 404 for every asset, so

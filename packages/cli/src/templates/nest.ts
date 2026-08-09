@@ -11,6 +11,7 @@
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { LocalImport, TemplateDefinition, Wiring } from './registry.ts';
+import { DI_WIRING } from './di.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS, REST_SEAMS } from './rest.ts';
 import {
   MODULE_SEAM_FILES,
@@ -114,6 +115,12 @@ export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
  * Without it the classes still work, resolved from the kernel's
  * `ServiceRegistry`; the template includes it because a NestJS reader expects
  * scoped providers to be there.
+ *
+ * The wiring comes from `templates/di.ts` rather than a literal here, so this
+ * list and the `--di` flag name the same package. That is what lets
+ * `withDiPlugin` recognize the plugin as already present and leave
+ * `--template nest --di` byte-identical to `--template nest` — appending a
+ * second one would throw `Duplicate plugin name 'di'` at `start()`.
  */
 export const NEST_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
   withModuleSeam(
@@ -125,7 +132,7 @@ export const NEST_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
     ['GreetingService', ...decoratorSeamExtras(REST_SEAMS).services],
   ),
   REST_SEAMS,
-).concat([{ pkg: 'di-plugin', symbol: 'DiPlugin' }]);
+).concat([DI_WIRING]);
 
 /**
  * `nest` — the REST set plus a DI container, a decorated controller, and an

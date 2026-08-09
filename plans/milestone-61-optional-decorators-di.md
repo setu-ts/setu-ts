@@ -258,10 +258,19 @@ deno task release:verify <version>   # version agreement, specifiers, coverage, 
   `Duplicate plugin name 'di'` at `start()` (§1), and a scaffolded project that type-checks but
   cannot boot passes `deno check` and every unit test. → §3.2's dedupe, plus the byte-identical
   `nest`/`nest --di` assertion, plus the e2e that actually BOOTS a `--di` project.
-- **The `full-stack` `di: {}` string is invisible to the CLI's own type-checker.** `args` is
-  rendered text (the M50b trap: a wrong discriminant or misspelled field is a compile error only in
-  the GENERATED project). → the `template-e2e` `deno check`, verified to discriminate by breaking
-  the field name first.
+- **The `full-stack` `di: {}` string is invisible to the CLI's own type-checker, AND — measured — to
+  the generated project's.** `args` is rendered text, which is the M50b trap; but M50b's mitigation
+  ("a misspelled field is a compile error in the GENERATED project") turns out NOT to hold for an
+  `appFactory`. The emitted call is `createFullStackAppFromConfig((config) => ({ … }))`, and
+  TypeScript does not apply excess-property checking to an object literal returned from a
+  contextually-typed callback: probed against the real `FullStackStarterOptions`,
+  `{ session: {…}, totallyBogusKey: {} }` in that position type-checks CLEANLY (exit 0), while the
+  identical literal assigned to an annotated variable raises `TS2353`. Type-checking
+  `setu.config.ts` alone would therefore have passed whatever key this template emitted. → the e2e
+  writes an extra probe module putting the arm in an ANNOTATED position, where the check does fire;
+  verified to discriminate by renaming the starter's `di` arm and watching the test fail, then
+  restoring it. The pre-existing `reactRouter`/`session` keys in the same call have the same
+  exposure and no such guard — flagged in §9 rather than fixed here.
 - **Extracting `TemplateHost` silently drops a member on one path.** The six `?? []` defaults are
   replaced by object members; missing one would make a template stop emitting a seam with no
   diagnostic. → `test/unit/new-command.test.ts` asserts every existing template's full file list is
@@ -291,3 +300,10 @@ deno task release:verify <version>   # version agreement, specifiers, coverage, 
   contradictable source.
 - **Changing any schematic's emitted shape** — §3.7. `--di` forks the composition, never the
   generated source.
+- **Guarding the `full-stack` template's OTHER `appFactory` option keys** (`reactRouter`, `session`,
+  and every field inside them). §8 establishes by measurement that a misspelled key there is caught
+  by nothing — not the CLI's `deno check`, not the generated project's, because excess-property
+  checking does not reach a callback's returned object literal. This milestone adds an
+  annotated-position probe for the ONE arm it introduces; extending the same technique to the
+  pre-existing keys is a real gap but belongs to whoever next touches that template, since it is
+  neither caused by nor specific to `--di`. Recorded here so it is not rediscovered as new.

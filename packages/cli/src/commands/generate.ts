@@ -163,6 +163,17 @@ export async function runGenerateCommand(
           `which is not installed in ${dir}.`,
       );
       deps.error(`Install it, then run this command again.`);
+      // Naming the alternative is the whole point of the refusal for the two
+      // decorated schematics: decorators are OPTIONAL in this framework, and a
+      // refusal that only says "install the decorator plugin" reads as though
+      // they are required to serve HTTP. Schematics with no honest alternative
+      // print the two lines above and nothing more.
+      if (metadata.alternative !== undefined) {
+        deps.error(
+          `Or run \`${PROGRAM_NAME} generate ${metadata.alternative.schematic} ${name}\` — ` +
+            `${metadata.alternative.why}.`,
+        );
+      }
       return EXIT_ERROR;
     }
 
