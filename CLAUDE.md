@@ -1738,17 +1738,109 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   regenerated barrel). Fixing it dropped `seam-spec.ts` to 95.7% branch on an unreachable `?? ''`
   fallback, removed rather than tested since the arm is dead. All changed `src` files at **100%**
   branch/function/line) — complete (PR #141)
+- **Milestone 61** (`packages/cli` — decorators and DI as real choices in the generator.
+  AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is optional, and that
+  **"everything has a programmatic API — no feature requires decorators or reflection"**; the
+  generator contradicted all three, and the contradiction was mechanically checkable. `VALUE_FLAGS`
+  declared no `--di`, `DiPlugin` appeared in exactly one template module, and `controller`/`module`
+  are gated on `decorator-plugin` — so the only opt-in was the template and it was coarse: no
+  template gave neither AND refused the decorated schematics, `rest`/`microservice` gave decorators
+  without a container, `nest` gave both plus a NestJS showcase you may not have wanted.
+
+  **`--di`** adds `DiPlugin` to any template. It is boolean, so it needs no `VALUE_FLAGS` entry, and
+  it is read ONCE in `runNewCommand` and passed down as a `TemplateFeatures` value. It
+  **deduplicates**, which is the load-bearing part rather than tidiness: the kernel THROWS
+  `Duplicate plugin name 'di'` at `start()` (`plugin-resolver.ts:106`), so appending blindly would
+  make `--template nest --di` scaffold a project that type-checks, passes every file assertion, and
+  then cannot boot — a test pins `nest --di` byte-identical to `nest`. On `full-stack` it reaches
+  the starter's own `di?: DiPluginOptions` arm instead of a wiring, because `TemplateHost.plugins`
+  must stay empty when an `appFactory` is set; that arm is the one M36b built and then observed was
+  "unreachable from `setu new`". `--di` forks the COMPOSITION, never the generated source —
+  `DecoratorPlugin` branches on the container's presence, so the same `@Injectable` class works
+  either way and only its lifecycle changes.
+
+  **The `controller`/`module` gate refusal now names `g route`**, as `SchematicMetadata.alternative`
+  data beside the gate rather than a string in the command layer. The gate is NOT removed: those
+  schematics emit `@Controller`, so an ungated project would get source whose own import cannot
+  resolve (the M34b defect). Schematics with no honest alternative print exactly their committed two
+  lines.
+
+  **The no-template path became a seam host**, reversing a decision M60 recorded as _Unowned_. M60's
+  premise was that it "means inventing a fourth `TemplateDefinition` … where six of the ten seams
+  would be inert"; neither survived checking — `seamsFor(new Set())` already returns exactly the
+  three ungated seams (`route`, `middleware`, `plugin`), so none is inert, and extracting
+  `TemplateHost` from `TemplateDefinition` gives the minimal path a host with no `--template` value,
+  so `TEMPLATES` and `new --help` are untouched. This mattered because it is the milestone's own
+  claim: a bare project's `setu g route` wrote the module and the barrel while the generated
+  `setu.config.ts` imported neither, so the ONLY HTTP handler a decorator-free project can generate
+  answered `404` until the developer hand-edited the config. It is now proven by BOOTING a
+  scaffolded bare project and driving the route (200), its middleware header, and its plugin token.
+
+  **Booting the full matrix found two defects the gates could not see, and both are fixed here.**
+  Every `template x --di` combination was scaffolded, generated into, and BOOTED in a subprocess:
+  all 8 serve, `nest` and `nest --di` are byte-identical (the dedupe holding), and a `transient`
+  `@Injectable` resolves to ONE instance without a container and TWO with one — which is what makes
+  `--di` a real composition change rather than a registered-and-ignored plugin. (1) The generated
+  service's JSDoc told consumers to reach the class with `services.get('<name>-service')`; with a
+  container that THROWS, because `registerService` registers a provider on the container and never
+  touches the kernel registry. Before `--di` only `nest` had a container, so the advice was almost
+  always right — the flag makes it wrong on every template, which is why the correction ships here.
+  (2) **`--runtime node` could not run ANY decorated code.** It started with
+  `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases types
+  without transforming code: a legacy decorator is a bare `SyntaxError` and the constructor
+  parameter property `g module` emits is `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. So `--template rest`
+  and `g route` booted while `g service`, `g controller`, `g module` and `--template nest` could not
+  start at all — nest not even from a clean scaffold, shipped that way since M34. Node projects now
+  declare `tsx` and start with `tsx main.ts`, reading the `experimentalDecorators` the generated
+  tsconfig already sets; `--experimental-transform-types` was tried and rejected (it fixes the
+  parameter property and still refuses the decorator). Runtime-level, not template-level — Bun
+  compiles TypeScript outright and Deno/Workers never invoke the runner. Verified with real
+  `npm install` + `npm start`. (3) **`--runtime cloudflare-workers` could not be built or deployed
+  at all.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers
+  nor a Deno import map, and the Workers target emitted no `package.json` and no `.npmrc` — so
+  `npm install && npx wrangler dev`, which the CLI itself prints as the next step, failed with one
+  `Could not resolve "@setu-ts/…"` per package. There was nothing to install. Workers projects now
+  emit an npm manifest (npm-compat `@jsr/…` deps, `wrangler` pinned, `dev`/`deploy` scripts) plus
+  `.npmrc`, alongside the `deno.json` that `setu generate` reads for plugin gating; Deno still gets
+  none, because a `package.json` switches it to node_modules resolution.
+
+  **Every runtime was driven for real**: Deno (8 combos), Bun (`bun install`, all artifacts 200),
+  Node (`npm install` + `npm start`), Cloudflare Workers (**real workerd** via `wrangler dev` — a
+  pristine scaffold serves `/`, `/health`, `/metrics` and every generated route, controller and
+  module), and `full-stack --di` through a real `deno install` + `react-router build` to an SSR 200
+  with the container live — which is what proves the `di: {}` string reaches the starter rather than
+  merely being emitted. NOT verified against a DEPLOYED Worker: `wrangler dev --local` runs workerd
+  on this machine, which is the same runtime but not Cloudflare's edge.
+
+  **A `--no-decorators` variant was rejected rather than deferred**: it would have to emit a
+  router-registered handler module, which is exactly what `g route` emits, so it is either a second
+  copy of that schematic (§11.1) or a bare alias — dead surface either way.
+
+  **One plan claim did not survive measurement and was corrected rather than quietly dropped.** The
+  plan asserted the M50b mitigation — that a misspelled `args` field is "a compile error in the
+  GENERATED project" — covered the `full-stack` `di: {}` string. It does not: TypeScript does NOT
+  apply excess-property checking to an object literal returned from a contextually-typed callback,
+  and the emitted call is `createFullStackAppFromConfig((config) => ({ … }))`. Probed against the
+  real type, `{ session: {…}, totallyBogusKey: {} }` in that position type-checks CLEANLY while the
+  identical literal assigned to an annotated variable raises `TS2353` — so type-checking
+  `setu.config.ts` would have passed whatever key the template emitted, and this template's
+  pre-existing `reactRouter`/`session` keys have the same exposure with no guard (recorded in
+  ROADMAP "Out of scope", not fixed here). The e2e now writes a probe module putting the arm in an
+  ANNOTATED position, verified to discriminate by renaming the starter's `di` arm and watching it
+  fail. Four other negative controls were each observed failing and reverted: removing the
+  `withDiPlugin` dedupe, emptying the minimal host's seams, dropping the refusal's alternative line,
+  and suppressing the full-stack `di` emission) — complete (PR #142)
 - **Next milestone** — **M38** (documentation), then M39–M40. Queued behind those: **M59**
-  (`cloudflare-plugin` — Workers-native messaging), plus **M61** (`cli` — decorator/DI opt-in) and
-  **M62** (`cli` — monorepo support). All three are ROADMAP sections only, with no plan and no code
-  yet. M59 came from an external DX review; note what that review got wrong, since the section says
-  so and a reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship
-  them) and that Workers queues are still blocked (M52b shipped them). M60–M62 came from a measured
-  audit after M58: a project with all fourteen schematics generated type-checked clean while its
-  entry points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
-  unreachable — that, not breadth, was the distance from NestJS. **M60 has now closed eleven of the
-  thirteen**, so M61 and M62 are the remaining CLI parity work: the optional-decorators/DI promise,
-  and monorepos.
+  (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
+  ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of
+  the CLI parity work, so M62 (monorepos) is the remaining piece. M59 came from an external DX
+  review; note what that review got wrong, since the section says so and a reader should not
+  re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and that Workers
+  queues are still blocked (M52b shipped them). M60–M62 came from a measured audit after M58: a
+  project with all fourteen schematics generated type-checked clean while its entry points imported
+  exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable — that,
+  not breadth, was the distance from NestJS. **M60 has now closed eleven of the thirteen**, so M61
+  and M62 are the remaining CLI parity work: the optional-decorators/DI promise, and monorepos.
 
 ## Verification (run before declaring any work done)
 

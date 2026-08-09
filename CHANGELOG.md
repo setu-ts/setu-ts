@@ -8,6 +8,39 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Decorators and DI are independently selectable in the generator** (M61). AI_GUIDELINES states
+  that decorators are optional, DI is optional, and that no feature requires either — but the CLI
+  offered one coarse control. No template gave you neither and refused `g controller`/`g module`;
+  `rest`/`microservice` gave decorators without a container; only `nest` gave both, along with a
+  worked NestJS-style example you may not have wanted.
+
+  `setu new --di` adds `DiPlugin` to any template, so a container is now a choice of its own:
+
+  ```bash
+  setu new app --di                       # a container, no decorators
+  setu new app --template rest --di       # decorators and a container
+  setu new app --template nest --di       # a no-op — nest already registers DiPlugin
+  ```
+
+  It changes the composition, never the generated source: `DecoratorPlugin` branches on the
+  container's presence, so the same `@Injectable` class works either way and what changes is the
+  lifecycle it gets. On `--template full-stack` the flag reaches the starter's own `di` arm rather
+  than a plugin wiring, because a starter-composed template owns its whole plugin set. Adding it to
+  a template that already registers `DiPlugin` is deliberately a no-op — the kernel refuses a
+  duplicate plugin name at `start()`, so a second registration would scaffold a project that
+  type-checks and then cannot boot.
+
+- **`setu generate route` is now a first-class decorator-free path.** A project scaffolded with no
+  template registers the runtime plugin alone, so `g route` is the only HTTP handler it can generate
+  — and it used to land unwired: the schematic wrote `src/routes/<name>.routes.ts` and a
+  `src/routes/index.ts` barrel while the generated `setu.config.ts` imported neither, so the route
+  answered `404` until you edited the config by hand. The no-template path is now a seam host for
+  the three families that need no plugin (`route`, `middleware`, `plugin`), so a generated route,
+  middleware or plugin is wired from scaffold time exactly as it is under `--template rest`.
+
+  Existing projects are unaffected — nothing rewrites a scaffolded `setu.config.ts`. Each barrel's
+  header states the two lines to add; add them once and every later generate is wired.
+
 - **Generated code is now wired** (M60). `setu generate` emitted fourteen artifacts and exactly one
   of them — the M58 domain module — reached a registration site. The other thirteen compiled and did
   nothing: `g service` emitted a class nothing constructed, `g health-indicator` an indicator
@@ -50,7 +83,56 @@ All notable changes to this project are documented here. The format follows
   are also the only host a scaffolded project can have for `g command-handler`, `g query-handler`
   and `g event-handler`, all three of which were gated on plugins no template installed.
 
+### Fixed
+
+- **`setu new --runtime cloudflare-workers` produced a project that could not be built or
+  deployed.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
+  specifiers nor a Deno import map — and the Workers target declared its framework packages only in
+  `deno.json`, emitting no `package.json` and no `.npmrc`. So the flow the CLI itself prints,
+  `npm install && npx wrangler dev`, failed with one `Could not resolve "@setu-ts/…"` per package.
+  There was nothing to install.
+
+  Workers projects now also emit `package.json` (the npm-compat `@jsr/…` dependencies, plus
+  `wrangler` pinned in `devDependencies` and `dev`/`deploy` scripts) and `.npmrc`. Verified against
+  real workerd through `wrangler dev`: a scaffolded project serves `/`, `/health`, `/metrics`, and
+  every generated route, controller and module. The Deno target deliberately still gets no
+  `package.json` — that would switch it to node_modules resolution.
+
+  **Existing Workers projects are not rewritten.** Add a `package.json` declaring the same
+  `@setu-ts/*` packages your `deno.json` lists, using their `npm:@jsr/setu-ts__<name>` form, plus an
+  `.npmrc` containing `@jsr:registry=https://npm.jsr.io`.
+
+- **`setu new --runtime node` could not run any decorated code.** Generated Node projects started
+  with `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases
+  types without transforming code — so a legacy decorator was a bare
+  `SyntaxError: Invalid or unexpected token`, and the constructor parameter property
+  `setu generate module` emits was `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. In practice a scaffolded
+  Node project booted until the first `setu generate service`, `generate controller` or
+  `generate module`, and `setu new --template nest --runtime node` never booted at all. Deno, Bun
+  and Cloudflare Workers were unaffected.
+
+  Node projects now declare `tsx` in `devDependencies` and start with `tsx main.ts`, which reads the
+  `experimentalDecorators` the generated `tsconfig.json` already sets.
+  `--experimental-transform-types` was evaluated and rejected: it handles the parameter property but
+  still refuses the decorator, because it does not enable `experimentalDecorators`. No other target
+  carries the dependency — Bun compiles TypeScript outright, and Deno and Workers never invoke it.
+
+  **Existing Node projects are not rewritten.** To pick this up, add `tsx` to your `devDependencies`
+  and change the `start` script from `node --experimental-strip-types main.ts` to `tsx main.ts`.
+
 ### Changed
+
+- **The `controller` and `module` gate refusals now name `setu generate route`** as the
+  decorator-free alternative. The gate itself is unchanged (those schematics emit `@Controller`, so
+  an ungated project would get source whose own import cannot resolve), but refusing with only
+  "install `@setu-ts/decorator-plugin`" read as though decorators were required to serve HTTP, which
+  is the opposite of what the framework promises.
+
+  ```
+  The "controller" schematic requires @setu-ts/decorator-plugin, which is not installed in /path/to/app.
+  Install it, then run this command again.
+  Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
+  ```
 
 - **`setu generate plugin` now writes `src/plugins/<name>.plugin.ts`**, not `src/plugins/<name>.ts`.
   The seam barrel is regenerated from a directory scan, and a suffix of `.ts` would admit any module

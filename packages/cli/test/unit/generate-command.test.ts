@@ -154,6 +154,50 @@ describe('runGenerateCommand', () => {
     }
   });
 
+  // AI_GUIDELINES' "5 Optional Rules" promise that no feature requires
+  // decorators. Refusing `g controller` with only "install the decorator
+  // plugin" told a developer the opposite — that decorators are the way to get
+  // an HTTP handler — when `g route` is ungated, wired, and right there.
+  describe('the decorator-free alternative in a gate refusal', () => {
+    for (const schematic of ['controller', 'module'] as const) {
+      it(`names \`generate route\` when ${schematic} is refused`, async () => {
+        const h = harness();
+        expect(await h.run([schematic, 'widget'])).toBe(1);
+        const text = h.err.text();
+
+        // The gate itself is unchanged: still refused, still exit 1, still names
+        // the package. Removing the gate would emit source whose own import
+        // cannot resolve (the M34b defect).
+        expect(text).toContain('@setu-ts/decorator-plugin');
+        expect(text).toContain('setu generate route widget');
+        expect(text).toContain('needs no decorators');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    it('suggests the name the user actually typed', async () => {
+      const h = harness();
+      await h.run(['controller', 'UserProfile']);
+      expect(h.err.text()).toContain('setu generate route UserProfile');
+    });
+
+    // A schematic with no honest alternative must print nothing extra —
+    // inventing one would be worse than silence.
+    it('adds no suggestion to a gate that has no alternative', async () => {
+      const h = harness();
+      expect(await h.run(['guard', 'admin'])).toBe(1);
+      const text = h.err.text();
+      expect(text).toContain('@setu-ts/auth-plugin');
+      expect(text).not.toContain('Or run');
+    });
+
+    it('says nothing about alternatives once the plugin is installed', async () => {
+      const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
+      expect(await h.run(['controller', 'widget'])).toBe(0);
+      expect(h.err.text()).not.toContain('Or run');
+    });
+  });
+
   describe('usage errors', () => {
     it('returns 2 and lists schematics when none is named', async () => {
       const h = harness();

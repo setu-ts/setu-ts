@@ -4,10 +4,10 @@ import { TARGET_RUNTIMES, TEMPLATES } from '../../src/constants.ts';
 import {
   getTemplate,
   listTemplates,
-  MINIMAL_PLUGINS,
   packagesOf,
   type Wiring,
 } from '../../src/templates/registry.ts';
+import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS, REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
 import { NEST_TEMPLATE } from '../../src/templates/nest.ts';
@@ -42,14 +42,15 @@ describe('template registry', () => {
   });
 });
 
-describe('MINIMAL_PLUGINS', () => {
+describe('MINIMAL_HOST plugins', () => {
   it('is the runtime provider alone', () => {
-    expect(symbols(MINIMAL_PLUGINS)).toEqual(['RuntimePlugin']);
+    expect(symbols(MINIMAL_HOST.plugins)).toEqual(['RuntimePlugin']);
   });
 
   it('registers no middleware', () => {
     // The default scaffold has no error handler; only templates add one.
-    expect(MINIMAL_PLUGINS.every((w) => w.pkg !== 'exceptions')).toBe(true);
+    expect(MINIMAL_HOST.plugins.every((w) => w.pkg !== 'exceptions')).toBe(true);
+    expect(MINIMAL_HOST.middleware).toEqual([]);
   });
 });
 
@@ -208,7 +209,7 @@ describe('every template', () => {
   // starter FACTORY (`appFactory`), never through a plugin wiring — so a
   // starter package must still never appear in a plugin or middleware list.
   it('never references a starter package in its wirings', () => {
-    for (const template of listTemplates()) {
+    for (const template of [...listTemplates(), MINIMAL_HOST]) {
       for (const wiring of [...template.plugins, ...template.middleware]) {
         expect(wiring.pkg).not.toContain('starter');
       }
@@ -216,19 +217,38 @@ describe('every template', () => {
   });
 
   it('declares a runtime provider first, unless a factory owns the plugin set', () => {
-    for (const template of listTemplates()) {
-      if (template.appFactory !== undefined) continue;
-      expect(template.plugins[0].symbol).toBe('RuntimePlugin');
+    // MINIMAL_HOST is included: it is a TemplateHost like the rest, and the
+    // kernel makes the runtime capability mandatory at start() whichever host
+    // built the project.
+    for (const host of [...listTemplates(), MINIMAL_HOST]) {
+      if (host.appFactory !== undefined) continue;
+      expect(host.plugins[0].symbol).toBe('RuntimePlugin');
     }
   });
 
   // A factory returns the application, so anything in `plugins` would be
   // silently dropped by the renderer. Enforced across the registry here rather
   // than by a runtime check no user input could ever reach.
-  it('lists no plugins when a factory owns the plugin set', () => {
+  // `--di` reaches a plugin-list template by appending a wiring, and a
+  // starter-composed one through its factory's own options — two mechanisms, so
+  // a new `appFactory` template that forgets the second would accept the flag
+  // and silently ignore it, with nothing failing. `full-stack` is the only such
+  // template today; this makes the next one fail here instead.
+  it('honors --di in every factory template that renders arguments', () => {
     for (const template of listTemplates()) {
-      if (template.appFactory === undefined) continue;
-      expect(template.plugins).toEqual([]);
+      const args = template.appFactory?.args;
+      if (args === undefined) continue;
+      for (const runtime of TARGET_RUNTIMES) {
+        if (template.unsupported[runtime] !== undefined) continue;
+        expect(args(runtime, { di: true })).not.toBe(args(runtime, { di: false }));
+      }
+    }
+  });
+
+  it('lists no plugins when a factory owns the plugin set', () => {
+    for (const host of [...listTemplates(), MINIMAL_HOST]) {
+      if (host.appFactory === undefined) continue;
+      expect(host.plugins).toEqual([]);
     }
   });
 

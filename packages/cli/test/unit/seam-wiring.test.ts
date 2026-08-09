@@ -19,6 +19,7 @@ import {
   withPluginOptionSeams,
 } from '../../src/templates/seam.ts';
 import { listSeamSpecs } from '../../src/seams/registry.ts';
+import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { seamSpecFor } from './schematics/_shared.ts';
 
 /** The templates that host generated-artifact seams — M58's host set, unchanged. */
@@ -36,6 +37,26 @@ function barrels(template: TemplateDefinition): readonly string[] {
     .filter((p) => p.endsWith('/index.ts'))
     .sort();
 }
+
+describe('the no-template host', () => {
+  // M60 left this Unowned, reasoning that a minimal host would carry six inert
+  // seams. It carries none: `seamsFor` selects only the three that need no
+  // plugin, which is what makes the host possible without a fourth template.
+  it('carries exactly the three barrels that need no plugin', () => {
+    expect((MINIMAL_HOST.files ?? []).map((f) => f.path).sort()).toEqual([
+      'src/middleware/index.ts',
+      'src/plugins/index.ts',
+      'src/routes/index.ts',
+    ]);
+  });
+
+  it('is not a template — --help still lists exactly the four that exist', () => {
+    const names = listTemplates().map((t) => t.name);
+    expect(names).toEqual(['rest', 'microservice', 'nest', 'full-stack']);
+    expect(getTemplate('minimal')).toBeUndefined();
+    expect(getTemplate('none')).toBeUndefined();
+  });
+});
 
 describe('seam selection', () => {
   it('omits a seam whose backing plugin the host does not install', () => {
