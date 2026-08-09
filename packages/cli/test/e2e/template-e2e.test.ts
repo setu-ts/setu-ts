@@ -599,6 +599,97 @@ describe('setu generate module, end to end', () => {
     expect(barrel.match(/from '\.\/user\/user\.controller\.ts'/g)?.length).toBe(1);
   });
 
+  /**
+   * Boots a scaffolded project in a subprocess and returns the probe's JSON.
+   *
+   * A subprocess rather than an in-process import: the project resolves
+   * `@setu-ts/*` through its own manifest, and running it here would load a
+   * second copy of the framework into this test process.
+   *
+   * @param project - The project directory, already repointed at the workspace
+   * @param probe - The probe module source, written into the project
+   * @returns The parsed JSON the probe printed
+   */
+  async function bootAndProbe(
+    project: string,
+    probe: string,
+  ): Promise<Record<string, { status: number; body: string }>> {
+    await Deno.writeTextFile(`${project}/run-probe.ts`, probe);
+    const command = new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '-A',
+        '--node-modules-dir=none',
+        '--config',
+        `${project}/deno.json`,
+        `${project}/run-probe.ts`,
+      ],
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    const { code, stdout, stderr } = await command.output();
+    const out = new TextDecoder().decode(stdout);
+    if (code !== 0) {
+      throw new Error(`probe exited ${code}\n${new TextDecoder().decode(stderr)}`);
+    }
+    // The booted app logs its own JSON lines to stdout, so the result is carried
+    // on ONE line behind a marker rather than located by shape — searching for a
+    // brace finds the app's log records, or a nested object inside the result.
+    const line = out.split('\n').find((l) => l.startsWith(PROBE_MARKER));
+    if (line === undefined) throw new Error(`probe printed no result:\n${out}`);
+    return JSON.parse(line.slice(PROBE_MARKER.length));
+  }
+
+  /** Prefix the probe puts its one-line JSON result behind. */
+  const PROBE_MARKER = '__PROBE_RESULT__';
+
+  /** A probe that drives both generated modules through the real pipeline. */
+  const MODULE_PROBE = `import { createApp } from './setu.config.ts';
+const app = await createApp();
+await app.start();
+const out: Record<string, unknown> = {};
+for (const url of ['/orders', '/order-item']) {
+  const r = await app.inject({ method: 'GET', url });
+  out[\`GET \${url}\`] = { status: r.statusCode, body: r.body };
+}
+const p = await app.inject({
+  method: 'POST',
+  url: '/orders',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ sku: 'ABC-1' }),
+});
+out['POST /orders'] = { status: p.statusCode, body: p.body };
+console.log('__PROBE_RESULT__' + JSON.stringify(out));
+await app.stop();
+`;
+
+  // The proof that matters, and the one every other check in this milestone
+  // missed: `deno check` and the unit assertions both passed while every route a
+  // generated module declared answered 500, because the plugin builds a handler's
+  // arguments from parameter metadata alone and the emitted handler expected the
+  // context positionally. Compiling is not working.
+  for (const template of ['rest', 'nest']) {
+    it(`serves requests from generated modules on --template ${template}`, async () => {
+      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      const project = `${root}/shop`;
+      expect(await run(['g', 'module', 'orders', '--dir', project])).toBe(0);
+      expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
+      await useWorkspacePackages(project);
+
+      const out = await bootAndProbe(project, MODULE_PROBE);
+
+      // The injected service's return value reached the response body, so
+      // `@Inject` resolved — on `rest` that is the ServiceRegistry path, with no
+      // DI container present at all.
+      expect(out['GET /orders']).toEqual({ status: 200, body: '{"items":[]}' });
+      // The second module registered too, so the barrel wired both.
+      expect(out['GET /order-item']).toEqual({ status: 200, body: '{"items":[]}' });
+      // `@Body()` parsed and round-tripped.
+      expect(out['POST /orders'].status).toBe(200);
+      expect(out['POST /orders'].body).toContain('ABC-1');
+    });
+  }
+
   it('still refuses to overwrite a module that already exists', async () => {
     await run(['new', 'shop', '--template', 'rest']);
     const project = `${root}/shop`;

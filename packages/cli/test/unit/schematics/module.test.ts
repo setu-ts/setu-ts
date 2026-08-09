@@ -58,6 +58,20 @@ describe('generateModule', () => {
     expect(source).toContain("@Controller('/user-profile')");
   });
 
+  it('declares no request-context parameter on a handler', () => {
+    // The plugin builds a handler's argument list from parameter metadata ALONE
+    // and never passes the context positionally, so a `ctx` parameter arrives
+    // `undefined` and the first `ctx.response` throws — a 500 on every request.
+    // This is a cheap guard; the e2e that boots the app is the real proof.
+    const source = fileAt(
+      generateModule(names, options()),
+      'src/modules/user-profile/user-profile.controller.ts',
+    );
+
+    expect(source).not.toContain('IRequestContext');
+    expect(source).not.toContain('ctx.response');
+  });
+
   it('registers the service under the token the controller injects', () => {
     const source = fileAt(
       generateModule(names, options()),
