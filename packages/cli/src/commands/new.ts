@@ -446,10 +446,46 @@ function npmScripts(
   runtime: TargetRuntime,
   manifest?: TemplateManifest,
 ): Record<string, string> {
-  const start = runtime === 'bun' ? 'bun run main.ts' : 'node --experimental-strip-types main.ts';
+  const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
   return manifest?.npmBuildScript === undefined
     ? { start }
     : { build: manifest.npmBuildScript, start };
+}
+
+/**
+ * The command a generated Node project runs its TypeScript entry with.
+ *
+ * NOT `node --experimental-strip-types`. Node's built-in TypeScript support
+ * ERASES types without transforming code, so it cannot run the decorated half
+ * of this framework: a legacy decorator is a bare
+ * `SyntaxError: Invalid or unexpected token`, and the constructor parameter
+ * property `setu generate module` emits is
+ * `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. `--experimental-transform-types` does
+ * not close it either — it handles the parameter property but still rejects the
+ * decorator, because it does not enable `experimentalDecorators`.
+ *
+ * Measured on Node v24: with `--experimental-strip-types` a scaffolded Node
+ * project boots until the first `setu generate service|controller|module`, and
+ * `--template nest` never boots at all. `tsx` runs all of them, reading the
+ * `experimentalDecorators` the generated `tsconfig.json` already sets.
+ */
+const NODE_RUNNER = 'tsx';
+
+/**
+ * npm packages a generated project needs because of its RUNTIME, not its
+ * template.
+ *
+ * Kept apart from {@linkcode TemplateManifest.npmDevDependencies}, which is a
+ * per-template concern, because this one is per-target: every Node project
+ * needs it and no Bun, Deno or Workers project does. Bun compiles TypeScript
+ * outright, and the Workers and Deno targets never invoke {@linkcode
+ * NODE_RUNNER}.
+ *
+ * @param runtime - The selected runtime target
+ * @returns devDependencies to merge, empty for every target but Node
+ */
+function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
+  return runtime === 'node' ? { tsx: '^4.20.0' } : {};
 }
 
 /**
@@ -591,9 +627,12 @@ ${PROGRAM_NAME} generate --help
             type: 'module',
             scripts: npmScripts(runtime, manifest),
             dependencies: npmDependencies(host),
-            ...(manifest?.npmDevDependencies === undefined
-              ? {}
-              : { devDependencies: { ...manifest.npmDevDependencies } }),
+            // Runtime-level first, so a template that pins its own copy of the
+            // same package wins — the template knows what its build needs.
+            ...(() => {
+              const dev = { ...runtimeDevDependencies(runtime), ...manifest?.npmDevDependencies };
+              return Object.keys(dev).length === 0 ? {} : { devDependencies: dev };
+            })(),
           },
           null,
           2,

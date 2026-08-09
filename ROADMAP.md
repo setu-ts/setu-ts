@@ -6317,6 +6317,16 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
   `TemplateDefinition` gives the minimal path a host without giving it a `--template` value. Without
   this, `setu generate route` — the only HTTP handler a decorator-free project can generate, and the
   one this milestone's refusal points at — still landed unwired.
+- **`--runtime node` can run decorated source.** Found by booting the matrix, and pre-existing since
+  M34 chose `node --experimental-strip-types main.ts`: Node's built-in TypeScript support erases
+  types without transforming code, so a legacy decorator was a `SyntaxError` and the constructor
+  parameter property `g module` emits was `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. On that target
+  `--template rest` and `g route` booted, while `g service`, `g controller`, `g module` and
+  `--template nest` could not start at all — and no gate saw it, because CI never boots a
+  Node-target project. Generated Node projects now declare `tsx` and start with `tsx main.ts`;
+  `--experimental-transform-types` was checked and rejected, since it fixes the parameter property
+  but still refuses the decorator. Runtime-level rather than template-level: Bun compiles TypeScript
+  outright, and Deno and Workers never invoke the runner.
 - Docs: PUBLIC_API options table and a short "decorators and DI are optional" section stating what
   each combination gives you; the guidelines' claim becomes true rather than aspirational.
 
@@ -6331,16 +6341,6 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
   implementing it means either a second copy of that schematic (§11.1, no duplicated logic) or a
   bare alias that dispatches to it (dead surface). The honest fix for discoverability is the refusal
   plus the wiring above.
-- **Making `--runtime node` able to run decorated source.** Found by booting the matrix during M61,
-  and pre-existing since M34 chose `node --experimental-strip-types main.ts`: Node's built-in
-  TypeScript support erases types without transforming code, so a legacy decorator is a
-  `SyntaxError` and a constructor parameter property is `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
-  `--experimental-transform-types` handles the parameter property but still rejects the decorator,
-  because it does not enable `experimentalDecorators`. So on the Node target `--template rest` and
-  `g route` boot and serve, while `g service`, `g controller`, `g module` and `--template nest`
-  cannot start; Deno, Bun and Workers run all of them. No gate sees this — CI never boots a
-  Node-target project. The fix is a transpiler decision (a `tsx`/`swc` dependency, or a build step)
-  and a new dependency needs approval, so it is named here rather than improvised. **Unowned.**
 - **Guarding the `full-stack` template's other `appFactory` option keys.** Established by
   measurement during this milestone: TypeScript does NOT apply excess-property checking to an object
   literal returned from a contextually-typed callback, so a misspelled key inside

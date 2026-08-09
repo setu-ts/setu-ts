@@ -73,6 +73,63 @@ describe('firstDuplicatePath', () => {
   });
 });
 
+// Node's built-in TypeScript support ERASES types without transforming code, so
+// `node --experimental-strip-types main.ts` — what this CLI emitted through
+// alpha.5 — cannot run a legacy decorator or a constructor parameter property.
+// Measured on Node v24: a scaffolded Node project booted until the first
+// `g service|controller|module`, and `--template nest` never booted at all,
+// while Deno, Bun and Workers ran every combination.
+describe('the Node target can run decorated source', () => {
+  const manifestOf = async (runtime: string, template?: string) => {
+    const h = harness();
+    const argv = ['app', '--runtime', runtime];
+    if (template !== undefined) argv.push('--template', template);
+    expect(await h.run(argv)).toBe(0);
+    return JSON.parse(h.fs.read('/work/app/package.json')) as {
+      scripts: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+  };
+
+  it('runs Node through a transpiler, not through type stripping', async () => {
+    const manifest = await manifestOf('node');
+    expect(manifest.scripts['start']).toBe('tsx main.ts');
+    expect(manifest.scripts['start']).not.toContain('experimental-strip-types');
+    expect(manifest.scripts['start']).not.toContain('experimental-transform-types');
+  });
+
+  it('declares the transpiler it invokes', async () => {
+    // A start script naming a binary the manifest does not install is a project
+    // that reports success and then cannot run.
+    const manifest = await manifestOf('node');
+    expect(manifest.devDependencies?.['tsx']).toBeDefined();
+  });
+
+  it('gives no other target the Node transpiler', async () => {
+    // Bun compiles TypeScript outright; Deno and Workers never invoke it.
+    const bun = await manifestOf('bun');
+    expect(bun.scripts['start']).toBe('bun run main.ts');
+    expect(bun.devDependencies?.['tsx']).toBeUndefined();
+  });
+
+  it('keeps a template own devDependencies alongside it', async () => {
+    // The merge must not replace the template's block — full-stack pins a whole
+    // frontend toolchain there.
+    const manifest = await manifestOf('node', 'full-stack');
+    expect(manifest.devDependencies?.['tsx']).toBeDefined();
+    expect(manifest.devDependencies?.['vite']).toBeDefined();
+  });
+
+  it('emits no devDependencies block when there is nothing to declare', async () => {
+    // Deno and Workers have no package.json at all unless a template needs one,
+    // so this pins the Bun path: no runtime devDeps, template devDeps only.
+    const h = harness();
+    expect(await h.run(['app', '--runtime', 'bun'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as Record<string, unknown>;
+    expect(Object.keys(manifest)).toContain('dependencies');
+  });
+});
+
 describe('resolveHost', () => {
   // Every host in the registry declares `localImports` and `files`, so these
   // fallbacks are unreachable through `runNewCommand`. They are not dead —

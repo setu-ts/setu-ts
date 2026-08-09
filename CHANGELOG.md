@@ -83,6 +83,26 @@ All notable changes to this project are documented here. The format follows
   are also the only host a scaffolded project can have for `g command-handler`, `g query-handler`
   and `g event-handler`, all three of which were gated on plugins no template installed.
 
+### Fixed
+
+- **`setu new --runtime node` could not run any decorated code.** Generated Node projects started
+  with `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases
+  types without transforming code — so a legacy decorator was a bare
+  `SyntaxError: Invalid or unexpected token`, and the constructor parameter property
+  `setu generate module` emits was `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. In practice a scaffolded
+  Node project booted until the first `setu generate service`, `generate controller` or
+  `generate module`, and `setu new --template nest --runtime node` never booted at all. Deno, Bun
+  and Cloudflare Workers were unaffected.
+
+  Node projects now declare `tsx` in `devDependencies` and start with `tsx main.ts`, which reads the
+  `experimentalDecorators` the generated `tsconfig.json` already sets.
+  `--experimental-transform-types` was evaluated and rejected: it handles the parameter property but
+  still refuses the decorator, because it does not enable `experimentalDecorators`. No other target
+  carries the dependency — Bun compiles TypeScript outright, and Deno and Workers never invoke it.
+
+  **Existing Node projects are not rewritten.** To pick this up, add `tsx` to your `devDependencies`
+  and change the `start` script from `node --experimental-strip-types main.ts` to `tsx main.ts`.
+
 ### Changed
 
 - **The `controller` and `module` gate refusals now name `setu generate route`** as the
