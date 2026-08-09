@@ -1836,8 +1836,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   migration-fastify, examples, runtime-deployment), a reproducible
   [`deno doc`](https://docs.deno.com/runtime/reference/cli/doc/) HTML API generator
   ([`scripts/generate-api-docs.ts`](scripts/generate-api-docs.ts)) over local manifest export
-  targets, a JSDoc-lint **ratchet** freezing the measured 776 pre-existing diagnostics while keeping
-  ten clean packages permanently clean, a Markdown documentation gate
+  targets, a JSDoc-lint **ratchet** freezing the measured pre-existing diagnostics (776 when the
+  plan was written; **775** after merging `origin/main`, which the ratchet itself caught and named —
+  a below-baseline run is a failure that says "lower the constant", so debt paid down is locked in)
+  while keeping ten clean packages permanently clean, a Markdown documentation gate
   ([`scripts/check-docs.ts`](scripts/check-docs.ts)) with structural package-catalog validation,
   generated-API-link and cross-file-anchor validation, and a dedicated per-file script-coverage gate
   ([`scripts/script-coverage.ts`](scripts/script-coverage.ts)) enforcing ≥90% branch/function/line
@@ -1847,10 +1849,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
   `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
   published-artifact compat). No package source, manifest export, capability token, or plugin option
-  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the
-  final verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56),
-  derived OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all
-  postdate the guides' first draft — complete (PR pending)
+  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the final
+  verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56), derived
+  OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all postdate the
+  guides' first draft — complete (PR pending)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
   (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
   ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of

@@ -10,7 +10,7 @@
  * The ratchet policy (§3.10 of the M38 plan):
  * - Diagnostics are partitioned by owning package path
  * - Any diagnostic in a CLEAN_PACKAGE fails the gate
- * - The total diagnostic count must not exceed DOC_LINT_BASELINE (776)
+ * - The total diagnostic count must not exceed DOC_LINT_BASELINE (775)
  * - If the count is BELOW baseline, the script instructs to lower the constant
  *
  * Usage:
@@ -37,8 +37,16 @@ export const CLEAN_PACKAGES = new Set([
   'rest-starter',
 ]);
 
-/** The frozen baseline diagnostic count from the M38 plan (§1.1). */
-export const DOC_LINT_BASELINE = 776;
+/**
+ * The frozen baseline diagnostic count.
+ *
+ * Measured at 776 in the M38 plan (§1.1) against a tree cut before M56–M61.
+ * Merging `origin/main` brought the JSDoc improvements those milestones shipped
+ * and the real count fell to 775, so the ratchet did its job: it refused the
+ * stale constant and named the new number. Lowered here rather than widened,
+ * which is the whole point of a ratchet — debt paid down is locked in.
+ */
+export const DOC_LINT_BASELINE = 775;
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {

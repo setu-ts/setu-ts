@@ -348,8 +348,12 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the frozen baseline of 776', () => {
-      expect(DOC_LINT_BASELINE).toBe(776);
+    it('is the frozen baseline of 775', () => {
+      // 776 when the plan was written against a pre-M56 tree; merging
+      // origin/main brought M56-M61's JSDoc and the real count fell to 775.
+      // The ratchet refused the stale constant and named the new number, which
+      // is exactly the behaviour §3.10 specifies for a below-baseline run.
+      expect(DOC_LINT_BASELINE).toBe(775);
     });
   });
 

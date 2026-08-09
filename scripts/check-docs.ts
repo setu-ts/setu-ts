@@ -434,7 +434,9 @@ export function buildGeneratedApiPages(targets: readonly string[]): Set<string> 
  *
  * @param file - The file being checked (repository-relative)
  * @param source - The file contents
- * @param allFiles - Complete set of known markdown files for resolution
+ * @param allFiles - Complete set of existing repository paths a link may point
+ *   at. This is deliberately WIDER than the set of documents being checked: it
+ *   includes `.ts`/`.js` so a guide linking to a source file resolves.
  * @param generatedApiPages - Optional set of valid generated API page paths;
  *   when null, generated API links are skipped (output not yet generated)
  * @returns Findings for broken links
@@ -1319,9 +1321,23 @@ async function collectMarkdown(root: string): Promise<string[]> {
 
 if (import.meta.main) {
   const args = Deno.args.filter((a) => !a.startsWith('-'));
+  // Two distinct sets, deliberately not one:
+  //   `files`      — the DOCUMENTS to check. Markdown only; `checkDocument` is
+  //                  a Markdown checker and running it over TypeScript source
+  //                  is meaningless (a JSDoc `@example` fence is not a runaway
+  //                  document fence).
+  //   `linkTargets`— the paths that EXIST, used solely to resolve links. This
+  //                  must include `.ts`/`.js`, because guides legitimately link
+  //                  to source files; collecting them is what makes those links
+  //                  resolvable, and it is the only reason they are walked.
+  // Conflating the two made the gate read ~1500 TypeScript files into memory,
+  // scan each for Markdown defects, and then report the total as "markdown
+  // files" — a false count over work that could not find anything.
   let files: string[];
+  let linkTargets: string[];
   if (args.length > 0) {
     files = args;
+    linkTargets = args;
   } else {
     const collected = new Set<string>();
     for (const root of SCAN_ROOTS) {
@@ -1343,10 +1359,11 @@ if (import.meta.main) {
         // Skip if directory doesn't exist
       }
     }
-    files = [...collected].sort();
+    linkTargets = [...collected].sort();
+    files = linkTargets.filter((file) => file.endsWith('.md'));
   }
 
-  // Read all file contents for cross-file checks
+  // Read contents for the documents actually being checked.
   const fileContents = new Map<string, string>();
   for (const file of files) {
     try {
@@ -1388,7 +1405,7 @@ if (import.meta.main) {
     for (const file of files) {
       if (!file.endsWith('.md') || file.startsWith('plans/archive/')) continue;
       const source = fileContents.get(file)!;
-      const linkFindings = await checkLocalLinks(file, source, files, generatedApiPages);
+      const linkFindings = await checkLocalLinks(file, source, linkTargets, generatedApiPages);
       findings.push(...linkFindings);
     }
 
@@ -1446,7 +1463,10 @@ if (import.meta.main) {
   }
 
   if (findings.length === 0) {
-    console.log(`Documentation check passed: ${files.length} markdown files, 0 findings.`);
+    console.log(
+      `Documentation check passed: ${files.length} markdown files ` +
+        `(${linkTargets.length} link targets), 0 findings.`,
+    );
     Deno.exit(0);
   }
 

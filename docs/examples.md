@@ -103,7 +103,7 @@ A complete REST API example.
 **What it demonstrates:**
 
 - RESTful routing
-- Error handling with RFC 7807 Problem Details
+- Error handling with RFC 9457 Problem Details
 - Request validation
 - Health checks
 - Metrics collection
@@ -117,12 +117,12 @@ import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
 // `errorHandler()` returns middleware; register it as the OUTERMOST layer
 // (lowest priority) so it wraps the whole pipeline and formats any thrown
-// error (HttpError or otherwise) as a JSON / RFC 7807 response.
-app.middleware.add(errorHandler({ format: 'rfc7807' }), {
+// error (HttpError or otherwise) as a JSON / RFC 9457 response.
+app.middleware.add(errorHandler({ format: 'rfc9457' }), {
   priority: 0,
   name: 'error-handler',
 });
-app.register(ValidationPlugin({ errorFormat: 'rfc7807' }));
+app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
 
 app.router.post('/items', async (ctx) => {
   const body: Record<string, unknown> = await ctx.request.json();
