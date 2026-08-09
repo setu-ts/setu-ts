@@ -13,7 +13,7 @@ The `DecoratorPlugin` reads the metadata and translates it into framework capabi
 - **No reflection metadata**: Setu-TS does not use `reflect-metadata`. You must provide explicit
   injection tokens.
 - **No emitted design metadata**: Constructor parameter types are not automatically available. Use
-  `@Inject(Token)` for disambiguation.
+  `@inject(Token)` for disambiguation.
 - **Plugin-required**: Decorators are inert without `DecoratorPlugin` registration.
 
 ## Setup
@@ -46,9 +46,9 @@ import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin);
-await app.register(DiPlugin); // Required for dependency injection
-await app.register(DecoratorPlugin); // Required for decorator processing
+app.register(RuntimePlugin());
+app.register(DiPlugin()); // Required for dependency injection
+app.register(DecoratorPlugin()); // Required for decorator processing
 ```
 
 ## Controllers
@@ -308,7 +308,7 @@ export class TransformInterceptor implements NestInterceptor {
     return next().then((data) => ({
       success: true,
       data,
-      timestamp: Date.now(),
+      timestamp: ctx.runtime.now(),
     }));
   }
 }
@@ -463,12 +463,12 @@ Every decorator has a programmatic equivalent:
 
 | Decorator                       | Programmatic                                          |
 | ------------------------------- | ----------------------------------------------------- |
-| `@Controller('/path')`          | `app.get('/path', handler)`                           |
+| `@Controller('/path')`          | `app.router.get('/path', handler)`                    |
 | `@injectable()`                 | `ctx.services.register('token', instance)`            |
 | `@inject('token')`              | N/A (injection configuration)                         |
-| `@UseGuards(Guard)`             | Middleware: `app.use(guardMiddleware)`                |
-| `@UseInterceptors(Interceptor)` | Middleware: `app.use(interceptorMiddleware)`          |
-| `@UseFilters(Filter)`           | Exception handler: `ctx.middleware.add(errorHandler)` |
+| `@UseGuards(Guard)`             | Middleware: `app.middleware.add(guardMiddleware)`     |
+| `@UseInterceptors(Interceptor)` | Middleware: `app.middleware.add(interceptorMiddleware)` |
+| `@UseFilters(Filter)`           | Exception handler: `app.middleware.add(errorHandler)` |
 
 ## Examples
 

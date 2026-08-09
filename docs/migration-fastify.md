@@ -44,11 +44,11 @@ import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin);
-await app.register(LoggerPlugin);
+app.register(RuntimePlugin());
+app.register(LoggerPlugin());
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello' });
 });
 
 await app.start({ port: 3000 });
@@ -88,15 +88,15 @@ app.post<{ Body }>('/users', async (request, reply) => {
 ### Setu-TS
 
 ```typescript
-app.get('/users/:id', async (ctx) => {
+app.router.get('/users/:id', async (ctx) => {
   const id = ctx.params.id;
   const search = ctx.request.url.searchParams.get('search');
-  return ctx.json({ id, search });
+  return ctx.response.json({ id, search });
 });
 
-app.post('/users', async (ctx) => {
+app.router.post('/users', async (ctx) => {
   const body = await ctx.request.json();
-  return ctx.json({ created: body.name }, { status: 201 });
+  return ctx.response.json({ created: body.name }, { status: 201 });
 });
 ```
 
@@ -114,8 +114,8 @@ app.register(async (fastify) => {
 ### Setu-TS
 
 ```typescript
-app.get('/api/users', async (ctx) => []);
-app.post('/api/users', async (ctx) => ({}));
+app.router.get('/api/users', async (ctx) => []);
+app.router.post('/api/users', async (ctx) => ({}));
 
 // Or use a route group
 ctx.router.group('/api', (group) => {
@@ -183,14 +183,12 @@ ctx.lifecycle.onError((error, ctx) => {
 });
 
 // Using middleware for transformation
-
-
 const preSerializationMiddleware: MiddlewareFunction = async (ctx, next) => {
   await next();
   // Post-processing after response is generated
-});
+};
 
-app.use(preSerializationMiddleware);
+app.middleware.add(preSerializationMiddleware);
 ```
 
 ## Middleware
@@ -213,9 +211,9 @@ app.use('/api/*', apiMiddleware);
 const myMiddleware: MiddlewareFunction = async (ctx, next) => {
   console.log('Middleware');
   await next();
-});
+};
 
-app.use(myMiddleware);
+app.middleware.add(myMiddleware);
 
 // Route-specific middleware
 // Route-specific middleware is not supported in Setu-TS; use a middleware that checks ctx.request.path instead.
@@ -246,9 +244,9 @@ ctx.services.register('myUtil', {
 });
 
 // Use service
-app.get('/', async (ctx) => {
+app.router.get('/', async (ctx) => {
   const myUtil = ctx.services.get('myUtil');
-  return ctx.json({ date: myUtil.formatDate(new Date()) });
+  return ctx.response.json({ date: myUtil.formatDate(new Date()) });
 });
 ```
 
@@ -287,13 +285,13 @@ const userSchema = z.object({
 });
 
 // Using validation plugin
-app.post('/users', async (ctx) => {
+app.router.post('/users', async (ctx) => {
   const result = userSchema.safeParse(await ctx.request.json());
   if (!result.success) {
-    return ctx.json({ errors: result.error.errors }, { status: 400 });
+    return ctx.response.json({ errors: result.error.errors }, { status: 400 });
   }
   const body = result.data;
-  return ctx.json({ created: true }, { status: 201 });
+  return ctx.response.json({ created: true }, { status: 201 });
 });
 ```
 
@@ -317,21 +315,21 @@ const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
     await next();
   } catch (error) {
     if (error instanceof HttpException) {
-      return ctx.json(
+      return ctx.response.json(
         { error: error.message },
         { status: error.status },
       );
     }
 
     ctx.logger?.error('Unhandled error', { error });
-    return ctx.json(
+    return ctx.response.json(
       { error: 'Internal server error' },
       { status: 500 },
     );
   }
-});
+};
 
-app.use(errorMiddleware);
+app.middleware.add(errorMiddleware);
 ```
 
 ## Type Providers
@@ -357,9 +355,9 @@ interface CreateUserData {
   email: string;
 }
 
-app.post('/users', async (ctx) => {
+app.router.post('/users', async (ctx) => {
   const body = await ctx.request.json<CreateUserData>();
-  return ctx.json({ created: true }, { status: 201 });
+  return ctx.response.json({ created: true }, { status: 201 });
 });
 ```
 
@@ -434,7 +432,7 @@ export function AuthPlugin(options: AuthOptions): IPlugin {
   };
 }
 
-await app.register(AuthPlugin(options));
+app.register(AuthPlugin(options));
 ```
 
 ## Server Decoration
@@ -454,11 +452,11 @@ app.addHook('onRequest', async (request, reply) => {
 ```typescript
 const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   // Set user on context
-  ctx.user = { id: 1, name: 'John' };
+  ctx.state['user'] = { id: 1, name: 'John' };
   await next();
-});
+};
 
-app.use(authMiddleware);
+app.middleware.add(authMiddleware);
 ```
 
 ## Async Initialization
@@ -477,7 +475,7 @@ await app.ready();
 ```typescript
 const app = createApplication();
 
-await app.register(RuntimePlugin);
+app.register(RuntimePlugin());
 await app.start();
 // App is ready and listening (if port specified)
 // Or ready for fetch (if no port)
@@ -506,15 +504,15 @@ console.log(response.json());
 ```typescript
 import { createTestApp, inject } from '@setu-ts/testing';
 
-const app = createTestApp();
-app.get('/', async (ctx) => ctx.json({ hello: 'world' }));
+const app = await createTestApp();
+app.router.get('/', async (ctx) => ctx.response.json({ hello: 'world' }));
 
 const response = await inject(app, {
   method: 'GET',
-  path: '/',
+  url: '/',
 });
 
-console.log(await response.json());
+console.log(response.json());
 ```
 
 ## Common Patterns
@@ -542,7 +540,7 @@ ctx.services.register('child-util', () => 'child');
 ctx.router.group('/child', (group) => {
   group.get('/', async (ctx) => {
     const util = ctx.services.get('child-util');
-    return ctx.json({ util: util() });
+    return ctx.response.json({ util: util() });
   });
 });
 ```
@@ -566,9 +564,9 @@ app.get('/', async (request, reply) => {
 
 ```typescript
 // Use context state
-app.get('/', async (ctx) => {
-  ctx.state.user = { id: 1 };
-  return ctx.json({ user: ctx.state.user });
+app.router.get('/', async (ctx) => {
+  ctx.state['user'] = { id: 1 };
+  return ctx.response.json({ user: ctx.state['user'] });
 });
 ```
 

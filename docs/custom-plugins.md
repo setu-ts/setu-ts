@@ -8,7 +8,7 @@ This guide shows you how to build custom plugins for the Setu-TS framework.
 
 ```typescript
 // my-plugin.ts
-import { IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 export interface MyPluginOptions {
   greeting?: string;
@@ -41,7 +41,7 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
       // Register a route
       ctx.router.get('/greet/:name', async (ctx) => {
         const service = ctx.services.get<{ greet: (name: string) => string }>('my-service');
-        return ctx.json({ message: service.greet(ctx.params.name) });
+        return ctx.response.json({ message: service.greet(ctx.params.name) });
       });
     },
   };
@@ -57,8 +57,8 @@ import { MyPlugin } from './my-plugin';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin);
-await app.register(MyPlugin({ greeting: 'Bonjour' }));
+app.register(RuntimePlugin());
+app.register(MyPlugin({ greeting: 'Bonjour' }));
 
 await app.start({ port: 3000 });
 ```
@@ -116,7 +116,7 @@ const myMiddleware: MiddlewareFunction = async (ctx, next) => {
   await next();
   const duration = ctx.startTime - start;
   ctx.logger?.info('Request completed', { duration });
-});
+};
 
 // Add to pipeline
 ctx.middleware.add(myMiddleware);
@@ -144,9 +144,6 @@ ctx.router.delete('/path', handler);
 ctx.router.head('/path', handler);
 ctx.router.options('/path', handler);
 
-// All methods
-ctx.router.all('/path', handler);
-
 // Route group
 ctx.router.group('/api', (group) => {
   group.get('/users', getUsers);
@@ -161,7 +158,7 @@ ctx.health.register('my-check', async () => {
   const healthy = await checkHealth();
   return {
     status: healthy ? 'healthy' : 'unhealthy',
-    detail: { timestamp: Date.now() },
+    detail: { timestamp: ctx.runtime.now() },
   };
 });
 ```
@@ -170,8 +167,9 @@ ctx.health.register('my-check', async () => {
 
 ```typescript
 // Counter
-const requests = ctx.metrics.registerCounter('my_requests_total', {
-  description: 'Total requests',
+const requests = ctx.metrics.register('my_requests_total', {
+  type: 'counter',
+  help: 'Total requests',
   labels: ['method', 'path'],
 });
 
@@ -181,13 +179,15 @@ ctx.middleware.add(async (ctx, next) => {
 });
 
 // Gauge
-const activeConnections = ctx.metrics.registerGauge('active_connections', {
-  description: 'Active connections',
+const activeConnections = ctx.metrics.register('active_connections', {
+  type: 'gauge',
+  help: 'Active connections',
 });
 
 // Histogram
-const duration = ctx.metrics.registerHistogram('request_duration', {
-  description: 'Request duration in seconds',
+const duration = ctx.metrics.register('request_duration', {
+  type: 'histogram',
+  help: 'Request duration in seconds',
   buckets: [0.1, 0.5, 1, 2.5, 5],
 });
 ```
@@ -235,19 +235,8 @@ ctx.lifecycle.onClose(() => {
 ### CLI Commands
 
 ```typescript
-ctx.cli.register({
-  name: 'my-command',
-  aliases: ['mc'],
-  description: 'My custom command',
-  options: {
-    verbose: { type: 'boolean', description: 'Enable verbose output' },
-  },
-  async handler(args) {
-    if (args.verbose) {
-      console.log('Verbose mode enabled');
-    }
-    console.log('Command executed');
-  },
+ctx.cli.register('my-command', async (args) => {
+  console.log('Command executed with args:', args);
 });
 ```
 
@@ -263,15 +252,6 @@ ctx.openapi.addSchema('User', {
     email: { type: 'string', format: 'email' },
   },
   required: ['name', 'email'],
-});
-
-// Modify the document
-ctx.openapi.addDocumentModifier((doc) => {
-  doc.info = {
-    title: 'My API',
-    version: '1.0.0',
-  };
-  return doc;
 });
 ```
 
@@ -301,15 +281,9 @@ ctx.environment.validate({
 
 ```typescript
 // Read configuration
-const config = ctx.config.get('my-plugin', {
+const config = ctx.config?.get('my-plugin', {
   greeting: 'Hello',
   enabled: true,
-});
-
-// Validate configuration
-ctx.config.validate('my-plugin', {
-  greeting: { type: 'string', default: 'Hello' },
-  enabled: { type: 'boolean', default: true },
 });
 ```
 
@@ -451,17 +425,18 @@ import { MyPlugin } from '../my-plugin';
 
 describe('MyPlugin integration', () => {
   it('handles GET /greet/:name', async () => {
-    const app = createTestApp();
-    await app.register(RuntimePlugin);
-    await app.register(MyPlugin({ greeting: 'Hello' }));
+    const app = await createTestApp({
+      plugins: [RuntimePlugin()],
+    });
+    app.register(MyPlugin({ greeting: 'Hello' }));
 
     const response = await inject(app, {
       method: 'GET',
-      path: '/greet/World',
+      url: '/greet/World',
     });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
     expect(body).toEqual({ message: 'Hello, World!' });
   });
 });
@@ -558,7 +533,7 @@ deno add jsr:@acme/my-plugin
 ```typescript
 import { MyPlugin } from '@acme/my-plugin';
 
-await app.register(MyPlugin({ option: 'value' }));
+app.register(MyPlugin({ option: 'value' }));
 ```
 
 ## Options
@@ -567,9 +542,7 @@ await app.register(MyPlugin({ option: 'value' }));
 | ------ | ------ | --------- | ----------- |
 | option | string | 'default' | Description |
 
-```
 ## Next Steps
 
 - [Plugin Architecture](./plugin-architecture.md) - Deep dive into the plugin system
 - [Examples](./examples.md) - See real-world applications
-```

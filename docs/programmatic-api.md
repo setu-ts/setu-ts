@@ -28,43 +28,43 @@ Register a plugin with the application.
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
-await app.register(RuntimePlugin);
-await app.register(LoggerPlugin, { level: 'info' });
+app.register(RuntimePlugin());
+app.register(LoggerPlugin({ level: 'info' }));
 ```
 
-#### `get(path, handler)`
+#### `router.get(path, handler)`
 
-Register a GET route handler.
+Register a GET route handler through the router.
 
 ```typescript
-app.get('/users', async (ctx) => {
+app.router.get('/users', async (ctx) => {
   const users = await ctx.services.get<IDatabaseService>('database').findAll('users');
-  return ctx.json(users);
+  return ctx.response.json(users);
 });
 ```
 
-#### `post(path, handler)`, `put(path, handler)`, `patch(path, handler)`, `delete(path, handler)`
+#### `router.post(path, handler)`, `router.put(path, handler)`, `router.patch(path, handler)`, `router.delete(path, handler)`
 
 Register route handlers for other HTTP methods.
 
 ```typescript
-app.post('/users', async (ctx) => {
+app.router.post('/users', async (ctx) => {
   const user = await ctx.services.get<IDatabaseService>('database').create(
     'users',
-    ctx.request.body,
+    await ctx.request.json(),
   );
-  return ctx.json(user, { status: 201 });
+  return ctx.response.json(user, { status: 201 });
 });
 ```
 
-#### `use(middleware)`
+#### `middleware.add(middleware)`
 
 Add global middleware to the pipeline.
 
 ```typescript
 import { metricsMiddleware } from '@setu-ts/metrics-plugin';
 
-app.use(metricsMiddleware);
+app.middleware.add(metricsMiddleware);
 ```
 
 #### `start(options?)`
@@ -105,7 +105,7 @@ import { inject } from '@setu-ts/testing';
 
 const response = await inject(app, {
   method: 'GET',
-  path: '/health',
+  url: '/health',
 });
 ```
 
@@ -118,14 +118,28 @@ Route handlers receive a context object with the following properties:
 ```typescript
 interface RouteHandlerContext {
   request: IRequest;
-  context: IRequestContext;
+  response: IResponse;
   services: ServiceRegistry;
-  json<T>(data: T, options?: ResponseOptions): Promise<Response>;
-  text(text: string, options?: ResponseOptions): Promise<Response>;
-  html(html: string, options?: ResponseOptions): Promise<Response>;
-  redirect(url: string, status?: number): Promise<Response>;
-  stream(body: ReadableStream<Uint8Array>, options?: ResponseOptions): Promise<Response>;
+  params: Readonly<Record<string, string>>;
+  query: Readonly<Record<string, string>>;
+  state: Map<string, unknown>;
 }
+```
+
+### Response Methods
+
+```typescript
+// JSON response
+ctx.response.json(data);
+
+// Text response
+ctx.response.text('Hello');
+
+// Redirect
+ctx.response.redirect('/other');
+
+// Streaming response
+ctx.response.stream(readableStream);
 ```
 
 ### Response Options
@@ -182,22 +196,32 @@ const myMiddleware: MiddlewareFunction = async (ctx, next) => {
   console.log('Before');
   await next();
   console.log('After');
-});
+};
 ```
 
 ### Middleware Priority
 
 ```typescript
-ctx.middleware.add(myMiddleware, { priority: 25 });
+app.middleware.add(myMiddleware, { priority: 25 });
 ```
 
-Default priority is 50. Lower numbers run first.
+Default priority is 500. Lower numbers run first.
 
 ## Lifecycle Hooks
 
+### `onRegister(handler)`
+
+Called during plugin registration.
+
+```typescript
+ctx.lifecycle.onRegister(() => {
+  console.log('Registering...');
+});
+```
+
 ### `onInit(handler)`
 
-Called during application initialization.
+Called after all plugins have registered.
 
 ```typescript
 ctx.lifecycle.onInit(() => {
@@ -258,17 +282,16 @@ ctx.lifecycle.onClose(() => {
 ```typescript
 interface IRequest {
   readonly method: string;
-  readonly url: URL;
+  readonly url: string;
   readonly path: string;
-  readonly query: Readonly<Record<string, string | string[]>>;
-  readonly headers: Readonly<Headers>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly headers: Headers;
   readonly body?: ReadableStream<Uint8Array>;
   readonly bodyUsed: boolean;
 
   json<T>(): Promise<T>;
   text(): Promise<string>;
-  arrayBuffer(): Promise<ArrayBuffer>;
-  formData(): Promise<FormData>;
+  bytes(): Promise<Uint8Array>;
 }
 ```
 
@@ -276,12 +299,15 @@ interface IRequest {
 
 ```typescript
 interface IRequestContext {
+  readonly id: string;
+  readonly request: IRequest;
+  readonly response: IResponse;
+  readonly services: IServiceRegistry;
+  readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly state: Map<string, unknown>;
   readonly startTime: number;
   readonly signal: AbortSignal;
-  readonly params: Readonly<Record<string, string>>;
-  readonly state: Record<string, unknown>;
-  readonly user?: unknown;
-  readonly tenant?: unknown;
 }
 ```
 
@@ -289,12 +315,14 @@ interface IRequestContext {
 
 ```typescript
 interface IResponse {
-  json<T>(data: T, options?: ResponseOptions): Promise<Response>;
-  text(text: string, options?: ResponseOptions): Promise<Response>;
-  html(html: string, options?: ResponseOptions): Promise<Response>;
-  redirect(url: string, status?: number): Promise<Response>;
-  stream(body: ReadableStream<Uint8Array>, options?: ResponseOptions): Promise<Response>;
-  send(body: Uint8Array, options?: ResponseOptions): Promise<Response>;
+  status(code: number): IResponse;
+  header(name: string, value: string): IResponse;
+  appendHeader(name: string, value: string): IResponse;
+  json<T>(body: T): HandlerResult;
+  text(body: string): HandlerResult;
+  send(body?: Uint8Array): HandlerResult;
+  redirect(url: string, status?: number): HandlerResult;
+  stream(body: ReadableStream<Uint8Array>): HandlerResult;
   snapshot(): ResponseSnapshot;
 }
 ```
@@ -315,46 +343,15 @@ ctx.health.register('database', async () => {
 
 ## Metrics
 
-### `registerCounter(name, options?)`
+### `register(name, config)`
 
-Register a counter metric.
+Register a metric.
 
 ```typescript
-const requestCount = ctx.metrics.registerCounter('http_requests_total', {
-  description: 'Total HTTP requests',
+const requestCount = ctx.metrics.register('http_requests_total', {
+  type: 'counter',
+  help: 'Total HTTP requests',
   labels: ['method', 'path'],
-});
-```
-
-### `registerGauge(name, options?)`
-
-Register a gauge metric.
-
-```typescript
-const activeConnections = ctx.metrics.registerGauge('active_connections', {
-  description: 'Number of active connections',
-});
-```
-
-### `registerHistogram(name, options?)`
-
-Register a histogram metric.
-
-```typescript
-const requestDuration = ctx.metrics.registerHistogram('http_request_duration_seconds', {
-  description: 'HTTP request duration',
-  buckets: [0.1, 0.5, 1, 2.5, 5, 10],
-});
-```
-
-### `registerSummary(name, options?)`
-
-Register a summary metric.
-
-```typescript
-const requestSummary = ctx.metrics.registerSummary('http_request_summary', {
-  description: 'HTTP request summary',
-  percentiles: [0.5, 0.9, 0.99],
 });
 ```
 
@@ -374,42 +371,26 @@ ctx.openapi.addSchema('User', {
 });
 ```
 
-### `addDocumentModifier(modifier)`
-
-Contribute an OpenAPI document modifier.
-
-```typescript
-ctx.openapi.addDocumentModifier((doc) => {
-  doc.info.title = 'My API';
-  return doc;
-});
-```
-
 ## CLI Contributions
 
-### `register(command)`
+### `register(name, handler)`
 
 Register a CLI command.
 
 ```typescript
-ctx.cli.register({
-  name: 'my-command',
-  aliases: ['mc'],
-  description: 'My custom command',
-  handler: async (args) => {
-    console.log('Command executed with args:', args);
-  },
+ctx.cli.register('my-command', async (args) => {
+  console.log('Command executed with args:', args);
 });
 ```
 
 ## Decorator Contributions
 
-### `register(type, handler)`
+### `register(name, handler)`
 
 Register a decorator handler.
 
 ```typescript
-ctx.decorators.register('MyDecorator', async (metadata, ctx) => {
+ctx.decorators.register('MyDecorator', async (metadata, target) => {
   // Handle decorator application
 });
 ```
@@ -445,15 +426,16 @@ type RuntimePlatform = 'deno' | 'node' | 'bun' | 'cloudflare-workers' | 'unknown
 
 ## Testing Utilities
 
-### `createTestApp()`
+### `createTestApp(options?)`
 
 Create a test application.
 
 ```typescript
 import { createTestApp } from '@setu-ts/testing';
 
-const app = createTestApp();
-await app.register(RuntimePlugin);
+const app = await createTestApp({
+  plugins: [RuntimePlugin()],
+});
 ```
 
 ### `inject(app, request)`
@@ -465,7 +447,7 @@ import { inject } from '@setu-ts/testing';
 
 const response = await inject(app, {
   method: 'GET',
-  path: '/test',
+  url: '/test',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ foo: 'bar' }),
 });
@@ -491,7 +473,7 @@ const mockPlugin = createMockPlugin({
 ### Streaming Responses
 
 ```typescript
-app.get('/stream', async (ctx) => {
+app.router.get('/stream', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       for (let i = 0; i < 10; i++) {
@@ -502,14 +484,14 @@ app.get('/stream', async (ctx) => {
     },
   });
 
-  return ctx.stream(stream);
+  return ctx.response.stream(stream);
 });
 ```
 
 ### Client Disconnect Handling
 
 ```typescript
-app.get('/long-running', async (ctx) => {
+app.router.get('/long-running', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
@@ -525,7 +507,7 @@ app.get('/long-running', async (ctx) => {
     },
   });
 
-  return ctx.stream(stream);
+  return ctx.response.stream(stream);
 });
 ```
 

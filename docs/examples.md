@@ -85,10 +85,10 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
-await app.register(RuntimePlugin);
+app.register(RuntimePlugin());
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello, World!' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello, World!' });
 });
 
 await app.start({ port: 3000 });
@@ -115,13 +115,13 @@ A complete REST API example.
 import { ExceptionsPlugin } from '@setu-ts/exceptions';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
-await app.register(ExceptionsPlugin);
-await app.register(ValidationPlugin, { validator: 'zod' });
+app.register(ExceptionsPlugin());
+app.register(ValidationPlugin({ validator: 'zod' }));
 
-app.post('/items', async (ctx) => {
+app.router.post('/items', async (ctx) => {
   const body = await ctx.request.json();
   // Validation happens automatically if schema is registered
-  return ctx.json({ id: '1', ...body }, { status: 201 });
+  return ctx.response.json({ id: '1', ...body }, { status: 201 });
 });
 ```
 
@@ -182,9 +182,9 @@ Database operations.
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-await app.register(DatabasePlugin, {
+app.register(DatabasePlugin({
   type: 'memory', // Use in-memory for development
-});
+}));
 
 const db = ctx.services.get<IDatabaseService>('database');
 const items = await db.findAll('items');
@@ -212,7 +212,7 @@ Command-Query Responsibility Segregation.
 ```typescript
 import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
 
-await app.register(CqrsPlugin);
+app.register(CqrsPlugin());
 
 const cqrs = ctx.services.get<ICqrsFacade>('cqrs');
 
@@ -241,10 +241,10 @@ Cross-service communication.
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 
-await app.register(MessagingPlugin, {
+app.register(MessagingPlugin({
   broker: 'redis-streams',
   redis: { host: 'localhost', port: 6379 },
-});
+}));
 
 const broker = ctx.services.get<IMessageBroker>('messaging');
 
@@ -279,20 +279,20 @@ Real-time communication with cross-replica synchronization.
 import { WebsocketPlugin } from '@setu-ts/websocket-plugin';
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 
-await app.register(WebsocketPlugin, {
+app.register(WebsocketPlugin({
   rooms: {
     '/ws/chat': {
       onMessage: (ctx, message) => {
-        ctx.room.broadcast({ type: 'message', from: ctx.user.id, data: message });
+        ctx.room.broadcast({ type: 'message', from: ctx.state['user']?.id, data: message });
       },
     },
   },
-});
+}));
 
-await app.register(RealtimeBackplanePlugin, {
+app.register(RealtimeBackplanePlugin({
   transport: 'redis',
   redis: { host: 'localhost', port: 6379 },
-});
+}));
 ```
 
 ---
@@ -313,7 +313,7 @@ GraphQL server.
 ```typescript
 import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 
-await app.register(GraphqlPlugin, {
+app.register(GraphqlPlugin({
   schema: `
     type Query {
       hello: String
@@ -324,7 +324,7 @@ await app.register(GraphqlPlugin, {
       hello: () => 'Hello, World!',
     },
   },
-});
+}));
 ```
 
 ---
@@ -346,7 +346,7 @@ Cloudflare Workers integration.
 ```typescript
 import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 
-await app.register(CloudflarePlugin);
+app.register(CloudflarePlugin());
 
 // KV
 const kv = ctx.services.get<ICloudflareBindings>('cloudflare').kv;
@@ -370,7 +370,7 @@ React Router SSR.
 
 **What it demonstrates:**
 
-- React Router v7 framework mode
+- React Router v8 framework mode
 - SSR with streaming
 - Form actions
 - Session management
@@ -382,13 +382,13 @@ React Router SSR.
 import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
 
-await app.register(SessionPlugin, {
+app.register(SessionPlugin({
   secret: process.env.SESSION_SECRET!,
-});
+}));
 
-await app.register(ReactRouterPlugin, {
+app.register(ReactRouterPlugin({
   build: () => import('./build/server.js'),
-});
+}));
 ```
 
 ---
@@ -408,7 +408,7 @@ Custom plugin template.
 **Key code:**
 
 ```typescript
-import { IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 export function MyPlugin(options: MyPluginOptions): IPlugin {
   return {
@@ -425,7 +425,7 @@ export function MyPlugin(options: MyPluginOptions): IPlugin {
 
       // Register routes
       ctx.router.get('/my-route', async (ctx) => {
-        return ctx.json({ message: 'Hello from plugin' });
+        return ctx.response.json({ message: 'Hello from plugin' });
       });
     },
   };

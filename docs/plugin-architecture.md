@@ -45,8 +45,8 @@ import type { MiddlewareFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 // Use the predefined tokens
-await app.register(RuntimePlugin); // Provides: CAPABILITIES.RUNTIME
-await app.register(LoggerPlugin); // Provides: CAPABILITIES.LOGGER
+app.register(RuntimePlugin()); // Provides: CAPABILITIES.RUNTIME
+app.register(LoggerPlugin()); // Provides: CAPABILITIES.LOGGER
 
 // Access services via tokens
 const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
@@ -85,14 +85,14 @@ import { CAPABILITIES } from '@setu-ts/common';
 async register(ctx: IPluginContext) {
   // Register a service
   ctx.services.register<MyService>('my-service', new MyService());
-  
+
   // Register with options
   ctx.services.register<MyService>('my-service', new MyService(), {
     override: true,   // Replace existing registration
     multi: true,      // Allow multiple providers
     lazy: true,       // Instantiate on first get
   });
-  
+
   // Register a factory (lazy instantiation)
   ctx.services.registerFactory('my-service', () => new MyService());
 }
@@ -127,7 +127,7 @@ async register(ctx: IPluginContext) {
     await next();
     console.log('After request');
   });
-  
+
   // Add middleware with specific priority
   ctx.middleware.add(
     async (ctx, next) => {
@@ -136,9 +136,6 @@ async register(ctx: IPluginContext) {
     },
     { priority: 15 } // Runs at priority 15
   );
-  
-  // Add route-specific middleware
-  ctx.middleware.forRoute('/api/*').add(myRouteMiddleware);
 }
 ```
 
@@ -155,7 +152,7 @@ The default middleware priority order:
 | 30       | `telemetryMiddleware`    | Telemetry/request tracing         |
 | 35       | `validationMiddleware`   | Request validation                |
 | 40       | `multiTenancyMiddleware` | Multi-tenancy                     |
-| 50       | Route handlers           | Application routes                |
+| 500      | Default middleware       | Application routes                |
 
 ## Plugin Context
 
@@ -164,51 +161,51 @@ The `IPluginContext` provides access to all framework capabilities during plugin
 ```typescript
 interface IPluginContext {
   // Service registry
-  services: ServiceRegistry;
+  services: IServiceRegistry;
 
   // Middleware pipeline
-  middleware: MiddlewareApi;
+  middleware: IMiddlewareApi;
 
   // Router
-  router: RouterApi;
+  router: IRouterApi;
 
   // Configuration
-  config: ConfigApi;
+  config?: IConfig;
 
   // Environment validation
-  environment: EnvironmentApi;
+  environment: IEnvironmentApi;
 
   // Health checks
-  health: HealthApi;
+  health: IHealthApi;
 
   // Metrics
-  metrics: MetricsApi;
+  metrics: IMetricsApi;
 
   // OpenAPI contributions
-  openapi: OpenApiApi;
+  openapi: IOpenApiApi;
 
   // Decorators
-  decorators: DecoratorApi;
+  decorators: IDecoratorApi;
 
   // CLI commands
-  cli: CliApi;
+  cli: ICliApi;
 
   // Lifecycle hooks
-  lifecycle: LifecycleApi;
+  lifecycle: ILifecycleApi;
 
   // Runtime services (always available)
   runtime: IRuntimeServices;
 
   // Optional services (may be undefined)
   logger?: ILogger;
-  metadata?: MetadataStore;
+  metadata?: IMetadataStore;
   container?: IContainer;
 
   // Plugin-specific options
-  options: Record<string, unknown>;
+  options: Readonly<Record<string, unknown>>;
 
   // Application instance
-  app: Application;
+  app: IApplication;
 }
 ```
 
@@ -222,35 +219,35 @@ async register(ctx: IPluginContext) {
   ctx.lifecycle.onInit(() => {
     // Initialization logic
   });
-  
+
   // Register when app is ready to accept requests
   ctx.lifecycle.onBootstrap(() => {
     // Bootstrap logic
   });
-  
+
   // Per-request hooks
   ctx.lifecycle.onRequest((ctx) => {
     // Request started
   });
-  
+
   ctx.lifecycle.onResponse((ctx) => {
     // Response completed
   });
-  
+
   // Error handling
   ctx.lifecycle.onError((error, ctx) => {
     // Handle error
   });
-  
+
   // Shutdown hooks (drain period)
   ctx.lifecycle.onStopping(() => {
     // Start graceful shutdown
   });
-  
+
   ctx.lifecycle.onShutdown(() => {
     // Final cleanup
   });
-  
+
   ctx.lifecycle.onClose(() => {
     // Release resources
   });
@@ -300,6 +297,7 @@ The `consumes` field indicates capabilities your plugin needs but won't fail if 
 ```typescript
 const MyPlugin: IPlugin = {
   name: 'my-plugin',
+  version: '1.0.0',
   consumes: ['metrics'], // Warning if missing, but doesn't fail
   register(ctx) {
     // Plugin works but logs a warning if metrics not available
@@ -333,9 +331,7 @@ Plugins can be replaced by custom implementations:
 
 ```typescript
 // Register a custom logger
-await app.register(CustomLoggerPlugin, {
-  override: true, // Replace the default logger
-});
+app.register(CustomLoggerPlugin(), { override: true });
 ```
 
 ## Runtime Independence
@@ -348,7 +344,7 @@ async register(ctx: IPluginContext) {
   const uuid = ctx.runtime.uuid();
   const env = ctx.runtime.env;
   const now = ctx.runtime.now();
-  
+
   // Check platform if needed
   const platform = ctx.runtime.platform();
   if (platform === 'cloudflare-workers') {
@@ -407,19 +403,23 @@ import { createTestApp, inject } from '@setu-ts/testing';
 
 describe('MyPlugin', () => {
   it('registers services correctly', async () => {
-    const app = createTestApp();
-    await app.register(MyPlugin);
+    const app = await createTestApp({
+      plugins: [RuntimePlugin()],
+    });
+    app.register(MyPlugin());
 
     expect(app.services.has('my-service')).toBe(true);
   });
 
   it('adds middleware to the pipeline', async () => {
-    const app = createTestApp();
-    await app.register(MyPlugin);
+    const app = await createTestApp({
+      plugins: [RuntimePlugin()],
+    });
+    app.register(MyPlugin());
 
     const response = await inject(app, {
       method: 'GET',
-      path: '/test',
+      url: '/test',
     });
 
     // Assert middleware behavior

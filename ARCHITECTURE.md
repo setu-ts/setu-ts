@@ -1032,6 +1032,7 @@ graph TB
         feature-flags[feature-flags-plugin]
         multi-tenancy[multi-tenancy-plugin]
         resilience[resilience-plugin]
+        session[session-plugin]
     end
 
     subgraph Realtime Plugins
@@ -1044,16 +1045,8 @@ graph TB
         graphql[graphql-plugin]
         grpc[grpc-plugin]
         react-router[react-router-plugin]
-        cloudflare[cloudflare-plugin]
         static[static-plugin]
         worker-pool[worker-pool-plugin]
-    end
-
-    subgraph Feature Plugins
-        feature-flags[feature-flags-plugin]
-        multi-tenancy[multi-tenancy-plugin]
-        resilience[resilience-plugin]
-        session[session-plugin]
     end
 
     subgraph Developer Tools
@@ -1063,6 +1056,7 @@ graph TB
         cli[cli]
         testing[testing]
         sdk[sdk]
+        exceptions[exceptions]
     end
 
     subgraph Starters

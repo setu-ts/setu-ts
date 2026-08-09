@@ -46,10 +46,10 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin);
+app.register(RuntimePlugin());
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello' });
 });
 
 await app.start({ port: 3000 });
@@ -76,13 +76,13 @@ class AppController {
 async function bootstrap() {
   const app = createApplication();
 
-  await app.register(RuntimePlugin);
-  await app.register(DiPlugin);
-  await app.register(DecoratorPlugin);
+  app.register(RuntimePlugin());
+  app.register(DiPlugin());
+  app.register(DecoratorPlugin());
 
-  // Register controller manually or use discoverControllers
+  // Register controllers manually or use discoverControllers
   // For decorators to work, register the controller instance
-  await app.register(MyController);
+  app.register(MyController);
 
   await app.start({ port: 3000 });
 }
@@ -116,21 +116,21 @@ export class UsersController {
 ### Setu-TS (Programmatic)
 
 ```typescript
-app.get('/users', async (ctx) => {
+app.router.get('/users', async (ctx) => {
   const userService = ctx.services.get<UserService>('userService');
-  return ctx.json(await userService.findAll());
+  return ctx.response.json(await userService.findAll());
 });
 
-app.get('/users/:id', async (ctx) => {
+app.router.get('/users/:id', async (ctx) => {
   const userService = ctx.services.get<UserService>('userService');
   const id = ctx.params.id;
-  return ctx.json(await userService.findById(id));
+  return ctx.response.json(await userService.findById(id));
 });
 
-app.post('/users', async (ctx) => {
+app.router.post('/users', async (ctx) => {
   const userService = ctx.services.get<UserService>('userService');
   const dto = await ctx.request.json();
-  return ctx.json(await userService.create(dto), { status: 201 });
+  return ctx.response.json(await userService.create(dto), { status: 201 });
 });
 ```
 
@@ -234,15 +234,15 @@ export function UsersPlugin(): IPlugin {
       // Or register routes directly
       ctx.router.get('/users', async (ctx) => {
         const userService = ctx.services.get<UserService>('UserService');
-        return ctx.json(await userService.findAll());
+        return ctx.response.json(await userService.findAll());
       });
     },
   };
 }
 
 // In main.ts
-await app.register(UsersPlugin());
-await app.register(DatabasePlugin());
+app.register(UsersPlugin());
+app.register(DatabasePlugin());
 ```
 
 ## Guards
@@ -270,18 +270,18 @@ export const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
   if (!token) {
-    return ctx.json({ error: 'Unauthorized' }, { status: 401 });
+    return ctx.response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   // Verify token and set user
   const user = await verifyToken(token);
-  ctx.user = user;
+  ctx.state['user'] = user;
 
   await next();
-});
+};
 
 // Use middleware
-app.use(authMiddleware);
+app.middleware.add(authMiddleware);
 ```
 
 ## Interceptors
@@ -313,7 +313,7 @@ export const transformMiddleware: MiddlewareFunction = async (ctx, next) => {
   if (!snapshot.streaming && snapshot.body) {
     const data = JSON.parse(snapshot.body as string);
     const transformed = { success: true, data };
-    return ctx.json(transformed);
+    return ctx.response.json(transformed);
   }
 });
 ```
@@ -351,11 +351,11 @@ export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
     await next();
   } catch (error) {
     if (error instanceof HttpException) {
-      return ctx.json(
+      return ctx.response.json(
         {
           statusCode: error.status,
           timestamp: new Date().toISOString(),
-          path: ctx.request.url.pathname,
+          path: ctx.request.path,
           message: error.message,
         },
         { status: error.status },
@@ -365,7 +365,7 @@ export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
     // Log error
     ctx.logger?.error('Unhandled error', { error });
 
-    return ctx.json(
+    return ctx.response.json(
       {
         statusCode: 500,
         message: 'Internal server error',
@@ -373,7 +373,7 @@ export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
       { status: 500 },
     );
   }
-});
+};
 ```
 
 ## Pipelines (Validation)
@@ -393,7 +393,7 @@ async create(@Body() createDto: CreateCatDto) {
 ```typescript
 import { validationMiddleware } from '@setu-ts/validation-plugin';
 
-app.post(
+app.router.post(
   '/users',
   validationMiddleware(CreateUserDto),
   async (ctx) => {
@@ -427,16 +427,16 @@ constructor(@InjectConfig() private readonly config: ConfigService) {}
 ```typescript
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 
-await app.register(ConfigPlugin, {
+app.register(ConfigPlugin({
   env: true,
   validate: {
     PORT: { type: 'number', default: 3000 },
     NODE_ENV: { type: 'string', enum: ['development', 'production'] },
   },
-});
+}));
 
 // Usage
-const config = ctx.config.get('PORT');
+const config = ctx.config?.get('PORT');
 ```
 
 ## Database (TypeORM → Prisma/Drizzle)
@@ -470,12 +470,12 @@ export class UserService {
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-await app.register(DatabasePlugin, {
+app.register(DatabasePlugin({
   type: 'prisma',
   prisma: {
     // Prisma client configuration
   },
-});
+}));
 
 // Usage
 const db = ctx.services.get<IDatabaseService>('database');
@@ -501,13 +501,13 @@ export class UserService {
 ```typescript
 import { CachePlugin } from '@setu-ts/cache-plugin';
 
-await app.register(CachePlugin, {
+app.register(CachePlugin({
   store: 'redis',
   redis: {
     host: 'localhost',
     port: 6379,
   },
-});
+}));
 
 // Usage
 const cache = ctx.services.get<ICacheService>('cache');
@@ -541,15 +541,15 @@ const CreateUserDto = z.object({
 });
 
 // Usage with validation plugin
-await app.register(ValidationPlugin, {
+app.register(ValidationPlugin({
   validator: 'zod',
-});
+}));
 
 // Or manual validation
-app.post('/users', async (ctx) => {
+app.router.post('/users', async (ctx) => {
   const result = CreateUserDto.safeParse(await ctx.request.json());
   if (!result.success) {
-    return ctx.json({ errors: result.error.errors }, { status: 400 });
+    return ctx.response.json({ errors: result.error.errors }, { status: 400 });
   }
   const dto = result.data;
   // ...
@@ -575,7 +575,7 @@ export class EventsGateway {
 ```typescript
 import { WebsocketPlugin } from '@setu-ts/websocket-plugin';
 
-await app.register(WebsocketPlugin, {
+app.register(WebsocketPlugin({
   rooms: {
     '/ws': {
       onConnect: (ctx) => {
@@ -586,7 +586,7 @@ await app.register(WebsocketPlugin, {
       },
     },
   },
-});
+}));
 ```
 
 ## Testing
@@ -618,16 +618,20 @@ import { createTestApp, inject } from '@setu-ts/testing';
 
 describe('Users', () => {
   it('GET /users', async () => {
-    const app = createTestApp();
-    await app.register(RuntimePlugin);
-
-    app.get('/users', async (ctx) => {
-      return ctx.json([{ id: 1, name: 'John' }]);
+    const app = await createTestApp({
+      plugins: [RuntimePlugin()],
     });
 
-    const response = await inject(app, { method: 'GET', path: '/users' });
-    expect(response.status).toBe(200);
-    const body = await response.json();
+    app.router.get('/users', async (ctx) => {
+      return ctx.response.json([{ id: 1, name: 'John' }]);
+    });
+
+    const response = await inject(app, {
+      method: 'GET',
+      url: '/users',
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
     expect(body).toEqual([{ id: 1, name: 'John' }]);
   });
 });
@@ -667,9 +671,9 @@ app.use(app.getHttpAdapter().getInstance());
 
 ```typescript
 // Middleware runs in priority order (lower first)
-app.use(loggerMiddleware); // Default priority: 50
-app.use(corsMiddleware); // Default priority: 50
-app.use(authMiddleware, { priority: 25 }); // Runs before default
+app.middleware.add(loggerMiddleware); // Default priority: 500
+app.middleware.add(corsMiddleware); // Default priority: 500
+app.middleware.add(authMiddleware, { priority: 25 }); // Runs before default
 ```
 
 ## Migration Checklist
