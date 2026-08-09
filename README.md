@@ -97,7 +97,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Routing             | ✅     | `kernel`             | Hono `LinearRouter` under the framework's own pipeline |
 | Runtime abstraction | ✅     | `runtime`            | Node.js, Deno, Bun, Cloudflare Workers with detection  |
 | Streaming responses | ✅     | `kernel` + `runtime` | `IResponse.stream()` with request `AbortSignal`        |
-| Exceptions          | ✅     | `exceptions`         | Error hierarchy, RFC 7807 Problem Details, handler     |
+| Exceptions          | ✅     | `exceptions`         | Error hierarchy, RFC 9457 Problem Details, handler     |
 | Testing             | ✅     | `testing`            | Test app factory, mock plugins, request injection      |
 
 ### Request path
@@ -106,7 +106,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | -------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
 | Logging        | ✅     | `logger-plugin`        | Console, pino, noop; request/response middleware                                 |
 | Configuration  | ✅     | `config-plugin`        | Env loading, variable expansion, schema validation                               |
-| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 7807 / NestJS / default error shapes                         |
+| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 9457 / NestJS / default error shapes                         |
 | HTTP security  | ✅     | `http-security-plugin` | CORS, security headers, CSRF, request size, IP rules                             |
 | Authentication | ✅     | `auth-plugin`          | JWT (HS256/RS256 via Web Crypto), API keys, local, refresh tokens, rate limiting |
 | Authorization  | ✅     | `auth-plugin`          | RBAC with transitive role hierarchy and permission guards                        |

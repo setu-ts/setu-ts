@@ -5,13 +5,16 @@
  * Supported formats:
  * - `'default'` — Framework-standard error shape (`statusCode`, `message`,
  *   optional `details`).
- * - `'rfc7807'` — RFC 7807 Problem Details (see `rfc7807-formatter.ts`).
+ * - `'rfc9457'` — RFC 9457 Problem Details (see `rfc9457-formatter.ts`).
+ * - `'rfc7807'` — deprecated; RFC 7807 Problem Details (see
+ *   `rfc7807-formatter.ts`). RFC 7807 was obsoleted by RFC 9457.
  * - A custom function — used as-is.
  *
  * @module
  */
 import type { IRequestContext } from '@setu-ts/common';
 
+import { rfc9457Formatter } from './rfc9457-formatter.ts';
 import { rfc7807Formatter } from './rfc7807-formatter.ts';
 import { HttpError } from '../errors/http-error.ts';
 
@@ -33,11 +36,14 @@ export type ErrorHandlerFormatter = (
 ) => Record<string, unknown>;
 
 /**
- * The built-in error format identifiers.
+ * The built-in error format identifiers for `@setu-ts/exceptions`.
+ *
+ * `'rfc7807'` is retained for backward compatibility and resolves to the
+ * deprecated {@linkcode rfc7807Formatter}; prefer `'rfc9457'`.
  *
  * @since 0.1.0
  */
-export type ErrorFormat = 'default' | 'rfc7807';
+export type ErrorFormat = 'default' | 'rfc9457' | 'rfc7807';
 
 // ---------------------------------------------------------------------------
 // Built-in default formatter
@@ -92,8 +98,8 @@ export const defaultFormatter: ErrorHandlerFormatter = (error: Error): DefaultEr
 /**
  * Resolve the error format configuration to a concrete formatter function.
  *
- * - When `format` is `'default'` or `'rfc7807'`, the corresponding built-in
- *   formatter is returned.
+ * - When `format` is `'default'`, `'rfc9457'`, or the deprecated `'rfc7807'`,
+ *   the corresponding built-in formatter is returned.
  * - When `format` is already a function, it is returned as-is.
  * - Otherwise a `TypeError` is thrown.
  *
@@ -111,6 +117,8 @@ export function selectFormatter(
   switch (format) {
     case 'default':
       return defaultFormatter;
+    case 'rfc9457':
+      return rfc9457Formatter;
     case 'rfc7807':
       return rfc7807Formatter;
     default:

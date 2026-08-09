@@ -21,9 +21,9 @@ describe('rest-starter / integration', () => {
     expect(response.body).toBe('Hello world');
   });
 
-  // C7: errorHandler must be outermost (priority 0) — both throw sites yield RFC 7807 body
-  // with "detail" field and NO "message" field
-  it('errorHandler catches route handler throws and formats RFC 7807 body', async () => {
+  // C7: errorHandler must be outermost (priority 0) — both throw sites yield an
+  // RFC 9457 body with a "detail" field and NO "message" field
+  it('errorHandler catches route handler throws and formats an RFC 9457 body', async () => {
     const app = createRestApp();
     app.router.get('/throw', () => {
       throw new Error('test route error');
@@ -35,10 +35,13 @@ describe('rest-starter / integration', () => {
     expect(response.statusCode).toBe(500);
     // Parse the JSON body to check fields
     const body = JSON.parse(response.body!);
-    // RFC 7807 format: type includes ERROR_TYPE_BASE/statusCode
-    expect(body.type).toContain('setu-ts.dev/errors/500');
+    // RFC 9457 §4.2: a problem carrying no semantics beyond its status code is
+    // identified by about:blank, not by a URI minted from that status.
+    expect(body.type).toBe('about:blank');
+    expect(body.title).toBe('Internal Server Error');
+    expect(body.status).toBe(500);
     expect(body.detail).toBe('test route error');
-    // RFC 7807 Problem Details MUST NOT have a "message" field
+    // Problem Details MUST NOT carry a "message" field
     expect(Object.keys(body).includes('message')).toBe(false);
   });
 
@@ -61,7 +64,7 @@ describe('rest-starter / integration', () => {
     expect(response.statusCode).toBe(500);
     const body = JSON.parse(response.body!);
     expect(body.detail).toBe('test middleware error');
-    // Must not have a "message" field per RFC 7807
+    // Must not have a "message" field per RFC 9457
     expect(Object.keys(body).includes('message')).toBe(false);
   });
 

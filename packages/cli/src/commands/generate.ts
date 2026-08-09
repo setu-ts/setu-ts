@@ -33,6 +33,10 @@ import {
   type SchematicOptions,
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
+import { readModuleNames } from '../utils/module-scanner.ts';
+import { scanArtifacts } from '../utils/artifact-scanner.ts';
+import { findNameConflict } from '../utils/name-conflicts.ts';
+import { listSeamSpecs } from '../seams/registry.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -159,6 +163,17 @@ export async function runGenerateCommand(
           `which is not installed in ${dir}.`,
       );
       deps.error(`Install it, then run this command again.`);
+      // Naming the alternative is the whole point of the refusal for the two
+      // decorated schematics: decorators are OPTIONAL in this framework, and a
+      // refusal that only says "install the decorator plugin" reads as though
+      // they are required to serve HTTP. Schematics with no honest alternative
+      // print the two lines above and nothing more.
+      if (metadata.alternative !== undefined) {
+        deps.error(
+          `Or run \`${PROGRAM_NAME} generate ${metadata.alternative.schematic} ${name}\` — ` +
+            `${metadata.alternative.why}.`,
+        );
+      }
       return EXIT_ERROR;
     }
 
@@ -175,7 +190,55 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
 
-  const options: SchematicOptions = { runtime, plugins: installed, now: deps.now };
+  // Read unconditionally, like `detectPlugins` above: the `module` schematic
+  // needs it to render its aggregate barrel, and branching on the schematic name
+  // here would put a second dispatch beside the registry.
+  const modules = await readModuleNames(deps.fs, dir);
+  // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
+  // per family against paths that usually do not exist; a custom schematic reads it
+  // too, so it cannot be gated on a built-in name.
+  const scan = await scanArtifacts(deps.fs, dir, listSeamSpecs());
+
+  // A candidate the scan rejected is reported, never silently dropped. This is the path
+  // an artifact generated before its family gained a second export takes: the barrel
+  // cannot name a symbol the file does not export, so the artifact is left out and the
+  // developer is told to regenerate it — rather than getting a barrel that will not
+  // compile, or one that quietly omits their work.
+  for (const skip of scan.skipped) {
+    deps.error(
+      `Skipped ${skip.path}: it does not export ${skip.missing.join(', ')}, ` +
+        `so it cannot be listed in the generated barrel.`,
+    );
+    deps.error(`  Regenerate it to bring it up to date.`);
+  }
+
+  // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
+  // output cannot work is not a plan worth printing. Both collisions this catches were
+  // observed as real failures against a booted application — see `name-conflicts.ts`.
+  const conflict = findNameConflict(
+    schematicName,
+    names.kebab,
+    installed,
+    scan.artifacts,
+    modules,
+  );
+  if (conflict !== undefined) {
+    deps.error(
+      `Cannot generate ${schematicName} "${names.kebab}": ${conflict.resource} is already ` +
+        `claimed by the ${conflict.schematic} of the same name.`,
+    );
+    deps.error(`If both existed, ${conflict.consequence}.`);
+    deps.error(`Choose a different name, or remove the existing ${conflict.schematic}.`);
+    return EXIT_ERROR;
+  }
+
+  const options: SchematicOptions = {
+    runtime,
+    plugins: installed,
+    now: deps.now,
+    modules,
+    artifacts: scan.artifacts,
+  };
 
   let generated: readonly GeneratedFile[];
   try {
@@ -191,9 +254,13 @@ export async function runGenerateCommand(
 
   // Root every path at the target directory before touching the filesystem, so
   // the overwrite check and the write agree on exactly the same paths.
+  // Spread the file rather than rebuilding it from two known fields: dropping a
+  // member here silently discards whatever the schematic declared about it, and
+  // losing `managed` makes the aggregate module barrel refuse on every run after
+  // the first.
   const files: readonly GeneratedFile[] = generated.map((file) => ({
+    ...file,
     path: joinPath(dir, file.path),
-    contents: file.contents,
   }));
 
   if (files.length === 0) {

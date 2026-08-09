@@ -1525,6 +1525,311 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   zero — the ETag is now STRONG whenever `mtime` is present, matching what nginx and Apache emit for
   static files, and weak only when size is the sole signal. Reverting the three fixed `src` files
   failed 8 of 13 regression steps, the other 5 being deliberate controls) — complete (PR #132)
+- **Milestone 56** (`packages/exceptions` + `packages/validation-plugin` + the three starters — RFC
+  9457 Problem Details, retiring a withdrawn specification. RFC 7807 was obsoleted by RFC 9457 in
+  July 2023 and the framework advertised it in two packages, a public `ErrorFormat` union value, an
+  exported symbol in each, the three starters, and eleven doc sites. **The wire format barely
+  changed, and that was established from the RFC rather than assumed**: Appendix D lists exactly
+  three changes — a type-URI registry (§4.2), clarified multiple-problem handling (§3), and
+  non-dereferenceable type-URI guidance (§3.1.1) — with the five core members, the
+  `application/problem+json` media type, and extension members all carried over verbatim. So this is
+  a naming change plus ONE semantic correction. That correction is **`about:blank`**: `HttpError`
+  carries `statusCode`/`message`/`details`/`cause` and **no problem-type identity beyond the status
+  code**, so the `https://setu-ts.dev/errors/404` it minted for every error identified nothing
+  `status` did not already carry — precisely what §4.2 registers `about:blank` for. The sole
+  exception is `validationError()`, the only factory placing `errors` into `details`; it defines an
+  extension member, so it keeps a concrete URI, spelled to match the literal `validation-plugin`
+  already emitted so both packages finally identify one problem type identically. `statusTitle()`
+  needed no change — it already yields the reason phrase §4.2 wants beside `about:blank`. The
+  deprecated `'rfc7807'` arm **keeps RFC 7807 behavior in `exceptions`** (§9.4 forbids silently
+  changing a released API, and a symbol named after 7807 emitting something else gives the caller no
+  signal); the two formatters differ only in a `typeOf` strategy passed to one shared
+  `buildProblemDetails` core, so nothing is duplicated. In `validation-plugin` the alias is the
+  **same object**, because that formatter's `type` was always semantic rather than status-derived
+  and its body was already 9457-valid. **The defect most likely to ship green was the media type**:
+  both packages keyed `application/problem+json` off a single formatter REFERENCE
+  (`error-handler.ts:93`, `validation-middleware.ts:129`) so a directly-passed formatter agreed with
+  the alias — adding a second formatter without generalizing that serves a Problem Details body as
+  `application/json`, which generic clients ignore, while the `'rfc9457'` STRING arm tests fine.
+  Both are membership tests now, driven by reference in tests; reverting the exceptions fix fails 8
+  steps across the unit AND integration suites. Also corrected a doc-vs-behavior conflict predating
+  the milestone: `ARCHITECTURE.md` documented `type: https://setu-ts.dev/errors/not-found` while the
+  code emitted `.../404`. The `errors` extension keeps `{ field, message, code }` — realigning to
+  RFC 9457 §3's illustrated `{ detail, pointer }` was explicitly declined, since `errors[].field` is
+  the most widely consumed part of the validation response. Code review then found that **neither
+  package asserted its barrel exports**: dropping `rfc9457Formatter` from the exceptions
+  `src/index.ts` left 18 other tests green — including the integration test and all three starters,
+  which are that barrel's only consumers — plus `deno check`, the 100% per-file coverage bar (a
+  re-export file is fully covered merely by being loaded), and `publish:check`, because every test
+  imported the concrete module rather than the barrel. The M52c defect class. Both packages now
+  carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal Problem
+  Details core does NOT leak into the published surface) — complete (PR #135)
+- **Milestone 57** (`packages/common` + `packages/auth-plugin` + `packages/openapi-plugin` — derived
+  OpenAPI security. PR #136 made an operation's requirement DECLARABLE, which left the document as a
+  second source of truth: a route could carry `requireAuth()` and declare `security: []`, or carry
+  no guard and inherit a document-level requirement, and nothing objected. `common` gains a
+  `SECURITY_METADATA` symbol + `RouteSecurityMetadata` + the pure
+  `withSecurityMetadata`/`securityMetadataOf` helpers; all six `auth-plugin` guard factories brand
+  the middleware they return; `openapi-plugin` gains `deriveSecurity: { scheme }` and reads the
+  brand off `RouteInfo.definition.middleware`. No plugin imports another — the symbol in `common` is
+  the entire channel (the M24 `TELEMETRY_CONTEXT_OPAQUE` precedent), and it uses **`Symbol.for`**
+  deliberately, because a locally-created symbol misses on every read when two copies of `common`
+  share a process — the failure M37c hit with hand-written React Router context keys. **Guards were
+  otherwise indistinguishable**: probed, `requireAuth()` returns a function with `name === ''`,
+  arity 2, zero own properties and zero own symbols — an ad-hoc inline middleware has a BETTER
+  identity than the guards did. The metadata carries authentication PRESENCE only, and that is a
+  decision rather than a simplification: an OpenAPI requirement names a **scheme**, and none can be
+  inferred from `'admin'`, so a `roles` field would be dead surface. The consequence is documented
+  in three sites — a 403 remains a surprise the document cannot warn about. Precedence is declared >
+  derived > document-level, so a route that already declares is byte-identical, which includes every
+  `@Public` decorated route (PR #136 gives those a declared `[]`); `authenticated: true` beats
+  `false` on a route carrying both, matching enforcement since `publicRoute()` only calls `next()`.
+  Everything is **opt-in**: without `deriveSecurity` no document changes. Only ROUTE-level
+  middleware is inspected — `app.middleware.add()` is absent from `RouteInfo`, which is correct
+  anyway since `authMiddleware()` populates the principal and never rejects. The §3.5 `register()`
+  refusal from PR #136 was extended to the derived scheme name. The integration suite drives the
+  REAL `auth-plugin` guards through a kernel app rather than hand-branded fakes, which is what
+  proves the two packages agree on the symbol) — complete (PR #137, stacked on PR #136)
+- **Milestone 58** (`packages/cli` — `setu g module`, the first aggregate schematic and the first
+  managed file. 13 single-artifact schematics existed and no aggregate, so a domain module meant
+  `g controller` + `g service` plus a hand edit of `setu.config.ts` to reach
+  `DecoratorPlugin({ controllers, services })`. Emits five files: an `@Injectable` service, a
+  `@Controller` injecting it by an explicit token (`emitDecoratorMetadata` is unavailable under
+  Deno, so a parameter's type cannot be read), a `describe`/`it` service test, a per-module barrel,
+  and a regenerated aggregate barrel exporting `MODULE_CONTROLLERS`/`MODULE_SERVICES`. **The design
+  problem was not the aggregate but the wiring.** `Schematic` is
+  `(names, options) => readonly GeneratedFile[]` — pure, no I/O — and `--dry-run` prints from that
+  same array, so nothing that reads the project can live inside a schematic; an AST edit of
+  `setu.config.ts` was rejected outright (needs a TypeScript parser in a zero-dependency package,
+  cannot preserve formatting, makes `--dry-run` a prediction). So the command layer scans
+  `src/modules/` and passes the names through a new **optional** `SchematicOptions.modules` — the
+  `plugins` precedent — and the schematic returns the whole barrel from its one pure call. Rewriting
+  a barrel the CLI itself wrote needed an exemption from the overwrite refusal, shipped as a
+  per-file `GeneratedFile.managed` read ONLY by `findExisting`; a `--force` flag was rejected
+  because it would lift the check for all fourteen schematics and let a mistyped `g service user`
+  clobber real work. Both widened types are barrel exports, so both are **optional** additions on
+  the M42 `signal?` / M44 `fs?` precedent — a required `modules` would break a custom schematic's
+  own test with no deprecation path, since §9.2 assumes a replacement API and an added field has
+  none. The `rest`, `microservice` and `nest` templates emit the seam from scaffold time and
+  reference it through `Wiring.args`, so a NEW project is wired with no edit ever; `full-stack` is
+  deliberately not a host (`routes → features → services`, no `src/modules/` concept). Writing the
+  tests found the defect that would have shipped green: `runGenerateCommand` rebuilt each file as
+  `{ path, contents }` and **dropped `managed`**, so the exemption never reached `findExisting` and
+  every generate after the first refused on the barrel — two tests failed, and it now spreads the
+  file instead. A fixture defect was fixed first: `createFakeFs.stat` reported a directory only if
+  its own `mkdir` had been called, so a test seeding `src/modules/user/x.ts` saw no module while a
+  real filesystem would — the contract-violating-double class, now prefix-aware. The hostile-name
+  sweep covers `g module` (six names including the reserved words `class` and `new`), and a
+  scaffold→generate→`deno check` pass runs on both `rest` (no DI) and `nest` (DI), which is the only
+  place the emitted `@Inject` is proven to compile on the container-less path. Three negative
+  controls were each observed failing and reverted: removing the `managed` skip, misspelling an
+  option key inside the `args` string (invisible to the CLI's own `deno check` — the M50b trap), and
+  dropping the barrel sort. All new and changed files at 100% branch/function/line.
+
+  **Code review and a functional probe then found four more defects, every one of which had passed
+  all four gates, both publish gates and 100% per-file coverage.** The headline one: **the generated
+  module did not work at all** — every route answered
+  `500 Cannot read properties of undefined (reading 'response')`, because `DecoratorPlugin` builds a
+  handler's argument list from parameter metadata ALONE (`createHandler` → `resolveParameters`) and
+  never passes the request context positionally, so the emitted `list(ctx: IRequestContext)`
+  received `undefined`. There is no built-in decorator for the context either — the set is
+  Body/Query/Param/Header/Cookie/CurrentUser — so a decorated handler must return a plain value and
+  let the plugin serialize it. The `201` on `create` is dropped rather than faked, since a decorated
+  handler cannot set a status code. **`setu generate controller` carried the identical defect from
+  M34 through five releases**, so every controller it ever emitted answered 500; it is fixed HERE
+  rather than on a `fix/…` branch at the maintainer's direction (same package, same one-line class
+  of fix), a deliberate deviation from this plan's out-of-scope list. Also: a stray directory under
+  `src/modules/` (a `shared/` helper folder) was swept in as a module, so the barrel imported files
+  that do not exist and the developer's project stopped compiling — a directory now counts only when
+  it holds both canonical files; and the emitted service test could not run because no template
+  declared `@std/testing`/`@std/expect`, whose fix then exposed an **overload** —
+  `npmDevDependencies`' mere PRESENCE was a proxy for "this template has a frontend npm build", so
+  declaring test deps gave a REST Node project `npm run build` and a REST **Deno** project a
+  `package.json`, which switches Deno to `node_modules` resolution (the `apps/full-stack` trap).
+  `TemplateManifest.npmBuildScript` now carries that signal explicitly.
+
+  **Every one of the four hid behind a check scoped to what its author already believed worked** —
+  the e2e skipping the one generated file it was least sure of, an `emits no package.json` test that
+  never passed a template, and unit tests asserting decorator PRESENCE rather than behaviour (the
+  `controller` one asserted the broken `IRequestContext` import was present, so a controller that
+  could not serve a request was fully "covered"). The missing gate is now committed:
+  `serves requests from generated modules` boots a scaffolded project in a subprocess and drives
+  real requests on BOTH `--template rest` (no DI → `@Inject` resolves from the ServiceRegistry) and
+  `--template nest` (DI present, a different construction path), plus one for the standalone
+  controller; restoring the old shape reproduces the exact 500 and fails all three. The hostile-name
+  sweep now covers `g module`, and no longer excludes `*.test.ts` from the drift check.
+  `g controller`'s output shape changing is a **behaviour change to already-published generated
+  output** — CHANGELOG carries the migration note, and it belongs in the next alpha's release notes)
+  — complete (PR #139)
+- **Milestone 60** (`packages/cli` + `cqrs-plugin` + `events-plugin` + `metrics-plugin` — generated
+  code that is wired. `setu generate` emitted fourteen artifacts and exactly ONE reached a
+  registration site (the M58 module barrel); the other thirteen compiled and did nothing. Eleven now
+  reach one with no edit to a file the developer owns, and three get an explicit "none" backed by
+  evidence. **The ROADMAP's own per-schematic sort did not survive `grep`, and correcting it was the
+  milestone's substance**: five of the six artifacts it placed in the "plugin-options registration
+  site" bucket have no such option — `CqrsPluginOptions` carried only `behaviors`,
+  `EventsPluginOptions` only `async`/`errorHandler`, `auth-plugin` publishes no guard list, and
+  `MetricsPluginOptions.customMetrics` is declarative (`NamedMetricConfig`) not the accessor
+  function the schematic emits. `IApplication` also has **no `lifecycle` member**, so application
+  code has no phase in which to register anything imperatively — anything needing a resolved
+  capability must be a plugin option or a plugin, which is what forced the two option additions
+  rather than a call somewhere in `createApp()`.
+
+  One generalized mechanism replaces what would have been ten bespoke copies: a `SeamSpec` per
+  family (`dir`/`suffix`/`barrel`/`exports`/`renderBarrel`), one `readArtifactNames` scanner, one
+  optional `SchematicOptions.artifacts`, and `templates/seam.ts` deriving the scaffold-time files,
+  config imports and wiring from that ONE registry — so a family cannot acquire a barrel no config
+  imports, or an import no barrel exports. Two new `TemplateDefinition` fields (`setupCalls`,
+  `pluginSpreads`) carry the seams whose site is a statement or an array spread rather than a plugin
+  option; `configModule` rendered the plugin list, the middleware adds and the hello-world route as
+  three fixed blocks and a statement was expressible in none of them.
+
+  `CqrsPlugin` and `EventsPlugin` join the `microservice` template, because **no template installed
+  them** and their three schematics are gated on them — so `g command-handler`, `g query-handler`
+  and `g event-handler` could never be wired in any scaffolded project. Both are in-memory and
+  zero-config (the tier's rule), and neither needs a socket, so the Workers refusal is unchanged.
+  `g service` is shaped on the DETECTED plugin set (the maintainer's call among three framings):
+  `@Injectable` plus a barrel with `decorator-plugin` present, today's plain class byte-for-byte
+  otherwise, so it stays ungated and keeps working in a bare project. `g plugin` moves to
+  `src/plugins/<name>.plugin.ts` — a suffix of `.ts` would admit any hand-written module in that
+  folder and the barrel would import a symbol the developer never wrote. `g metric` gains the
+  `NamedMetricConfig` its option actually takes (the accessor is how code increments a counter; the
+  config is how it EXISTS at boot, visible in `/metrics` as `# HELP`/`# TYPE` before anything
+  samples it — verified from `renderCounter`, not assumed).
+
+  **Booting a fully generated project found a defect the wiring itself introduced, which is the
+  whole argument for the functional bar.** `g service widget` and `g module widget` both register
+  `@Injectable({ token: 'widget-service' })`, `DecoratorPlugin.registerService` is first-wins on a
+  token, and the standalone barrel is spread before the module one — so the module's controller was
+  handed the standalone service and every request to it answered `500`
+  (`this.widgets.list is not a function`). The same class exists on HTTP paths, where the kernel
+  keys `#entryMap` on `${method} ${path}` and a duplicate OVERWRITES: `GET /widget` was registered
+  three times and two of the three artifacts were unreachable. `generate` now refuses both before
+  writing, naming the conflict and the consequence; the check is skipped without `decorator-plugin`,
+  since neither collision can exist there. That refusal in turn forced the M34b hostile-name drift
+  sweep to split into three non-colliding groups — folding a suffix into the name instead would mean
+  `class` never lands in a binding position again, which is the one thing that sweep exists to test.
+
+  Verified by scaffolding both host templates, generating one of every available artifact,
+  type-checking all 39 emitted files against this workspace, and BOOTING: the generated route
+  answers 200 carrying the generated middleware's header, the standalone controller and the module
+  both answer 200, the service and plugin tokens resolve, both indicators appear in `/health`, both
+  metrics are declared in `/metrics` before anything samples them, and the command, query and event
+  buses all reach their generated handlers. Four negative controls were each observed failing and
+  reverted — and the fourth caught a **vacuous assertion in my own test helper**:
+  `assertSeamContract` reversed a single-element list, so its byte-identical clause passed whether
+  the barrel sorted or not. It now refuses fewer than two names, or names already in sorted order,
+  and all ten seam contracts fail without the sort.
+
+  **Code review then found a second defect the wiring introduced, and it is the one that would have
+  hurt every existing user.** A barrel imports specific symbols from each artifact, and `middleware`
+  and `metric` each gained a second export here — so a project that generated one of them BEFORE M60
+  got a regenerated barrel naming a symbol its own file did not have:
+  `TS2305 … has no exported member 'AUDIT_LOG_MIDDLEWARE_PRIORITY'`, from a command that reported
+  success. Every existing generated project would have broken on its next `g middleware` or
+  `g metric`. The scanner admitted a candidate on filename and file-ness alone; it now requires the
+  file to EXPORT every symbol the barrel will import, and reports what it skipped so an artifact is
+  never silently unwired. That list now has ONE home — `SeamSpec.importSymbols`, read by
+  `renderBarrel` for the import it emits AND by `readArtifactNames` as the admission rule; the split
+  between those two is exactly what let it ship. This is the flat-family form of the precondition
+  `readModuleNames` already applies to a module directory, which the M58 review added for the
+  identical reason. Reproduced with a real `deno check` and verified to fail without the fix at all
+  three levels (scanner unit tests, the command-level skip report, and an e2e that type-checks the
+  regenerated barrel). Fixing it dropped `seam-spec.ts` to 95.7% branch on an unreachable `?? ''`
+  fallback, removed rather than tested since the arm is dead. All changed `src` files at **100%**
+  branch/function/line) — complete (PR #141)
+- **Milestone 61** (`packages/cli` — decorators and DI as real choices in the generator.
+  AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is optional, and that
+  **"everything has a programmatic API — no feature requires decorators or reflection"**; the
+  generator contradicted all three, and the contradiction was mechanically checkable. `VALUE_FLAGS`
+  declared no `--di`, `DiPlugin` appeared in exactly one template module, and `controller`/`module`
+  are gated on `decorator-plugin` — so the only opt-in was the template and it was coarse: no
+  template gave neither AND refused the decorated schematics, `rest`/`microservice` gave decorators
+  without a container, `nest` gave both plus a NestJS showcase you may not have wanted.
+
+  **`--di`** adds `DiPlugin` to any template. It is boolean, so it needs no `VALUE_FLAGS` entry, and
+  it is read ONCE in `runNewCommand` and passed down as a `TemplateFeatures` value. It
+  **deduplicates**, which is the load-bearing part rather than tidiness: the kernel THROWS
+  `Duplicate plugin name 'di'` at `start()` (`plugin-resolver.ts:106`), so appending blindly would
+  make `--template nest --di` scaffold a project that type-checks, passes every file assertion, and
+  then cannot boot — a test pins `nest --di` byte-identical to `nest`. On `full-stack` it reaches
+  the starter's own `di?: DiPluginOptions` arm instead of a wiring, because `TemplateHost.plugins`
+  must stay empty when an `appFactory` is set; that arm is the one M36b built and then observed was
+  "unreachable from `setu new`". `--di` forks the COMPOSITION, never the generated source —
+  `DecoratorPlugin` branches on the container's presence, so the same `@Injectable` class works
+  either way and only its lifecycle changes.
+
+  **The `controller`/`module` gate refusal now names `g route`**, as `SchematicMetadata.alternative`
+  data beside the gate rather than a string in the command layer. The gate is NOT removed: those
+  schematics emit `@Controller`, so an ungated project would get source whose own import cannot
+  resolve (the M34b defect). Schematics with no honest alternative print exactly their committed two
+  lines.
+
+  **The no-template path became a seam host**, reversing a decision M60 recorded as _Unowned_. M60's
+  premise was that it "means inventing a fourth `TemplateDefinition` … where six of the ten seams
+  would be inert"; neither survived checking — `seamsFor(new Set())` already returns exactly the
+  three ungated seams (`route`, `middleware`, `plugin`), so none is inert, and extracting
+  `TemplateHost` from `TemplateDefinition` gives the minimal path a host with no `--template` value,
+  so `TEMPLATES` and `new --help` are untouched. This mattered because it is the milestone's own
+  claim: a bare project's `setu g route` wrote the module and the barrel while the generated
+  `setu.config.ts` imported neither, so the ONLY HTTP handler a decorator-free project can generate
+  answered `404` until the developer hand-edited the config. It is now proven by BOOTING a
+  scaffolded bare project and driving the route (200), its middleware header, and its plugin token.
+
+  **Booting the full matrix found two defects the gates could not see, and both are fixed here.**
+  Every `template x --di` combination was scaffolded, generated into, and BOOTED in a subprocess:
+  all 8 serve, `nest` and `nest --di` are byte-identical (the dedupe holding), and a `transient`
+  `@Injectable` resolves to ONE instance without a container and TWO with one — which is what makes
+  `--di` a real composition change rather than a registered-and-ignored plugin. (1) The generated
+  service's JSDoc told consumers to reach the class with `services.get('<name>-service')`; with a
+  container that THROWS, because `registerService` registers a provider on the container and never
+  touches the kernel registry. Before `--di` only `nest` had a container, so the advice was almost
+  always right — the flag makes it wrong on every template, which is why the correction ships here.
+  (2) **`--runtime node` could not run ANY decorated code.** It started with
+  `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases types
+  without transforming code: a legacy decorator is a bare `SyntaxError` and the constructor
+  parameter property `g module` emits is `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. So `--template rest`
+  and `g route` booted while `g service`, `g controller`, `g module` and `--template nest` could not
+  start at all — nest not even from a clean scaffold, shipped that way since M34. Node projects now
+  declare `tsx` and start with `tsx main.ts`, reading the `experimentalDecorators` the generated
+  tsconfig already sets; `--experimental-transform-types` was tried and rejected (it fixes the
+  parameter property and still refuses the decorator). Runtime-level, not template-level — Bun
+  compiles TypeScript outright and Deno/Workers never invoke the runner. Verified with real
+  `npm install` + `npm start`. (3) **`--runtime cloudflare-workers` could not be built or deployed
+  at all.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers
+  nor a Deno import map, and the Workers target emitted no `package.json` and no `.npmrc` — so
+  `npm install && npx wrangler dev`, which the CLI itself prints as the next step, failed with one
+  `Could not resolve "@setu-ts/…"` per package. There was nothing to install. Workers projects now
+  emit an npm manifest (npm-compat `@jsr/…` deps, `wrangler` pinned, `dev`/`deploy` scripts) plus
+  `.npmrc`, alongside the `deno.json` that `setu generate` reads for plugin gating; Deno still gets
+  none, because a `package.json` switches it to node_modules resolution.
+
+  **Every runtime was driven for real**: Deno (8 combos), Bun (`bun install`, all artifacts 200),
+  Node (`npm install` + `npm start`), Cloudflare Workers (**real workerd** via `wrangler dev` — a
+  pristine scaffold serves `/`, `/health`, `/metrics` and every generated route, controller and
+  module), and `full-stack --di` through a real `deno install` + `react-router build` to an SSR 200
+  with the container live — which is what proves the `di: {}` string reaches the starter rather than
+  merely being emitted. NOT verified against a DEPLOYED Worker: `wrangler dev --local` runs workerd
+  on this machine, which is the same runtime but not Cloudflare's edge.
+
+  **A `--no-decorators` variant was rejected rather than deferred**: it would have to emit a
+  router-registered handler module, which is exactly what `g route` emits, so it is either a second
+  copy of that schematic (§11.1) or a bare alias — dead surface either way.
+
+  **One plan claim did not survive measurement and was corrected rather than quietly dropped.** The
+  plan asserted the M50b mitigation — that a misspelled `args` field is "a compile error in the
+  GENERATED project" — covered the `full-stack` `di: {}` string. It does not: TypeScript does NOT
+  apply excess-property checking to an object literal returned from a contextually-typed callback,
+  and the emitted call is `createFullStackAppFromConfig((config) => ({ … }))`. Probed against the
+  real type, `{ session: {…}, totallyBogusKey: {} }` in that position type-checks CLEANLY while the
+  identical literal assigned to an annotated variable raises `TS2353` — so type-checking
+  `setu.config.ts` would have passed whatever key the template emitted, and this template's
+  pre-existing `reactRouter`/`session` keys have the same exposure with no guard (recorded in
+  ROADMAP "Out of scope", not fixed here). The e2e now writes a probe module putting the arm in an
+  ANNOTATED position, verified to discriminate by renaming the starter's `di` arm and watching it
+  fail. Four other negative controls were each observed failing and reverted: removing the
+  `withDiPlugin` dedupe, emptying the minimal host's seams, dropping the refusal's alternative line,
+  and suppressing the full-stack `di` emission) — complete (PR #142)
 - **Milestone 38** (`docs/*` + `scripts/*` + `test/*` — documentation hub and tooling) — the
   documentation milestone: nine curated guides under [`docs/`](docs/) (getting-started,
   plugin-architecture, plugins, programmatic-api, decorators, custom-plugins, migration-nestjs,
@@ -1542,9 +1847,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
   `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
   published-artifact compat). No package source, manifest export, capability token, or plugin option
-  changed — complete (PR pending)
-- **Next milestone** — **M39** (docker/kubernetes), then M40. No milestone is queued behind those:
-  M37c, M54, and M55 have all shipped, closing the last entries on that list.
+  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the
+  final verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56),
+  derived OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all
+  postdate the guides' first draft — complete (PR pending)
+- **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
+  (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
+  ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of
+  the CLI parity work, so M62 (monorepos) is the remaining piece. M59 came from an external DX
+  review; note what that review got wrong, since the section says so and a reader should not
+  re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and that Workers
+  queues are still blocked (M52b shipped them). M60–M62 came from a measured audit after M58: a
+  project with all fourteen schematics generated type-checked clean while its entry points imported
+  exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable — that,
+  not breadth, was the distance from NestJS. **M60 has now closed eleven of the thirteen**, so M61
+  and M62 are the remaining CLI parity work: the optional-decorators/DI promise, and monorepos.
 
 ## Verification (run before declaring any work done)
 

@@ -9,8 +9,8 @@ import { deriveNames } from '../../../src/utils/names.ts';
 import { options } from './_shared.ts';
 
 describe('schematic registry', () => {
-  it('registers exactly thirteen built-in schematics', () => {
-    expect(listSchematics()).toHaveLength(13);
+  it('registers exactly fourteen built-in schematics', () => {
+    expect(listSchematics()).toHaveLength(14);
   });
 
   it('names the custom pseudo-schematic', () => {
@@ -29,7 +29,7 @@ describe('schematic registry', () => {
     }
   });
 
-  it('gates exactly the eight plugin-dependent schematics', () => {
+  it('gates exactly the nine plugin-dependent schematics', () => {
     const gated = listSchematics()
       .filter((s) => s.requiresPlugin !== undefined)
       .map((s) => s.name);
@@ -41,6 +41,7 @@ describe('schematic registry', () => {
       'health-indicator',
       'metric',
       'migration',
+      'module',
       'query-handler',
     ]);
   });
@@ -62,11 +63,33 @@ describe('schematic registry', () => {
     }
   });
 
-  it('every registered factory emits a distinct path', () => {
+  // Artifact paths only. Two schematics DO share one seam barrel by design —
+  // `command-handler` and `query-handler` both regenerate `src/cqrs/index.ts` from both
+  // name lists — so a blanket distinctness check would fail on a deliberate property.
+  // What must stay distinct is the artifact each schematic writes: two of those on one
+  // path would silently clobber.
+  it('every registered factory emits a distinct artifact path', () => {
     const paths = listSchematics().flatMap(({ name }) =>
-      getSchematic(name)!.factory(deriveNames('order-item'), options()).map((f) => f.path)
+      getSchematic(name)!
+        .factory(deriveNames('order-item'), options())
+        .filter((f) => f.managed !== true)
+        .map((f) => f.path)
     );
     expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it('shares a seam barrel only between the two cqrs schematics', () => {
+    const barrels = new Map<string, string[]>();
+    for (const { name } of listSchematics()) {
+      for (const file of getSchematic(name)!.factory(deriveNames('order-item'), options())) {
+        if (file.managed !== true) continue;
+        barrels.set(file.path, [...(barrels.get(file.path) ?? []), name]);
+      }
+    }
+    const shared = [...barrels].filter(([, owners]) => owners.length > 1);
+    expect(shared.map(([path, owners]) => [path, owners.sort()])).toEqual([
+      ['src/cqrs/index.ts', ['command-handler', 'query-handler']],
+    ]);
   });
 
   it('every registered factory emits TypeScript under src/', () => {

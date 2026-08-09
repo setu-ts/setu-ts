@@ -27,12 +27,15 @@ import {
   listTemplates,
   type LocalImport,
   type MiddlewareWiring,
-  MINIMAL_PLUGINS,
   type PackageImport,
   packagesOf,
+  type TemplateFeatures,
+  type TemplateHost,
   type TemplateManifest,
   type Wiring,
 } from '../templates/registry.ts';
+import { withDiPlugin } from '../templates/di.ts';
+import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { deriveNames } from '../utils/names.ts';
 import {
   findExisting,
@@ -75,6 +78,61 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
 }
 
 /**
+ * A {@linkcode TemplateHost} with every optional member filled in and the
+ * project's feature choices already applied.
+ *
+ * One normalization site rather than a `?? []` at each of nine read sites: the
+ * renderer and the manifest writer must agree about what the project contains,
+ * and a default applied in one of them and forgotten in the other is invisible
+ * until a generated project fails to compile.
+ */
+export interface ResolvedHost {
+  readonly plugins: readonly Wiring[];
+  readonly middleware: readonly MiddlewareWiring[];
+  readonly localImports: readonly LocalImport[];
+  readonly packageImports: readonly PackageImport[];
+  readonly files: readonly GeneratedFile[];
+  readonly pluginSpreads: readonly string[];
+  readonly setupCalls: readonly string[];
+  readonly appFactory?: AppFactoryWiring | undefined;
+  readonly manifest?: TemplateManifest | undefined;
+}
+
+/**
+ * Fills in a host's optional members and applies the project's feature choices.
+ *
+ * `--di` is applied HERE, once, so it cannot be honored by the renderer and
+ * missed by the manifest writer — the generated `setu.config.ts` would then
+ * import a package the project does not declare.
+ *
+ * Exported for its own unit test — not from the package barrel, exactly as
+ * {@linkcode firstDuplicatePath} is. Every host in the registry happens to
+ * declare `localImports` and `files`, so those two fallbacks are unreachable
+ * through `runNewCommand` today; they are not dead, because `TemplateHost`
+ * declares both optional and a future host may omit either.
+ *
+ * @param host - The selected template, or the no-template host
+ * @param features - The per-project choices parsed from the flags
+ * @returns The host with every member present
+ */
+export function resolveHost(host: TemplateHost, features: TemplateFeatures): ResolvedHost {
+  return {
+    // A starter-composed template owns its whole plugin set, so `--di` reaches
+    // it through the factory's options instead (see `fullStackArgs`). Appending
+    // here would be silently dropped by the renderer's factory branch.
+    plugins: host.appFactory === undefined ? withDiPlugin(host.plugins, features) : host.plugins,
+    middleware: host.middleware,
+    localImports: host.localImports ?? [],
+    packageImports: host.packageImports ?? [],
+    files: host.files ?? [],
+    pluginSpreads: host.pluginSpreads ?? [],
+    setupCalls: host.setupCalls ?? [],
+    appFactory: host.appFactory,
+    manifest: host.manifest,
+  };
+}
+
+/**
  * Renders the project's `setu.config.ts` — the single place its plugin list
  * lives.
  *
@@ -82,18 +140,25 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
  * and `setu` imports this module to discover plugin-contributed commands, so
  * importing it must never bind a socket.
  *
- * @param plugins - Plugins to pass to `createApplication`
- * @param middleware - Middleware to add after construction
+ * @param runtime - The selected runtime target
+ * @param host - The resolved template host
+ * @param features - The per-project choices, handed to a starter factory's args
  * @returns The `setu.config.ts` contents
  */
 function configModule(
   runtime: TargetRuntime,
-  plugins: readonly Wiring[],
-  middleware: readonly MiddlewareWiring[],
-  localImports: readonly LocalImport[] = [],
-  packageImports: readonly PackageImport[] = [],
-  appFactory?: AppFactoryWiring,
+  host: ResolvedHost,
+  features: TemplateFeatures,
 ): string {
+  const {
+    plugins,
+    middleware,
+    localImports,
+    packageImports,
+    appFactory,
+    pluginSpreads,
+    setupCalls,
+  } = host;
   // `common` is always imported for the return type, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.
@@ -130,6 +195,15 @@ function configModule(
       .join('\n')
   }\n`;
 
+  // Placed after the middleware block and before the hello-world route: the app must
+  // exist, and a generated route should be registered before the template's own `/`
+  // handler so route precedence reads top-to-bottom in the emitted file. Pipeline
+  // position is NOT affected by where a middleware is added — the kernel orders by
+  // priority — which is why the generated middleware loop passes one explicitly.
+  const setupLines = setupCalls.length === 0
+    ? ''
+    : `\n${setupCalls.map((line) => `  ${line}`).join('\n')}\n`;
+
   if (appFactory !== undefined) {
     // No hello-world route here: this application's routes come from its own
     // route module, and an exact '/' handler would take precedence over the
@@ -147,7 +221,7 @@ function configModule(
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
 ): Promise<IApplication> {
-  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime) ?? ''});
+  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime, features) ?? ''});
 ${middlewareLines}
   return app;
 }
@@ -158,9 +232,11 @@ ${middlewareLines}
   // no ambient environment on the edge, so `env` arrives as an argument of the
   // `fetch` handler and is threaded through the factory.
   const onWorkers = runtime === 'cloudflare-workers';
-  const pluginList = plugins
-    .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`)
-    .join('\n');
+  const pluginList = [
+    ...plugins
+      .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`),
+    ...pluginSpreads.map((spread) => `      ${spread},`),
+  ].join('\n');
 
   const factoryParam = onWorkers ? 'env: Readonly<Record<string, unknown>> = {}' : '';
   const envDoc = onWorkers
@@ -183,7 +259,7 @@ export function ${CONFIG_EXPORT}(${factoryParam}): IApplication {
 ${pluginList}
     ],
   });
-${middlewareLines}
+${middlewareLines}${setupLines}
   app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
 
   return app;
@@ -266,73 +342,56 @@ export default {
  * one entry per wiring, so the manifest can never omit a package the generated
  * source references.
  *
- * @param wirings - The template's plugin and middleware wirings
+ * @param host - The resolved template host
  * @returns Bare package names, deduplicated
  */
-function frameworkPackages(
-  extras: PackagesInput,
-  ...wirings: readonly (readonly Wiring[])[]
-): readonly string[] {
+function frameworkPackages(host: ResolvedHost): readonly string[] {
   // `common` is unconditional: the config module imports IApplication whichever
   // way it builds the app. `kernel` is not — a starter factory returns the
   // application, so `createApplication` is never imported on that path and
   // declaring the dependency would be a package the project never references.
   const packages = new Set<string>(['common']);
-  if (extras.appFactory === undefined) {
+  if (host.appFactory === undefined) {
     packages.add('kernel');
   } else {
-    packages.add(extras.appFactory.pkg);
+    packages.add(host.appFactory.pkg);
   }
-  for (const entry of extras.packageImports) packages.add(entry.pkg);
-  for (const pkg of packagesOf(...wirings)) packages.add(pkg);
+  for (const entry of host.packageImports) packages.add(entry.pkg);
+  // Reads the SAME resolved plugin list the renderer emits, so a `--di` project
+  // can never import `@setu-ts/di-plugin` without declaring it.
+  for (const pkg of packagesOf(host.plugins, host.middleware)) packages.add(pkg);
   return [...packages];
-}
-
-/** The template-supplied inputs to package and manifest resolution. */
-interface PackagesInput {
-  /** The starter factory, when the template composes through one. */
-  readonly appFactory?: AppFactoryWiring | undefined;
-  /** Packages needed beyond those the wirings name. */
-  readonly packageImports: readonly PackageImport[];
 }
 
 /**
  * Builds the Deno `imports` map for a generated project.
  *
- * @param wirings - The template's plugin and middleware wirings
+ * @param host - The resolved template host
  * @returns Specifier → `jsr:` URL
  */
-function jsrImports(
-  extras: PackagesInput,
-  manifest: TemplateManifest | undefined,
-  ...wirings: readonly (readonly Wiring[])[]
-): Record<string, string> {
+function jsrImports(host: ResolvedHost): Record<string, string> {
   const imports: Record<string, string> = {};
-  for (const pkg of frameworkPackages(extras, ...wirings)) {
+  for (const pkg of frameworkPackages(host)) {
     imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
-  return { ...imports, ...manifest?.denoImports };
+  return { ...imports, ...host.manifest?.denoImports };
 }
 
 /**
  * Builds the npm `dependencies` map for a generated project, using JSR's npm
  * compatibility names.
  *
- * @param wirings - The template's plugin and middleware wirings
+ * @param host - The resolved template host
  * @returns Specifier → `npm:@jsr/…` range
  */
-function npmDependencies(
-  extras: PackagesInput,
-  manifest: TemplateManifest | undefined,
-  ...wirings: readonly (readonly Wiring[])[]
-): Record<string, string> {
+function npmDependencies(host: ResolvedHost): Record<string, string> {
   const deps: Record<string, string> = {};
-  for (const pkg of frameworkPackages(extras, ...wirings)) {
+  for (const pkg of frameworkPackages(host)) {
     deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
   }
-  return { ...deps, ...manifest?.npmDependencies };
+  return { ...deps, ...host.manifest?.npmDependencies };
 }
 
 /**
@@ -388,28 +447,111 @@ function npmScripts(
   runtime: TargetRuntime,
   manifest?: TemplateManifest,
 ): Record<string, string> {
-  const start = runtime === 'bun' ? 'bun run main.ts' : 'node --experimental-strip-types main.ts';
-  return manifest?.npmDevDependencies === undefined
+  const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
+  return manifest?.npmBuildScript === undefined
     ? { start }
-    : { build: 'react-router build', start };
+    : { build: manifest.npmBuildScript, start };
 }
 
 /**
- * The npm manifest files a Deno or Workers project needs for a frontend build.
+ * The command a generated Node project runs its TypeScript entry with.
  *
- * Those targets carry a `deno.json` and no `package.json`, so a template with
- * an npm toolchain would otherwise have nowhere to declare it. Returns nothing
- * for a template that needs no npm packages, which is every template but one.
+ * NOT `node --experimental-strip-types`. Node's built-in TypeScript support
+ * ERASES types without transforming code, so it cannot run the decorated half
+ * of this framework: a legacy decorator is a bare
+ * `SyntaxError: Invalid or unexpected token`, and the constructor parameter
+ * property `setu generate module` emits is
+ * `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. `--experimental-transform-types` does
+ * not close it either — it handles the parameter property but still rejects the
+ * decorator, because it does not enable `experimentalDecorators`.
+ *
+ * Measured on Node v24: with `--experimental-strip-types` a scaffolded Node
+ * project boots until the first `setu generate service|controller|module`, and
+ * `--template nest` never boots at all. `tsx` runs all of them, reading the
+ * `experimentalDecorators` the generated `tsconfig.json` already sets.
+ */
+const NODE_RUNNER = 'tsx';
+
+/**
+ * npm packages a generated project needs because of its RUNTIME, not its
+ * template.
+ *
+ * Kept apart from {@linkcode TemplateManifest.npmDevDependencies}, which is a
+ * per-template concern, because this one is per-target: every Node project
+ * needs it and no Bun, Deno or Workers project does. Bun compiles TypeScript
+ * outright, and the Workers and Deno targets never invoke {@linkcode
+ * NODE_RUNNER}.
+ *
+ * @param runtime - The selected runtime target
+ * @returns devDependencies to merge, empty for every target but Node
+ */
+function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
+  // Node: see NODE_RUNNER — the start script invokes it, so it must be
+  // installed. Workers: `wrangler` is pinned rather than left to `npx`, which
+  // would otherwise fetch whatever is latest at that moment.
+  if (runtime === 'node') return { tsx: '^4.20.0' };
+  if (runtime === 'cloudflare-workers') return { wrangler: '^4.0.0' };
+  return {};
+}
+
+/**
+ * The npm manifest files a Deno or Workers project needs.
+ *
+ * Two independent reasons, and the second is unconditional:
+ *
+ * - **A template with a frontend build.** Those targets carry a `deno.json` and
+ *   no `package.json`, so an npm toolchain would otherwise have nowhere to be
+ *   declared. Only one template needs this.
+ * - **Cloudflare Workers, always.** `wrangler` bundles with esbuild, which
+ *   resolves neither `jsr:` specifiers nor a Deno import map, so every Workers
+ *   project needs its framework packages in a `package.json` regardless of
+ *   template.
+ *
+ * Returns nothing for any other Deno project.
  *
  * @param projectName - The project directory and manifest name
+ * @param runtime - The selected runtime target; Workers always gets a manifest
+ * @param host - The resolved host, read for the framework packages Workers pins
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The files to add, or an empty list
  */
 function standaloneNpmFiles(
   projectName: string,
+  runtime: TargetRuntime,
+  host: ResolvedHost,
   manifest?: TemplateManifest,
 ): readonly GeneratedFile[] {
-  if (manifest?.npmDevDependencies === undefined) return [];
+  // Keyed on the BUILD SCRIPT, not on the presence of dev dependencies: a Deno or
+  // Workers project needs an npm manifest only when it has an npm build to run.
+  // A template that declares dev dependencies for another reason (the `@std`
+  // packages the module schematic's emitted test imports, which reach Deno
+  // through the import map instead) must not acquire a package.json — that
+  // switches Deno to node_modules resolution.
+  // Workers ALWAYS needs one: `wrangler` bundles `src/index.ts` with esbuild,
+  // which resolves neither `jsr:` specifiers nor a Deno import map, so a project
+  // declaring its framework packages only in `deno.json` fails `wrangler dev`
+  // with one `Could not resolve "@setu-ts/…"` per package — while the CLI's own
+  // next-step hint already said `npm install && npx wrangler dev`. There was
+  // simply nothing to install. Deno is deliberately excluded: it resolves
+  // through the import map, and a package.json switches it to node_modules.
+  const onWorkers = runtime === 'cloudflare-workers';
+  if (manifest?.npmBuildScript === undefined && !onWorkers) return [];
+
+  const dependencies = {
+    ...(onWorkers ? npmDependencies(host) : {}),
+    ...manifest?.npmDependencies,
+  };
+  const devDependencies = {
+    // Through the same helper the Node branch uses, so runtime-level
+    // devDependencies have ONE home. Inlining Workers' here meant a package
+    // added to that helper would be silently ignored on this path.
+    ...runtimeDevDependencies(runtime),
+    ...manifest?.npmDevDependencies,
+  };
+  const scripts = {
+    ...(manifest?.npmBuildScript === undefined ? {} : { build: manifest.npmBuildScript }),
+    ...(onWorkers ? { dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+  };
 
   return [
     {
@@ -421,17 +563,21 @@ function standaloneNpmFiles(
             version: '0.1.0',
             private: true,
             type: 'module',
-            scripts: { build: 'react-router build' },
-            ...(manifest.npmDependencies === undefined
-              ? {}
-              : { dependencies: { ...manifest.npmDependencies } }),
-            devDependencies: { ...manifest.npmDevDependencies },
+            // Emitted unconditionally: this function returns early unless the
+            // target is Workers or the template has an npm build, and both of
+            // those always contribute a script, a dependency and a devDependency.
+            // Guarding each one added three branches no combination can reach.
+            scripts,
+            dependencies,
+            devDependencies,
           },
           null,
           2,
         )
       }\n`,
     },
+    // JSR packages resolve from npm only when the @jsr scope is mapped.
+    ...(onWorkers ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }] : []),
     {
       path: 'tsconfig.json',
       contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
@@ -440,29 +586,22 @@ function standaloneNpmFiles(
 }
 
 /**
- * Builds the file set for one runtime target and plugin set.
+ * Builds the file set for one runtime target and host.
  *
  * @param projectName - The project directory and manifest name
  * @param runtime - The selected runtime target
- * @param plugins - Plugins the generated `setu.config.ts` registers
- * @param middleware - Middleware the generated `setu.config.ts` adds
- * @param localImports - Project-local imports the config module needs, for a
- * template whose plugin arguments name a class it also emits
- * @param extras - Extra template source files, appended to the fixed set
+ * @param host - The resolved template host: its plugins, middleware, imports,
+ * extra source files, and manifest additions
+ * @param features - The per-project choices, threaded to the config renderer
  * @returns The files to create, relative to the project root
  */
 function projectFiles(
   projectName: string,
   runtime: TargetRuntime,
-  plugins: readonly Wiring[],
-  middleware: readonly MiddlewareWiring[],
-  localImports: readonly LocalImport[] = [],
-  extras: readonly GeneratedFile[] = [],
-  packageImports: readonly PackageImport[] = [],
-  appFactory?: AppFactoryWiring,
-  manifest?: TemplateManifest,
+  host: ResolvedHost,
+  features: TemplateFeatures,
 ): readonly GeneratedFile[] {
-  const packagesInput: PackagesInput = { appFactory, packageImports };
+  const manifest = host.manifest;
   const readme = `# ${projectName}
 
 A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
@@ -507,7 +646,7 @@ ${PROGRAM_NAME} generate --help
             // The decorator and OpenAPI plugins ship legacy decorators, so a
             // generated @Controller class only type-checks with this enabled.
             compilerOptions: { experimentalDecorators: true },
-            imports: jsrImports(packagesInput, manifest, plugins, middleware),
+            imports: jsrImports(host),
           },
           null,
           2,
@@ -519,7 +658,7 @@ ${PROGRAM_NAME} generate --help
     // needs one — a frontend build — gets a standalone file rather than a
     // merge. Framework packages stay in the import map above; only the
     // template's own npm dependencies appear here.
-    const npmFiles = standaloneNpmFiles(projectName, manifest);
+    const npmFiles = standaloneNpmFiles(projectName, runtime, host, manifest);
     for (const file of npmFiles) files.push(file);
   } else {
     files.push({
@@ -531,10 +670,13 @@ ${PROGRAM_NAME} generate --help
             version: '0.1.0',
             type: 'module',
             scripts: npmScripts(runtime, manifest),
-            dependencies: npmDependencies(packagesInput, manifest, plugins, middleware),
-            ...(manifest?.npmDevDependencies === undefined
-              ? {}
-              : { devDependencies: { ...manifest.npmDevDependencies } }),
+            dependencies: npmDependencies(host),
+            // Runtime-level first, so a template that pins its own copy of the
+            // same package wins — the template knows what its build needs.
+            ...(() => {
+              const dev = { ...runtimeDevDependencies(runtime), ...manifest?.npmDevDependencies };
+              return Object.keys(dev).length === 0 ? {} : { devDependencies: dev };
+            })(),
           },
           null,
           2,
@@ -551,7 +693,7 @@ ${PROGRAM_NAME} generate --help
 
   files.push({
     path: CONFIG_MODULE,
-    contents: configModule(runtime, plugins, middleware, localImports, packageImports, appFactory),
+    contents: configModule(runtime, host, features),
   });
 
   if (runtime === 'cloudflare-workers') {
@@ -587,7 +729,7 @@ compatibility_flags = ["nodejs_compat"]
 
   // Template source files last. Any path colliding with the fixed set above is
   // reported by the caller's overwrite check rather than silently winning.
-  for (const extra of extras) {
+  for (const extra of host.files) {
     files.push({ path: extra.path, contents: extra.contents });
   }
 
@@ -629,8 +771,8 @@ export async function runNewCommand(
   args: ParsedArgs,
   deps: NewDependencies,
 ): Promise<number> {
-  const usage =
-    `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] [--runtime <target>] [--dir <path>]`;
+  const usage = `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] ` +
+    `[--runtime <target>] [--di] [--dir <path>]`;
 
   // `--help` is never an error.
   if (args.flags['help'] === true || args.flags['h'] === true) {
@@ -645,6 +787,7 @@ export async function runNewCommand(
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
+    deps.log('  --di                Register DiPlugin, so @Injectable classes get a container');
     deps.log('  --dir <path>        Create the project under this directory');
     deps.log('  --dry-run           Print what would be created, write nothing');
     return EXIT_OK;
@@ -684,8 +827,13 @@ export async function runNewCommand(
     return EXIT_USAGE;
   }
 
-  const plugins = template?.plugins ?? MINIMAL_PLUGINS;
-  const middleware = template?.middleware ?? [];
+  // Read once, here, so the flag cannot be honored by one renderer and ignored
+  // by another. `--di` is boolean: it is absent from VALUE_FLAGS, so `parseArgs`
+  // records it as `true` rather than consuming the next token.
+  const features: TemplateFeatures = { di: args.flags['di'] === true };
+  // The no-template path is a HOST like any other — that is what gives a bare
+  // project the seams needing no plugin, so `setu generate route` lands wired.
+  const host = resolveHost(template ?? MINIMAL_HOST, features);
 
   const projectName = deriveNames(rawName).kebab;
   if (projectName === '') {
@@ -694,17 +842,7 @@ export async function runNewCommand(
   }
 
   const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), projectName);
-  const planned = projectFiles(
-    projectName,
-    runtime,
-    plugins,
-    middleware,
-    template?.localImports ?? [],
-    template?.files ?? [],
-    template?.packageImports ?? [],
-    template?.appFactory,
-    template?.manifest,
-  );
+  const planned = projectFiles(projectName, runtime, host, features);
 
   // A template file whose path collides with the fixed set would otherwise be
   // written twice, last one winning, with nothing reported — the overwrite

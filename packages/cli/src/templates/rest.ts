@@ -5,6 +5,21 @@
  */
 
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
+import {
+  MODULE_SEAM_FILES,
+  MODULE_SEAM_LOCAL_IMPORT,
+  MODULE_SEAM_MANIFEST,
+  withModuleSeam,
+} from './module-seam.ts';
+import {
+  decoratorSeamExtras,
+  seamFiles,
+  seamLocalImports,
+  seamPluginSpreads,
+  seamSetupCalls,
+  seamsFor,
+  withPluginOptionSeams,
+} from './seam.ts';
 
 /**
  * Always first: the kernel makes the `runtime` capability mandatory at `start()`.
@@ -39,6 +54,20 @@ export const REST_PLUGINS: readonly Wiring[] = [
 ];
 
 /**
+ * The `@setu-ts` packages the REST set registers, for seam selection.
+ *
+ * Derived from {@linkcode REST_PLUGINS} rather than listed again, so a plugin added
+ * there cannot be missed here — which would silently omit the seam that plugin hosts.
+ */
+const REST_PACKAGES: ReadonlySet<string> = new Set(REST_PLUGINS.map((p) => p.pkg));
+
+/** The generated-artifact seams a REST project can consume. */
+export const REST_SEAMS: ReturnType<typeof seamsFor> = seamsFor(REST_PACKAGES);
+
+/** The standalone controller and service barrels the decorator wiring must also name. */
+const REST_DECORATOR_EXTRAS = decoratorSeamExtras(REST_SEAMS);
+
+/**
  * Middleware added with `app.middleware.add(...)`.
  *
  * Kept separate from the plugin list because `@setu-ts/exceptions`
@@ -51,7 +80,7 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
   // sits inside every middleware these templates register — metrics (20),
   // ip-security (120), request-size (180), cors (200), security-headers (250),
   // csrf (270), plus telemetry (30) in the microservice set — so a throw from any
-  // of them escapes to the adapter backstop: a bare 500 with no RFC 7807 body and
+  // of them escapes to the adapter backstop: a bare 500 with no error body and
   // no error log. Nothing first-party registers at or below 0, so this slot is
   // unambiguous rather than merely early.
   { pkg: 'exceptions', symbol: 'errorHandler', addOptions: { priority: 0, name: 'error-handler' } },
@@ -59,7 +88,7 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 
 /**
  * `rest` — an opinionated REST API: configuration, logging, validation,
- * security headers, health probes, metrics, OpenAPI, and RFC 7807 errors.
+ * security headers, health probes, metrics, OpenAPI, and structured errors.
  *
  * `database-plugin` and `auth-plugin` are deliberately absent despite the
  * ROADMAP's REST starter listing them: both need real credentials before they
@@ -71,7 +100,19 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 export const REST_TEMPLATE: TemplateDefinition = {
   name: 'rest',
   description: 'REST API — config, logging, validation, security, health, metrics, OpenAPI',
-  plugins: REST_PLUGINS,
+  plugins: withPluginOptionSeams(
+    withModuleSeam(
+      REST_PLUGINS,
+      REST_DECORATOR_EXTRAS.controllers,
+      REST_DECORATOR_EXTRAS.services,
+    ),
+    REST_SEAMS,
+  ),
   middleware: REST_MIDDLEWARE,
+  localImports: [MODULE_SEAM_LOCAL_IMPORT, ...seamLocalImports(REST_SEAMS)],
+  files: [...MODULE_SEAM_FILES, ...seamFiles(REST_SEAMS)],
+  manifest: MODULE_SEAM_MANIFEST,
+  pluginSpreads: seamPluginSpreads(REST_SEAMS),
+  setupCalls: seamSetupCalls(REST_SEAMS),
   unsupported: {},
 };

@@ -1,8 +1,11 @@
 /**
- * Internal interfaces and types for the metrics plugin.
+ * Interfaces and types for the metrics plugin.
  *
- * This barrel is intentionally NOT exported from `src/index.ts` — it is an
- * internal seam used only by metrics-plugin implementation files.
+ * Mostly an internal seam used only by metrics-plugin implementation files. Two
+ * members are re-exported from `src/index.ts` and are therefore public:
+ * `MetricsPluginOptions`, and `NamedMetricConfig` — which its `customMetrics` member is
+ * typed as, so without it that option could not be named by a consumer at all.
+ * `MetricSnapshot`, `MetricValue` and `SummaryWindowConfig` remain internal.
  *
  * @module
  */

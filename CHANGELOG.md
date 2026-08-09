@@ -6,6 +6,346 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Decorators and DI are independently selectable in the generator** (M61). AI_GUIDELINES states
+  that decorators are optional, DI is optional, and that no feature requires either — but the CLI
+  offered one coarse control. No template gave you neither and refused `g controller`/`g module`;
+  `rest`/`microservice` gave decorators without a container; only `nest` gave both, along with a
+  worked NestJS-style example you may not have wanted.
+
+  `setu new --di` adds `DiPlugin` to any template, so a container is now a choice of its own:
+
+  ```bash
+  setu new app --di                       # a container, no decorators
+  setu new app --template rest --di       # decorators and a container
+  setu new app --template nest --di       # a no-op — nest already registers DiPlugin
+  ```
+
+  It changes the composition, never the generated source: `DecoratorPlugin` branches on the
+  container's presence, so the same `@Injectable` class works either way and what changes is the
+  lifecycle it gets. On `--template full-stack` the flag reaches the starter's own `di` arm rather
+  than a plugin wiring, because a starter-composed template owns its whole plugin set. Adding it to
+  a template that already registers `DiPlugin` is deliberately a no-op — the kernel refuses a
+  duplicate plugin name at `start()`, so a second registration would scaffold a project that
+  type-checks and then cannot boot.
+
+- **`setu generate route` is now a first-class decorator-free path.** A project scaffolded with no
+  template registers the runtime plugin alone, so `g route` is the only HTTP handler it can generate
+  — and it used to land unwired: the schematic wrote `src/routes/<name>.routes.ts` and a
+  `src/routes/index.ts` barrel while the generated `setu.config.ts` imported neither, so the route
+  answered `404` until you edited the config by hand. The no-template path is now a seam host for
+  the three families that need no plugin (`route`, `middleware`, `plugin`), so a generated route,
+  middleware or plugin is wired from scaffold time exactly as it is under `--template rest`.
+
+  Existing projects are unaffected — nothing rewrites a scaffolded `setu.config.ts`. Each barrel's
+  header states the two lines to add; add them once and every later generate is wired.
+
+- **Generated code is now wired** (M60). `setu generate` emitted fourteen artifacts and exactly one
+  of them — the M58 domain module — reached a registration site. The other thirteen compiled and did
+  nothing: `g service` emitted a class nothing constructed, `g health-indicator` an indicator
+  nothing registered, `g command-handler` a handler no bus dispatched to. Eleven now reach a
+  registration site with no edit to a file you own, and three are documented as having none.
+
+  Each wired schematic emits its artifact plus a CLI-owned `index.ts` seam barrel for its family,
+  and the `rest`, `microservice` and `nest` templates scaffold a `setu.config.ts` that already
+  imports every barrel they can consume. See PUBLIC_API "Generated code is wired" for the
+  per-schematic table.
+
+  ```bash
+  setu new shop --template microservice
+  setu g health-indicator external-api --dir shop   # appears in GET /health
+  setu g metric orders-placed --dir shop            # appears in GET /metrics at boot
+  setu g command-handler create-user --dir shop     # the command bus dispatches to it
+  ```
+
+  `guard`, `job` and `migration` are deliberately unwired, and their emitted JSDoc now names the
+  real call instead of implying a site is waiting: a guard belongs on one route (a global one would
+  answer `401` for `/health`), a job's transport is a choice between `queue.process` and the
+  scheduler that the artifact cannot make for you, and nothing in the framework reads migration
+  files — there is no `setu db:migrate`.
+
+- **`CqrsPluginOptions.commandHandlers` / `.queryHandlers`, and `EventsPluginOptions.handlers`** —
+  declarative handler registration, as `{ type, handler }` pairs. Pure additions: omitting them
+  behaves exactly as before. The events option subscribes through the same exported
+  `subscribeHandler` a caller would use by hand, so the two routes cannot diverge. Needed because
+  `IApplication` exposes no lifecycle hook, so application code has no phase in which to reach a bus
+  that does not exist until its plugin has registered. `CommandHandlerRegistration`,
+  `QueryHandlerRegistration` and `EventHandlerRegistration` are exported alongside them.
+
+- **`NamedMetricConfig` is exported from `@setu-ts/metrics-plugin`.**
+  `MetricsPluginOptions.customMetrics` is typed as an array of it, so without the export that option
+  could take an inline literal but a caller could not declare its own array in a variable.
+
+- **`CqrsPlugin` and `EventsPlugin` join `setu new --template microservice`.** Both are in-memory
+  and construct with no configuration, so the tier's rule that a scaffolded plugin needs no
+  credentials holds, and neither needs a socket so the Cloudflare Workers refusal is unchanged. They
+  are also the only host a scaffolded project can have for `g command-handler`, `g query-handler`
+  and `g event-handler`, all three of which were gated on plugins no template installed.
+
+### Fixed
+
+- **`setu new --runtime cloudflare-workers` produced a project that could not be built or
+  deployed.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
+  specifiers nor a Deno import map — and the Workers target declared its framework packages only in
+  `deno.json`, emitting no `package.json` and no `.npmrc`. So the flow the CLI itself prints,
+  `npm install && npx wrangler dev`, failed with one `Could not resolve "@setu-ts/…"` per package.
+  There was nothing to install.
+
+  Workers projects now also emit `package.json` (the npm-compat `@jsr/…` dependencies, plus
+  `wrangler` pinned in `devDependencies` and `dev`/`deploy` scripts) and `.npmrc`. Verified against
+  real workerd through `wrangler dev`: a scaffolded project serves `/`, `/health`, `/metrics`, and
+  every generated route, controller and module. The Deno target deliberately still gets no
+  `package.json` — that would switch it to node_modules resolution.
+
+  **Existing Workers projects are not rewritten.** Add a `package.json` declaring the same
+  `@setu-ts/*` packages your `deno.json` lists, using their `npm:@jsr/setu-ts__<name>` form, plus an
+  `.npmrc` containing `@jsr:registry=https://npm.jsr.io`.
+
+- **`setu new --runtime node` could not run any decorated code.** Generated Node projects started
+  with `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases
+  types without transforming code — so a legacy decorator was a bare
+  `SyntaxError: Invalid or unexpected token`, and the constructor parameter property
+  `setu generate module` emits was `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. In practice a scaffolded
+  Node project booted until the first `setu generate service`, `generate controller` or
+  `generate module`, and `setu new --template nest --runtime node` never booted at all. Deno, Bun
+  and Cloudflare Workers were unaffected.
+
+  Node projects now declare `tsx` in `devDependencies` and start with `tsx main.ts`, which reads the
+  `experimentalDecorators` the generated `tsconfig.json` already sets.
+  `--experimental-transform-types` was evaluated and rejected: it handles the parameter property but
+  still refuses the decorator, because it does not enable `experimentalDecorators`. No other target
+  carries the dependency — Bun compiles TypeScript outright, and Deno and Workers never invoke it.
+
+  **Existing Node projects are not rewritten.** To pick this up, add `tsx` to your `devDependencies`
+  and change the `start` script from `node --experimental-strip-types main.ts` to `tsx main.ts`.
+
+### Changed
+
+- **The `controller` and `module` gate refusals now name `setu generate route`** as the
+  decorator-free alternative. The gate itself is unchanged (those schematics emit `@Controller`, so
+  an ungated project would get source whose own import cannot resolve), but refusing with only
+  "install `@setu-ts/decorator-plugin`" read as though decorators were required to serve HTTP, which
+  is the opposite of what the framework promises.
+
+  ```
+  The "controller" schematic requires @setu-ts/decorator-plugin, which is not installed in /path/to/app.
+  Install it, then run this command again.
+  Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
+  ```
+
+- **`setu generate plugin` now writes `src/plugins/<name>.plugin.ts`**, not `src/plugins/<name>.ts`.
+  The seam barrel is regenerated from a directory scan, and a suffix of `.ts` would admit any module
+  you hand-wrote in that folder — the barrel would then import a `<Pascal>Plugin` symbol you never
+  wrote, and your project would fail to compile naming a file you never generated. Existing
+  generated files are untouched; only new generates take the new path.
+
+- **`setu generate service` emits an `@Injectable` when `@setu-ts/decorator-plugin` is installed**,
+  registered under the token `<name>-service` and listed in `src/services/index.ts`. Without that
+  package the output is unchanged, byte for byte, and the schematic stays **ungated** — so it keeps
+  working in a project with no plugins at all.
+
+- **An artifact generated before its family gained a second export is skipped and reported**, rather
+  than listed in a barrel that cannot compile. `middleware` gained a
+  `<SCREAMING>_MIDDLEWARE_PRIORITY` constant and `metric` a `<SCREAMING>_METRIC` declaration in this
+  release; an artifact generated earlier has the right filename and lacks that export, so a barrel
+  regenerated over it named a symbol the file did not have and the project stopped compiling — from
+  a command that reported success. The scan now admits a file only when it exports everything the
+  barrel will name, prints what it skipped and why, and tells you to regenerate. The same rule keeps
+  a hand-written module in a scanned directory out of the barrel.
+
+- **`setu generate` refuses a name that would collide with an existing artifact** (exit `1`), naming
+  the conflict and the consequence. `route`, `controller` and `module` all mount `/<name>`, and the
+  kernel's router keys routes by method and path — so a duplicate silently overwrites and one
+  artifact becomes unreachable. `service` and `module` both register
+  `@Injectable({ token: '<name>-service' })`, and the decorator plugin keeps the first class under a
+  token — so the wrong service would be injected, which was observed as a `500` on every request to
+  the affected module. Both checks apply only when `decorator-plugin` is installed, since neither
+  collision can exist without it.
+
+- **Fixed: `setu generate controller` emitted a controller that answered 500 on every request.**
+  `DecoratorPlugin` builds a handler's argument list from parameter metadata alone and never passes
+  the request context positionally, so the emitted `list(ctx: IRequestContext)` received `undefined`
+  and threw on the first `ctx.response`. Handlers now take only decorated parameters and return
+  plain values, which the plugin serializes as JSON; `create` takes `@Body()`. The `201` on create
+  is gone rather than faked — a decorated handler cannot set a status code, so a handler that needs
+  the context belongs on `app.router.get(...)` (`setu generate route`).
+
+  Regenerate any controller produced by an earlier release, or drop its `ctx` parameter and return a
+  plain value. Shipped alongside the module schematic below because it is the same package and the
+  same one-line class of defect.
+
+- **`setu generate module <name>` scaffolds a whole domain sub-module and wires it in** (M58),
+  instead of requiring `g controller` + `g service` plus a hand edit of `setu.config.ts`. Emits an
+  `@Injectable` service, a `@Controller` injecting it by token, a service test, a per-module barrel,
+  and a regenerated aggregate barrel at `src/modules/index.ts` exporting `MODULE_CONTROLLERS` /
+  `MODULE_SERVICES`. The `rest`, `microservice` and `nest` templates now scaffold a `setu.config.ts`
+  that already imports both and passes them to `DecoratorPlugin`, so nothing the developer owns is
+  ever edited by the CLI.
+
+  ```bash
+  setu new shop --template rest
+  setu g module orders --dir shop   # wired; no edit to setu.config.ts
+  ```
+
+  Gated on `@setu-ts/decorator-plugin`, like `g controller`. `--template full-stack` is not a host:
+  its layering is `routes → features → services` and it has no `src/modules/` concept. A project
+  scaffolded before this release adds the barrel import once; every later `g module` is automatic.
+
+  A directory counts as a module only when it holds both canonical files, so an unrelated folder
+  under `src/modules/` is skipped instead of producing a barrel that imports files which do not
+  exist. The host templates declare `@std/testing` and `@std/expect` (a `deno.json` import on
+  Deno/Workers, an `npm:@jsr/std__*` alias on Node/Bun), so the emitted test runs with no further
+  setup.
+
+  `GeneratedFile` gains an optional `managed` flag and `SchematicOptions` an optional `modules`
+  list. Both are additive — existing custom schematics compile unchanged. A managed file is exempt
+  from the overwrite refusal, which previously covered every path without exception; only
+  `src/modules/index.ts` is managed today, and the exemption is per file rather than a `--force`
+  flag so a mistyped `g service` still cannot clobber hand-written work.
+
+- **The OpenAPI document can be derived from the guards that enforce authentication** (M57), instead
+  of requiring every route to declare a requirement a second time. `@setu-ts/common` gains a
+  `SECURITY_METADATA` symbol, a `RouteSecurityMetadata` type, and the pure `withSecurityMetadata` /
+  `securityMetadataOf` helpers; every guard `@setu-ts/auth-plugin` ships is branded with them, and
+  `@setu-ts/openapi-plugin` reads the brand off a route's middleware.
+
+  ```typescript
+  app.register(OpenApiPlugin({
+    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+    deriveSecurity: { scheme: 'bearerAuth' },
+  }));
+
+  app.router.get('/todos/:id', { middleware: [requireAuth()], handler }); // → requires bearerAuth
+  app.router.post('/login', { middleware: [publicRoute()], handler }); // → public
+  ```
+
+  **Opt-in and non-breaking.** Without `deriveSecurity` nothing is derived and the document is
+  byte-identical, and a requirement declared on `schema.security` always wins over a derived one.
+  The brand is symbol-keyed and non-enumerable, so guard identity and behaviour are unchanged;
+  `Symbol.for` is used so two copies of `common` in one process resolve the same key.
+
+  Three limits are documented rather than left to discovery: only route-level middleware is
+  inspected (`app.middleware.add()` is invisible to a route, which is correct for `authMiddleware()`
+  — it populates the principal and never rejects); roles and permissions cannot be expressed,
+  because an OpenAPI requirement names a scheme and none can be inferred from `'admin'`; and the
+  scheme name is configured rather than inferred, with an undeclared name refused at `register()`.
+
+- **`RouteSchema.security` and a document-level `security` option describe which operations need
+  authentication.** `@setu-ts/openapi-plugin` accepted `securitySchemes` and emitted them under
+  `components`, but nothing ever declared a **requirement** — `OpenApiOperation.security` existed in
+  the generator's types with no assignment anywhere — so no operation was marked protected and
+  generated clients had no signal that a route needed a token.
+
+  `RouteSchema` in `@setu-ts/common` gains an optional `security`, alongside the `tags` and
+  `summary` it already carried, plus a new exported `SecurityRequirement` type. The addition is
+  optional, so existing routes and existing implementors are unaffected.
+
+  ```typescript
+  app.register(OpenApiPlugin({
+    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    security: [{ bearerAuth: [] }], // document-level default
+  }));
+
+  app.router.post('/login', { schema: { security: [] }, handler }); // explicitly public
+  ```
+
+  An **empty** `security` array is meaningful and is not the same as omitting the field: per the
+  OpenAPI specification it declares the operation public, which is how a route opts out of the
+  document-level default. Omitting the field leaves the operation inheriting it. Declaring this
+  enforces nothing — authentication is still enforced by middleware and guards; this describes the
+  route for documentation and client generation.
+
+- **`OpenApiPluginOptions.exclude` keeps operational endpoints out of the document.** Paths are
+  matched exactly against the fully-resolved router pattern — router-style (`/todos/:id`, not the
+  OpenAPI template `/todos/{id}`) and including any `router.group()` prefix — and every method on a
+  matched path is omitted.
+
+- **`@Public` reaches the OpenAPI document.** A decorated route marked public is now documented with
+  an empty `security` array, so it opts out of a document-level requirement. Without this the
+  opt-out was reachable only from a programmatic `schema`, and a decorated login route would have
+  been documented as requiring the token it issues. `@Roles`/`@Permissions` are deliberately not
+  mapped: a role is not a security scheme, and no declared scheme can be inferred from one.
+
+- **A `security` requirement naming an undeclared scheme is refused at `register()`,** naming the
+  offending scheme and the declared ones. Emitting it produced a document that is invalid per the
+  specification — Swagger UI renders a lock on every operation with no Authorize button to satisfy
+  it, and strict validators and client generators reject it — while the spec endpoint still answered
+  `200`, so nothing downstream could detect it.
+
+### Fixed
+
+- **The OpenAPI document no longer lists its own delivery endpoints.** `GET /openapi.json` and
+  `GET /docs` were generated as API operations, so every consumer of the spec — Swagger UI readers
+  and generated clients alike — was handed the documentation machinery as part of the API. Both are
+  now excluded automatically, honoring `endpoint`/`specEndpoint` when they are customized. The
+  routes are still served; only the document entries are gone.
+
+- **Path parameters are typed as strings instead of rendering as `any`.** A path parameter with no
+  entry in the route's `params` schema was emitted as `schema: {}`, which OpenAPI reads as "any
+  type" — Swagger UI rendered an untyped box and client generators produced `unknown` arguments.
+  Every path segment arrives as a string, so an undescribed path parameter now defaults to
+  `{ type: 'string' }`. A declared `params` schema still wins, per parameter.
+
+### Changed
+
+- **Problem Details move from RFC 7807 to RFC 9457** (M56). RFC 7807 was obsoleted by
+  [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) in July 2023, and the framework advertised
+  the withdrawn specification in two packages, a public format alias, an exported symbol in each,
+  the three starters, and every documentation site.
+
+  `@setu-ts/exceptions` and `@setu-ts/validation-plugin` each gain an `'rfc9457'` format arm and an
+  `rfc9457Formatter` export. `'rfc7807'` and `rfc7807Formatter` are **deprecated, not removed**
+  (AI_GUIDELINES §9.2), and are scheduled for removal in v1.0.0.
+
+  RFC 9457 changed very little on the wire — Appendix D lists three changes, none touching the five
+  core members or the `application/problem+json` media type — so the bodies were already
+  structurally valid. One 7807-era habit did need correcting, and that is the only behavior change
+  here.
+
+  > **⚠️ Breaking: `type` is now `about:blank` for status-only problems.** `@setu-ts/exceptions`
+  > previously minted a URI from the status code for every error (`https://setu-ts.dev/errors/404`),
+  > which identifies nothing the `status` member does not already carry. RFC 9457 §4.2 registers
+  > `about:blank` for precisely that case, and that is what the `'rfc9457'` format now emits.
+  > Clients matching on `type` to distinguish errors should read `status` instead. The one error
+  > carrying an extension member, `validationError()`, keeps a concrete type URI —
+  > `https://setu-ts.dev/errors/validation`, the same URI `@setu-ts/validation-plugin` emits for the
+  > same problem type.
+  >
+  > ```jsonc
+  > // Before                                   After
+  > { "type": "https://setu-ts.dev/errors/404", { "type": "about:blank",
+  >   "title": "Not Found",                       "title": "Not Found",
+  >   "status": 404,                              "status": 404,
+  >   "detail": "User 42 does not exist" }        "detail": "User 42 does not exist" }
+  > ```
+  >
+  > Two escape hatches, in order of preference: read `status`, which is what it is for; or keep the
+  > deprecated `format: 'rfc7807'`, which is **unchanged** and still emits the status-derived URI —
+  > a deprecated symbol must not silently change behavior (§9.4).
+
+  `@setu-ts/validation-plugin` has **no wire change at all**: its `type` was always a semantic URI
+  rather than a status-derived one, so `rfc7807Formatter` there is a deprecated alias bound to the
+  same object and the emitted body is byte-identical.
+
+  The three starters (`rest`, `microservice`, `full-stack`) now compose `errorHandler` with
+  `format: 'rfc9457'`, so an application built on one of them picks up the new `type` on upgrade.
+  Applications wiring `errorHandler` themselves are unaffected until they change the format string.
+
+### Fixed
+
+- **The Problem Details media type survives a second formatter.** Both packages keyed
+  `application/problem+json` off a single formatter **reference**, so that passing a formatter
+  directly (`format: rfc9457Formatter`) agreed with passing the alias (`format: 'rfc9457'`). Adding
+  a second formatter to that check without generalizing it would have served a Problem Details body
+  as `application/json` — which generic problem-details clients ignore — while the string alias
+  tested fine. The check is now a membership test over every Problem Details formatter, covered by
+  tests that drive each spelling **by reference**.
+
+- **`ARCHITECTURE.md` documented a `type` URI the code never emitted.** The Problem Details example
+  showed `https://setu-ts.dev/errors/not-found`; the formatter emitted
+  `https://setu-ts.dev/errors/404`. Corrected along with the rest of the section.
+
 ## [0.1.0-alpha.5] — 2026-08-08
 
 **This release renames the project and moves every package to a new JSR scope.** It is the first

@@ -6,7 +6,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { z } from 'npm:zod@^3.24.0';
-import type { RouteInfo } from '@setu-ts/common';
+import type { MiddlewareFunction, RouteInfo } from '@setu-ts/common';
+import { withSecurityMetadata } from '@setu-ts/common';
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
 
 describe('OpenApiGenerator', () => {
@@ -604,4 +605,336 @@ describe('OpenApiGenerator', () => {
       expect(Object.keys(result.components?.schemas || {})).toContain('CustomSchema');
     });
   });
+
+  describe('path parameter schemas', () => {
+    it('should type an undeclared path parameter as a string, not as any', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([route('GET', '/users/:id')]);
+
+      const params = result.paths['/users/{id}']?.get?.parameters;
+      expect(params).toEqual([
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+      ]);
+    });
+
+    it('should still prefer the declared params schema over the string default', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([
+        route('GET', '/users/:id', { params: z.object({ id: z.string().uuid() }) }),
+      ]);
+
+      const params = result.paths['/users/{id}']?.get?.parameters;
+      expect(params?.[0]?.schema).toEqual({ type: 'string', format: 'uuid' });
+    });
+
+    it('should give each parameter its OWN default schema object', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([route('GET', '/a/:x'), route('GET', '/b/:y')]);
+
+      const first = result.paths['/a/{x}']?.get?.parameters?.[0]?.schema;
+      const second = result.paths['/b/{y}']?.get?.parameters?.[0]?.schema;
+
+      // `OpenApiSchemaObject` declares mutable fields and `OpenApiDocument` is
+      // public API, so a consumer post-processing the document may assign to a
+      // parameter schema. A shared constant would alias every path parameter
+      // in the process; a frozen one would throw on a legitimate write.
+      expect(first).not.toBe(second);
+      expect(Object.isFrozen(first)).toBe(false);
+
+      (first as { type?: string }).type = 'integer';
+      expect(second).toEqual({ type: 'string' });
+    });
+
+    it('should default only the parameters the params schema omits', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([
+        route('GET', '/orgs/:orgId/users/:userId', {
+          params: z.object({ orgId: z.number() }),
+        }),
+      ]);
+
+      const params = result.paths['/orgs/{orgId}/users/{userId}']?.get?.parameters;
+      expect(params?.[0]).toEqual({
+        name: 'orgId',
+        in: 'path',
+        required: true,
+        schema: { type: 'number' },
+      });
+      expect(params?.[1]).toEqual({
+        name: 'userId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+      });
+    });
+  });
+
+  describe('exclude', () => {
+    it('should omit an excluded path from the document', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+        exclude: ['/openapi.json', '/docs'],
+      });
+
+      const result = generator.generate([
+        route('GET', '/users'),
+        route('GET', '/openapi.json'),
+        route('GET', '/docs'),
+      ]);
+
+      expect(Object.keys(result.paths)).toEqual(['/users']);
+    });
+
+    it('should omit every method registered on an excluded path', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+        exclude: ['/internal'],
+      });
+
+      const result = generator.generate([
+        route('GET', '/internal'),
+        route('POST', '/internal'),
+        route('DELETE', '/internal'),
+      ]);
+
+      expect(result.paths).toEqual({});
+    });
+
+    it('should match the registered router path, not the OpenAPI template', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+        exclude: ['/users/:id'],
+      });
+
+      const result = generator.generate([route('GET', '/users/:id'), route('GET', '/users')]);
+
+      expect(Object.keys(result.paths)).toEqual(['/users']);
+    });
+
+    it('should keep every path when no exclusions are configured', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([route('GET', '/users'), route('GET', '/docs')]);
+
+      expect(Object.keys(result.paths).sort()).toEqual(['/docs', '/users']);
+    });
+  });
+
+  describe('deriveSecurity', () => {
+    /** Stand-ins for branded guards; the real ones are driven in the integration suite. */
+    const guard = () => withSecurityMetadata(passthrough(), { authenticated: true });
+    const open = () => withSecurityMetadata(passthrough(), { authenticated: false });
+
+    it('should derive a requirement from a branded guard', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        securitySchemes: { bearerAuth: {} },
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect(result.paths['/todos']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    });
+
+    it('should derive an empty requirement from an explicitly public guard', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/health', undefined, [open()])]);
+
+      expect(result.paths['/health']?.get?.security).toEqual([]);
+    });
+
+    it('should let a DECLARED requirement win over a derived one', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      // The guard says protected; the route declares public. Declared wins, so
+      // this milestone cannot change a document that already declares.
+      const result = generator.generate([route('POST', '/login', { security: [] }, [guard()])]);
+
+      expect(result.paths['/login']?.post?.security).toEqual([]);
+    });
+
+    it('should treat authenticated as winning when a route carries both brands', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      // Matches enforcement: publicRoute() only calls next(), so requireAuth()
+      // still rejects an anonymous caller.
+      const result = generator.generate([route('GET', '/both', undefined, [open(), guard()])]);
+
+      expect(result.paths['/both']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    });
+
+    it('should derive nothing when the option is absent', () => {
+      const generator = new OpenApiGenerator({ title: 'T', version: '1' });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
+    });
+
+    it('should derive nothing from unbranded middleware', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [passthrough()])]);
+
+      expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
+    });
+
+    it('should derive nothing when the route declares no middleware at all', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      // `RouteDefinition.middleware` is optional — the derivation must not
+      // assume an array is present.
+      const result = generator.generate([route('GET', '/todos')]);
+
+      expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
+    });
+
+    it('should use the configured scheme name verbatim', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'myCustomScheme' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect(result.paths['/todos']?.get?.security).toEqual([{ myCustomScheme: [] }]);
+    });
+  });
+
+  describe('security', () => {
+    it('should emit the document-level requirement when configured', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+        securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+        security: [{ bearerAuth: [] }],
+      });
+
+      const result = generator.generate([route('GET', '/users')]);
+
+      expect(result.security).toEqual([{ bearerAuth: [] }]);
+      expect(result.components?.securitySchemes).toEqual({
+        bearerAuth: { type: 'http', scheme: 'bearer' },
+      });
+    });
+
+    it('should omit document-level security when not configured', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([route('GET', '/users')]);
+
+      expect(result.security).toBeUndefined();
+      expect('security' in result).toBe(false);
+    });
+
+    it('should emit a route-declared requirement on the operation', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([
+        route('GET', '/todos', { security: [{ bearerAuth: [] }] }),
+      ]);
+
+      expect(result.paths['/todos']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    });
+
+    it('should emit scopes for an OAuth2-style requirement', () => {
+      const generator = new OpenApiGenerator({ title: 'Test API', version: '1.0.0' });
+
+      const result = generator.generate([
+        route('POST', '/todos', { security: [{ oauth2: ['write:todos'] }] }),
+      ]);
+
+      expect(result.paths['/todos']?.post?.security).toEqual([{ oauth2: ['write:todos'] }]);
+    });
+
+    it('should emit an EMPTY security array so a route can opt out of the document default', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+        security: [{ bearerAuth: [] }],
+      });
+
+      const result = generator.generate([route('POST', '/login', { security: [] })]);
+
+      // The empty array is the specification's marker for a public operation.
+      // Dropping it (an `.length > 0` guard) would leave `/login` inheriting
+      // the document requirement and documented as needing the token it issues.
+      expect(result.paths['/login']?.post?.security).toEqual([]);
+    });
+
+    it('should leave an undeclared operation without a security key so it inherits', () => {
+      const generator = new OpenApiGenerator({
+        title: 'Test API',
+        version: '1.0.0',
+        security: [{ bearerAuth: [] }],
+      });
+
+      const result = generator.generate([route('GET', '/todos')]);
+
+      const operation = result.paths['/todos']?.get;
+      expect(operation).toBeDefined();
+      expect('security' in (operation as object)).toBe(false);
+    });
+  });
 });
+
+/**
+ * Builds a `RouteInfo` with a handler that is never invoked — these tests
+ * exercise document generation, never dispatch.
+ */
+function route(
+  method: RouteInfo['method'],
+  path: string,
+  schema?: RouteInfo['definition']['schema'],
+  middleware?: readonly MiddlewareFunction[],
+): RouteInfo {
+  return {
+    method,
+    path,
+    definition: {
+      handler: () => {
+        throw new Error('not used');
+      },
+      ...(schema !== undefined ? { schema } : {}),
+      ...(middleware !== undefined ? { middleware } : {}),
+    },
+  };
+}
+
+/** An unbranded middleware, for the negative derivation cases. */
+function passthrough(): MiddlewareFunction {
+  return async (_ctx, next) => {
+    await next();
+  };
+}

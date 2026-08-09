@@ -5926,6 +5926,482 @@ assets stay byte-identical, and a test pins that.
 
 ---
 
+## Milestone 56: RFC 9457 Problem Details — Retiring a Withdrawn Specification ✅ COMPLETE
+
+**Packages:** `packages/exceptions`, `packages/validation-plugin`, plus the three starters,
+`packages/cli` (prose), and `scripts/jsr-metadata.ts`.
+
+**Objective:** RFC 7807 was obsoleted by [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) in
+July 2023. The framework advertised the withdrawn specification in two packages, a public
+`ErrorFormat` union value, an exported symbol in each package, the three starters, and eleven
+documentation sites. Move onto RFC 9457, with a §9.2 deprecation path rather than a rename.
+
+**The wire format barely changed, and that is a finding rather than an assumption.** RFC 9457
+Appendix D lists exactly three changes from 7807: a registry of common problem type URIs (§4.2),
+clarified handling of multiple problems (§3), and guidance for non-dereferenceable type URIs
+(§3.1.1). The five core members, the `application/problem+json` media type, and extension members
+all carry over verbatim — so the emitted bodies were already structurally valid. This milestone is
+therefore a naming change plus exactly one semantic correction.
+
+**`about:blank` is that correction.** `HttpError` carries `statusCode`, `message`, optional
+`details` and optional `cause` — **no problem-type identity beyond the status code** — so the
+`https://setu-ts.dev/errors/404` it minted for every error identified nothing the `status` member
+did not already carry, which is precisely the case §4.2 registers `about:blank` for. The single
+exception is `validationError()`, the only factory placing `errors` into `details`: it defines an
+extension member and is a genuine problem type, so it keeps a concrete URI — spelled to match the
+literal `validation-plugin` already emitted, so both packages finally identify one problem type
+identically. `title` needed no change: `statusTitle()` already yields the status reason phrase §4.2
+expects beside `about:blank`.
+
+**The deprecated alias keeps RFC 7807 behavior in `exceptions`,** because §9.4 forbids silently
+changing a released API's behavior and a symbol named after RFC 7807 that emits something else gives
+the caller no signal at all. The two formatters differ only in a `typeOf` strategy passed to one
+shared `buildProblemDetails` core, so there is no duplicated logic. In `validation-plugin` the alias
+is the **same object**: that formatter's `type` was always semantic rather than status-derived, so
+its body was already 9457-valid and two implementations would have been the duplication §11.1
+forbids.
+
+**The defect this milestone was most likely to ship green** is the media type. Both packages keyed
+`application/problem+json` off a single formatter **reference** — `formatter === rfc7807Formatter`
+at `error-handler.ts:93` and `validation-middleware.ts:129` — so that passing a formatter directly
+agreed with passing the alias. Adding a second formatter without generalizing that check serves a
+Problem Details body as `application/json`, which generic problem-details clients ignore, while the
+`'rfc9457'` _string_ arm tests fine. Both are now membership tests, with tests driving every
+spelling **by reference**; reverting the exceptions fix fails 8 steps across the unit and
+integration suites.
+
+**Doc conflict found and fixed:** `ARCHITECTURE.md` documented a `type` of
+`https://setu-ts.dev/errors/not-found` while the formatter emitted `.../404` — a doc-vs-behavior
+disagreement that predated this milestone.
+
+### Deliverables
+
+- [x] `'rfc9457'` arm + `rfc9457Formatter` in both packages; `'rfc7807'` deprecated, not removed
+- [x] `about:blank` for status-only problems; validation keeps a concrete type URI
+- [x] Shared `buildProblemDetails` core behind both exceptions entry points
+- [x] Membership-based media-type selection in both packages
+- [x] Three starters moved to `format: 'rfc9457'`
+- [x] `PUBLIC_API.md`, `ARCHITECTURE.md`, root `README.md`, both package READMEs, `CHANGELOG.md`
+- [x] `scripts/jsr-metadata.ts` descriptions (live on jsr.io only after `release:set-metadata`)
+
+### Out of scope
+
+- Realigning the `errors` extension from `{ field, message, code }` to the `{ detail, pointer }`
+  shape RFC 9457 §3 illustrates — declined by the maintainer, since `errors[].field` is the most
+  widely consumed part of the validation response.
+- Removing the `'rfc7807'` arm and `rfc7807Formatter`: §9.2 puts removal in the next major, owned by
+  the 1.0 release.
+- IANA registration of a framework problem type (§4.2) — a specification submission, not code.
+- User-facing migration documentation, which belongs to **M38**.
+
+---
+
+## Milestone 57: Derived OpenAPI Security — The Document Tracks the Guards ✅ COMPLETE
+
+**Package:** `@setu-ts/common` + `@setu-ts/auth-plugin` + `@setu-ts/openapi-plugin`
+
+PR #136 made an operation's security requirement declarable, which left the OpenAPI document as a
+second source of truth: a route could carry `requireAuth()` and declare `security: []`, or carry no
+guard and inherit a document-level requirement, and nothing in the framework objected. This
+milestone lets the document be **derived** from the guards that actually enforce.
+
+`auth-plugin` brands the middleware each of its six guard factories returns with a
+`RouteSecurityMetadata` carried under a `SECURITY_METADATA` symbol exported from `common`;
+`openapi-plugin` reads the brand off `RouteInfo.definition.middleware`. No plugin imports another —
+the symbol in `common` is the entire channel, on the `TELEMETRY_CONTEXT_OPAQUE` precedent (M24). It
+is created with `Symbol.for` deliberately: a locally-created symbol would miss on every read if two
+copies of `common` shared a process, the failure M37c hit with hand-written React Router context
+keys.
+
+The metadata carries authentication **presence only** — `{ authenticated: boolean }`. That is not a
+simplification to revisit: an OpenAPI security requirement names a _scheme_, and no declared scheme
+can be inferred from the string `'admin'`, so a `roles` field would be read by nothing on a real
+code path. The consequence is stated in three doc sites rather than left to discovery —
+`requireRole` documents that authentication is required and nothing about the role, so a 403 remains
+a surprise the document cannot warn about.
+
+### Deliverables
+
+- `common`: `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`,
+  `securityMetadataOf`.
+- `auth-plugin`: all six guard factories branded (`requireAuth`, `requireRole`, `requirePermission`,
+  `requireAnyRole`, `requireAllPermissions` → `authenticated: true`; `publicRoute` → `false`).
+- `openapi-plugin`: `deriveSecurity: { scheme }`, precedence (declared > derived > document-level),
+  and the `register()` refusal extended to cover the derived scheme name.
+- Docs: PUBLIC_API common + OpenAPI sections, both package READMEs, CHANGELOG.
+
+### Explicitly out of scope
+
+- **Roles and permissions in the document** — OpenAPI has no vocabulary for them; an `x-` extension
+  is a separate decision about extension members. Unowned.
+- **Deriving from application-level middleware** (`app.middleware.add()`), which `RouteInfo` does
+  not expose. Would need a kernel change. Unowned.
+- **Branding guards outside `auth-plugin`** — `createFlagGuard` and `csrfFormMiddleware`
+  short-circuit too, but neither maps to a security scheme. Unowned.
+
+## Milestone 58: Domain Module Scaffolding — The First Mutating Schematic
+
+**Package:** `@setu-ts/cli`
+
+An external review asked for `nest g resource`: one command that scaffolds a domain sub-module with
+its bindings already wired, rather than four `setu g` invocations plus a hand edit of
+`setu.config.ts`. Two things in that framing are already false and are recorded here so the
+milestone is not built on them. The review's premise was that the framework "uses static capability
+tokens rather than decorators" — `decorator-plugin` has shipped `@Controller`/`@Get`/`@Injectable`
+since M9, parameter-level `@Inject` since M36b, and `setu new --template nest` scaffolds exactly the
+NestJS-familiar shape. Tokens are the plugin-to-plugin seam; decorators are the application seam.
+**Nothing in this milestone is about decorators.**
+
+What is real is narrower. `packages/cli/src/schematics/` holds 13 single-artifact generators and no
+**aggregate** — a domain module today means `g controller`, `g service`, and hand-written glue. And
+no schematic touches `setu.config.ts`: `grep -rln "setu.config" packages/cli/src` hits the templates
+and the app loader, never a schematic.
+
+**That second gap is the design problem, not an oversight.** `Schematic` is
+`(names, options) => readonly GeneratedFile[]` — a pure function performing no I/O, with the command
+layer owning every write. M34 made it pure deliberately: `--dry-run` is exact because the planned
+file list IS the output, and the overwrite check ("check every planned path, then write") lives in
+exactly one place. A schematic that edits `setu.config.ts` is the first schematic that must READ the
+target project, which breaks both properties.
+
+So auto-wiring is achieved **without** mutating `setu.config.ts`: `g module <name>` emits its files
+under `src/modules/<name>/` plus an aggregate `src/modules/index.ts` exporting `MODULE_CONTROLLERS`
+and `MODULE_SERVICES`, which the scaffolded `setu.config.ts` already imports and hands to
+`DecoratorPlugin`. Adding a module rewrites that one generated barrel — a file the CLI owns outright
+— rather than editing a file the developer owns. `TemplateDefinition` already carries `localImports`
+and `files` (M36b), so the templates emit the barrel seam with no contract widening.
+
+**Who rewrites the barrel matters, because a `Schematic` performs no I/O and cannot read the
+project.** The command layer scans `src/modules/` (`IFileSystem.readdir` + `stat`) and passes the
+names in through a new `SchematicOptions.modules`, exactly as it already passes the detected plugin
+set through `plugins`; the schematic then returns the whole barrel from its one pure call, so
+`--dry-run` still prints the truth rather than a prediction. Rewriting a file the CLI already wrote
+also needs an exemption from the overwrite refusal, which is a new per-file `GeneratedFile.managed`
+flag read only by `findExisting` — narrow by design, since a `--force` flag would lift the check for
+all fourteen schematics and let a mistyped `g service` clobber real work.
+
+The alternative — an AST edit of the plugin array — is **rejected with cause**, not deferred: it
+requires a TypeScript parser in a package whose entire dependency surface is zero, it cannot
+preserve a developer's formatting or comments, and it makes `--dry-run` a prediction rather than the
+truth.
+
+### Deliverables
+
+- `g module <name>` aggregate schematic: controller (gated on `decorator-plugin`), service, its
+  test, and a per-module barrel, under `src/modules/<name>/`.
+- `SchematicOptions.modules` (optional, so no published harness breaks) plus the
+  `utils/module-scanner.ts` seam that populates it.
+- `GeneratedFile.managed`, read only by `findExisting`, and the PUBLIC_API narrowing of the
+  overwrite guarantee it requires.
+- The `src/modules/index.ts` barrel seam, emitted by the `rest`, `microservice` and `nest` templates
+  and imported once by `setu.config.ts`. `full-stack` is deliberately not a host.
+- The hostile-name e2e gate (M34b) extended to `g module`, plus a scaffold-generate-`deno check`
+  pass on both `rest` (no DI) and `nest` (DI) against THIS workspace.
+- Docs: PUBLIC_API command list, overwrite-protection rewrite, a Domain modules section, and the two
+  widened types; ARCHITECTURE Rules row; CHANGELOG.
+
+### Out of scope
+
+- **Editing `setu.config.ts` in place** — rejected above, with the barrel as the shipped answer.
+- **`g module` on the `full-stack` template**, whose layering is `routes → features → services`
+  (M36c) and does not have a `src/modules/` concept. Unowned.
+- **Removing any existing schematic.** `g module` composes them; it does not replace them.
+
+## Milestone 59: Workers-Native Messaging — Closing the Last Edge Capability Gap
+
+**Package:** `@setu-ts/cloudflare-plugin` + `@setu-ts/cli`
+
+The same review reported that `--template microservice --runtime cloudflare-workers` is refused
+"because Workers lacks raw TCP socket support", and asked for HTTP-polling fallbacks. The refusal is
+real — [`microservice.ts`](packages/cli/src/templates/microservice.ts) declares
+`unsupported: { 'cloudflare-workers': … }` — but it is **template-level and unconditional**, not
+conditional on which plugins are requested, and most of the capability gap behind it closed four
+milestones ago. `cloudflare-plugin` already registers `QUEUE` (Cloudflare Queues, M52b), `CACHE`
+(KV), `STORAGE` (R2), `DATABASE` (D1, M52c) and `REALTIME_BACKPLANE` (Durable Objects, M52d).
+
+So the gap is exactly one token: **`CAPABILITIES.MESSAGING`**. All ten brokers need a socket or a
+socket-bound SDK, and [`cloud-gate.ts`](packages/messaging-plugin/src/brokers/cloud-gate.ts) hard-
+refuses Pub/Sub and Service Bus on Workers (gRPC, AMQP).
+
+**The review's suggested shape is the wrong one and is rejected here rather than in
+implementation.** An HTTP-polling adapter means a request-scoped isolate polling a queue it cannot
+hold open; a Worker has no ambient loop to poll from, which is the same constraint that makes
+`scheduler-plugin` unusable on Workers (M52b). The Workers-native answer is Cloudflare Queues for
+point-to-point plus a Durable Object for fan-out and reply correlation.
+
+`IMessageBroker` is `connect`/`disconnect`/`publish`/`subscribe`/`request`/`respond` (verified from
+`common/src/services/messaging.ts`), and the two halves fall differently:
+
+- **`publish`/`subscribe`** map onto Queues, but `subscribe` cannot be a live socket — a Cloudflare
+  queue consumer is a **module-level handler export**, so subscriptions are registered at
+  construction and driven by `createQueueHandler`'s dispatch (the M52b pattern), not by a runtime
+  callback the isolate holds open.
+- **`request`/`respond`** need a per-instance reply inbox, and an isolate cannot hold one. M14d's
+  `openInbox` seam is exactly the extension point for this: `KafkaBroker` already supplies its own
+  inbox rather than the shared `createTopicInbox`, so a Workers inbox is a third implementation of a
+  seam that exists, not a new design. The inbox lives in a Durable Object, which is the only
+  addressable long-lived thing on the platform.
+
+Whether `request`/`respond` ship at all is the milestone's open decision: the M52b Liskov precedent
+(six of eight `IScheduler` methods throwing meant not registering `SCHEDULER`) applies, so if the
+RPC half cannot be honest the plugin should register nothing rather than a mostly-throwing broker.
+Deciding that is the plan's job, on the plan's evidence.
+
+### Deliverables
+
+- `WorkersBroker` implementing `IMessageBroker` over a Queues producer plus a consumer-handler
+  dispatch table, opt-in and instance-named (`messaging.<name>`, the `cache.<name>` precedent).
+- A DO-backed reply inbox over M14d's `openInbox` seam, OR a recorded decision not to register
+  `MESSAGING` if RPC cannot be honoured — with the reasoning, per M52b's cron precedent.
+- The microservice template's Workers refusal replaced by a runtime-aware arm swapping
+  `MessagingPlugin`/`QueuePlugin` for `CloudflarePlugin`, with e2e coverage (M50b added the
+  template's first — do not assume it is otherwise covered).
+- Verification against real **workerd** via `wrangler dev`, the M52b/M52d bar. CI holds no
+  Cloudflare account, so a live-deployment claim is not available and must not be implied.
+
+### Out of scope
+
+- **HTTP-polling or WebSocket fallback adapters for the existing ten brokers** — rejected above; a
+  Worker has no loop to poll from.
+- **Lifting the Workers refusal on `scheduler-plugin`.** M52b settled that with Cron Triggers and
+  the decision not to register `SCHEDULER`.
+- **A `messaging` arm on `microservice-starter`.** M50b's boundary holds: the CLI emits inline
+  wiring and never imports a starter. Unowned.
+
+## Milestone 60: Generated Code That Is Wired — Closing the NestJS Productivity Gap
+
+**Package:** `@setu-ts/cli`
+
+`setu generate` emits fourteen artifacts and **one of them is reachable**. Measured, not inferred: a
+project scaffolded with `--template rest`, with every gated plugin installed and all fourteen
+schematics generated, type-checks clean (`deno check` exit `0` over every emitted file) while its
+entry points import exactly one generated path —
+
+```typescript
+import { MODULE_CONTROLLERS, MODULE_SERVICES } from './src/modules/index.ts';
+```
+
+That is the M58 barrel. The other thirteen are orphans: `g service` emits a class nothing
+constructs, `g guard` a guard nothing guards with, `g health-indicator` an indicator nothing
+registers, `g command-handler` a handler no bus dispatches to. They compile and they do nothing.
+
+**This is the whole distance from NestJS.** `nest g service foo` edits `foo.module.ts` to add the
+provider; that single behaviour is why it feels productive. Breadth is not the gap — the fourteen
+schematics cover more ground than Nest's generator does, across four runtime targets.
+
+M58 already built the mechanism and proved it: a CLI-owned barrel the scaffolded `setu.config.ts`
+already imports, regenerated from a directory scan handed to a pure schematic through
+`SchematicOptions.modules`, with the overwrite refusal lifted per-file via `GeneratedFile.managed`.
+This milestone extends that seam to the artifacts that have a registration site, and states plainly
+which do not.
+
+Not every orphan has one. Each schematic must be sorted before implementation, and the sort is a
+design decision, not a mechanical sweep.
+
+**The sort below is the one that survived source-checking, and it is not the one this section
+originally carried.** Five of the six artifacts first placed in the plugin-options bucket have no
+such option: `CqrsPluginOptions` carried only `behaviors`, `EventsPluginOptions` only
+`async`/`errorHandler`, `auth-plugin` publishes no guard list at all, and
+`MetricsPluginOptions.customMetrics` is declarative (`NamedMetricConfig`) rather than the accessor
+function the schematic emits. `IApplication` also has no `lifecycle` member, so application code has
+no phase in which to register anything imperatively — anything needing a resolved capability must be
+a plugin option or a plugin.
+
+- **Plugs into a plugin's options** (`controller`, `service`, `health-indicator`, `metric`,
+  `command-handler`, `query-handler`, `event-handler`) — each gets its own barrel and its own
+  `localImports` entry, and each needs the same functional proof M58's controller got. Two of those
+  options are ADDED here as pure additions (`CqrsPluginOptions.commandHandlers`/`.queryHandlers`,
+  `EventsPluginOptions.handlers`), and `CqrsPlugin`/`EventsPlugin` join the `microservice` template
+  so those seams have a host at all.
+- **Registers imperatively on the app** (`route`, `middleware`, `plugin`) — `g route` already emits
+  a `registerXxxRoutes(router)` function, so the seam is a statement in `createApp()` rather than a
+  plugin option, and a generated plugin is a spread into the plugin array. Both need a new
+  `TemplateDefinition` field, and the middleware one must not silently reorder priorities — so a
+  generated middleware declares its own priority constant, in the module the developer owns.
+- **Has no framework registration site at all** (`guard`, `job`, `migration`) — and each "none" is
+  backed by evidence, not by a name nobody read. A guard's positions are all per target
+  (`RouteDefinition.middleware`, `@UseGuards`) and the only barrel-shaped alternative — the global
+  pipeline — would answer `401` for `/health` and `/metrics`. A job is transport-ambiguous by design
+  and `QueuePluginOptions` publishes no `processors` list. And no plugin in this repository calls
+  `ctx.cli.register`, so there is no `setu db:migrate` and nothing reads migration files.
+- **The central decision — `g service`** — is resolved by shaping it on the DETECTED plugin set:
+  `@Injectable({ token: '<name>-service' })` plus a barrel when `decorator-plugin` is present,
+  today's plain class byte-for-byte otherwise. Emitting the decorator unconditionally would force
+  the schematic to be gated like `controller`, which would REFUSE `g service` in a bare project
+  where it works today.
+
+**The functional bar is M58's, not a type-check.** `g controller` shipped broken from M34 through
+five releases — every controller it ever emitted answered `500`, because `DecoratorPlugin` builds a
+handler's arguments from parameter metadata alone and the template expected the context
+positionally. `deno check` passed the whole time, and the unit test asserted the broken import was
+PRESENT. So every artifact this milestone wires needs a test that boots a scaffolded app and
+observes the artifact doing its job — a guard rejecting, an indicator appearing in `/health`, a
+handler receiving its command. Compiling is not working.
+
+### Deliverables
+
+- The per-schematic sort above, resolved in the plan with a named registration site (or an explicit
+  "none, and here is why") for all thirteen.
+- Barrel seams for the artifacts that have one, following M58's `module-seam.ts` pattern; the
+  templates emit each seam from scaffold time so a new project is wired before anything is
+  generated. One generalized `SeamSpec` + scanner + `SchematicOptions.artifacts` rather than ten
+  bespoke copies of each.
+- `CqrsPluginOptions.commandHandlers`/`.queryHandlers` and `EventsPluginOptions.handlers` as pure
+  additions, plus `CqrsPlugin`/`EventsPlugin` in the `microservice` template so those seams have a
+  host; `NamedMetricConfig` exported so `customMetrics` is nameable.
+- A refusal for a name that would collide with an existing artifact's HTTP path or injection token —
+  the wiring is what makes those collisions real, and both were observed as failures (a `500` on
+  every module request, and a silently unreachable route).
+- One functional e2e per wired artifact, extending M58's `bootAndProbe`, each verified to fail when
+  the wiring is removed. Batched one boot per host template rather than one per artifact: a single
+  booted app carrying all of them also proves they coexist.
+- Docs: PUBLIC_API per-schematic wiring table; ARCHITECTURE CLI Rules row; CHANGELOG.
+
+### Out of scope
+
+- **`setu g app` / monorepo support** — M62.
+- **A decorator-free controller path and a `--di` flag** — M61.
+- **Changing any emitted artifact's shape** beyond what wiring requires. M58 already corrected
+  `controller` and `module`; the rest keep their current output unless wiring forces a change.
+
+## Milestone 61: Decorators and DI as Real Choices in the Generator
+
+**Package:** `@setu-ts/cli`
+
+AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is optional, and
+**"Everything has a programmatic API. No feature requires decorators or reflection."** The generator
+contradicts all three, and the contradiction is checkable:
+
+- `VALUE_FLAGS` is `dir`, `runtime`, `template`, `config` (`constants.ts`) — there is **no `--di`
+  and no `--decorators` flag**. (`--di` needs no entry there: a flag absent from the set parses as
+  boolean.)
+- `DiPlugin` appears in exactly one template file, `templates/nest.ts`.
+- `controller` and `module` are gated on `decorator-plugin`, so a project scaffolded with **no
+  template cannot generate an HTTP handler at all** except `g route`.
+
+So the only opt-in is the template, and it is coarse: no template → neither, and the decorated
+schematics are refused; `rest`/`microservice` → decorators without DI; `nest` → both. A developer
+who wants DI without the NestJS showcase files, or a controller without decorators, has no path.
+
+The capability already exists one layer down and the CLI cannot reach it: M36b added a gated
+`di?: DiPluginOptions` arm to `RestStarterOptions`
+(`packages/starters/rest-starter/src/options.ts`), but templates emit INLINE wiring and never import
+a starter (M36b's own rule), so the arm is unreachable from `setu new`.
+
+Two deliverables, and the second is the one that discharges the guidelines' promise:
+
+- **`--di`** on `setu new`, adding `DiPlugin` to any template's wiring. Cheap: the template contract
+  already carries everything needed, and `DecoratorPlugin` branches on the container's presence, so
+  the emitted classes do not change — only the lifecycle they get. A test must pin that
+  `--template nest` is unchanged and that `--template rest --di` differs from `rest` by exactly one
+  wiring.
+- **A decorator-free path to an HTTP handler.** `g route` exists and is ungated, so the programmatic
+  path is not absent — but nothing tells a developer it is the decorator-free option, and
+  `g controller` simply refuses with "install `@setu-ts/decorator-plugin`" rather than naming the
+  alternative. The minimum honest fix is that refusal naming `g route`; the fuller one is a
+  `--no-decorators` variant of the resource generators. Which of the two ships is the plan's call.
+
+### Deliverables
+
+- `--di` flag, threaded through `new` for every template, with the no-change-to-`nest` test above.
+  On `full-stack` it reaches the starter's own `di` arm rather than a plugin wiring, because
+  `TemplateHost.plugins` must stay empty when an `appFactory` is set. It **deduplicates**: the
+  kernel throws `Duplicate plugin name 'di'` at `start()`, so `--template nest --di` must be a no-op
+  rather than a second registration.
+- The `controller`/`module` gate refusal naming `g route` as the decorator-free alternative, carried
+  as data on the schematic registry entry rather than a string in the command layer.
+- **The no-template path becomes a seam host** for the three seams that need no plugin (`route`,
+  `middleware`, `plugin`). M60 recorded this as Unowned on the grounds that it "means inventing a
+  fourth `TemplateDefinition` … where six of the ten seams would be inert"; neither holds —
+  `seamsFor` already selects exactly the three ungated seams, and extracting `TemplateHost` from
+  `TemplateDefinition` gives the minimal path a host without giving it a `--template` value. Without
+  this, `setu generate route` — the only HTTP handler a decorator-free project can generate, and the
+  one this milestone's refusal points at — still landed unwired.
+- **`--runtime cloudflare-workers` is deployable.** Same sweep, same class of defect: `wrangler`
+  bundles with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, and the
+  Workers target emitted no `package.json` — so the `npm install && npx wrangler dev` the CLI itself
+  prints failed with one `Could not resolve "@setu-ts/…"` per package. It now emits `package.json` +
+  `.npmrc` alongside `deno.json`, with `wrangler` pinned. Verified on real workerd. Deno still gets
+  none, deliberately: a `package.json` switches it to node_modules resolution (the `apps/full-stack`
+  cold-checkout trap).
+- **`--runtime node` can run decorated source.** Found by booting the matrix, and pre-existing since
+  M34 chose `node --experimental-strip-types main.ts`: Node's built-in TypeScript support erases
+  types without transforming code, so a legacy decorator was a `SyntaxError` and the constructor
+  parameter property `g module` emits was `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. On that target
+  `--template rest` and `g route` booted, while `g service`, `g controller`, `g module` and
+  `--template nest` could not start at all — and no gate saw it, because CI never boots a
+  Node-target project. Generated Node projects now declare `tsx` and start with `tsx main.ts`;
+  `--experimental-transform-types` was checked and rejected, since it fixes the parameter property
+  but still refuses the decorator. Runtime-level rather than template-level: Bun compiles TypeScript
+  outright, and Deno and Workers never invoke the runner.
+- Docs: PUBLIC_API options table and a short "decorators and DI are optional" section stating what
+  each combination gives you; the guidelines' claim becomes true rather than aspirational.
+
+### Out of scope
+
+- **Wiring generated artifacts** — M60.
+- **Removing the `decorator-plugin` gate** from `controller`/`module`. The gate is correct: those
+  emit `@Controller`, and an ungated project would get source whose own import cannot resolve (the
+  M34b defect). The fix is a better refusal, not a removed one.
+- **A `--no-decorators` variant of the resource generators** — rejected, not deferred. It would have
+  to emit a router-registered handler module, which is exactly what `g route` already emits;
+  implementing it means either a second copy of that schematic (§11.1, no duplicated logic) or a
+  bare alias that dispatches to it (dead surface). The honest fix for discoverability is the refusal
+  plus the wiring above.
+- **Guarding the `full-stack` template's other `appFactory` option keys.** Established by
+  measurement during this milestone: TypeScript does NOT apply excess-property checking to an object
+  literal returned from a contextually-typed callback, so a misspelled key inside
+  `createFullStackAppFromConfig((config) => ({ … }))` is caught by nothing — not the CLI's
+  `deno check`, not the generated project's. M50b's "a wrong field is a compile error in the
+  GENERATED project" does not hold for an `appFactory`. M61 adds an annotated-position probe for the
+  one arm it introduces; `reactRouter` and `session` have the same exposure and no guard.
+
+## Milestone 62: Monorepo Support — More Than One Deployable Service in a Repository
+
+**Package:** `@setu-ts/cli`
+
+There is **no workspace or monorepo concept in the CLI**: a grep across `packages/cli/src` for
+`workspace` / `monorepo` / app-adding surfaces returns one unrelated React Router `appDirectory`.
+The NestJS analogue is `nest g app` / `nest g library`, and nothing here corresponds to it.
+
+Today, adding a second service to a microservice project means running `setu new other --dir .`,
+which produces a fully independent project: its own manifest, its own lockfile, no shared config,
+and no knowledge of its sibling. The sharp edge is discovery — M50b wires
+`ServiceDiscoveryPlugin({ provider: 'static', services: {} })` into the microservice template with a
+**deliberately empty** map, because a sample entry would resolve to a dead port. So every caller's
+map is hand-edited, in every service, and nothing propagates a new name.
+
+Three questions must be settled in the plan before any code:
+
+- **What a Setu monorepo IS.** A Deno workspace (`deno.json` `workspace: []`, which is what this
+  repository itself uses, so there is an in-house precedent) or sibling directories with independent
+  manifests. The first gives one lockfile and one `deno task test`; the second is simpler and gives
+  neither.
+- **Who owns the discovery map.** Adding a service should register it with its callers, which is a
+  cross-FILE write — the mutation problem M58 solved for one file with a CLI-owned barrel. The same
+  technique probably applies (a generated `services.ts` the config imports), and the M58 rule holds:
+  never edit a file the developer owns.
+- **The boundary against M39.** M39 owns Docker Compose and Kubernetes manifests. A monorepo command
+  that emits a compose service per member would cross into it, so the split must be explicit — M62
+  owns the workspace and the app-side discovery map, M39 owns the platform objects.
+
+### Deliverables
+
+- `setu g app <name>` (name to be settled — `app` matches Nest, `service` matches the domain) adding
+  a member to the workspace, with the member's own `setu.config.ts` and entry.
+- Registration of the new member in its siblings' static discovery map through a CLI-owned generated
+  module, never by editing `setu.config.ts`.
+- An e2e that scaffolds a workspace, adds two members, type-checks both, and **boots one and has it
+  resolve the other through the discovery capability** — the M58 functional bar.
+- Docs: PUBLIC_API monorepo section; ARCHITECTURE note on the workspace shape; CHANGELOG.
+
+### Out of scope
+
+- **Compose / Kubernetes objects per member** — M39, per the boundary above.
+- **Converting an existing single-service project into a workspace.** A migration command is its own
+  design; the first version creates a workspace or adds to one that already exists. Unowned.
+- **Shared library members** (`nest g library`). Deferred until the application case is proven.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -5984,6 +6460,11 @@ assets stay byte-identical, and a test pins that.
 | 38        | ✅     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
+| 58        | ✅     | cli (domain module scaffolding)       |
+| 59        | ⬜     | cloudflare-plugin (workers messaging) |
+| 60        | ✅     | cli (wire generated artifacts)        |
+| 61        | ✅     | cli (decorator/DI opt-in)             |
+| 62        | ⬜     | cli (monorepo support)                |
 | 41        | ✅     | http-adapters                         |
 | 42        | ✅     | streaming-response                    |
 | 43        | ✅     | sse-plugin                            |
@@ -6004,3 +6485,5 @@ assets stay byte-identical, and a test pins that.
 | 53        | ✅     | real-backend CI (examples gate)       |
 | 54        | ✅     | messaging-plugin (cloud brokers)      |
 | 55        | ✅     | static-plugin                         |
+| 56        | ✅     | rfc9457 problem details               |
+| 57        | ✅     | derived openapi security              |

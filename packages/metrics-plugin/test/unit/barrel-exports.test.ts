@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as metricsPlugin from '../../src/index.ts';
+import type { MetricsPluginOptions, NamedMetricConfig } from '../../src/index.ts';
 
 describe('barrel exports', () => {
   it('MetricsPlugin is exported', () => {
@@ -93,6 +94,19 @@ describe('barrel exports', () => {
       labels: ['method'],
     };
     expect(_options.help).toEqual('Test');
+  });
+
+  // `MetricsPluginOptions.customMetrics` is typed as an array of this, so without the
+  // export the option was unnameable: a caller could pass an inline literal but could not
+  // declare its own array in a variable — which is what a generated metrics barrel does.
+  // Asserted by DECLARING one, so it compiles only while the type is exported.
+  it('exports NamedMetricConfig, which customMetrics is typed as', () => {
+    const customMetrics: readonly NamedMetricConfig[] = [
+      { name: 'orders_total', type: 'counter', help: 'Total orders.', labels: ['outcome'] },
+    ];
+    const options: MetricsPluginOptions = { customMetrics };
+
+    expect(options.customMetrics?.[0]?.name).toEqual('orders_total');
   });
 
   it('internal modules are not leaked', () => {

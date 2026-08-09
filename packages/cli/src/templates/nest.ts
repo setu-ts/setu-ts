@@ -11,7 +11,22 @@
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { LocalImport, TemplateDefinition, Wiring } from './registry.ts';
-import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
+import { DI_WIRING } from './di.ts';
+import { REST_MIDDLEWARE, REST_PLUGINS, REST_SEAMS } from './rest.ts';
+import {
+  MODULE_SEAM_FILES,
+  MODULE_SEAM_LOCAL_IMPORT,
+  MODULE_SEAM_MANIFEST,
+  withModuleSeam,
+} from './module-seam.ts';
+import {
+  decoratorSeamExtras,
+  seamFiles,
+  seamLocalImports,
+  seamPluginSpreads,
+  seamSetupCalls,
+  withPluginOptionSeams,
+} from './seam.ts';
 
 /** Where the emitted example classes live in the scaffolded project. */
 const SERVICE_PATH = './src/greeting-service.ts';
@@ -69,16 +84,26 @@ export class GreetingController {
 }
 `;
 
-/** The two example source files this template emits. */
+/**
+ * The two example source files this template emits, plus the seam barrels.
+ *
+ * `nest` registers exactly the REST plugin set plus `DiPlugin`, and `DiPlugin` hosts no
+ * seam, so its seam set is `REST_SEAMS` — reused rather than recomputed, which is what
+ * keeps this template from drifting into a different seam list than `rest`.
+ */
 export const NEST_FILES: readonly GeneratedFile[] = [
   { path: 'src/greeting-service.ts', contents: SERVICE_SOURCE },
   { path: 'src/greeting-controller.ts', contents: CONTROLLER_SOURCE },
+  ...MODULE_SEAM_FILES,
+  ...seamFiles(REST_SEAMS),
 ];
 
 /** The classes `setu.config.ts` must import to pass them to `DecoratorPlugin`. */
 export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
   { symbols: ['GreetingService'], from: SERVICE_PATH },
   { symbols: ['GreetingController'], from: CONTROLLER_PATH },
+  MODULE_SEAM_LOCAL_IMPORT,
+  ...seamLocalImports(REST_SEAMS),
 ];
 
 /**
@@ -90,15 +115,24 @@ export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
  * Without it the classes still work, resolved from the kernel's
  * `ServiceRegistry`; the template includes it because a NestJS reader expects
  * scoped providers to be there.
+ *
+ * The wiring comes from `templates/di.ts` rather than a literal here, so this
+ * list and the `--di` flag name the same package. That is what lets
+ * `withDiPlugin` recognize the plugin as already present and leave
+ * `--template nest --di` byte-identical to `--template nest` — appending a
+ * second one would throw `Duplicate plugin name 'di'` at `start()`.
  */
-export const NEST_PLUGINS: readonly Wiring[] = REST_PLUGINS.map((wiring) =>
-  wiring.pkg === 'decorator-plugin'
-    ? {
-      ...wiring,
-      args: '{ controllers: [GreetingController], services: [GreetingService] }',
-    }
-    : wiring
-).concat([{ pkg: 'di-plugin', symbol: 'DiPlugin' }]);
+export const NEST_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
+  withModuleSeam(
+    REST_PLUGINS,
+    // The showcase classes come first, then the seam barrels, then the module barrel —
+    // so `setu g controller` and `setu g module` both ADD to this registration rather
+    // than displacing the template's own example.
+    ['GreetingController', ...decoratorSeamExtras(REST_SEAMS).controllers],
+    ['GreetingService', ...decoratorSeamExtras(REST_SEAMS).services],
+  ),
+  REST_SEAMS,
+).concat([DI_WIRING]);
 
 /**
  * `nest` — the REST set plus a DI container, a decorated controller, and an
@@ -114,5 +148,8 @@ export const NEST_TEMPLATE: TemplateDefinition = {
   middleware: REST_MIDDLEWARE,
   localImports: NEST_LOCAL_IMPORTS,
   files: NEST_FILES,
+  manifest: MODULE_SEAM_MANIFEST,
+  pluginSpreads: seamPluginSpreads(REST_SEAMS),
+  setupCalls: seamSetupCalls(REST_SEAMS),
   unsupported: {},
 };

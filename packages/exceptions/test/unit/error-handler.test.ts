@@ -4,7 +4,7 @@
  * Covers: HttpError passthrough, unknown-error wrapping to 500, logging when
  * a logger is present (and skipped when absent), stack-trace gating, the
  * short-circuit behavior (next not re-invoked, downstream cannot overwrite),
- * and RFC 7807 content-type.
+ * and the Problem Details content-type.
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
@@ -16,6 +16,7 @@ import { badRequest, internalServerError, notFound } from '../../src/errors/exce
 import { HttpError } from '../../src/errors/http-error.ts';
 import { createFakeContext, FakeLogger } from '../fixtures/fake-runtime.ts';
 import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';
+import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';
 
 /** Decode the response body (Uint8Array or string) back to a parsed object. */
 function parseBody(body: Uint8Array | string | null): Record<string, unknown> {
@@ -201,6 +202,73 @@ describe('errorHandler middleware', () => {
       expect(body.status).toBe(404);
       expect(body.detail).toBe('User 42 not found');
       expect('message' in body).toBe(false);
+    });
+  });
+
+  describe('RFC 9457 format', () => {
+    it('sets content-type to application/problem+json', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ format: 'rfc9457' });
+
+      await mw(ctx, nextThrows(notFound('gone')));
+
+      expect(responseSnapshot().headers.get('content-type')).toBe(
+        'application/problem+json',
+      );
+    });
+
+    it('produces RFC 9457 fields with about:blank and without "message"', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ format: 'rfc9457' });
+
+      await mw(ctx, nextThrows(notFound('User 42 not found')));
+
+      const body = parseBody(responseSnapshot().body);
+      expect(body.type).toBe('about:blank');
+      expect(body.title).toBe('Not Found');
+      expect(body.status).toBe(404);
+      expect(body.detail).toBe('User 42 not found');
+      expect('message' in body).toBe(false);
+    });
+  });
+
+  describe('media type is keyed on the RESOLVED formatter', () => {
+    // Both formatters are exported, so `format` accepts a reference as well as
+    // an alias. Keying the media type on the format STRING would let
+    // `format: rfc9457Formatter` emit a Problem Details body as
+    // `application/json`, which generic problem-details clients ignore — a
+    // silent interoperability defect that a string-only test cannot see.
+    const problemDetailsSpellings: ReadonlyArray<
+      [string, Parameters<typeof errorHandler>[0]]
+    > = [
+      ["alias 'rfc9457'", { format: 'rfc9457' }],
+      ['reference rfc9457Formatter', { format: rfc9457Formatter }],
+      ["deprecated alias 'rfc7807'", { format: 'rfc7807' }],
+      ['deprecated reference rfc7807Formatter', { format: rfc7807Formatter }],
+    ];
+
+    for (const [label, options] of problemDetailsSpellings) {
+      it(`serves problem+json for the ${label}`, async () => {
+        const { ctx, responseSnapshot } = createFakeContext();
+        const mw = errorHandler(options);
+
+        await mw(ctx, nextThrows(notFound('gone')));
+
+        expect(responseSnapshot().headers.get('content-type')).toBe(
+          'application/problem+json',
+        );
+      });
+    }
+
+    it('does NOT serve problem+json for a custom formatter', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ format: () => ({ oops: true }) });
+
+      await mw(ctx, nextThrows(notFound('gone')));
+
+      expect(responseSnapshot().headers.get('content-type')).toBe(
+        'application/json; charset=utf-8',
+      );
     });
   });
 

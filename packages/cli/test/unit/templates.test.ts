@@ -4,10 +4,10 @@ import { TARGET_RUNTIMES, TEMPLATES } from '../../src/constants.ts';
 import {
   getTemplate,
   listTemplates,
-  MINIMAL_PLUGINS,
   packagesOf,
   type Wiring,
 } from '../../src/templates/registry.ts';
+import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS, REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
 import { NEST_TEMPLATE } from '../../src/templates/nest.ts';
@@ -42,14 +42,15 @@ describe('template registry', () => {
   });
 });
 
-describe('MINIMAL_PLUGINS', () => {
+describe('MINIMAL_HOST plugins', () => {
   it('is the runtime provider alone', () => {
-    expect(symbols(MINIMAL_PLUGINS)).toEqual(['RuntimePlugin']);
+    expect(symbols(MINIMAL_HOST.plugins)).toEqual(['RuntimePlugin']);
   });
 
   it('registers no middleware', () => {
     // The default scaffold has no error handler; only templates add one.
-    expect(MINIMAL_PLUGINS.every((w) => w.pkg !== 'exceptions')).toBe(true);
+    expect(MINIMAL_HOST.plugins.every((w) => w.pkg !== 'exceptions')).toBe(true);
+    expect(MINIMAL_HOST.middleware).toEqual([]);
   });
 });
 
@@ -101,14 +102,43 @@ describe('microservice template', () => {
       .toEqual(symbols(REST_PLUGINS));
   });
 
+  // `CqrsPlugin` and `EventsPlugin` are here because this is the only template that can
+  // HOST the CQRS and event-handler seams: all three of those schematics are gated on
+  // plugins no template installed, so their output could never be wired in a scaffolded
+  // project. Both are in-memory and zero-configuration, so they satisfy the tier's rule
+  // that a scaffolded plugin must construct with no credentials.
   it('adds exactly the service-to-service plugins', () => {
     expect(symbols(MICROSERVICE_TEMPLATE.plugins).slice(REST_PLUGINS.length)).toEqual([
       'MessagingPlugin',
       'QueuePlugin',
       'ResiliencePlugin',
       'TelemetryPlugin',
+      'CqrsPlugin',
+      'EventsPlugin',
       'ServiceDiscoveryPlugin',
     ]);
+  });
+
+  it('is the only template hosting the cqrs and events seams', () => {
+    const cqrs = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'CqrsPlugin');
+    const events = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'EventsPlugin');
+    expect(cqrs?.args).toBe(
+      '{ commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }',
+    );
+    expect(events?.args).toBe('{ handlers: EVENT_HANDLERS }');
+    // And the barrels they read are emitted from scaffold time, so a fresh project is
+    // wired before anything is generated.
+    const paths = (MICROSERVICE_TEMPLATE.files ?? []).map((f) => f.path);
+    expect(paths).toContain('src/cqrs/index.ts');
+    expect(paths).toContain('src/events/index.ts');
+  });
+
+  it('keeps neither plugin on the Workers refusal, since neither needs a socket', () => {
+    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).toContain(
+      'messaging and queue',
+    );
+    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).not.toContain('cqrs');
+    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).not.toContain('events');
   });
 
   it('wires service discovery with the static arm, the only one needing no backend', () => {
@@ -179,7 +209,7 @@ describe('every template', () => {
   // starter FACTORY (`appFactory`), never through a plugin wiring — so a
   // starter package must still never appear in a plugin or middleware list.
   it('never references a starter package in its wirings', () => {
-    for (const template of listTemplates()) {
+    for (const template of [...listTemplates(), MINIMAL_HOST]) {
       for (const wiring of [...template.plugins, ...template.middleware]) {
         expect(wiring.pkg).not.toContain('starter');
       }
@@ -187,19 +217,38 @@ describe('every template', () => {
   });
 
   it('declares a runtime provider first, unless a factory owns the plugin set', () => {
-    for (const template of listTemplates()) {
-      if (template.appFactory !== undefined) continue;
-      expect(template.plugins[0].symbol).toBe('RuntimePlugin');
+    // MINIMAL_HOST is included: it is a TemplateHost like the rest, and the
+    // kernel makes the runtime capability mandatory at start() whichever host
+    // built the project.
+    for (const host of [...listTemplates(), MINIMAL_HOST]) {
+      if (host.appFactory !== undefined) continue;
+      expect(host.plugins[0].symbol).toBe('RuntimePlugin');
     }
   });
 
   // A factory returns the application, so anything in `plugins` would be
   // silently dropped by the renderer. Enforced across the registry here rather
   // than by a runtime check no user input could ever reach.
-  it('lists no plugins when a factory owns the plugin set', () => {
+  // `--di` reaches a plugin-list template by appending a wiring, and a
+  // starter-composed one through its factory's own options — two mechanisms, so
+  // a new `appFactory` template that forgets the second would accept the flag
+  // and silently ignore it, with nothing failing. `full-stack` is the only such
+  // template today; this makes the next one fail here instead.
+  it('honors --di in every factory template that renders arguments', () => {
     for (const template of listTemplates()) {
-      if (template.appFactory === undefined) continue;
-      expect(template.plugins).toEqual([]);
+      const args = template.appFactory?.args;
+      if (args === undefined) continue;
+      for (const runtime of TARGET_RUNTIMES) {
+        if (template.unsupported[runtime] !== undefined) continue;
+        expect(args(runtime, { di: true })).not.toBe(args(runtime, { di: false }));
+      }
+    }
+  });
+
+  it('lists no plugins when a factory owns the plugin set', () => {
+    for (const host of [...listTemplates(), MINIMAL_HOST]) {
+      if (host.appFactory === undefined) continue;
+      expect(host.plugins).toEqual([]);
     }
   });
 
@@ -241,26 +290,49 @@ describe('nest template', () => {
   });
 
   it('carries the decorator class lists as rendered args', () => {
+    // Order is load-bearing: the example classes come first, then the standalone
+    // controller and service barrels, then the module barrel — so `setu g controller`
+    // and `setu g module` both ADD to this registration rather than displacing the
+    // template's own showcase classes.
     const decorator = NEST_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
     expect(decorator?.args).toBe(
-      '{ controllers: [GreetingController], services: [GreetingService] }',
+      '{\n' +
+        '        controllers: [GreetingController, ...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
+        '        services: [GreetingService, ...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '      }',
     );
   });
 
-  it('leaves every other wiring argument-free', () => {
+  it('leaves every wiring without a seam argument-free', () => {
+    // Three plugins now take a seam. Everything else must stay a bare call, or a
+    // template has grown configuration nothing asked for.
+    const withSeams = new Set(['decorator-plugin', 'health-plugin', 'metrics-plugin']);
     for (const wiring of NEST_TEMPLATE.plugins) {
-      if (wiring.pkg === 'decorator-plugin') continue;
+      if (withSeams.has(wiring.pkg)) {
+        expect(wiring.args).toBeDefined();
+        continue;
+      }
       expect(wiring.args).toBeUndefined();
     }
   });
 
-  it('does not mutate the shared REST_PLUGINS list', () => {
+  it('does not leak its example classes into the shared REST_PLUGINS list', () => {
     // NEST_PLUGINS is built by mapping REST_PLUGINS; a mutating implementation
     // would leak the args string into the rest and microservice templates.
+    //
+    // `REST_PLUGINS` is the raw constant, so its decorator entry carries no args
+    // at all — the seam is applied per template, not to the shared list.
     const restDecorator = REST_PLUGINS.find((w) => w.pkg === 'decorator-plugin');
     expect(restDecorator?.args).toBeUndefined();
-    const microDecorator = MICROSERVICE_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
-    expect(microDecorator?.args).toBeUndefined();
+
+    // The other two templates DO carry the seams, but must not have picked up nest's
+    // showcase classes along with them.
+    for (const plugins of [REST_TEMPLATE.plugins, MICROSERVICE_TEMPLATE.plugins]) {
+      const decorator = plugins.find((w) => w.pkg === 'decorator-plugin');
+      expect(decorator?.args).toContain('...APP_CONTROLLERS, ...MODULE_CONTROLLERS');
+      expect(decorator?.args).toContain('...APP_SERVICES, ...MODULE_SERVICES');
+      expect(decorator?.args).not.toContain('Greeting');
+    }
   });
 
   it('imports every identifier its args string names', () => {
@@ -276,11 +348,30 @@ describe('nest template', () => {
     }
   });
 
-  it('emits exactly the controller and the service', () => {
+  it('emits the controller, the service, and every seam barrel it can consume', () => {
     expect((NEST_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
       'src/greeting-service.ts',
       'src/greeting-controller.ts',
+      'src/modules/index.ts',
+      'src/controllers/index.ts',
+      'src/services/index.ts',
+      'src/routes/index.ts',
+      'src/middleware/index.ts',
+      'src/plugins/index.ts',
+      'src/health/index.ts',
+      'src/metrics/index.ts',
     ]);
+  });
+
+  // `nest` is the REST set plus `DiPlugin`, and `DiPlugin` hosts no seam — so its seam
+  // list must equal the REST one. A divergence here means the two templates picked up
+  // different seam sets, which is exactly the drift the shared `REST_SEAMS` prevents.
+  it('hosts the same seams as rest, and neither hosts the cqrs or events ones', () => {
+    const seamPaths = (files: readonly { readonly path: string }[]) =>
+      files.map((f) => f.path).filter((p) => p.endsWith('/index.ts')).sort();
+    expect(seamPaths(NEST_TEMPLATE.files ?? [])).toEqual(seamPaths(REST_TEMPLATE.files ?? []));
+    expect(seamPaths(NEST_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
+    expect(seamPaths(REST_TEMPLATE.files ?? [])).not.toContain('src/events/index.ts');
   });
 
   it('refuses no runtime target', () => {

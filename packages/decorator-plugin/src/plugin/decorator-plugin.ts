@@ -341,6 +341,14 @@ function buildResponseSchemas(route: RouteMetadata): Record<number, unknown> | u
 /**
  * Builds the {@linkcode RouteSchema} from validation and OpenAPI metadata.
  * Returns `undefined` when no schema-relevant metadata is present.
+ *
+ * `@Public` is carried through as an empty `security` array, the OpenAPI
+ * marker for a public operation. Without it a decorated route has no way to
+ * opt out of a document-level security requirement, and a route explicitly
+ * marked public would be documented as requiring the very token it bypasses.
+ * `@Roles`/`@Permissions` are deliberately NOT mapped: a role is not a
+ * security scheme, and there is no way to infer which declared scheme grants
+ * it without inventing a name the document does not contain.
  */
 function buildRouteSchema(
   ctrl: ControllerMetadata,
@@ -352,7 +360,10 @@ function buildRouteSchema(
   const response = buildResponseSchemas(route);
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
-  if (!hasSchema && !hasTags && summary === undefined && response === undefined) {
+  const isPublic = route.isPublic === true;
+  if (
+    !hasSchema && !hasTags && summary === undefined && response === undefined && !isPublic
+  ) {
     return undefined;
   }
   return {
@@ -362,6 +373,7 @@ function buildRouteSchema(
     ...(hasTags ? { tags } : {}),
     ...(summary !== undefined ? { summary } : {}),
     ...(response !== undefined ? { response } : {}),
+    ...(isPublic ? { security: [] } : {}),
   };
 }
 

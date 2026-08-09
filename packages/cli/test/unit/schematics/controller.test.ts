@@ -2,14 +2,26 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateController } from '../../../src/schematics/controller.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('controller schematic', () => {
   const files = generateController(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'controller');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the controller plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/controllers/order-item.controller.ts',
+      'src/controllers/index.ts',
+    ]);
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('controller', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('lists the class in the barrel for DecoratorPlugin({ controllers })', () => {
+    expect(barrelOf(files, 'controller').contents).toContain('OrderItemController');
+    expect(barrelOf(files, 'controller').contents).toContain('readonly Constructor[]');
   });
 
   it('emits it at src/controllers/order-item.controller.ts', () => {
@@ -36,12 +48,20 @@ describe('controller schematic', () => {
     expect(file.contents).toContain('export class OrderItemController');
   });
 
-  it('imports the decorators it uses as values and the types as types', () => {
+  it('imports the decorators it uses', () => {
     expect(file.contents).toContain(
-      "import { Controller, Get, Post } from '@setu-ts/decorator-plugin';",
+      "import { Body, Controller, Get, Post } from '@setu-ts/decorator-plugin';",
     );
-    expect(file.contents).toContain(
-      "import type { HandlerResult, IRequestContext } from '@setu-ts/common';",
-    );
+  });
+
+  it('declares no request-context parameter on a handler', () => {
+    // This assertion previously pinned the OPPOSITE — it required the
+    // `IRequestContext` import — which is how a controller that answered 500 on
+    // every request stayed "covered". The plugin builds a handler's arguments from
+    // parameter metadata alone and never passes the context positionally, so a
+    // `ctx` parameter arrives `undefined` and the first `ctx.response` throws.
+    // The e2e that boots a scaffolded app is the real proof; this is the fast one.
+    expect(file.contents).not.toContain('IRequestContext');
+    expect(file.contents).not.toContain('ctx.response');
   });
 });

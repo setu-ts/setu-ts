@@ -2,14 +2,30 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateEventHandler } from '../../../src/schematics/event-handler.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('event-handler schematic', () => {
   const files = generateEventHandler(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'event-handler');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the handler plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/events/order-item.event-handler.ts',
+      'src/events/index.ts',
+    ]);
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('event-handler', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('carries the event type alongside the handler, as subscribe requires', () => {
+    expect(barrelOf(files, 'event-handler').contents).toContain(
+      '{ type: ORDER_ITEM_EVENT, handler: new OrderItemEventHandler() }',
+    );
+    expect(barrelOf(files, 'event-handler').contents).toContain(
+      'readonly EventHandlerRegistration[]',
+    );
   });
 
   it('emits it at src/events/order-item.event-handler.ts', () => {

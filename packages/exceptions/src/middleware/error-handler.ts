@@ -12,7 +12,7 @@
  * import { errorHandler } from '@setu-ts/exceptions';
  *
  * app.middleware.add(errorHandler({
- *   format: 'rfc7807',
+ *   format: 'rfc9457',
  *   includeStackTrace: config.get('NODE_ENV') === 'development',
  *   logErrors: true,
  * }), { priority: 0, name: 'error-handler' });
@@ -30,6 +30,7 @@ import {
   type ErrorHandlerFormatter,
   selectFormatter,
 } from '../formatters/error-formatter.ts';
+import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
 import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
 
 /**
@@ -39,8 +40,8 @@ import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
  */
 export interface ErrorHandlerOptions {
   /**
-   * The error body format: `'default'`, `'rfc7807'`, or a custom formatter
-   * function. Defaults to `'default'`.
+   * The error body format: `'default'`, `'rfc9457'`, the deprecated
+   * `'rfc7807'`, or a custom formatter function. Defaults to `'default'`.
    */
   readonly format?: ErrorFormat | ErrorHandlerFormatter;
   /**
@@ -58,10 +59,26 @@ export interface ErrorHandlerOptions {
   readonly logErrors?: boolean;
 }
 
-/** The `application/problem+json` content type for RFC 7807 responses. */
+/** The `application/problem+json` content type for Problem Details responses. */
 const PROBLEM_JSON = 'application/problem+json';
 /** The default JSON content type. */
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
+
+/**
+ * The formatters whose bodies are Problem Details and therefore require the
+ * `application/problem+json` media type (RFC 9457 §3).
+ *
+ * Membership is keyed on the RESOLVED formatter rather than on the format
+ * string, because both formatters are exported: `format: rfc9457Formatter`
+ * passes a reference and must carry the same media type as `format: 'rfc9457'`.
+ * A body served as `application/json` is ignored by generic problem-details
+ * clients, so a formatter missing from this set is a silent interoperability
+ * defect rather than a visible failure.
+ */
+const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ErrorHandlerFormatter> = new Set([
+  rfc9457Formatter,
+  rfc7807Formatter,
+]);
 
 /**
  * Creates a global error-handler middleware.
@@ -86,12 +103,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
   const includeStackTrace = options?.includeStackTrace ?? false;
   const logErrors = options?.logErrors ?? true;
   const formatter = selectFormatter(format);
-  // Key the media type off the RESOLVED formatter, not just the string alias:
-  // `rfc7807Formatter` is exported, so `format: rfc7807Formatter` produces the
-  // identical Problem Details body and must carry the same content type. RFC
-  // 7807 §3 identifies that body with `application/problem+json`.
-  const isRfc7807 = formatter === rfc7807Formatter;
-  const contentType = isRfc7807 ? PROBLEM_JSON : JSON_CONTENT_TYPE;
+  const contentType = PROBLEM_DETAILS_FORMATTERS.has(formatter) ? PROBLEM_JSON : JSON_CONTENT_TYPE;
 
   return async function handleError(
     ctx: IRequestContext,
@@ -118,7 +130,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
 
       // Serialize and send via `.send(bytes)` rather than `.json(body)` so
       // the content-type header we set is not overwritten by json()'s own
-      // `application/json` default — RFC 7807 requires `application/problem+json`.
+      // `application/json` default — RFC 9457 requires `application/problem+json`.
       const bytes = new TextEncoder().encode(JSON.stringify(body));
       return ctx.response
         .status(error.statusCode)

@@ -93,6 +93,17 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
       if (bytes !== undefined) {
         return Promise.resolve({ isFile: true, isDirectory: false, size: bytes.length });
       }
+      // A path that is a PREFIX of a stored key is a directory, whether or not
+      // this fake's `mkdir` was ever called for it. A real filesystem cannot
+      // hold `a/b/c.ts` without `a/b` being a directory, so reporting otherwise
+      // would let a caller that walks directories pass here and fail in
+      // production — the fixture, not the code, would be under test.
+      const prefix = `${path}/`;
+      for (const key of store.keys()) {
+        if (key.startsWith(prefix)) {
+          return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
+        }
+      }
       if (dirs.has(path)) {
         return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
       }

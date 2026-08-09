@@ -25,6 +25,7 @@ import { generateQueryHandler } from './query-handler.ts';
 import { generateEventHandler } from './event-handler.ts';
 import { generateJob } from './job.ts';
 import { generateMigration } from './migration.ts';
+import { generateModule } from './module.ts';
 
 export type { GeneratedFile } from '../utils/file-writer.ts';
 export type { DerivedNames } from '../utils/names.ts';
@@ -42,6 +43,46 @@ export interface SchematicOptions {
    * schematic) is deterministic under test.
    */
   readonly now: () => number;
+  /**
+   * The domain modules already present under `src/modules/`, sorted.
+   *
+   * Gathered by the command layer (`utils/module-scanner.ts`) so the `module`
+   * schematic can render an aggregate barrel listing every module while staying
+   * a pure function — the same route {@linkcode SchematicOptions.plugins} takes
+   * for the detected plugin set.
+   *
+   * Read by the `module` schematic only, exactly as `now` is read only by
+   * `migration` and `plugins` only by the gated schematics.
+   *
+   * OPTIONAL purely for backward compatibility: `setu generate` always supplies
+   * it, but this interface is published, and a custom schematic's own test
+   * constructs one — making it required would break that test's compile with no
+   * deprecation path available (§9.2 assumes a replacement API, and there is
+   * none for an added field). Treat an absent value as "no modules yet".
+   *
+   * @since 0.1.0
+   */
+  readonly modules?: readonly string[];
+  /**
+   * The generated artifacts already present in the project, keyed by the schematic
+   * name that emits them (`{ 'health-indicator': ['external-api'] }`).
+   *
+   * Gathered by the command layer (`utils/artifact-scanner.ts`) so a wired schematic
+   * can render a barrel listing every artifact of its family while staying a pure
+   * function — the same route {@linkcode SchematicOptions.modules} takes for domain
+   * modules.
+   *
+   * Kept separate from `modules` rather than folded into it because the two admission
+   * rules genuinely differ: a module is a DIRECTORY that must hold both a controller
+   * and a service, while these families are FILES identified by a suffix.
+   *
+   * OPTIONAL for the same reason `modules` is: this interface is published, a custom
+   * schematic's own test constructs one, and there is no deprecation path for making
+   * an added field required. Treat an absent value as "no artifacts yet".
+   *
+   * @since 0.1.0
+   */
+  readonly artifacts?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -58,6 +99,20 @@ export type Schematic = (
 ) => readonly GeneratedFile[];
 
 /**
+ * Another schematic to reach for when a gated one is refused.
+ *
+ * Declared beside the gate it qualifies rather than built inside
+ * `commands/generate.ts`, so schematic knowledge lives in this one registry and
+ * a rename cannot leave a refusal pointing at a command that no longer exists.
+ */
+export interface SchematicAlternative {
+  /** The schematic name to suggest, e.g. `route`. */
+  readonly schematic: string;
+  /** One clause explaining what the alternative gives up and what it keeps. */
+  readonly why: string;
+}
+
+/**
  * A registry entry: the schematic plus the plugin it requires, if any.
  */
 export interface SchematicMetadata {
@@ -65,7 +120,32 @@ export interface SchematicMetadata {
   readonly factory: Schematic;
   /** The `@setu-ts` package that must be installed, when gated. */
   readonly requiresPlugin?: string;
+  /**
+   * A decorator-free (or otherwise ungated) schematic to suggest when this one
+   * is refused.
+   *
+   * AI_GUIDELINES' "5 Optional Rules" promise that "everything has a
+   * programmatic API — no feature requires decorators or reflection", and for
+   * an HTTP handler that API is `setu generate route`. Refusing `controller`
+   * with only "install the decorator plugin" told a developer to adopt
+   * decorators to get a route, which is the opposite of the promise. Present
+   * only where a genuine alternative exists: `guard`, `metric` and the rest
+   * have none, and inventing one would be worse than silence.
+   */
+  readonly alternative?: SchematicAlternative;
 }
+
+/**
+ * The decorator-free way to serve HTTP, suggested by both decorated schematics.
+ *
+ * `route` is ungated and wired: it emits `register<X>Routes(router)` and the
+ * `src/routes/index.ts` barrel that `createApp()` already calls, on every host
+ * including the no-template one.
+ */
+const ROUTE_ALTERNATIVE: SchematicAlternative = {
+  schematic: 'route',
+  why: 'it registers handlers on the router API, so it needs no decorators',
+};
 
 /**
  * The built-in schematics, keyed by the name `setu generate` accepts.
@@ -76,9 +156,20 @@ export interface SchematicMetadata {
  */
 const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, SchematicMetadata>([
   ['plugin', { factory: generatePlugin }],
+  // Gated for the same reason as `controller`: the module's emitted controller
+  // imports @Controller/@Get/@Inject/@Post.
+  ['module', {
+    factory: generateModule,
+    requiresPlugin: 'decorator-plugin',
+    alternative: ROUTE_ALTERNATIVE,
+  }],
   // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
   // the decorator plugin gets source that cannot resolve its own import.
-  ['controller', { factory: generateController, requiresPlugin: 'decorator-plugin' }],
+  ['controller', {
+    factory: generateController,
+    requiresPlugin: 'decorator-plugin',
+    alternative: ROUTE_ALTERNATIVE,
+  }],
   ['service', { factory: generateService }],
   ['route', { factory: generateRoute }],
   ['middleware', { factory: generateMiddleware }],
