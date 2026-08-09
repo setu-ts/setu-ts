@@ -6196,21 +6196,39 @@ This milestone extends that seam to the artifacts that have a registration site,
 which do not.
 
 Not every orphan has one. Each schematic must be sorted before implementation, and the sort is a
-design decision, not a mechanical sweep:
+design decision, not a mechanical sweep.
 
-- **Has a plugin-options registration site** (`guard`, `health-indicator`, `metric`,
-  `command-handler`, `query-handler`, `event-handler`) — these plug into a plugin's options or a
-  registry the plugin owns, so each needs its own barrel and its own `localImports` entry, and each
-  needs the same functional proof M58's controller got.
+**The sort below is the one that survived source-checking, and it is not the one this section
+originally carried.** Five of the six artifacts first placed in the plugin-options bucket have no
+such option: `CqrsPluginOptions` carried only `behaviors`, `EventsPluginOptions` only
+`async`/`errorHandler`, `auth-plugin` publishes no guard list at all, and
+`MetricsPluginOptions.customMetrics` is declarative (`NamedMetricConfig`) rather than the accessor
+function the schematic emits. `IApplication` also has no `lifecycle` member, so application code has
+no phase in which to register anything imperatively — anything needing a resolved capability must be
+a plugin option or a plugin.
+
+- **Plugs into a plugin's options** (`controller`, `service`, `health-indicator`, `metric`,
+  `command-handler`, `query-handler`, `event-handler`) — each gets its own barrel and its own
+  `localImports` entry, and each needs the same functional proof M58's controller got. Two of those
+  options are ADDED here as pure additions (`CqrsPluginOptions.commandHandlers`/`.queryHandlers`,
+  `EventsPluginOptions.handlers`), and `CqrsPlugin`/`EventsPlugin` join the `microservice` template
+  so those seams have a host at all.
 - **Registers imperatively on the app** (`route`, `middleware`, `plugin`) — `g route` already emits
-  a `registerXxxRoutes(app)` function, so the seam is a call in `createApp()` rather than a plugin
-  option. A different shape from a barrel array, and it must not silently reorder middleware
-  priorities.
-- **Has no framework registration site at all** (`service`, `migration`) — a bare service is
-  consumed by whatever imports it, and a migration is read by the database tooling by convention.
-  For these the honest answer may be to leave them unwired and say so in the emitted JSDoc, OR to
-  make `g service` emit an `@Injectable` with a token like the module's does. That choice is the
-  milestone's central decision and belongs in its plan.
+  a `registerXxxRoutes(router)` function, so the seam is a statement in `createApp()` rather than a
+  plugin option, and a generated plugin is a spread into the plugin array. Both need a new
+  `TemplateDefinition` field, and the middleware one must not silently reorder priorities — so a
+  generated middleware declares its own priority constant, in the module the developer owns.
+- **Has no framework registration site at all** (`guard`, `job`, `migration`) — and each "none" is
+  backed by evidence, not by a name nobody read. A guard's positions are all per target
+  (`RouteDefinition.middleware`, `@UseGuards`) and the only barrel-shaped alternative — the global
+  pipeline — would answer `401` for `/health` and `/metrics`. A job is transport-ambiguous by design
+  and `QueuePluginOptions` publishes no `processors` list. And no plugin in this repository calls
+  `ctx.cli.register`, so there is no `setu db:migrate` and nothing reads migration files.
+- **The central decision — `g service`** — is resolved by shaping it on the DETECTED plugin set:
+  `@Injectable({ token: '<name>-service' })` plus a barrel when `decorator-plugin` is present,
+  today's plain class byte-for-byte otherwise. Emitting the decorator unconditionally would force
+  the schematic to be gated like `controller`, which would REFUSE `g service` in a bare project
+  where it works today.
 
 **The functional bar is M58's, not a type-check.** `g controller` shipped broken from M34 through
 five releases — every controller it ever emitted answered `500`, because `DecoratorPlugin` builds a
@@ -6226,10 +6244,18 @@ handler receiving its command. Compiling is not working.
   "none, and here is why") for all thirteen.
 - Barrel seams for the artifacts that have one, following M58's `module-seam.ts` pattern; the
   templates emit each seam from scaffold time so a new project is wired before anything is
-  generated.
+  generated. One generalized `SeamSpec` + scanner + `SchematicOptions.artifacts` rather than ten
+  bespoke copies of each.
+- `CqrsPluginOptions.commandHandlers`/`.queryHandlers` and `EventsPluginOptions.handlers` as pure
+  additions, plus `CqrsPlugin`/`EventsPlugin` in the `microservice` template so those seams have a
+  host; `NamedMetricConfig` exported so `customMetrics` is nameable.
+- A refusal for a name that would collide with an existing artifact's HTTP path or injection token —
+  the wiring is what makes those collisions real, and both were observed as failures (a `500` on
+  every module request, and a silently unreachable route).
 - One functional e2e per wired artifact, extending M58's `bootAndProbe`, each verified to fail when
-  the wiring is removed.
-- Docs: PUBLIC_API per-schematic wiring table; CHANGELOG.
+  the wiring is removed. Batched one boot per host template rather than one per artifact: a single
+  booted app carrying all of them also proves they coexist.
+- Docs: PUBLIC_API per-schematic wiring table; ARCHITECTURE CLI Rules row; CHANGELOG.
 
 ### Out of scope
 
@@ -6394,7 +6420,7 @@ Three questions must be settled in the plan before any code:
 | 40        | ⬜     | final release                         |
 | 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ⬜     | cloudflare-plugin (workers messaging) |
-| 60        | ⬜     | cli (wire generated artifacts)        |
+| 60        | ✅     | cli (wire generated artifacts)        |
 | 61        | ⬜     | cli (decorator/DI opt-in)             |
 | 62        | ⬜     | cli (monorepo support)                |
 | 41        | ✅     | http-adapters                         |
