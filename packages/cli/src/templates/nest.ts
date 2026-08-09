@@ -12,6 +12,7 @@
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { LocalImport, TemplateDefinition, Wiring } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
+import { MODULE_SEAM_FILES, MODULE_SEAM_LOCAL_IMPORT, withModuleSeam } from './module-seam.ts';
 
 /** Where the emitted example classes live in the scaffolded project. */
 const SERVICE_PATH = './src/greeting-service.ts';
@@ -73,12 +74,14 @@ export class GreetingController {
 export const NEST_FILES: readonly GeneratedFile[] = [
   { path: 'src/greeting-service.ts', contents: SERVICE_SOURCE },
   { path: 'src/greeting-controller.ts', contents: CONTROLLER_SOURCE },
+  ...MODULE_SEAM_FILES,
 ];
 
 /** The classes `setu.config.ts` must import to pass them to `DecoratorPlugin`. */
 export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
   { symbols: ['GreetingService'], from: SERVICE_PATH },
   { symbols: ['GreetingController'], from: CONTROLLER_PATH },
+  MODULE_SEAM_LOCAL_IMPORT,
 ];
 
 /**
@@ -91,13 +94,10 @@ export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
  * `ServiceRegistry`; the template includes it because a NestJS reader expects
  * scoped providers to be there.
  */
-export const NEST_PLUGINS: readonly Wiring[] = REST_PLUGINS.map((wiring) =>
-  wiring.pkg === 'decorator-plugin'
-    ? {
-      ...wiring,
-      args: '{ controllers: [GreetingController], services: [GreetingService] }',
-    }
-    : wiring
+export const NEST_PLUGINS: readonly Wiring[] = withModuleSeam(
+  REST_PLUGINS,
+  ['GreetingController'],
+  ['GreetingService'],
 ).concat([{ pkg: 'di-plugin', symbol: 'DiPlugin' }]);
 
 /**

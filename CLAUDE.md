@@ -1590,12 +1590,47 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   refusal from PR #136 was extended to the derived scheme name. The integration suite drives the
   REAL `auth-plugin` guards through a kernel app rather than hand-branded fakes, which is what
   proves the two packages agree on the symbol) — complete (PR #137, stacked on PR #136)
-- **Next milestone** — **M38** (documentation), then M39–M40. **M58** (`cli` — domain module
-  scaffolding) and **M59** (`cloudflare-plugin` — Workers-native messaging) are queued behind those,
-  opened from an external DX review; both are ROADMAP sections only, with no plan and no code yet.
-  Note what that review got wrong, since the sections say so and a reader should not re-raise it: it
-  claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
-  blocked (M52b shipped them).
+- **Milestone 58** (`packages/cli` — `setu g module`, the first aggregate schematic and the first
+  managed file. 13 single-artifact schematics existed and no aggregate, so a domain module meant
+  `g controller` + `g service` plus a hand edit of `setu.config.ts` to reach
+  `DecoratorPlugin({ controllers, services })`. Emits five files: an `@Injectable` service, a
+  `@Controller` injecting it by an explicit token (`emitDecoratorMetadata` is unavailable under
+  Deno, so a parameter's type cannot be read), a `describe`/`it` service test, a per-module barrel,
+  and a regenerated aggregate barrel exporting `MODULE_CONTROLLERS`/`MODULE_SERVICES`. **The design
+  problem was not the aggregate but the wiring.** `Schematic` is
+  `(names, options) => readonly GeneratedFile[]` — pure, no I/O — and `--dry-run` prints from that
+  same array, so nothing that reads the project can live inside a schematic; an AST edit of
+  `setu.config.ts` was rejected outright (needs a TypeScript parser in a zero-dependency package,
+  cannot preserve formatting, makes `--dry-run` a prediction). So the command layer scans
+  `src/modules/` and passes the names through a new **optional** `SchematicOptions.modules` — the
+  `plugins` precedent — and the schematic returns the whole barrel from its one pure call. Rewriting
+  a barrel the CLI itself wrote needed an exemption from the overwrite refusal, shipped as a
+  per-file `GeneratedFile.managed` read ONLY by `findExisting`; a `--force` flag was rejected
+  because it would lift the check for all fourteen schematics and let a mistyped `g service user`
+  clobber real work. Both widened types are barrel exports, so both are **optional** additions on
+  the M42 `signal?` / M44 `fs?` precedent — a required `modules` would break a custom schematic's
+  own test with no deprecation path, since §9.2 assumes a replacement API and an added field has
+  none. The `rest`, `microservice` and `nest` templates emit the seam from scaffold time and
+  reference it through `Wiring.args`, so a NEW project is wired with no edit ever; `full-stack` is
+  deliberately not a host (`routes → features → services`, no `src/modules/` concept). Writing the
+  tests found the defect that would have shipped green: `runGenerateCommand` rebuilt each file as
+  `{ path, contents }` and **dropped `managed`**, so the exemption never reached `findExisting` and
+  every generate after the first refused on the barrel — two tests failed, and it now spreads the
+  file instead. A fixture defect was fixed first: `createFakeFs.stat` reported a directory only if
+  its own `mkdir` had been called, so a test seeding `src/modules/user/x.ts` saw no module while a
+  real filesystem would — the contract-violating-double class, now prefix-aware. The hostile-name
+  sweep covers `g module` (six names including the reserved words `class` and `new`), and a
+  scaffold→generate→`deno check` pass runs on both `rest` (no DI) and `nest` (DI), which is the only
+  place the emitted `@Inject` is proven to compile on the container-less path. Three negative
+  controls were each observed failing and reverted: removing the `managed` skip, misspelling an
+  option key inside the `args` string (invisible to the CLI's own `deno check` — the M50b trap), and
+  dropping the barrel sort. All new and changed files at 100% branch/function/line) — complete (PR
+  pending)
+- **Next milestone** — **M38** (documentation), then M39–M40. **M59** (`cloudflare-plugin` —
+  Workers-native messaging) is queued behind those, opened from the same external DX review as M58;
+  it is a ROADMAP section only, with no plan and no code yet. Note what that review got wrong, since
+  the section says so and a reader should not re-raise it: it claimed the framework has no
+  decorators (M9/M36b ship them) and that Workers queues are still blocked (M52b shipped them).
 
 ## Verification (run before declaring any work done)
 

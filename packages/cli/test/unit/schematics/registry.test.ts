@@ -9,8 +9,8 @@ import { deriveNames } from '../../../src/utils/names.ts';
 import { options } from './_shared.ts';
 
 describe('schematic registry', () => {
-  it('registers exactly thirteen built-in schematics', () => {
-    expect(listSchematics()).toHaveLength(13);
+  it('registers exactly fourteen built-in schematics', () => {
+    expect(listSchematics()).toHaveLength(14);
   });
 
   it('names the custom pseudo-schematic', () => {
@@ -29,7 +29,7 @@ describe('schematic registry', () => {
     }
   });
 
-  it('gates exactly the eight plugin-dependent schematics', () => {
+  it('gates exactly the nine plugin-dependent schematics', () => {
     const gated = listSchematics()
       .filter((s) => s.requiresPlugin !== undefined)
       .map((s) => s.name);
@@ -41,6 +41,7 @@ describe('schematic registry', () => {
       'health-indicator',
       'metric',
       'migration',
+      'module',
       'query-handler',
     ]);
   });

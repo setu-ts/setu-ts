@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`setu generate module <name>` scaffolds a whole domain sub-module and wires it in** (M58),
+  instead of requiring `g controller` + `g service` plus a hand edit of `setu.config.ts`. Emits an
+  `@Injectable` service, a `@Controller` injecting it by token, a service test, a per-module barrel,
+  and a regenerated aggregate barrel at `src/modules/index.ts` exporting `MODULE_CONTROLLERS` /
+  `MODULE_SERVICES`. The `rest`, `microservice` and `nest` templates now scaffold a `setu.config.ts`
+  that already imports both and passes them to `DecoratorPlugin`, so nothing the developer owns is
+  ever edited by the CLI.
+
+  ```bash
+  setu new shop --template rest
+  setu g module orders --dir shop   # wired; no edit to setu.config.ts
+  ```
+
+  Gated on `@setu-ts/decorator-plugin`, like `g controller`. `--template full-stack` is not a host:
+  its layering is `routes → features → services` and it has no `src/modules/` concept. A project
+  scaffolded before this release adds the barrel import once; every later `g module` is automatic.
+
+  `GeneratedFile` gains an optional `managed` flag and `SchematicOptions` an optional `modules`
+  list. Both are additive — existing custom schematics compile unchanged. A managed file is exempt
+  from the overwrite refusal, which previously covered every path without exception; only
+  `src/modules/index.ts` is managed today, and the exemption is per file rather than a `--force`
+  flag so a mistyped `g service` still cannot clobber hand-written work.
+
 - **The OpenAPI document can be derived from the guards that enforce authentication** (M57), instead
   of requiring every route to declare a requirement a second time. `@setu-ts/common` gains a
   `SECURITY_METADATA` symbol, a `RouteSecurityMetadata` type, and the pure `withSecurityMetadata` /

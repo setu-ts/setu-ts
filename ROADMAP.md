@@ -6064,12 +6064,21 @@ file list IS the output, and the overwrite check ("check every planned path, the
 exactly one place. A schematic that edits `setu.config.ts` is the first schematic that must READ the
 target project, which breaks both properties.
 
-So auto-wiring is achieved **without** mutating `setu.config.ts`: `g module <name>` emits a
-`src/modules/<name>/index.ts` barrel exporting the module's wiring, and the scaffolded
-`setu.config.ts` imports `src/modules/index.ts` once. Adding a module appends to a generated barrel
-— a file the CLI owns outright — rather than editing a file the developer owns. `TemplateDefinition`
-already carries `localImports` and `files` (M36b), so the templates can emit the barrel seam with no
-contract widening.
+So auto-wiring is achieved **without** mutating `setu.config.ts`: `g module <name>` emits its files
+under `src/modules/<name>/` plus an aggregate `src/modules/index.ts` exporting `MODULE_CONTROLLERS`
+and `MODULE_SERVICES`, which the scaffolded `setu.config.ts` already imports and hands to
+`DecoratorPlugin`. Adding a module rewrites that one generated barrel — a file the CLI owns outright
+— rather than editing a file the developer owns. `TemplateDefinition` already carries `localImports`
+and `files` (M36b), so the templates emit the barrel seam with no contract widening.
+
+**Who rewrites the barrel matters, because a `Schematic` performs no I/O and cannot read the
+project.** The command layer scans `src/modules/` (`IFileSystem.readdir` + `stat`) and passes the
+names in through a new `SchematicOptions.modules`, exactly as it already passes the detected plugin
+set through `plugins`; the schematic then returns the whole barrel from its one pure call, so
+`--dry-run` still prints the truth rather than a prediction. Rewriting a file the CLI already wrote
+also needs an exemption from the overwrite refusal, which is a new per-file `GeneratedFile.managed`
+flag read only by `findExisting` — narrow by design, since a `--force` flag would lift the check for
+all fourteen schematics and let a mistyped `g service` clobber real work.
 
 The alternative — an AST edit of the plugin array — is **rejected with cause**, not deferred: it
 requires a TypeScript parser in a package whose entire dependency surface is zero, it cannot
@@ -6078,13 +6087,18 @@ truth.
 
 ### Deliverables
 
-- `g module <name>` aggregate schematic: controller (gated on `decorator-plugin`), service, and
-  their tests, under `src/modules/<name>/`.
-- The `src/modules/index.ts` barrel seam, emitted by the templates and imported once by
-  `setu.config.ts`.
-- The hostile-name e2e gate (M34b) extended to `g module`, scaffolding a project, generating two
-  modules into it, and `deno check`ing the result against THIS workspace.
-- Docs: `docs/*` CLI guide, PUBLIC_API `Schematic` note that purity is preserved.
+- `g module <name>` aggregate schematic: controller (gated on `decorator-plugin`), service, its
+  test, and a per-module barrel, under `src/modules/<name>/`.
+- `SchematicOptions.modules` (optional, so no published harness breaks) plus the
+  `utils/module-scanner.ts` seam that populates it.
+- `GeneratedFile.managed`, read only by `findExisting`, and the PUBLIC_API narrowing of the
+  overwrite guarantee it requires.
+- The `src/modules/index.ts` barrel seam, emitted by the `rest`, `microservice` and `nest` templates
+  and imported once by `setu.config.ts`. `full-stack` is deliberately not a host.
+- The hostile-name e2e gate (M34b) extended to `g module`, plus a scaffold-generate-`deno check`
+  pass on both `rest` (no DI) and `nest` (DI) against THIS workspace.
+- Docs: PUBLIC_API command list, overwrite-protection rewrite, a Domain modules section, and the two
+  widened types; ARCHITECTURE Rules row; CHANGELOG.
 
 ### Out of scope
 
@@ -6212,7 +6226,7 @@ Deciding that is the plan's job, on the plan's evidence.
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
-| 58        | ⬜     | cli (domain module scaffolding)       |
+| 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ⬜     | cloudflare-plugin (workers messaging) |
 | 41        | ✅     | http-adapters                         |
 | 42        | ✅     | streaming-response                    |
