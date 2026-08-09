@@ -6,6 +6,12 @@
 
 import type { TemplateDefinition } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
+import {
+  MODULE_SEAM_FILES,
+  MODULE_SEAM_LOCAL_IMPORT,
+  MODULE_SEAM_MANIFEST,
+  withModuleSeam,
+} from './module-seam.ts';
 
 /**
  * `microservice` — `rest` plus the pieces a service needs to talk to others:
@@ -29,7 +35,7 @@ import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
 export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   name: 'microservice',
   description: 'REST plus messaging, queues, resilience, telemetry, and service discovery',
-  plugins: [
+  plugins: withModuleSeam([
     ...REST_PLUGINS,
     { pkg: 'messaging-plugin', symbol: 'MessagingPlugin' },
     { pkg: 'queue-plugin', symbol: 'QueuePlugin' },
@@ -47,8 +53,11 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
       symbol: 'ServiceDiscoveryPlugin',
       args: "{ provider: 'static', services: {} }",
     },
-  ],
+  ]),
   middleware: REST_MIDDLEWARE,
+  localImports: [MODULE_SEAM_LOCAL_IMPORT],
+  files: MODULE_SEAM_FILES,
+  manifest: MODULE_SEAM_MANIFEST,
   unsupported: {
     'cloudflare-workers':
       'the messaging and queue plugins reach brokers over raw sockets, which Workers does not provide',

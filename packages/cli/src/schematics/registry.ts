@@ -25,6 +25,7 @@ import { generateQueryHandler } from './query-handler.ts';
 import { generateEventHandler } from './event-handler.ts';
 import { generateJob } from './job.ts';
 import { generateMigration } from './migration.ts';
+import { generateModule } from './module.ts';
 
 export type { GeneratedFile } from '../utils/file-writer.ts';
 export type { DerivedNames } from '../utils/names.ts';
@@ -42,6 +43,26 @@ export interface SchematicOptions {
    * schematic) is deterministic under test.
    */
   readonly now: () => number;
+  /**
+   * The domain modules already present under `src/modules/`, sorted.
+   *
+   * Gathered by the command layer (`utils/module-scanner.ts`) so the `module`
+   * schematic can render an aggregate barrel listing every module while staying
+   * a pure function — the same route {@linkcode SchematicOptions.plugins} takes
+   * for the detected plugin set.
+   *
+   * Read by the `module` schematic only, exactly as `now` is read only by
+   * `migration` and `plugins` only by the gated schematics.
+   *
+   * OPTIONAL purely for backward compatibility: `setu generate` always supplies
+   * it, but this interface is published, and a custom schematic's own test
+   * constructs one — making it required would break that test's compile with no
+   * deprecation path available (§9.2 assumes a replacement API, and there is
+   * none for an added field). Treat an absent value as "no modules yet".
+   *
+   * @since 0.1.0
+   */
+  readonly modules?: readonly string[];
 }
 
 /**
@@ -76,6 +97,9 @@ export interface SchematicMetadata {
  */
 const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, SchematicMetadata>([
   ['plugin', { factory: generatePlugin }],
+  // Gated for the same reason as `controller`: the module's emitted controller
+  // imports @Controller/@Get/@Inject/@Post.
+  ['module', { factory: generateModule, requiresPlugin: 'decorator-plugin' }],
   // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
   // the decorator plugin gets source that cannot resolve its own import.
   ['controller', { factory: generateController, requiresPlugin: 'decorator-plugin' }],

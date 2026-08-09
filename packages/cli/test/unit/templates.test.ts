@@ -241,9 +241,13 @@ describe('nest template', () => {
   });
 
   it('carries the decorator class lists as rendered args', () => {
+    // The example classes come first, then the module barrel is spread — so a
+    // generated module registers alongside the template's own showcase classes
+    // rather than displacing them.
     const decorator = NEST_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
     expect(decorator?.args).toBe(
-      '{ controllers: [GreetingController], services: [GreetingService] }',
+      '{ controllers: [GreetingController, ...MODULE_CONTROLLERS], ' +
+        'services: [GreetingService, ...MODULE_SERVICES] }',
     );
   });
 
@@ -254,13 +258,24 @@ describe('nest template', () => {
     }
   });
 
-  it('does not mutate the shared REST_PLUGINS list', () => {
+  it('does not leak its example classes into the shared REST_PLUGINS list', () => {
     // NEST_PLUGINS is built by mapping REST_PLUGINS; a mutating implementation
     // would leak the args string into the rest and microservice templates.
+    //
+    // `REST_PLUGINS` is the raw constant, so its decorator entry carries no args
+    // at all — the seam is applied per template, not to the shared list.
     const restDecorator = REST_PLUGINS.find((w) => w.pkg === 'decorator-plugin');
     expect(restDecorator?.args).toBeUndefined();
-    const microDecorator = MICROSERVICE_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
-    expect(microDecorator?.args).toBeUndefined();
+
+    // The other two templates DO carry the module-barrel seam, but must not have
+    // picked up nest's showcase classes along with it.
+    for (const plugins of [REST_TEMPLATE.plugins, MICROSERVICE_TEMPLATE.plugins]) {
+      const decorator = plugins.find((w) => w.pkg === 'decorator-plugin');
+      expect(decorator?.args).toBe(
+        '{ controllers: [...MODULE_CONTROLLERS], services: [...MODULE_SERVICES] }',
+      );
+      expect(decorator?.args).not.toContain('Greeting');
+    }
   });
 
   it('imports every identifier its args string names', () => {
@@ -276,10 +291,11 @@ describe('nest template', () => {
     }
   });
 
-  it('emits exactly the controller and the service', () => {
+  it('emits the controller, the service, and the module barrel seam', () => {
     expect((NEST_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
       'src/greeting-service.ts',
       'src/greeting-controller.ts',
+      'src/modules/index.ts',
     ]);
   });
 

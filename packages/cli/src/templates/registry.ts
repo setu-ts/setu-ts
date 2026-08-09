@@ -147,8 +147,26 @@ export interface PackageImport {
 export interface TemplateManifest {
   /** npm packages the running application needs, merged into `dependencies`. */
   readonly npmDependencies?: Readonly<Record<string, string>>;
-  /** npm packages the build needs, merged into `devDependencies`. */
+  /** npm packages the build or tests need, merged into `devDependencies`. */
   readonly npmDevDependencies?: Readonly<Record<string, string>>;
+  /**
+   * The build command for a template with a real frontend npm toolchain, emitted
+   * as the generated `package.json`'s `build` script.
+   *
+   * Present ONLY for such a template, and it is what marks one — a Deno or
+   * Workers target emits a standalone `package.json` + `tsconfig.json` only when
+   * this is set.
+   *
+   * Declared explicitly rather than inferred from
+   * {@linkcode TemplateManifest.npmDevDependencies}, which is what the two sites
+   * below used to do. That proxy held only while exactly one template declared
+   * npm packages at all: the moment a non-frontend template needed a dev
+   * dependency for another reason — `@std/testing` and `@std/expect`, so the
+   * module schematic's emitted test can run — it started emitting a
+   * `react-router build` script into REST projects and, worse, a `package.json`
+   * into Deno ones, which switches Deno to node_modules resolution.
+   */
+  readonly npmBuildScript?: string;
   /** `compilerOptions` merged into `tsconfig.json`. */
   readonly tsconfigCompilerOptions?: Readonly<Record<string, unknown>>;
   /** Entries merged into the Deno import map, for aliases `deno check` must resolve. */

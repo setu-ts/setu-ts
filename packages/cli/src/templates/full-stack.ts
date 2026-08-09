@@ -118,6 +118,9 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   ],
   files: [...FULL_STACK_APP_FILES, ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES)],
   manifest: {
+    // The one template with a real frontend build, and the only one that should
+    // therefore carry an npm manifest on a Deno or Workers target.
+    npmBuildScript: 'react-router build',
     npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
     npmDevDependencies: FULL_STACK_NPM_DEV_DEPENDENCIES,
     tsconfigCompilerOptions: FULL_STACK_TSCONFIG_OPTIONS,
