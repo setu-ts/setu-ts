@@ -15,6 +15,7 @@
  * @module
  */
 
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /**
@@ -38,12 +39,27 @@ export interface SeamSpec {
   /**
    * Filename suffix that identifies an artifact of this family.
    *
-   * Load-bearing rather than cosmetic: it is the admission rule that keeps a
-   * hand-written module in the same directory out of the barrel. Admitting one
-   * would make the barrel import a symbol the developer never wrote, so their
-   * project would fail to compile naming a file they never generated.
+   * The first half of the admission rule. The second half is
+   * {@linkcode SeamSpec.importSymbols}: a suffix is a claim about intent, not a
+   * guarantee that the file exports what the barrel is about to name.
    */
   readonly suffix: string;
+  /**
+   * The symbols the barrel imports FROM one artifact module.
+   *
+   * Read by two callers deliberately, so they cannot disagree: `renderBarrel` names
+   * these in the import it emits, and `readArtifactNames` requires the file to export
+   * every one of them before admitting it.
+   *
+   * Splitting those two was a real defect. `middleware` and `metric` each gained a
+   * second export in M60, and a project that generated one of them earlier got a
+   * regenerated barrel importing a symbol its own file did not have — so `deno check`
+   * failed on a file the CLI had just reported creating.
+   *
+   * @param names - The artifact's derived naming forms
+   * @returns The symbols, in the order the import should name them
+   */
+  readonly importSymbols: (names: DerivedNames) => readonly string[];
   /** The barrel's path, relative to the project root. */
   readonly barrel: string;
   /**
@@ -142,20 +158,65 @@ export function seamHeader(command: string, wiring: readonly string[]): string {
 /**
  * Renders one import per artifact, in the order the names are given.
  *
+ * Takes the spec's own {@linkcode SeamSpec.importSymbols} rather than a symbol callback
+ * of its own, so the symbols this emits are exactly the ones the scanner requires the
+ * file to export.
+ *
  * @param names - Artifact names (kebab-case), already sorted
- * @param symbol - Maps an artifact's derived names to the symbol to import
+ * @param symbols - The spec's `importSymbols`
  * @param module - Maps an artifact's kebab name to the specifier to import from
  * @returns The import statements, one per line, or `''` when there are none
  */
 export function renderSeamImports(
   names: readonly string[],
-  symbol: (names: ReturnType<typeof deriveNames>) => string,
+  symbols: (names: DerivedNames) => readonly string[],
   module: (kebab: string) => string,
 ): string {
   if (names.length === 0) return '';
   return names
-    .map((name) => `import { ${symbol(deriveNames(name))} } from '${module(name)}';`)
+    .map((name) => `import { ${symbols(deriveNames(name)).join(', ')} } from '${module(name)}';`)
     .join('\n');
+}
+
+/**
+ * Reports whether a module's source exports a symbol.
+ *
+ * A source-text check rather than a parse, because this package has a zero-dependency
+ * surface and carries no TypeScript parser. It recognizes the declaration form
+ * (`export const|function|class|…  X`) and the named-re-export form (`export { X }`,
+ * including `y as X`), which covers everything the CLI itself emits.
+ *
+ * An aliased default export, or a symbol re-exported through `export * from`, reads as
+ * ABSENT. That direction is deliberate: a false negative skips the artifact and reports
+ * it, while a false positive would put an unresolvable import in the developer's barrel
+ * — so the heuristic errs toward the outcome that still compiles.
+ *
+ * The symbol is interpolated into a pattern unescaped, which is safe because every
+ * caller passes an identifier derived by `deriveNames` — letters and digits only, never
+ * a regular-expression metacharacter.
+ *
+ * @param source - The module's source text
+ * @param symbol - The identifier to look for
+ * @returns True when the module appears to export it
+ */
+export function exportsSymbol(source: string, symbol: string): boolean {
+  const declaration = new RegExp(
+    `export\\s+(?:declare\\s+)?(?:abstract\\s+)?(?:async\\s+)?` +
+      `(?:const|let|var|function|class|type|interface|enum)\\s+${symbol}\\b`,
+  );
+  if (declaration.test(source)) return true;
+
+  // `export { a, b as c }` — the symbol may appear as the local name or the alias.
+  // Matched WITHOUT a capture group, and tested against the whole match: a group would
+  // need a `?? ''` fallback for its `string | undefined` type, and that fallback is
+  // unreachable, so it would sit permanently uncovered. Including the `export {` and `}`
+  // in the tested text is harmless, because a symbol is always a derived identifier and
+  // never the reserved word itself.
+  const word = new RegExp(`\\b${symbol}\\b`);
+  for (const clause of source.matchAll(/export\s*\{[^}]*\}/g)) {
+    if (word.test(clause[0])) return true;
+  }
+  return false;
 }
 
 /**

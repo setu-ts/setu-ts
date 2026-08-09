@@ -5060,6 +5060,27 @@ the exact lines to add to `setu.config.ts`; add them once and every later genera
 project is wired before anything is generated. `--template full-stack` and the no-template path are
 deliberately not hosts.
 
+**Artifacts generated before their family gained a second export are skipped, and reported.** A
+barrel imports specific symbols from each artifact, and two families gained one in this release:
+`middleware` now exports a `<SCREAMING>_MIDDLEWARE_PRIORITY` constant and `metric` a
+`<SCREAMING>_METRIC` declaration. An artifact generated earlier has the right filename and lacks
+that export, so listing it would put an unresolvable import in the barrel. The scan admits a file
+only when it exports everything the barrel will name, and prints what it left out:
+
+```
+Skipped src/middleware/audit-log.middleware.ts: it does not export
+  AUDIT_LOG_MIDDLEWARE_PRIORITY, so it cannot be listed in the generated barrel.
+  Regenerate it to bring it up to date.
+```
+
+Delete and regenerate the artifact to bring it back in. The same rule keeps a hand-written module in
+a scanned directory out of the barrel — the flat-family form of the precondition that admits a
+`src/modules/` directory only when it holds both canonical files. Export detection reads the source
+text rather than parsing it (this package has no TypeScript parser), so a declaration
+(`export const X`) and a named re-export (`export { y as X }`) are recognized while an aliased
+default export is not; an undetected export means the artifact is skipped and reported, never that a
+broken barrel is written.
+
 Which seams a host carries depends on which plugins it registers: `rest` and `nest` carry eight
 barrels, and `microservice` additionally carries `src/cqrs/` and `src/events/`, because it is the
 only template registering `CqrsPlugin` and `EventsPlugin`.

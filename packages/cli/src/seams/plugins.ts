@@ -22,10 +22,21 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated plugin, ready to register. */
 export const GENERATED_PLUGINS_EXPORT = 'GENERATED_PLUGINS';
+
+/**
+ * Symbols the barrel imports from one plugin module.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [`${names.pascal}Plugin`];
+}
 
 /**
  * Renders `src/plugins/index.ts`.
@@ -40,11 +51,7 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { IPlugin } from '@setu-ts/common';`,
-    renderSeamImports(
-      names,
-      (n) => `${n.pascal}Plugin`,
-      (kebab) => `./${kebab}.plugin.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.plugin.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   const entries = names.map((name) => `${deriveNames(name).pascal}Plugin()`);
@@ -67,6 +74,7 @@ export const PLUGINS_SEAM: SeamSpec = {
   schematic: 'plugin',
   dir: 'src/plugins',
   suffix: '.plugin.ts',
+  importSymbols,
   barrel: 'src/plugins/index.ts',
   exports: [GENERATED_PLUGINS_EXPORT],
   renderBarrel: renderPluginsBarrel,

@@ -303,6 +303,58 @@ describe('generated artifacts are wired — end to end', () => {
     });
   }
 
+  // A project that generated a middleware or a metric BEFORE that artifact gained its
+  // second export has the right filename and the wrong exports. The barrel is
+  // regenerated from a directory scan, so it used to name a symbol the old file did not
+  // have — `deno check` then failed on a file the CLI had just reported creating.
+  //
+  // Checked with a real `deno check` rather than a string assertion, because the failure
+  // was a type error in the developer's project, which is the only place it shows up.
+  describe("an artifact predating its family's second export", () => {
+    /** The pre-seam middleware shape: the factory only, no priority constant. */
+    const OLD_MIDDLEWARE = `import type { MiddlewareFunction } from '@setu-ts/common';
+
+export function auditLogMiddleware(): MiddlewareFunction {
+  return async (ctx, next) => {
+    await next();
+    void ctx;
+  };
+}
+`;
+
+    it('leaves the regenerated barrel compiling', async () => {
+      expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+      const project = `${root}/shop`;
+      await Deno.mkdir(`${project}/src/middleware`, { recursive: true });
+      await Deno.writeTextFile(
+        `${project}/src/middleware/audit-log.middleware.ts`,
+        OLD_MIDDLEWARE,
+      );
+
+      err = [];
+      expect(await run(['g', 'middleware', 'request-id', '--dir', project])).toBe(0);
+
+      // Reported, not silently dropped.
+      expect(err.join('\n')).toContain('audit-log.middleware.ts');
+      expect(err.join('\n')).toContain('AUDIT_LOG_MIDDLEWARE_PRIORITY');
+
+      await useWorkspacePackages(project);
+      const barrel = `${project}/src/middleware/index.ts`;
+      const command = new Deno.Command(Deno.execPath(), {
+        args: ['check', '--node-modules-dir=none', '--config', `${project}/deno.json`, barrel],
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const { code, stderr } = await command.output();
+      const output = new TextDecoder().decode(stderr);
+
+      // Without the scanner's export check this is TS2305: "has no exported member
+      // 'AUDIT_LOG_MIDDLEWARE_PRIORITY'".
+      expect(output).not.toContain('TS2305');
+      expect(code).toBe(0);
+    });
+  });
+
   // The wiring is what makes these collisions real: before the seams, two artifacts
   // sharing a name were two inert files. Both refusals below were derived from observed
   // failures — a 500 on every module request, and a silently unreachable route.

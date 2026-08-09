@@ -124,6 +124,68 @@ describe('setu generate, with seams', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  // The upgrade path. `middleware` gained a second export in M60, so an artifact
+  // generated earlier has the right filename and the wrong exports. Before the scanner
+  // checked exports, the regenerated barrel named a constant that file did not have and
+  // the project stopped compiling — from a command that reported success.
+  describe("an artifact predating its family's second export", () => {
+    const PRE_M60 = {
+      ...WIRED,
+      '/app/src/middleware/audit-log.middleware.ts':
+        'export function auditLogMiddleware() { return async () => {}; }',
+    };
+
+    it('leaves it out of the barrel instead of emitting an unresolvable import', async () => {
+      const h = harness(PRE_M60);
+
+      expect(await h.run(['middleware', 'request-id'])).toBe(0);
+
+      const barrel = h.fs.read('/app/src/middleware/index.ts');
+      expect(barrel).toContain('REQUEST_ID_MIDDLEWARE_PRIORITY');
+      // The symbol the old file does not export must not appear at all.
+      expect(barrel).not.toContain('AUDIT_LOG_MIDDLEWARE_PRIORITY');
+      expect(barrel).not.toContain('audit-log.middleware.ts');
+    });
+
+    it('says so, rather than dropping it silently', async () => {
+      // A silent omission would leave the artifact unwired with no diagnostic, which is
+      // the failure this whole milestone exists to end.
+      const h = harness(PRE_M60);
+
+      expect(await h.run(['middleware', 'request-id'])).toBe(0);
+
+      const reported = h.err.lines.join('\n');
+      expect(reported).toContain('src/middleware/audit-log.middleware.ts');
+      expect(reported).toContain('AUDIT_LOG_MIDDLEWARE_PRIORITY');
+      expect(reported).toContain('Regenerate it');
+    });
+
+    it('still exits 0, because the generate itself succeeded', async () => {
+      const h = harness(PRE_M60);
+      expect(await h.run(['middleware', 'request-id'])).toBe(0);
+      expect(h.fs.writes).toContain('/app/src/middleware/request-id.middleware.ts');
+    });
+
+    it('admits it again once it is regenerated', async () => {
+      const h = harness(PRE_M60);
+      // Regenerating is refused on the artifact itself (it exists), so the developer
+      // deletes and regenerates — modelled here by replacing the stale source.
+      await h.run(['middleware', 'request-id']);
+      await h.fs.writeFile(
+        '/app/src/middleware/audit-log.middleware.ts',
+        new TextEncoder().encode(
+          'export const AUDIT_LOG_MIDDLEWARE_PRIORITY = 500;\n' +
+            'export function auditLogMiddleware() { return async () => {}; }',
+        ),
+      );
+
+      expect(await h.run(['middleware', 'another'])).toBe(0);
+      expect(h.fs.read('/app/src/middleware/index.ts')).toContain(
+        'AUDIT_LOG_MIDDLEWARE_PRIORITY',
+      );
+    });
+  });
+
   it('survives an unreadable family directory', async () => {
     // `readdir` throws for every family in a fresh project; a generate must still work.
     const h = harness();

@@ -63,6 +63,15 @@ All notable changes to this project are documented here. The format follows
   package the output is unchanged, byte for byte, and the schematic stays **ungated** — so it keeps
   working in a project with no plugins at all.
 
+- **An artifact generated before its family gained a second export is skipped and reported**, rather
+  than listed in a barrel that cannot compile. `middleware` gained a
+  `<SCREAMING>_MIDDLEWARE_PRIORITY` constant and `metric` a `<SCREAMING>_METRIC` declaration in this
+  release; an artifact generated earlier has the right filename and lacks that export, so a barrel
+  regenerated over it named a symbol the file did not have and the project stopped compiling — from
+  a command that reported success. The scan now admits a file only when it exports everything the
+  barrel will name, prints what it skipped and why, and tells you to regenerate. The same rule keeps
+  a hand-written module in a scanned directory out of the barrel.
+
 - **`setu generate` refuses a name that would collide with an existing artifact** (exit `1`), naming
   the conflict and the consequence. `route`, `controller` and `module` all mount `/<name>`, and the
   kernel's router keys routes by method and path — so a duplicate silently overwrites and one

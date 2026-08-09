@@ -16,10 +16,26 @@
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import { assembleSeamBarrel, renderSeamImports, seamHeader, seamNames } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated middleware with its pipeline position. */
 export const GENERATED_MIDDLEWARE_EXPORT = 'GENERATED_MIDDLEWARE';
+
+/**
+ * Symbols the barrel imports from one middleware module.
+ *
+ * TWO of them, and that is what made the scanner's export check necessary: a middleware
+ * generated before this seam existed exports only the factory, so a barrel regenerated
+ * over it named a priority constant the file did not have and the project stopped
+ * compiling. Such a file is now skipped and reported instead.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [middlewarePriorityExport(names.screaming), `${names.camel}Middleware`];
+}
 
 /**
  * The name of the priority constant a generated middleware exports.
@@ -46,11 +62,7 @@ function renderMiddlewareBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { MiddlewareFunction } from '@setu-ts/common';`,
-    renderSeamImports(
-      names,
-      (n) => `${middlewarePriorityExport(n.screaming)}, ${n.camel}Middleware`,
-      (kebab) => `./${kebab}.middleware.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.middleware.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   const entries = names.map((name) => {
@@ -84,6 +96,7 @@ export const MIDDLEWARE_SEAM: SeamSpec = {
   schematic: 'middleware',
   dir: 'src/middleware',
   suffix: '.middleware.ts',
+  importSymbols,
   barrel: 'src/middleware/index.ts',
   exports: [GENERATED_MIDDLEWARE_EXPORT],
   renderBarrel: renderMiddlewareBarrel,

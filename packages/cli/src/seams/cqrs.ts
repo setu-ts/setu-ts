@@ -23,7 +23,28 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
+
+/**
+ * Symbols the barrel imports from one command-handler module.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function commandImportSymbols(names: DerivedNames): readonly string[] {
+  return [`${names.screaming}_COMMAND`, `${names.pascal}CommandHandler`];
+}
+
+/**
+ * Symbols the barrel imports from one query-handler module.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function queryImportSymbols(names: DerivedNames): readonly string[] {
+  return [`${names.screaming}_QUERY`, `${names.pascal}QueryHandler`];
+}
 
 /** Barrel export naming every generated command handler with its command type. */
 export const COMMAND_HANDLERS_EXPORT = 'COMMAND_HANDLERS';
@@ -58,14 +79,10 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
     `} from '@setu-ts/cqrs-plugin';`,
     renderSeamImports(
       commands,
-      (n) => `${n.screaming}_COMMAND, ${n.pascal}CommandHandler`,
+      commandImportSymbols,
       (kebab) => `./${kebab}.command-handler.ts`,
     ),
-    renderSeamImports(
-      queries,
-      (n) => `${n.screaming}_QUERY, ${n.pascal}QueryHandler`,
-      (kebab) => `./${kebab}.query-handler.ts`,
-    ),
+    renderSeamImports(queries, queryImportSymbols, (kebab) => `./${kebab}.query-handler.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   // The type constant travels with the handler because the bus routes on it and the
@@ -97,6 +114,7 @@ export const COMMAND_HANDLER_SEAM: SeamSpec = {
   schematic: 'command-handler',
   dir: 'src/cqrs',
   suffix: '.command-handler.ts',
+  importSymbols: commandImportSymbols,
   barrel: CQRS_BARREL,
   exports: [COMMAND_HANDLERS_EXPORT, QUERY_HANDLERS_EXPORT],
   requiresPlugin: 'cqrs-plugin',
@@ -114,6 +132,7 @@ export const QUERY_HANDLER_SEAM: SeamSpec = {
   schematic: 'query-handler',
   dir: 'src/cqrs',
   suffix: '.query-handler.ts',
+  importSymbols: queryImportSymbols,
   barrel: CQRS_BARREL,
   exports: [COMMAND_HANDLERS_EXPORT, QUERY_HANDLERS_EXPORT],
   requiresPlugin: 'cqrs-plugin',
