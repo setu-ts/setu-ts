@@ -1795,12 +1795,22 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tsconfig already sets; `--experimental-transform-types` was tried and rejected (it fixes the
   parameter property and still refuses the decorator). Runtime-level, not template-level — Bun
   compiles TypeScript outright and Deno/Workers never invoke the runner. Verified with real
-  `npm install` + `npm start`. **Every runtime was driven for real**: Deno (8 combos), Bun
-  (`bun install`, all artifacts 200), Node (as above), Cloudflare Workers (through the real
-  `fetch(request, env)` export), and `full-stack --di` through a real `deno install` +
-  `react-router build` to an SSR 200 with the container live — which is what proves the `di: {}`
-  string reaches the starter rather than merely being emitted. NOT verified against a deployed
-  Worker: `wrangler` is not installed here, so Workers ran through its fetch export, not workerd.
+  `npm install` + `npm start`. (3) **`--runtime cloudflare-workers` could not be built or deployed
+  at all.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers
+  nor a Deno import map, and the Workers target emitted no `package.json` and no `.npmrc` — so
+  `npm install && npx wrangler dev`, which the CLI itself prints as the next step, failed with one
+  `Could not resolve "@setu-ts/…"` per package. There was nothing to install. Workers projects now
+  emit an npm manifest (npm-compat `@jsr/…` deps, `wrangler` pinned, `dev`/`deploy` scripts) plus
+  `.npmrc`, alongside the `deno.json` that `setu generate` reads for plugin gating; Deno still gets
+  none, because a `package.json` switches it to node_modules resolution.
+
+  **Every runtime was driven for real**: Deno (8 combos), Bun (`bun install`, all artifacts 200),
+  Node (`npm install` + `npm start`), Cloudflare Workers (**real workerd** via `wrangler dev` — a
+  pristine scaffold serves `/`, `/health`, `/metrics` and every generated route, controller and
+  module), and `full-stack --di` through a real `deno install` + `react-router build` to an SSR 200
+  with the container live — which is what proves the `di: {}` string reaches the starter rather than
+  merely being emitted. NOT verified against a DEPLOYED Worker: `wrangler dev --local` runs workerd
+  on this machine, which is the same runtime but not Cloudflare's edge.
 
   **A `--no-decorators` variant was rejected rather than deferred**: it would have to emit a
   router-registered handler module, which is exactly what `g route` emits, so it is either a second
