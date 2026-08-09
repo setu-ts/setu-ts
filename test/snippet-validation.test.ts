@@ -213,7 +213,13 @@ describe('Documentation snippet validation — guide content invariants', () => 
     ];
     for (const guide of guides) {
       const content = await Deno.readTextFile(guide);
-      const badMatches = [...content.matchAll(/response\.status(?![a-zA-Z])/g)];
+      // `response.status(code)` is the real IResponse chaining API (returns
+      // IResponse for `.json()` chaining), and `response.statusCode` is a
+      // valid property access in test assertions. Reject only a bare
+      // `response.status` NOT followed by a letter or `(` — that catches the
+      // nonexistent `response.status =` / `response.status,` patterns the gate
+      // was originally written to catch.
+      const badMatches = [...content.matchAll(/response\.status(?![a-zA-Z(])/g)];
       expect(badMatches.length).toBe(0);
     }
   });

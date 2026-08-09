@@ -43,6 +43,7 @@ node_modules/
 apps/full-stack/build/
 apps/full-stack/.react-router/
 apps/full-stack/deno.lock
+test/fixtures/snippets/deno.lock
 
 # Claude Code local state (worktree checkouts, personal settings). Nothing
 # under .claude/ is meant to be tracked today; if shared project config is

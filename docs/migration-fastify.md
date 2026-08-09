@@ -96,7 +96,7 @@ app.router.get('/users/:id', async (ctx) => {
 
 app.router.post('/users', async (ctx) => {
   const body = await ctx.request.json();
-  return ctx.response.json({ created: body.name }, { status: 201 });
+  return ctx.response.status(201).json({ created: body.name });
 });
 ```
 
@@ -288,10 +288,10 @@ const userSchema = z.object({
 app.router.post('/users', async (ctx) => {
   const result = userSchema.safeParse(await ctx.request.json());
   if (!result.success) {
-    return ctx.response.json({ errors: result.error.errors }, { status: 400 });
+    return ctx.response.status(400).json({ errors: result.error.errors });
   }
   const body = result.data;
-  return ctx.response.json({ created: true }, { status: 201 });
+  return ctx.response.status(201).json({ created: true });
 });
 ```
 
@@ -357,7 +357,7 @@ interface CreateUserData {
 
 app.router.post('/users', async (ctx) => {
   const body = await ctx.request.json<CreateUserData>();
-  return ctx.response.json({ created: true }, { status: 201 });
+  return ctx.response.status(201).json({ created: true });
 });
 ```
 
