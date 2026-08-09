@@ -163,7 +163,9 @@ app.register(LoggerPlugin());
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 
 app.register(ConfigPlugin({
-  env: true, // Load from environment variables
+  // Optional: load .env files. Requires a runtime with filesystem support
+  // (absent on edge platforms). Defaults to reading only `runtime.env`.
+  envFilePath: '.env',
 }));
 ```
 
@@ -185,7 +187,12 @@ import { AuthPlugin } from '@setu-ts/auth-plugin';
 app.register(AuthPlugin({
   jwt: {
     secret: 'your-secret-key',
-    algorithms: ['HS256'],
+    // Singular algorithm matching the signing key. 'HS256' pairs with
+    // `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
+    algorithm: 'HS256',
+  },
+  rbac: {
+    roles: {},
   },
 }));
 ```

@@ -490,17 +490,22 @@ import { CAPABILITIES } from '@setu-ts/common';
 // Deployment glue: at runtime `env` and `waitUntil` come from
 // `import { env, waitUntil } from 'cloudflare:workers'`. That specifier is
 // unresolvable off a Worker toolchain, so this block declares a minimal,
-// explicitly typed binding interface compatible with `CloudflarePluginOptions`
+// explicitly typed binding record compatible with `CloudflarePluginOptions`
 // rather than importing it — the real Worker passes the platform's `env`, which
 // satisfies this shape structurally. Do not invent members the Worker does not
 // carry; name only the bindings your wrangler.toml declares.
-interface WorkerEnv {
+//
+// `CloudflareWorkerEnv` is `Readonly<Record<string, unknown>>`, so a named-only
+// interface (which lacks the string index signature) is NOT assignable to it.
+// An intersection with `Record<string, unknown>` keeps the named accessors for
+// type-safe binding use AND satisfies the index signature the plugin requires.
+type WorkerEnv = Readonly<Record<string, unknown>> & {
   readonly KV: IKvNamespace;
   readonly DB: ID1Database;
   readonly BUCKET: IR2Bucket;
   readonly QUEUE: IQueueProducer;
   readonly API_KEY: string;
-}
+};
 
 // `waitUntil` is the platform's background-work sink; `env` is the binding record.
 declare const env: WorkerEnv;

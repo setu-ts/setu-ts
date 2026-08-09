@@ -112,10 +112,16 @@ A complete REST API example.
 **Key code:**
 
 ```typescript
-import { ExceptionsPlugin } from '@setu-ts/exceptions';
+import { errorHandler } from '@setu-ts/exceptions';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
-app.register(ExceptionsPlugin());
+// `errorHandler()` returns middleware; register it as the OUTERMOST layer
+// (lowest priority) so it wraps the whole pipeline and formats any thrown
+// error (HttpError or otherwise) as a JSON / RFC 7807 response.
+app.middleware.add(errorHandler({ format: 'rfc7807' }), {
+  priority: 0,
+  name: 'error-handler',
+});
 app.register(ValidationPlugin({ validator: 'zod' }));
 
 app.router.post('/items', async (ctx) => {
@@ -240,9 +246,13 @@ Cross-service communication.
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 
+// The redis-streams arm is discriminated on `broker: 'redis-streams'`.
+// `url` is the Redis connection URL (read when no client is injected);
+// `defaultQueue` is the consumer group every consumer shares.
 app.register(MessagingPlugin({
   broker: 'redis-streams',
-  redis: { host: 'localhost', port: 6379 },
+  url: 'redis://localhost:6379',
+  defaultQueue: 'items-consumers',
 }));
 
 const broker = ctx.services.get<IMessageBroker>('messaging');
@@ -277,21 +287,32 @@ Real-time communication with cross-replica synchronization.
 ```typescript
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
+import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
-app.register(WebSocketPlugin({
-  rooms: {
-    '/ws/chat': {
-      onMessage: (ctx, message) => {
-        ctx.room.broadcast({ type: 'message', from: ctx.state['user']?.id, data: message });
-      },
-    },
-  },
-}));
+// WebSocketPlugin options carry heartbeat/idle/limit knobs only — rooms are
+// application-level, created from the WebSocketService after registration.
+app.register(WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 }));
 
+// The redis transport fans room broadcasts across replicas. It takes a
+// connection `url` (and/or injected `client`/`subscriber`), not a `redis`
+// object — a Redis connection in subscriber mode refuses other commands, so
+// one connection cannot both publish and subscribe.
 app.register(RealtimeBackplanePlugin({
   transport: 'redis',
-  redis: { host: 'localhost', port: 6379 },
+  url: 'redis://localhost:6379',
 }));
+
+// Routes + rooms are registered on the service, not in plugin options.
+const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+ws.route('/ws/chat', {
+  onOpen: (conn) => ws.room('chat').add(conn),
+  onMessage: (conn, message) => {
+    ws.room('chat').broadcast(
+      { type: 'message', from: conn.state['user']?.id, data: message },
+      { except: conn },
+    );
+  },
+});
 ```
 
 ---
@@ -402,7 +423,21 @@ app.register(SessionPlugin({
 }));
 
 app.register(ReactRouterPlugin({
-  build: () => import('./build/server.js'),
+  // Absolute path/URL to the React Router Vite server build (default export
+  // = ServerBuild). Derive one with
+  // `new URL('./build/server/index.js', import.meta.url).href`.
+  serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+  // Optional seam for lazy loading the RR runtime (e.g. a dev server returning
+  // a handler built over `vite.ssrLoadModule`). Omit to use the default
+  // `await import(serverBuildPath)` + `await import('npm:react-router@8')`.
+  loadRequestHandler: async (_serverBuildPath, _mode) => {
+    const build = await import('./build/server/index.js');
+    const { createRequestHandler, createRouterContext } = await import('npm:react-router@8');
+    return {
+      handler: createRequestHandler(build, _mode),
+      createLoadContext: () => createRouterContext(),
+    };
+  },
 }));
 ```
 
