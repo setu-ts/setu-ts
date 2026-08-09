@@ -11,10 +11,11 @@
 
 import type { TargetRuntime, TemplateName } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import type { TemplateFeatures } from './di.ts';
 import { FULL_STACK_TEMPLATE } from './full-stack.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
 import { NEST_TEMPLATE } from './nest.ts';
-import { REST_TEMPLATE, RUNTIME_WIRING } from './rest.ts';
+import { REST_TEMPLATE } from './rest.ts';
 
 /**
  * One symbol a generated `setu.config.ts` imports and calls.
@@ -37,7 +38,7 @@ export interface Wiring {
    * so there is no injection surface, and an option-object AST would be a second
    * serializer to keep in step with TypeScript syntax for no gain. Any
    * identifier the string names must be brought into scope by the template's
-   * {@linkcode TemplateDefinition.localImports}, and the e2e drift gate
+   * {@linkcode TemplateHost.localImports}, and the e2e drift gate
    * type-checks the generated project, so an `args` string that does not compile
    * fails the build.
    */
@@ -111,8 +112,14 @@ export interface AppFactoryWiring {
    * enclosing parentheses. Omitted → the factory is called with no arguments.
    *
    * The rendered call is always `await`ed, so a factory may be sync or async.
+   *
+   * Takes the project's {@linkcode TemplateFeatures} as a second parameter
+   * because a starter-composed template cannot express `--di` as a
+   * {@linkcode Wiring}: {@linkcode TemplateHost.plugins} must stay empty
+   * when a factory is set, so the choice has to reach the factory's own options
+   * object instead.
    */
-  readonly args?: (runtime: TargetRuntime) => string;
+  readonly args?: (runtime: TargetRuntime, features: TemplateFeatures) => string;
 }
 
 /**
@@ -184,18 +191,26 @@ export interface TemplateManifest {
 }
 
 /**
- * A named plugin set, plus the runtimes it cannot target.
+ * Everything `commands/new.ts` needs to render a project, independent of
+ * whether the user named a template.
+ *
+ * Extracted from {@linkcode TemplateDefinition} so the no-template path is a
+ * HOST like any other rather than a pile of `?? []` defaults at the call site.
+ * That is what lets a bare `setu new` project carry the seams that need no
+ * plugin — `route`, `middleware` and `plugin` — so `setu generate route`, the
+ * only HTTP handler a decorator-free project can generate, reaches a
+ * registration site with no edit to a file the developer owns.
+ *
+ * It is deliberately NOT a fourth template: {@linkcode TemplateName} and the
+ * registry below are untouched, so `new --help` still lists exactly the four
+ * templates that exist and `--template minimal` is still an unknown value.
  */
-export interface TemplateDefinition {
-  /** The `--template` value that selects this set. */
-  readonly name: TemplateName;
-  /** One line describing the template, shown in `new --help`. */
-  readonly description: string;
+export interface TemplateHost {
   /**
    * Plugins passed to `createApplication({ plugins: [...] })`, in registration
    * order, starting with the runtime provider.
    *
-   * Must be empty when {@linkcode TemplateDefinition.appFactory} is set — the
+   * Must be empty when {@linkcode TemplateHost.appFactory} is set — the
    * factory owns the whole plugin set, so anything listed here would be
    * dropped. A unit test enforces it across the registry rather than a runtime
    * check that no user input could ever reach.
@@ -247,12 +262,12 @@ export interface TemplateDefinition {
    * Needed because a seam barrel's contribution is a SPREAD of a local array
    * (`...GENERATED_PLUGINS`), which is not a {@linkcode Wiring} — it has no package
    * and no symbol to import from one, and its identifier comes from
-   * {@linkcode TemplateDefinition.localImports}.
+   * {@linkcode TemplateHost.localImports}.
    *
    * Array position does not decide registration order: the kernel resolves plugins by
    * their declared `dependencies`.
    *
-   * Must be empty when {@linkcode TemplateDefinition.appFactory} is set, for the same
+   * Must be empty when {@linkcode TemplateHost.appFactory} is set, for the same
    * reason `plugins` must: the factory owns the whole plugin set, so anything here
    * would be silently dropped. A unit test enforces it across the registry.
    *
@@ -273,11 +288,11 @@ export interface TemplateDefinition {
    * A rendered string for the same reason {@linkcode Wiring.args} is: the value is
    * authored by a template module in this repo and never taken from user input, so
    * there is no injection surface. Any identifier it names must be brought into scope
-   * by {@linkcode TemplateDefinition.localImports}, and the e2e drift gate
+   * by {@linkcode TemplateHost.localImports}, and the e2e drift gate
    * type-checks the generated project — which is the only thing that can catch a
    * statement that does not compile.
    *
-   * Must be empty when {@linkcode TemplateDefinition.appFactory} is set: a
+   * Must be empty when {@linkcode TemplateHost.appFactory} is set: a
    * starter-composed template's registration is the starter's business, and the
    * factory branch of the renderer does not emit these. A unit test enforces it across
    * the registry rather than leaving a silently-dropped field.
@@ -285,6 +300,20 @@ export interface TemplateDefinition {
    * Omitted → nothing rendered, byte-identical to before this field existed.
    */
   readonly setupCalls?: readonly string[];
+}
+
+/**
+ * A named plugin set, plus the runtimes it cannot target.
+ *
+ * A {@linkcode TemplateHost} that `--template` can select by name, which is the
+ * whole difference: the no-template host is rendered the same way and simply
+ * has no name to be selected by.
+ */
+export interface TemplateDefinition extends TemplateHost {
+  /** The `--template` value that selects this set. */
+  readonly name: TemplateName;
+  /** One line describing the template, shown in `new --help`. */
+  readonly description: string;
   /**
    * Runtime targets this template refuses, mapped to the reason shown to the
    * user. Refusing at scaffold time beats a project that deploys and then
@@ -292,14 +321,6 @@ export interface TemplateDefinition {
    */
   readonly unsupported: Readonly<Partial<Record<TargetRuntime, string>>>;
 }
-
-/**
- * The plugin set used when no `--template` is given: a runtime provider alone.
- *
- * Still emitted through the same `setu.config.ts` seam as every template, so
- * plugin-command discovery has one shape to read.
- */
-export const MINIMAL_PLUGINS: readonly Wiring[] = [RUNTIME_WIRING];
 
 const TEMPLATE_REGISTRY: ReadonlyMap<string, TemplateDefinition> = new Map([
   [REST_TEMPLATE.name, REST_TEMPLATE],

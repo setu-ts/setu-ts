@@ -68,11 +68,33 @@ describe('setu end-to-end on a real filesystem', () => {
 
   it('creates nested directories that did not exist', async () => {
     await run(['new', 'shop-api']);
-    const info = await Deno.stat(`${root}/shop-api/src`).catch(() => undefined);
+    // `src/jobs` rather than `src` itself: a scaffolded project now carries the
+    // three seam barrels that need no plugin, so `src/routes`, `src/middleware`
+    // and `src/plugins` exist from the start. `job` hosts no seam, so its
+    // directory is still created by the generate rather than by the scaffold.
+    const info = await Deno.stat(`${root}/shop-api/src/jobs`).catch(() => undefined);
     expect(info).toBeUndefined();
 
-    await run(['g', 'route', 'orders', '--dir', `${root}/shop-api`]);
-    expect((await Deno.stat(`${root}/shop-api/src/routes`)).isDirectory).toBe(true);
+    await run(['g', 'job', 'send-invoice', '--dir', `${root}/shop-api`]);
+    expect((await Deno.stat(`${root}/shop-api/src/jobs`)).isDirectory).toBe(true);
+  });
+
+  // The milestone's own claim, end to end on a real filesystem: the ONE HTTP
+  // handler a decorator-free project can generate reaches a registration site
+  // with no edit to a file the developer owns.
+  it('wires a generated route into a template-less project with no hand edit', async () => {
+    await run(['new', 'shop-api']);
+    const project = `${root}/shop-api`;
+
+    expect(await run(['g', 'route', 'orders', '--dir', project])).toBe(0);
+
+    const barrel = await Deno.readTextFile(`${project}/src/routes/index.ts`);
+    expect(barrel).toContain('registerOrdersRoutes(router);');
+
+    // The scaffolded config already calls the barrel, so nothing further is needed.
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config).toContain("from './src/routes/index.ts'");
+    expect(config).toContain('registerGeneratedRoutes(app.router);');
   });
 
   it('honours the plugin gate against a real manifest on disk', async () => {
