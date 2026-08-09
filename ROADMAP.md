@@ -6331,6 +6331,16 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
   implementing it means either a second copy of that schematic (§11.1, no duplicated logic) or a
   bare alias that dispatches to it (dead surface). The honest fix for discoverability is the refusal
   plus the wiring above.
+- **Making `--runtime node` able to run decorated source.** Found by booting the matrix during M61,
+  and pre-existing since M34 chose `node --experimental-strip-types main.ts`: Node's built-in
+  TypeScript support erases types without transforming code, so a legacy decorator is a
+  `SyntaxError` and a constructor parameter property is `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+  `--experimental-transform-types` handles the parameter property but still rejects the decorator,
+  because it does not enable `experimentalDecorators`. So on the Node target `--template rest` and
+  `g route` boot and serve, while `g service`, `g controller`, `g module` and `--template nest`
+  cannot start; Deno, Bun and Workers run all of them. No gate sees this — CI never boots a
+  Node-target project. The fix is a transpiler decision (a `tsx`/`swc` dependency, or a build step)
+  and a new dependency needs approval, so it is named here rather than improvised. **Unowned.**
 - **Guarding the `full-stack` template's other `appFactory` option keys.** Established by
   measurement during this milestone: TypeScript does NOT apply excess-property checking to an object
   literal returned from a contextually-typed callback, so a misspelled key inside

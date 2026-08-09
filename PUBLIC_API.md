@@ -4997,6 +4997,18 @@ container's presence, so the same `@Injectable` class works with and without it 
 the lifecycle it gets. Adding `--di` to `--template nest` is a no-op, because that template already
 registers `DiPlugin` and the kernel refuses a duplicate plugin name at `start()`.
 
+> **`--runtime node` cannot run the decorated half.** A scaffolded Node project starts with
+> `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases types
+> without transforming code — so a legacy decorator is a `SyntaxError: Invalid or unexpected token`
+> and a constructor parameter property is `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+> `--experimental-transform-types` does not help: it handles parameter properties but still rejects
+> the decorator, because it does not enable `experimentalDecorators`. Measured on Node v24:
+> `--template rest` and `setu generate route` boot and serve, while `setu generate service` (which
+> emits `@Injectable` when `decorator-plugin` is installed), `generate controller`,
+> `generate module` and `--template nest` all fail to start. Deno, Bun and Cloudflare Workers run
+> every combination. Until the Node target ships a real transpiler, treat it as the decorator-free
+> target and use `g route` plus plain services there.
+
 **The decorator-free way to serve HTTP is `setu generate route`.** It emits
 `register<Name>Routes(router: IRouterApi)` and is ungated, so it works in a project with no plugins
 at all — and it is wired on every host, including the no-template one. `g controller` and `g module`

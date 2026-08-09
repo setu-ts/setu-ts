@@ -67,10 +67,20 @@ function renderInjectableService(names: DerivedNames): string {
  * Registered through the \`${APP_SERVICES_EXPORT}\` barrel in \`src/services/index.ts\`,
  * which \`setu.config.ts\` passes to \`DecoratorPlugin\` — so this class needs no further
  * wiring. Consumers reach it with \`@Inject('${serviceSeamToken(names.kebab)}')\` on a
- * constructor parameter, or \`services.get('${serviceSeamToken(names.kebab)}')\`.
+ * constructor parameter, which works whether or not a container is registered.
  *
- * It works with and without \`DiPlugin\`: with a container the service is constructed
- * through it, and without one it lands in the kernel's service registry.
+ * Resolving it BY HAND depends on the composition, because the two paths register
+ * in different places:
+ *
+ * - without \`DiPlugin\`: the class is instantiated once and stored in the kernel's
+ *   registry — \`services.get('${serviceSeamToken(names.kebab)}')\`. \`scope\` is ignored,
+ *   because there is one instance.
+ * - with \`DiPlugin\` (\`setu new --di\`, or \`--template nest\`): the class is registered
+ *   as a PROVIDER on the container and is NOT in the kernel registry, so
+ *   \`services.get(...)\` throws. Resolve through the container —
+ *   \`services.get<IContainer>(CAPABILITIES.DI_CONTAINER).resolve('${
+    serviceSeamToken(names.kebab)
+  }')\` — and \`scope\` is honored.
  */
 @Injectable({ token: '${serviceSeamToken(names.kebab)}' })
 export class ${names.pascal}Service {
