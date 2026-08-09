@@ -389,9 +389,9 @@ function npmScripts(
   manifest?: TemplateManifest,
 ): Record<string, string> {
   const start = runtime === 'bun' ? 'bun run main.ts' : 'node --experimental-strip-types main.ts';
-  return manifest?.npmDevDependencies === undefined
+  return manifest?.npmBuildScript === undefined
     ? { start }
-    : { build: 'react-router build', start };
+    : { build: manifest.npmBuildScript, start };
 }
 
 /**
@@ -409,7 +409,13 @@ function standaloneNpmFiles(
   projectName: string,
   manifest?: TemplateManifest,
 ): readonly GeneratedFile[] {
-  if (manifest?.npmDevDependencies === undefined) return [];
+  // Keyed on the BUILD SCRIPT, not on the presence of dev dependencies: a Deno or
+  // Workers project needs an npm manifest only when it has an npm build to run.
+  // A template that declares dev dependencies for another reason (the `@std`
+  // packages the module schematic's emitted test imports, which reach Deno
+  // through the import map instead) must not acquire a package.json — that
+  // switches Deno to node_modules resolution.
+  if (manifest?.npmBuildScript === undefined) return [];
 
   return [
     {
@@ -421,11 +427,13 @@ function standaloneNpmFiles(
             version: '0.1.0',
             private: true,
             type: 'module',
-            scripts: { build: 'react-router build' },
+            scripts: { build: manifest.npmBuildScript },
             ...(manifest.npmDependencies === undefined
               ? {}
               : { dependencies: { ...manifest.npmDependencies } }),
-            devDependencies: { ...manifest.npmDevDependencies },
+            ...(manifest.npmDevDependencies === undefined
+              ? {}
+              : { devDependencies: { ...manifest.npmDevDependencies } }),
           },
           null,
           2,
