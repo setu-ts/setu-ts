@@ -13,10 +13,14 @@ export const FIXED_NOW = Date.UTC(2026, 6, 28, 12, 30, 45);
  * Builds schematic options.
  *
  * @param plugins - Packages to report as installed
+ * @param modules - Domain modules to report as already present
  * @returns The options every schematic receives
  */
-export function options(plugins: readonly string[] = []): SchematicOptions {
-  return { runtime: 'deno', plugins: new Set(plugins), now: () => FIXED_NOW };
+export function options(
+  plugins: readonly string[] = [],
+  modules: readonly string[] = [],
+): SchematicOptions {
+  return { runtime: 'deno', plugins: new Set(plugins), now: () => FIXED_NOW, modules };
 }
 
 /**

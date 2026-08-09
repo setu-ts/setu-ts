@@ -14,6 +14,24 @@ export interface GeneratedFile {
   readonly path: string;
   /** The file contents. */
   readonly contents: string;
+  /**
+   * Marks a file the CLI owns outright and regenerates, exempting it from the
+   * overwrite refusal in {@linkcode findExisting}.
+   *
+   * Set on exactly one emitted file today: the `src/modules/index.ts` aggregate
+   * barrel, which has to list every module and therefore has to be rewritten
+   * whenever one is added. Every other path keeps the refusal.
+   *
+   * Declared per FILE rather than as a `--force` flag on the command,
+   * deliberately: a flag would lift the check for all fourteen schematics, so a
+   * mistyped `setu g service user` could clobber hand-written work. A schematic
+   * naming the files it owns keeps the exemption to paths the CLI wrote in the
+   * first place, and {@linkcode findExisting} is the single chokepoint every
+   * write passes through, so it cannot be bypassed elsewhere.
+   *
+   * Omitted or `false` → current behavior, byte-identical.
+   */
+  readonly managed?: boolean;
 }
 
 /**
@@ -84,11 +102,15 @@ export function dirName(path: string): string {
 }
 
 /**
- * Returns the paths in `files` that already exist on `fs`.
+ * Returns the paths in `files` that already exist on `fs` and would be
+ * overwritten.
+ *
+ * A file marked {@linkcode GeneratedFile.managed} is skipped: the CLI generated
+ * it and regenerates it, so rewriting it destroys nothing the developer authored.
  *
  * @param fs - The filesystem to probe
  * @param files - The planned files
- * @returns The subset of paths that already exist, in plan order
+ * @returns The subset of unmanaged paths that already exist, in plan order
  */
 export async function findExisting(
   fs: IFileSystem,
@@ -96,6 +118,7 @@ export async function findExisting(
 ): Promise<readonly string[]> {
   const existing: string[] = [];
   for (const file of files) {
+    if (file.managed === true) continue;
     try {
       await fs.stat(file.path);
       existing.push(file.path);

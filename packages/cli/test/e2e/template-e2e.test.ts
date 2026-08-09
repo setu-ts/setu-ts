@@ -51,8 +51,43 @@ const HOSTILE_NAMES: readonly { readonly name: string; readonly accepted: boolea
  */
 const UNGATED = ['plugin', 'service', 'route', 'middleware', 'job'] as const;
 
-/** Every schematic the `rest` template's plugin set makes available. */
+/**
+ * Every single-file schematic the `rest` template's plugin set makes available.
+ *
+ * `module` is excluded here and swept separately: it is the one aggregate, so it
+ * emits four files per name plus one shared barrel rather than one file, and
+ * folding it in would make the file-count arithmetic below unreadable.
+ */
 const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
+
+/** Files the `module` schematic emits per name that the drift check reads. */
+const MODULE_CHECKED_FILES_PER_NAME = 3;
+
+/**
+ * Collects every `.ts` source under a directory, recursively.
+ *
+ * Recursive because `src/modules/` holds the aggregate barrel BESIDE the module
+ * directories, so a fixed two-level walk would try to read a file as a directory.
+ *
+ * `*.test.ts` is skipped: the emitted service test imports `@std/testing/bdd`,
+ * which a scaffolded project's manifest does not alias — it is run by the
+ * generated project's own `deno test`, not type-checked by this gate.
+ *
+ * @param dir - Directory to walk
+ * @returns Absolute paths of the `.ts` files found
+ */
+async function collectSources(dir: string): Promise<string[]> {
+  const found: string[] = [];
+  for await (const entry of Deno.readDir(dir)) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory) {
+      found.push(...(await collectSources(path)));
+    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+      found.push(path);
+    }
+  }
+  return found;
+}
 
 /** This repository's root, four levels up from `packages/cli/test/e2e/`. */
 const REPO_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/, '');
@@ -374,15 +409,19 @@ describe('template scaffolding — end to end', () => {
     expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
     const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
 
-    // The args string, rendered into the plugin call.
+    // The args string, rendered into the plugin call. The showcase classes come
+    // first, then the module barrel is spread, so `setu g module` adds to this
+    // registration rather than replacing it.
     expect(config).toContain(
-      'DecoratorPlugin({ controllers: [GreetingController], services: [GreetingService] })',
+      'DecoratorPlugin({ controllers: [GreetingController, ...MODULE_CONTROLLERS], ' +
+        'services: [GreetingService, ...MODULE_SERVICES] })',
     );
     // DiPlugin is what puts @Injectable classes on the container path.
     expect(config).toContain('DiPlugin()');
     // The local imports that bring the args identifiers into scope.
     expect(config).toContain("from './src/greeting-controller.ts'");
     expect(config).toContain("from './src/greeting-service.ts'");
+    expect(config).toContain("from './src/modules/index.ts'");
   });
 
   it('emits parameter-level @Inject in the nest controller', async () => {
@@ -410,24 +449,157 @@ describe('template scaffolding — end to end', () => {
 
     for (const { name, accepted } of HOSTILE_NAMES) {
       if (!accepted) continue;
-      for (const schematic of REST_AVAILABLE) {
+      for (const schematic of [...REST_AVAILABLE, 'module']) {
         expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
       }
     }
 
-    const sources: string[] = [`${project}/main.ts`, `${project}/setu.config.ts`];
-    for await (const entry of Deno.readDir(`${project}/src`)) {
-      for await (const file of Deno.readDir(`${project}/src/${entry.name}`)) {
-        sources.push(`${project}/src/${entry.name}/${file.name}`);
-      }
-    }
-    // one file per schematic × accepted name, plus the two entry files.
+    const sources: string[] = [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      ...(await collectSources(`${project}/src`)),
+    ];
+    // One file per single-file schematic × accepted name; the module aggregate
+    // adds its own per-name files plus the ONE shared barrel; plus two entries.
     const accepted = HOSTILE_NAMES.filter((n) => n.accepted).length;
-    expect(sources.length).toBe(REST_AVAILABLE.length * accepted + 2);
+    expect(sources.length).toBe(
+      REST_AVAILABLE.length * accepted + MODULE_CHECKED_FILES_PER_NAME * accepted + 1 + 2,
+    );
 
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
     expect(code).toBe(0);
+  });
+});
+
+// The module schematic's whole point is that the generated module is WIRED, and
+// the wiring travels through a `Wiring.args` string plus a generated barrel —
+// neither of which the CLI's own `deno check` can see. Only a scaffolded,
+// type-checked project proves the barrel's exports, the config's import of them,
+// and the controller's `@Inject` all agree.
+describe('setu generate module, end to end', () => {
+  let root: string;
+  let out: string[];
+  let err: string[];
+
+  const run = (argv: readonly string[]) =>
+    runCli(argv, {
+      fs,
+      cwd: root,
+      now: () => runtime.now(),
+      log: (m) => out.push(m),
+      error: (m) => err.push(m),
+    });
+
+  beforeEach(async () => {
+    root = await Deno.makeTempDir({ prefix: 'setu-module-e2e-' });
+    out = [];
+    err = [];
+  });
+
+  afterEach(async () => {
+    await Deno.remove(root, { recursive: true });
+  });
+
+  /**
+   * Collects every generated module source in a project.
+   *
+   * @param project - The project directory
+   * @returns Absolute paths, including the aggregate barrel
+   */
+  async function moduleSources(project: string): Promise<string[]> {
+    const paths: string[] = [`${project}/src/modules/index.ts`];
+    for await (const entry of Deno.readDir(`${project}/src/modules`)) {
+      if (!entry.isDirectory) continue;
+      for await (const file of Deno.readDir(`${project}/src/modules/${entry.name}`)) {
+        // The emitted service test imports @std/* through the project's own
+        // manifest, which does not alias them — it is checked by the generated
+        // project's own `deno test`, not by this gate.
+        if (file.name.endsWith('.test.ts')) continue;
+        paths.push(`${project}/src/modules/${entry.name}/${file.name}`);
+      }
+    }
+    return paths;
+  }
+
+  it('type-checks a rest project carrying two generated modules', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+
+    expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
+    expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
+
+    // The barrel names both modules — the second generate did not drop the first.
+    const barrel = await Deno.readTextFile(`${project}/src/modules/index.ts`);
+    expect(barrel).toContain('UserController');
+    expect(barrel).toContain('OrderItemController');
+
+    // And the config consumes it, so both are registered with no hand edit.
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config).toContain("from './src/modules/index.ts'");
+    expect(config).toContain('...MODULE_CONTROLLERS');
+
+    const sources = [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      ...(await moduleSources(project)),
+    ];
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // `rest` has no DiPlugin, `nest` does, and DecoratorPlugin branches on the
+  // container's presence — so the emitted `@Inject` has to compile and resolve
+  // on both paths, not just the one the showcase template takes.
+  it('type-checks a nest project carrying a generated module', async () => {
+    expect(await run(['new', 'shop', '--template', 'nest'])).toBe(0);
+    const project = `${root}/shop`;
+
+    expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
+
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    // The seam must not have displaced the template's own example classes.
+    expect(config).toContain('GreetingController');
+    expect(config).toContain('...MODULE_CONTROLLERS');
+
+    const sources = [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/src/greeting-controller.ts`,
+      `${project}/src/greeting-service.ts`,
+      ...(await moduleSources(project)),
+    ];
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  it('regenerates the barrel without refusing, and lists each module once', async () => {
+    await run(['new', 'shop', '--template', 'rest']);
+    const project = `${root}/shop`;
+    await run(['g', 'module', 'user', '--dir', project]);
+
+    // A second module rewrites the barrel — the managed-file exemption is what
+    // makes this exit 0 rather than refusing on an existing path.
+    expect(await run(['g', 'module', 'billing', '--dir', project])).toBe(0);
+
+    const barrel = await Deno.readTextFile(`${project}/src/modules/index.ts`);
+    expect(barrel.match(/UserController/g)?.length).toBe(2); // import + array entry
+    expect(barrel.match(/from '\.\/user\/user\.controller\.ts'/g)?.length).toBe(1);
+  });
+
+  it('still refuses to overwrite a module that already exists', async () => {
+    await run(['new', 'shop', '--template', 'rest']);
+    const project = `${root}/shop`;
+    await run(['g', 'module', 'user', '--dir', project]);
+    err = [];
+
+    expect(await run(['g', 'module', 'user', '--dir', project])).toBe(1);
+
+    expect(err.join('\n')).toContain('user.service.ts');
   });
 });
