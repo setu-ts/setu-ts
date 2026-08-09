@@ -22,10 +22,26 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated standalone service. */
 export const APP_SERVICES_EXPORT = 'APP_SERVICES';
+
+/**
+ * Symbols the barrel imports from one service module.
+ *
+ * The class only. A service generated before this seam existed exports exactly that, so
+ * it is still admitted — but it carries no `@Injectable`, so `DecoratorPlugin` registers
+ * it under its CLASS NAME rather than the `<name>-service` token. The barrel's own
+ * comment says so rather than claiming a token that entry does not have.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [`${names.pascal}Service`];
+}
 
 /**
  * The capability token a generated service registers under.
@@ -55,18 +71,19 @@ function renderServicesBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { Constructor } from '@setu-ts/common';`,
-    renderSeamImports(
-      names,
-      (n) => `${n.pascal}Service`,
-      (kebab) => `./${kebab}.service.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.service.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   const entries = names.map((name) => `${deriveNames(name).pascal}Service`);
 
   return assembleSeamBarrel(header, imports, [
-    `/** Every generated service, for \`DecoratorPlugin({ services })\`. Each registers\n` +
-    ` * under the token \`<name>-service\`. */\n` +
+    `/**\n` +
+    ` * Every generated service, for \`DecoratorPlugin({ services })\`.\n` +
+    ` *\n` +
+    ` * An \`@Injectable\` service registers under its declared \`<name>-service\` token. One\n` +
+    ` * generated before this seam existed has no decorator, so it registers under its\n` +
+    ` * class name instead — regenerate it to get the token.\n` +
+    ` */\n` +
     `export const ${APP_SERVICES_EXPORT}: readonly Constructor[] = [${renderList(entries)}];`,
   ]);
 }
@@ -76,6 +93,7 @@ export const SERVICES_SEAM: SeamSpec = {
   schematic: 'service',
   dir: 'src/services',
   suffix: '.service.ts',
+  importSymbols,
   barrel: 'src/services/index.ts',
   exports: [APP_SERVICES_EXPORT],
   requiresPlugin: 'decorator-plugin',

@@ -14,6 +14,7 @@ import { seamSpecFor } from '../schematics/_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 import {
   assembleSeamBarrel,
+  exportsSymbol,
   renderList,
   renderSeamImports,
   seamHeader,
@@ -137,15 +138,70 @@ describe('seam rendering helpers', () => {
   });
 
   it('renders no imports for an empty family', () => {
-    expect(renderSeamImports([], (n) => n.pascal, (k) => `./${k}.ts`)).toBe('');
+    expect(renderSeamImports([], (n) => [n.pascal], (k) => `./${k}.ts`)).toBe('');
   });
 
   it('renders one import per name, in the order given', () => {
     expect(
-      renderSeamImports(['order-item', 'user'], (n) => `${n.pascal}X`, (k) => `./${k}.ts`),
+      renderSeamImports(['order-item', 'user'], (n) => [`${n.pascal}X`], (k) => `./${k}.ts`),
     ).toBe(
       `import { OrderItemX } from './order-item.ts';\nimport { UserX } from './user.ts';`,
     );
+  });
+
+  it('names every symbol a spec declares on one import', () => {
+    // The multi-symbol families (middleware, cqrs, events) depend on this, and it is the
+    // same list the scanner requires the file to export.
+    expect(
+      renderSeamImports(['user'], (n) => [`${n.screaming}_A`, `${n.camel}B`], (k) => `./${k}.ts`),
+    ).toBe(`import { USER_A, userB } from './user.ts';`);
+  });
+});
+
+describe('exportsSymbol', () => {
+  it('recognizes every declaration form the CLI emits', () => {
+    for (
+      const source of [
+        'export const X = 1;',
+        'export function X() {}',
+        'export class X {}',
+        'export interface X {}',
+        'export type X = 1;',
+        'export async function X() {}',
+        'export declare const X: number;',
+        'export abstract class X {}',
+      ]
+    ) {
+      expect(exportsSymbol(source, 'X')).toBe(true);
+    }
+  });
+
+  it('recognizes the named-re-export form, aliased or not', () => {
+    expect(exportsSymbol('export { X };', 'X')).toBe(true);
+    expect(exportsSymbol('export { impl as X };', 'X')).toBe(true);
+    expect(exportsSymbol('export {\n  a,\n  X,\n};', 'X')).toBe(true);
+  });
+
+  it('does not mistake a mention for an export', () => {
+    // A false positive would put an unresolvable import in the developer's barrel, so
+    // every one of these must read as absent.
+    for (
+      const source of [
+        '// X is documented here',
+        'X();',
+        'const X = 1;',
+        'import { X } from "./other.ts";',
+        'export const XY = 1;',
+        'export const YX = 1;',
+      ]
+    ) {
+      expect(exportsSymbol(source, 'X')).toBe(false);
+    }
+  });
+
+  it('is not confused by a similarly-named sibling export', () => {
+    expect(exportsSymbol('export const ORDERS_TOTAL = 1;', 'ORDERS_METRIC')).toBe(false);
+    expect(exportsSymbol('export const ORDERS_TOTAL = 1;', 'ORDERS_TOTAL')).toBe(true);
   });
 
   it('puts the command on its own header line, so a long one cannot overflow', () => {

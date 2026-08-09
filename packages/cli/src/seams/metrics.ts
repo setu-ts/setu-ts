@@ -22,6 +22,7 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated metric definition. */
@@ -38,6 +39,21 @@ export function metricConfigExport(screaming: string): string {
 }
 
 /**
+ * Symbols the barrel imports from one metric module.
+ *
+ * The declaration only — the accessor is for application code, not the barrel. A metric
+ * generated before this seam existed has no declaration at all, which is why the scanner
+ * checks exports: a barrel regenerated over one named a constant the file did not have,
+ * and the project stopped compiling.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [metricConfigExport(names.screaming)];
+}
+
+/**
  * Renders `src/metrics/index.ts`.
  *
  * @param artifacts - Artifact names by schematic name
@@ -50,11 +66,7 @@ function renderMetricsBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { NamedMetricConfig } from '@setu-ts/metrics-plugin';`,
-    renderSeamImports(
-      names,
-      (n) => metricConfigExport(n.screaming),
-      (kebab) => `./${kebab}.metric.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.metric.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   const entries = names.map((name) => metricConfigExport(deriveNames(name).screaming));
@@ -72,6 +84,7 @@ export const METRICS_SEAM: SeamSpec = {
   schematic: 'metric',
   dir: 'src/metrics',
   suffix: '.metric.ts',
+  importSymbols,
   barrel: 'src/metrics/index.ts',
   exports: [CUSTOM_METRICS_EXPORT],
   requiresPlugin: 'metrics-plugin',

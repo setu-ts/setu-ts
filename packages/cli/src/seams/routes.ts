@@ -10,10 +10,21 @@
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import { assembleSeamBarrel, renderSeamImports, seamHeader, seamNames } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export that registers every generated route module. */
 export const REGISTER_ROUTES_EXPORT = 'registerGeneratedRoutes';
+
+/**
+ * Symbols the barrel imports from one route module.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [`register${names.pascal}Routes`];
+}
 
 /**
  * Renders `src/routes/index.ts`.
@@ -28,11 +39,7 @@ function renderRoutesBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { IRouterApi } from '@setu-ts/common';`,
-    renderSeamImports(
-      names,
-      (n) => `register${n.pascal}Routes`,
-      (kebab) => `./${kebab}.routes.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.routes.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   const calls = names.length === 0
@@ -59,6 +66,7 @@ export const ROUTES_SEAM: SeamSpec = {
   schematic: 'route',
   dir: 'src/routes',
   suffix: '.routes.ts',
+  importSymbols,
   barrel: 'src/routes/index.ts',
   exports: [REGISTER_ROUTES_EXPORT],
   renderBarrel: renderRoutesBarrel,

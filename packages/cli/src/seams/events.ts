@@ -18,10 +18,21 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated event handler with its event type. */
 export const EVENT_HANDLERS_EXPORT = 'EVENT_HANDLERS';
+
+/**
+ * Symbols the barrel imports from one event-handler module.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [`${names.screaming}_EVENT`, `${names.pascal}EventHandler`];
+}
 
 /**
  * Renders `src/events/index.ts`.
@@ -36,11 +47,7 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { EventHandlerRegistration } from '@setu-ts/events-plugin';`,
-    renderSeamImports(
-      names,
-      (n) => `${n.screaming}_EVENT, ${n.pascal}EventHandler`,
-      (kebab) => `./${kebab}.event-handler.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.event-handler.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   const entries = names.map((name) => {
@@ -61,6 +68,7 @@ export const EVENTS_SEAM: SeamSpec = {
   schematic: 'event-handler',
   dir: 'src/events',
   suffix: '.event-handler.ts',
+  importSymbols,
   barrel: 'src/events/index.ts',
   exports: [EVENT_HANDLERS_EXPORT],
   requiresPlugin: 'events-plugin',

@@ -18,10 +18,21 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated health indicator. */
 export const HEALTH_INDICATORS_EXPORT = 'HEALTH_INDICATORS';
+
+/**
+ * Symbols the barrel imports from one indicator module.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The symbols to import
+ */
+function importSymbols(names: DerivedNames): readonly string[] {
+  return [`${names.pascal}HealthIndicator`];
+}
 
 /**
  * Renders `src/health/index.ts`.
@@ -36,11 +47,7 @@ function renderHealthBarrel(artifacts: SeamArtifacts): string {
   ]);
   const imports = [
     `import type { IHealthIndicator } from '@setu-ts/common';`,
-    renderSeamImports(
-      names,
-      (n) => `${n.pascal}HealthIndicator`,
-      (kebab) => `./${kebab}.indicator.ts`,
-    ),
+    renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.indicator.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
   // Instances, not constructors: `HealthPluginOptions.indicators` is
@@ -61,6 +68,7 @@ export const HEALTH_SEAM: SeamSpec = {
   schematic: 'health-indicator',
   dir: 'src/health',
   suffix: '.indicator.ts',
+  importSymbols,
   barrel: 'src/health/index.ts',
   exports: [HEALTH_INDICATORS_EXPORT],
   requiresPlugin: 'health-plugin',
