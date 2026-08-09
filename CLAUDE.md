@@ -1590,8 +1590,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   refusal from PR #136 was extended to the derived scheme name. The integration suite drives the
   REAL `auth-plugin` guards through a kernel app rather than hand-branded fakes, which is what
   proves the two packages agree on the symbol) — complete (PR #137, stacked on PR #136)
-- **Next milestone** — **M38** (documentation), then M39–M40. No milestone is queued behind those:
-  M37c, M54, M55, and M56 have all shipped, closing the last entries on that list.
+- **Next milestone** — **M38** (documentation), then M39–M40. **M58** (`cli` — domain module
+  scaffolding) and **M59** (`cloudflare-plugin` — Workers-native messaging) are queued behind those,
+  opened from an external DX review; both are ROADMAP sections only, with no plan and no code yet.
+  Note what that review got wrong, since the sections say so and a reader should not re-raise it: it
+  claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
+  blocked (M52b shipped them).
 
 ## Verification (run before declaring any work done)
 
