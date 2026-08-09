@@ -695,33 +695,34 @@ capability tokens to service instances.
 ### Registration
 
 ```typescript
-// Register a service
-ctx.services.register('database', new DatabaseService());
+import { CAPABILITIES } from '@setu-ts/common';
 
-// Register with options
-ctx.services.register('database', new DatabaseService(), {
+// Register a service under a standard capability token
+ctx.services.register(CAPABILITIES.DATABASE, new DatabaseService());
+
+// Register with options (RegisterOptions has only `override` and `multi`)
+ctx.services.register(CAPABILITIES.DATABASE, new DatabaseService(), {
   override: false, // Throw if already registered (default)
   multi: false, // Single provider (default)
-  lazy: false, // Eager instantiation (default)
 });
 
-// Register a factory (lazy)
-ctx.services.registerFactory('database', () => new DatabaseService());
+// Lazy construction: the factory runs only on the first get()
+ctx.services.registerFactory(CAPABILITIES.DATABASE, () => new DatabaseService());
 ```
 
 ### Capability Lookup
 
 ```typescript
 // Get a service (throws if not found)
-const db = ctx.services.get<IDatabaseService>('database');
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
 
 // Check if a capability is available
-if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICacheStore>('cache');
+if (ctx.services.has(CAPABILITIES.CACHE)) {
+  const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
 }
 
 // Get all services for a multi-provider token
-const allNotifiers = ctx.services.getAll<INotifier>('notifier');
+const allNotifiers = ctx.services.getAll<INotifier>(CAPABILITIES.NOTIFICATION);
 ```
 
 ### Multi-Provider Support
@@ -744,13 +745,13 @@ const notifiers = ctx.services.getAll<INotifier>(CAPABILITIES.NOTIFICATION);
 
 ```typescript
 // First registration
-ctx.services.register('logger', new PinoLogger());
+ctx.services.register(CAPABILITIES.LOGGER, new PinoLogger());
 
 // Override (explicit)
-ctx.services.register('logger', new ConsoleLogger(), { override: true });
+ctx.services.register(CAPABILITIES.LOGGER, new ConsoleLogger(), { override: true });
 
 // Without override flag, throws an error
-ctx.services.register('logger', new ConsoleLogger());
+ctx.services.register(CAPABILITIES.LOGGER, new ConsoleLogger());
 // Error: Capability 'logger' is already registered. Use { override: true } to replace.
 ```
 
@@ -758,8 +759,8 @@ ctx.services.register('logger', new ConsoleLogger());
 
 ```typescript
 // Factory is called only on first get()
-ctx.services.registerFactory('database', () => {
-  const config = ctx.services.get('config');
+ctx.services.registerFactory(CAPABILITIES.DATABASE, () => {
+  const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
   return new DatabaseService({ url: config.get('DATABASE_URL') });
 });
 
@@ -767,10 +768,10 @@ ctx.services.registerFactory('database', () => {
 // ...
 
 // First get() triggers factory
-const db = ctx.services.get('database'); // Factory called here
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE); // Factory called here
 
 // Subsequent get() returns cached instance
-const db2 = ctx.services.get('database'); // Same instance
+const db2 = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE); // Same instance
 ```
 
 ### Service Scopes
@@ -2423,8 +2424,10 @@ Each plugin must test:
 
 ### Runtime Compatibility Tests
 
-- All tests must pass on Node.js, Deno, and Bun.
-- CI runs the full test suite on all three runtimes.
+- Deno runs the full workspace test suite against the working tree (HEAD).
+- Node and Bun run the published-artifact compatibility suite in [`compat/`](../compat/), which
+  consumes the packages through JSR's npm compatibility layer — it exercises module loading, runtime
+  detection, and the per-runtime HTTP adapters, not the current HEAD source.
 - Runtime-specific tests are guarded with `runtime.platform()` checks.
 
 ### Contract Tests

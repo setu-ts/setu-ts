@@ -396,21 +396,49 @@ export function checkRequiredGuides(files: readonly string[]): readonly Finding[
 }
 
 /**
+ * Builds the set of generated API page paths that `deno task docs:api`
+ * produces from a list of manifest export targets. Each target
+ * `packages/<pkg>/src/<path>.ts` maps to `docs/api/<pkg>/src/<path>.ts/index.html`.
+ *
+ * @param targets - The manifest export targets (from collectApiEntrypoints)
+ * @returns The set of generated API page paths
+ */
+export function buildGeneratedApiPages(targets: readonly string[]): Set<string> {
+  const pages = new Set<string>();
+  for (const target of targets) {
+    // deno doc --html maps packages/<pkg>/src/index.ts →
+    // docs/api/<pkg>/src/index.ts/index.html (the packages/ prefix is stripped).
+    let stripped = target.startsWith('./') ? target.slice(2) : target;
+    if (stripped.startsWith('packages/')) {
+      stripped = stripped.slice('packages/'.length);
+    }
+    pages.add(`docs/api/${stripped}/index.html`);
+  }
+  return pages;
+}
+
+/**
  * Checks that local Markdown links resolve to existing files/anchors.
  *
- * Resolves each relative target from the containing document's directory using
- * real filesystem checks. Handles files, directories (with README fallback),
- * anchors/fragments, root-relative policy, and URL/mailto exclusions.
+ * Resolves each relative target from the containing document's directory.
+ * Handles files, directories (with README fallback), anchors/fragments,
+ * root-relative policy, decoded URI paths/fragments, query strings, and
+ * URL/mailto exclusions. Generated API links (`./api/...`) are validated
+ * against a deterministic manifest-derived page set when one is supplied,
+ * rather than unconditionally accepted.
  *
  * @param file - The file being checked (repository-relative)
  * @param source - The file contents
  * @param allFiles - Complete set of known markdown files for resolution
+ * @param generatedApiPages - Optional set of valid generated API page paths;
+ *   when null, generated API links are skipped (output not yet generated)
  * @returns Findings for broken links
  */
 export async function checkLocalLinks(
   file: string,
   source: string,
   allFiles: readonly string[],
+  generatedApiPages?: Set<string> | null,
 ): Promise<readonly Finding[]> {
   const findings: Finding[] = [];
   const lines = source.split('\n');
@@ -438,23 +466,46 @@ export async function checkLocalLinks(
       continue;
     }
     for (const match of line.matchAll(linkPattern)) {
-      const link = match[2] as string;
+      let link = match[2] as string;
 
-      // Skip external links, anchors-only, and mailto/tel
+      // Skip external links and mailto/tel. A bare `#anchor` is a same-file
+      // anchor that must be validated against the current document's headings.
       if (
         link.startsWith('http://') || link.startsWith('https://') ||
-        link.startsWith('mailto:') || link.startsWith('tel:') ||
-        link.startsWith('#')
+        link.startsWith('mailto:') || link.startsWith('tel:')
       ) {
         continue;
+      }
+
+      // Decode URI-encoded characters in the link before splitting/resolving.
+      link = decodeURIComponent(link);
+
+      // Strip a query string before resolving the path (e.g. "?raw=true").
+      const queryIndex = link.indexOf('?');
+      if (queryIndex !== -1) {
+        link = link.slice(0, queryIndex);
       }
 
       // Split path and anchor
       const hashIndex = link.indexOf('#');
       const linkPath = hashIndex === -1 ? link : link.slice(0, hashIndex);
-      const anchor = hashIndex === -1 ? null : link.slice(hashIndex + 1);
+      const anchor = hashIndex === -1 ? null : decodeURIComponent(link.slice(hashIndex + 1));
 
-      if (!linkPath) continue;
+      // A bare anchor with no path is a same-file anchor.
+      if (!linkPath) {
+        if (anchor !== null && anchor !== '') {
+          const headings = collectHeadings(lines, scanFences(lines).fenced);
+          const anchorSet = new Set(headings.map((h) => h.anchor));
+          if (!anchorSet.has(anchor)) {
+            findings.push({
+              file,
+              line: index + 1,
+              message: `Same-file anchor "#${anchor}" matches no heading in this file.`,
+            });
+          }
+        }
+        continue;
+      }
 
       // Resolve relative path from the containing document's directory
       let resolvedPath: string;
@@ -487,17 +538,32 @@ export async function checkLocalLinks(
         .filter((p) => p !== '')
         .join('/');
 
-      // Skip generated API links (docs/api/ is intentionally untracked)
+      // Generated API links: validate against the manifest-derived page set
+      // rather than unconditionally accepting. When the set is null/undefined
+      // (output not yet generated), skip — the gate runs before `deno task docs:api`.
       if (resolvedPath.startsWith('docs/api/')) {
+        if (generatedApiPages == null) {
+          continue;
+        }
+        if (!generatedApiPages.has(resolvedPath)) {
+          findings.push({
+            file,
+            line: index + 1,
+            message:
+              `Generated API link "${linkPath}" does not resolve to a known generated page (${resolvedPath}).`,
+          });
+        }
         continue;
       }
 
       // Check if the path resolves to a known file, directory, or anchor
       let resolved = false;
+      let resolvedFilePath: string | null = null;
 
       // Direct file match (any file type, not just markdown)
       if (knownFiles.has(resolvedPath)) {
         resolved = true;
+        resolvedFilePath = resolvedPath;
       }
 
       // Check for file:line anchor format (e.g., "packages/foo.ts:79")
@@ -507,11 +573,13 @@ export async function checkLocalLinks(
         // Check if the file portion exists (markdown or any file type)
         if (knownFiles.has(filePath) || knownFiles.has(`${filePath}.md`)) {
           resolved = true;
+          resolvedFilePath = knownFiles.has(filePath) ? filePath : `${filePath}.md`;
         } else {
           try {
             const info = await Deno.stat(filePath);
             if (info.isFile) {
               resolved = true;
+              resolvedFilePath = filePath;
             }
           } catch {
             // File doesn't exist
@@ -522,36 +590,80 @@ export async function checkLocalLinks(
       // Directory with README fallback
       if (!resolved && knownFiles.has(`${resolvedPath}/README.md`)) {
         resolved = true;
+        resolvedFilePath = `${resolvedPath}/README.md`;
       }
 
       // .md extension fallback
       if (!resolved && knownFiles.has(`${resolvedPath}.md`)) {
         resolved = true;
+        resolvedFilePath = `${resolvedPath}.md`;
       }
 
-      // Check if the path exists on disk (file or directory)
+      // Check if the path exists on disk (file or directory) — non-Markdown
+      // assets (images, configs) are valid link targets but are NOT parsed as
+      // documents, so a fragment on one is not validated against headings.
       if (!resolved) {
         try {
           const info = await Deno.stat(resolvedPath);
           if (info.isFile || info.isDirectory) {
             resolved = true;
+            resolvedFilePath = info.isFile ? resolvedPath : null;
           }
         } catch {
           // Path doesn't exist
         }
       }
 
-      // Anchor in same file
-      if (!resolved && anchor !== null && anchor !== '') {
-        // Check if the anchor exists in the current document
-        const headings = collectHeadings(lines, scanFences(lines).fenced);
-        const anchorSet = new Set(headings.map((h) => h.anchor));
-        if (anchorSet.has(anchor)) {
-          resolved = true;
+      // Cross-file anchor: if the link targets a Markdown file with a fragment,
+      // parse the TARGET file's headings and reject a missing fragment even when
+      // the file exists. Same-file anchors were handled above.
+      if (anchor !== null && anchor !== '') {
+        if (resolvedFilePath && resolvedFilePath.endsWith('.md') && resolvedFilePath !== file) {
+          // Cross-file anchor: parse the target file's renderer-compatible anchors.
+          let targetSource: string;
+          try {
+            targetSource = await Deno.readTextFile(resolvedFilePath);
+          } catch {
+            targetSource = '';
+          }
+          const targetLines = targetSource.split('\n');
+          const targetHeadings = collectHeadings(targetLines, scanFences(targetLines).fenced);
+          const targetAnchors = new Set(targetHeadings.map((h) => h.anchor));
+          if (!targetAnchors.has(anchor)) {
+            findings.push({
+              file,
+              line: index + 1,
+              message:
+                `Cross-file anchor "${linkPath}#${anchor}" matches no heading in ${resolvedFilePath}.`,
+            });
+            // The file exists, but the anchor does not — report only the anchor.
+            continue;
+          }
+        } else if (!resolvedFilePath || resolvedFilePath === file) {
+          // Same-file anchor (file matched is the current document, or no file
+          // path resolved — check the current document's headings).
+          const headings = collectHeadings(lines, scanFences(lines).fenced);
+          const anchorSet = new Set(headings.map((h) => h.anchor));
+          if (!anchorSet.has(anchor)) {
+            if (!resolved) {
+              findings.push({
+                file,
+                line: index + 1,
+                message:
+                  `Local link "${linkPath}" does not resolve to an existing file or directory.`,
+              });
+            } else {
+              findings.push({
+                file,
+                line: index + 1,
+                message: `Same-file anchor "#${anchor}" matches no heading in this file.`,
+              });
+            }
+          }
         }
-      }
-
-      if (!resolved) {
+        // For non-Markdown assets with a fragment, the fragment is not
+        // validated (assets are not parsed as documents).
+      } else if (!resolved) {
         findings.push({
           file,
           line: index + 1,
@@ -636,23 +748,152 @@ export function checkAppsReadmeCoverage(
 }
 
 /**
- * Checks that all published packages have a README, metadata entry, catalog entry,
- * API link, and runtime note.
+ * The runtime compatibility flags a catalog entry must reflect. The catalog
+ * uses ✅/❌ cells; this maps the metadata flags to the expected cell symbol.
+ */
+interface RuntimeCompatFlags {
+  readonly deno?: boolean;
+  readonly node?: boolean;
+  readonly bun?: boolean;
+  readonly workerd?: boolean;
+}
+
+/**
+ * Packages whose catalog section must include an explicit provider/resource
+ * caveat (e.g. SMTP/raw-socket brokers, worker threads, DNS-SRV unavailable on
+ * Workers). Keyed by package short name; the value is a substring the section
+ * must mention. This is the explicit checked metadata map the plan requires.
+ */
+const REQUIRED_CAVEATS: Readonly<Record<string, string>> = {
+  'mail-plugin': 'SMTP',
+  'messaging-plugin': 'broker',
+  'queue-plugin': 'Redis',
+  'scheduler-plugin': 'lock',
+  'storage-plugin': 'S3',
+  'service-discovery-plugin': 'Consul',
+  'worker-pool-plugin': 'thread',
+  'realtime-backplane-plugin': 'redis',
+};
+
+/** Allowed runtime cell values in the catalog's compatibility table. */
+const RUNTIME_CELL_VALUES = new Set(['✅', '❌', '⚠️', 'N/A']);
+
+/**
+ * Parses the catalog into bounded per-package sections keyed by
+ * `### @setu-ts/<name>` headings. Each section's body is the text from its
+ * heading line up to the next `###` heading or a `---` separator.
  *
- * Derives the authoritative package set from PUBLISHED_PACKAGES and
- * PACKAGE_METADATA rather than scanning the catalog text.
+ * @param content - The docs/plugins.md content
+ * @returns A map of package short name → section body text
+ */
+export function parseCatalogSections(
+  content: string,
+): { sections: Map<string, string>; duplicates: Set<string> } {
+  const sections = new Map<string, string>();
+  const duplicates = new Set<string>();
+  const lines = content.split('\n');
+  let currentName: string | null = null;
+  let currentBody: string[] = [];
+  const flush = () => {
+    if (currentName !== null) {
+      if (sections.has(currentName)) {
+        duplicates.add(currentName);
+      }
+      sections.set(currentName, currentBody.join('\n'));
+      currentName = null;
+      currentBody = [];
+    }
+  };
+  for (const line of lines) {
+    const headingMatch = /^###\s+@setu-ts\/([^\s]+)\s*$/.exec(line);
+    if (headingMatch) {
+      flush();
+      currentName = headingMatch[1] as string;
+      currentBody = [];
+      continue;
+    }
+    if (currentName !== null) {
+      // A `---` separator or a same-level `##` heading ends the section.
+      if (line.trim() === '---' || /^##\s/.test(line)) {
+        flush();
+        continue;
+      }
+      currentBody.push(line);
+    }
+  }
+  flush();
+  return { sections, duplicates };
+}
+
+/**
+ * Extracts the runtime compatibility table cells from a section body. Returns
+ * the four cell values (Deno, Node, Bun, Workers) in order, or null if no
+ * table row is found.
+ */
+/**
+ * Extracts the base value of a runtime cell, stripping any parenthetical
+ * caveat (e.g. "✅ (KV)" → "✅"). The parenthetical is a provider-level note,
+ * not a different status.
+ */
+function cellBase(value: string): string {
+  return value.replace(/\s*\([^)]*\)\s*/g, '').trim();
+}
+
+function extractRuntimeCells(
+  sectionBody: string,
+): { deno: string; node: string; bun: string; workers: string } | null {
+  const lines = sectionBody.split('\n');
+  // Find the header row with Deno|Node|Bun|Workers, then the next data row.
+  let headerIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/Deno\s*\|\s*Node\s*\|\s*Bun\s*\|\s*Workers/.test(lines[i] as string)) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+  // Skip the separator row (|---|---|), then the data row.
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = (lines[i] as string).trim();
+    if (line.startsWith('|') && !line.includes('-')) {
+      const cells = line.split('|').map((c) => c.trim()).filter((c) => c !== '');
+      if (cells.length >= 4) {
+        return { deno: cells[0]!, node: cells[1]!, bun: cells[2]!, workers: cells[3]! };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Structurally validates the package catalog in docs/plugins.md.
+ *
+ * Parses bounded per-package sections keyed by `### @setu-ts/<name>` headings
+ * and requires, within each section:
+ * - exactly one expected heading/record;
+ * - a Purpose line;
+ * - an exact README link;
+ * - an exact valid generated API link;
+ * - explicit Deno/Node/Bun/Workers compatibility cells with allowed values;
+ * - a provider/resource caveat where required by {@linkcode REQUIRED_CAVEATS}.
+ *
+ * Rejects duplicate/extra/missing sections, fields moved into another
+ * package, wrong README/API links, absent/invalid runtime cells, and missing
+ * required caveats. One unstructured paragraph cannot pass.
  *
  * @param pluginsMdContent - The content of docs/plugins.md
  * @param runtimeMdContent - The content of docs/runtime-deployment.md
- * @param publishedPackages - Authoritative list of published package names
+ * @param publishedPackages - Authoritative list of published package paths
  * @param packageMetadata - Package metadata map with runtime compat flags
- * @returns Findings for missing package entries
+ * @returns Findings for structural catalog defects
  */
 export function checkPackageCatalog(
   pluginsMdContent: string,
   runtimeMdContent: string,
   publishedPackages: readonly string[],
-  packageMetadata: Readonly<Record<string, { description: string; runtimeCompat: unknown }>>,
+  packageMetadata: Readonly<
+    Record<string, { description: string; runtimeCompat: RuntimeCompatFlags }>
+  >,
 ): readonly Finding[] {
   const findings: Finding[] = [];
 
@@ -668,21 +909,49 @@ export function checkPackageCatalog(
     });
   }
 
-  // Derive expected package keys from authoritative sources
-  const expectedKeys = new Set<string>();
+  // Derive the expected package set (short name → path) from authoritative sources.
+  const expected = new Map<string, string>();
   for (const pkgPath of publishedPackages) {
-    const match = pkgPath.match(/^packages\/([^/]+)/);
-    if (match) {
-      expectedKeys.add(match[1]);
+    const match = pkgPath.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+    if (!match) continue;
+    const first = match[1] as string;
+    const second = match[2];
+    const shortName = (first === 'starters' && second) ? second : first;
+    expected.set(shortName, pkgPath);
+  }
+  // "starters" is a directory, not a package — remove it.
+  expected.delete('starters');
+
+  // Parse the catalog into bounded sections.
+  const { sections, duplicates } = parseCatalogSections(pluginsMdContent);
+
+  // Reject duplicate sections (same package heading appears more than once).
+  for (const name of duplicates) {
+    findings.push({
+      file: 'docs/plugins.md',
+      line: 1,
+      message:
+        `Duplicate catalog section "@setu-ts/${name}" appears more than once in docs/plugins.md.`,
+    });
+  }
+
+  // Reject extra sections not in the expected set.
+  for (const name of sections.keys()) {
+    if (!expected.has(name)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Extra catalog section "@setu-ts/${name}" is not in PUBLISHED_PACKAGES.`,
+      });
     }
   }
-  // "starters" is a directory, not a package — remove it from expected keys
-  expectedKeys.delete('starters');
 
-  // Check each expected package has a catalog entry
-  for (const pkg of expectedKeys) {
-    // Check README exists
-    const readmePath = `packages/${pkg}/README.md`;
+  // Validate each expected package's section structurally.
+  for (const [pkg, pkgPath] of expected) {
+    // Check README exists on disk.
+    const readmePath = pkgPath.includes('starters/')
+      ? `${pkgPath}/README.md`
+      : `packages/${pkg}/README.md`;
     try {
       Deno.statSync(readmePath);
     } catch {
@@ -693,7 +962,7 @@ export function checkPackageCatalog(
       });
     }
 
-    // Check metadata entry exists
+    // Check metadata entry exists.
     if (!packageMetadata[pkg]) {
       findings.push({
         file: 'docs/plugins.md',
@@ -702,113 +971,126 @@ export function checkPackageCatalog(
       });
     }
 
-    // Check catalog entry exists (look for package name in plugins.md)
-    if (!pluginsMdContent.includes(`@setu-ts/${pkg}`)) {
+    const section = sections.get(pkg);
+    if (!section) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message: `Package "${pkg}" has no catalog entry in docs/plugins.md.`,
+        message:
+          `Package "${pkg}" has no catalog section (### @setu-ts/${pkg}) in docs/plugins.md.`,
+      });
+      continue;
+    }
+
+    // Required: a Purpose line.
+    if (!/\*\*Purpose:\*\*/.test(section)) {
+      findings.push({
+        file: 'docs/plugins.md',
+        line: 1,
+        message: `Package "${pkg}" catalog section has no **Purpose:** line.`,
       });
     }
 
-    // Check API link exists
-    // deno doc generates paths like ./api/<pkg>/src/index.ts/index.html
-    if (!pluginsMdContent.includes(`./api/${pkg}/`)) {
+    // Required: exact README link within this section.
+    const expectedReadmeLink = pkgPath.includes('starters/')
+      ? `../packages/starters/${pkg}/README.md`
+      : `../packages/${pkg}/README.md`;
+    if (!section.includes(`[README](${expectedReadmeLink})`)) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message: `Package "${pkg}" has no API link in docs/plugins.md.`,
+        message:
+          `Package "${pkg}" catalog section has a wrong or missing README link (expected [README](${expectedReadmeLink})).`,
       });
     }
 
-    // Check runtime note exists (README link in the package section)
-    if (!pluginsMdContent.includes(`packages/${pkg}/README.md`)) {
+    // Required: exact valid generated API link within this section.
+    const apiPathPrefix = pkgPath.includes('starters/') ? `starters/${pkg}` : pkg;
+    const expectedApiLink = `./api/${apiPathPrefix}/src/index.ts/index.html`;
+    if (!section.includes(`[API Reference](${expectedApiLink})`)) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message: `Package "${pkg}" has no runtime note in docs/plugins.md.`,
-      });
-    }
-  }
-
-  // Starters are under packages/starters/<name>/ — check them separately
-  for (const starter of ['rest-starter', 'microservice-starter', 'full-stack-starter']) {
-    const readmePath = `packages/starters/${starter}/README.md`;
-    try {
-      Deno.statSync(readmePath);
-    } catch {
-      findings.push({
-        file: 'docs/plugins.md',
-        line: 1,
-        message: `Package "${starter}" has no README at ${readmePath}.`,
+        message:
+          `Package "${pkg}" catalog section has a wrong or missing API link (expected [API Reference](${expectedApiLink})).`,
       });
     }
 
-    if (!packageMetadata[starter]) {
+    // Required: explicit runtime compatibility cells with allowed values.
+    const cells = extractRuntimeCells(section);
+    if (!cells) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message: `Package "${starter}" has no metadata entry in PACKAGE_METADATA.`,
+        message: `Package "${pkg}" catalog section has no runtime compatibility table.`,
       });
+    } else {
+      const cellMap: Record<string, string> = {
+        deno: cells.deno,
+        node: cells.node,
+        bun: cells.bun,
+        workers: cells.workers,
+      };
+      for (const [runtime, value] of Object.entries(cellMap)) {
+        const base = cellBase(value);
+        if (!RUNTIME_CELL_VALUES.has(base)) {
+          findings.push({
+            file: 'docs/plugins.md',
+            line: 1,
+            message:
+              `Package "${pkg}" has an invalid ${runtime} runtime cell "${value}" (allowed: ${
+                [...RUNTIME_CELL_VALUES].join(', ')
+              }).`,
+          });
+        }
+      }
+      // Cross-check cells against metadata flags when metadata exists. The base
+      // value (stripped of any parenthetical caveat) must match. `N/A` is
+      // compatible with a `false` flag (both mean "not applicable here").
+      const meta = packageMetadata[pkg];
+      if (meta) {
+        const flags = meta.runtimeCompat;
+        const expectedCells: Record<string, string> = {
+          deno: flags.deno ? '✅' : '❌',
+          node: flags.node ? '✅' : '❌',
+          bun: flags.bun ? '✅' : '❌',
+          workers: flags.workerd ? '✅' : '❌',
+        };
+        for (const [runtime, expectedValue] of Object.entries(expectedCells)) {
+          const rawCell = cellMap[runtime]!;
+          const actualBase = cellBase(rawCell);
+          // N/A is compatible with a false metadata flag.
+          if (actualBase === 'N/A' && expectedValue === '❌') continue;
+          // A ✅ cell with a parenthetical caveat (e.g. "✅ (HTTP brokers)")
+          // documents provider-level support that overrides the package-level
+          // metadata flag — the caveat IS the provider/resource note. Do not
+          // flag it against the package-level flag.
+          if (
+            actualBase === '✅' && expectedValue === '❌' &&
+            rawCell.includes('(') && rawCell.includes(')')
+          ) {
+            continue;
+          }
+          if (actualBase !== expectedValue) {
+            findings.push({
+              file: 'docs/plugins.md',
+              line: 1,
+              message:
+                `Package "${pkg}" ${runtime} cell "${rawCell}" does not match PACKAGE_METADATA (expected "${expectedValue}").`,
+            });
+          }
+        }
+      }
     }
 
-    if (!pluginsMdContent.includes(`@setu-ts/${starter}`)) {
+    // Required: provider/resource caveat where the metadata map demands it.
+    const requiredCaveat = REQUIRED_CAVEATS[pkg];
+    if (requiredCaveat && !section.toLowerCase().includes(requiredCaveat.toLowerCase())) {
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message: `Package "${starter}" has no catalog entry in docs/plugins.md.`,
-      });
-    }
-
-    if (!pluginsMdContent.includes(`./api/starters/${starter}/`)) {
-      findings.push({
-        file: 'docs/plugins.md',
-        line: 1,
-        message: `Package "${starter}" has no API link in docs/plugins.md.`,
-      });
-    }
-
-    if (!pluginsMdContent.includes(`packages/starters/${starter}/README.md`)) {
-      findings.push({
-        file: 'docs/plugins.md',
-        line: 1,
-        message: `Package "${starter}" has no runtime note in docs/plugins.md.`,
-      });
-    }
-  }
-
-  // Check for duplicate entries (package mentioned more than once)
-  const pkgMatches = [...pluginsMdContent.matchAll(/@setu-ts\/([^/\s]+)/g)];
-  const pkgCounts = new Map<string, number>();
-  for (const match of pkgMatches) {
-    const pkgName = match[1];
-    pkgCounts.set(pkgName, (pkgCounts.get(pkgName) ?? 0) + 1);
-  }
-  for (const [pkg, count] of pkgCounts) {
-    if (count > 1) {
-      findings.push({
-        file: 'docs/plugins.md',
-        line: 1,
-        message: `Package "${pkg}" appears ${count} times in docs/plugins.md (expected 1).`,
-      });
-    }
-  }
-
-  // Check for extra entries not in published packages
-  // Note: starters are under packages/starters/<name>/ so their short name
-  // (e.g. "rest-starter") is NOT in expectedKeys — they are valid catalog entries.
-  const starterShortNames = new Set([
-    'rest-starter',
-    'microservice-starter',
-    'full-stack-starter',
-  ]);
-  for (const match of pluginsMdContent.matchAll(/###\s+@setu-ts\/([^\s]+)/g)) {
-    const pkgName = match[1];
-    if (!expectedKeys.has(pkgName) && !starterShortNames.has(pkgName)) {
-      findings.push({
-        file: 'docs/plugins.md',
-        line: 1,
-        message: `Extra catalog entry "${pkgName}" not in PUBLISHED_PACKAGES.`,
+        message:
+          `Package "${pkg}" catalog section is missing the required caveat mentioning "${requiredCaveat}".`,
       });
     }
   }
@@ -904,12 +1186,29 @@ if (import.meta.main) {
   }
 
   // Run local link checks (only in default scan mode, only on markdown files)
-  // Skip archived plan files as they may reference historical paths
+  // Skip archived plan files as they may reference historical paths.
+  // Collect the deterministic manifest-derived generated API page set so
+  // generated links are validated rather than unconditionally accepted.
   if (args.length === 0) {
+    let generatedApiPages: Set<string> | null;
+    try {
+      const { collectApiEntrypoints } = await import('./generate-api-docs.ts');
+      const fs = {
+        readTextFile: (path: string) => Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const { targets } = await collectApiEntrypoints(fs);
+      generatedApiPages = buildGeneratedApiPages(targets);
+    } catch {
+      // If entrypoint collection fails, skip generated-link validation.
+      generatedApiPages = null;
+    }
+
     for (const file of files) {
       if (!file.endsWith('.md') || file.startsWith('plans/archive/')) continue;
       const source = fileContents.get(file)!;
-      const linkFindings = await checkLocalLinks(file, source, files);
+      const linkFindings = await checkLocalLinks(file, source, files, generatedApiPages);
       findings.push(...linkFindings);
     }
 

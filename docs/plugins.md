@@ -1085,7 +1085,7 @@ emitDecoratorMetadata).
 
 | Deno | Node | Bun | Workers |
 | ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | N/A     |
+| ✅   | ✅   | ❌  | N/A     |
 
 **Commands:**
 
@@ -1182,7 +1182,7 @@ OpenAPI, Health, Metrics.
 
 | Deno | Node | Bun | Workers |
 | ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | ✅      |
+| ✅   | ✅   | ✅  | ❌      |
 
 **Includes:** All REST starter plugins + Messaging, Queue, Resilience, Telemetry, Service Discovery.
 

@@ -1,51 +1,135 @@
 /**
  * Mechanical validation of documentation snippet fixtures.
  *
- * Each fixture is a self-contained TypeScript snippet extracted from the nine
- * M38 guides. The test type-checks them against the current workspace so that
- * any API drift (wrong method names, wrong context shape, missing await) is
- * caught immediately rather than silently shipping incorrect documentation.
+ * The previous version of this test read files from a git-ignored `.tmp/`
+ * directory and asserted only that their text was non-empty — a no-op gate
+ * that passed from a clean checkout (where `.tmp/` is absent) and proved
+ * nothing about whether the snippets compile.
+ *
+ * This version depends ONLY on committed repository files:
+ *   - Each fixture lives under `test/fixtures/snippets/` (git-tracked).
+ *   - Each fixture is mechanically type-checked by invoking `deno check` via
+ *     `Deno.Command` against the workspace import map, so API drift (wrong
+ *     method names, wrong context shape, missing await) is caught rather than
+ *     silently shipping incorrect documentation.
+ *   - A clean-checkout regression asserts every fixture is git-tracked, so a
+ *     fixture moved back to `.tmp/` fails the gate.
+ *   - A negative control asserts the mechanical compiler REJECTS a fixture
+ *     using the banned `app.get()` family, proving the gate discriminates.
+ *   - A manifest maps each fixture to the guide(s) it represents, so a guide
+ *     whose fixture is deleted fails the gate.
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-const FIXTURES = [
-  'minimal-app.ts',
-  'plugin-registration.ts',
-  'testing-injection.ts',
-  'decorator-flow.ts',
-  'runtime-workers.ts',
-  'migration-nestjs.ts',
-  'migration-fastify.ts',
-  'middleware.ts',
-  'lifecycle-hooks.ts',
+/** Each fixture mapped to the guide(s) whose examples it mechanically verifies. */
+const SNIPPET_FIXTURES: ReadonlyArray<{ fixture: string; guides: readonly string[] }> = [
+  { fixture: 'minimal-app.ts', guides: ['docs/getting-started.md'] },
+  { fixture: 'plugin-registration.ts', guides: ['docs/custom-plugins.md'] },
+  {
+    fixture: 'testing-injection.ts',
+    guides: ['docs/getting-started.md', 'docs/programmatic-api.md'],
+  },
+  { fixture: 'decorator-flow.ts', guides: ['docs/decorators.md'] },
+  { fixture: 'runtime-workers.ts', guides: ['docs/runtime-deployment.md'] },
+  { fixture: 'migration-nestjs.ts', guides: ['docs/migration-nestjs.md'] },
+  { fixture: 'migration-fastify.ts', guides: ['docs/migration-fastify.md'] },
+  { fixture: 'middleware.ts', guides: ['docs/plugin-architecture.md'] },
+  { fixture: 'lifecycle-hooks.ts', guides: ['docs/plugin-architecture.md'] },
+  { fixture: 'examples-guide.ts', guides: ['docs/examples.md'] },
+  { fixture: 'architecture-registry.ts', guides: ['ARCHITECTURE.md'] },
 ];
 
-describe('Documentation snippet validation', () => {
-  for (const fixture of FIXTURES) {
-    it(`type-checks .tmp/snippet-fixtures/${fixture}`, async () => {
-      const path = `.tmp/snippet-fixtures/${fixture}`;
-      // Read the file to verify it exists and is valid TypeScript
-      const content = await Deno.readTextFile(path);
-      expect(content.length).toBeGreaterThan(0);
-      // Verify the file compiles by checking for common syntax errors
-      // (full type-checking is done via deno check in CI)
+const FIXTURE_DIR = 'test/fixtures/snippets';
+
+/** Invokes `deno check` on a fixture and returns the exit code + stderr. */
+async function denoCheck(
+  fixturePath: string,
+): Promise<{ code: number; stderr: string }> {
+  const cmd = new Deno.Command('deno', {
+    args: ['check', fixturePath],
+    stdout: 'null',
+    stderr: 'piped',
+  });
+  const output = await cmd.output();
+  return {
+    code: output.code,
+    stderr: new TextDecoder().decode(output.stderr),
+  };
+}
+
+describe('Documentation snippet validation — mechanical type-check', () => {
+  for (const { fixture, guides } of SNIPPET_FIXTURES) {
+    it(`compiles ${fixture} (represents ${guides.join(', ')})`, async () => {
+      const path = `${FIXTURE_DIR}/${fixture}`;
+      // The fixture must exist as a committed file (clean-checkout safety).
+      await Deno.stat(path);
+      const { code, stderr } = await denoCheck(path);
+      if (code !== 0) {
+        throw new Error(
+          `deno check ${path} failed (exit ${code}). The guide snippet it represents (${
+            guides.join(', ')
+          }) is invalid.\n--- stderr ---\n${stderr}`,
+        );
+      }
+      expect(code).toBe(0);
     });
   }
 
+  it('rejects the negative control using the banned app.get() family (gate discriminates)', async () => {
+    const path = `${FIXTURE_DIR}/_negative-app-get.ts`;
+    await Deno.stat(path);
+    const { code } = await denoCheck(path);
+    // The negative control MUST fail to compile — if it passes, the gate
+    // does not actually invoke the compiler and is a no-op.
+    expect(code).not.toBe(0);
+  });
+
+  it('every fixture is git-tracked (clean-checkout regression)', async () => {
+    // A fixture living only in .tmp/ would pass a non-empty-text check from a
+    // warm tree and fail from a clean checkout. Asserting git tracking makes
+    // the gate depend only on committed files.
+    const fixtures = [...SNIPPET_FIXTURES.map((f) => f.fixture), '_negative-app-get.ts'];
+    const cmd = new Deno.Command('git', {
+      args: ['ls-files', '--', FIXTURE_DIR],
+      stdout: 'piped',
+      stderr: 'null',
+    });
+    const output = await cmd.output();
+    const tracked = new TextDecoder().decode(output.stdout).split('\n').filter(Boolean);
+    const trackedSet = new Set(tracked);
+    for (const fixture of fixtures) {
+      const trackedPath = `${FIXTURE_DIR}/${fixture}`;
+      expect(trackedSet.has(trackedPath)).toBe(true);
+    }
+    // The import map must also be tracked, or the fixtures cannot resolve.
+    expect(trackedSet.has(`${FIXTURE_DIR}/deno.json`)).toBe(true);
+  });
+
+  it('every represented guide exists on disk', async () => {
+    for (const { guides } of SNIPPET_FIXTURES) {
+      for (const guide of guides) {
+        await Deno.stat(guide);
+      }
+    }
+  });
+});
+
+describe('Documentation snippet validation — guide content invariants', () => {
+  const ROUTE_GUIDES = [
+    'docs/getting-started.md',
+    'docs/programmatic-api.md',
+    'docs/custom-plugins.md',
+    'docs/plugin-architecture.md',
+    'docs/examples.md',
+    'docs/decorators.md',
+    'docs/runtime-deployment.md',
+  ];
+
   it('verifies no app.get() calls in Setu-TS guides (must use app.router.get)', async () => {
-    const guides = [
-      'docs/getting-started.md',
-      'docs/programmatic-api.md',
-      'docs/custom-plugins.md',
-      'docs/plugin-architecture.md',
-      'docs/examples.md',
-      'docs/decorators.md',
-      'docs/runtime-deployment.md',
-    ];
-    for (const guide of guides) {
+    for (const guide of ROUTE_GUIDES) {
       const content = await Deno.readTextFile(guide);
       // Match app.get/post/put/patch/delete but NOT app.router.get etc.
       const badMatches = [...content.matchAll(/app\.(get|post|put|patch|delete|head|options)\(/g)]
@@ -55,16 +139,7 @@ describe('Documentation snippet validation', () => {
   });
 
   it('verifies no ctx.json() calls in Setu-TS guides (must use ctx.response.json)', async () => {
-    const guides = [
-      'docs/getting-started.md',
-      'docs/programmatic-api.md',
-      'docs/custom-plugins.md',
-      'docs/plugin-architecture.md',
-      'docs/examples.md',
-      'docs/decorators.md',
-      'docs/runtime-deployment.md',
-    ];
-    for (const guide of guides) {
+    for (const guide of ROUTE_GUIDES) {
       const content = await Deno.readTextFile(guide);
       const badMatches = [...content.matchAll(/ctx\.json\(/g)]
         .filter((m) => !m[0].startsWith('ctx.response.json'));
@@ -100,16 +175,12 @@ describe('Documentation snippet validation', () => {
       const lines = content.split('\n');
       let inCodeBlock = false;
       for (const line of lines) {
-        // Track code blocks
         if (line.trim().startsWith('```')) {
           inCodeBlock = !inCodeBlock;
           continue;
         }
-        // Only check inside code blocks
         if (!inCodeBlock) continue;
-        // Skip import lines
         if (line.trim().startsWith('import ')) continue;
-        // Check for createTestApp( that is not preceded by await
         const matches = [...line.matchAll(/createTestApp\(/g)];
         for (const match of matches) {
           const idx = match.index!;
@@ -133,5 +204,49 @@ describe('Documentation snippet validation', () => {
       const badMatches = [...content.matchAll(/app\.register\((?!.*\(\))\w+Plugin\)/g)];
       expect(badMatches.length).toBe(0);
     }
+  });
+
+  it('verifies architecture testing claim matches real CI (Deno full, Node/Bun compat)', async () => {
+    const content = await Deno.readTextFile('ARCHITECTURE.md');
+    const start = content.indexOf('### Runtime Compatibility Tests');
+    const end = content.indexOf('### Contract Tests');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const section = content.slice(start, end);
+    // The stale claim that the full suite runs on all three runtimes must be gone.
+    expect(section).not.toMatch(/full test suite on all three runtimes/);
+    expect(section).not.toMatch(/All tests must pass on Node\.js, Deno, and Bun/);
+    // The corrected claim: Deno runs the full suite; Node/Bun run compat.
+    expect(section).toMatch(/Deno runs the full workspace test suite/);
+    expect(section).toMatch(/Node and Bun run the published-artifact compatibility suite/);
+  });
+
+  it('verifies architecture registry examples use CAPABILITIES constants, not raw standard tokens', async () => {
+    const content = await Deno.readTextFile('ARCHITECTURE.md');
+    // The §6 Service Registry section is between "## 6. Service Registry" and "## 7. Runtime Layer".
+    const start = content.indexOf('## 6. Service Registry');
+    const end = content.indexOf('## 7. Runtime Layer');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const section = content.slice(start, end);
+    // Standard tokens registered/looked up must use CAPABILITIES.* — a raw
+    // quoted standard token in a register/get/has/getAll call is a defect.
+    const standardTokens = [
+      'database',
+      'cache',
+      'logger',
+      'config',
+      'notifier',
+      'notification',
+      'messaging',
+    ];
+    for (const token of standardTokens) {
+      const bad = section.match(
+        new RegExp(`ctx\\.services\\.(register|get|has|getAll|registerFactory)\\('${token}'`, 'g'),
+      );
+      expect(bad).toBeNull();
+    }
+    // The nonexistent `lazy` option must not appear in RegisterOptions examples.
+    expect(section).not.toMatch(/lazy:\s*(true|false)/);
   });
 });

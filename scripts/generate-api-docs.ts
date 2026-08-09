@@ -95,20 +95,69 @@ export function reconcileWorkspaceVsPublication(
 }
 
 /**
- * Parses a deno.json manifest and extracts export targets.
- * Returns empty array if manifest is missing, unreadable, or malformed.
+ * The classification of a manifest-read failure, so a caller can distinguish a
+ * missing file from a malformed one rather than blanket-catching both into an
+ * empty list.
+ */
+export type ManifestReadFailure =
+  | { kind: 'read-failed'; path: string; cause: unknown }
+  | { kind: 'malformed-manifest'; path: string; cause: unknown }
+  | { kind: 'invalid-export-map'; path: string }
+  | { kind: 'no-export-targets'; path: string }
+  | { kind: 'missing-target'; path: string; target: string };
+
+/**
+ * Parses a deno.json manifest and extracts export targets, preserving exact
+ * error classifications rather than blanket-catching all causes into an empty
+ * list.
+ *
+ * Classifications:
+ * - missing/unreadable manifest → `{ kind: 'read-failed' }` with path + cause;
+ * - malformed JSON → `{ kind: 'malformed-manifest' }` with path + cause;
+ * - invalid `exports` type/shape → `{ kind: 'invalid-export-map' }`;
+ * - valid manifest with no local export targets → `{ kind: 'no-export-targets' }`.
+ *
+ * A missing declared target on disk is detected later by the caller (the
+ * collector) and reported as `{ kind: 'missing-target' }`.
+ *
+ * @param manifestPath - Repository-relative path to the deno.json
+ * @param fs - File system abstraction
+ * @returns The export targets on success, or a failure classification
  */
 export async function readManifestExports(
   manifestPath: string,
   fs: { readTextFile: (path: string) => Promise<string> },
-): Promise<string[]> {
+): Promise<{ ok: true; targets: string[] } | { ok: false; failure: ManifestReadFailure }> {
+  let content: string;
   try {
-    const content = await fs.readTextFile(manifestPath);
-    const manifest = JSON.parse(content) as { exports?: unknown };
-    return expandExportTargets(manifest.exports);
-  } catch {
-    return [];
+    content = await fs.readTextFile(manifestPath);
+  } catch (cause) {
+    return { ok: false, failure: { kind: 'read-failed', path: manifestPath, cause } };
   }
+
+  let manifest: { exports?: unknown };
+  try {
+    manifest = JSON.parse(content) as { exports?: unknown };
+  } catch (cause) {
+    return { ok: false, failure: { kind: 'malformed-manifest', path: manifestPath, cause } };
+  }
+
+  // A valid manifest with no `exports` field at all, or an `exports` that is
+  // neither a string nor an object, is an invalid export map.
+  if (
+    manifest.exports === undefined ||
+    manifest.exports === null ||
+    (typeof manifest.exports !== 'string' && typeof manifest.exports !== 'object')
+  ) {
+    return { ok: false, failure: { kind: 'invalid-export-map', path: manifestPath } };
+  }
+
+  const targets = expandExportTargets(manifest.exports);
+  if (targets.length === 0) {
+    return { ok: false, failure: { kind: 'no-export-targets', path: manifestPath } };
+  }
+
+  return { ok: true, targets };
 }
 
 /**
@@ -121,39 +170,42 @@ export async function readManifestExports(
  * @returns Sorted, deduplicated list of local source paths
  */
 export function expandExportTargets(exports: unknown): string[] {
-  if (typeof exports === 'string') {
-    return [exports];
-  }
-  if (exports === null || typeof exports !== 'object') {
-    return [];
-  }
-
   const targets: string[] = [];
-  const exp = exports as Record<string, unknown>;
+  if (typeof exports === 'string') {
+    targets.push(exports);
+  } else if (exports !== null && typeof exports === 'object') {
+    const exp = exports as Record<string, unknown>;
 
-  for (const [, value] of Object.entries(exp)) {
-    if (typeof value === 'string') {
-      targets.push(value);
-    } else if (value !== null && typeof value === 'object') {
-      // Object-valued export: look for "." key (root export) and subpaths
-      const obj = value as Record<string, unknown>;
-      if (obj['.'] !== undefined && typeof obj['.'] === 'string') {
-        targets.push(obj['.'] as string);
-      }
-      // Subpaths are also valid entry points
-      for (const [subkey, subvalue] of Object.entries(obj)) {
-        if (subkey !== '.' && typeof subvalue === 'string') {
-          targets.push(subvalue);
+    for (const [, value] of Object.entries(exp)) {
+      if (typeof value === 'string') {
+        targets.push(value);
+      } else if (value !== null && typeof value === 'object') {
+        // Object-valued export: look for "." key (root export) and subpaths
+        const obj = value as Record<string, unknown>;
+        if (obj['.'] !== undefined && typeof obj['.'] === 'string') {
+          targets.push(obj['.'] as string);
+        }
+        // Subpaths are also valid entry points
+        for (const [subkey, subvalue] of Object.entries(obj)) {
+          if (subkey !== '.' && typeof subvalue === 'string') {
+            targets.push(subvalue);
+          }
         }
       }
     }
   }
 
-  // Normalize and deduplicate
+  // Normalize and deduplicate. Collapse any doubled ./ prefixes (e.g.
+  // "././src/index.ts" → "./src/index.ts") so a corrupt manifest cannot
+  // smuggle a doubled prefix through to the collector.
   const normalized = new Set<string>();
   for (const target of targets) {
-    // Keep the ./ prefix so package extraction works correctly
-    const normalizedPath = target.startsWith('./') ? target : `./${target}`;
+    let normalizedPath = target;
+    // Strip all leading ./ sequences, then re-add exactly one.
+    while (normalizedPath.startsWith('./')) {
+      normalizedPath = normalizedPath.slice(2);
+    }
+    normalizedPath = `./${normalizedPath}`;
     normalized.add(normalizedPath);
   }
 
@@ -199,17 +251,43 @@ export async function collectApiEntrypoints(
   const targetsWithPackage: Array<{ target: string; pkg: string }> = [];
   const packagesWithExports = new Set<string>();
 
-  // Read each published package's manifest and expand exports
+  // Read each published package's manifest and expand exports, preserving
+  // exact error classifications rather than blanket-catching all causes.
   for (const pkgPath of PUBLISHED_PACKAGES) {
     const manifestPath = `${pkgPath}/deno.json`;
-    const targets = await readManifestExports(manifestPath, fs);
+    const result = await readManifestExports(manifestPath, fs);
 
-    if (targets.length === 0) {
-      // Reject no-export manifests — this is a failure, not a valid empty state
-      throw new Error(
-        `Package ${pkgPath} has no export targets in its deno.json manifest`,
-      );
+    if (!result.ok) {
+      const failure = result.failure;
+      switch (failure.kind) {
+        case 'read-failed':
+          throw new Error(
+            `Cannot read manifest ${failure.path}: ${
+              (failure.cause as Error)?.message ?? String(failure.cause)
+            }`,
+          );
+        case 'malformed-manifest':
+          throw new Error(
+            `Manifest ${failure.path} is malformed JSON: ${
+              (failure.cause as Error)?.message ?? String(failure.cause)
+            }`,
+          );
+        case 'invalid-export-map':
+          throw new Error(
+            `Manifest ${failure.path} has an invalid exports map (must be a string or object)`,
+          );
+        case 'no-export-targets':
+          throw new Error(
+            `Package ${pkgPath} has no export targets in its deno.json manifest`,
+          );
+        case 'missing-target':
+          throw new Error(
+            `Export target ${failure.target} declared in ${failure.path} does not exist on disk`,
+          );
+      }
     }
+
+    const targets = result.targets;
 
     // Validate every target exists on disk before including
     for (const target of targets) {
@@ -397,6 +475,95 @@ export function partitionDiagnostics(
   return { cleanPackageFindings, knownDebt };
 }
 
+/** The documented lint-debt exit code: `deno doc --lint` exits 1 when it reports lint diagnostics. */
+export const DOC_LINT_EXIT_CODE = 1;
+
+/**
+ * The exact summary line `deno doc --lint` prints when it exits non-zero due
+ * to lint debt (ANSI-stripped). Used to recognize — not suppress — the summary.
+ */
+const LINT_SUMMARY_PATTERN = /Found \d+ documentation lint errors/;
+
+/**
+ * A line that is a lint diagnostic opener: `error[rule]: message`. The bracket
+ * after `error` is what distinguishes a lint diagnostic from a fatal `error:`.
+ */
+const LINT_DIAGNOSTIC_PATTERN = /^error\[[^\]]+\]:/;
+
+/**
+ * A `--> path:line:col` continuation line belonging to a lint diagnostic.
+ */
+const LINT_LOCATION_PATTERN = /^\s*-->\s/;
+
+/**
+ * A stack-trace line (at file:line:col) that a fatal error prints.
+ */
+const STACK_TRACE_PATTERN = /^\s+at\s+/;
+
+/**
+ * Classifies the raw child-process output of `deno doc --lint` into one of:
+ * - `'lint-debt'` — the documented ratchet-eligible shape (exit 1, only lint
+ *   diagnostics and the summary line, no independent fatal/error/stack text);
+ * - `'fatal'` — an unexpected failure (any nonzero code other than the lint
+ *   exit code, OR the lint exit code with independent fatal/error/stack text
+ *   that the summary does not account for).
+ *
+ * The classification is structural: it removes the recognized lint records
+ * (diagnostic openers, their `-->` location lines, and the summary line) from
+ * each ANSI-stripped stream and then rejects any remaining `error:` /
+ * `at ` (stack) / non-empty content. A lint diagnostic whose message contains
+ * the literal `error: ` is NOT falsely fatal, because the opener line matches
+ * `error[rule]:` and is removed before the residual scan.
+ *
+ * @param code - The child exit code
+ * @param stdout - Raw stdout
+ * @param stderr - Raw stderr
+ * @returns The classification and the ANSI-stripped streams
+ */
+export function classifyChildResult(
+  code: number,
+  stdout: string,
+  stderr: string,
+): { kind: 'lint-debt' | 'fatal'; stdoutStripped: string; stderrStripped: string } {
+  const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
+  const stdoutStripped = stdout.replace(ansiStripRe, '');
+  const stderrStripped = stderr.replace(ansiStripRe, '');
+
+  // An unexpected nonzero code (including code 2) is always fatal, regardless
+  // of stream content — it is not the documented lint-debt exit shape.
+  if (code !== 0 && code !== DOC_LINT_EXIT_CODE) {
+    return { kind: 'fatal', stdoutStripped, stderrStripped };
+  }
+
+  // For the ratchet-eligible code (1) or code 0, remove recognized lint records
+  // from each stream and reject any independent fatal/error/stack residual.
+  for (const stream of [stdoutStripped, stderrStripped]) {
+    const lines = stream.split('\n');
+    const residual: string[] = [];
+    for (const line of lines) {
+      // Recognized lint diagnostic opener: error[rule]: message
+      if (LINT_DIAGNOSTIC_PATTERN.test(line)) continue;
+      // Recognized lint location continuation: --> path:line:col
+      if (LINT_LOCATION_PATTERN.test(line)) continue;
+      // Recognized lint summary line: Found N documentation lint errors.
+      if (LINT_SUMMARY_PATTERN.test(line)) continue;
+      residual.push(line);
+    }
+    const residualText = residual.join('\n');
+    // Any remaining `error:` line is an independent fatal (module-not-found,
+    // permission denied, etc.) — NOT a lint diagnostic (those were removed).
+    if (/error: /.test(residualText)) {
+      return { kind: 'fatal', stdoutStripped, stderrStripped };
+    }
+    // Any remaining stack-trace line is an independent fatal.
+    if (STACK_TRACE_PATTERN.test(residualText)) {
+      return { kind: 'fatal', stdoutStripped, stderrStripped };
+    }
+  }
+
+  return { kind: 'lint-debt', stdoutStripped, stderrStripped };
+}
+
 /**
  * Runs the API documentation generation.
  *
@@ -442,38 +609,18 @@ export async function runApiDocs(
   const result = await cmd.run(['deno', ...args]);
 
   if (mode === 'check') {
-    // deno doc --lint outputs diagnostics to stderr; exit code 1 is expected
-    // when diagnostics exist — we parse them and apply the ratchet policy.
-    //
-    // CRITICAL: deno doc --lint exits 1 for BOTH lint diagnostics AND fatal
-    // errors (module not found, permission denied, etc.). Fatal errors produce
-    // `error:` lines (no `[rule]` bracket), not `error[rule]:` lines. We must
-    // distinguish fatal child failures from normal lint debt runs:
-    // - Fatal exit + zero parseable diagnostics → propagate the original error
-    // - Fatal exit + partial parseable diagnostics → still fatal (fatal text present)
-    // - Normal lint exit (code 0 or 1 with parseable diagnostics) → apply ratchet
-    // deno doc --lint may emit fatal errors to either stderr or stdout.
-    // Strip ANSI from both streams before classification so ANSI-coloured
-    // fatal text is still detected.
-    const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
-    const stderrStripped = result.stderr.replace(ansiStripRe, '');
-    const stdoutStripped = result.stdout.replace(ansiStripRe, '');
-    // Fatal errors use `error: message` (space after colon); lint diagnostics
-    // use `error[rule]: message` (bracket after colon). Only the former is fatal.
-    // The summary line `error: Found N documentation lint errors.` is NOT fatal —
-    // it appears whenever deno doc --lint exits non-zero due to lint debt.
-    const isLintSummary = /Found \d+ documentation lint errors/.test(stderrStripped) ||
-      /Found \d+ documentation lint errors/.test(stdoutStripped);
-    const hasFatalText = !isLintSummary &&
-      (/error: /.test(stderrStripped) || /error: /.test(stdoutStripped));
-    const diagnostics = parseDocLintDiagnostics(result.stderr);
-    const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
+    // deno doc --lint outputs diagnostics to stderr; exit code 1 is the
+    // documented lint-debt exit shape. We classify the child result
+    // structurally: only the lint-debt shape is ratchet-eligible; every
+    // unexpected nonzero code (including code 2) or any independent
+    // fatal/error/stack output in either ANSI-stripped stream is fatal.
+    const classification = classifyChildResult(result.code, result.stdout, result.stderr);
 
-    // A fatal invocation/resolution/permission/module error must never be
-    // converted into a baseline-count message or success — even if stderr
-    // also contains zero, partial, or exactly baseline-sized parseable
-    // diagnostics.
-    if (result.code !== 0 && hasFatalText) {
+    if (classification.kind === 'fatal') {
+      // Preserve the raw stdout/stderr (not ANSI-stripped) so the failure is
+      // actionable. A fatal must never be converted into a baseline-count
+      // message or success — even if stderr also contains zero, partial, or
+      // exactly baseline-sized parseable diagnostics.
       findings.push(`deno doc --lint failed with exit code ${result.code}`);
       if (result.stderr) {
         findings.push(`stderr: ${result.stderr}`);
@@ -485,8 +632,12 @@ export async function runApiDocs(
       for (const finding of findings) {
         console.error(`  ${finding}`);
       }
-      return { code: result.code, findings };
+      return { code: result.code === 0 ? 1 : result.code, findings };
     }
+
+    // Ratchet-eligible: parse diagnostics and apply the clean-package + baseline policy.
+    const diagnostics = parseDocLintDiagnostics(result.stderr);
+    const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 
     if (cleanPackageFindings.length > 0) {
       findings.push(
