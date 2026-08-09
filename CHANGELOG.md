@@ -85,6 +85,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`setu new --runtime cloudflare-workers` produced a project that could not be built or
+  deployed.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
+  specifiers nor a Deno import map — and the Workers target declared its framework packages only in
+  `deno.json`, emitting no `package.json` and no `.npmrc`. So the flow the CLI itself prints,
+  `npm install && npx wrangler dev`, failed with one `Could not resolve "@setu-ts/…"` per package.
+  There was nothing to install.
+
+  Workers projects now also emit `package.json` (the npm-compat `@jsr/…` dependencies, plus
+  `wrangler` pinned in `devDependencies` and `dev`/`deploy` scripts) and `.npmrc`. Verified against
+  real workerd through `wrangler dev`: a scaffolded project serves `/`, `/health`, `/metrics`, and
+  every generated route, controller and module. The Deno target deliberately still gets no
+  `package.json` — that would switch it to node_modules resolution.
+
+  **Existing Workers projects are not rewritten.** Add a `package.json` declaring the same
+  `@setu-ts/*` packages your `deno.json` lists, using their `npm:@jsr/setu-ts__<name>` form, plus an
+  `.npmrc` containing `@jsr:registry=https://npm.jsr.io`.
+
 - **`setu new --runtime node` could not run any decorated code.** Generated Node projects started
   with `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases
   types without transforming code — so a legacy decorator was a bare

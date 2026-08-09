@@ -79,6 +79,80 @@ describe('firstDuplicatePath', () => {
 // Measured on Node v24: a scaffolded Node project booted until the first
 // `g service|controller|module`, and `--template nest` never booted at all,
 // while Deno, Bun and Workers ran every combination.
+// `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
+// specifiers nor a Deno import map. Before this, a scaffolded Workers project
+// declared its framework packages only in `deno.json`, so the documented
+// `npm install && npx wrangler dev` failed with one
+// `Could not resolve "@setu-ts/…"` per package — eleven of them — even though
+// the CLI's own next-step hint already told you to run npm install. Verified
+// against real workerd both ways.
+describe('the Workers target is deployable as documented', () => {
+  const workers = async (template?: string) => {
+    const h = harness();
+    const argv = ['app', '--runtime', 'cloudflare-workers'];
+    if (template !== undefined) argv.push('--template', template);
+    expect(await h.run(argv)).toBe(0);
+    return h;
+  };
+
+  it('emits an npm manifest esbuild can resolve the framework through', async () => {
+    const h = await workers('rest');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      dependencies?: Record<string, string>;
+    };
+    // Every package the generated config imports must be installable.
+    const config = h.fs.read('/work/app/setu.config.ts');
+    for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
+      expect(Object.keys(manifest.dependencies ?? {})).toContain(match[1]);
+    }
+  });
+
+  it('maps the @jsr scope, without which those packages do not install', async () => {
+    const h = await workers('rest');
+    expect(h.fs.read('/work/app/.npmrc')).toContain('@jsr:registry=https://npm.jsr.io');
+  });
+
+  it('pins wrangler rather than leaving npx to fetch whatever is latest', async () => {
+    const h = await workers('rest');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
+    expect(manifest.devDependencies?.['wrangler']).toBeDefined();
+    expect(manifest.scripts?.['dev']).toBe('wrangler dev');
+    expect(manifest.scripts?.['deploy']).toBe('wrangler deploy');
+  });
+
+  it('keeps its deno.json too, which is what generate reads for plugin gating', async () => {
+    const h = await workers('rest');
+    expect(h.fs.has('/work/app/deno.json')).toBe(true);
+  });
+
+  // The trap this must not reintroduce: a package.json switches Deno to
+  // node_modules resolution, which is the `apps/full-stack` cold-checkout
+  // failure. Only Workers gets one for this reason.
+  it('gives a plain Deno project no package.json', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--runtime', 'deno', '--template', 'rest'])).toBe(0);
+    expect(h.fs.has('/work/app/package.json')).toBe(false);
+    expect(h.fs.has('/work/app/.npmrc')).toBe(false);
+  });
+
+  it('merges a template npm build into the same manifest, not a second one', async () => {
+    const h = await workers('full-stack');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(manifest.scripts?.['build']).toBe('react-router build');
+    expect(manifest.scripts?.['deploy']).toBe('wrangler deploy');
+    expect(manifest.devDependencies?.['wrangler']).toBeDefined();
+    expect(manifest.devDependencies?.['vite']).toBeDefined();
+    expect(manifest.dependencies?.['@setu-ts/common']).toBeDefined();
+  });
+});
+
 describe('the Node target can run decorated source', () => {
   const manifestOf = async (runtime: string, template?: string) => {
     const h = harness();

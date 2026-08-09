@@ -5007,6 +5007,13 @@ registers `DiPlugin` and the kernel refuses a duplicate plugin name at `start()`
 > `experimentalDecorators` its own `tsconfig.json` already sets. Bun compiles TypeScript outright
 > and Deno and Workers never invoke it, so no other target carries the dependency.
 
+> **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
+> `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, so a
+> scaffolded Workers project emits `package.json` (npm-compat `@jsr/…` dependencies, `wrangler`
+> pinned in `devDependencies`, and `dev`/`deploy` scripts) plus `.npmrc`, and
+> `npm install && npx wrangler dev` works as printed. The Deno target does NOT get one: it resolves
+> through the import map, and a `package.json` switches Deno to node_modules resolution.
+
 **The decorator-free way to serve HTTP is `setu generate route`.** It emits
 `register<Name>Routes(router: IRouterApi)` and is ungated, so it works in a project with no plugins
 at all — and it is wired on every host, including the no-template one. `g controller` and `g module`

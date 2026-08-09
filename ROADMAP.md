@@ -6317,6 +6317,13 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
   `TemplateDefinition` gives the minimal path a host without giving it a `--template` value. Without
   this, `setu generate route` — the only HTTP handler a decorator-free project can generate, and the
   one this milestone's refusal points at — still landed unwired.
+- **`--runtime cloudflare-workers` is deployable.** Same sweep, same class of defect: `wrangler`
+  bundles with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, and the
+  Workers target emitted no `package.json` — so the `npm install && npx wrangler dev` the CLI itself
+  prints failed with one `Could not resolve "@setu-ts/…"` per package. It now emits `package.json` +
+  `.npmrc` alongside `deno.json`, with `wrangler` pinned. Verified on real workerd. Deno still gets
+  none, deliberately: a `package.json` switches it to node_modules resolution (the `apps/full-stack`
+  cold-checkout trap).
 - **`--runtime node` can run decorated source.** Found by booting the matrix, and pre-existing since
   M34 chose `node --experimental-strip-types main.ts`: Node's built-in TypeScript support erases
   types without transforming code, so a legacy decorator was a `SyntaxError` and the constructor
