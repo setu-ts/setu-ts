@@ -4922,6 +4922,7 @@ setu new my-app
 setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers
 setu new my-app --template rest                # rest | microservice | nest | full-stack
 setu new my-app --template microservice --runtime bun
+setu new my-app --template rest --di           # add a DI container to any template
 
 # Commands this application's plugins provide
 setu commands
@@ -4959,13 +4960,14 @@ Any casing of the name produces identical output: `setu g controller user-profil
 
 ### Options
 
-| Option                                          | Commands          | Behavior                                                                                                                                                                                                               |
-| ----------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both. |
-| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                 |
-| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                           |
-| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                           |
-| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                              |
+| Option                                          | Commands          | Behavior                                                                                                                                                                                                                       |
+| ----------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.         |
+| `--di`                                          | `new`             | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it. |
+| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                         |
+| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                   |
+| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                   |
+| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                      |
 
 ### Exit codes
 
@@ -4974,6 +4976,38 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `0`  | Success (including `--help` and `--version`).                                                                                                                                                       |
 | `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice. |
 | `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot form an identifier (empty after normalization, or digit-leading).                           |
+
+### Decorators and DI are optional
+
+AI_GUIDELINES states that decorators are optional, dependency injection is optional, and that
+**everything has a programmatic API — no feature requires decorators or reflection.** The two axes
+are independent, and the CLI selects them separately: the template decides decorators, `--di`
+decides the container.
+
+| You want                    | Scaffold with                       | You get                                                                                                                      |
+| --------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Neither                     | `setu new app`                      | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g job` all work and are wired.                |
+| Decorators, no container    | `setu new app --template rest`      | `DecoratorPlugin`, so `g controller` and `g module` work. `@Injectable` classes resolve from the kernel's `ServiceRegistry`. |
+| A container, no decorators  | `setu new app --di`                 | `DiPlugin` on the minimal set. Nothing generated changes shape; there is simply a container present.                         |
+| Both                        | `setu new app --template rest --di` | `DecoratorPlugin` + `DiPlugin`: `@Injectable` classes are constructed through the container and their `scope` is honored.    |
+| Both, plus a worked example | `setu new app --template nest`      | The above, with a decorated controller and an injected service already written.                                              |
+
+`--di` changes the **composition**, never the generated source: `DecoratorPlugin` branches on the
+container's presence, so the same `@Injectable` class works with and without it — what changes is
+the lifecycle it gets. Adding `--di` to `--template nest` is a no-op, because that template already
+registers `DiPlugin` and the kernel refuses a duplicate plugin name at `start()`.
+
+**The decorator-free way to serve HTTP is `setu generate route`.** It emits
+`register<Name>Routes(router: IRouterApi)` and is ungated, so it works in a project with no plugins
+at all — and it is wired on every host, including the no-template one. `g controller` and `g module`
+stay gated on `@setu-ts/decorator-plugin` (they emit `@Controller`, so an ungated project would get
+source whose own import cannot resolve), and their refusal names `g route` as the alternative:
+
+```
+The "controller" schematic requires @setu-ts/decorator-plugin, which is not installed in /path/to/app.
+Install it, then run this command again.
+Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
+```
 
 ### Plugin gating
 
@@ -5057,8 +5091,10 @@ without it. A repeat generate of the _same_ schematic is the ordinary overwrite 
 A project scaffolded before a seam existed has no import of its barrel. Each barrel's header states
 the exact lines to add to `setu.config.ts`; add them once and every later generate is wired. The
 `rest`, `microservice` and `nest` templates emit every applicable seam from scaffold time, so a new
-project is wired before anything is generated. `--template full-stack` and the no-template path are
-deliberately not hosts.
+project is wired before anything is generated — and so does the **no-template path**, for the three
+seams that need no plugin (`route`, `middleware`, `plugin`). `--template full-stack` is deliberately
+not a host: its layering is `routes → features → services`, it composes through a starter factory,
+and its `createApp` has no plugin array to spread into.
 
 **Artifacts generated before their family gained a second export are skipped, and reported.** A
 barrel imports specific symbols from each artifact, and two families gained one in this release:
@@ -5081,9 +5117,10 @@ text rather than parsing it (this package has no TypeScript parser), so a declar
 default export is not; an undetected export means the artifact is skipped and reported, never that a
 broken barrel is written.
 
-Which seams a host carries depends on which plugins it registers: `rest` and `nest` carry eight
-barrels, and `microservice` additionally carries `src/cqrs/` and `src/events/`, because it is the
-only template registering `CqrsPlugin` and `EventsPlugin`.
+Which seams a host carries depends on which plugins it registers: the no-template path carries the
+three that need none (`src/routes/`, `src/middleware/`, `src/plugins/`), `rest` and `nest` carry
+eight barrels, and `microservice` additionally carries `src/cqrs/` and `src/events/`, because it is
+the only template registering `CqrsPlugin` and `EventsPlugin`.
 
 ### Domain modules
 

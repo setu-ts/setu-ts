@@ -8,6 +8,39 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Decorators and DI are independently selectable in the generator** (M61). AI_GUIDELINES states
+  that decorators are optional, DI is optional, and that no feature requires either — but the CLI
+  offered one coarse control. No template gave you neither and refused `g controller`/`g module`;
+  `rest`/`microservice` gave decorators without a container; only `nest` gave both, along with a
+  worked NestJS-style example you may not have wanted.
+
+  `setu new --di` adds `DiPlugin` to any template, so a container is now a choice of its own:
+
+  ```bash
+  setu new app --di                       # a container, no decorators
+  setu new app --template rest --di       # decorators and a container
+  setu new app --template nest --di       # a no-op — nest already registers DiPlugin
+  ```
+
+  It changes the composition, never the generated source: `DecoratorPlugin` branches on the
+  container's presence, so the same `@Injectable` class works either way and what changes is the
+  lifecycle it gets. On `--template full-stack` the flag reaches the starter's own `di` arm rather
+  than a plugin wiring, because a starter-composed template owns its whole plugin set. Adding it to
+  a template that already registers `DiPlugin` is deliberately a no-op — the kernel refuses a
+  duplicate plugin name at `start()`, so a second registration would scaffold a project that
+  type-checks and then cannot boot.
+
+- **`setu generate route` is now a first-class decorator-free path.** A project scaffolded with no
+  template registers the runtime plugin alone, so `g route` is the only HTTP handler it can generate
+  — and it used to land unwired: the schematic wrote `src/routes/<name>.routes.ts` and a
+  `src/routes/index.ts` barrel while the generated `setu.config.ts` imported neither, so the route
+  answered `404` until you edited the config by hand. The no-template path is now a seam host for
+  the three families that need no plugin (`route`, `middleware`, `plugin`), so a generated route,
+  middleware or plugin is wired from scaffold time exactly as it is under `--template rest`.
+
+  Existing projects are unaffected — nothing rewrites a scaffolded `setu.config.ts`. Each barrel's
+  header states the two lines to add; add them once and every later generate is wired.
+
 - **Generated code is now wired** (M60). `setu generate` emitted fourteen artifacts and exactly one
   of them — the M58 domain module — reached a registration site. The other thirteen compiled and did
   nothing: `g service` emitted a class nothing constructed, `g health-indicator` an indicator
@@ -51,6 +84,18 @@ All notable changes to this project are documented here. The format follows
   and `g event-handler`, all three of which were gated on plugins no template installed.
 
 ### Changed
+
+- **The `controller` and `module` gate refusals now name `setu generate route`** as the
+  decorator-free alternative. The gate itself is unchanged (those schematics emit `@Controller`, so
+  an ungated project would get source whose own import cannot resolve), but refusing with only
+  "install `@setu-ts/decorator-plugin`" read as though decorators were required to serve HTTP, which
+  is the opposite of what the framework promises.
+
+  ```
+  The "controller" schematic requires @setu-ts/decorator-plugin, which is not installed in /path/to/app.
+  Install it, then run this command again.
+  Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
+  ```
 
 - **`setu generate plugin` now writes `src/plugins/<name>.plugin.ts`**, not `src/plugins/<name>.ts`.
   The seam barrel is regenerated from a directory scan, and a suffix of `.ts` would admit any module
