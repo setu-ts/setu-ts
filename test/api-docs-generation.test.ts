@@ -474,15 +474,19 @@ error[private-type-ref]: public type references private type
     });
 
     it('throws when a published package has no export targets', async () => {
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
-        readTextFile: (_path: string) => Promise.resolve('{}'),
-        readDir: (path: string) => Deno.readDir(path),
-        stat: (path: string) => {
-          // Reject all stat calls so disk validation fails
-          throw new Deno.errors.NotFound(`Not found: ${path}`);
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          }
+          // All manifests return empty exports
+          return Promise.resolve('{}');
         },
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
       };
-      // All manifests return {} and no fallback files exist → should throw
+      // All manifests return {} → should throw about missing export targets
       await expect(collectApiEntrypoints(fs)).rejects.toThrow(
         'has no export targets in its deno.json manifest',
       );
@@ -601,10 +605,17 @@ error[private-type-ref]: public type references private type
     });
 
     it('generation-mode fatal failure remains propagated', async () => {
-      // Use a mock fs that returns a valid manifest with exports for the
-      // generate-mode test so collectApiEntrypoints succeeds.
+      // Use a mock fs that returns valid manifests for the generate-mode test
+      // so collectApiEntrypoints succeeds and we can test cmd.run failure.
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
-        readTextFile: (_path: string) => Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } })),
+        readTextFile: (path: string) => {
+          if (path === 'deno.json') {
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          }
+          // Return valid manifest for published packages
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
+        },
         readDir: async function* () {
           yield* [];
         },
