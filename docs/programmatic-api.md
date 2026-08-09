@@ -99,11 +99,13 @@ const response = await app.fetch(new Request('http://localhost:3000/health'));
 Inject a request without a network socket (testing only).
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
 import { inject } from '@setu-ts/testing';
-import type { IKernelApplication } from '@setu-ts/kernel';
 
-const kernApp = app as unknown as IKernelApplication;
-const response = await inject(kernApp, {
+const app = createApplication();
+// createApplication returns IKernelApplication directly, so inject accepts it
+// without any cast.
+const response = await inject(app, {
   method: 'GET',
   url: '/health',
 });
@@ -334,24 +336,46 @@ interface IResponse {
 Register a health check.
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+
+const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
 ctx.health.register('database', async () => {
-  return { status: 'up', data: { timestamp: Date.now() } };
+  return { status: 'up', data: { timestamp: runtime.now() } };
 });
 ```
 
 ## Metrics
 
-### `register(name, config)`
+### Obtaining the Metrics Service
 
-Register a metric.
+Resolve `IMetricsService` through the capability token:
 
 ```typescript
-const requestCount = ctx.metrics.register('http_requests_total', {
-  type: 'counter',
-  help: 'Total HTTP requests',
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICounter, IMetricsService } from '@setu-ts/common';
+
+const metrics = ctx.services.get<IMetricsService>(CAPABILITIES.METRICS);
+```
+
+### Creating a Custom Counter
+
+Use `counter()` to get or create an `ICounter`, then call `inc()` with labels:
+
+```typescript
+const counter = metrics.counter('my_requests_total', {
+  help: 'Total requests handled by my service',
   labels: ['method', 'path'],
 });
+
+// Increment the counter explicitly in your middleware or handler
+counter.inc(1, { method: 'GET', path: '/users' });
 ```
+
+**Note:** A custom contributed counter is NOT automatically observed by any built-in HTTP collector.
+The built-in HTTP collectors track their own metrics (`http_requests_total`,
+`http_request_duration_seconds`, etc.). To record a custom counter you must call `inc()` (or
+`observe()`) explicitly.
 
 ## OpenAPI Contributions
 
@@ -399,20 +423,23 @@ ctx.decorators.register('MyDecorator', async (metadata, target) => {
 
 ```typescript
 interface IRuntimeServices {
-  readonly platform: RuntimePlatform;
-  readonly env: Record<string, string | undefined>;
-  readonly uuid: () => string;
-  readonly randomBytes: (length: number) => Uint8Array;
-  readonly now: () => number;
-  readonly hrtime: () => number;
-  readonly setTimeout: typeof setTimeout;
-  readonly setInterval: typeof setInterval;
-  readonly clearTimeout: typeof clearTimeout;
-  readonly clearInterval: typeof clearInterval;
+  platform(): RuntimePlatform;
+  version(): string;
+  hostname(): string;
+  uuid(): string;
+  randomBytes(length: number): Uint8Array;
+  readonly subtle: SubtleCrypto;
+  now(): number;
+  hrtime(): number;
+  setTimeout(fn: () => void, ms: number): TimerHandle;
+  clearTimeout(handle: TimerHandle): void;
+  setInterval(fn: () => void, ms: number): TimerHandle;
+  clearInterval(handle: TimerHandle): void;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  exit(code?: number): never;
   readonly fs?: IFileSystem;
   readonly workers?: IWorkerHost;
   readonly dns?: IDnsResolver;
-  readonly subtle?: SubtleCrypto;
 }
 ```
 
@@ -445,11 +472,13 @@ const app = await createTestApp({
 Inject a request.
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
 import { inject } from '@setu-ts/testing';
-import type { IKernelApplication } from '@setu-ts/kernel';
 
-const kernApp = app as unknown as IKernelApplication;
-const response = await inject(kernApp, {
+const app = createApplication();
+// createApplication returns IKernelApplication directly, so inject accepts it
+// without any cast.
+const response = await inject(app, {
   method: 'GET',
   url: '/test',
   headers: { 'Content-Type': 'application/json' },
