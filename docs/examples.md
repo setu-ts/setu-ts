@@ -122,10 +122,10 @@ app.middleware.add(errorHandler({ format: 'rfc7807' }), {
   priority: 0,
   name: 'error-handler',
 });
-app.register(ValidationPlugin({ validator: 'zod' }));
+app.register(ValidationPlugin({ errorFormat: 'rfc7807' }));
 
 app.router.post('/items', async (ctx) => {
-  const body = await ctx.request.json();
+  const body: Record<string, unknown> = await ctx.request.json();
   // Validation happens automatically if schema is registered
   return ctx.response.status(201).json({ id: '1', ...body });
 });
@@ -216,16 +216,17 @@ Command-Query Responsibility Segregation.
 
 ```typescript
 import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import type { CqrsCommand, CqrsQuery } from '@setu-ts/common';
 
 app.register(CqrsPlugin());
 
 const cqrs = ctx.services.get<ICqrsFacade>('cqrs');
 
-// Command
-const result = await cqrs.command(new CreateItemCommand({ name: 'Item' }));
+// Command — pass a command object matching your command handler type
+const result = await cqrs.commandBus.execute({} as unknown as CqrsCommand);
 
-// Query
-const items = await cqrs.query(new GetAllItemsQuery());
+// Query — pass a query object matching your query handler type
+const items = await cqrs.queryBus.execute({} as unknown as CqrsQuery);
 ```
 
 ---
@@ -245,6 +246,7 @@ Cross-service communication.
 
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { MessageHandler } from '@setu-ts/common';
 
 // The redis-streams arm is discriminated on `broker: 'redis-streams'`.
 // `url` is the Redis connection URL (read when no client is injected);
@@ -257,16 +259,16 @@ app.register(MessagingPlugin({
 
 const broker = ctx.services.get<IMessageBroker>('messaging');
 
-// Subscribe
-await broker.subscribe('items.created', async (message) => {
-  console.log('Item created:', message.data);
+// Subscribe — the handler receives the message payload directly
+await broker.subscribe('items.created', (message: { id: string; name: string }) => {
+  console.log('Item created:', message);
 });
 
 // Publish
 await broker.publish('items.created', { id: '1', name: 'New Item' });
 
 // Request/Reply
-const response = await broker.request<Request, Response>('service.method', data);
+const response = await broker.request('service.method', data);
 ```
 
 ---
@@ -306,11 +308,10 @@ app.register(RealtimeBackplanePlugin({
 const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 ws.route('/ws/chat', {
   onOpen: (conn) => ws.room('chat').add(conn),
-  onMessage: (conn, message) => {
-    ws.room('chat').broadcast(
-      { type: 'message', from: conn.state['user']?.id, data: message },
-      { except: conn },
-    );
+  onMessage: (conn, message: string | Uint8Array) => {
+    const text = typeof message === 'string' ? message : new TextDecoder().decode(message);
+    const userData = conn.data.get('user') as { id?: string } | undefined;
+    ws.room('chat').broadcast(text, { except: conn });
   },
 });
 ```
@@ -334,7 +335,7 @@ GraphQL server.
 import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 
 app.register(GraphqlPlugin({
-  schema: `
+  typeDefs: `
     type Query {
       hello: String
     }
@@ -416,6 +417,7 @@ React Router SSR.
 
 ```typescript
 import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
+import type { SsrRequestHandler } from '@setu-ts/react-router-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
 
 app.register(SessionPlugin({
@@ -427,15 +429,13 @@ app.register(ReactRouterPlugin({
   // = ServerBuild). Derive one with
   // `new URL('./build/server/index.js', import.meta.url).href`.
   serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
-  // Optional seam for lazy loading the RR runtime (e.g. a dev server returning
-  // a handler built over `vite.ssrLoadModule`). Omit to use the default
-  // `await import(serverBuildPath)` + `await import('npm:react-router@8')`.
-  loadRequestHandler: async (_serverBuildPath, _mode) => {
-    const build = await import('./build/server/index.js');
-    const { createRequestHandler, createRouterContext } = await import('npm:react-router@8');
+  // Optional seam for lazy loading the RR runtime. Returns SsrRuntime since v0.2.0.
+  loadRequestHandler: async (serverBuildPath, mode) => {
+    const build = await import(serverBuildPath);
+    const { createRequestHandler, RouterContextProvider } = await import('npm:react-router@8');
     return {
-      handler: createRequestHandler(build, _mode),
-      createLoadContext: () => createRouterContext(),
+      handler: createRequestHandler(build, mode) as SsrRequestHandler,
+      createLoadContext: () => new RouterContextProvider(),
     };
   },
 }));
@@ -460,16 +460,16 @@ Custom plugin template.
 ```typescript
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
-export function MyPlugin(options: MyPluginOptions): IPlugin {
+export function MyPlugin(): IPlugin {
   return {
     name: 'my-plugin',
     version: '1.0.0',
     async register(ctx: IPluginContext) {
       // Register service
-      ctx.services.register('my-service', new MyService(options));
+      ctx.services.register('my-service', new MyService());
 
       // Add middleware
-      ctx.middleware.add(async (ctx, next) => {
+      ctx.middleware.add(async (requestCtx, next) => {
         await next();
       });
 

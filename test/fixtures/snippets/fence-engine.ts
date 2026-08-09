@@ -226,6 +226,10 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   IHealthApi: '@setu-ts/common',
   IMetricsApi: '@setu-ts/common',
   HealthCheckResult: '@setu-ts/common',
+  ICounter: '@setu-ts/common',
+  IGauge: '@setu-ts/common',
+  IHistogram: '@setu-ts/common',
+  IMetric: '@setu-ts/common',
   IKernelApplication: '@setu-ts/kernel',
   IRouterApi: '@setu-ts/common',
   ILifecycleApi: '@setu-ts/common',
@@ -234,6 +238,9 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   IOpenApiApi: '@setu-ts/common',
   IDecoratorApi: '@setu-ts/common',
   StartOptions: '@setu-ts/common',
+  RegisterOptions: '@setu-ts/common',
+  HealthIndicatorFn: '@setu-ts/common',
+  MockPluginOptions: '@setu-ts/testing',
 };
 
 /**
@@ -258,8 +265,8 @@ const LOCAL_TYPE_DECLS: Readonly<Record<string, string>> = {
     'declare interface ICacheService { get<T = unknown>(key: string): Promise<T | null>; set<T = unknown>(key: string, value: T, options?: { ttl?: number }): Promise<void>; del(key: string): Promise<void>; has(key: string): Promise<boolean>; }',
   IDatabaseService:
     'declare interface IDatabaseService { findAll<T = unknown>(entity: string, options?: unknown): Promise<T[]>; findById<T = unknown>(entity: string, id: string): Promise<T | null>; create<T = unknown>(entity: string, data: Partial<T>): Promise<T>; update<T = unknown>(entity: string, id: string, data: Partial<T>): Promise<T>; delete(entity: string, id: string): Promise<boolean>; }',
-  // Additional local types for guides
-  HealthIndicatorFn: 'declare type HealthIndicatorFn = () => Promise<{ status: "healthy" | "unhealthy"; detail?: Record<string, unknown>; }>',
+  // Local types that are NOT public exports (satisfy generic type-argument references).
+  // HealthIndicatorFn moved to TYPE_EXPORTS — it IS a real public export.
 };
 
 /**
@@ -279,6 +286,7 @@ const VALUE_EXPORTS: Readonly<Record<string, string>> = {
   createApplication: '@setu-ts/kernel',
   createTestApp: '@setu-ts/testing',
   inject: '@setu-ts/testing',
+  createMockPlugin: '@setu-ts/testing',
 };
 
 /**
@@ -290,7 +298,8 @@ const VALUE_EXPORTS: Readonly<Record<string, string>> = {
  * the declaration is the minimum the block's usage requires.
  */
 const APP_DECLARATIONS: Readonly<Record<string, string>> = {
-  UserService: 'declare class UserService { findAll(): Promise<{ id: string; name: string }[]>; findById(id: string): Promise<{ id: string; name: string } | null>; create(dto: unknown): Promise<{ id: string }> }',
+  UserService:
+    'declare class UserService { findAll(): Promise<{ id: string; name: string }[]>; findById(id: string): Promise<{ id: string; name: string } | null>; create(dto: unknown): Promise<{ id: string }> }',
   CreateUserDto: 'declare class CreateUserDto {}',
   MyPlugin: 'declare function MyPlugin(options: unknown): IPlugin',
   mockMyService: 'declare const mockMyService: { findAll(): Promise<unknown[]> }',
@@ -303,16 +312,20 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
   MyValidator: 'declare class MyValidator { validate(data: unknown): unknown }',
   handler: 'declare const handler: (ctx: IRequestContext) => Promise<void>',
   data: 'declare const data: unknown',
-  userRepository: 'declare const userRepository: { findByName(name: string): Promise<unknown | null>; save(entity: unknown): Promise<unknown> }',
-  UserRepository: 'declare class UserRepository { findByName(name: string): Promise<unknown | null>; save(entity: unknown): Promise<unknown> }',
+  userRepository:
+    'declare const userRepository: { findByName(name: string): Promise<unknown | null>; save(entity: unknown): Promise<unknown> }',
+  UserRepository:
+    'declare class UserRepository { findByName(name: string): Promise<unknown | null>; save(entity: unknown): Promise<unknown> }',
   verifyToken: 'declare function verifyToken(token: string): unknown',
-  HttpException: 'declare class HttpException extends Error { status: number; constructor(message: string, status?: number) }',
+  HttpException:
+    'declare class HttpException extends Error { status: number; constructor(message: string, status?: number) }',
   loggerMiddleware: 'declare const loggerMiddleware: MiddlewareFunction',
   CustomLoggerPlugin: 'declare function CustomLoggerPlugin(options?: unknown): IPlugin',
   myMiddleware: 'declare const myMiddleware: MiddlewareFunction',
   defaultConfig: 'declare const defaultConfig: Record<string, unknown>',
   readableStream: 'declare const readableStream: ReadableStream<Uint8Array>',
-  createCache: 'declare function createCache(config: Record<string, unknown>): { get(key: string): unknown; set(key: string, value: unknown): void; close(): Promise<void> }',
+  createCache:
+    'declare function createCache(config: Record<string, unknown>): { get(key: string): unknown; set(key: string, value: unknown): void; close(): Promise<void> }',
 };
 
 /**
@@ -474,10 +487,9 @@ export function classify(fence: Fence): ClassifiedFence {
     return {
       fence,
       kind: 'compile-fragment',
-      reason:
-        `imports @setu-ts/ and references fragment globals [${globals.join(', ')}]${
-          hasRelativeImport ? '; relative import' : ''
-        } — compiled with prelude "${wrapperId}"`,
+      reason: `imports @setu-ts/ and references fragment globals [${globals.join(', ')}]${
+        hasRelativeImport ? '; relative import' : ''
+      } — compiled with prelude "${wrapperId}"`,
       wrapperId,
     };
   }
@@ -516,10 +528,9 @@ export function classify(fence: Fence): ClassifiedFence {
     return {
       fence,
       kind: 'compile-fragment',
-      reason:
-        `Setu-TS fragment (globals [${globals.join(', ')}]${
-          hasRelativeImport ? '; relative import' : ''
-        }) — compiled with prelude "${wrapperId}"`,
+      reason: `Setu-TS fragment (globals [${globals.join(', ')}]${
+        hasRelativeImport ? '; relative import' : ''
+      }) — compiled with prelude "${wrapperId}"`,
       wrapperId,
     };
   }
@@ -589,7 +600,9 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // fence that defines `interface IRequest { … }` must not get a competing
     // import — that would be "Import declaration conflicts with local
     // declaration").
-    if (TYPE_EXPORTS[name] !== undefined && !importsIdentifier(code, name) && !fenceDeclares(name)) {
+    if (
+      TYPE_EXPORTS[name] !== undefined && !importsIdentifier(code, name) && !fenceDeclares(name)
+    ) {
       typeNames.add(name);
     }
   }
@@ -608,7 +621,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   for (const [name, decl] of Object.entries(APP_DECLARATIONS)) {
     if (present.has(name) && !fenceDeclares(name)) {
       for (const typeName of Object.keys(TYPE_EXPORTS)) {
-        if (new RegExp(`\\b${typeName}\\b`).test(decl) && !importsIdentifier(code, typeName) && !fenceDeclares(typeName)) {
+        if (
+          new RegExp(`\\b${typeName}\\b`).test(decl) && !importsIdentifier(code, typeName) &&
+          !fenceDeclares(typeName)
+        ) {
           typeNames.add(typeName);
         }
       }
@@ -629,8 +645,13 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // the real imported option interfaces, independent of `ctx`.
     if (!importsIdentifier(code, 'IRequestContext')) typeNames.add('IRequestContext');
     if (!importsIdentifier(code, 'IPluginContext')) typeNames.add('IPluginContext');
+    // ILogger is optional on IPluginContext; add it so ctx.logger resolves
+    if (!importsIdentifier(code, 'ILogger')) typeNames.add('ILogger');
   }
-  if (present.has('platform') && !fenceDeclares('platform') && !importsIdentifier(code, 'RuntimePlatform')) {
+  if (
+    present.has('platform') && !fenceDeclares('platform') &&
+    !importsIdentifier(code, 'RuntimePlatform')
+  ) {
     typeNames.add('RuntimePlatform');
   }
   const typeByPkg = new Map<string, string[]>();
@@ -664,7 +685,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // Avoid a second import if already added from the 'present' pass.
     let dominated = false;
     for (const [, names] of valByPkg) {
-      if (names.includes(name)) { dominated = true; break; }
+      if (names.includes(name)) {
+        dominated = true;
+        break;
+      }
     }
     if (dominated) continue;
     const wordRe = new RegExp(`\\b${name}\\b`);
@@ -706,7 +730,15 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // (the real Map lacks an index signature; the intersection with Record allows
   // the pattern the guides use while keeping all real type checks).
   if (present.has('ctx') && !fenceDeclares('ctx')) {
-    lines.push('declare const ctx: (IRequestContext & IPluginContext) & { state: Map<string, unknown> & Record<string, unknown> };');
+    // Widen state Map with index signature for guide patterns like ctx.state['key']
+    if (!importsIdentifier(code, 'IRequestContext')) typeNames.add('IRequestContext');
+    if (!importsIdentifier(code, 'IPluginContext')) typeNames.add('IPluginContext');
+    if (!importsIdentifier(code, 'ILogger')) typeNames.add('ILogger');
+    lines.push(
+      'declare const ctx: (IRequestContext & IPluginContext) & { ' +
+        'logger: ILogger | undefined; ' +
+        'state: Map<string, unknown> & Record<string, unknown> };',
+    );
   }
   // `platform` — a RuntimePlatform value.
   if (present.has('platform') && !fenceDeclares('platform')) {

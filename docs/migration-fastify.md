@@ -90,13 +90,13 @@ app.post<{ Body }>('/users', async (request, reply) => {
 ```typescript
 app.router.get('/users/:id', async (ctx) => {
   const id = ctx.params.id;
-  const search = ctx.request.url.searchParams.get('search');
+  const search = new URL(ctx.request.url).searchParams.get('search');
   return ctx.response.json({ id, search });
 });
 
 app.router.post('/users', async (ctx) => {
-  const body = await ctx.request.json();
-  return ctx.response.status(201).json({ created: body.name });
+  const body: Record<string, unknown> = await ctx.request.json();
+  return ctx.response.status(201).json({ created: body });
 });
 ```
 
@@ -114,13 +114,13 @@ app.register(async (fastify) => {
 ### Setu-TS
 
 ```typescript
-app.router.get('/api/users', async (ctx) => []);
-app.router.post('/api/users', async (ctx) => ({}));
+app.router.get('/api/users', async (ctx) => ctx.response.json([]));
+app.router.post('/api/users', async (ctx) => ctx.response.json({}));
 
 // Or use a route group
-ctx.router.group('/api', (group) => {
-  group.get('/users', async () => []);
-  group.post('/users', async () => ({}));
+app.router.group('/api', (group) => {
+  group.get('/users', async (ctx) => ctx.response.json([]));
+  group.post('/users', async (ctx) => ctx.response.json({}));
 });
 ```
 
@@ -239,13 +239,16 @@ app.get('/', async (request, reply) => {
 
 ```typescript
 // Register as a service
-ctx.services.register('myUtil', {
+interface MyUtil {
+  formatDate(date: Date): string;
+}
+ctx.services.register<MyUtil>('myUtil', {
   formatDate: (date: Date) => date.toISOString(),
 });
 
 // Use service
 app.router.get('/', async (ctx) => {
-  const myUtil = ctx.services.get('myUtil');
+  const myUtil = ctx.services.get<MyUtil>('myUtil');
   return ctx.response.json({ date: myUtil.formatDate(new Date()) });
 });
 ```
@@ -315,16 +318,14 @@ const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
     await next();
   } catch (error) {
     if (error instanceof HttpException) {
-      return ctx.response.json(
+      return ctx.response.status(error.status).json(
         { error: error.message },
-        { status: error.status },
       );
     }
 
-    ctx.logger?.error('Unhandled error', { error });
-    return ctx.response.json(
+    console.error('Unhandled error', { error });
+    return ctx.response.status(500).json(
       { error: 'Internal server error' },
-      { status: 500 },
     );
   }
 };
@@ -417,12 +418,13 @@ app.register(authPlugin, {/* options */});
 ### Setu-TS
 
 ```typescript
-export function AuthPlugin(options: AuthOptions): IPlugin {
+// Self-contained example plugin demonstrating the registration pattern.
+function MyAuthPlugin(): IPlugin {
   return {
-    name: 'auth',
+    name: 'my-auth',
     version: '1.0.0',
     async register(ctx) {
-      ctx.services.register('authenticate', async (request) => {
+      ctx.services.register('authenticate', async (request: Request) => {
         const authHeader = request.headers.get('Authorization');
         if (!authHeader) {
           throw new Error('Missing authorization header');
@@ -432,7 +434,7 @@ export function AuthPlugin(options: AuthOptions): IPlugin {
   };
 }
 
-app.register(AuthPlugin(options));
+app.register(MyAuthPlugin());
 ```
 
 ## Server Decoration
@@ -452,7 +454,7 @@ app.addHook('onRequest', async (request, reply) => {
 ```typescript
 const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   // Set user on context
-  ctx.state['user'] = { id: 1, name: 'John' };
+  ctx.state.set('user', { id: 1, name: 'John' });
   await next();
 };
 
@@ -534,13 +536,13 @@ app.register(async (child) => {
 
 ```typescript
 // Use capability tokens for encapsulation
-ctx.services.register('child-util', () => 'child');
+ctx.services.register('child-util', { value: 'child' });
 
 // Register routes in a scoped manner
 ctx.router.group('/child', (group) => {
   group.get('/', async (ctx) => {
-    const util = ctx.services.get('child-util');
-    return ctx.response.json({ util: util() });
+    const util = ctx.services.get<{ value: string }>('child-util');
+    return ctx.response.json({ util });
   });
 });
 ```
@@ -565,8 +567,8 @@ app.get('/', async (request, reply) => {
 ```typescript
 // Use context state
 app.router.get('/', async (ctx) => {
-  ctx.state['user'] = { id: 1 };
-  return ctx.response.json({ user: ctx.state['user'] });
+  ctx.state.set('user', { id: 1 });
+  return ctx.response.json({ user: ctx.state.get('user') });
 });
 ```
 
