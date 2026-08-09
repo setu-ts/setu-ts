@@ -496,9 +496,14 @@ const LINT_DIAGNOSTIC_PATTERN = /^error\[[^\]]+\]:/;
 const LINT_LOCATION_PATTERN = /^\s*-->\s/;
 
 /**
- * A stack-trace line (at file:line:col) that a fatal error prints.
+ * A stack-trace line (`    at file:line:col`) that a fatal error prints. The
+ * `m` flag is required: a stack frame is rarely at the START of the residual
+ * (it follows the error header, e.g. `TypeError: foo\n    at file:///x.ts`),
+ * so `^` must anchor to the start of each LINE, not the start of the whole
+ * string. Without `m`, a stack trace not at position 0 is missed and a fatal
+ * whose residual contains no `error: ` literal is misclassified as lint debt.
  */
-const STACK_TRACE_PATTERN = /^\s+at\s+/;
+const STACK_TRACE_PATTERN = /^\s+at\s+/m;
 
 /**
  * Classifies the raw child-process output of `deno doc --lint` into one of:

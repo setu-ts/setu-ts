@@ -405,6 +405,11 @@ export function checkRequiredGuides(files: readonly string[]): readonly Finding[
  */
 export function buildGeneratedApiPages(targets: readonly string[]): Set<string> {
   const pages = new Set<string>();
+  // `deno doc --html` always emits a top-level site index at
+  // docs/api/index.html (the landing page listing every symbol). Include it
+  // so a doc that links to the bare top-level index resolves instead of
+  // false-positiving as "does not resolve to a known generated page".
+  pages.add('docs/api/index.html');
   for (const target of targets) {
     // deno doc --html maps packages/<pkg>/src/index.ts →
     // docs/api/<pkg>/src/index.ts/index.html (the packages/ prefix is stripped).

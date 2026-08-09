@@ -440,6 +440,24 @@ describe('documentation gate — local links and anchors', () => {
       .toBe(true);
   });
 
+  it('includes the top-level generated docs/api/index.html in the page set', async () => {
+    // `deno doc --html` always emits a top-level site index at
+    // docs/api/index.html. buildGeneratedApiPages must include it so a doc
+    // linking to the bare top-level index resolves instead of false-positiving.
+    const fs = {
+      readTextFile: async (path: string) => await Deno.readTextFile(path),
+      readDir: (path: string) => Deno.readDir(path),
+      stat: (path: string) => Deno.stat(path),
+    };
+    const { targets } = await collectApiEntrypoints(fs);
+    const generatedApiPages = buildGeneratedApiPages(targets);
+    expect(generatedApiPages.has('docs/api/index.html')).toBe(true);
+    // A link to the top-level index from a docs/ file must resolve.
+    const indexLink = '[Index](./api/index.html)';
+    const findings = await checkLocalLinks('docs/test.md', indexLink, [], generatedApiPages);
+    expect(findings.length).toBe(0);
+  });
+
   it('skips generated API links when the page set is null', async () => {
     // When output has not been generated, the gate skips rather than falsely rejecting.
     const link = '[API](./api/common/src/index.ts/index.html)';
