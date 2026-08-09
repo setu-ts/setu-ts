@@ -4986,6 +4986,14 @@ holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a modu
 folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
 than breaking it.
 
+The emitted controller's handlers take **only decorated parameters** and return plain values, which
+the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a style choice: it
+builds a handler's argument list from parameter metadata alone and never passes the request context
+positionally, so a `ctx: IRequestContext` parameter arrives `undefined` and the first `ctx.response`
+throws — a 500 on every request. There is no built-in decorator for the context, so a handler that
+needs it (to set a status code, or to stream) belongs on `app.router.get(...)` — see
+`setu generate route`.
+
 The service's `@Injectable` token is explicit (`'<name>-service'`) and the controller's `@Inject`
 names that exact string, because `emitDecoratorMetadata` is unavailable under Deno, so a parameter's
 type cannot be read. The module works with and without `DiPlugin`: with a container the service is
