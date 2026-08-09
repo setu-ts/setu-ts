@@ -26,6 +26,8 @@
     "@setu-ts/sse-plugin": "../../../packages/sse-plugin/src/index.ts",
     "@setu-ts/validation-plugin": "../../../packages/validation-plugin/src/index.ts",
     "@setu-ts/websocket-plugin": "../../../packages/websocket-plugin/src/index.ts",
+    "@std/testing/bdd": "jsr:@std/testing@^1.0.6/bdd",
+    "@std/expect": "jsr:@std/expect@^1.0.19",
     "@std/zod": "npm:zod@^3.23.8"
   }
 }

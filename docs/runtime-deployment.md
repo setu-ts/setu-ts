@@ -25,9 +25,22 @@ Setu-TS applications can run in two modes:
 // Fetch mode (Workers, testing)
 // On Workers, `env` comes from `cloudflare:workers` and is passed to the plugins
 // (see the Workers section below). Off Workers, `app.fetch(request)` is the test entry point.
+// Startup must precede the fetch — use a memoized startup so concurrent first
+// requests all await the same start rather than racing.
+let _app: Promise<typeof app> | undefined;
+async function started(): Promise<typeof app> {
+  if (_app === undefined) {
+    _app = (async () => {
+      await app.start();
+      return app;
+    })();
+    await _app;
+  }
+  return await _app;
+}
 export default {
-  async fetch(request: Request) {
-    return app.fetch(request);
+  fetch(request: Request): Promise<Response> {
+    return started().then((s) => s.fetch(request));
   },
 };
 
@@ -390,21 +403,38 @@ import { env, waitUntil } from 'cloudflare:workers';
 // `env` (bindings + variables) and `waitUntil` are imported from `cloudflare:workers`
 // and passed to the plugins. RuntimePlugin auto-detects Workers and selects
 // CloudflareWorkersHttpAdapter; `env` populates `runtime.env`.
-const app = createApplication({
+const raw = createApplication({
   plugins: [
     RuntimePlugin({ env }),
     CloudflarePlugin({ env, waitUntil }),
   ],
 });
 
-app.router.get('/', async (ctx) => {
+raw.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Workers!' });
 });
 
+// Memoized startup: the application starts once (awaited by all concurrent
+// first requests) and the result is reused. This avoids racing two concurrent
+// cold-start requests both trying to start the app independently.
+let application: Promise<typeof raw> | undefined;
+
+async function app(): Promise<typeof raw> {
+  if (application === undefined) {
+    application = (async () => {
+      await raw.start();
+      return raw;
+    })();
+    await application;
+  }
+  return await application;
+}
+
 // Export the fetch handler — Workers invokes this per request.
+// Startup (app.start()) always precedes the fetch call.
 export default {
-  async fetch(request: Request) {
-    return app.fetch(request);
+  fetch(request: Request): Promise<Response> {
+    return app().then((started) => started.fetch(request));
   },
 };
 ```

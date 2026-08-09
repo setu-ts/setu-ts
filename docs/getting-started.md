@@ -256,21 +256,38 @@ import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 declare const env: Record<string, unknown>;
 declare const waitUntil: (promise: Promise<unknown>) => void;
 
-const app = createApplication({
+const raw = createApplication({
   plugins: [
     RuntimePlugin({ env }),
     CloudflarePlugin({ env, waitUntil }),
   ],
 });
 
-app.router.get('/', async (ctx) => {
+raw.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Workers!' });
 });
 
+// Memoized startup: the application starts once (awaited by all concurrent
+// first requests) and the result is reused. This avoids racing two concurrent
+// cold-start requests both trying to start the app independently.
+let application: Promise<typeof raw> | undefined;
+
+async function app(): Promise<typeof raw> {
+  if (application === undefined) {
+    application = (async () => {
+      await raw.start();
+      return raw;
+    })();
+    await application;
+  }
+  return await application;
+}
+
 // Export the fetch handler — Workers invokes this per request.
+// Startup (app.start()) always precedes the fetch call.
 export default {
-  async fetch(request: Request) {
-    return app.fetch(request);
+  fetch(request: Request): Promise<Response> {
+    return app().then((started) => started.fetch(request));
   },
 };
 ```

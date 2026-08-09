@@ -121,13 +121,17 @@ ctx.services.register('my-service', new MyService(), {
 ### Middleware
 
 ```typescript
-import type { MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices, MiddlewareFunction } from '@setu-ts/common';
 
 const myMiddleware: MiddlewareFunction = async (ctx, next) => {
-  const start = ctx.startTime;
+  // Use the runtime's monotonic clock for durations, not host performance.now().
+  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const start = runtime.hrtime();
   await next();
-  const duration = performance.now() - start;
-  console.log('Request completed', { duration });
+  const duration = runtime.hrtime() - start;
+  // Use wall-clock time from runtime for timestamps, not host Date.now().
+  console.log('Request completed', { duration, timestamp: runtime.now() });
 };
 
 // Add to pipeline
@@ -180,25 +184,35 @@ ctx.health.register('my-check', async () => {
 ### Metrics
 
 ```typescript
-// Register metrics (IMetricsApi.register returns void)
-ctx.metrics.register('my_requests_total', {
-  type: 'counter',
-  help: 'Total requests',
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICounter, IGauge, IHistogram, IMetricsService } from '@setu-ts/common';
+
+// Resolve IMetricsService through the capability token
+const metrics = ctx.services.get<IMetricsService>(CAPABILITIES.METRICS);
+
+// Create a custom counter (counter() returns ICounter, not void)
+const requestCounter: ICounter = metrics.counter('my_requests_total', {
+  help: 'Total requests handled by my plugin',
   labels: ['method', 'path'],
 });
 
+// Explicitly increment the counter — a custom counter is NOT automatically
+// observed by built-in HTTP collection. You must call inc() yourself.
 ctx.middleware.add(async (ctx, next) => {
   await next();
-  // Metrics are collected automatically by the metrics middleware
+  requestCounter.inc(1, {
+    method: ctx.request.method,
+    path: ctx.request.path,
+  });
 });
 
-ctx.metrics.register('active_connections', {
-  type: 'gauge',
-  help: 'Active connections',
+// Gauge for tracking current connections
+const activeConnections: IGauge = metrics.gauge('active_connections', {
+  help: 'Current active connections',
 });
 
-ctx.metrics.register('request_duration', {
-  type: 'histogram',
+// Histogram for request durations
+const requestDuration: IHistogram = metrics.histogram('request_duration_seconds', {
   help: 'Request duration in seconds',
   buckets: [0.1, 0.5, 1, 2.5, 5],
 });

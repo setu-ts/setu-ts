@@ -137,6 +137,7 @@ export const FRAGMENT_GLOBALS = new Set([
   'SsePlugin',
   'MyPlugin',
   'mockMyService',
+  'metrics',
   'reportUsage',
   // Setu-TS type names interface-sketch blocks reference without importing.
   'IRequest',
@@ -228,6 +229,8 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   HealthCheckResult: '@setu-ts/common',
   ICounter: '@setu-ts/common',
   IGauge: '@setu-ts/common',
+  IMetricsService: '@setu-ts/common',
+  TimerHandle: '@setu-ts/common',
   IHistogram: '@setu-ts/common',
   IMetric: '@setu-ts/common',
   IKernelApplication: '@setu-ts/kernel',
@@ -302,6 +305,7 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
     'declare class UserService { findAll(): Promise<{ id: string; name: string }[]>; findById(id: string): Promise<{ id: string; name: string } | null>; create(dto: unknown): Promise<{ id: string }> }',
   CreateUserDto: 'declare class CreateUserDto {}',
   MyPlugin: 'declare function MyPlugin(options: unknown): IPlugin',
+  metrics: 'declare const metrics: IMetricsService',
   mockMyService: 'declare const mockMyService: { findAll(): Promise<unknown[]> }',
   reportUsage: 'declare function reportUsage(value: string | null): Promise<void>',
   MyService: 'declare class MyService { doSomething(): void }',
@@ -464,7 +468,12 @@ const EXTERNAL_HEADINGS = new Set([
  */
 export function classify(fence: Fence): ClassifiedFence {
   if (!TS_ALIASES.has(fence.lang)) {
-    return { fence, kind: 'skip', reason: `non-TS language "${fence.lang}"`, wrapperId: null };
+    return {
+      fence,
+      kind: 'skip',
+      reason: `non-TS language "${fence.lang}"`,
+      wrapperId: null,
+    };
   }
 
   const setu = importsFromSetuTs(fence.code);
@@ -553,7 +562,10 @@ export function classify(fence: Fence): ClassifiedFence {
  * (the function is pure and the set of globals is closed). The id is the sorted
  * globals joined by `+`, with a `rel` suffix when a relative import is present.
  */
-function wrapperIdFor(globals: readonly string[], hasRelativeImport: boolean): string {
+function wrapperIdFor(
+  globals: readonly string[],
+  hasRelativeImport: boolean,
+): string {
   const sorted = [...globals].sort();
   const base = sorted.length === 0 ? 'none' : sorted.join('+');
   return hasRelativeImport ? `${base}+rel` : base;
@@ -601,7 +613,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // import — that would be "Import declaration conflicts with local
     // declaration").
     if (
-      TYPE_EXPORTS[name] !== undefined && !importsIdentifier(code, name) && !fenceDeclares(name)
+      TYPE_EXPORTS[name] !== undefined && !importsIdentifier(code, name) &&
+      !fenceDeclares(name)
     ) {
       typeNames.add(name);
     }
@@ -612,7 +625,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // globals (they're not in FRAGMENT_GLOBALS but are still real type imports).
   for (const name of Object.keys(TYPE_EXPORTS)) {
     const wordRe = new RegExp(`\\b${name}\\b`);
-    if (wordRe.test(code) && !importsIdentifier(code, name) && !fenceDeclares(name)) {
+    if (
+      wordRe.test(code) && !importsIdentifier(code, name) &&
+      !fenceDeclares(name)
+    ) {
       typeNames.add(name);
     }
   }
@@ -622,7 +638,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     if (present.has(name) && !fenceDeclares(name)) {
       for (const typeName of Object.keys(TYPE_EXPORTS)) {
         if (
-          new RegExp(`\\b${typeName}\\b`).test(decl) && !importsIdentifier(code, typeName) &&
+          new RegExp(`\\b${typeName}\\b`).test(decl) &&
+          !importsIdentifier(code, typeName) &&
           !fenceDeclares(typeName)
         ) {
           typeNames.add(typeName);
@@ -633,7 +650,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // Backing types for declared runtime globals (only when the fence does NOT
   // declare the global itself — a fence that declares `const app` provides its
   // own type and needs no prelude `app`).
-  if (present.has('app') && !fenceDeclares('app') && !importsIdentifier(code, 'IApplication')) {
+  if (
+    present.has('app') && !fenceDeclares('app') &&
+    !importsIdentifier(code, 'IApplication')
+  ) {
     typeNames.add('IApplication');
   }
   if (present.has('ctx') && !fenceDeclares('ctx')) {
@@ -643,8 +663,12 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // `ctx.lifecycle`/`ctx.health`/`ctx.router` (IPluginContext) resolve.
     // A wrong @setu-ts/ option name still fails — those are checked against
     // the real imported option interfaces, independent of `ctx`.
-    if (!importsIdentifier(code, 'IRequestContext')) typeNames.add('IRequestContext');
-    if (!importsIdentifier(code, 'IPluginContext')) typeNames.add('IPluginContext');
+    if (!importsIdentifier(code, 'IRequestContext')) {
+      typeNames.add('IRequestContext');
+    }
+    if (!importsIdentifier(code, 'IPluginContext')) {
+      typeNames.add('IPluginContext');
+    }
     // ILogger is optional on IPluginContext; add it so ctx.logger resolves
     if (!importsIdentifier(code, 'ILogger')) typeNames.add('ILogger');
   }
@@ -692,7 +716,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     }
     if (dominated) continue;
     const wordRe = new RegExp(`\\b${name}\\b`);
-    if (wordRe.test(code) && !importsIdentifier(code, name) && !fenceDeclares(name)) {
+    if (
+      wordRe.test(code) && !importsIdentifier(code, name) &&
+      !fenceDeclares(name)
+    ) {
       const pkg = VALUE_EXPORTS[name]!;
       const list = valByPkg.get(pkg) ?? [];
       list.push(name);
@@ -712,7 +739,9 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // Also scan the code body for local-type names referenced directly.
   const localDecls: string[] = [];
   for (const [name, decl] of Object.entries(LOCAL_TYPE_DECLS)) {
-    if (present.has(name) || /\b${name}\b/.test(code)) localDecls.push(decl + ';');
+    if (present.has(name) || new RegExp(`\\b${name}\\b`).test(code)) {
+      localDecls.push(decl + ';');
+    }
   }
   if (localDecls.length > 0) {
     lines.push(...localDecls);
@@ -731,8 +760,12 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // the pattern the guides use while keeping all real type checks).
   if (present.has('ctx') && !fenceDeclares('ctx')) {
     // Widen state Map with index signature for guide patterns like ctx.state['key']
-    if (!importsIdentifier(code, 'IRequestContext')) typeNames.add('IRequestContext');
-    if (!importsIdentifier(code, 'IPluginContext')) typeNames.add('IPluginContext');
+    if (!importsIdentifier(code, 'IRequestContext')) {
+      typeNames.add('IRequestContext');
+    }
+    if (!importsIdentifier(code, 'IPluginContext')) {
+      typeNames.add('IPluginContext');
+    }
     if (!importsIdentifier(code, 'ILogger')) typeNames.add('ILogger');
     lines.push(
       'declare const ctx: (IRequestContext & IPluginContext) & { ' +
@@ -751,10 +784,14 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // Test-harness globals (describe/it/expect) — the snippet import map does
   // not resolve @std/testing, so declare minimal signatures.
   if (present.has('describe')) {
-    lines.push('declare function describe(name: string, fn: () => void | Promise<void>): void;');
+    lines.push(
+      'declare function describe(name: string, fn: () => void | Promise<void>): void;',
+    );
   }
   if (present.has('it')) {
-    lines.push('declare function it(name: string, fn: () => void | Promise<void>): void;');
+    lines.push(
+      'declare function it(name: string, fn: () => void | Promise<void>): void;',
+    );
   }
   if (present.has('expect')) {
     lines.push(
@@ -784,7 +821,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
  * redeclares a name the fence defines and never re-imports a symbol the fence
  * already imports.
  */
-export function assembleSource(fence: Fence, classified: ClassifiedFence): string {
+export function assembleSource(
+  fence: Fence,
+  classified: ClassifiedFence,
+): string {
   if (classified.kind === 'compile-complete') return fence.code;
   if (classified.kind !== 'compile-fragment') return fence.code;
   const globals = referencesFragmentGlobal(fence.code);
