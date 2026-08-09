@@ -211,7 +211,7 @@ export function UsersPlugin(): IPlugin {
   return {
     name: 'users',
     version: '1.0.0',
-    dependencies: ['runtime', 'database'],
+    dependencies: [CAPABILITIES.RUNTIME, CAPABILITIES.DATABASE],
     async register(ctx) {
       // Register services
       ctx.services.register('UserService', new UserService());
@@ -468,7 +468,7 @@ app.register(DatabasePlugin({
 }));
 
 // Usage — IDatabaseService.getRepository() returns IRepository, not raw CRUD.
-const db = ctx.services.get<IDatabaseService>('database');
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
 const usersRepo = db.getRepository<{ id: string; name: string }>('users');
 const users = await usersRepo.findAll();
 ```
@@ -503,7 +503,7 @@ app.register(CachePlugin({
 // Usage — ICacheStore uses the token 'cache' (CAPABILITIES.CACHE), stores value
 // with numeric TTL seconds (not an options bag), and deletes with delete().
 import type { ICacheStore } from '@setu-ts/common';
-const cache = ctx.services.get<ICacheStore>('cache');
+const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
 const users: unknown[] = [];
 await cache.set('users:all', users, 300);
 const cachedUsers = await cache.get<unknown[]>('users:all');

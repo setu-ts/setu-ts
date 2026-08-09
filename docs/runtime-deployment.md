@@ -53,12 +53,21 @@ await app.start({ port: 3000 });
 All runtimes support streaming responses via `IResponse.stream()`:
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+
+const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    runtime.setTimeout(resolve, ms);
+  });
+
 app.router.get('/stream', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       for (let i = 0; i < 10; i++) {
         controller.enqueue(new TextEncoder().encode(`Line ${i}\n`));
-        await new Promise((r) => setTimeout(r, 100));
+        await delay(100);
       }
       controller.close();
     },
@@ -614,7 +623,7 @@ if (ctx.runtime.fs) {
   const content = await ctx.runtime.fs.readFile('file.txt');
 } else {
   // Fallback for Workers
-  const content = await ctx.services.get<ICacheStore>('cache').get('file.txt');
+  const content = await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get('file.txt');
 }
 ```
 

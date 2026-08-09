@@ -145,7 +145,6 @@ export const FRAGMENT_GLOBALS = new Set([
   'IRequestContext',
   'IRuntimeServices',
   'IServiceRegistry',
-  'ServiceRegistry',
   'RuntimePlatform',
   'HandlerResult',
   'ResponseSnapshot',
@@ -263,15 +262,6 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
  * Only genuinely application-owned names (ServiceRegistry) remain as local
  * declarations here, and they must not shadow or widen framework-owned APIs.
  */
-const LOCAL_TYPE_DECLS: Readonly<Record<string, string>> = {
-  // Deliberately self-contained structural types (no reference to unimported names).
-  // These satisfy a generic type-argument reference without masking option-name errors.
-  ServiceRegistry:
-    'declare class ServiceRegistry { get<T = unknown>(token: string): T | undefined; register<T>(token: string, service: T, options?: { singleton?: boolean; lazy?: boolean }): void; }',
-  // ICacheStore removed — it is a real export from @setu-ts/common (in TYPE_EXPORTS).
-  // IDatabaseService removed — it is a real export from @setu-ts/database-plugin (in TYPE_EXPORTS).
-};
-
 /**
  * Plugin factories the prelude may import when a fragment references them
  * without their import line. Each maps a factory name to its package. The
@@ -657,20 +647,19 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     typeNames.add('IApplication');
   }
   if (present.has('ctx') && !fenceDeclares('ctx')) {
-    // The guides use `ctx` ambiguously for both the request context (route
-    // handlers) and the plugin context (register(ctx)). Declare it as the
-    // intersection so both `ctx.response` (IRequestContext) and
-    // `ctx.lifecycle`/`ctx.health`/`ctx.router` (IPluginContext) resolve.
-    // A wrong @setu-ts/ option name still fails — those are checked against
-    // the real imported option interfaces, independent of `ctx`.
-    if (!importsIdentifier(code, 'IRequestContext')) {
+    const pluginUse =
+      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/
+        .test(
+          code,
+        ) ||
+      /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
+    if (pluginUse) {
+      if (!importsIdentifier(code, 'IPluginContext')) {
+        typeNames.add('IPluginContext');
+      }
+    } else if (!importsIdentifier(code, 'IRequestContext')) {
       typeNames.add('IRequestContext');
     }
-    if (!importsIdentifier(code, 'IPluginContext')) {
-      typeNames.add('IPluginContext');
-    }
-    // ILogger is optional on IPluginContext; add it so ctx.logger resolves
-    if (!importsIdentifier(code, 'ILogger')) typeNames.add('ILogger');
   }
   if (
     present.has('platform') && !fenceDeclares('platform') &&
@@ -732,45 +721,25 @@ export function buildPrelude(globals: readonly string[], code: string): string {
 
   if (typeByPkg.size > 0 || valByPkg.size > 0) lines.push('');
 
-  // Local type declarations for documentation-shorthand type names that are
-  // NOT public exports (ServiceRegistry, ICacheService, IDatabaseService).
-  // These satisfy a generic type-argument reference without masking the
-  // fence's own @setu-ts/ option checks.
-  // Also scan the code body for local-type names referenced directly.
-  const localDecls: string[] = [];
-  for (const [name, decl] of Object.entries(LOCAL_TYPE_DECLS)) {
-    if (present.has(name) || new RegExp(`\\b${name}\\b`).test(code)) {
-      localDecls.push(decl + ';');
-    }
-  }
-  if (localDecls.length > 0) {
-    lines.push(...localDecls);
-    lines.push('');
-  }
-
   // `app` — the real IApplication. Only declared when the fence does NOT
   // declare its own `app` (a fence with `const app = createApplication()`
   // provides its own and would otherwise hit "Cannot redeclare").
   if (present.has('app') && !fenceDeclares('app')) {
     lines.push('declare const app: IApplication;');
   }
-  // `ctx` — the request/plugin context intersection (see backing-type note).
-  // Also widen the `state` Map so index access like `ctx.state['key']` compiles
-  // (the real Map lacks an index signature; the intersection with Record allows
-  // the pattern the guides use while keeping all real type checks).
+  // `ctx` — choose exactly one real callback context from the members used.
+  // A plugin context wins when a fence also contains a nested route/middleware
+  // callback whose own `ctx` shadows it; TypeScript checks the nested callback
+  // against the real callback signature.
   if (present.has('ctx') && !fenceDeclares('ctx')) {
-    // Widen state Map with index signature for guide patterns like ctx.state['key']
-    if (!importsIdentifier(code, 'IRequestContext')) {
-      typeNames.add('IRequestContext');
-    }
-    if (!importsIdentifier(code, 'IPluginContext')) {
-      typeNames.add('IPluginContext');
-    }
-    if (!importsIdentifier(code, 'ILogger')) typeNames.add('ILogger');
+    const pluginUse =
+      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/
+        .test(
+          code,
+        ) ||
+      /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
     lines.push(
-      'declare const ctx: (IRequestContext & IPluginContext) & { ' +
-        'logger: ILogger | undefined; ' +
-        'state: Map<string, unknown> & Record<string, unknown> };',
+      `declare const ctx: ${pluginUse ? 'IPluginContext' : 'IRequestContext'};`,
     );
   }
   // `platform` — a RuntimePlatform value.

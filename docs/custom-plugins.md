@@ -24,7 +24,7 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
   return {
     name: 'my-plugin',
     version: '1.0.0',
-    dependencies: ['runtime'], // Requires RuntimePlugin
+    dependencies: [CAPABILITIES.RUNTIME], // Requires RuntimePlugin
     provides: ['my-service'],
     async register(ctx: IPluginContext) {
       // Register a service
@@ -87,12 +87,12 @@ export function CachePlugin(options: CachePluginOptions): IPlugin {
   return {
     name: 'cache',
     version: '1.0.0',
-    optionalDependencies: ['logger'],
-    provides: ['cache'],
+    optionalDependencies: [CAPABILITIES.LOGGER],
+    provides: [CAPABILITIES.CACHE],
     async register(ctx) {
       const cache = createCache(config);
 
-      ctx.services.register('cache', cache);
+      ctx.services.register(CAPABILITIES.CACHE, cache);
 
       ctx.lifecycle.onClose(() => {
         cache.close();
@@ -246,11 +246,11 @@ ctx.lifecycle.onError((error, ctx) => {
 
 // Shutdown hooks
 ctx.lifecycle.onStopping(() => {
-  console.log('Stopping - no new requests');
+  console.log('Stopping - deregister from external traffic sources');
 });
 
 ctx.lifecycle.onShutdown(() => {
-  console.log('Shutdown - draining requests');
+  console.log('Shutdown - kernel has drained requests and closed the socket');
 });
 
 ctx.lifecycle.onClose(() => {
@@ -365,9 +365,9 @@ export function MyPlugin(): IPlugin {
   return {
     name: 'my-plugin',
     version: '1.0.0',
-    dependencies: ['runtime', 'logger'], // Will fail if missing
+    dependencies: [CAPABILITIES.RUNTIME, CAPABILITIES.LOGGER], // Will fail if missing
     async register(ctx) {
-      // ctx.logger is guaranteed to be available (when 'logger' is in dependencies)
+      // ctx.logger is guaranteed when CAPABILITIES.LOGGER is in dependencies.
       ctx.logger?.info('Plugin registered');
     },
   };
@@ -381,10 +381,10 @@ export function MyPlugin(): IPlugin {
   return {
     name: 'my-plugin',
     version: '1.0.0',
-    optionalDependencies: ['cache'], // Works without it
+    optionalDependencies: [CAPABILITIES.CACHE], // Works without it
     async register(ctx) {
-      if (ctx.services.has('cache')) {
-        const cache = ctx.services.get('cache');
+      if (ctx.services.has(CAPABILITIES.CACHE)) {
+        const cache = ctx.services.get(CAPABILITIES.CACHE);
         // Use cache
       } else {
         // Fallback behavior
@@ -401,7 +401,7 @@ export function MyPlugin(): IPlugin {
   return {
     name: 'my-plugin',
     version: '1.0.0',
-    consumes: ['metrics'], // Warning if missing, doesn't fail
+    consumes: [CAPABILITIES.METRICS], // Warning if missing, doesn't fail
     async register(ctx) {
       // Plugin works but logs warning if metrics not available
     },

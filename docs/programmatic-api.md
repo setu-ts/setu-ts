@@ -54,9 +54,12 @@ app.register(LoggerPlugin({ level: 'info' }));
 Register a GET route handler through the router.
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 app.router.get('/users', async (ctx) => {
-  const usersRepo = ctx.services.get<IDatabaseService>('database').getRepository('users');
+  const usersRepo = ctx.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository('users');
   const users = await usersRepo.findAll();
   return ctx.response.json(users);
 });
@@ -67,7 +70,7 @@ app.router.get('/users', async (ctx) => {
 Register route handlers for other HTTP methods.
 
 ```typescript
-const db = ctx.services.get<IDatabaseService>('database');
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
 const usersRepo = db.getRepository<{ id: string; name: string }>('users');
 app.router.post('/users', async (ctx) => {
   const user = await usersRepo.create({ name: 'alice' });
@@ -121,14 +124,20 @@ Inject a request without a network socket (testing only).
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
-const app = createApplication();
-// createApplication returns IKernelApplication directly, so inject accepts it
-// without any cast.
+const app = createApplication({ plugins: [RuntimePlugin()] });
+app.router.get('/health', (ctx) => ctx.response.json({ status: 'up' }));
+await app.start();
+
 const response = await inject(app, {
   method: 'GET',
   url: '/health',
 });
+if (response.statusCode !== 200 || response.json<{ status: string }>().status !== 'up') {
+  throw new Error('health injection failed');
+}
+await app.stop();
 ```
 
 ## Router
@@ -200,7 +209,7 @@ ctx.services.register<IMyService>('my-service', new MyService());
 Resolve a service.
 
 ```typescript
-const db = ctx.services.get<IDatabaseService>('database');
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
 ```
 
 ### `has(token)`
@@ -208,8 +217,8 @@ const db = ctx.services.get<IDatabaseService>('database');
 Check if a service is registered.
 
 ```typescript
-if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICacheStore>('cache');
+if (ctx.services.has(CAPABILITIES.CACHE)) {
+  const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
 }
 ```
 
@@ -293,16 +302,18 @@ ctx.lifecycle.onError((error, ctx) => {
 
 ### `onStopping(handler)`, `onShutdown(handler)`, `onClose(handler)`
 
-Shutdown lifecycle hooks. The actual shutdown order is: **stopping → drain → shutdown hook →
-close**.
+Shutdown lifecycle hooks. The kernel owns the guard, drain, and socket close. The actual shutdown
+order is: **stopping hooks while requests are still accepted → refuse new requests → drain in-flight
+requests → close the server socket → shutdown hooks → close hooks**. A rejecting stopping hook is
+reported only after the remaining shutdown phases finish.
 
 ```typescript
 ctx.lifecycle.onStopping(() => {
-  // Stop accepting new requests
+  // Tell an external load balancer or service registry to stop sending traffic.
 });
 
 ctx.lifecycle.onShutdown(() => {
-  // Drain in-flight requests
+  // Flush buffers and close resources after the kernel drains and closes the socket.
 });
 
 ctx.lifecycle.onClose(() => {
@@ -314,7 +325,8 @@ ctx.lifecycle.onClose(() => {
 
 ### IRequest (exact contract from `@setu-ts/common`)
 
-Derived from the `IRequest` interface in `@setu-ts/common`.
+Transcribed exactly from the `IRequest` interface in `@setu-ts/common`; mutable middleware-owned
+fields deliberately remain mutable.
 
 ```typescript
 interface IRequest {
@@ -323,16 +335,14 @@ interface IRequest {
   readonly path: string;
   readonly headers: Headers;
   readonly ip?: string;
-  readonly user?: IPrincipal; // populated by auth middleware
-  readonly tenant?: ITenant; // populated by multi-tenancy middleware
-  readonly signal?: AbortSignal; // fires on client disconnect
+  user?: IPrincipal; // populated by auth middleware
+  tenant?: ITenant; // populated by multi-tenancy middleware
+  signal?: AbortSignal; // fires on client disconnect
 
   // Body readers (consume the body exactly once)
   json<T = unknown>(): Promise<T>;
   text(): Promise<string>;
   bytes(): Promise<Uint8Array>;
-  arrayBuffer(): Promise<ArrayBuffer>;
-  formData(): Promise<FormData>;
 }
 ```
 
@@ -516,16 +526,24 @@ Inject a request.
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
-const app = createApplication();
-// createApplication returns IKernelApplication directly, so inject accepts it
-// without any cast.
+const app = createApplication({ plugins: [RuntimePlugin()] });
+app.router.post('/test', async (ctx) => {
+  return ctx.response.status(201).json(await ctx.request.json<{ foo: string }>());
+});
+await app.start();
+
 const response = await inject(app, {
-  method: 'GET',
+  method: 'POST',
   url: '/test',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ foo: 'bar' }),
 });
+if (response.statusCode !== 201 || response.json<{ foo: string }>().foo !== 'bar') {
+  throw new Error('request injection failed');
+}
+await app.stop();
 ```
 
 ### `createMockPlugin(options?)`
@@ -546,12 +564,21 @@ const mockPlugin = createMockPlugin({
 ### Streaming Responses
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+
+const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    runtime.setTimeout(resolve, ms);
+  });
+
 app.router.get('/stream', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       for (let i = 0; i < 10; i++) {
         controller.enqueue(new TextEncoder().encode(`Line ${i}\n`));
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await delay(100);
       }
       controller.close();
     },
@@ -564,13 +591,22 @@ app.router.get('/stream', async (ctx) => {
 ### Client Disconnect Handling
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+
+const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    runtime.setTimeout(resolve, ms);
+  });
+
 app.router.get('/long-running', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       try {
         while (!ctx.signal.aborted) {
           controller.enqueue(new TextEncoder().encode('data\n'));
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await delay(1000);
         }
       } catch {
         // Client disconnected

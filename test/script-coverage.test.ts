@@ -21,6 +21,7 @@ import { expect } from '@std/expect';
 import {
   belowThreshold,
   parseCoverageTable,
+  parseSuccessfulCoverageChild,
   SCRIPT_TARGETS,
   validateTargetSet,
 } from '../scripts/script-coverage.ts';
@@ -136,6 +137,20 @@ describe('script-coverage target-set completeness', () => {
     expect(cov?.branchPct).toBe(75.9);
     // 75.9 < 90, so this target is below threshold.
     expect(belowThreshold(parsed).length).toBe(1);
+  });
+
+  it('rejects a failed child before parsing two plausible 99% rows', () => {
+    const stdout = HEADER + '\n' +
+      row('scripts/check-docs.ts', 99, 99, 99) + '\n' +
+      row('scripts/generate-api-docs.ts', 99, 99, 99);
+    expect(() =>
+      parseSuccessfulCoverageChild({
+        success: false,
+        code: 1,
+        stdout,
+        stderr: 'coverage profile is incomplete',
+      })
+    ).toThrow('deno coverage exited with code 1');
   });
 });
 

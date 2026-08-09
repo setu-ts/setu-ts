@@ -42,16 +42,13 @@ describe('metrics behavior — custom counter observation', () => {
     counter.inc(1, { action: 'create' });
     counter.inc(1, { action: 'delete' });
 
-    // The metric is registered and observable
-    const found = metrics.get('test_counter');
-    expect(found).toBeDefined();
-    expect(found!.name).toBe('test_counter');
-    expect(found!.type).toBe('counter');
-
-    // Prove inc() is not a no-op by exercising the IMetric observe path
-    // (counter.inc delegates to observe internally). The counter must have
-    // accumulated the observations — a no-op inc() would leave values at 0.
-    expect(found!.observe).toBeDefined();
+    const response = await app.inject({ method: 'GET', url: '/metrics' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('# HELP test_counter A test counter');
+    expect(response.body).toContain('# TYPE test_counter counter');
+    expect(response.body).toContain('test_counter{action="create"} 2');
+    expect(response.body).toContain('test_counter{action="delete"} 1');
+    expect(response.body?.match(/^test_counter\{/gm)?.length).toBe(2);
   });
 
   it('counter inc() with no labels increments the unlabeled total', async () => {
@@ -60,18 +57,18 @@ describe('metrics behavior — custom counter observation', () => {
     });
 
     const metrics = app.services.get<IMetricsService>(CAPABILITIES.METRICS);
-    const counter = metrics.counter('simple_counter', { help: 'Simple counter' });
+    const counter = metrics.counter('simple_counter', {
+      help: 'Simple counter',
+    });
 
     // inc() with no labels increments the unlabeled total
     counter.inc();
     counter.inc(5);
 
-    const found = metrics.get('simple_counter');
-    expect(found).toBeDefined();
-    expect(found!.type).toBe('counter');
-
-    // Prove inc() is not a no-op — the metric must be observable
-    expect(found!.observe).toBeDefined();
+    const response = await app.inject({ method: 'GET', url: '/metrics' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('simple_counter 6');
+    expect(response.body).not.toContain('simple_counter{');
   });
 
   it('counter inc() with labels creates distinct label-set series', async () => {
@@ -89,11 +86,10 @@ describe('metrics behavior — custom counter observation', () => {
     counter.inc(3, { status: 'success' });
     counter.inc(1, { status: 'error' });
 
-    const found = metrics.get('labeled_counter');
-    expect(found).toBeDefined();
-    expect(found!.type).toBe('counter');
-
-    // Verify the counter has the expected label dimension
-    expect(found!.help).toBe('Counter with labels');
+    const response = await app.inject({ method: 'GET', url: '/metrics' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('labeled_counter{status="success"} 3');
+    expect(response.body).toContain('labeled_counter{status="error"} 1');
+    expect(response.body?.match(/^labeled_counter\{/gm)?.length).toBe(2);
   });
 });
