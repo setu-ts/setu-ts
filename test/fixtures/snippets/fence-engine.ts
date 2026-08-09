@@ -603,6 +603,17 @@ export function buildPrelude(globals: readonly string[], code: string): string {
       typeNames.add(name);
     }
   }
+  // Also scan APP_DECLARATIONS values for types they reference (MiddlewareFunction, etc.)
+  // so the prelude imports them BEFORE the type-by-package map is built.
+  for (const [name, decl] of Object.entries(APP_DECLARATIONS)) {
+    if (present.has(name) && !fenceDeclares(name)) {
+      for (const typeName of Object.keys(TYPE_EXPORTS)) {
+        if (new RegExp(`\\b${typeName}\\b`).test(decl) && !importsIdentifier(code, typeName) && !fenceDeclares(typeName)) {
+          typeNames.add(typeName);
+        }
+      }
+    }
+  }
   // Backing types for declared runtime globals (only when the fence does NOT
   // declare the global itself — a fence that declares `const app` provides its
   // own type and needs no prelude `app`).
