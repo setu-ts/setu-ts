@@ -121,7 +121,7 @@ app.register(ValidationPlugin({ validator: 'zod' }));
 app.router.post('/items', async (ctx) => {
   const body = await ctx.request.json();
   // Validation happens automatically if schema is registered
-  return ctx.response.json({ id: '1', ...body }, { status: 201 });
+  return ctx.response.status(201).json({ id: '1', ...body });
 });
 ```
 
@@ -134,16 +134,16 @@ Dependency injection and decorators.
 **What it demonstrates:**
 
 - `@Controller` and `@Get` decorators
-- `@injectable()` for service registration
-- `@inject('token')` for constructor injection
+- `@Injectable()` for service registration
+- `@Inject('token')` for constructor injection
 - Parameter decorators (`@Param`, `@Body`, `@Query`)
 
 **Key code:**
 
 ```typescript
-import { Controller, Get, inject, injectable } from '@setu-ts/decorator-plugin';
+import { Controller, Get, Inject, Injectable } from '@setu-ts/decorator-plugin';
 
-@injectable()
+@Injectable({ token: 'UserService' })
 class UserService {
   async findAll() {
     return [{ id: '1', name: 'John' }];
@@ -151,10 +151,9 @@ class UserService {
 }
 
 @Controller('/users')
-@injectable()
 class UserController {
   constructor(
-    @inject('UserService') private readonly userService: UserService,
+    @Inject('UserService') private readonly userService: UserService,
   ) {}
 
   @Get()
@@ -276,10 +275,10 @@ Real-time communication with cross-replica synchronization.
 **Key code:**
 
 ```typescript
-import { WebsocketPlugin } from '@setu-ts/websocket-plugin';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 
-app.register(WebsocketPlugin({
+app.register(WebSocketPlugin({
   rooms: {
     '/ws/chat': {
       onMessage: (ctx, message) => {

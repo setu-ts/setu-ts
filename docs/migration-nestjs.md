@@ -12,7 +12,7 @@ flexible.
 | **Reflection**           | `reflect-metadata` required | Explicit injection tokens (no reflection) |
 | **Module System**        | `@Module` decorators        | Plugin composition                        |
 | **HTTP Server**          | Express/Fastify             | Hono (fetch API)                          |
-| **Dependency Injection** | Automatic via reflection    | Explicit tokens (`@inject('token')`)      |
+| **Dependency Injection** | Automatic via reflection    | Explicit tokens (`@Inject('token')`)      |
 | **Decorators**           | Built-in                    | Optional, via `DecoratorPlugin`           |
 
 ## Basic Application
@@ -61,11 +61,9 @@ await app.start({ port: 3000 });
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { DiPlugin } from '@setu-ts/di-plugin';
-import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
-import { Controller, Get, injectable } from '@setu-ts/decorator-plugin';
+import { Controller, DecoratorPlugin, Get } from '@setu-ts/decorator-plugin';
 
-@Controller()
-@injectable()
+@Controller('/')
 class AppController {
   @Get()
   async hello() {
@@ -73,20 +71,15 @@ class AppController {
   }
 }
 
-async function bootstrap() {
-  const app = createApplication();
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DiPlugin(),
+    DecoratorPlugin({ controllers: [AppController] }),
+  ],
+});
 
-  app.register(RuntimePlugin());
-  app.register(DiPlugin());
-  app.register(DecoratorPlugin());
-
-  // Register controllers manually or use discoverControllers
-  // For decorators to work, register the controller instance
-  app.register(MyController);
-
-  await app.start({ port: 3000 });
-}
-bootstrap();
+await app.start({ port: 3000 });
 ```
 
 ## Controllers and Routes
@@ -137,13 +130,12 @@ app.router.post('/users', async (ctx) => {
 ### Setu-TS (With Decorators)
 
 ```typescript
-import { Body, Controller, Get, injectable, Param, Post } from '@setu-ts/decorator-plugin';
+import { Body, Controller, Get, Inject, Param, Post } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
-@injectable()
 export class UsersController {
   constructor(
-    @inject('UserService') private readonly userService: UserService,
+    @Inject('UserService') private readonly userService: UserService,
   ) {}
 
   @Get()
@@ -179,20 +171,17 @@ export class UserService {
 ### Setu-TS
 
 ```typescript
-import { inject, injectable } from '@setu-ts/di-plugin';
+import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 
-@injectable()
+@Injectable({ token: 'UserService' })
 export class UserService {
   constructor(
-    @inject('UserRepository') private readonly userRepository: UserRepository,
+    @Inject('UserRepository') private readonly userRepository: UserRepository,
   ) {}
 }
 
-// Register the service
-ctx.services.registerFactory(
-  'UserService',
-  () => ctx.services.get<IDiContainer>('container').create(UserService),
-);
+// Register the service with the DecoratorPlugin, or programmatically:
+ctx.services.register('UserService', new UserService(userRepository));
 ```
 
 ## Modules vs Plugins
@@ -270,7 +259,7 @@ export const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
   if (!token) {
-    return ctx.response.json({ error: 'Unauthorized' }, { status: 401 });
+    return ctx.response.status(401).json({ error: 'Unauthorized' });
   }
 
   // Verify token and set user
@@ -391,16 +380,15 @@ async create(@Body() createDto: CreateCatDto) {
 ### Setu-TS
 
 ```typescript
-import { validationMiddleware } from '@setu-ts/validation-plugin';
+import { validateBody } from '@setu-ts/validation-plugin';
 
-app.router.post(
-  '/users',
-  validationMiddleware(CreateUserDto),
-  async (ctx) => {
+app.router.post('/users', {
+  middleware: [validateBody(CreateUserDto)],
+  handler: async (ctx) => {
     const dto = await ctx.request.json();
     // dto is validated
   },
-);
+});
 ```
 
 ## Configuration
@@ -549,7 +537,7 @@ app.register(ValidationPlugin({
 app.router.post('/users', async (ctx) => {
   const result = CreateUserDto.safeParse(await ctx.request.json());
   if (!result.success) {
-    return ctx.response.json({ errors: result.error.errors }, { status: 400 });
+    return ctx.response.status(400).json({ errors: result.error.errors });
   }
   const dto = result.data;
   // ...
@@ -573,9 +561,9 @@ export class EventsGateway {
 ### Setu-TS
 
 ```typescript
-import { WebsocketPlugin } from '@setu-ts/websocket-plugin';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 
-app.register(WebsocketPlugin({
+app.register(WebSocketPlugin({
   rooms: {
     '/ws': {
       onConnect: (ctx) => {
@@ -651,9 +639,9 @@ export class RequestScopedService {}
 ### Setu-TS
 
 ```typescript
-import { injectable, Scope } from '@setu-ts/di-plugin';
+import { Injectable } from '@setu-ts/decorator-plugin';
 
-@injectable({ scope: Scope.REQUEST })
+@Injectable({ scope: 'scoped' })
 export class RequestScopedService {}
 ```
 
@@ -679,14 +667,14 @@ app.middleware.add(authMiddleware, { priority: 25 }); // Runs before default
 ## Migration Checklist
 
 - [ ] Replace `@nestjs/*` imports with `@setu-ts/*`
-- [ ] Replace `@Injectable()` with `@injectable()`
+- [ ] Replace `@Injectable()` with `@Injectable()` from `@setu-ts/decorator-plugin`
 - [ ] Replace `@Controller()` with programmatic routes or `@Controller()` + `DecoratorPlugin`
-- [ ] Replace constructor injection with `@inject('token')`
+- [ ] Replace constructor injection with `@Inject('token')` from `@setu-ts/decorator-plugin`
 - [ ] Replace modules with plugin factories
 - [ ] Replace TypeORM with Prisma/Drizzle or other supported ORM
 - [ ] Replace `ConfigModule` with `ConfigPlugin`
 - [ ] Replace `CacheModule` with `CachePlugin`
-- [ ] Replace `@WebSocketGateway` with `WebsocketPlugin`
+- [ ] Replace `@WebSocketGateway` with `WebSocketPlugin`
 - [ ] Update testing utilities to use `createTestApp` and `inject`
 - [ ] Update deployment configuration for target runtime
 

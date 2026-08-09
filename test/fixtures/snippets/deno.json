@@ -6,6 +6,7 @@
     "@setu-ts/common": "../../../packages/common/src/index.ts",
     "@setu-ts/kernel": "../../../packages/kernel/src/index.ts",
     "@setu-ts/runtime": "../../../packages/runtime/src/index.ts",
+    "@setu-ts/exceptions": "../../../packages/exceptions/src/index.ts",
     "@setu-ts/di-plugin": "../../../packages/di-plugin/src/index.ts",
     "@setu-ts/decorator-plugin": "../../../packages/decorator-plugin/src/index.ts",
     "@setu-ts/testing": "../../../packages/testing/src/index.ts"

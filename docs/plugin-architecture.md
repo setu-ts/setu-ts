@@ -143,16 +143,16 @@ async register(ctx: IPluginContext) {
 
 The default middleware priority order:
 
-| Priority | Middleware               | Description                       |
-| -------- | ------------------------ | --------------------------------- |
-| 10       | `cacheApiMiddleware`     | Cache API middleware (Cloudflare) |
-| 15       | `cacheMiddleware`        | Response caching                  |
-| 20       | `metricsMiddleware`      | Metrics collection                |
-| 25       | `authMiddleware`         | Authentication                    |
-| 30       | `telemetryMiddleware`    | Telemetry/request tracing         |
-| 35       | `validationMiddleware`   | Request validation                |
-| 40       | `multiTenancyMiddleware` | Multi-tenancy                     |
-| 500      | Default middleware       | Application routes                |
+| Priority | Middleware                     | Description                       |
+| -------- | ------------------------------ | --------------------------------- |
+| 10       | `cacheApiMiddleware`           | Cache API middleware (Cloudflare) |
+| 15       | `cacheMiddleware`              | Response caching                  |
+| 20       | `metricsMiddleware`            | Metrics collection                |
+| 25       | `authMiddleware`               | Authentication                    |
+| 30       | `telemetryMiddleware`          | Telemetry/request tracing         |
+| 35       | `validateBody`/`validateQuery` | Request validation                |
+| 40       | `multiTenancyMiddleware`       | Multi-tenancy                     |
+| 500      | Default middleware             | Application routes                |
 
 ## Plugin Context
 
