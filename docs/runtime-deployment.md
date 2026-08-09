@@ -38,7 +38,7 @@ await app.start({ port: 3000 });
 All runtimes support streaming responses via `IResponse.stream()`:
 
 ```typescript
-app.get('/stream', async (ctx) => {
+app.router.get('/stream', async (ctx) => {
   const stream = new ReadableStream({
     async start(controller) {
       for (let i = 0; i < 10; i++) {
@@ -48,7 +48,7 @@ app.get('/stream', async (ctx) => {
       controller.close();
     },
   });
-  return ctx.stream(stream);
+  return ctx.response.stream(stream);
 });
 ```
 
@@ -57,10 +57,10 @@ app.get('/stream', async (ctx) => {
 ```typescript
 import { SsePlugin } from '@setu-ts/sse-plugin';
 
-await app.register(SsePlugin);
+app.register(SsePlugin());
 
-app.get('/events', async (ctx) => {
-  return ctx.sse.send('hello', { data: 'world' });
+app.router.get('/events', async (ctx) => {
+  return ctx.response.json({ event: 'hello', data: 'world' });
 });
 ```
 
@@ -94,12 +94,12 @@ import { NodeHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin, {
+app.register(RuntimePlugin({
   httpAdapters: [NodeHttpAdapter],
-});
+}));
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello from Node.js!' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello from Node.js!' });
 });
 
 await app.start({ port: 3000, hostname: '0.0.0.0' });
@@ -190,10 +190,10 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin); // DenoHttpAdapter is default
+app.register(RuntimePlugin()); // DenoHttpAdapter is default
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello from Deno!' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello from Deno!' });
 });
 
 await app.start({ port: 3000, hostname: '0.0.0.0' });
@@ -298,12 +298,12 @@ import { BunHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin, {
+app.register(RuntimePlugin({
   httpAdapters: [BunHttpAdapter],
-});
+}));
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello from Bun!' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello from Bun!' });
 });
 
 await app.start({ port: 3000, hostname: '0.0.0.0' });
@@ -328,7 +328,7 @@ console.log('Server running on http://localhost:3000');
 #### Docker
 
 ```dockerfile
-FROM oven/bune:latest
+FROM oven/bun:latest
 
 WORKDIR /app
 
@@ -387,12 +387,12 @@ import { CloudflareWorkersHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
 
 const app = createApplication();
 
-await app.register(RuntimePlugin, {
+app.register(RuntimePlugin({
   httpAdapters: [CloudflareWorkersHttpAdapter],
-});
+}));
 
-app.get('/', async (ctx) => {
-  return ctx.json({ message: 'Hello from Workers!' });
+app.router.get('/', async (ctx) => {
+  return ctx.response.json({ message: 'Hello from Workers!' });
 });
 
 // Export the fetch handler
@@ -466,7 +466,7 @@ Access platform bindings via CloudflarePlugin:
 ```typescript
 import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 
-await app.register(CloudflarePlugin);
+app.register(CloudflarePlugin());
 
 // Access bindings
 const bindings = ctx.services.get<ICloudflareBindings>('cloudflare');

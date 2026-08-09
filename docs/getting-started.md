@@ -54,16 +54,16 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 const app = createApplication();
 
 // Register the runtime plugin (required)
-await app.register(RuntimePlugin);
+app.register(RuntimePlugin());
 
-// Add a simple route
-app.get('/hello', async (ctx) => {
-  return ctx.json({ message: 'Hello, World!' });
+// Add a simple route through the router
+app.router.get('/hello', async (ctx) => {
+  return ctx.response.json({ message: 'Hello, World!' });
 });
 
 // Add a health check endpoint
-app.get('/health', async (ctx) => {
-  return ctx.json({ status: 'ok' });
+app.router.get('/health', async (ctx) => {
+  return ctx.response.json({ status: 'ok' });
 });
 
 // Start the server
@@ -119,20 +119,21 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 describe('My Application', () => {
   it('handles GET /hello', async () => {
-    const app = createTestApp();
-    await app.register(RuntimePlugin);
+    const app = await createTestApp({
+      plugins: [RuntimePlugin()],
+    });
 
-    app.get('/hello', async (ctx) => {
-      return ctx.json({ message: 'Hello, World!' });
+    app.router.get('/hello', async (ctx) => {
+      return ctx.response.json({ message: 'Hello, World!' });
     });
 
     const response = await inject(app, {
       method: 'GET',
-      path: '/hello',
+      url: '/hello',
     });
 
-    expect(response.status).toBe(200);
-    const body = await response.json();
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
     expect(body).toEqual({ message: 'Hello, World!' });
   });
 });
@@ -153,7 +154,7 @@ Setu-TS is built around a plugin architecture. Here's how to add common plugins:
 ```typescript
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
-await app.register(LoggerPlugin);
+app.register(LoggerPlugin());
 ```
 
 ### Config Plugin
@@ -161,9 +162,9 @@ await app.register(LoggerPlugin);
 ```typescript
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 
-await app.register(ConfigPlugin, {
+app.register(ConfigPlugin({
   env: true, // Load from environment variables
-});
+}));
 ```
 
 ### Database Plugin
@@ -171,9 +172,9 @@ await app.register(ConfigPlugin, {
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-await app.register(DatabasePlugin, {
+app.register(DatabasePlugin({
   type: 'memory', // Use in-memory database for development
-});
+}));
 ```
 
 ### Auth Plugin
@@ -181,12 +182,12 @@ await app.register(DatabasePlugin, {
 ```typescript
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
-await app.register(AuthPlugin, {
+app.register(AuthPlugin({
   jwt: {
     secret: 'your-secret-key',
     algorithms: ['HS256'],
   },
-});
+}));
 ```
 
 ## Running on Different Runtimes
@@ -203,9 +204,9 @@ await app.start({ port: 3000 });
 ```typescript
 import { NodeHttpAdapter } from '@setu-ts/runtime';
 
-await app.register(RuntimePlugin, {
+app.register(RuntimePlugin({
   httpAdapters: [NodeHttpAdapter],
-});
+}));
 await app.start({ port: 3000 });
 ```
 
@@ -214,9 +215,9 @@ await app.start({ port: 3000 });
 ```typescript
 import { BunHttpAdapter } from '@setu-ts/runtime';
 
-await app.register(RuntimePlugin, {
+app.register(RuntimePlugin({
   httpAdapters: [BunHttpAdapter],
-});
+}));
 await app.start({ port: 3000 });
 ```
 
@@ -226,9 +227,9 @@ await app.start({ port: 3000 });
 import { CloudflareWorkersHttpAdapter } from '@setu-ts/runtime';
 
 const adapter = CloudflareWorkersHttpAdapter;
-await app.register(RuntimePlugin, {
+app.register(RuntimePlugin({
   httpAdapters: [adapter],
-});
+}));
 
 // Export the fetch handler
 export default {

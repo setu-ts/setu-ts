@@ -478,13 +478,13 @@ error[private-type-ref]: public type references private type
         readTextFile: (_path: string) => Promise.resolve('{}'),
         readDir: (path: string) => Deno.readDir(path),
         stat: (path: string) => {
-          // Reject all stat calls so fallback also fails
+          // Reject all stat calls so disk validation fails
           throw new Deno.errors.NotFound(`Not found: ${path}`);
         },
       };
       // All manifests return {} and no fallback files exist → should throw
       await expect(collectApiEntrypoints(fs)).rejects.toThrow(
-        'Published packages missing export targets',
+        'has no export targets in its deno.json manifest',
       );
     });
 
@@ -601,10 +601,10 @@ error[private-type-ref]: public type references private type
     });
 
     it('generation-mode fatal failure remains propagated', async () => {
-      // Use a mock fs that does not touch the real filesystem for the
-      // generate-mode test so it does not require --allow-write.
+      // Use a mock fs that returns a valid manifest with exports for the
+      // generate-mode test so collectApiEntrypoints succeeds.
       const fs = {
-        readTextFile: (_path: string) => Promise.resolve('{}'),
+        readTextFile: (_path: string) => Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } })),
         readDir: async function* () {
           yield* [];
         },

@@ -40,26 +40,75 @@ export const CLEAN_PACKAGES = new Set([
 /** The frozen baseline diagnostic count from the M38 plan (§1.1). */
 export const DOC_LINT_BASELINE = 776;
 
-/** Required guide inventory for the docs hub (§5.2 of the plan). */
-export const REQUIRED_GUIDES = [
-  'docs/getting-started.md',
-  'docs/plugin-architecture.md',
-  'docs/plugins.md',
-  'docs/programmatic-api.md',
-  'docs/decorators.md',
-  'docs/custom-plugins.md',
-  'docs/migration-nestjs.md',
-  'docs/migration-fastify.md',
-  'docs/examples.md',
-  'docs/runtime-deployment.md',
-];
-
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {
   rule: string;
   path: string;
   line?: number;
   message?: string;
+}
+
+/**
+ * Reads the root deno.json and extracts the workspace array as the authoritative
+ * workspace set. Returns paths relative to the repo root (e.g. "packages/common").
+ */
+export async function readWorkspaceMembers(
+  fs: { readTextFile: (path: string) => Promise<string> },
+): Promise<string[]> {
+  const content = await fs.readTextFile('deno.json');
+  const root = JSON.parse(content) as { workspace?: string[] };
+  if (!root.workspace) {
+    throw new Error('deno.json has no "workspace" field');
+  }
+  // Normalize: strip leading "./" if present
+  return root.workspace.map((p) => p.startsWith('./') ? p.slice(2) : p).sort();
+}
+
+/**
+ * Derives package short names from workspace paths.
+ * - "packages/common" → "common"
+ * - "packages/starters/rest-starter" → "rest-starter"
+ */
+export function workspaceName(path: string): string {
+  const match = path.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+  const first = match?.[1];
+  const second = match?.[2];
+  return (first === 'starters' && second) ? second : (first ?? path);
+}
+
+/**
+ * Compares the authoritative workspace set against the publication inventory.
+ * Returns exact missing/extra errors in both directions.
+ */
+export function reconcileWorkspaceVsPublication(
+  workspace: string[],
+  published: readonly string[],
+): {
+  readonly missingInPublication: string[];
+  readonly missingInWorkspace: string[];
+} {
+  const wsSet = new Set(workspace);
+  const pubSet = new Set(published);
+  const missingInPublication = workspace.filter((p) => !pubSet.has(p));
+  const missingInWorkspace = published.filter((p) => !wsSet.has(p));
+  return { missingInPublication, missingInWorkspace };
+}
+
+/**
+ * Parses a deno.json manifest and extracts export targets.
+ * Returns empty array if manifest is missing, unreadable, or malformed.
+ */
+export async function readManifestExports(
+  manifestPath: string,
+  fs: { readTextFile: (path: string) => Promise<string> },
+): Promise<string[]> {
+  try {
+    const content = await fs.readTextFile(manifestPath);
+    const manifest = JSON.parse(content) as { exports?: unknown };
+    return expandExportTargets(manifest.exports);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -112,33 +161,11 @@ export function expandExportTargets(exports: unknown): string[] {
 }
 
 /**
- * Reads a deno.json manifest and extracts export targets.
+ * Collects API entry points from the root workspace and publication inventory.
  *
- * @param manifestPath - Path to the deno.json file
- * @param fs - File system abstraction
- * @returns Array of local source targets, or empty array if manifest not found
- */
-export async function readManifestExports(
-  manifestPath: string,
-  fs: {
-    readTextFile: (path: string) => Promise<string>;
-  },
-): Promise<string[]> {
-  try {
-    const content = await fs.readTextFile(manifestPath);
-    const manifest = JSON.parse(content) as { exports?: unknown };
-    return expandExportTargets(manifest.exports);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Collects API entry points from published package manifests.
- *
- * Reads each package's deno.json exports map and expands all local string/object
- * export targets. Validates workspace parity (every published package has at
- * least one target) and sorts/deduplicates the result.
+ * Independently reconciles workspace members against published packages, reads
+ * each package's deno.json exports map, validates disk existence, and returns
+ * sorted/deduplicated targets.
  *
  * @param fs - File system abstraction
  * @returns Sorted targets and package mapping
@@ -150,6 +177,22 @@ export async function collectApiEntrypoints(
     stat: (path: string) => Promise<Deno.FileInfo>;
   },
 ): Promise<{ targets: string[]; targetsWithPackage: Array<{ target: string; pkg: string }> }> {
+  // Read authoritative workspace from root deno.json
+  const workspace = await readWorkspaceMembers(fs);
+
+  // Independent reconciliation
+  const reconciliation = reconcileWorkspaceVsPublication(workspace, PUBLISHED_PACKAGES);
+  if (reconciliation.missingInPublication.length > 0) {
+    throw new Error(
+      `Workspace members missing from PUBLISHED_PACKAGES: ${reconciliation.missingInPublication.join(', ')}`,
+    );
+  }
+  if (reconciliation.missingInWorkspace.length > 0) {
+    throw new Error(
+      `Published packages missing from workspace: ${reconciliation.missingInWorkspace.join(', ')}`,
+    );
+  }
+
   const allTargets: string[] = [];
   const targetsWithPackage: Array<{ target: string; pkg: string }> = [];
   const packagesWithExports = new Set<string>();
@@ -160,50 +203,38 @@ export async function collectApiEntrypoints(
     const targets = await readManifestExports(manifestPath, fs);
 
     if (targets.length === 0) {
-      // Fallback to src/index.ts if manifest has no exports
-      const fallback = `${pkgPath}/src/index.ts`;
+      // Reject no-export manifests — this is a failure, not a valid empty state
+      throw new Error(
+        `Package ${pkgPath} has no export targets in its deno.json manifest`,
+      );
+    }
+
+    // Validate every target exists on disk before including
+    for (const target of targets) {
+      const workspaceTarget = target.startsWith('./')
+        ? `${pkgPath}/${target.slice(2)}`
+        : `${pkgPath}/${target}`;
       try {
-        await fs.stat(fallback);
-        targets.push(fallback);
-      } catch {
-        // No fallback either
-      }
-    }
-
-    if (targets.length > 0) {
-      packagesWithExports.add(pkgPath);
-      for (const target of targets) {
-        // Prepend the package path so the target is workspace-relative.
-        // `expandExportTargets` returns paths like "./src/index.ts"; we need
-        // "packages/common/src/index.ts" for `deno doc` to resolve them.
-        const workspaceTarget = target.startsWith('./')
-          ? `${pkgPath}/${target.slice(2)}`
-          : `${pkgPath}/${target}`;
+        await fs.stat(workspaceTarget);
         allTargets.push(workspaceTarget);
-        // Extract package name from pkgPath (e.g., "packages/kernel" -> "kernel",
-        // "packages/starters/rest-starter" -> "rest-starter")
-        const pkgMatch = pkgPath.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
-        const firstSegment = pkgMatch?.[1];
-        const secondSegment = pkgMatch?.[2];
-        const pkg = (firstSegment === 'starters' && secondSegment)
-          ? secondSegment
-          : (pkgMatch?.[1] ?? pkgPath.split('/')[1]);
-        targetsWithPackage.push({ target: workspaceTarget, pkg });
+      } catch {
+        throw new Error(
+          `Export target ${workspaceTarget} does not exist on disk`,
+        );
       }
     }
-  }
 
-  // Validate workspace parity: every published package must have at least one target
-  const missingPackages = PUBLISHED_PACKAGES.filter((p) => !packagesWithExports.has(p));
-  if (missingPackages.length > 0) {
-    throw new Error(
-      `Published packages missing export targets: ${missingPackages.join(', ')}`,
-    );
+    const pkgName = workspaceName(pkgPath);
+    packagesWithExports.add(pkgName);
+    for (const target of targets) {
+      const workspaceTarget = target.startsWith('./')
+        ? `${pkgPath}/${target.slice(2)}`
+        : `${pkgPath}/${target}`;
+      targetsWithPackage.push({ target: workspaceTarget, pkg: pkgName });
+    }
   }
 
   // Sort and deduplicate
-  // Targets are unique per-package (e.g., packages/kernel/src/index.ts vs
-  // packages/common/src/index.ts), so dedup by the full path including package.
   const uniqueTargets = [...new Set(allTargets)].sort();
 
   // Rebuild targetsWithPackage preserving all packages
@@ -390,47 +421,7 @@ export async function runApiDocs(
   const findings: string[] = [];
 
   // Collect entry points
-  let targets: string[];
-  let targetsWithPackage: Array<{ target: string; pkg: string }>;
-  try {
-    const result = await collectApiEntrypoints(fs);
-    targets = result.targets;
-    targetsWithPackage = result.targetsWithPackage;
-  } catch (error) {
-    console.error(`Error collecting API entry points: ${error}`);
-    return { code: 1, findings: [`Failed to collect API entry points: ${error}`] };
-  }
-
-  // Validate workspace parity
-  const packagesWithExports = new Set<string>();
-  for (const { pkg } of targetsWithPackage) {
-    // "starters" is a directory, not a package — skip it
-    if (pkg !== 'starters') {
-      packagesWithExports.add(pkg);
-    }
-  }
-
-  // Check that all published packages have exports
-  for (const pkg of PUBLISHED_PACKAGES) {
-    // Extract package name: "packages/kernel" -> "kernel", "packages/starters/rest-starter" -> "rest-starter"
-    const match = pkg.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
-    const firstSegment = match?.[1];
-    const secondSegment = match?.[2];
-    const packageName = (firstSegment === 'starters' && secondSegment)
-      ? secondSegment
-      : (match?.[1] ?? pkg);
-    if (!packagesWithExports.has(packageName)) {
-      findings.push(`Published package '${pkg}' has no export targets`);
-    }
-  }
-
-  if (findings.length > 0) {
-    console.error('Workspace parity check failed:');
-    for (const finding of findings) {
-      console.error(`  - ${finding}`);
-    }
-    return { code: 1, findings };
-  }
+  const { targets } = await collectApiEntrypoints(fs);
 
   // Build and run deno doc command
   const args = buildDenoDocArgs(targets, mode, outputDir);
