@@ -93,6 +93,8 @@ function configModule(
   localImports: readonly LocalImport[] = [],
   packageImports: readonly PackageImport[] = [],
   appFactory?: AppFactoryWiring,
+  pluginSpreads: readonly string[] = [],
+  setupCalls: readonly string[] = [],
 ): string {
   // `common` is always imported for the return type, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
@@ -130,6 +132,15 @@ function configModule(
       .join('\n')
   }\n`;
 
+  // Placed after the middleware block and before the hello-world route: the app must
+  // exist, and a generated route should be registered before the template's own `/`
+  // handler so route precedence reads top-to-bottom in the emitted file. Pipeline
+  // position is NOT affected by where a middleware is added — the kernel orders by
+  // priority — which is why the generated middleware loop passes one explicitly.
+  const setupLines = setupCalls.length === 0
+    ? ''
+    : `\n${setupCalls.map((line) => `  ${line}`).join('\n')}\n`;
+
   if (appFactory !== undefined) {
     // No hello-world route here: this application's routes come from its own
     // route module, and an exact '/' handler would take precedence over the
@@ -158,9 +169,11 @@ ${middlewareLines}
   // no ambient environment on the edge, so `env` arrives as an argument of the
   // `fetch` handler and is threaded through the factory.
   const onWorkers = runtime === 'cloudflare-workers';
-  const pluginList = plugins
-    .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`)
-    .join('\n');
+  const pluginList = [
+    ...plugins
+      .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`),
+    ...pluginSpreads.map((spread) => `      ${spread},`),
+  ].join('\n');
 
   const factoryParam = onWorkers ? 'env: Readonly<Record<string, unknown>> = {}' : '';
   const envDoc = onWorkers
@@ -183,7 +196,7 @@ export function ${CONFIG_EXPORT}(${factoryParam}): IApplication {
 ${pluginList}
     ],
   });
-${middlewareLines}
+${middlewareLines}${setupLines}
   app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
 
   return app;
@@ -457,6 +470,8 @@ function standaloneNpmFiles(
  * @param localImports - Project-local imports the config module needs, for a
  * template whose plugin arguments name a class it also emits
  * @param extras - Extra template source files, appended to the fixed set
+ * @param pluginSpreads - Verbatim entries appended to the `plugins` array
+ * @param setupCalls - Verbatim statements rendered inside `createApp()`
  * @returns The files to create, relative to the project root
  */
 function projectFiles(
@@ -469,6 +484,8 @@ function projectFiles(
   packageImports: readonly PackageImport[] = [],
   appFactory?: AppFactoryWiring,
   manifest?: TemplateManifest,
+  pluginSpreads: readonly string[] = [],
+  setupCalls: readonly string[] = [],
 ): readonly GeneratedFile[] {
   const packagesInput: PackagesInput = { appFactory, packageImports };
   const readme = `# ${projectName}
@@ -559,7 +576,16 @@ ${PROGRAM_NAME} generate --help
 
   files.push({
     path: CONFIG_MODULE,
-    contents: configModule(runtime, plugins, middleware, localImports, packageImports, appFactory),
+    contents: configModule(
+      runtime,
+      plugins,
+      middleware,
+      localImports,
+      packageImports,
+      appFactory,
+      pluginSpreads,
+      setupCalls,
+    ),
   });
 
   if (runtime === 'cloudflare-workers') {
@@ -712,6 +738,8 @@ export async function runNewCommand(
     template?.packageImports ?? [],
     template?.appFactory,
     template?.manifest,
+    template?.pluginSpreads ?? [],
+    template?.setupCalls ?? [],
   );
 
   // A template file whose path collides with the fixed set would otherwise be

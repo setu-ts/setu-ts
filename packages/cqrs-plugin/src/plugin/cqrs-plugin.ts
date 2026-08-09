@@ -16,6 +16,8 @@ const PLUGIN_NAME = 'cqrs-plugin';
 /** Default options. */
 const DEFAULT_OPTIONS: Required<CqrsPluginOptions> = {
   behaviors: [],
+  commandHandlers: [],
+  queryHandlers: [],
 };
 
 /**
@@ -33,7 +35,11 @@ const DEFAULT_OPTIONS: Required<CqrsPluginOptions> = {
  * ```typescript
  * import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
  *
- * app.register(CqrsPlugin({ behaviors: [timingBehavior] }));
+ * app.register(CqrsPlugin({
+ *   behaviors: [timingBehavior],
+ *   commandHandlers: [{ type: CREATE_USER, handler: new CreateUserHandler() }],
+ *   queryHandlers: [{ type: GET_USER, handler: new GetUserHandler() }],
+ * }));
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
@@ -53,6 +59,16 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
       // Build buses with the configured behaviors.
       const commandBus = new CommandBus(opts.behaviors);
       const queryBus = new QueryBus(opts.behaviors);
+
+      // Register the declaratively-supplied handlers. Done here rather than left to
+      // the application because the buses do not exist until this point and
+      // `IApplication` exposes no lifecycle hook in which app code could reach them.
+      for (const entry of opts.commandHandlers) {
+        commandBus.register(entry.type, entry.handler);
+      }
+      for (const entry of opts.queryHandlers) {
+        queryBus.register(entry.type, entry.handler);
+      }
 
       // Build the facade.
       const facade: ICqrsFacade = {

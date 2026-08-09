@@ -247,13 +247,53 @@ describe('runNewCommand', () => {
           'LoggerPlugin',
           'ValidationPlugin',
           'HttpSecurityPlugin',
-          'HealthPlugin',
-          'MetricsPlugin',
           'OpenApiPlugin',
         ]
       ) {
         expect(config).toContain(`${symbol}()`);
       }
+      // Three plugins take a generated-artifact seam, so they are NOT argument-free.
+      // Asserted by their actual call so a dropped seam shows up here rather than only
+      // in the drift gate.
+      expect(config).toContain('HealthPlugin({ indicators: [...HEALTH_INDICATORS] })');
+      expect(config).toContain('MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })');
+      expect(config).toContain('DecoratorPlugin({');
+    });
+
+    it('renders the plugin list, middleware, setup calls, then the index route', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest'])).toBe(0);
+      const config = h.fs.read('/work/app/setu.config.ts');
+
+      const order = [
+        'createApplication({',
+        'app.middleware.add(errorHandler()',
+        'registerGeneratedRoutes(app.router);',
+        'for (const generated of GENERATED_MIDDLEWARE) {',
+        "app.router.get('/'",
+      ].map((needle) => config.indexOf(needle));
+
+      expect(order.every((index) => index >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it('spreads the generated plugins into the plugin array', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest'])).toBe(0);
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain('...GENERATED_PLUGINS,');
+    });
+
+    // Pins that a template declaring neither new field renders as it always did: the
+    // minimal (no-template) path has no `TemplateDefinition` at all, so it must be
+    // untouched by the seams.
+    it('leaves a template-less project free of seam wiring', async () => {
+      const h = harness();
+      expect(await h.run(['bare'])).toBe(0);
+      const config = h.fs.read('/work/bare/setu.config.ts');
+      expect(config).toContain('RuntimePlugin(),');
+      expect(config).not.toContain('GENERATED');
+      expect(config).not.toContain('registerGeneratedRoutes');
+      expect(config).not.toContain('./src/');
     });
 
     it('adds errorHandler through middleware.add, not the plugin list', async () => {

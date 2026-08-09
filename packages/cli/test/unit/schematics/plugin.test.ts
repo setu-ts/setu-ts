@@ -2,18 +2,37 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generatePlugin } from '../../../src/schematics/plugin.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('plugin schematic', () => {
   const files = generatePlugin(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'plugin');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the plugin plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/plugins/order-item.plugin.ts',
+      'src/plugins/index.ts',
+    ]);
   });
 
-  it('emits it at src/plugins/order-item.ts', () => {
-    expect(file.path).toBe('src/plugins/order-item.ts');
+  // `.plugin.ts`, not the bare `.ts` this schematic wrote before the seam existed: the
+  // barrel is regenerated from a directory scan, and a suffix of `.ts` would admit any
+  // module a developer put here — the barrel would then import a `<Pascal>Plugin` symbol
+  // they never wrote, and their project would fail to compile naming a file they never
+  // generated.
+  it('emits it at src/plugins/order-item.plugin.ts, a scannable suffix', () => {
+    expect(file.path).toBe('src/plugins/order-item.plugin.ts');
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('plugin', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('spreads constructed plugins from the barrel', () => {
+    const barrel = barrelOf(files, 'plugin').contents;
+    expect(barrel).toContain('readonly IPlugin[]');
+    // Called, not referenced: `createApplication` takes plugin instances.
+    expect(barrel).toContain('OrderItemPlugin()');
   });
 
   it('produces non-empty contents ending in a newline', () => {

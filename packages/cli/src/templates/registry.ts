@@ -242,6 +242,50 @@ export interface TemplateDefinition {
    */
   readonly files?: readonly GeneratedFile[];
   /**
+   * Extra entries appended to the `plugins: [...]` array, rendered verbatim.
+   *
+   * Needed because a seam barrel's contribution is a SPREAD of a local array
+   * (`...GENERATED_PLUGINS`), which is not a {@linkcode Wiring} — it has no package
+   * and no symbol to import from one, and its identifier comes from
+   * {@linkcode TemplateDefinition.localImports}.
+   *
+   * Array position does not decide registration order: the kernel resolves plugins by
+   * their declared `dependencies`.
+   *
+   * Must be empty when {@linkcode TemplateDefinition.appFactory} is set, for the same
+   * reason `plugins` must: the factory owns the whole plugin set, so anything here
+   * would be silently dropped. A unit test enforces it across the registry.
+   *
+   * Omitted → nothing appended, which is what every template did before this field
+   * existed.
+   */
+  readonly pluginSpreads?: readonly string[];
+  /**
+   * Statements rendered verbatim inside `createApp()`, after the middleware block and
+   * before the hello-world route.
+   *
+   * The seam for a generated artifact whose registration site is a CALL rather than a
+   * plugin option — `registerGeneratedRoutes(app.router)`, or the loop that adds
+   * generated middleware. Neither is expressible as a `Wiring` or a
+   * `MiddlewareWiring`, and `IApplication` exposes no lifecycle hook that could carry
+   * them instead.
+   *
+   * A rendered string for the same reason {@linkcode Wiring.args} is: the value is
+   * authored by a template module in this repo and never taken from user input, so
+   * there is no injection surface. Any identifier it names must be brought into scope
+   * by {@linkcode TemplateDefinition.localImports}, and the e2e drift gate
+   * type-checks the generated project — which is the only thing that can catch a
+   * statement that does not compile.
+   *
+   * Must be empty when {@linkcode TemplateDefinition.appFactory} is set: a
+   * starter-composed template's registration is the starter's business, and the
+   * factory branch of the renderer does not emit these. A unit test enforces it across
+   * the registry rather than leaving a silently-dropped field.
+   *
+   * Omitted → nothing rendered, byte-identical to before this field existed.
+   */
+  readonly setupCalls?: readonly string[];
+  /**
    * Runtime targets this template refuses, mapped to the reason shown to the
    * user. Refusing at scaffold time beats a project that deploys and then
    * fails at first use.

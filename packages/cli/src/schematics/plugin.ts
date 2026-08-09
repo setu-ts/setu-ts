@@ -6,17 +6,20 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { GENERATED_PLUGINS_EXPORT, PLUGINS_SEAM } from '../seams/plugins.ts';
+import { seamNames } from '../seams/seam-spec.ts';
 
 /**
- * Generates a plugin module.
+ * Generates a plugin module and regenerates the seam barrel that registers it.
  *
  * @param names - Naming forms derived from the user's input
- * @param _options - Unused: the plugin shape is runtime-agnostic
- * @returns One file at `src/plugins/<kebab>.ts`
+ * @param options - Supplies the plugins already present, for the barrel
+ * @returns The plugin at `src/plugins/<kebab>.plugin.ts`, plus the managed
+ *   `src/plugins/index.ts` barrel
  */
 export function generatePlugin(
   names: DerivedNames,
-  _options: SchematicOptions,
+  options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const contents = `import { createCapabilityToken } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
@@ -32,6 +35,11 @@ export interface I${names.pascal}Service {
 
 /**
  * Registers the ${names.kebab} capability.
+ *
+ * Registered for you through the \`${GENERATED_PLUGINS_EXPORT}\` barrel in
+ * \`src/plugins/index.ts\`, which \`setu.config.ts\` spreads into
+ * \`createApplication({ plugins })\` — so this module needs no further wiring. Delete
+ * this file to stop registering it; the barrel is regenerated from the directory.
  *
  * @returns The plugin to pass to \`createApplication({ plugins: [...] })\`
  */
@@ -49,5 +57,18 @@ export function ${names.pascal}Plugin(): IPlugin {
   };
 }
 `;
-  return [{ path: `src/plugins/${names.kebab}.ts`, contents }];
+  return [
+    // `<kebab>.plugin.ts`, not the bare `<kebab>.ts` this schematic wrote before the
+    // seam existed: the barrel is regenerated from a directory scan, and a suffix of
+    // `.ts` would admit any module a developer put here — the barrel would then import
+    // a `<Pascal>Plugin` symbol they never wrote.
+    { path: `src/plugins/${names.kebab}.plugin.ts`, contents },
+    {
+      path: PLUGINS_SEAM.barrel,
+      contents: PLUGINS_SEAM.renderBarrel({
+        plugin: seamNames(options.artifacts, 'plugin', names.kebab),
+      }),
+      managed: true,
+    },
+  ];
 }

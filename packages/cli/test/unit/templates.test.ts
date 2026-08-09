@@ -101,14 +101,43 @@ describe('microservice template', () => {
       .toEqual(symbols(REST_PLUGINS));
   });
 
+  // `CqrsPlugin` and `EventsPlugin` are here because this is the only template that can
+  // HOST the CQRS and event-handler seams: all three of those schematics are gated on
+  // plugins no template installed, so their output could never be wired in a scaffolded
+  // project. Both are in-memory and zero-configuration, so they satisfy the tier's rule
+  // that a scaffolded plugin must construct with no credentials.
   it('adds exactly the service-to-service plugins', () => {
     expect(symbols(MICROSERVICE_TEMPLATE.plugins).slice(REST_PLUGINS.length)).toEqual([
       'MessagingPlugin',
       'QueuePlugin',
       'ResiliencePlugin',
       'TelemetryPlugin',
+      'CqrsPlugin',
+      'EventsPlugin',
       'ServiceDiscoveryPlugin',
     ]);
+  });
+
+  it('is the only template hosting the cqrs and events seams', () => {
+    const cqrs = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'CqrsPlugin');
+    const events = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'EventsPlugin');
+    expect(cqrs?.args).toBe(
+      '{ commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }',
+    );
+    expect(events?.args).toBe('{ handlers: EVENT_HANDLERS }');
+    // And the barrels they read are emitted from scaffold time, so a fresh project is
+    // wired before anything is generated.
+    const paths = (MICROSERVICE_TEMPLATE.files ?? []).map((f) => f.path);
+    expect(paths).toContain('src/cqrs/index.ts');
+    expect(paths).toContain('src/events/index.ts');
+  });
+
+  it('keeps neither plugin on the Workers refusal, since neither needs a socket', () => {
+    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).toContain(
+      'messaging and queue',
+    );
+    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).not.toContain('cqrs');
+    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).not.toContain('events');
   });
 
   it('wires service discovery with the static arm, the only one needing no backend', () => {
@@ -241,19 +270,28 @@ describe('nest template', () => {
   });
 
   it('carries the decorator class lists as rendered args', () => {
-    // The example classes come first, then the module barrel is spread — so a
-    // generated module registers alongside the template's own showcase classes
-    // rather than displacing them.
+    // Order is load-bearing: the example classes come first, then the standalone
+    // controller and service barrels, then the module barrel — so `setu g controller`
+    // and `setu g module` both ADD to this registration rather than displacing the
+    // template's own showcase classes.
     const decorator = NEST_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
     expect(decorator?.args).toBe(
-      '{ controllers: [GreetingController, ...MODULE_CONTROLLERS], ' +
-        'services: [GreetingService, ...MODULE_SERVICES] }',
+      '{\n' +
+        '        controllers: [GreetingController, ...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
+        '        services: [GreetingService, ...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '      }',
     );
   });
 
-  it('leaves every other wiring argument-free', () => {
+  it('leaves every wiring without a seam argument-free', () => {
+    // Three plugins now take a seam. Everything else must stay a bare call, or a
+    // template has grown configuration nothing asked for.
+    const withSeams = new Set(['decorator-plugin', 'health-plugin', 'metrics-plugin']);
     for (const wiring of NEST_TEMPLATE.plugins) {
-      if (wiring.pkg === 'decorator-plugin') continue;
+      if (withSeams.has(wiring.pkg)) {
+        expect(wiring.args).toBeDefined();
+        continue;
+      }
       expect(wiring.args).toBeUndefined();
     }
   });
@@ -267,13 +305,12 @@ describe('nest template', () => {
     const restDecorator = REST_PLUGINS.find((w) => w.pkg === 'decorator-plugin');
     expect(restDecorator?.args).toBeUndefined();
 
-    // The other two templates DO carry the module-barrel seam, but must not have
-    // picked up nest's showcase classes along with it.
+    // The other two templates DO carry the seams, but must not have picked up nest's
+    // showcase classes along with them.
     for (const plugins of [REST_TEMPLATE.plugins, MICROSERVICE_TEMPLATE.plugins]) {
       const decorator = plugins.find((w) => w.pkg === 'decorator-plugin');
-      expect(decorator?.args).toBe(
-        '{ controllers: [...MODULE_CONTROLLERS], services: [...MODULE_SERVICES] }',
-      );
+      expect(decorator?.args).toContain('...APP_CONTROLLERS, ...MODULE_CONTROLLERS');
+      expect(decorator?.args).toContain('...APP_SERVICES, ...MODULE_SERVICES');
       expect(decorator?.args).not.toContain('Greeting');
     }
   });
@@ -291,12 +328,30 @@ describe('nest template', () => {
     }
   });
 
-  it('emits the controller, the service, and the module barrel seam', () => {
+  it('emits the controller, the service, and every seam barrel it can consume', () => {
     expect((NEST_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
       'src/greeting-service.ts',
       'src/greeting-controller.ts',
       'src/modules/index.ts',
+      'src/controllers/index.ts',
+      'src/services/index.ts',
+      'src/routes/index.ts',
+      'src/middleware/index.ts',
+      'src/plugins/index.ts',
+      'src/health/index.ts',
+      'src/metrics/index.ts',
     ]);
+  });
+
+  // `nest` is the REST set plus `DiPlugin`, and `DiPlugin` hosts no seam — so its seam
+  // list must equal the REST one. A divergence here means the two templates picked up
+  // different seam sets, which is exactly the drift the shared `REST_SEAMS` prevents.
+  it('hosts the same seams as rest, and neither hosts the cqrs or events ones', () => {
+    const seamPaths = (files: readonly { readonly path: string }[]) =>
+      files.map((f) => f.path).filter((p) => p.endsWith('/index.ts')).sort();
+    expect(seamPaths(NEST_TEMPLATE.files ?? [])).toEqual(seamPaths(REST_TEMPLATE.files ?? []));
+    expect(seamPaths(NEST_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
+    expect(seamPaths(REST_TEMPLATE.files ?? [])).not.toContain('src/events/index.ts');
   });
 
   it('refuses no runtime target', () => {

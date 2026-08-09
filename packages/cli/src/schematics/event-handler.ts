@@ -5,17 +5,20 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { EVENT_HANDLERS_EXPORT, EVENTS_SEAM } from '../seams/events.ts';
+import { seamNames } from '../seams/seam-spec.ts';
 
 /**
- * Generates an event handler.
+ * Generates an event handler and regenerates the seam barrel that subscribes it.
  *
  * @param names - Naming forms derived from the user's input
- * @param _options - Unused: event handlers are runtime-agnostic
- * @returns One file at `src/events/<kebab>.event-handler.ts`
+ * @param options - Supplies the handlers already present, for the barrel
+ * @returns The handler at `src/events/<kebab>.event-handler.ts`, plus the managed
+ *   `src/events/index.ts` barrel
  */
 export function generateEventHandler(
   names: DerivedNames,
-  _options: SchematicOptions,
+  options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const contents = `import type { IDomainEvent } from '@setu-ts/common';
 import type { IEventHandler } from '@setu-ts/events-plugin';
@@ -32,8 +35,11 @@ export interface ${names.pascal}Payload {
 /**
  * Handles the ${names.kebab} event.
  *
- * Subscribe it with
- * \`subscribeHandler(bus, ${names.screaming}_EVENT, new ${names.pascal}EventHandler())\`.
+ * Subscribed through the \`${EVENT_HANDLERS_EXPORT}\` barrel in \`src/events/index.ts\`,
+ * which \`setu.config.ts\` passes to \`EventsPlugin\` — so this class needs no further
+ * wiring, and any \`bus.publish\` of \`${names.screaming}_EVENT\` reaches it. The plugin
+ * subscribes each entry through the exported \`subscribeHandler\`, which is also how to
+ * subscribe one by hand.
  */
 export class ${names.pascal}EventHandler implements IEventHandler<${names.pascal}Payload> {
   /**
@@ -47,5 +53,14 @@ export class ${names.pascal}EventHandler implements IEventHandler<${names.pascal
   }
 }
 `;
-  return [{ path: `src/events/${names.kebab}.event-handler.ts`, contents }];
+  return [
+    { path: `src/events/${names.kebab}.event-handler.ts`, contents },
+    {
+      path: EVENTS_SEAM.barrel,
+      contents: EVENTS_SEAM.renderBarrel({
+        'event-handler': seamNames(options.artifacts, 'event-handler', names.kebab),
+      }),
+      managed: true,
+    },
+  ];
 }

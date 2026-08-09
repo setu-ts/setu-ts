@@ -2,18 +2,36 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateHealthIndicator } from '../../../src/schematics/health-indicator.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('health-indicator schematic', () => {
   const files = generateHealthIndicator(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'health-indicator');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the indicator plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/health/order-item.indicator.ts',
+      'src/health/index.ts',
+    ]);
   });
 
   it('emits it at src/health/order-item.indicator.ts', () => {
     expect(file.path).toBe('src/health/order-item.indicator.ts');
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('health-indicator', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('registers instances, which is what HealthPluginOptions.indicators takes', () => {
+    const barrel = barrelOf(
+      generateHealthIndicator(deriveNames('order-item'), options()),
+      'health-indicator',
+    );
+    // The plugin reads `.name` and binds `.check` off each entry, so a constructor
+    // would not satisfy the option's own type.
+    expect(barrel.contents).toContain('new OrderItemHealthIndicator()');
+    expect(barrel.contents).toContain('readonly IHealthIndicator[]');
   });
 
   it('produces non-empty contents ending in a newline', () => {
@@ -41,5 +59,10 @@ describe('health-indicator schematic', () => {
 
   it('names the indicator after the kebab form', () => {
     expect(file.contents).toContain("readonly name = 'order-item';");
+  });
+
+  it('tells the reader it is already wired, not how to wire it', () => {
+    expect(file.contents).toContain('HEALTH_INDICATORS');
+    expect(file.contents).toContain('needs no further wiring');
   });
 });
