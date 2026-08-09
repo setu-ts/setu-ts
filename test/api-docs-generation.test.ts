@@ -848,6 +848,38 @@ error[private-type-ref]: public type references private type
       expect(result.kind).toBe('fatal');
     });
 
+    it('F3 regression: a stack trace with no "error: " literal is fatal via the stack-pattern branch', () => {
+      // This residual contains NO `error: ` literal, so the unanchored
+      // `/error: /` check does NOT fire. The stack frame is on the SECOND
+      // line (not at position 0 of the residual), so a `STACK_TRACE_PATTERN`
+      // without the `m` flag (whose `^` anchors to the start of the whole
+      // string) would MISS it and misclassify as lint-debt. The `m` flag
+      // makes `^` anchor to the start of each line, so the stack frame is
+      // found and the result is fatal. This proves the stack-pattern branch
+      // itself — not the `error: ` detector — causes the classification.
+      const stderr = 'TypeError: foo\n    at file:///x.ts:10:5\n';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('fatal');
+      // The actionable output is preserved (not converted to a baseline
+      // message).
+      expect(result.stderrStripped).toContain('TypeError: foo');
+      expect(result.stderrStripped).toContain('at file:///x.ts:10:5');
+      // No `error: ` marker is present, confirming the stack branch — not the
+      // error-detector branch — classified this.
+      expect(result.stderrStripped).not.toMatch(/^error: /m);
+    });
+
+    it('lint location lines ( --> file) are not confused with stack frames', () => {
+      // A normal lint-debt residual contains only diagnostic openers (removed),
+      // their ` --> ` location continuation lines, and the summary. The ` --> `
+      // lines must NOT match the stack-trace pattern, and the residual must
+      // classify as lint-debt, not fatal.
+      const stderr =
+        'error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 776 documentation lint errors.';
+      const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
+      expect(result.kind).toBe('lint-debt');
+    });
+
     it('recognizes the lint summary line so it is not residual-fatal', () => {
       const stderr =
         `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 776 documentation lint errors.`;

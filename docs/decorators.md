@@ -56,31 +56,76 @@ app.register(DecoratorPlugin()); // Required for decorator processing
 ### Basic Controller
 
 ```typescript
-import { Body, Controller, Get, Param, Post, Query } from '@setu-ts/decorator-plugin';
-import { inject, injectable } from '@setu-ts/di-plugin';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Injectable,
+  Param,
+  Post,
+  Query,
+} from '@setu-ts/decorator-plugin';
+
+@Injectable({ token: 'user-service' })
+export class UserService {
+  findAll() {
+    return [{ id: '1', name: 'Alice' }];
+  }
+
+  findById(id: string) {
+    return { id, name: `user-${id}` };
+  }
+
+  create(dto: { name: string }) {
+    return { id: '2', ...dto };
+  }
+}
 
 @Controller('/users')
-@injectable()
 export class UserController {
   constructor(
-    @inject('UserService') private readonly userService: UserService,
+    @Inject('user-service') private readonly userService: UserService,
   ) {}
 
   @Get()
-  async findAll() {
+  findAll() {
     return this.userService.findAll();
   }
 
   @Get('/:id')
-  async findOne(@Param('id') id: string) {
+  findOne(@Param('id') id: string) {
     return this.userService.findById(id);
   }
 
   @Post()
-  async create(@Body() dto: CreateUserDto) {
+  create(@Body() dto: { name: string }) {
     return this.userService.create(dto);
   }
 }
+```
+
+Register the controller and service with the `DecoratorPlugin` so the metadata is translated into
+routes and DI registrations:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { DiPlugin } from '@setu-ts/di-plugin';
+import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DiPlugin(),
+    DecoratorPlugin({
+      controllers: [UserController],
+      services: [UserService],
+    }),
+  ],
+});
+
+await app.start({ port: 3000 });
 ```
 
 ### HTTP Method Decorators
@@ -320,31 +365,54 @@ async list() {
 }
 ```
 
-## Exception Filters
+## Error Handling
 
-Exception filters handle errors globally or per-route.
+Setu-TS does not ship a NestJS-shaped `ExceptionFilter`/`ArgumentsHost` contract. Errors are handled
+by a single global error-handler middleware from `@setu-ts/exceptions`, registered as the outermost
+middleware so it wraps the whole pipeline. The `@UseFilters(...)` decorator attaches per-route
+filter middleware (bare `MiddlewareFunction`s or `IMiddleware` classes) that run last in the route's
+middleware chain, but the canonical, source-valid surface for global error handling is
+`errorHandler()`:
 
 ```typescript
-import { ExceptionFilter, ArgumentsHost } from '@setu-ts/decorator-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler } from '@setu-ts/exceptions';
 
-export class HttpExceptionFilter implements ExceptionFilter {
-  catch(exception: unknown, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse();
+const app = createApplication();
+app.register(RuntimePlugin());
 
-    if (exception instanceof HttpException) {
-      response.status(exception.getStatus()).json({
-        statusCode: exception.getStatus(),
-        message: exception.message,
-      });
-    }
+// Register the error handler as the outermost middleware (lowest priority
+// number) so it catches errors thrown by any downstream middleware or route
+// handler, formats them, and sends the response.
+app.middleware.add(errorHandler({ format: 'rfc7807', logErrors: true }), {
+  priority: 0,
+  name: 'error-handler',
+});
+```
+
+For per-route error handling, attach a filter middleware with `@UseFilters`:
+
+```typescript
+import { Controller, Get, UseFilters } from '@setu-ts/decorator-plugin';
+import type { IRequestContext } from '@setu-ts/common';
+
+const routeErrorHandler = async (ctx: IRequestContext, next: () => Promise<void>) => {
+  try {
+    await next();
+  } catch (error) {
+    return ctx.response.status(500).json({ error: 'route failure' });
   }
-}
+};
 
-@UseFilters(HttpExceptionFilter)
-@Get()
-async risky() {
-  // Exceptions handled by HttpExceptionFilter
+@Controller('/risky')
+export class RiskyController {
+  @Get()
+  @UseFilters(routeErrorHandler)
+  async risky() {
+    // Errors thrown here are caught by routeErrorHandler.
+    return { ok: true };
+  }
 }
 ```
 
@@ -352,16 +420,25 @@ async risky() {
 
 ### Parameter Decorator
 
+`createParameterDecorator(name, metadata?)` stores a custom parameter resolved at request time by a
+resolver registered under the same `name` via `registerParameterResolver`. There is no
+`ExecutionContext`/`switchToHttp` surface — the resolver receives the `IRequestContext` directly:
+
 ```typescript
-import { createParamDecorator } from '@setu-ts/decorator-plugin';
+import { createParameterDecorator, registerParameterResolver } from '@setu-ts/decorator-plugin';
 
-export const CurrentUser = createParamDecorator((ctx: ExecutionContext) => {
-  return ctx.switchToHttp().getRequest().context.user;
-});
+export const CurrentUser = () => createParameterDecorator('current-user');
 
-@Get()
-async info(@CurrentUser() user: unknown) {
-  return { user };
+// Register the resolver that reads the authenticated principal from the
+// request context. The registered name must match the decorator's name.
+registerParameterResolver('current-user', (ctx) => ctx.request.user);
+
+@Controller('/me')
+export class MeController {
+  @Get()
+  async info(@CurrentUser() user: unknown) {
+    return { user };
+  }
 }
 ```
 
