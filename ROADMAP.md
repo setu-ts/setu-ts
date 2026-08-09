@@ -6039,6 +6039,121 @@ a surprise the document cannot warn about.
 - **Branding guards outside `auth-plugin`** — `createFlagGuard` and `csrfFormMiddleware`
   short-circuit too, but neither maps to a security scheme. Unowned.
 
+## Milestone 58: Domain Module Scaffolding — The First Mutating Schematic
+
+**Package:** `@setu-ts/cli`
+
+An external review asked for `nest g resource`: one command that scaffolds a domain sub-module with
+its bindings already wired, rather than four `setu g` invocations plus a hand edit of
+`setu.config.ts`. Two things in that framing are already false and are recorded here so the
+milestone is not built on them. The review's premise was that the framework "uses static capability
+tokens rather than decorators" — `decorator-plugin` has shipped `@Controller`/`@Get`/`@Injectable`
+since M9, parameter-level `@Inject` since M36b, and `setu new --template nest` scaffolds exactly the
+NestJS-familiar shape. Tokens are the plugin-to-plugin seam; decorators are the application seam.
+**Nothing in this milestone is about decorators.**
+
+What is real is narrower. `packages/cli/src/schematics/` holds 13 single-artifact generators and no
+**aggregate** — a domain module today means `g controller`, `g service`, and hand-written glue. And
+no schematic touches `setu.config.ts`: `grep -rln "setu.config" packages/cli/src` hits the templates
+and the app loader, never a schematic.
+
+**That second gap is the design problem, not an oversight.** `Schematic` is
+`(names, options) => readonly GeneratedFile[]` — a pure function performing no I/O, with the command
+layer owning every write. M34 made it pure deliberately: `--dry-run` is exact because the planned
+file list IS the output, and the overwrite check ("check every planned path, then write") lives in
+exactly one place. A schematic that edits `setu.config.ts` is the first schematic that must READ the
+target project, which breaks both properties.
+
+So auto-wiring is achieved **without** mutating `setu.config.ts`: `g module <name>` emits a
+`src/modules/<name>/index.ts` barrel exporting the module's wiring, and the scaffolded
+`setu.config.ts` imports `src/modules/index.ts` once. Adding a module appends to a generated barrel
+— a file the CLI owns outright — rather than editing a file the developer owns. `TemplateDefinition`
+already carries `localImports` and `files` (M36b), so the templates can emit the barrel seam with no
+contract widening.
+
+The alternative — an AST edit of the plugin array — is **rejected with cause**, not deferred: it
+requires a TypeScript parser in a package whose entire dependency surface is zero, it cannot
+preserve a developer's formatting or comments, and it makes `--dry-run` a prediction rather than the
+truth.
+
+### Deliverables
+
+- `g module <name>` aggregate schematic: controller (gated on `decorator-plugin`), service, and
+  their tests, under `src/modules/<name>/`.
+- The `src/modules/index.ts` barrel seam, emitted by the templates and imported once by
+  `setu.config.ts`.
+- The hostile-name e2e gate (M34b) extended to `g module`, scaffolding a project, generating two
+  modules into it, and `deno check`ing the result against THIS workspace.
+- Docs: `docs/*` CLI guide, PUBLIC_API `Schematic` note that purity is preserved.
+
+### Out of scope
+
+- **Editing `setu.config.ts` in place** — rejected above, with the barrel as the shipped answer.
+- **`g module` on the `full-stack` template**, whose layering is `routes → features → services`
+  (M36c) and does not have a `src/modules/` concept. Unowned.
+- **Removing any existing schematic.** `g module` composes them; it does not replace them.
+
+## Milestone 59: Workers-Native Messaging — Closing the Last Edge Capability Gap
+
+**Package:** `@setu-ts/cloudflare-plugin` + `@setu-ts/cli`
+
+The same review reported that `--template microservice --runtime cloudflare-workers` is refused
+"because Workers lacks raw TCP socket support", and asked for HTTP-polling fallbacks. The refusal is
+real — [`microservice.ts`](packages/cli/src/templates/microservice.ts) declares
+`unsupported: { 'cloudflare-workers': … }` — but it is **template-level and unconditional**, not
+conditional on which plugins are requested, and most of the capability gap behind it closed four
+milestones ago. `cloudflare-plugin` already registers `QUEUE` (Cloudflare Queues, M52b), `CACHE`
+(KV), `STORAGE` (R2), `DATABASE` (D1, M52c) and `REALTIME_BACKPLANE` (Durable Objects, M52d).
+
+So the gap is exactly one token: **`CAPABILITIES.MESSAGING`**. All ten brokers need a socket or a
+socket-bound SDK, and [`cloud-gate.ts`](packages/messaging-plugin/src/brokers/cloud-gate.ts) hard-
+refuses Pub/Sub and Service Bus on Workers (gRPC, AMQP).
+
+**The review's suggested shape is the wrong one and is rejected here rather than in
+implementation.** An HTTP-polling adapter means a request-scoped isolate polling a queue it cannot
+hold open; a Worker has no ambient loop to poll from, which is the same constraint that makes
+`scheduler-plugin` unusable on Workers (M52b). The Workers-native answer is Cloudflare Queues for
+point-to-point plus a Durable Object for fan-out and reply correlation.
+
+`IMessageBroker` is `connect`/`disconnect`/`publish`/`subscribe`/`request`/`respond` (verified from
+`common/src/services/messaging.ts`), and the two halves fall differently:
+
+- **`publish`/`subscribe`** map onto Queues, but `subscribe` cannot be a live socket — a Cloudflare
+  queue consumer is a **module-level handler export**, so subscriptions are registered at
+  construction and driven by `createQueueHandler`'s dispatch (the M52b pattern), not by a runtime
+  callback the isolate holds open.
+- **`request`/`respond`** need a per-instance reply inbox, and an isolate cannot hold one. M14d's
+  `openInbox` seam is exactly the extension point for this: `KafkaBroker` already supplies its own
+  inbox rather than the shared `createTopicInbox`, so a Workers inbox is a third implementation of a
+  seam that exists, not a new design. The inbox lives in a Durable Object, which is the only
+  addressable long-lived thing on the platform.
+
+Whether `request`/`respond` ship at all is the milestone's open decision: the M52b Liskov precedent
+(six of eight `IScheduler` methods throwing meant not registering `SCHEDULER`) applies, so if the
+RPC half cannot be honest the plugin should register nothing rather than a mostly-throwing broker.
+Deciding that is the plan's job, on the plan's evidence.
+
+### Deliverables
+
+- `WorkersBroker` implementing `IMessageBroker` over a Queues producer plus a consumer-handler
+  dispatch table, opt-in and instance-named (`messaging.<name>`, the `cache.<name>` precedent).
+- A DO-backed reply inbox over M14d's `openInbox` seam, OR a recorded decision not to register
+  `MESSAGING` if RPC cannot be honoured — with the reasoning, per M52b's cron precedent.
+- The microservice template's Workers refusal replaced by a runtime-aware arm swapping
+  `MessagingPlugin`/`QueuePlugin` for `CloudflarePlugin`, with e2e coverage (M50b added the
+  template's first — do not assume it is otherwise covered).
+- Verification against real **workerd** via `wrangler dev`, the M52b/M52d bar. CI holds no
+  Cloudflare account, so a live-deployment claim is not available and must not be implied.
+
+### Out of scope
+
+- **HTTP-polling or WebSocket fallback adapters for the existing ten brokers** — rejected above; a
+  Worker has no loop to poll from.
+- **Lifting the Workers refusal on `scheduler-plugin`.** M52b settled that with Cron Triggers and
+  the decision not to register `SCHEDULER`.
+- **A `messaging` arm on `microservice-starter`.** M50b's boundary holds: the CLI emits inline
+  wiring and never imports a starter. Unowned.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6097,6 +6212,8 @@ a surprise the document cannot warn about.
 | 38        | ⬜     | documentation                         |
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
+| 58        | ⬜     | cli (domain module scaffolding)       |
+| 59        | ⬜     | cloudflare-plugin (workers messaging) |
 | 41        | ✅     | http-adapters                         |
 | 42        | ✅     | streaming-response                    |
 | 43        | ✅     | sse-plugin                            |
