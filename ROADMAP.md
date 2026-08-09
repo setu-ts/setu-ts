@@ -6168,6 +6168,172 @@ Deciding that is the plan's job, on the plan's evidence.
 - **A `messaging` arm on `microservice-starter`.** M50b's boundary holds: the CLI emits inline
   wiring and never imports a starter. Unowned.
 
+## Milestone 60: Generated Code That Is Wired — Closing the NestJS Productivity Gap
+
+**Package:** `@setu-ts/cli`
+
+`setu generate` emits fourteen artifacts and **one of them is reachable**. Measured, not inferred: a
+project scaffolded with `--template rest`, with every gated plugin installed and all fourteen
+schematics generated, type-checks clean (`deno check` exit `0` over every emitted file) while its
+entry points import exactly one generated path —
+
+```typescript
+import { MODULE_CONTROLLERS, MODULE_SERVICES } from './src/modules/index.ts';
+```
+
+That is the M58 barrel. The other thirteen are orphans: `g service` emits a class nothing
+constructs, `g guard` a guard nothing guards with, `g health-indicator` an indicator nothing
+registers, `g command-handler` a handler no bus dispatches to. They compile and they do nothing.
+
+**This is the whole distance from NestJS.** `nest g service foo` edits `foo.module.ts` to add the
+provider; that single behaviour is why it feels productive. Breadth is not the gap — the fourteen
+schematics cover more ground than Nest's generator does, across four runtime targets.
+
+M58 already built the mechanism and proved it: a CLI-owned barrel the scaffolded `setu.config.ts`
+already imports, regenerated from a directory scan handed to a pure schematic through
+`SchematicOptions.modules`, with the overwrite refusal lifted per-file via `GeneratedFile.managed`.
+This milestone extends that seam to the artifacts that have a registration site, and states plainly
+which do not.
+
+Not every orphan has one. Each schematic must be sorted before implementation, and the sort is a
+design decision, not a mechanical sweep:
+
+- **Has a plugin-options registration site** (`guard`, `health-indicator`, `metric`,
+  `command-handler`, `query-handler`, `event-handler`) — these plug into a plugin's options or a
+  registry the plugin owns, so each needs its own barrel and its own `localImports` entry, and each
+  needs the same functional proof M58's controller got.
+- **Registers imperatively on the app** (`route`, `middleware`, `plugin`) — `g route` already emits
+  a `registerXxxRoutes(app)` function, so the seam is a call in `createApp()` rather than a plugin
+  option. A different shape from a barrel array, and it must not silently reorder middleware
+  priorities.
+- **Has no framework registration site at all** (`service`, `migration`) — a bare service is
+  consumed by whatever imports it, and a migration is read by the database tooling by convention.
+  For these the honest answer may be to leave them unwired and say so in the emitted JSDoc, OR to
+  make `g service` emit an `@Injectable` with a token like the module's does. That choice is the
+  milestone's central decision and belongs in its plan.
+
+**The functional bar is M58's, not a type-check.** `g controller` shipped broken from M34 through
+five releases — every controller it ever emitted answered `500`, because `DecoratorPlugin` builds a
+handler's arguments from parameter metadata alone and the template expected the context
+positionally. `deno check` passed the whole time, and the unit test asserted the broken import was
+PRESENT. So every artifact this milestone wires needs a test that boots a scaffolded app and
+observes the artifact doing its job — a guard rejecting, an indicator appearing in `/health`, a
+handler receiving its command. Compiling is not working.
+
+### Deliverables
+
+- The per-schematic sort above, resolved in the plan with a named registration site (or an explicit
+  "none, and here is why") for all thirteen.
+- Barrel seams for the artifacts that have one, following M58's `module-seam.ts` pattern; the
+  templates emit each seam from scaffold time so a new project is wired before anything is
+  generated.
+- One functional e2e per wired artifact, extending M58's `bootAndProbe`, each verified to fail when
+  the wiring is removed.
+- Docs: PUBLIC_API per-schematic wiring table; CHANGELOG.
+
+### Out of scope
+
+- **`setu g app` / monorepo support** — M62.
+- **A decorator-free controller path and a `--di` flag** — M61.
+- **Changing any emitted artifact's shape** beyond what wiring requires. M58 already corrected
+  `controller` and `module`; the rest keep their current output unless wiring forces a change.
+
+## Milestone 61: Decorators and DI as Real Choices in the Generator
+
+**Package:** `@setu-ts/cli`
+
+AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is optional, and
+**"Everything has a programmatic API. No feature requires decorators or reflection."** The generator
+contradicts all three, and the contradiction is checkable:
+
+- `VALUE_FLAGS` is `dir`, `runtime`, `template` (`constants.ts`) — there is **no `--di` and no
+  `--decorators` flag**.
+- `DiPlugin` appears in exactly one template file, `templates/nest.ts`.
+- `controller` and `module` are gated on `decorator-plugin`, so a project scaffolded with **no
+  template cannot generate an HTTP handler at all** except `g route`.
+
+So the only opt-in is the template, and it is coarse: no template → neither, and the decorated
+schematics are refused; `rest`/`microservice` → decorators without DI; `nest` → both. A developer
+who wants DI without the NestJS showcase files, or a controller without decorators, has no path.
+
+The capability already exists one layer down and the CLI cannot reach it: M36b added a gated
+`di?: DiPluginOptions` arm to `RestStarterOptions`
+(`packages/starters/rest-starter/src/options.ts`), but templates emit INLINE wiring and never import
+a starter (M36b's own rule), so the arm is unreachable from `setu new`.
+
+Two deliverables, and the second is the one that discharges the guidelines' promise:
+
+- **`--di`** on `setu new`, adding `DiPlugin` to any template's wiring. Cheap: the template contract
+  already carries everything needed, and `DecoratorPlugin` branches on the container's presence, so
+  the emitted classes do not change — only the lifecycle they get. A test must pin that
+  `--template nest` is unchanged and that `--template rest --di` differs from `rest` by exactly one
+  wiring.
+- **A decorator-free path to an HTTP handler.** `g route` exists and is ungated, so the programmatic
+  path is not absent — but nothing tells a developer it is the decorator-free option, and
+  `g controller` simply refuses with "install `@setu-ts/decorator-plugin`" rather than naming the
+  alternative. The minimum honest fix is that refusal naming `g route`; the fuller one is a
+  `--no-decorators` variant of the resource generators. Which of the two ships is the plan's call.
+
+### Deliverables
+
+- `--di` flag, threaded through `new` for every template, with the no-change-to-`nest` test above.
+- The `controller`/`module` gate refusal naming `g route` as the decorator-free alternative.
+- Docs: PUBLIC_API options table and a short "decorators and DI are optional" section stating what
+  each combination gives you; the guidelines' claim becomes true rather than aspirational.
+
+### Out of scope
+
+- **Wiring generated artifacts** — M60.
+- **Removing the `decorator-plugin` gate** from `controller`/`module`. The gate is correct: those
+  emit `@Controller`, and an ungated project would get source whose own import cannot resolve (the
+  M34b defect). The fix is a better refusal, not a removed one.
+
+## Milestone 62: Monorepo Support — More Than One Deployable Service in a Repository
+
+**Package:** `@setu-ts/cli`
+
+There is **no workspace or monorepo concept in the CLI**: a grep across `packages/cli/src` for
+`workspace` / `monorepo` / app-adding surfaces returns one unrelated React Router `appDirectory`.
+The NestJS analogue is `nest g app` / `nest g library`, and nothing here corresponds to it.
+
+Today, adding a second service to a microservice project means running `setu new other --dir .`,
+which produces a fully independent project: its own manifest, its own lockfile, no shared config,
+and no knowledge of its sibling. The sharp edge is discovery — M50b wires
+`ServiceDiscoveryPlugin({ provider: 'static', services: {} })` into the microservice template with a
+**deliberately empty** map, because a sample entry would resolve to a dead port. So every caller's
+map is hand-edited, in every service, and nothing propagates a new name.
+
+Three questions must be settled in the plan before any code:
+
+- **What a Setu monorepo IS.** A Deno workspace (`deno.json` `workspace: []`, which is what this
+  repository itself uses, so there is an in-house precedent) or sibling directories with independent
+  manifests. The first gives one lockfile and one `deno task test`; the second is simpler and gives
+  neither.
+- **Who owns the discovery map.** Adding a service should register it with its callers, which is a
+  cross-FILE write — the mutation problem M58 solved for one file with a CLI-owned barrel. The same
+  technique probably applies (a generated `services.ts` the config imports), and the M58 rule holds:
+  never edit a file the developer owns.
+- **The boundary against M39.** M39 owns Docker Compose and Kubernetes manifests. A monorepo command
+  that emits a compose service per member would cross into it, so the split must be explicit — M62
+  owns the workspace and the app-side discovery map, M39 owns the platform objects.
+
+### Deliverables
+
+- `setu g app <name>` (name to be settled — `app` matches Nest, `service` matches the domain) adding
+  a member to the workspace, with the member's own `setu.config.ts` and entry.
+- Registration of the new member in its siblings' static discovery map through a CLI-owned generated
+  module, never by editing `setu.config.ts`.
+- An e2e that scaffolds a workspace, adds two members, type-checks both, and **boots one and has it
+  resolve the other through the discovery capability** — the M58 functional bar.
+- Docs: PUBLIC_API monorepo section; ARCHITECTURE note on the workspace shape; CHANGELOG.
+
+### Out of scope
+
+- **Compose / Kubernetes objects per member** — M39, per the boundary above.
+- **Converting an existing single-service project into a workspace.** A migration command is its own
+  design; the first version creates a workspace or adds to one that already exists. Unowned.
+- **Shared library members** (`nest g library`). Deferred until the application case is proven.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6228,6 +6394,9 @@ Deciding that is the plan's job, on the plan's evidence.
 | 40        | ⬜     | final release                         |
 | 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ⬜     | cloudflare-plugin (workers messaging) |
+| 60        | ⬜     | cli (wire generated artifacts)        |
+| 61        | ⬜     | cli (decorator/DI opt-in)             |
+| 62        | ⬜     | cli (monorepo support)                |
 | 41        | ✅     | http-adapters                         |
 | 42        | ✅     | streaming-response                    |
 | 43        | ✅     | sse-plugin                            |
