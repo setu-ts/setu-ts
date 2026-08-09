@@ -461,14 +461,14 @@ async createItem() {}
 
 Every decorator has a programmatic equivalent:
 
-| Decorator                       | Programmatic                                          |
-| ------------------------------- | ----------------------------------------------------- |
-| `@Controller('/path')`          | `app.router.get('/path', handler)`                    |
-| `@injectable()`                 | `ctx.services.register('token', instance)`            |
-| `@inject('token')`              | N/A (injection configuration)                         |
-| `@UseGuards(Guard)`             | Middleware: `app.middleware.add(guardMiddleware)`     |
+| Decorator                       | Programmatic                                            |
+| ------------------------------- | ------------------------------------------------------- |
+| `@Controller('/path')`          | `app.router.get('/path', handler)`                      |
+| `@injectable()`                 | `ctx.services.register('token', instance)`              |
+| `@inject('token')`              | N/A (injection configuration)                           |
+| `@UseGuards(Guard)`             | Middleware: `app.middleware.add(guardMiddleware)`       |
 | `@UseInterceptors(Interceptor)` | Middleware: `app.middleware.add(interceptorMiddleware)` |
-| `@UseFilters(Filter)`           | Exception handler: `app.middleware.add(errorHandler)` |
+| `@UseFilters(Filter)`           | Exception handler: `app.middleware.add(errorHandler)`   |
 
 ## Examples
 

@@ -184,7 +184,9 @@ export async function collectApiEntrypoints(
   const reconciliation = reconcileWorkspaceVsPublication(workspace, PUBLISHED_PACKAGES);
   if (reconciliation.missingInPublication.length > 0) {
     throw new Error(
-      `Workspace members missing from PUBLISHED_PACKAGES: ${reconciliation.missingInPublication.join(', ')}`,
+      `Workspace members missing from PUBLISHED_PACKAGES: ${
+        reconciliation.missingInPublication.join(', ')
+      }`,
     );
   }
   if (reconciliation.missingInWorkspace.length > 0) {
