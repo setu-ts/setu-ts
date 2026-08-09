@@ -1776,6 +1776,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   answered `404` until the developer hand-edited the config. It is now proven by BOOTING a
   scaffolded bare project and driving the route (200), its middleware header, and its plugin token.
 
+  **Booting the full matrix found two defects the gates could not see, and both are fixed here.**
+  Every `template x --di` combination was scaffolded, generated into, and BOOTED in a subprocess:
+  all 8 serve, `nest` and `nest --di` are byte-identical (the dedupe holding), and a `transient`
+  `@Injectable` resolves to ONE instance without a container and TWO with one — which is what makes
+  `--di` a real composition change rather than a registered-and-ignored plugin. (1) The generated
+  service's JSDoc told consumers to reach the class with `services.get('<name>-service')`; with a
+  container that THROWS, because `registerService` registers a provider on the container and never
+  touches the kernel registry. Before `--di` only `nest` had a container, so the advice was almost
+  always right — the flag makes it wrong on every template, which is why the correction ships here.
+  (2) **`--runtime node` could not run ANY decorated code.** It started with
+  `node --experimental-strip-types main.ts`, and Node's built-in TypeScript support erases types
+  without transforming code: a legacy decorator is a bare `SyntaxError` and the constructor
+  parameter property `g module` emits is `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. So `--template rest`
+  and `g route` booted while `g service`, `g controller`, `g module` and `--template nest` could not
+  start at all — nest not even from a clean scaffold, shipped that way since M34. Node projects now
+  declare `tsx` and start with `tsx main.ts`, reading the `experimentalDecorators` the generated
+  tsconfig already sets; `--experimental-transform-types` was tried and rejected (it fixes the
+  parameter property and still refuses the decorator). Runtime-level, not template-level — Bun
+  compiles TypeScript outright and Deno/Workers never invoke the runner. Verified with real
+  `npm install` + `npm start`. **Every runtime was driven for real**: Deno (8 combos), Bun
+  (`bun install`, all artifacts 200), Node (as above), Cloudflare Workers (through the real
+  `fetch(request, env)` export), and `full-stack --di` through a real `deno install` +
+  `react-router build` to an SSR 200 with the container live — which is what proves the `di: {}`
+  string reaches the starter rather than merely being emitted. NOT verified against a deployed
+  Worker: `wrangler` is not installed here, so Workers ran through its fetch export, not workerd.
+
   **A `--no-decorators` variant was rejected rather than deferred**: it would have to emit a
   router-registered handler module, which is exactly what `g route` emits, so it is either a second
   copy of that schematic (§11.1) or a bare alias — dead surface either way.
