@@ -4880,6 +4880,7 @@ setu commands
 setu db:migrate up 3                           # runs a plugin-registered command
 
 # Generate code
+setu generate module orders                    # requires @setu-ts/decorator-plugin
 setu generate plugin my-plugin
 setu generate controller user-profile
 setu generate service user-profile
@@ -4935,8 +4936,68 @@ imports or boots the project. A schematic whose backing plugin is absent is refu
 
 ### Overwrite protection
 
-A generate that would overwrite ANY existing file writes NOTHING at all — every planned path is
+A generate that would overwrite any existing file writes NOTHING at all — every planned path is
 checked before the first write, so a multi-file schematic can never leave a half-written tree.
+
+The one exception is a **managed file**: a path the CLI generated itself and regenerates, declared
+by the schematic as `GeneratedFile.managed`. Managed paths are exempt from the check and rewritten
+in place; every other path keeps the refusal above, including within the same command. The exemption
+is per file rather than a `--force` flag, so a mistyped `setu g service user` can never clobber
+hand-written work.
+
+Exactly one managed file ships today: `src/modules/index.ts`, the aggregate module barrel.
+
+### Domain modules
+
+`setu generate module <name>` is the one aggregate schematic. It emits a whole domain sub-module and
+wires it in, without editing `setu.config.ts`:
+
+```
+src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
+src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject
+src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
+src/modules/<name>/index.ts                 the module's own re-exports
+src/modules/index.ts                        the aggregate barrel  (managed — regenerated)
+```
+
+The aggregate barrel exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, and the `rest`,
+`microservice` and `nest` templates scaffold a `setu.config.ts` that already imports both and passes
+them to `DecoratorPlugin`:
+
+```typescript
+import { MODULE_CONTROLLERS, MODULE_SERVICES } from './src/modules/index.ts';
+
+DecoratorPlugin({ controllers: [...MODULE_CONTROLLERS], services: [...MODULE_SERVICES] });
+```
+
+So generating a module changes only files the CLI owns. Regenerating over an existing module still
+refuses on that module's own files; the barrel is rewritten either way and lists each module once.
+
+A project scaffolded before this schematic existed has no barrel import — add the two lines above to
+its `setu.config.ts` once, and every later `setu g module` is wired automatically.
+`--template
+full-stack` is deliberately not a host: its layering is `routes → features → services`
+and it has no `src/modules/` concept.
+
+A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
+setup — as a `deno.json` import on Deno and Cloudflare Workers, and as an `npm:@jsr/std__*` alias in
+`devDependencies` on Node and Bun, which get a `package.json` and no `deno.json`. Only a directory
+holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a module, so unrelated
+folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
+than breaking it.
+
+The emitted controller's handlers take **only decorated parameters** and return plain values, which
+the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a style choice: it
+builds a handler's argument list from parameter metadata alone and never passes the request context
+positionally, so a `ctx: IRequestContext` parameter arrives `undefined` and the first `ctx.response`
+throws — a 500 on every request. There is no built-in decorator for the context, so a handler that
+needs it (to set a status code, or to stream) belongs on `app.router.get(...)` — see
+`setu generate route`.
+
+The service's `@Injectable` token is explicit (`'<name>-service'`) and the controller's `@Inject`
+names that exact string, because `emitDecoratorMetadata` is unavailable under Deno, so a parameter's
+type cannot be read. The module works with and without `DiPlugin`: with a container the service is
+constructed through it, without one it resolves from the kernel's service registry.
 
 ### Project templates
 
@@ -5119,26 +5180,30 @@ export function schematic(
 ```
 
 `DerivedNames` carries `raw`, `kebab`, `camel`, `pascal`, and `screaming`. `SchematicOptions`
-carries the target `runtime`, the detected `plugins` set, and `now()` — an injected clock, so
-timestamped output stays deterministic. Schematics perform no I/O; the command layer writes what
-they return, which is what makes `--dry-run` exact.
+carries the target `runtime`, the detected `plugins` set, `now()` — an injected clock, so
+timestamped output stays deterministic — and `modules?`, the domain modules already present under
+`src/modules/`. Schematics perform no I/O; the command layer gathers the project state they need and
+writes what they return, which is what makes `--dry-run` exact.
+
+`modules` is optional so that a harness written before it existed still compiles; `setu generate`
+always supplies it. `GeneratedFile` carries an optional `managed` flag — see "Overwrite protection".
 
 ### Programmatic API
 
-| Export             | Kind     | Purpose                                                                   |
-| ------------------ | -------- | ------------------------------------------------------------------------- |
-| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.           |
-| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.      |
-| `deriveNames`      | function | Produces the five naming forms every schematic uses.                      |
-| `DerivedNames`     | type     | The result of `deriveNames`.                                              |
-| `GeneratedFile`    | type     | `{ path, contents }` — one file a schematic asks to create.               |
-| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                           |
-| `SchematicOptions` | type     | The second parameter of every schematic.                                  |
-| `PROGRAM_NAME`     | const    | `'setu'` — interpolated into every usage string.                          |
-| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically. |
-| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                     |
-| `AppLoader`        | type     | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).  |
-| `detectPlugins`    | function | Reads a project manifest and returns the installed `@setu-ts` names.      |
+| Export             | Kind     | Purpose                                                                         |
+| ------------------ | -------- | ------------------------------------------------------------------------------- |
+| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                 |
+| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.            |
+| `deriveNames`      | function | Produces the five naming forms every schematic uses.                            |
+| `DerivedNames`     | type     | The result of `deriveNames`.                                                    |
+| `GeneratedFile`    | type     | `{ path, contents, managed? }` — one file a schematic asks to create.           |
+| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                                 |
+| `SchematicOptions` | type     | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`). |
+| `PROGRAM_NAME`     | const    | `'setu'` — interpolated into every usage string.                                |
+| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically.       |
+| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                           |
+| `AppLoader`        | type     | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).        |
+| `detectPlugins`    | function | Reads a project manifest and returns the installed `@setu-ts` names.            |
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is

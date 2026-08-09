@@ -36,12 +36,20 @@ describe('controller schematic', () => {
     expect(file.contents).toContain('export class OrderItemController');
   });
 
-  it('imports the decorators it uses as values and the types as types', () => {
+  it('imports the decorators it uses', () => {
     expect(file.contents).toContain(
-      "import { Controller, Get, Post } from '@setu-ts/decorator-plugin';",
+      "import { Body, Controller, Get, Post } from '@setu-ts/decorator-plugin';",
     );
-    expect(file.contents).toContain(
-      "import type { HandlerResult, IRequestContext } from '@setu-ts/common';",
-    );
+  });
+
+  it('declares no request-context parameter on a handler', () => {
+    // This assertion previously pinned the OPPOSITE — it required the
+    // `IRequestContext` import — which is how a controller that answered 500 on
+    // every request stayed "covered". The plugin builds a handler's arguments from
+    // parameter metadata alone and never passes the context positionally, so a
+    // `ctx` parameter arrives `undefined` and the first `ctx.response` throws.
+    // The e2e that boots a scaffolded app is the real proof; this is the fast one.
+    expect(file.contents).not.toContain('IRequestContext');
+    expect(file.contents).not.toContain('ctx.response');
   });
 });

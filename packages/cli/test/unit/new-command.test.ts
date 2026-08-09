@@ -407,9 +407,51 @@ describe('runNewCommand', () => {
       await h.run(['app', '--runtime', 'deno']);
       expect(h.fs.has('/work/app/package.json')).toBe(false);
     });
+
+    // A Deno project must not gain an npm manifest just because its template
+    // declares npm packages for some other purpose. Beyond being noise, a
+    // package.json switches Deno to node_modules resolution, so a project whose
+    // import graph reaches a lazily-imported npm driver stops resolving on a cold
+    // checkout — the trap `apps/full-stack` documents.
+    for (const template of ['rest', 'microservice', 'nest']) {
+      it(`emits no npm manifest for --template ${template}`, async () => {
+        const h = harness();
+
+        await h.run(['app', '--runtime', 'deno', '--template', template]);
+
+        expect(h.fs.has('/work/app/package.json')).toBe(false);
+        expect(h.fs.has('/work/app/tsconfig.json')).toBe(false);
+      });
+    }
   });
 
   for (const runtime of ['node', 'bun']) {
+    describe(`--runtime ${runtime} — npm scripts`, () => {
+      it('declares the module test dependencies without a frontend build script', async () => {
+        // The `rest` template declares @std/* so the module schematic's emitted
+        // test can run. That must NOT be read as "this template has a frontend
+        // npm build" — a REST project with `npm run build` invoking a tool it
+        // does not depend on is a broken script the developer did not ask for.
+        const h = harness();
+
+        await h.run(['app', '--runtime', runtime, '--template', 'rest']);
+
+        const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
+        expect(pkg.devDependencies['@std/expect']).toBe('npm:@jsr/std__expect@^1.0.20');
+        expect(pkg.scripts.build).toBeUndefined();
+        expect(pkg.scripts.start).toBeDefined();
+      });
+
+      it('keeps the frontend build script for the template that has one', async () => {
+        const h = harness();
+
+        await h.run(['app', '--runtime', runtime, '--template', 'full-stack']);
+
+        const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
+        expect(pkg.scripts.build).toBe('react-router build');
+      });
+    });
+
     describe(`--runtime ${runtime}`, () => {
       it('emits a package.json with npm-compatible JSR specifiers', async () => {
         const h = harness();

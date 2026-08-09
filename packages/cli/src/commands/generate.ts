@@ -33,6 +33,7 @@ import {
   type SchematicOptions,
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
+import { readModuleNames } from '../utils/module-scanner.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -175,7 +176,17 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
 
-  const options: SchematicOptions = { runtime, plugins: installed, now: deps.now };
+  // Read unconditionally, like `detectPlugins` above: the `module` schematic
+  // needs it to render its aggregate barrel, and branching on the schematic name
+  // here would put a second dispatch beside the registry.
+  const modules = await readModuleNames(deps.fs, dir);
+
+  const options: SchematicOptions = {
+    runtime,
+    plugins: installed,
+    now: deps.now,
+    modules,
+  };
 
   let generated: readonly GeneratedFile[];
   try {
@@ -191,9 +202,13 @@ export async function runGenerateCommand(
 
   // Root every path at the target directory before touching the filesystem, so
   // the overwrite check and the write agree on exactly the same paths.
+  // Spread the file rather than rebuilding it from two known fields: dropping a
+  // member here silently discards whatever the schematic declared about it, and
+  // losing `managed` makes the aggregate module barrel refuse on every run after
+  // the first.
   const files: readonly GeneratedFile[] = generated.map((file) => ({
+    ...file,
     path: joinPath(dir, file.path),
-    contents: file.contents,
   }));
 
   if (files.length === 0) {
