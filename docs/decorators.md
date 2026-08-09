@@ -201,7 +201,7 @@ optional scope and token; `@Inject` declares a constructor-parameter token.
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
-import type { ICacheStore } from '@setu-ts/common';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 interface UserRepository {
   findAll(table: string): Promise<readonly { id: string; name: string }[]>;
@@ -211,7 +211,7 @@ interface UserRepository {
 export class UserService {
   constructor(
     @Inject('user-repository') private readonly repo: UserRepository,
-    @Inject('cache') private readonly cache: ICacheStore,
+    @Inject(CAPABILITIES.CACHE) private readonly cache: ICacheStore,
   ) {}
 
   async findAll() {
@@ -233,13 +233,13 @@ Setu-TS requires explicit tokens for parameter injection because type-inferred i
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
-import type { ICacheStore } from '@setu-ts/common';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 @Injectable()
 export class UserRepository {
   // Preferred: one token per constructor parameter, bound by position.
   constructor(
-    @Inject('cache') private readonly cache: ICacheStore,
+    @Inject(CAPABILITIES.CACHE) private readonly cache: ICacheStore,
   ) {}
 }
 ```
@@ -249,10 +249,10 @@ is mutually exclusive with the parameter form (a class carrying both fails at `r
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
-import type { ICacheStore } from '@setu-ts/common';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 @Injectable()
-@Inject('cache')
+@Inject(CAPABILITIES.CACHE)
 export class UserRepository {
   constructor(private readonly cache: ICacheStore) {}
 }
@@ -265,12 +265,12 @@ the argument receives `undefined` instead of failing construction. A token is st
 
 ```typescript
 import { Inject, Injectable, Optional } from '@setu-ts/decorator-plugin';
-import type { ICacheStore } from '@setu-ts/common';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 @Injectable()
 export class MyService {
   constructor(
-    @Optional() @Inject('cache') private readonly cache?: ICacheStore,
+    @Optional() @Inject(CAPABILITIES.CACHE) private readonly cache?: ICacheStore,
   ) {}
 }
 ```
@@ -696,7 +696,7 @@ Setu-TS does not emit design metadata. You must provide explicit tokens:
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
-import type { ICacheStore } from '@setu-ts/common';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 // ❌ This won't work - type information is not available
 @Injectable()
@@ -707,7 +707,7 @@ class UserRepository {
 // ✅ Provide explicit token
 @Injectable()
 class UserRepositoryOk {
-  constructor(@Inject('cache') private readonly cache: ICacheStore) {}
+  constructor(@Inject(CAPABILITIES.CACHE) private readonly cache: ICacheStore) {}
 }
 ```
 

@@ -185,6 +185,7 @@ Database operations.
 **Key code:**
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 import type { IDatabaseService, IRepository } from '@setu-ts/database-plugin';
 
@@ -192,7 +193,7 @@ app.register(DatabasePlugin({
   type: 'memory', // Use in-memory for development
 }));
 
-const db = ctx.services.get<IDatabaseService>('database');
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
 const itemsRepo = db.getRepository<{ id: string; name: string }>('items');
 const items = await itemsRepo.findAll();
 const item = await itemsRepo.findById('1');
@@ -218,11 +219,11 @@ Command-Query Responsibility Segregation.
 
 ```typescript
 import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
-import type { CqrsCommand, CqrsQuery } from '@setu-ts/common';
+import { CAPABILITIES, type CqrsCommand, type CqrsQuery } from '@setu-ts/common';
 
 app.register(CqrsPlugin());
 
-const cqrs = ctx.services.get<ICqrsFacade>('cqrs');
+const cqrs = ctx.services.get<ICqrsFacade>(CAPABILITIES.CQRS);
 
 // Command — pass a command object matching your command handler type
 const result = await cqrs.commandBus.execute({} as unknown as CqrsCommand);
@@ -248,7 +249,7 @@ Cross-service communication.
 
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-import type { MessageHandler } from '@setu-ts/common';
+import { CAPABILITIES, type MessageHandler } from '@setu-ts/common';
 
 // The redis-streams arm is discriminated on `broker: 'redis-streams'`.
 // `url` is the Redis connection URL (read when no client is injected);
@@ -259,7 +260,7 @@ app.register(MessagingPlugin({
   defaultQueue: 'items-consumers',
 }));
 
-const broker = ctx.services.get<IMessageBroker>('messaging');
+const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
 // Subscribe — the handler receives the message payload directly
 await broker.subscribe('items.created', (message: { id: string; name: string }) => {
@@ -421,10 +422,13 @@ React Router SSR.
 import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 import type { SsrRequestHandler } from '@setu-ts/react-router-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
+import { CAPABILITIES, type IRuntimeServices } from '@setu-ts/common';
 
-app.register(SessionPlugin({
-  secret: process.env.SESSION_SECRET!,
-}));
+const sessionSecret = app.services
+  .get<IRuntimeServices>(CAPABILITIES.RUNTIME)
+  .env.SESSION_SECRET;
+if (sessionSecret === undefined) throw new Error('SESSION_SECRET is required');
+app.register(SessionPlugin({ secret: sessionSecret }));
 
 app.register(ReactRouterPlugin({
   // Absolute path/URL to the React Router Vite server build (default export

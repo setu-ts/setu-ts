@@ -267,7 +267,7 @@ Hard dependencies must be present for your plugin to work:
 const MyPlugin: IPlugin = {
   name: 'my-plugin',
   version: '1.0.0',
-  dependencies: ['runtime', 'logger'], // Will fail if missing
+  dependencies: [CAPABILITIES.RUNTIME, CAPABILITIES.LOGGER], // Will fail if missing
   register(ctx) {
     // ctx.logger is guaranteed to be available
   },
@@ -282,9 +282,9 @@ Optional dependencies are used when available:
 const MyPlugin: IPlugin = {
   name: 'my-plugin',
   version: '1.0.0',
-  optionalDependencies: ['cache'], // Works without it
+  optionalDependencies: [CAPABILITIES.CACHE], // Works without it
   register(ctx) {
-    if (ctx.services.has('cache')) {
+    if (ctx.services.has(CAPABILITIES.CACHE)) {
       // Use cache
     } else {
       // Fallback behavior
@@ -301,7 +301,7 @@ The `consumes` field indicates capabilities your plugin needs but won't fail if 
 const MyPlugin: IPlugin = {
   name: 'my-plugin',
   version: '1.0.0',
-  consumes: ['metrics'], // Warning if missing, but doesn't fail
+  consumes: [CAPABILITIES.METRICS], // Warning if missing, but doesn't fail
   register(ctx) {
     // Plugin works but logs a warning if metrics not available
   },
@@ -376,8 +376,8 @@ Always use capability tokens from `@setu-ts/common` or create your own with
 Check for optional dependencies before using them:
 
 ```typescript
-if (ctx.services.has('cache')) {
-  const cache = ctx.services.get<ICacheStore>('cache');
+if (ctx.services.has(CAPABILITIES.CACHE)) {
+  const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
   // Use cache
 }
 ```

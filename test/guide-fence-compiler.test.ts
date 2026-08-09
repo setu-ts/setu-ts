@@ -32,6 +32,99 @@ import {
 
 const SCRATCH_DIR = '.tmp/guide-fences';
 
+interface FenceCounts {
+  readonly total: number;
+  readonly ts: number;
+  readonly compile: number;
+  readonly external: number;
+  readonly pseudocode: number;
+  readonly skipped: number;
+}
+
+const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
+  'docs/getting-started.md': {
+    total: 22,
+    ts: 12,
+    compile: 12,
+    external: 0,
+    pseudocode: 0,
+    skipped: 10,
+  },
+  'docs/programmatic-api.md': {
+    total: 41,
+    ts: 41,
+    compile: 41,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
+  },
+  'docs/custom-plugins.md': {
+    total: 23,
+    ts: 20,
+    compile: 20,
+    external: 0,
+    pseudocode: 0,
+    skipped: 3,
+  },
+  'docs/plugin-architecture.md': {
+    total: 17,
+    ts: 17,
+    compile: 17,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
+  },
+  'docs/examples.md': {
+    total: 14,
+    ts: 11,
+    compile: 11,
+    external: 0,
+    pseudocode: 0,
+    skipped: 3,
+  },
+  'docs/decorators.md': {
+    total: 30,
+    ts: 28,
+    compile: 28,
+    external: 0,
+    pseudocode: 0,
+    skipped: 2,
+  },
+  'docs/migration-fastify.md': {
+    total: 32,
+    ts: 32,
+    compile: 16,
+    external: 16,
+    pseudocode: 0,
+    skipped: 0,
+  },
+  'docs/migration-nestjs.md': {
+    total: 34,
+    ts: 34,
+    compile: 18,
+    external: 16,
+    pseudocode: 0,
+    skipped: 0,
+  },
+  'docs/runtime-deployment.md': {
+    total: 29,
+    ts: 12,
+    compile: 12,
+    external: 0,
+    pseudocode: 0,
+    skipped: 17,
+  },
+};
+
+const EXPECTED_AGGREGATE: FenceCounts = {
+  total: 242,
+  ts: 207,
+  compile: 175,
+  external: 32,
+  pseudocode: 0,
+  skipped: 35,
+};
+
 describe('actual-fence compiler — all nine guides (shared engine)', () => {
   it('compiles every compile fence against the workspace', async () => {
     const all = await allFences();
@@ -45,7 +138,9 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
       const fence = classified.fence;
       const safe = fence.guide.replace(/[/.]/g, '_');
       const file = `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}.ts`;
-      const { assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
+      const { assembleSource } = await import(
+        './fixtures/snippets/fence-engine.ts'
+      );
       const source = assembleSource(fence, classified);
       await Deno.writeTextFile(file, source);
       const { code, stderr } = await denoCheck(file);
@@ -66,50 +161,77 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
 
   it('per-guide total/compile/exclude/skip counts are pinned', async () => {
     const all = await allFences();
-    const perGuide = new Map<string, {
-      total: number;
-      ts: number;
-      compile: number;
-      exclude: number;
-      skipped: number;
-    }>();
+    const perGuide = new Map<string, FenceCounts>();
     for (const classified of all) {
       const fence = classified.fence;
       const g = perGuide.get(fence.guide) ??
-        { total: 0, ts: 0, compile: 0, exclude: 0, skipped: 0 };
-      g.total += 1;
-      if (TS_ALIASES.has(fence.lang)) g.ts += 1;
-      if (classified.kind === 'compile-complete' || classified.kind === 'compile-fragment') {
-        g.compile += 1;
-      } else if (
-        classified.kind === 'external-source' || classified.kind === 'non-runnable-pseudocode'
-      ) {
-        g.exclude += 1;
-      } else {
-        g.skipped += 1;
-      }
-      perGuide.set(fence.guide, g);
+        { total: 0, ts: 0, compile: 0, external: 0, pseudocode: 0, skipped: 0 };
+      const next: FenceCounts = {
+        ...g,
+        total: g.total + 1,
+        ts: g.ts + (TS_ALIASES.has(fence.lang) ? 1 : 0),
+        compile: g.compile + ((
+            classified.kind === 'compile-complete' ||
+            classified.kind === 'compile-fragment'
+          )
+          ? 1
+          : 0),
+        external: g.external + (classified.kind === 'external-source' ? 1 : 0),
+        pseudocode: g.pseudocode +
+          (classified.kind === 'non-runnable-pseudocode' ? 1 : 0),
+        skipped: g.skipped + (classified.kind === 'skip' ? 1 : 0),
+      };
+      perGuide.set(fence.guide, next);
     }
     // Every guide must have at least one fence, and at least one compile fence
     // OR one excluded TS block (a guide with zero TS fences is a defect).
     for (const [guide, counts] of perGuide) {
       expect(counts.total).toBeGreaterThan(0);
       if (counts.ts === 0 && counts.compile === 0) {
-        throw new Error(`${guide} has zero TypeScript fences and zero compiled fences.`);
+        throw new Error(
+          `${guide} has zero TypeScript fences and zero compiled fences.`,
+        );
       }
     }
-    // Report the counts (visible in test output on failure).
-    const report = [...perGuide.entries()]
-      .map(([g, c]) =>
-        `${g}: total=${c.total} ts=${c.ts} compile=${c.compile} exclude=${c.exclude} skipped=${c.skipped}`
-      )
-      .join('\n');
-    // Assert each guide is present — a missing guide is a defect.
-    for (const guide of GUIDES) {
-      expect(perGuide.has(guide)).toBe(true);
+    expect(Object.fromEntries(perGuide)).toEqual(EXPECTED_INVENTORY);
+    const aggregate = [...perGuide.values()].reduce<FenceCounts>(
+      (sum, count) => ({
+        total: sum.total + count.total,
+        ts: sum.ts + count.ts,
+        compile: sum.compile + count.compile,
+        external: sum.external + count.external,
+        pseudocode: sum.pseudocode + count.pseudocode,
+        skipped: sum.skipped + count.skipped,
+      }),
+      { total: 0, ts: 0, compile: 0, external: 0, pseudocode: 0, skipped: 0 },
+    );
+    expect(aggregate).toEqual(EXPECTED_AGGREGATE);
+    expect(Object.keys(EXPECTED_INVENTORY)).toEqual([...GUIDES]);
+  });
+
+  it('rejects request/plugin context mixing and synthetic context widening', async () => {
+    const { assembleSource, classify } = await import(
+      './fixtures/snippets/fence-engine.ts'
+    );
+    const cases = [
+      "ctx.state['invalid'] = true;",
+      'ctx.request.text(); ctx.lifecycle.onClose(() => {});',
+      "ctx.services.register('app:test', {}, { singleton: true, lazy: true });",
+    ];
+    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    for (const [index, code] of cases.entries()) {
+      const fence = {
+        guide: 'docs/programmatic-api.md',
+        index,
+        line: 1,
+        heading: 'negative control',
+        lang: 'typescript',
+        code,
+      };
+      const file = `${SCRATCH_DIR}/context-negative-${index}.ts`;
+      await Deno.writeTextFile(file, assembleSource(fence, classify(fence)));
+      expect((await denoCheck(file)).code).not.toBe(0);
     }
-    expect(perGuide.size).toBe(GUIDES.length);
-    expect(report.length).toBeGreaterThan(0);
   });
 
   it('excluded external-source/pseudocode blocks carry a heading and reason', async () => {
@@ -148,7 +270,9 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
     // gate, proving the fence engine (not a raw deno-check of raw code) catches
     // the mutation. Assert: original compiles, mutation replaces the option,
     // mutated source fails, and diagnostic names NONEXISTENT_BROKEN_OPTION.
-    const { classify, assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
+    const { classify, assembleSource } = await import(
+      './fixtures/snippets/fence-engine.ts'
+    );
     const cloudflareGuide = 'docs/runtime-deployment.md';
     const markdown = await Deno.readTextFile(cloudflareGuide);
     const fences = extractFences(cloudflareGuide, markdown);
@@ -163,7 +287,10 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
     expect(original).toBeDefined();
 
     // Original source must compile (or be a genuine external/excluded classification)
-    if (original.kind === 'compile-complete' || original.kind === 'compile-fragment') {
+    if (
+      original.kind === 'compile-complete' ||
+      original.kind === 'compile-fragment'
+    ) {
       await Deno.mkdir(SCRATCH_DIR, { recursive: true });
       const origFile = `${SCRATCH_DIR}/b1-cloudflare-original.ts`;
       const origSource = assembleSource(cfFence!, original);
@@ -186,7 +313,9 @@ describe('actual-fence compiler — all nine guides (shared engine)', () => {
     const mutated = classify(mutatedFence);
 
     // The mutated fence must fail compilation through the shared engine
-    if (mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment') {
+    if (
+      mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment'
+    ) {
       await Deno.mkdir(SCRATCH_DIR, { recursive: true });
       const mutFile = `${SCRATCH_DIR}/b1-cloudflare-mutated.ts`;
       const mutSource = assembleSource(mutatedFence, mutated);

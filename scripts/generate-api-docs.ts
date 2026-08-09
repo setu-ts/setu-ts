@@ -127,19 +127,27 @@ export type ManifestReadFailure =
 export async function readManifestExports(
   manifestPath: string,
   fs: { readTextFile: (path: string) => Promise<string> },
-): Promise<{ ok: true; targets: string[] } | { ok: false; failure: ManifestReadFailure }> {
+): Promise<
+  { ok: true; targets: string[] } | { ok: false; failure: ManifestReadFailure }
+> {
   let content: string;
   try {
     content = await fs.readTextFile(manifestPath);
   } catch (cause) {
-    return { ok: false, failure: { kind: 'read-failed', path: manifestPath, cause } };
+    return {
+      ok: false,
+      failure: { kind: 'read-failed', path: manifestPath, cause },
+    };
   }
 
   let manifest: { exports?: unknown };
   try {
     manifest = JSON.parse(content) as { exports?: unknown };
   } catch (cause) {
-    return { ok: false, failure: { kind: 'malformed-manifest', path: manifestPath, cause } };
+    return {
+      ok: false,
+      failure: { kind: 'malformed-manifest', path: manifestPath, cause },
+    };
   }
 
   // A valid manifest with no `exports` field at all, or an `exports` that is
@@ -147,14 +155,21 @@ export async function readManifestExports(
   if (
     manifest.exports === undefined ||
     manifest.exports === null ||
-    (typeof manifest.exports !== 'string' && typeof manifest.exports !== 'object')
+    (typeof manifest.exports !== 'string' &&
+      typeof manifest.exports !== 'object')
   ) {
-    return { ok: false, failure: { kind: 'invalid-export-map', path: manifestPath } };
+    return {
+      ok: false,
+      failure: { kind: 'invalid-export-map', path: manifestPath },
+    };
   }
 
   const targets = expandExportTargets(manifest.exports);
   if (targets.length === 0) {
-    return { ok: false, failure: { kind: 'no-export-targets', path: manifestPath } };
+    return {
+      ok: false,
+      failure: { kind: 'no-export-targets', path: manifestPath },
+    };
   }
 
   return { ok: true, targets };
@@ -228,12 +243,20 @@ export async function collectApiEntrypoints(
     readDir: (path: string) => AsyncIterable<Deno.DirEntry>;
     stat: (path: string) => Promise<Deno.FileInfo>;
   },
-): Promise<{ targets: string[]; targetsWithPackage: Array<{ target: string; pkg: string }> }> {
+): Promise<
+  {
+    targets: string[];
+    targetsWithPackage: Array<{ target: string; pkg: string }>;
+  }
+> {
   // Read authoritative workspace from root deno.json
   const workspace = await readWorkspaceMembers(fs);
 
   // Independent reconciliation
-  const reconciliation = reconcileWorkspaceVsPublication(workspace, PUBLISHED_PACKAGES);
+  const reconciliation = reconcileWorkspaceVsPublication(
+    workspace,
+    PUBLISHED_PACKAGES,
+  );
   if (reconciliation.missingInPublication.length > 0) {
     throw new Error(
       `Workspace members missing from PUBLISHED_PACKAGES: ${
@@ -328,7 +351,10 @@ export async function collectApiEntrypoints(
     }
   }
 
-  return { targets: uniqueTargets, targetsWithPackage: uniqueTargetsWithPackage };
+  return {
+    targets: uniqueTargets,
+    targetsWithPackage: uniqueTargetsWithPackage,
+  };
 }
 
 /**
@@ -368,7 +394,10 @@ export function parseDocLintDiagnostics(output: string): DocLintDiagnostic[] {
   const diagnostics: DocLintDiagnostic[] = [];
   // Strip ANSI escape codes before parsing
   // Use a function that avoids control characters in the regex literal
-  const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
+  const ansiStripRe = new RegExp(
+    String.fromCharCode(0x1b) + '\\[[0-9;]*m',
+    'g',
+  );
   const stripped = output.replace(ansiStripRe, '');
   const lines = stripped.split('\n');
 
@@ -482,7 +511,7 @@ export const DOC_LINT_EXIT_CODE = 1;
  * The exact summary line `deno doc --lint` prints when it exits non-zero due
  * to lint debt (ANSI-stripped). Used to recognize — not suppress — the summary.
  */
-const LINT_SUMMARY_PATTERN = /Found \d+ documentation lint errors/;
+const LINT_SUMMARY_PATTERN = /^(?:error:\s*)?Found \d+ documentation lint errors\.?$/;
 
 /**
  * A line that is a lint diagnostic opener: `error[rule]: message`. The bracket
@@ -542,10 +571,25 @@ export function classifyChildResult(
   code: number,
   stdout: string,
   stderr: string,
-): { kind: 'lint-debt' | 'fatal'; stdoutStripped: string; stderrStripped: string } {
-  const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
+): {
+  kind: 'success' | 'lint-debt' | 'fatal';
+  stdoutStripped: string;
+  stderrStripped: string;
+} {
+  const ansiStripRe = new RegExp(
+    String.fromCharCode(0x1b) + '\\[[0-9;]*m',
+    'g',
+  );
   const stdoutStripped = stdout.replace(ansiStripRe, '');
   const stderrStripped = stderr.replace(ansiStripRe, '');
+
+  if (code === 0) {
+    return {
+      kind: stdoutStripped.trim() === '' && stderrStripped.trim() === '' ? 'success' : 'fatal',
+      stdoutStripped,
+      stderrStripped,
+    };
+  }
 
   // An unexpected nonzero code (including code 2) is always fatal, regardless
   // of stream content — it is not the documented lint-debt exit shape.
@@ -553,27 +597,58 @@ export function classifyChildResult(
     return { kind: 'fatal', stdoutStripped, stderrStripped };
   }
 
-  // For the ratchet-eligible code (1) or code 0, remove recognized lint records
-  // from each stream and reject any residual content.
+  // For the ratchet-eligible code (1), consume complete lint records. A
+  // continuation-like line is recognized only while attached to an opener;
+  // otherwise it remains fatal residual output.
   for (const stream of [stdoutStripped, stderrStripped]) {
     const lines = stream.split('\n');
     const residual: string[] = [];
+    let inDiagnostic = false;
+    let diagnosticHasLocation = false;
+    let diagnosticCount = 0;
+    let summaryCount: number | undefined;
     for (const line of lines) {
-      // Recognized lint diagnostic opener: error[rule]: message
-      if (LINT_DIAGNOSTIC_PATTERN.test(line)) continue;
-      // Recognized lint location continuation: --> path:line:col
-      if (LINT_LOCATION_PATTERN.test(line)) continue;
-      // Recognized lint summary line: Found N documentation lint errors.
-      if (LINT_SUMMARY_PATTERN.test(line)) continue;
-      // Recognized code context lines (pipe-indented source context).
-      if (LINT_CODE_CONTEXT_PATTERN.test(line)) continue;
-      // Recognized hint lines (= hint: ...).
-      if (LINT_HINT_PATTERN.test(line)) continue;
-      // Recognized info lines (info: ...).
-      if (LINT_INFO_PATTERN.test(line)) continue;
-      // Recognized cross-reference annotations (- this is the referenced type).
-      if (LINT_REF_ANNOTATION_PATTERN.test(line)) continue;
+      if (LINT_DIAGNOSTIC_PATTERN.test(line)) {
+        if (inDiagnostic && !diagnosticHasLocation) {
+          residual.push('malformed diagnostic');
+        }
+        inDiagnostic = true;
+        diagnosticHasLocation = false;
+        diagnosticCount += 1;
+        continue;
+      }
+      if (LINT_SUMMARY_PATTERN.test(line)) {
+        if (inDiagnostic && !diagnosticHasLocation) {
+          residual.push('malformed diagnostic');
+        }
+        inDiagnostic = false;
+        const count = line.match(/Found (\d+) documentation/)?.[1];
+        summaryCount = count === undefined ? undefined : Number(count);
+        continue;
+      }
+      if (
+        inDiagnostic &&
+        (line.trim().length === 0 || LINT_LOCATION_PATTERN.test(line) ||
+          LINT_CODE_CONTEXT_PATTERN.test(line) ||
+          LINT_HINT_PATTERN.test(line) ||
+          LINT_INFO_PATTERN.test(line) ||
+          LINT_REF_ANNOTATION_PATTERN.test(line))
+      ) {
+        if (LINT_LOCATION_PATTERN.test(line)) diagnosticHasLocation = true;
+        continue;
+      }
+      if (line.trim().length === 0) continue;
+      if (inDiagnostic && !diagnosticHasLocation) {
+        residual.push('malformed diagnostic');
+      }
+      inDiagnostic = false;
       residual.push(line);
+    }
+    if (inDiagnostic && !diagnosticHasLocation) {
+      residual.push('malformed diagnostic');
+    }
+    if (summaryCount !== undefined && summaryCount !== diagnosticCount) {
+      residual.push('diagnostic summary count mismatch');
     }
     const residualText = residual.join('\n').trim();
     // After removing recognized diagnostics and the exact known summary, every
@@ -608,7 +683,9 @@ export async function runApiDocs(
     mkdir: (path: string, options?: { recursive: boolean }) => Promise<void>;
   },
   cmd: {
-    run: (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+    run: (
+      args: string[],
+    ) => Promise<{ code: number; stdout: string; stderr: string }>;
   },
 ): Promise<{ code: number; findings: string[] }> {
   const findings: string[] = [];
@@ -638,7 +715,15 @@ export async function runApiDocs(
     // structurally: only the lint-debt shape is ratchet-eligible; every
     // unexpected nonzero code (including code 2) or any independent
     // fatal/error/stack output in either ANSI-stripped stream is fatal.
-    const classification = classifyChildResult(result.code, result.stdout, result.stderr);
+    const classification = classifyChildResult(
+      result.code,
+      result.stdout,
+      result.stderr,
+    );
+
+    if (classification.kind === 'success') {
+      return { code: 0, findings };
+    }
 
     if (classification.kind === 'fatal') {
       // Preserve the raw stdout/stderr (not ANSI-stripped) so the failure is
@@ -668,7 +753,9 @@ export async function runApiDocs(
         `Found ${cleanPackageFindings.length} JSDoc diagnostic(s) in CLEAN packages:`,
       );
       for (const diag of cleanPackageFindings) {
-        findings.push(`  - [${diag.rule}] ${diag.path}:${diag.line} ${diag.message}`);
+        findings.push(
+          `  - [${diag.rule}] ${diag.path}:${diag.line} ${diag.message}`,
+        );
       }
     }
 
