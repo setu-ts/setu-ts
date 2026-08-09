@@ -1829,17 +1829,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   ANNOTATED position, verified to discriminate by renaming the starter's `di` arm and watching it
   fail. Four other negative controls were each observed failing and reverted: removing the
   `withDiPlugin` dedupe, emptying the minimal host's seams, dropping the refusal's alternative line,
-  and suppressing the full-stack `di` emission) — complete (PR pending)
+  and suppressing the full-stack `di` emission) — complete (PR #142)
 - **Next milestone** — **M38** (documentation), then M39–M40. Queued behind those: **M59**
   (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
-  ROADMAP sections only, with no plan and no code yet. M59 came from an external DX review; note
-  what that review got wrong, since the section says so and a reader should not re-raise it: it
-  claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
-  blocked (M52b shipped them). M60–M62 came from a measured audit after M58: a project with all
-  fourteen schematics generated type-checked clean while its entry points imported exactly ONE
-  generated path, so thirteen of fourteen generated artifacts were unreachable — that, not breadth,
-  was the distance from NestJS. **M60 has now closed eleven of the thirteen**, so M61 and M62 are
-  the remaining CLI parity work: the optional-decorators/DI promise, and monorepos.
+  ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of
+  the CLI parity work, so M62 (monorepos) is the remaining piece. M59 came from an external DX
+  review; note what that review got wrong, since the section says so and a reader should not
+  re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and that Workers
+  queues are still blocked (M52b shipped them). M60–M62 came from a measured audit after M58: a
+  project with all fourteen schematics generated type-checked clean while its entry points imported
+  exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable — that,
+  not breadth, was the distance from NestJS. **M60 has now closed eleven of the thirteen**, so M61
+  and M62 are the remaining CLI parity work: the optional-decorators/DI promise, and monorepos.
 
 ## Verification (run before declaring any work done)
 
