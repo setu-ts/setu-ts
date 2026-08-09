@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
-import { firstDuplicatePath, runNewCommand } from '../../src/commands/new.ts';
+import { firstDuplicatePath, resolveHost, runNewCommand } from '../../src/commands/new.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 
 interface Harness {
@@ -70,6 +70,46 @@ describe('firstDuplicatePath', () => {
         expect(h.err.lines.join('\n')).not.toContain('twice');
       }
     }
+  });
+});
+
+describe('resolveHost', () => {
+  // Every host in the registry declares `localImports` and `files`, so these
+  // fallbacks are unreachable through `runNewCommand`. They are not dead —
+  // `TemplateHost` declares both optional — so they are driven here directly
+  // rather than left as an untested path behind a template that happens not to
+  // exercise them.
+  it('fills in every optional member of a bare host', () => {
+    const resolved = resolveHost(
+      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
+      { di: false },
+    );
+    expect(resolved.localImports).toEqual([]);
+    expect(resolved.packageImports).toEqual([]);
+    expect(resolved.files).toEqual([]);
+    expect(resolved.pluginSpreads).toEqual([]);
+    expect(resolved.setupCalls).toEqual([]);
+    expect(resolved.appFactory).toBeUndefined();
+    expect(resolved.manifest).toBeUndefined();
+  });
+
+  it('applies --di to a plugin-list host', () => {
+    const resolved = resolveHost(
+      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
+      { di: true },
+    );
+    expect(resolved.plugins.map((w) => w.pkg)).toEqual(['runtime', 'di-plugin']);
+  });
+
+  // A starter factory owns the whole plugin set, so a wiring appended here
+  // would be silently dropped by the renderer's factory branch. The flag
+  // reaches that template through the factory's own options instead.
+  it('leaves a factory host plugin list alone under --di', () => {
+    const resolved = resolveHost(
+      { plugins: [], middleware: [], appFactory: { pkg: 'full-stack-starter', symbol: 'x' } },
+      { di: true },
+    );
+    expect(resolved.plugins).toEqual([]);
   });
 });
 

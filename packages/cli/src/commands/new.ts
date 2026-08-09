@@ -85,7 +85,7 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
  * and a default applied in one of them and forgotten in the other is invisible
  * until a generated project fails to compile.
  */
-interface ResolvedHost {
+export interface ResolvedHost {
   readonly plugins: readonly Wiring[];
   readonly middleware: readonly MiddlewareWiring[];
   readonly localImports: readonly LocalImport[];
@@ -104,11 +104,17 @@ interface ResolvedHost {
  * missed by the manifest writer — the generated `setu.config.ts` would then
  * import a package the project does not declare.
  *
+ * Exported for its own unit test — not from the package barrel, exactly as
+ * {@linkcode firstDuplicatePath} is. Every host in the registry happens to
+ * declare `localImports` and `files`, so those two fallbacks are unreachable
+ * through `runNewCommand` today; they are not dead, because `TemplateHost`
+ * declares both optional and a future host may omit either.
+ *
  * @param host - The selected template, or the no-template host
  * @param features - The per-project choices parsed from the flags
  * @returns The host with every member present
  */
-function resolveHost(host: TemplateHost, features: TemplateFeatures): ResolvedHost {
+export function resolveHost(host: TemplateHost, features: TemplateFeatures): ResolvedHost {
   return {
     // A starter-composed template owns its whole plugin set, so `--di` reaches
     // it through the factory's options instead (see `fullStackArgs`). Appending
