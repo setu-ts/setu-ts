@@ -32,9 +32,6 @@ export interface TemplateFeatures {
   readonly di: boolean;
 }
 
-/** The features a `setu new` run has when no feature flag is given. */
-export const DEFAULT_FEATURES: TemplateFeatures = { di: false };
-
 /**
  * The `DiPlugin` wiring, declared once.
  *
