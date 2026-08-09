@@ -501,6 +501,8 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
  */
 function standaloneNpmFiles(
   projectName: string,
+  runtime: TargetRuntime,
+  host: ResolvedHost,
   manifest?: TemplateManifest,
 ): readonly GeneratedFile[] {
   // Keyed on the BUILD SCRIPT, not on the presence of dev dependencies: a Deno or
@@ -509,7 +511,30 @@ function standaloneNpmFiles(
   // packages the module schematic's emitted test imports, which reach Deno
   // through the import map instead) must not acquire a package.json — that
   // switches Deno to node_modules resolution.
-  if (manifest?.npmBuildScript === undefined) return [];
+  // Workers ALWAYS needs one: `wrangler` bundles `src/index.ts` with esbuild,
+  // which resolves neither `jsr:` specifiers nor a Deno import map, so a project
+  // declaring its framework packages only in `deno.json` fails `wrangler dev`
+  // with one `Could not resolve "@setu-ts/…"` per package — while the CLI's own
+  // next-step hint already said `npm install && npx wrangler dev`. There was
+  // simply nothing to install. Deno is deliberately excluded: it resolves
+  // through the import map, and a package.json switches it to node_modules.
+  const onWorkers = runtime === 'cloudflare-workers';
+  if (manifest?.npmBuildScript === undefined && !onWorkers) return [];
+
+  const dependencies = {
+    ...(onWorkers ? npmDependencies(host) : {}),
+    ...manifest?.npmDependencies,
+  };
+  const devDependencies = {
+    // Pinned so `npx wrangler dev` runs a known version rather than whatever is
+    // latest at that moment.
+    ...(onWorkers ? { wrangler: '^4.0.0' } : {}),
+    ...manifest?.npmDevDependencies,
+  };
+  const scripts = {
+    ...(manifest?.npmBuildScript === undefined ? {} : { build: manifest.npmBuildScript }),
+    ...(onWorkers ? { dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+  };
 
   return [
     {
@@ -521,19 +546,17 @@ function standaloneNpmFiles(
             version: '0.1.0',
             private: true,
             type: 'module',
-            scripts: { build: manifest.npmBuildScript },
-            ...(manifest.npmDependencies === undefined
-              ? {}
-              : { dependencies: { ...manifest.npmDependencies } }),
-            ...(manifest.npmDevDependencies === undefined
-              ? {}
-              : { devDependencies: { ...manifest.npmDevDependencies } }),
+            ...(Object.keys(scripts).length === 0 ? {} : { scripts }),
+            ...(Object.keys(dependencies).length === 0 ? {} : { dependencies }),
+            ...(Object.keys(devDependencies).length === 0 ? {} : { devDependencies }),
           },
           null,
           2,
         )
       }\n`,
     },
+    // JSR packages resolve from npm only when the @jsr scope is mapped.
+    ...(onWorkers ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }] : []),
     {
       path: 'tsconfig.json',
       contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
@@ -614,7 +637,7 @@ ${PROGRAM_NAME} generate --help
     // needs one — a frontend build — gets a standalone file rather than a
     // merge. Framework packages stay in the import map above; only the
     // template's own npm dependencies appear here.
-    const npmFiles = standaloneNpmFiles(projectName, manifest);
+    const npmFiles = standaloneNpmFiles(projectName, runtime, host, manifest);
     for (const file of npmFiles) files.push(file);
   } else {
     files.push({
