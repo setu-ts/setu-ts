@@ -546,9 +546,13 @@ function standaloneNpmFiles(
             version: '0.1.0',
             private: true,
             type: 'module',
-            ...(Object.keys(scripts).length === 0 ? {} : { scripts }),
-            ...(Object.keys(dependencies).length === 0 ? {} : { dependencies }),
-            ...(Object.keys(devDependencies).length === 0 ? {} : { devDependencies }),
+            // Emitted unconditionally: this function returns early unless the
+            // target is Workers or the template has an npm build, and both of
+            // those always contribute a script, a dependency and a devDependency.
+            // Guarding each one added three branches no combination can reach.
+            scripts,
+            dependencies,
+            devDependencies,
           },
           null,
           2,
