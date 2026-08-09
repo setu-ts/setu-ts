@@ -5,17 +5,20 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { COMMAND_HANDLER_SEAM, COMMAND_HANDLERS_EXPORT } from '../seams/cqrs.ts';
+import { seamNames } from '../seams/seam-spec.ts';
 
 /**
- * Generates a command and its handler.
+ * Generates a command and its handler, and regenerates the seam barrel.
  *
  * @param names - Naming forms derived from the user's input
- * @param _options - Unused: CQRS handlers are runtime-agnostic
- * @returns One file at `src/cqrs/<kebab>.command-handler.ts`
+ * @param options - Supplies the handlers already present, for the barrel
+ * @returns The handler at `src/cqrs/<kebab>.command-handler.ts`, plus the managed
+ *   `src/cqrs/index.ts` barrel, which lists query handlers too
  */
 export function generateCommandHandler(
   names: DerivedNames,
-  _options: SchematicOptions,
+  options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const contents = `import type { CqrsCommand, ICommandHandler } from '@setu-ts/common';
 
@@ -42,8 +45,9 @@ export interface ${names.pascal}Command extends CqrsCommand<${names.pascal}Paylo
 /**
  * Handles {@linkcode ${names.pascal}Command}.
  *
- * Register it with
- * \`cqrs.commandBus.register(${names.screaming}_COMMAND, new ${names.pascal}CommandHandler())\`.
+ * Registered through the \`${COMMAND_HANDLERS_EXPORT}\` barrel in \`src/cqrs/index.ts\`,
+ * which \`setu.config.ts\` passes to \`CqrsPlugin\` — so this class needs no further
+ * wiring, and \`commandBus.execute({ type: ${names.screaming}_COMMAND, … })\` reaches it.
  */
 export class ${names.pascal}CommandHandler
   implements ICommandHandler<${names.pascal}Command, ${names.pascal}Result> {
@@ -59,5 +63,17 @@ export class ${names.pascal}CommandHandler
   }
 }
 `;
-  return [{ path: `src/cqrs/${names.kebab}.command-handler.ts`, contents }];
+  return [
+    { path: `src/cqrs/${names.kebab}.command-handler.ts`, contents },
+    {
+      path: COMMAND_HANDLER_SEAM.barrel,
+      // Both kinds are passed: the barrel lists commands AND queries, so generating a
+      // command handler must not drop a query handler already present.
+      contents: COMMAND_HANDLER_SEAM.renderBarrel({
+        'command-handler': seamNames(options.artifacts, 'command-handler', names.kebab),
+        'query-handler': seamNames(options.artifacts, 'query-handler'),
+      }),
+      managed: true,
+    },
+  ];
 }

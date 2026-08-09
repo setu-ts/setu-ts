@@ -11,6 +11,15 @@ import {
   MODULE_SEAM_MANIFEST,
   withModuleSeam,
 } from './module-seam.ts';
+import {
+  decoratorSeamExtras,
+  seamFiles,
+  seamLocalImports,
+  seamPluginSpreads,
+  seamSetupCalls,
+  seamsFor,
+  withPluginOptionSeams,
+} from './seam.ts';
 
 /**
  * Always first: the kernel makes the `runtime` capability mandatory at `start()`.
@@ -45,6 +54,20 @@ export const REST_PLUGINS: readonly Wiring[] = [
 ];
 
 /**
+ * The `@setu-ts` packages the REST set registers, for seam selection.
+ *
+ * Derived from {@linkcode REST_PLUGINS} rather than listed again, so a plugin added
+ * there cannot be missed here — which would silently omit the seam that plugin hosts.
+ */
+export const REST_PACKAGES: ReadonlySet<string> = new Set(REST_PLUGINS.map((p) => p.pkg));
+
+/** The generated-artifact seams a REST project can consume. */
+export const REST_SEAMS: ReturnType<typeof seamsFor> = seamsFor(REST_PACKAGES);
+
+/** The standalone controller and service barrels the decorator wiring must also name. */
+const REST_DECORATOR_EXTRAS = decoratorSeamExtras(REST_SEAMS);
+
+/**
  * Middleware added with `app.middleware.add(...)`.
  *
  * Kept separate from the plugin list because `@setu-ts/exceptions`
@@ -77,10 +100,19 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 export const REST_TEMPLATE: TemplateDefinition = {
   name: 'rest',
   description: 'REST API — config, logging, validation, security, health, metrics, OpenAPI',
-  plugins: withModuleSeam(REST_PLUGINS),
+  plugins: withPluginOptionSeams(
+    withModuleSeam(
+      REST_PLUGINS,
+      REST_DECORATOR_EXTRAS.controllers,
+      REST_DECORATOR_EXTRAS.services,
+    ),
+    REST_SEAMS,
+  ),
   middleware: REST_MIDDLEWARE,
-  localImports: [MODULE_SEAM_LOCAL_IMPORT],
-  files: MODULE_SEAM_FILES,
+  localImports: [MODULE_SEAM_LOCAL_IMPORT, ...seamLocalImports(REST_SEAMS)],
+  files: [...MODULE_SEAM_FILES, ...seamFiles(REST_SEAMS)],
   manifest: MODULE_SEAM_MANIFEST,
+  pluginSpreads: seamPluginSpreads(REST_SEAMS),
+  setupCalls: seamSetupCalls(REST_SEAMS),
   unsupported: {},
 };

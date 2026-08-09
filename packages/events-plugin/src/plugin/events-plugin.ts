@@ -7,6 +7,7 @@ import type { IEventBus, ILogger, IPlugin, IPluginContext } from '@setu-ts/commo
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { EventsPluginOptions } from '../interfaces/index.ts';
 import { InMemoryEventBus } from '../bus/in-memory-event-bus.ts';
+import { subscribeHandler } from '../handlers/event-handler.ts';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -28,7 +29,10 @@ const DEFAULT_OPTIONS: EventsPluginOptions = {
  * ```typescript
  * import { EventsPlugin } from '@setu-ts/events-plugin';
  *
- * app.register(EventsPlugin({ async: true }));
+ * app.register(EventsPlugin({
+ *   async: true,
+ *   handlers: [{ type: 'user-created', handler: new UserCreatedEventHandler() }],
+ * }));
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
@@ -75,6 +79,14 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
 
       // Register the bus under CAPABILITIES.EVENTS.
       ctx.services.register<IEventBus>(CAPABILITIES.EVENTS, bus);
+
+      // Subscribe the declaratively-supplied handlers, through the SAME
+      // `subscribeHandler` a caller would use by hand — so the option and the manual
+      // route cannot diverge. The `Unsubscribe` is dropped deliberately: `onClose`
+      // clears the bus and no caller could hold the handle.
+      for (const entry of opts.handlers ?? []) {
+        subscribeHandler(bus, entry.type, entry.handler);
+      }
 
       // Register health indicator.
       // deno-lint-ignore require-await

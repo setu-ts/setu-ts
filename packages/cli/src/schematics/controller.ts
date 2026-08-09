@@ -5,25 +5,29 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { APP_CONTROLLERS_EXPORT, CONTROLLERS_SEAM } from '../seams/controllers.ts';
+import { seamNames } from '../seams/seam-spec.ts';
 
 /**
- * Generates a controller class.
+ * Generates a controller class and regenerates the seam barrel that registers it.
  *
  * @param names - Naming forms derived from the user's input
- * @param _options - Unused: the controller shape is runtime-agnostic
- * @returns One file at `src/controllers/<kebab>.controller.ts`
+ * @param options - Supplies the controllers already present, for the barrel
+ * @returns The controller at `src/controllers/<kebab>.controller.ts`, plus the managed
+ *   `src/controllers/index.ts` barrel
  */
 export function generateController(
   names: DerivedNames,
-  _options: SchematicOptions,
+  options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const contents = `import { Body, Controller, Get, Post } from '@setu-ts/decorator-plugin';
 
 /**
  * HTTP controller for the ${names.kebab} resource.
  *
- * Register it through the DecoratorPlugin's \`controllers\` option or
- * \`discoverControllers\`.
+ * Registered through the \`${APP_CONTROLLERS_EXPORT}\` barrel in
+ * \`src/controllers/index.ts\`, which \`setu.config.ts\` passes to \`DecoratorPlugin\` —
+ * so this class needs no further wiring.
  *
  * A decorated handler receives ONLY its decorated parameters: the plugin builds
  * the argument list from parameter metadata alone and never passes the request
@@ -56,5 +60,17 @@ export class ${names.pascal}Controller {
   }
 }
 `;
-  return [{ path: `src/controllers/${names.kebab}.controller.ts`, contents }];
+  return [
+    { path: `src/controllers/${names.kebab}.controller.ts`, contents },
+    {
+      path: CONTROLLERS_SEAM.barrel,
+      // Union rather than append: regenerating over an existing controller must list it
+      // exactly once, so the barrel is idempotent even though the command refuses on
+      // the controller's own file.
+      contents: CONTROLLERS_SEAM.renderBarrel({
+        controller: seamNames(options.artifacts, 'controller', names.kebab),
+      }),
+      managed: true,
+    },
+  ];
 }

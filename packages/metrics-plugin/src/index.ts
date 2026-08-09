@@ -25,7 +25,10 @@
  * ```
  */
 export { MetricsPlugin } from './plugin/metrics-plugin.ts';
-export type { MetricsPluginOptions } from './interfaces/index.ts';
+// `NamedMetricConfig` is exported because `MetricsPluginOptions.customMetrics` is typed
+// as an array of it: without it that option was unnameable by any consumer, so a caller
+// could not declare its own `customMetrics` array in a variable — only inline.
+export type { MetricsPluginOptions, NamedMetricConfig } from './interfaces/index.ts';
 export { MetricsService } from './services/metrics-service.ts';
 export { Counter } from './metrics/counter.ts';
 export { Gauge } from './metrics/gauge.ts';
