@@ -788,6 +788,14 @@ export async function runApiDocs(
       }
       return { code: 1, findings };
     }
+
+    // Report the ratchet state on success. A gate that passes in total silence
+    // is indistinguishable from a gate that did nothing, and this one's whole
+    // job is to make a known, frozen debt VISIBLE rather than merely tolerated.
+    console.log(
+      `API JSDoc lint passed: ${totalDiagnostics} known diagnostic(s) at baseline ` +
+        `${DOC_LINT_BASELINE}, 0 in the ${CLEAN_PACKAGES.size} clean package(s).`,
+    );
   } else {
     // Propagate child-process failures: non-zero exit code is a failure
     if (result.code !== 0) {

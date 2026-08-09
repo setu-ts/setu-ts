@@ -684,6 +684,37 @@ export async function checkLocalLinks(
 }
 
 /**
+ * Reports whether a document actually LINKS to an application directory.
+ *
+ * A bare `content.includes(dir)` cannot do this job, and the failure is not
+ * theoretical: deleting both the `database` table row and its `### database`
+ * section from `docs/examples.md` left the gate green, because the word
+ * "database" still appeared in unrelated prose ("SSR with database
+ * integration", "D1 database queries", `DatabasePlugin`). Every app whose name
+ * is an ordinary word — `database`, `minimal`, `realtime`, `cloudflare`,
+ * `grpc` — was effectively unpoliced.
+ *
+ * So a reference means a Markdown link whose TARGET names the directory as its
+ * final path segment. That covers both spellings in use — `](./minimal)` in
+ * `apps/README.md` and `](../apps/database)` in `docs/examples.md` — while
+ * prose mentioning the word, and a longer sibling directory such as
+ * `apps/database-extra`, do not satisfy it.
+ *
+ * @param content - The Markdown document to search
+ * @param dir - The application directory name
+ * @returns True when the document links to that directory
+ */
+function referencesAppDirectory(content: string, dir: string): boolean {
+  const segment = dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const endsWithDir = new RegExp(`(?:^|/)${segment}/?$`);
+  for (const match of content.matchAll(/\]\(([^)\s]+)[^)]*\)/g)) {
+    const target = (match[1] as string).split('#')[0] as string;
+    if (endsWithDir.test(target)) return true;
+  }
+  return false;
+}
+
+/**
  * Checks that the examples guide covers all directories under apps/.
  *
  * The expected set is derived from the filesystem (`Deno.readDir('apps')`), not
@@ -698,21 +729,14 @@ export function checkExamplesCoverage(
   appDirs: readonly string[],
 ): readonly Finding[] {
   const findings: Finding[] = [];
-  const coveredApps = new Set<string>();
-
-  // Look for app directory references in the examples guide
-  for (const dir of appDirs) {
-    if (examplesGuideContent.includes(dir) || examplesGuideContent.includes(`apps/${dir}`)) {
-      coveredApps.add(dir);
-    }
-  }
 
   for (const dir of appDirs) {
-    if (!coveredApps.has(dir)) {
+    if (!referencesAppDirectory(examplesGuideContent, dir)) {
       findings.push({
         file: 'docs/examples.md',
         line: 1,
-        message: `Example app "${dir}" is not documented in docs/examples.md.`,
+        message: `Example app "${dir}" is not documented in docs/examples.md ` +
+          `(no Markdown link resolves to apps/${dir}).`,
       });
     }
   }
@@ -732,21 +756,14 @@ export function checkAppsReadmeCoverage(
   appDirs: readonly string[],
 ): readonly Finding[] {
   const findings: Finding[] = [];
-  const coveredApps = new Set<string>();
-
-  // Look for app directory references in the README
-  for (const dir of appDirs) {
-    if (appsReadmeContent.includes(dir) || appsReadmeContent.includes(`apps/${dir}`)) {
-      coveredApps.add(dir);
-    }
-  }
 
   for (const dir of appDirs) {
-    if (!coveredApps.has(dir)) {
+    if (!referencesAppDirectory(appsReadmeContent, dir)) {
       findings.push({
         file: 'apps/README.md',
         line: 1,
-        message: `Example app "${dir}" is not listed in apps/README.md.`,
+        message: `Example app "${dir}" is not listed in apps/README.md ` +
+          `(no Markdown link resolves to that directory).`,
       });
     }
   }

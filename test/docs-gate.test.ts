@@ -187,7 +187,7 @@ describe('documentation gate — required guides', () => {
 
 describe('documentation gate — examples coverage', () => {
   it('reports an app not documented in examples.md', () => {
-    const examplesGuide = '# Examples\n\n## REST Example\n\nSee apps/rest for more.';
+    const examplesGuide = '# Examples\n\n## REST Example\n\nSee [rest](../apps/rest) for more.';
     const appDirs = ['minimal', 'rest', 'new-app'];
 
     const findings = checkExamplesCoverage(examplesGuide, appDirs);
@@ -197,21 +197,57 @@ describe('documentation gate — examples coverage', () => {
     expect(findings.some((f) => f.message.includes('new-app'))).toBe(true);
   });
 
-  it('passes when all apps are documented', () => {
-    const examplesGuide =
-      '# Examples\n\n## Minimal\n\nSee apps/minimal.\n\n## REST\n\nSee apps/rest.\n\n## New App\n\nSee apps/new-app.';
+  it('passes when every app is linked in the real table format', () => {
+    const examplesGuide = [
+      '# Examples',
+      '',
+      '| [minimal](../apps/minimal) | Minimal example |',
+      '| [rest](../apps/rest) | REST example |',
+      '| [new-app](../apps/new-app) | New app example |',
+    ].join('\n');
     const appDirs = ['minimal', 'rest', 'new-app'];
 
-    const findings = checkExamplesCoverage(examplesGuide, appDirs);
+    expect(checkExamplesCoverage(examplesGuide, appDirs).length).toBe(0);
+  });
 
-    expect(findings.length).toBe(0);
+  /**
+   * The gate used to be `content.includes(dir)`, which any prose satisfied.
+   * Deleting the `database` table row AND its `### database` section from the
+   * real `docs/examples.md` left `check:docs` green, because "database" still
+   * appeared in "SSR with database integration", "D1 database queries", and
+   * `DatabasePlugin`. Every app named after an ordinary word was unpoliced.
+   */
+  it('a prose mention is NOT coverage — only a link to the directory is', () => {
+    const proseOnly = [
+      '# Examples',
+      '',
+      'The full-stack example shows SSR with database integration.',
+      'It also covers D1 database queries via `DatabasePlugin`.',
+    ].join('\n');
+
+    const findings = checkExamplesCoverage(proseOnly, ['database']);
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('database');
+  });
+
+  it('a longer sibling directory does not satisfy a shorter name', () => {
+    const guide = '| [database-extra](../apps/database-extra) | Other |';
+
+    expect(checkExamplesCoverage(guide, ['database']).length).toBe(1);
+    expect(checkExamplesCoverage(guide, ['database-extra']).length).toBe(0);
+  });
+
+  it('accepts a link carrying an anchor or trailing slash', () => {
+    const guide = '[a](../apps/minimal/) and [b](../apps/rest#setup)';
+
+    expect(checkExamplesCoverage(guide, ['minimal', 'rest']).length).toBe(0);
   });
 });
 
 describe('documentation gate — apps README coverage', () => {
   it('reports an app not listed in apps/README.md', () => {
-    const appsReadme =
-      '# Apps\n\n| Name | Description |\n|------|-------------|\n| minimal | Minimal example |';
+    const appsReadme = '# Apps\n\n| [minimal](./minimal) | Minimal example |';
     const appDirs = ['minimal', 'rest', 'new-app'];
 
     const findings = checkAppsReadmeCoverage(appsReadme, appDirs);
@@ -221,14 +257,25 @@ describe('documentation gate — apps README coverage', () => {
     expect(findings.some((f) => f.message.includes('new-app'))).toBe(true);
   });
 
-  it('passes when all apps are listed', () => {
-    const appsReadme =
-      '# Apps\n\n| Name | Description |\n|------|-------------|\n| minimal | Minimal example |\n| rest | REST example |\n| new-app | New app example |';
+  it('passes when every app is linked in the real `./dir` format', () => {
+    const appsReadme = [
+      '# Apps',
+      '',
+      '| [minimal](./minimal) | Minimal example |',
+      '| [rest](./rest) | REST example |',
+      '| [new-app](./new-app) | New app example |',
+    ].join('\n');
     const appDirs = ['minimal', 'rest', 'new-app'];
 
-    const findings = checkAppsReadmeCoverage(appsReadme, appDirs);
+    expect(checkAppsReadmeCoverage(appsReadme, appDirs).length).toBe(0);
+  });
 
-    expect(findings.length).toBe(0);
+  it('a bare table cell naming the app is NOT a listing', () => {
+    // The previous implementation accepted this, so a row could lose its link
+    // (and with it its navigability) without the gate noticing.
+    const appsReadme = '# Apps\n\n| Name | Description |\n| minimal | Minimal example |';
+
+    expect(checkAppsReadmeCoverage(appsReadme, ['minimal']).length).toBe(1);
   });
 });
 
