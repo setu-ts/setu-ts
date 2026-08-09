@@ -34,6 +34,9 @@ import {
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
 import { readModuleNames } from '../utils/module-scanner.ts';
+import { scanArtifacts } from '../utils/artifact-scanner.ts';
+import { findNameConflict } from '../utils/name-conflicts.ts';
+import { listSeamSpecs } from '../seams/registry.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -180,12 +183,50 @@ export async function runGenerateCommand(
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
   const modules = await readModuleNames(deps.fs, dir);
+  // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
+  // per family against paths that usually do not exist; a custom schematic reads it
+  // too, so it cannot be gated on a built-in name.
+  const scan = await scanArtifacts(deps.fs, dir, listSeamSpecs());
+
+  // A candidate the scan rejected is reported, never silently dropped. This is the path
+  // an artifact generated before its family gained a second export takes: the barrel
+  // cannot name a symbol the file does not export, so the artifact is left out and the
+  // developer is told to regenerate it — rather than getting a barrel that will not
+  // compile, or one that quietly omits their work.
+  for (const skip of scan.skipped) {
+    deps.error(
+      `Skipped ${skip.path}: it does not export ${skip.missing.join(', ')}, ` +
+        `so it cannot be listed in the generated barrel.`,
+    );
+    deps.error(`  Regenerate it to bring it up to date.`);
+  }
+
+  // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
+  // output cannot work is not a plan worth printing. Both collisions this catches were
+  // observed as real failures against a booted application — see `name-conflicts.ts`.
+  const conflict = findNameConflict(
+    schematicName,
+    names.kebab,
+    installed,
+    scan.artifacts,
+    modules,
+  );
+  if (conflict !== undefined) {
+    deps.error(
+      `Cannot generate ${schematicName} "${names.kebab}": ${conflict.resource} is already ` +
+        `claimed by the ${conflict.schematic} of the same name.`,
+    );
+    deps.error(`If both existed, ${conflict.consequence}.`);
+    deps.error(`Choose a different name, or remove the existing ${conflict.schematic}.`);
+    return EXIT_ERROR;
+  }
 
   const options: SchematicOptions = {
     runtime,
     plugins: installed,
     now: deps.now,
     modules,
+    artifacts: scan.artifacts,
   };
 
   let generated: readonly GeneratedFile[];

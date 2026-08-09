@@ -5,17 +5,20 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { QUERY_HANDLER_SEAM, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
+import { seamNames } from '../seams/seam-spec.ts';
 
 /**
- * Generates a query and its handler.
+ * Generates a query and its handler, and regenerates the seam barrel.
  *
  * @param names - Naming forms derived from the user's input
- * @param _options - Unused: CQRS handlers are runtime-agnostic
- * @returns One file at `src/cqrs/<kebab>.query-handler.ts`
+ * @param options - Supplies the handlers already present, for the barrel
+ * @returns The handler at `src/cqrs/<kebab>.query-handler.ts`, plus the managed
+ *   `src/cqrs/index.ts` barrel, which lists command handlers too
  */
 export function generateQueryHandler(
   names: DerivedNames,
-  _options: SchematicOptions,
+  options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const contents = `import type { CqrsQuery, IQueryHandler } from '@setu-ts/common';
 
@@ -42,8 +45,9 @@ export interface ${names.pascal}Query extends CqrsQuery<${names.pascal}Criteria>
 /**
  * Handles {@linkcode ${names.pascal}Query}.
  *
- * Register it with
- * \`cqrs.queryBus.register(${names.screaming}_QUERY, new ${names.pascal}QueryHandler())\`.
+ * Registered through the \`${QUERY_HANDLERS_EXPORT}\` barrel in \`src/cqrs/index.ts\`,
+ * which \`setu.config.ts\` passes to \`CqrsPlugin\` — so this class needs no further
+ * wiring, and \`queryBus.execute({ type: ${names.screaming}_QUERY, … })\` reaches it.
  */
 export class ${names.pascal}QueryHandler
   implements IQueryHandler<${names.pascal}Query, ${names.pascal}View> {
@@ -59,5 +63,15 @@ export class ${names.pascal}QueryHandler
   }
 }
 `;
-  return [{ path: `src/cqrs/${names.kebab}.query-handler.ts`, contents }];
+  return [
+    { path: `src/cqrs/${names.kebab}.query-handler.ts`, contents },
+    {
+      path: QUERY_HANDLER_SEAM.barrel,
+      contents: QUERY_HANDLER_SEAM.renderBarrel({
+        'command-handler': seamNames(options.artifacts, 'command-handler'),
+        'query-handler': seamNames(options.artifacts, 'query-handler', names.kebab),
+      }),
+      managed: true,
+    },
+  ];
 }

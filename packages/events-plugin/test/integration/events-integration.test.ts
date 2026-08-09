@@ -5,6 +5,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { EventsPlugin } from '../../src/plugin/events-plugin.ts';
+import { subscribeHandler } from '../../src/handlers/event-handler.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IEventBus, IPlugin } from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -169,5 +170,87 @@ describe('EventsPlugin integration', () => {
     await app.stop();
 
     expect(response.statusCode).toBe(200);
+  });
+
+  // The declarative subscription option, driven through a real application rather than a
+  // hand-rolled plugin context: the option exists precisely because application code has
+  // no phase in which to reach the bus, and a mock context would hide that.
+  describe('declarative handler subscription', () => {
+    it('delivers a published event to a handler supplied through options', async () => {
+      const seen: string[] = [];
+      const app = createApplication({
+        plugins: [
+          fakeRuntimePlugin(),
+          EventsPlugin({
+            handlers: [
+              {
+                type: 'TestEvent',
+                handler: { handle: (event) => void seen.push(String(event.id)) },
+              },
+            ],
+          }),
+        ],
+      });
+      await app.start();
+
+      await app.services
+        .get<IEventBus>(CAPABILITIES.EVENTS)
+        .publish({ type: 'TestEvent', id: 'evt-1', occurredOn: new Date(), data: {} });
+      await app.stop();
+
+      expect(seen).toEqual(['evt-1']);
+    });
+
+    // One implementation behind two entry points: the option routes through the same
+    // exported `subscribeHandler` a caller would use, so the two cannot diverge.
+    it('delivers identically through the option and a manual subscribeHandler', async () => {
+      const viaOption: string[] = [];
+      const viaCode: string[] = [];
+      const app = createApplication({
+        plugins: [
+          fakeRuntimePlugin(),
+          EventsPlugin({
+            handlers: [
+              {
+                type: 'TestEvent',
+                handler: { handle: (event) => void viaOption.push(String(event.id)) },
+              },
+            ],
+          }),
+        ],
+      });
+      app.register({
+        name: 'manual',
+        version: '1.0.0',
+        dependencies: ['events'],
+        register(ctx) {
+          subscribeHandler(ctx.services.get<IEventBus>(CAPABILITIES.EVENTS), 'TestEvent', {
+            handle: (event) => void viaCode.push(String(event.id)),
+          });
+        },
+      });
+      await app.start();
+
+      await app.services
+        .get<IEventBus>(CAPABILITIES.EVENTS)
+        .publish({ type: 'TestEvent', id: 'evt-2', occurredOn: new Date(), data: {} });
+      await app.stop();
+
+      expect(viaOption).toEqual(viaCode);
+      expect(viaOption).toEqual(['evt-2']);
+    });
+
+    it('subscribes nothing when the option is omitted', async () => {
+      // Pins that the addition is inert by default, so an upgrade changes no behaviour.
+      const app = createApplication({ plugins: [fakeRuntimePlugin(), EventsPlugin()] });
+      await app.start();
+      const bus = app.services.get<IEventBus>(CAPABILITIES.EVENTS);
+      // A publish with no subscriber resolves rather than throwing, so the observable
+      // difference is the plugin's own subscription count.
+      await bus.publish({ type: 'TestEvent', id: 'evt-3', occurredOn: new Date(), data: {} });
+      await app.stop();
+
+      expect((bus as unknown as { subscriptionCount: number }).subscriptionCount).toBe(0);
+    });
   });
 });

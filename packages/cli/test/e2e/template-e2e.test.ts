@@ -54,9 +54,9 @@ const UNGATED = ['plugin', 'service', 'route', 'middleware', 'job'] as const;
 /**
  * Every single-file schematic the `rest` template's plugin set makes available.
  *
- * `module` is excluded here and swept separately: it is the one aggregate, so it
- * emits four files per name plus one shared barrel rather than one file, and
- * folding it in would make the file-count arithmetic below unreadable.
+ * Retained as the authoritative list of what a REST project can generate, and used by
+ * {@linkcode NON_COLLIDING_GROUPS} to check that the groups below partition it — a
+ * schematic added to one and not the other would drop out of the sweep unnoticed.
  */
 const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
 
@@ -71,6 +71,29 @@ const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
  * sure about is a gate written around the bug.
  */
 const MODULE_FILES_PER_NAME = 4;
+
+/**
+ * Families that can share one name, grouped so no group contains a collision.
+ *
+ * `route`, `controller` and `module` all mount `/<name>`, and `service` and `module` both
+ * register `<name>-service` — generating two of either set under one name is refused,
+ * because the kernel's router silently overwrites a duplicate and the decorator plugin
+ * keeps only the first class under a token. So the sweep runs one project per group.
+ */
+const NON_COLLIDING_GROUPS: Readonly<Record<string, readonly string[]>> = {
+  ungated: [...UNGATED],
+  controller: ['controller'],
+  module: ['module'],
+};
+
+/**
+ * Seam barrels a `rest` project carries from scaffold time, before anything is generated.
+ *
+ * Counted separately from the generated files because they exist whether or not the group
+ * under test writes into their directories: `src/modules/index.ts` plus one each for
+ * controllers, services, routes, middleware, plugins, health and metrics.
+ */
+const SCAFFOLDED_BARRELS = 8;
 
 /**
  * Collects every `.ts` source under a directory, recursively.
@@ -419,11 +442,15 @@ describe('template scaffolding — end to end', () => {
     const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
 
     // The args string, rendered into the plugin call. The showcase classes come
-    // first, then the module barrel is spread, so `setu g module` adds to this
-    // registration rather than replacing it.
+    // first, then the standalone barrels, then the module barrel — so `setu g controller`
+    // and `setu g module` both add to this registration rather than replacing it.
+    // Broken across lines because the single-line form runs past 110 characters inside
+    // the plugin array once all three sources are named.
     expect(config).toContain(
-      'DecoratorPlugin({ controllers: [GreetingController, ...MODULE_CONTROLLERS], ' +
-        'services: [GreetingService, ...MODULE_SERVICES] })',
+      'DecoratorPlugin({\n' +
+        '        controllers: [GreetingController, ...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
+        '        services: [GreetingService, ...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '      }),',
     );
     // DiPlugin is what puts @Injectable classes on the container path.
     expect(config).toContain('DiPlugin()');
@@ -452,34 +479,50 @@ describe('template scaffolding — end to end', () => {
     }
   });
 
-  it('type-checks a scaffolded project generated over every accepted name', async () => {
-    expect(await run(['new', 'svc', '--template', 'rest'])).toBe(0);
-    const project = `${root}/svc`;
-
-    for (const { name, accepted } of HOSTILE_NAMES) {
-      if (!accepted) continue;
-      for (const schematic of [...REST_AVAILABLE, 'module']) {
-        expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
-      }
-    }
-
-    const sources: string[] = [
-      `${project}/main.ts`,
-      `${project}/setu.config.ts`,
-      ...(await collectSources(`${project}/src`)),
-    ];
-    // One file per single-file schematic × accepted name; the module aggregate
-    // adds its own per-name files plus the ONE shared barrel; plus two entries.
-    const accepted = HOSTILE_NAMES.filter((n) => n.accepted).length;
-    expect(sources.length).toBe(
-      REST_AVAILABLE.length * accepted + MODULE_FILES_PER_NAME * accepted + 1 + 2,
-    );
-
-    await useWorkspacePackages(project);
-    const { code, stderr } = await denoCheck(project, sources);
-    expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+  // Swept in three projects rather than one, because `route`, `controller` and `module`
+  // all mount `/<name>` and `service` and `module` both claim `<name>-service` — so a
+  // single project generating every family under one name now hits the collision guard
+  // rather than the drift check. Splitting keeps the hostile name EXACT for every
+  // schematic, which is the whole point of the sweep; folding a suffix into the name
+  // instead would mean `class` never lands in a binding position again.
+  it('partitions every REST-available schematic across the sweep groups', () => {
+    // Without this, adding a schematic to `REST_AVAILABLE` and forgetting a group would
+    // silently drop it from the hostile-name sweep entirely.
+    const swept = Object.values(NON_COLLIDING_GROUPS).flat().sort();
+    expect(swept).toEqual([...REST_AVAILABLE, 'module'].sort());
   });
+
+  for (const [group, schematics] of Object.entries(NON_COLLIDING_GROUPS)) {
+    it(`type-checks a ${group} project generated over every accepted name`, async () => {
+      expect(await run(['new', 'svc', '--template', 'rest'])).toBe(0);
+      const project = `${root}/svc`;
+
+      for (const { name, accepted } of HOSTILE_NAMES) {
+        if (!accepted) continue;
+        for (const schematic of schematics) {
+          expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
+        }
+      }
+
+      const sources: string[] = [
+        `${project}/main.ts`,
+        `${project}/setu.config.ts`,
+        ...(await collectSources(`${project}/src`)),
+      ];
+      const accepted = HOSTILE_NAMES.filter((n) => n.accepted).length;
+      // Per accepted name: one artifact file per single-file schematic, or
+      // MODULE_FILES_PER_NAME for the aggregate. Plus one seam barrel per family that has
+      // one — emitted at SCAFFOLD time, so every host carries all eight whether or not
+      // this group generated into them — plus the two entry points.
+      const perName = group === 'module' ? MODULE_FILES_PER_NAME : schematics.length;
+      expect(sources.length).toBe(perName * accepted + SCAFFOLDED_BARRELS + 2);
+
+      await useWorkspacePackages(project);
+      const { code, stderr } = await denoCheck(project, sources);
+      expect(stderr).not.toContain('SyntaxError');
+      expect(code).toBe(0);
+    });
+  }
 });
 
 // The module schematic's whole point is that the generated module is WIRED, and

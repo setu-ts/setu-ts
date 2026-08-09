@@ -1,6 +1,15 @@
 /**
  * Guard schematic — a short-circuiting route guard (gated on `auth-plugin`).
  *
+ * Deliberately NOT wired, and this is a design decision rather than a gap. A guard's
+ * positions are all per target — `RouteDefinition.middleware` on one route, or
+ * `@UseGuards` on one controller or handler — and `auth-plugin` publishes no guard
+ * list a barrel could feed. The only barrel-shaped alternative is the global
+ * middleware pipeline, and the emitted guard answers `401` whenever
+ * `ctx.request.user` is absent: registering it there would 401 `/health`, `/metrics`
+ * and `/`, turning a generated file into an outage. A wiring that must not be applied
+ * is not a wiring, so the emitted JSDoc names both real positions instead.
+ *
  * @module
  */
 
@@ -24,6 +33,20 @@ export function generateGuard(
  *
  * The guard short-circuits by responding WITHOUT calling \`next()\`, so the
  * handler never runs when the check fails.
+ *
+ * Apply it PER ROUTE — the CLI does not wire guards, because a guard applied globally
+ * would reject unauthenticated requests to \`/health\`, \`/metrics\` and every public
+ * route:
+ *
+ * \`\`\`typescript
+ * app.router.get('/reports', {
+ *   handler: (ctx) => ctx.response.json({ reports: [] }),
+ *   middleware: [require${names.pascal}()],
+ * });
+ * \`\`\`
+ *
+ * On a decorated controller, \`@UseGuards(require${names.pascal}())\` is the equivalent,
+ * on either the class or one handler.
  *
  * @returns The guard middleware
  */

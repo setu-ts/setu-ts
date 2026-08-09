@@ -92,7 +92,30 @@ export function withModuleSeam(
 
   return wirings.map((wiring) =>
     wiring.pkg === 'decorator-plugin'
-      ? { ...wiring, args: `{ controllers: [${controllers}], services: [${services}] }` }
+      ? { ...wiring, args: renderDecoratorArgs(controllers, services) }
       : wiring
   );
+}
+
+/**
+ * Renders the decorator wiring's argument object, breaking onto lines when the
+ * single-line form would run long.
+ *
+ * Wrapping matters because the emitted `setu.config.ts` is a file a developer opens and
+ * edits: once the standalone-controller and standalone-service barrels join the module
+ * ones, the inline form runs past 110 characters inside the plugin array.
+ *
+ * The indentation is absolute rather than relative — `Wiring.args` is rendered verbatim
+ * into an array entry the renderer has already indented by six spaces, so a
+ * continuation line has to carry its own eight and the closing brace its own six.
+ *
+ * @param controllers - Rendered contents of the `controllers` array
+ * @param services - Rendered contents of the `services` array
+ * @returns The argument source, without the enclosing parentheses
+ */
+function renderDecoratorArgs(controllers: string, services: string): string {
+  const inline = `{ controllers: [${controllers}], services: [${services}] }`;
+  // 6 spaces of array indent + `DecoratorPlugin(` + `),` is 24 characters of overhead.
+  if (inline.length <= 76) return inline;
+  return `{\n        controllers: [${controllers}],\n        services: [${services}],\n      }`;
 }

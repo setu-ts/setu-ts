@@ -225,4 +225,97 @@ describe('CqrsPlugin integration', () => {
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual(['before', 'handler', 'after']);
   });
+
+  // The declarative registration options. Driven through a real application rather than
+  // a hand-rolled plugin context, because the option's whole purpose is to spare the
+  // caller the imperative `commandBus.register` a mock context would make trivial.
+  describe('declarative handler registration', () => {
+    it('dispatches a command to a handler supplied through options', async () => {
+      const app = createApplication({
+        plugins: [
+          fakeRuntimePlugin(),
+          CqrsPlugin({
+            commandHandlers: [
+              { type: 'TestCommand', handler: { handle: () => 'from options' } },
+            ],
+          }),
+        ],
+      });
+      await app.start();
+
+      const bus = app.services.get<ICommandBus>(CAPABILITIES.COMMAND_BUS);
+      const result = await bus.execute<string>({ type: 'TestCommand', data: {} });
+      await app.stop();
+
+      expect(result).toBe('from options');
+    });
+
+    it('dispatches a query to a handler supplied through options', async () => {
+      const app = createApplication({
+        plugins: [
+          fakeRuntimePlugin(),
+          CqrsPlugin({
+            queryHandlers: [
+              { type: 'TestQuery', handler: { handle: () => ({ found: true }) } },
+            ],
+          }),
+        ],
+      });
+      await app.start();
+
+      const bus = app.services.get<IQueryBus>(CAPABILITIES.QUERY_BUS);
+      const result = await bus.execute<{ found: boolean }>({ type: 'TestQuery', data: {} });
+      await app.stop();
+
+      expect(result).toEqual({ found: true });
+    });
+
+    it('registers options handlers alongside imperatively-registered ones', async () => {
+      // A generated project uses the option; hand-written code may still call `register`.
+      // Neither may displace the other.
+      const app = createApplication({
+        plugins: [
+          fakeRuntimePlugin(),
+          CqrsPlugin({
+            commandHandlers: [{ type: 'FromOptions', handler: { handle: () => 'a' } }],
+          }),
+        ],
+      });
+      app.register({
+        name: 'manual',
+        version: '1.0.0',
+        dependencies: ['cqrs'],
+        register(ctx) {
+          ctx.services
+            .get<ICommandBus>(CAPABILITIES.COMMAND_BUS)
+            .register<TestCommand, string>('FromCode', { handle: () => 'b' });
+        },
+      });
+      await app.start();
+
+      const bus = app.services.get<ICommandBus>(CAPABILITIES.COMMAND_BUS);
+      const both = [
+        await bus.execute<string>({ type: 'FromOptions', data: {} }),
+        await bus.execute<string>({ type: 'FromCode', data: {} }),
+      ];
+      await app.stop();
+
+      expect(both).toEqual(['a', 'b']);
+    });
+
+    it('registers nothing when the options are omitted', async () => {
+      // Pins that the addition is inert by default, so an upgrade changes no behaviour.
+      const app = createApplication({ plugins: [fakeRuntimePlugin(), CqrsPlugin()] });
+      await app.start();
+
+      const bus = app.services.get<ICommandBus>(CAPABILITIES.COMMAND_BUS);
+      const rejected = await bus
+        .execute({ type: 'TestCommand', data: {} })
+        .then(() => 'resolved')
+        .catch((cause: unknown) => (cause as Error).name);
+      await app.stop();
+
+      expect(rejected).toBe('HandlerNotFoundError');
+    });
+  });
 });

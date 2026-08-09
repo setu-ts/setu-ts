@@ -7,6 +7,8 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { getTemplate } from '../../src/templates/registry.ts';
+import type { Wiring } from '../../src/templates/registry.ts';
+import { withModuleSeam } from '../../src/templates/module-seam.ts';
 import { MODULES_DIR } from '../../src/utils/module-scanner.ts';
 import { CONTROLLERS_EXPORT, SERVICES_EXPORT } from '../../src/schematics/module-barrel.ts';
 
@@ -77,5 +79,41 @@ describe('the module barrel seam', () => {
     expect(seam?.contents).toContain(
       `export const ${CONTROLLERS_EXPORT}: readonly Constructor[] = [];`,
     );
+  });
+
+  // The emitted `setu.config.ts` is a file a developer opens and edits, so the decorator
+  // wiring wraps once it would run long. Both arms are exercised here because no shipped
+  // template takes the inline one any more — every host now names the standalone barrels
+  // alongside the module ones, which pushes the single-line form past the threshold.
+  describe('the decorator args wrap', () => {
+    const decoratorOf = (wirings: readonly Wiring[]) =>
+      wirings.find((w) => w.pkg === 'decorator-plugin')?.args;
+    const WIRINGS: readonly Wiring[] = [{ pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' }];
+
+    it('stays inline when only the module barrels are named', () => {
+      // The pre-seam shape: short enough to read on one line, so it is left there.
+      expect(decoratorOf(withModuleSeam(WIRINGS))).toBe(
+        `{ controllers: [...${CONTROLLERS_EXPORT}], services: [...${SERVICES_EXPORT}] }`,
+      );
+    });
+
+    it('breaks across lines once more sources are named', () => {
+      const args = decoratorOf(
+        withModuleSeam(WIRINGS, ['...APP_CONTROLLERS'], ['...APP_SERVICES']),
+      );
+
+      expect(args).toContain('{\n');
+      // Indented to sit inside the plugin-array entry the renderer already indented by
+      // six, and closed at that same six.
+      expect(args).toContain(
+        `\n        controllers: [...APP_CONTROLLERS, ...${CONTROLLERS_EXPORT}],\n`,
+      );
+      expect(args?.endsWith('\n      }')).toBe(true);
+    });
+
+    it('leaves a wiring that is not the decorator plugin untouched', () => {
+      const others: readonly Wiring[] = [{ pkg: 'logger-plugin', symbol: 'LoggerPlugin' }];
+      expect(withModuleSeam(others)).toEqual(others);
+    });
   });
 });

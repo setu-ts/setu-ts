@@ -14,7 +14,7 @@ import {
   IntegrationEvent,
   subscribeHandler,
 } from '@setu-ts/events-plugin';
-import type { IEventHandler } from '@setu-ts/events-plugin';
+import type { EventHandlerRegistration, IEventHandler } from '@setu-ts/events-plugin';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('events-plugin barrel exports', () => {
@@ -48,5 +48,16 @@ describe('events-plugin barrel exports', () => {
     seen = null;
     await bus.publish(new TestEvent({ v: 'y' }));
     expect(seen).toBeNull();
+  });
+
+  // `EventsPluginOptions.handlers` is typed as an array of this, so without the export a
+  // caller could not declare its own array in a variable — which is what a generated
+  // events barrel does. Asserted by DECLARING one, so it compiles only while exported.
+  it('exports EventHandlerRegistration, which the handlers option is typed as', () => {
+    const handlers: readonly EventHandlerRegistration[] = [
+      { type: 'TestEvent', handler: { handle: () => {} } },
+    ];
+
+    expect(handlers[0]!.type).toEqual('TestEvent');
   });
 });
