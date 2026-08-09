@@ -691,8 +691,11 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     lines.push('declare const app: IApplication;');
   }
   // `ctx` — the request/plugin context intersection (see backing-type note).
+  // Also widen the `state` Map so index access like `ctx.state['key']` compiles
+  // (the real Map lacks an index signature; the intersection with Record allows
+  // the pattern the guides use while keeping all real type checks).
   if (present.has('ctx') && !fenceDeclares('ctx')) {
-    lines.push('declare const ctx: IRequestContext & IPluginContext;');
+    lines.push('declare const ctx: (IRequestContext & IPluginContext) & { state: Map<string, unknown> & Record<string, unknown> };');
   }
   // `platform` — a RuntimePlatform value.
   if (present.has('platform') && !fenceDeclares('platform')) {
