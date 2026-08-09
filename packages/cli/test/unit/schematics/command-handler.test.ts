@@ -2,14 +2,45 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateCommandHandler } from '../../../src/schematics/command-handler.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('command-handler schematic', () => {
   const files = generateCommandHandler(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'command-handler');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the handler plus the shared cqrs seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/cqrs/order-item.command-handler.ts',
+      'src/cqrs/index.ts',
+    ]);
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('command-handler', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('carries the command type alongside the handler, as the bus requires', () => {
+    // `ICommandBus.register(type, handler)` takes a pair, and the module already declares
+    // the type constant — deriving it from the class name would be a second source of
+    // truth for the same string.
+    expect(barrelOf(files, 'command-handler').contents).toContain(
+      '{ type: ORDER_ITEM_COMMAND, handler: new OrderItemCommandHandler() }',
+    );
+    expect(barrelOf(files, 'command-handler').contents).toContain(
+      'readonly CommandHandlerRegistration[]',
+    );
+  });
+
+  // Both schematics render the SAME barrel, so generating a command handler must not
+  // drop a query handler already present.
+  it('keeps existing query handlers in the shared barrel', () => {
+    const withQueries = generateCommandHandler(
+      deriveNames('order-item'),
+      options([], [], { 'query-handler': ['billing'] }),
+    );
+    const barrel = barrelOf(withQueries, 'command-handler').contents;
+    expect(barrel).toContain('BillingQueryHandler');
+    expect(barrel).toContain('OrderItemCommandHandler');
   });
 
   it('emits it at src/cqrs/order-item.command-handler.ts', () => {

@@ -2,14 +2,26 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateController } from '../../../src/schematics/controller.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('controller schematic', () => {
   const files = generateController(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'controller');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the controller plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/controllers/order-item.controller.ts',
+      'src/controllers/index.ts',
+    ]);
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('controller', 'order-item', ['gizmo', 'billing']);
+  });
+
+  it('lists the class in the barrel for DecoratorPlugin({ controllers })', () => {
+    expect(barrelOf(files, 'controller').contents).toContain('OrderItemController');
+    expect(barrelOf(files, 'controller').contents).toContain('readonly Constructor[]');
   });
 
   it('emits it at src/controllers/order-item.controller.ts', () => {

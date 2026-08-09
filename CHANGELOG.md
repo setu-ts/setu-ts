@@ -8,6 +8,70 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Generated code is now wired** (M60). `setu generate` emitted fourteen artifacts and exactly one
+  of them — the M58 domain module — reached a registration site. The other thirteen compiled and did
+  nothing: `g service` emitted a class nothing constructed, `g health-indicator` an indicator
+  nothing registered, `g command-handler` a handler no bus dispatched to. Eleven now reach a
+  registration site with no edit to a file you own, and three are documented as having none.
+
+  Each wired schematic emits its artifact plus a CLI-owned `index.ts` seam barrel for its family,
+  and the `rest`, `microservice` and `nest` templates scaffold a `setu.config.ts` that already
+  imports every barrel they can consume. See PUBLIC_API "Generated code is wired" for the
+  per-schematic table.
+
+  ```bash
+  setu new shop --template microservice
+  setu g health-indicator external-api --dir shop   # appears in GET /health
+  setu g metric orders-placed --dir shop            # appears in GET /metrics at boot
+  setu g command-handler create-user --dir shop     # the command bus dispatches to it
+  ```
+
+  `guard`, `job` and `migration` are deliberately unwired, and their emitted JSDoc now names the
+  real call instead of implying a site is waiting: a guard belongs on one route (a global one would
+  answer `401` for `/health`), a job's transport is a choice between `queue.process` and the
+  scheduler that the artifact cannot make for you, and nothing in the framework reads migration
+  files — there is no `setu db:migrate`.
+
+- **`CqrsPluginOptions.commandHandlers` / `.queryHandlers`, and `EventsPluginOptions.handlers`** —
+  declarative handler registration, as `{ type, handler }` pairs. Pure additions: omitting them
+  behaves exactly as before. The events option subscribes through the same exported
+  `subscribeHandler` a caller would use by hand, so the two routes cannot diverge. Needed because
+  `IApplication` exposes no lifecycle hook, so application code has no phase in which to reach a bus
+  that does not exist until its plugin has registered. `CommandHandlerRegistration`,
+  `QueryHandlerRegistration` and `EventHandlerRegistration` are exported alongside them.
+
+- **`NamedMetricConfig` is exported from `@setu-ts/metrics-plugin`.**
+  `MetricsPluginOptions.customMetrics` is typed as an array of it, so without the export that option
+  could take an inline literal but a caller could not declare its own array in a variable.
+
+- **`CqrsPlugin` and `EventsPlugin` join `setu new --template microservice`.** Both are in-memory
+  and construct with no configuration, so the tier's rule that a scaffolded plugin needs no
+  credentials holds, and neither needs a socket so the Cloudflare Workers refusal is unchanged. They
+  are also the only host a scaffolded project can have for `g command-handler`, `g query-handler`
+  and `g event-handler`, all three of which were gated on plugins no template installed.
+
+### Changed
+
+- **`setu generate plugin` now writes `src/plugins/<name>.plugin.ts`**, not `src/plugins/<name>.ts`.
+  The seam barrel is regenerated from a directory scan, and a suffix of `.ts` would admit any module
+  you hand-wrote in that folder — the barrel would then import a `<Pascal>Plugin` symbol you never
+  wrote, and your project would fail to compile naming a file you never generated. Existing
+  generated files are untouched; only new generates take the new path.
+
+- **`setu generate service` emits an `@Injectable` when `@setu-ts/decorator-plugin` is installed**,
+  registered under the token `<name>-service` and listed in `src/services/index.ts`. Without that
+  package the output is unchanged, byte for byte, and the schematic stays **ungated** — so it keeps
+  working in a project with no plugins at all.
+
+- **`setu generate` refuses a name that would collide with an existing artifact** (exit `1`), naming
+  the conflict and the consequence. `route`, `controller` and `module` all mount `/<name>`, and the
+  kernel's router keys routes by method and path — so a duplicate silently overwrites and one
+  artifact becomes unreachable. `service` and `module` both register
+  `@Injectable({ token: '<name>-service' })`, and the decorator plugin keeps the first class under a
+  token — so the wrong service would be injected, which was observed as a `500` on every request to
+  the affected module. Both checks apply only when `decorator-plugin` is installed, since neither
+  collision can exist without it.
+
 - **Fixed: `setu generate controller` emitted a controller that answered 500 on every request.**
   `DecoratorPlugin` builds a handler's argument list from parameter metadata alone and never passes
   the request context positionally, so the emitted `list(ctx: IRequestContext)` received `undefined`

@@ -1661,16 +1661,77 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `g controller`'s output shape changing is a **behaviour change to already-published generated
   output** — CHANGELOG carries the migration note, and it belongs in the next alpha's release notes)
   — complete (PR #139)
+- **Milestone 60** (`packages/cli` + `cqrs-plugin` + `events-plugin` + `metrics-plugin` — generated
+  code that is wired. `setu generate` emitted fourteen artifacts and exactly ONE reached a
+  registration site (the M58 module barrel); the other thirteen compiled and did nothing. Eleven now
+  reach one with no edit to a file the developer owns, and three get an explicit "none" backed by
+  evidence. **The ROADMAP's own per-schematic sort did not survive `grep`, and correcting it was the
+  milestone's substance**: five of the six artifacts it placed in the "plugin-options registration
+  site" bucket have no such option — `CqrsPluginOptions` carried only `behaviors`,
+  `EventsPluginOptions` only `async`/`errorHandler`, `auth-plugin` publishes no guard list, and
+  `MetricsPluginOptions.customMetrics` is declarative (`NamedMetricConfig`) not the accessor
+  function the schematic emits. `IApplication` also has **no `lifecycle` member**, so application
+  code has no phase in which to register anything imperatively — anything needing a resolved
+  capability must be a plugin option or a plugin, which is what forced the two option additions
+  rather than a call somewhere in `createApp()`.
+
+  One generalized mechanism replaces what would have been ten bespoke copies: a `SeamSpec` per
+  family (`dir`/`suffix`/`barrel`/`exports`/`renderBarrel`), one `readArtifactNames` scanner, one
+  optional `SchematicOptions.artifacts`, and `templates/seam.ts` deriving the scaffold-time files,
+  config imports and wiring from that ONE registry — so a family cannot acquire a barrel no config
+  imports, or an import no barrel exports. Two new `TemplateDefinition` fields (`setupCalls`,
+  `pluginSpreads`) carry the seams whose site is a statement or an array spread rather than a plugin
+  option; `configModule` rendered the plugin list, the middleware adds and the hello-world route as
+  three fixed blocks and a statement was expressible in none of them.
+
+  `CqrsPlugin` and `EventsPlugin` join the `microservice` template, because **no template installed
+  them** and their three schematics are gated on them — so `g command-handler`, `g query-handler`
+  and `g event-handler` could never be wired in any scaffolded project. Both are in-memory and
+  zero-config (the tier's rule), and neither needs a socket, so the Workers refusal is unchanged.
+  `g service` is shaped on the DETECTED plugin set (the maintainer's call among three framings):
+  `@Injectable` plus a barrel with `decorator-plugin` present, today's plain class byte-for-byte
+  otherwise, so it stays ungated and keeps working in a bare project. `g plugin` moves to
+  `src/plugins/<name>.plugin.ts` — a suffix of `.ts` would admit any hand-written module in that
+  folder and the barrel would import a symbol the developer never wrote. `g metric` gains the
+  `NamedMetricConfig` its option actually takes (the accessor is how code increments a counter; the
+  config is how it EXISTS at boot, visible in `/metrics` as `# HELP`/`# TYPE` before anything
+  samples it — verified from `renderCounter`, not assumed).
+
+  **Booting a fully generated project found a defect the wiring itself introduced, which is the
+  whole argument for the functional bar.** `g service widget` and `g module widget` both register
+  `@Injectable({ token: 'widget-service' })`, `DecoratorPlugin.registerService` is first-wins on a
+  token, and the standalone barrel is spread before the module one — so the module's controller was
+  handed the standalone service and every request to it answered `500`
+  (`this.widgets.list is not a function`). The same class exists on HTTP paths, where the kernel
+  keys `#entryMap` on `${method} ${path}` and a duplicate OVERWRITES: `GET /widget` was registered
+  three times and two of the three artifacts were unreachable. `generate` now refuses both before
+  writing, naming the conflict and the consequence; the check is skipped without `decorator-plugin`,
+  since neither collision can exist there. That refusal in turn forced the M34b hostile-name drift
+  sweep to split into three non-colliding groups — folding a suffix into the name instead would mean
+  `class` never lands in a binding position again, which is the one thing that sweep exists to test.
+
+  Verified by scaffolding both host templates, generating one of every available artifact,
+  type-checking all 39 emitted files against this workspace, and BOOTING: the generated route
+  answers 200 carrying the generated middleware's header, the standalone controller and the module
+  both answer 200, the service and plugin tokens resolve, both indicators appear in `/health`, both
+  metrics are declared in `/metrics` before anything samples them, and the command, query and event
+  buses all reach their generated handlers. Four negative controls were each observed failing and
+  reverted — and the fourth caught a **vacuous assertion in my own test helper**:
+  `assertSeamContract` reversed a single-element list, so its byte-identical clause passed whether
+  the barrel sorted or not. It now refuses fewer than two names, or names already in sorted order,
+  and all ten seam contracts fail without the sort. All changed `src` files at **100%**
+  branch/function/line) — complete (PR pending)
 - **Next milestone** — **M38** (documentation), then M39–M40. Queued behind those: **M59**
-  (`cloudflare-plugin` — Workers-native messaging), plus **M60** (`cli` — wire the generated
-  artifacts), **M61** (`cli` — decorator/DI opt-in) and **M62** (`cli` — monorepo support). All four
-  are ROADMAP sections only, with no plan and no code yet. M59 came from an external DX review; note
-  what that review got wrong, since the section says so and a reader should not re-raise it: it
-  claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
-  blocked (M52b shipped them). M60–M62 came from a measured audit after M58: a project with all
-  fourteen schematics generated type-checks clean while its entry points import exactly ONE
-  generated path (the M58 barrel), so **thirteen of fourteen generated artifacts are unreachable** —
-  that, not breadth, is the distance from NestJS.
+  (`cloudflare-plugin` — Workers-native messaging), plus **M61** (`cli` — decorator/DI opt-in) and
+  **M62** (`cli` — monorepo support). All three are ROADMAP sections only, with no plan and no code
+  yet. M59 came from an external DX review; note what that review got wrong, since the section says
+  so and a reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship
+  them) and that Workers queues are still blocked (M52b shipped them). M60–M62 came from a measured
+  audit after M58: a project with all fourteen schematics generated type-checked clean while its
+  entry points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
+  unreachable — that, not breadth, was the distance from NestJS. **M60 has now closed eleven of the
+  thirteen**, so M61 and M62 are the remaining CLI parity work: the optional-decorators/DI promise,
+  and monorepos.
 
 ## Verification (run before declaring any work done)
 

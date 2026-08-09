@@ -2,14 +2,38 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateMetric } from '../../../src/schematics/metric.ts';
-import { gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('metric schematic', () => {
   const files = generateMetric(deriveNames('order-item'), options());
-  const [file] = files;
+  const file = artifactOf(files, 'metric');
 
-  it('emits exactly one file', () => {
-    expect(files).toHaveLength(1);
+  it('emits the metric plus its seam barrel', () => {
+    expect(files.map((f) => f.path)).toEqual([
+      'src/metrics/order-item.metric.ts',
+      'src/metrics/index.ts',
+    ]);
+  });
+
+  it('satisfies the seam contract', () => {
+    assertSeamContract('metric', 'order-item', ['gizmo', 'billing']);
+  });
+
+  // `MetricsPluginOptions.customMetrics` takes `NamedMetricConfig`, not a factory, so the
+  // module carries BOTH: the config is how the metric exists at boot (visible in
+  // /metrics before anything samples it), the accessor is how code increments it.
+  it('emits the NamedMetricConfig the plugin option actually takes', () => {
+    expect(file.contents).toContain('export const ORDER_ITEM_METRIC: NamedMetricConfig = {');
+    expect(file.contents).toContain("type: 'counter',");
+    expect(file.contents).toContain(
+      `import type { NamedMetricConfig } from '@setu-ts/metrics-plugin';`,
+    );
+    expect(barrelOf(files, 'metric').contents).toContain('ORDER_ITEM_METRIC');
+    expect(barrelOf(files, 'metric').contents).toContain('readonly NamedMetricConfig[]');
+  });
+
+  it('reads help and labels from the declaration, so they have one home', () => {
+    expect(file.contents).toContain('metrics.counter(ORDER_ITEM_TOTAL, ORDER_ITEM_METRIC)');
   });
 
   it('emits it at src/metrics/order-item.metric.ts', () => {
