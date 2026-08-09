@@ -1719,8 +1719,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   reverted — and the fourth caught a **vacuous assertion in my own test helper**:
   `assertSeamContract` reversed a single-element list, so its byte-identical clause passed whether
   the barrel sorted or not. It now refuses fewer than two names, or names already in sorted order,
-  and all ten seam contracts fail without the sort. All changed `src` files at **100%**
-  branch/function/line) — complete (PR pending)
+  and all ten seam contracts fail without the sort.
+
+  **Code review then found a second defect the wiring introduced, and it is the one that would have
+  hurt every existing user.** A barrel imports specific symbols from each artifact, and `middleware`
+  and `metric` each gained a second export here — so a project that generated one of them BEFORE M60
+  got a regenerated barrel naming a symbol its own file did not have:
+  `TS2305 … has no exported member 'AUDIT_LOG_MIDDLEWARE_PRIORITY'`, from a command that reported
+  success. Every existing generated project would have broken on its next `g middleware` or
+  `g metric`. The scanner admitted a candidate on filename and file-ness alone; it now requires the
+  file to EXPORT every symbol the barrel will import, and reports what it skipped so an artifact is
+  never silently unwired. That list now has ONE home — `SeamSpec.importSymbols`, read by
+  `renderBarrel` for the import it emits AND by `readArtifactNames` as the admission rule; the split
+  between those two is exactly what let it ship. This is the flat-family form of the precondition
+  `readModuleNames` already applies to a module directory, which the M58 review added for the
+  identical reason. Reproduced with a real `deno check` and verified to fail without the fix at all
+  three levels (scanner unit tests, the command-level skip report, and an e2e that type-checks the
+  regenerated barrel). Fixing it dropped `seam-spec.ts` to 95.7% branch on an unreachable `?? ''`
+  fallback, removed rather than tested since the arm is dead. All changed `src` files at **100%**
+  branch/function/line) — complete (PR #141)
 - **Next milestone** — **M38** (documentation), then M39–M40. Queued behind those: **M59**
   (`cloudflare-plugin` — Workers-native messaging), plus **M61** (`cli` — decorator/DI opt-in) and
   **M62** (`cli` — monorepo support). All three are ROADMAP sections only, with no plan and no code
