@@ -24,7 +24,7 @@ const FEATURES = { di: false } as const;
 function hostOf(name: string) {
   const template = getTemplate(name);
   expect(template).toBeDefined();
-  return resolveHost(template ?? MINIMAL_HOST, FEATURES);
+  return resolveHost(template ?? MINIMAL_HOST, FEATURES, 'deno');
 }
 
 describe('withWorkspaceMember', () => {
@@ -67,7 +67,7 @@ describe('withWorkspaceMember', () => {
   });
 
   it('changes nothing for a member scaffolded with no template', () => {
-    const base = resolveHost(MINIMAL_HOST, FEATURES);
+    const base = resolveHost(MINIMAL_HOST, FEATURES, 'deno');
     expect(withWorkspaceMember(base, HTTP)).toEqual(base);
   });
 });

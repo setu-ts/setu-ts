@@ -143,5 +143,4 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   // Every runtime is supported: a missing filesystem makes the asset handler
   // answer 404 rather than throw, and this template omits the asset route
   // entirely on Workers, so nothing here needs refusing.
-  unsupported: {},
 };

@@ -25,6 +25,7 @@ describe('resolveHost', () => {
     const resolved = resolveHost(
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
       { di: false },
+      'deno',
     );
     expect(resolved.localImports).toEqual([]);
     expect(resolved.packageImports).toEqual([]);
@@ -39,6 +40,7 @@ describe('resolveHost', () => {
     const resolved = resolveHost(
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
       { di: true },
+      'deno',
     );
     expect(resolved.plugins.map((w) => w.pkg)).toEqual(['runtime', 'di-plugin']);
   });
@@ -50,6 +52,7 @@ describe('resolveHost', () => {
     const resolved = resolveHost(
       { plugins: [], middleware: [], appFactory: { pkg: 'full-stack-starter', symbol: 'x' } },
       { di: true },
+      'deno',
     );
     expect(resolved.plugins).toEqual([]);
   });
@@ -59,6 +62,7 @@ describe('the entry port', () => {
   const host = resolveHost(
     { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
     { di: false },
+    'deno',
   );
 
   // The default is what every scaffolded project emitted before workspaces

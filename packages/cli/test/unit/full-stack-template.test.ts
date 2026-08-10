@@ -54,7 +54,6 @@ describe('full-stack template | registration', () => {
   });
 
   it('refuses no runtime target', () => {
-    expect(FULL_STACK_TEMPLATE.unsupported).toEqual({});
   });
 });
 

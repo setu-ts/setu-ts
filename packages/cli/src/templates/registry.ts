@@ -322,6 +322,82 @@ export interface TemplateHost {
    * Omitted → nothing rendered, byte-identical to before this field existed.
    */
   readonly setupCalls?: readonly string[];
+  /**
+   * Per-runtime replacements applied before anything is rendered.
+   *
+   * @see {@linkcode RuntimeSwap}
+   */
+  readonly runtimeSwaps?: Readonly<Partial<Record<TargetRuntime, RuntimeSwap>>>;
+}
+
+/**
+ * One module export a Workers entry declares beside `fetch`.
+ *
+ * Cloudflare invokes a queue consumer through a **module-level export**, not
+ * through `fetch`, so a template whose capabilities include consuming a queue
+ * has to contribute one. The rendered export reuses the entry's memoised
+ * `boot(env)`: a second application would mean a second broker with its own
+ * dispatch table, and the subscriptions registered on one would be invisible to
+ * the other.
+ *
+ * @since 0.2.0
+ */
+export interface WorkerExport {
+  /** The module-export name, e.g. `queue`. */
+  readonly name: string;
+  /** Bare `@setu-ts` package the factory comes from, e.g. `cloudflare-plugin`. */
+  readonly pkg: string;
+  /** The factory symbol, called with the booted application. */
+  readonly symbol: string;
+  /**
+   * The type of the payload the platform passes, imported as a type from the
+   * same package — e.g. `IQueueMessageBatch`.
+   *
+   * Named rather than left as a placeholder: the export is part of the
+   * project's public module surface, and a generated signature that does not
+   * describe what the platform actually passes is a lie that type-checks
+   * (nothing in the project calls it).
+   */
+  readonly payloadType: string;
+}
+
+/**
+ * What a template swaps when it is scaffolded for a particular runtime.
+ *
+ * Declarative data rather than a callback, so `--dry-run` stays exact and the
+ * swap is assertable without rendering a project.
+ *
+ * This exists because a capability can be genuinely available on a runtime
+ * through a *different* plugin. `microservice` is the case it was built for:
+ * its `messaging` and `queue` capabilities come from brokers that need raw
+ * sockets everywhere except Cloudflare Workers, where the platform serves both
+ * itself. Before this the whole template was refused on that target.
+ *
+ * @since 0.2.0
+ */
+export interface RuntimeSwap {
+  /**
+   * Bare package names dropped from the plugin list on this runtime.
+   *
+   * By name rather than by index, so a plugin added to the template later
+   * cannot silently shift what the swap removes. A name that is not in the
+   * list throws — that is a defect in this repository's own template, caught
+   * by a unit test and never reachable by a user.
+   */
+  readonly removePackages: readonly string[];
+  /** Wirings appended in their place. */
+  readonly addPlugins: readonly Wiring[];
+  /** Extra module exports the Workers entry declares beside `fetch`. */
+  readonly workerExports?: readonly WorkerExport[];
+  /** Extra source files this runtime needs, appended to the template's own. */
+  readonly files?: readonly GeneratedFile[];
+  /**
+   * Lines appended verbatim to the Workers entry, for a Durable Object class
+   * the platform requires the entry module to re-export.
+   */
+  readonly entryReExports?: readonly string[];
+  /** TOML appended verbatim to the generated `wrangler.toml`. */
+  readonly wranglerToml?: string;
 }
 
 /**
@@ -336,12 +412,6 @@ export interface TemplateDefinition extends TemplateHost {
   readonly name: TemplateName;
   /** One line describing the template, shown in `new --help`. */
   readonly description: string;
-  /**
-   * Runtime targets this template refuses, mapped to the reason shown to the
-   * user. Refusing at scaffold time beats a project that deploys and then
-   * fails at first use.
-   */
-  readonly unsupported: Readonly<Partial<Record<TargetRuntime, string>>>;
 }
 
 const TEMPLATE_REGISTRY: ReadonlyMap<string, TemplateDefinition> = new Map([
